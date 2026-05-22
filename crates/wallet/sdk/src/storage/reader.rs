@@ -243,9 +243,12 @@ pub trait WalletStoreReader {
     /// Used by the authenticator on every agent-presented credential, so
     /// kept as a single indexed lookup.
     fn api_key_find_active_by_hash(&mut self, key_hash: &str) -> Result<Option<ApiKey>, WalletStorageError>;
-    /// Enumerate all API keys including revoked ones. Used by the admin
-    /// `auth.list_api_keys` endpoint, which renders status + last-used.
-    fn api_key_list_all(&mut self) -> Result<Vec<ApiKey>, WalletStorageError>;
+    /// Enumerate API keys. When `include_revoked` is false (the typical
+    /// admin-UI case), revoked rows are filtered out at the SQL layer so
+    /// the list shows only active + expired credentials. Expired rows are
+    /// always returned because their `last_used_at` is useful audit
+    /// context.
+    fn api_key_list(&mut self, include_revoked: bool) -> Result<Vec<ApiKey>, WalletStorageError>;
     /// Fetch a single key by id; surfaces both active and revoked rows so
     /// admin tooling can show history.
     fn api_key_get_by_id(&mut self, id: i32) -> Result<ApiKey, WalletStorageError>;

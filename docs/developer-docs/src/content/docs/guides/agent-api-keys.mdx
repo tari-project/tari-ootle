@@ -57,6 +57,41 @@ For a trading agent that needs to submit transactions from one specific account:
 Granting `Admin` to an API key is allowed (since you have it), but the daemon requires you to set
 `confirm_admin: true` in the create request so a UI checkbox can be the gate, not the JSON-RPC payload alone.
 
+### Setting an expiry
+
+API keys can optionally carry an `expires_at` timestamp (unix seconds). When set, the daemon's active-row filter
+stops surfacing the key once that timestamp has passed — the agent's next request fails with the same opaque
+`ApiKey is invalid or revoked` error as for an unknown or revoked key. Prefer the shortest expiry that fits the
+agent's job: shorter is safer, since a leaked short-lived key dies on its own without manual revocation.
+
+```bash
+# CLI: relative duration, parsed with `humantime`. Accepts forms like
+# 30d, 12h, 1y, 90 days, 1day 6h.
+tari-wallet-cli auth api-key create \
+    --name monitoring-agent \
+    --permissions AccountInfo,TransactionGet \
+    --expires-in 30d
+```
+
+```rust
+// Rust: absolute unix-seconds. `None` means the key never expires.
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
+
+let expires_at = (SystemTime::now() + Duration::from_secs(30 * 24 * 3600))
+    .duration_since(UNIX_EPOCH)?
+    .as_secs() as i64;
+
+admin_client.auth_create_api_key(AuthCreateApiKeyRequest {
+    name: "monitoring-agent".into(),
+    permissions: vec!["AccountInfo".into(), "TransactionGet".into()],
+    confirm_admin: false,
+    expires_at: Some(expires_at),
+}).await?;
+```
+
+The Web UI exposes this as a "Never expires" checkbox plus a date picker on the create dialog. The list view
+shows the expiry column and renders a yellow `EXPIRED` pill for keys whose expiry has passed.
+
 <Aside type="note">
 The three key-management endpoints (`auth.create_api_key`, `auth.list_api_keys`, `auth.revoke_api_key`) require an
 interactive **user session** (WebAuthn). An Admin-scoped API key cannot mint, list, or revoke further keys — this

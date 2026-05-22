@@ -846,6 +846,11 @@ pub struct AuthRevokeTokenResponse {}
 /// must be set to `true` if and only if the list contains the `Admin`
 /// permission — this is a deliberate speed-bump so the UI can render an
 /// explicit warning before issuing a fully-privileged credential.
+///
+/// `expires_at` is an optional unix-seconds deadline. When set, the daemon's
+/// active-row filter excludes the key once that timestamp has passed; the
+/// agent receives the same opaque "invalid or revoked" error as for an
+/// unknown or revoked key. `None` means the key never expires.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AuthCreateApiKeyRequest {
@@ -853,6 +858,11 @@ pub struct AuthCreateApiKeyRequest {
     pub permissions: Vec<String>,
     #[serde(default)]
     pub confirm_admin: bool,
+    /// Unix timestamp (seconds) at which the key becomes unusable. `None`
+    /// for a never-expiring key. Rejected at the handler if it lies in the
+    /// past — refusing to mint an instantly-expired credential.
+    #[serde(default)]
+    pub expires_at: Option<i64>,
 }
 
 /// Daemon → admin: response after successful key creation.
@@ -887,11 +897,17 @@ impl std::fmt::Debug for AuthCreateApiKeyResponse {
     }
 }
 
-/// Admin → daemon: list all API keys, active and revoked. The raw key
-/// material is NEVER included in the response.
+/// Admin → daemon: list API keys. By default returns only non-revoked
+/// rows (the typical admin-UI view); set `include_revoked` to retrieve
+/// the historical audit list. Expired keys are always included — their
+/// `last_used_at` is useful audit context. The raw key material is
+/// NEVER included in the response.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct AuthListApiKeysRequest {}
+pub struct AuthListApiKeysRequest {
+    #[serde(default)]
+    pub include_revoked: bool,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
@@ -917,9 +933,9 @@ pub struct IssuedApiKey {
     /// the key has been revoked and is no longer usable.
     pub revoked_at: Option<i64>,
     /// Unix timestamp (seconds). `None` means the key does not expire.
-    /// Always `None` for keys created by the current implementation; the
-    /// field exists so an expiry-enforcement feature can be added later
-    /// without a wire-format change.
+    /// Once the timestamp has passed, the auth shim's active-row filter
+    /// stops surfacing the key — the agent gets the same opaque error as
+    /// for a revoked key.
     pub expires_at: Option<i64>,
 }
 

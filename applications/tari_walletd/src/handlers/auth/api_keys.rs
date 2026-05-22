@@ -176,6 +176,23 @@ pub async fn handle_create_api_key(
         ));
     }
 
+    // Convert the optional unix-seconds expiry to a PrimitiveDateTime,
+    // rejecting any value in the past — minting an already-expired key
+    // would be useless and almost certainly a client bug.
+    let expires_at = request
+        .expires_at
+        .map(|secs| {
+            let ts = time::OffsetDateTime::from_unix_timestamp(secs)
+                .map_err(|e| anyhow!("Invalid expires_at unix timestamp {secs}: {e}"))?;
+            if ts <= time::OffsetDateTime::now_utc() {
+                return Err(anyhow!(
+                    "expires_at must be in the future; refusing to mint an already-expired key"
+                ));
+            }
+            Ok(time::PrimitiveDateTime::new(ts.date(), ts.time()))
+        })
+        .transpose()?;
+
     let raw_key: EncodedApiKey = mint_raw_api_key();
     let hash = hash_api_key(&raw_key);
 
@@ -192,7 +209,7 @@ pub async fn handle_create_api_key(
             .create_write_tx()
             .context("Failed to open write transaction")?;
         let row = tx
-            .api_key_insert(request.name.trim(), &hash, &permissions_str)
+            .api_key_insert(request.name.trim(), &hash, &permissions_str, expires_at)
             .context("Failed to insert api_key row")?;
         tx.commit().context("Failed to commit api_key insert")?;
         row
@@ -213,7 +230,7 @@ pub async fn handle_create_api_key(
 pub async fn handle_list_api_keys(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    _request: AuthListApiKeysRequest,
+    request: AuthListApiKeysRequest,
 ) -> Result<AuthListApiKeysResponse, anyhow::Error> {
     // User-auth-only: enumeration is an admin-tooling operation; an API
     // key shouldn't be able to enumerate the wallet's other keys.
@@ -225,7 +242,7 @@ pub async fn handle_list_api_keys(
             .store()
             .create_read_tx()
             .context("Failed to open read transaction")?;
-        tx.api_key_list_all()?
+        tx.api_key_list(request.include_revoked)?
     };
 
     let keys = rows
@@ -380,11 +397,20 @@ mod shim_tests {
     }
 
     fn mint_key(store: &SqliteWalletStore, name: &str, perms: JrpcPermissions) -> (EncodedApiKey, i32) {
+        mint_key_with_expiry(store, name, perms, None)
+    }
+
+    fn mint_key_with_expiry(
+        store: &SqliteWalletStore,
+        name: &str,
+        perms: JrpcPermissions,
+        expires_at: Option<time::PrimitiveDateTime>,
+    ) -> (EncodedApiKey, i32) {
         let raw = mint_raw_api_key();
         let hash = hash_api_key(&raw);
         let perm_str = format_permissions(&perms);
         let mut tx = store.create_write_tx().unwrap();
-        let row = tx.api_key_insert(name, &hash, &perm_str).unwrap();
+        let row = tx.api_key_insert(name, &hash, &perm_str, expires_at).unwrap();
         tx.commit().unwrap();
         (raw, row.id)
     }
@@ -487,6 +513,35 @@ mod shim_tests {
         // A JWT-shaped string (no `tw_` prefix) passes the gate so the
         // JWT path can handle it normally.
         user_only_gate("eyJhbGciOiJIUzI1NiJ9.fakeclaims.sig").expect("JWT bearer must pass the user-only gate");
+    }
+
+    /// An expired API key must be indistinguishable from a revoked or
+    /// unknown one at the auth boundary — same `ApiKeyInvalidOrRevoked`
+    /// error, no enumeration leak via error type or string.
+    #[test]
+    fn expired_key_yields_api_key_invalid_or_revoked() {
+        let store = open_store();
+        let past = time::OffsetDateTime::now_utc() - time::Duration::seconds(60);
+        let past = time::PrimitiveDateTime::new(past.date(), past.time());
+        let (raw, _id) = mint_key_with_expiry(&store, "expired", vec![JrpcPermission::AccountInfo].into(), Some(past));
+
+        let err = resolve(&store, &raw, &[JrpcPermission::AccountInfo]).expect_err("expired key must be rejected");
+        assert!(
+            matches!(err, AuthError::ApiKeyInvalidOrRevoked),
+            "expected ApiKeyInvalidOrRevoked, got {err:?}"
+        );
+    }
+
+    /// A key with a future `expires_at` authenticates normally — the
+    /// expiry filter is `expires_at > NOW`, so a future timestamp passes.
+    #[test]
+    fn future_expiry_key_is_accepted() {
+        let store = open_store();
+        let future = time::OffsetDateTime::now_utc() + time::Duration::seconds(3600);
+        let future = time::PrimitiveDateTime::new(future.date(), future.time());
+        let (raw, _) = mint_key_with_expiry(&store, "future", vec![JrpcPermission::AccountInfo].into(), Some(future));
+
+        resolve(&store, &raw, &[JrpcPermission::AccountInfo]).expect("future-expiry key must authenticate");
     }
 
     #[test]

@@ -8,5 +8,15 @@
  * must be set to `true` if and only if the list contains the `Admin`
  * permission — this is a deliberate speed-bump so the UI can render an
  * explicit warning before issuing a fully-privileged credential.
+ *
+ * `expires_at` is an optional unix-seconds deadline. When set, the daemon's
+ * active-row filter excludes the key once that timestamp has passed; the
+ * agent receives the same opaque "invalid or revoked" error as for an
+ * unknown or revoked key. `None` means the key never expires.
  */
-export type AuthCreateApiKeyRequest = { name: string; permissions: Array<string>; confirm_admin: boolean };
+export type AuthCreateApiKeyRequest = {
+  name: string;
+  permissions: Array<string>;
+  confirm_admin: boolean;
+  expires_at: bigint | null;
+};

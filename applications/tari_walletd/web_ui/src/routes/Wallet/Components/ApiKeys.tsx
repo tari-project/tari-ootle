@@ -114,7 +114,11 @@ function fmtTs(ts: bigint | null | undefined): string {
 }
 
 export default function ApiKeys() {
-  const { data, isLoading, error, isError } = useListApiKeys();
+  // The "Show revoked" toggle defaults off — the typical admin view is
+  // the currently-usable set. Flipping it refetches against the daemon
+  // because `useListApiKeys` includes the flag in its query key.
+  const [includeRevoked, setIncludeRevoked] = useState(false);
+  const { data, isLoading, error, isError } = useListApiKeys(includeRevoked);
   const { mutate: revoke } = useRevokeApiKey();
 
   // Stash the create-result here so the dialog can show the raw key
@@ -129,6 +133,12 @@ export default function ApiKeys() {
   const [selectedPerms, setSelectedPerms] = useState<Set<string>>(() => new Set());
   const [grantAdmin, setGrantAdmin] = useState(false);
   const [confirmAdmin, setConfirmAdmin] = useState(false);
+  // Expiry is optional. `expiresOn` is a YYYY-MM-DD string from a native
+  // `<input type="date">`; empty means "never expires". We convert to a
+  // unix-seconds timestamp at submit time. A "never expires" choice maps
+  // to `null` on the wire.
+  const [expiresOn, setExpiresOn] = useState<string>("");
+  const [neverExpires, setNeverExpires] = useState<boolean>(true);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const resetCreateForm = () => {
@@ -136,6 +146,8 @@ export default function ApiKeys() {
     setSelectedPerms(new Set());
     setGrantAdmin(false);
     setConfirmAdmin(false);
+    setExpiresOn("");
+    setNeverExpires(true);
     setCreateError(null);
   };
 
@@ -174,8 +186,38 @@ export default function ApiKeys() {
       setCreateError("Granting the Admin permission requires explicit confirmation. Tick the box below to proceed.");
       return;
     }
+    // Convert the date-only picker value (`YYYY-MM-DD`, browser-local) into
+    // unix-seconds at end-of-day in the user's timezone. End-of-day
+    // (23:59:59) is the friendlier interpretation of "expires on this
+    // date" — a key minted to "expire 2026-12-31" stays usable through
+    // the whole of that day rather than dying at midnight at the start.
+    let expires_at: bigint | null = null;
+    if (!neverExpires) {
+      if (!expiresOn) {
+        setCreateError("Pick an expiry date, or tick 'Never expires'.");
+        return;
+      }
+      // Parse as YYYY-MM-DD in local time, set to 23:59:59.
+      const [y, m, d] = expiresOn.split("-").map((s) => parseInt(s, 10));
+      if (!y || !m || !d) {
+        setCreateError("Expiry date must be a valid calendar date.");
+        return;
+      }
+      const localEndOfDay = new Date(y, m - 1, d, 23, 59, 59);
+      const ts = Math.floor(localEndOfDay.getTime() / 1000);
+      if (ts <= Math.floor(Date.now() / 1000)) {
+        setCreateError("Expiry must be in the future.");
+        return;
+      }
+      expires_at = BigInt(ts);
+    }
     createKey(
-      { name: createName, permissions, confirm_admin: grantAdmin && confirmAdmin },
+      {
+        name: createName,
+        permissions,
+        confirm_admin: grantAdmin && confirmAdmin,
+        expires_at,
+      },
       {
         onError: (err: unknown) => {
           setCreateError(err instanceof Error ? err.message : "Create failed");
@@ -184,6 +226,18 @@ export default function ApiKeys() {
     );
   };
 
+  /// Tomorrow's date in YYYY-MM-DD as the minimum the date picker accepts —
+  /// the daemon rejects past expiries server-side anyway, but pre-validating
+  /// here keeps the UX honest.
+  const minExpiryDate = (() => {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    const y = t.getFullYear();
+    const m = String(t.getMonth() + 1).padStart(2, "0");
+    const d = String(t.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  })();
+
   return (
     <Stack spacing={2}>
       <Alert severity="info">
@@ -191,7 +245,17 @@ export default function ApiKeys() {
         permission scopes you choose at creation time.
       </Alert>
 
-      <Stack direction="row" justifyContent="flex-end">
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={includeRevoked}
+              onChange={(e) => setIncludeRevoked(e.target.checked)}
+            />
+          }
+          label={<Typography variant="body2">Show revoked</Typography>}
+        />
         <Button variant="contained" onClick={() => setCreateOpen(true)}>
           Create API Key
         </Button>
@@ -212,6 +276,7 @@ export default function ApiKeys() {
                   <TableCell>Permissions</TableCell>
                   <TableCell>Created</TableCell>
                   <TableCell>Last used</TableCell>
+                  <TableCell>Expires</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
@@ -219,6 +284,17 @@ export default function ApiKeys() {
               <TableBody>
                 {(data?.keys || []).map((k: IssuedApiKey) => {
                   const revoked = k.revoked_at != null;
+                  // Treat the row as expired only when there's an expiry
+                  // timestamp and it lies in the past. Revoked takes
+                  // precedence in the status pill (a revoked key that was
+                  // also going to expire is still presented as REVOKED).
+                  const expired = !revoked && k.expires_at != null && Number(k.expires_at) * 1000 <= Date.now();
+                  const statusLabel = revoked ? "REVOKED" : expired ? "EXPIRED" : "active";
+                  const statusColor: "default" | "warning" | "success" = revoked
+                    ? "default"
+                    : expired
+                      ? "warning"
+                      : "success";
                   return (
                     <TableRow key={k.id}>
                       <TableCell>{k.id}</TableCell>
@@ -232,12 +308,9 @@ export default function ApiKeys() {
                       </TableCell>
                       <TableCell>{fmtTs(k.created_at)}</TableCell>
                       <TableCell>{fmtTs(k.last_used_at)}</TableCell>
+                      <TableCell>{k.expires_at == null ? "never" : fmtTs(k.expires_at)}</TableCell>
                       <TableCell>
-                        <Chip
-                          label={revoked ? "REVOKED" : "active"}
-                          color={revoked ? "default" : "success"}
-                          size="small"
-                        />
+                        <Chip label={statusLabel} color={statusColor} size="small" />
                       </TableCell>
                       <TableCell align="right">
                         <Button variant="outlined" size="small" disabled={revoked} onClick={() => revoke({ id: k.id })}>
@@ -249,7 +322,7 @@ export default function ApiKeys() {
                 })}
                 {(data?.keys || []).length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       No API keys issued.
                     </TableCell>
                   </TableRow>
@@ -359,6 +432,44 @@ export default function ApiKeys() {
                       I understand granting Admin gives this agent full control of the wallet daemon.
                     </Typography>
                   }
+                />
+              )}
+            </Box>
+            <Divider />
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                Expiry
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                Pick a date for this key to stop working. Shorter is safer — the daemon stops accepting the key the
+                moment the date passes.
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={neverExpires}
+                    onChange={(e) => {
+                      setNeverExpires(e.target.checked);
+                      if (e.target.checked) {
+                        setExpiresOn("");
+                      }
+                    }}
+                  />
+                }
+                label={<Typography variant="body2">Never expires</Typography>}
+              />
+              {!neverExpires && (
+                <TextField
+                  type="date"
+                  label="Expires on"
+                  value={expiresOn}
+                  onChange={(e) => setExpiresOn(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ min: minExpiryDate }}
+                  helperText="Key stops working at end of day in your local time."
+                  fullWidth
+                  sx={{ mt: 1 }}
                 />
               )}
             </Box>

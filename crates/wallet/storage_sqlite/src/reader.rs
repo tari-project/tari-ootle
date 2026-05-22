@@ -1595,13 +1595,18 @@ impl WalletStoreReader for ReadTransaction<'_> {
     fn api_key_find_active_by_hash(&mut self, key_hash: &str) -> Result<Option<ApiKey>, WalletStorageError> {
         use crate::schema::api_keys;
 
-        // Filter `revoked_at IS NULL` in SQL so the authenticator never sees
-        // revoked rows, even if the index lookup matches one. This keeps the
-        // "revoke is immediate" guarantee on the data-layer boundary rather
-        // than relying on every caller to remember to check `is_active`.
+        // Active filter pushed to SQL so the authenticator never sees a
+        // row that should be excluded: revoked keys, and keys whose
+        // `expires_at` has passed. The auth path returns `None` for both,
+        // surfaced as the same `ApiKeyInvalidOrRevoked` error so an
+        // attacker can't distinguish "revoked" from "expired" from "never
+        // existed" via response shape.
+        let now = time::OffsetDateTime::now_utc();
+        let now = time::PrimitiveDateTime::new(now.date(), now.time());
         let row = api_keys::table
             .filter(api_keys::key_hash.eq(key_hash))
             .filter(api_keys::revoked_at.is_null())
+            .filter(api_keys::expires_at.is_null().or(api_keys::expires_at.gt(Some(now))))
             .first::<models::ApiKey>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("api_key_find_active_by_hash", e))?;
@@ -1609,16 +1614,24 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(row.map(map_api_key_row))
     }
 
-    fn api_key_list_all(&mut self) -> Result<Vec<ApiKey>, WalletStorageError> {
+    fn api_key_list(&mut self, include_revoked: bool) -> Result<Vec<ApiKey>, WalletStorageError> {
         use crate::schema::api_keys;
 
         // Active first (revoked_at IS NULL ranks before NOT NULL on SQLite
         // because NULL sorts before any value), then most-recently-created.
-        // The admin UI typically wants active keys near the top of the list.
-        let rows = api_keys::table
+        // The admin UI typically wants active keys near the top of the
+        // list. Revoked rows are filtered out by default — admins opt in
+        // via `include_revoked=true` to see historical audit data. Expired
+        // keys stay in the list regardless (they're useful audit context).
+        let mut query = api_keys::table
             .order((api_keys::revoked_at.asc(), api_keys::created_at.desc()))
+            .into_boxed();
+        if !include_revoked {
+            query = query.filter(api_keys::revoked_at.is_null());
+        }
+        let rows = query
             .load::<models::ApiKey>(self.connection())
-            .map_err(|e| WalletStorageError::general("api_key_list_all", e))?;
+            .map_err(|e| WalletStorageError::general("api_key_list", e))?;
 
         Ok(rows.into_iter().map(map_api_key_row).collect())
     }

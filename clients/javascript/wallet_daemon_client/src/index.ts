@@ -218,8 +218,14 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("auth.create_api_key", params);
   }
 
-  /** List all API keys (active and revoked). Never returns the raw key material. */
-  public authListApiKeys(params: AuthListApiKeysRequest = {}): Promise<AuthListApiKeysResponse> {
+  /**
+   * List API keys. By default returns only active (non-revoked) keys; pass
+   * `{ include_revoked: true }` to retrieve the full audit history.
+   * Expired keys are always included. Never returns raw key material.
+   */
+  public authListApiKeys(
+    params: AuthListApiKeysRequest = { include_revoked: false },
+  ): Promise<AuthListApiKeysResponse> {
     return this.sendRequest("auth.list_api_keys", params);
   }
 

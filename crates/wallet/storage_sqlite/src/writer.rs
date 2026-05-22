@@ -1780,7 +1780,13 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn api_key_insert(&mut self, name: &str, key_hash: &str, permissions: &str) -> Result<ApiKey, WalletStorageError> {
+    fn api_key_insert(
+        &mut self,
+        name: &str,
+        key_hash: &str,
+        permissions: &str,
+        expires_at: Option<time::PrimitiveDateTime>,
+    ) -> Result<ApiKey, WalletStorageError> {
         const OPERATION: &str = "api_key_insert";
         use crate::schema::api_keys;
 
@@ -1789,6 +1795,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 api_keys::name.eq(name),
                 api_keys::key_hash.eq(key_hash),
                 api_keys::permissions.eq(permissions),
+                api_keys::expires_at.eq(expires_at),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;

@@ -12,7 +12,7 @@
 //!   * `api_key_revoke` is immediately reflected in `api_key_find_active_by_hash` returning `None` (so a revoked key
 //!     cannot authenticate even if the lookup races with the revoke commit),
 //!   * `api_key_touch_last_used` updates the timestamp, is throttled, and respects the `revoked_at IS NULL` filter,
-//!   * `api_key_list_all` includes both active and revoked rows so the admin UI can show revoked-key history.
+//!   * `api_key_list` honours the `include_revoked` flag and the expiry filter on `find_active_by_hash`.
 
 use std::time::Duration;
 
@@ -32,7 +32,7 @@ fn insert_and_find_active_round_trips() {
     let inserted = {
         let mut tx = db.create_write_tx().unwrap();
         let row = tx
-            .api_key_insert("agent-prod", "deadbeefcafef00d", "AccountInfo, TransactionGet")
+            .api_key_insert("agent-prod", "deadbeefcafef00d", "AccountInfo, TransactionGet", None)
             .unwrap();
         tx.commit().unwrap();
         row
@@ -71,7 +71,7 @@ fn revoke_is_immediate_for_subsequent_lookups() {
 
     let id = {
         let mut tx = db.create_write_tx().unwrap();
-        let row = tx.api_key_insert("ephemeral", "0000abc", "AccountInfo").unwrap();
+        let row = tx.api_key_insert("ephemeral", "0000abc", "AccountInfo", None).unwrap();
         tx.commit().unwrap();
         row.id
     };
@@ -129,7 +129,9 @@ fn double_revoke_does_not_clobber_first_timestamp() {
 
     let id = {
         let mut tx = db.create_write_tx().unwrap();
-        let row = tx.api_key_insert("twice-revoked", "01010101", "AccountInfo").unwrap();
+        let row = tx
+            .api_key_insert("twice-revoked", "01010101", "AccountInfo", None)
+            .unwrap();
         tx.commit().unwrap();
         row.id
     };
@@ -153,7 +155,7 @@ fn touch_last_used_updates_timestamp() {
 
     let id = {
         let mut tx = db.create_write_tx().unwrap();
-        let row = tx.api_key_insert("touched", "feedfeed", "AccountInfo").unwrap();
+        let row = tx.api_key_insert("touched", "feedfeed", "AccountInfo", None).unwrap();
         tx.commit().unwrap();
         row.id
     };
@@ -184,7 +186,7 @@ fn touch_last_used_is_throttled() {
 
     let id = {
         let mut tx = db.create_write_tx().unwrap();
-        let row = tx.api_key_insert("throttled", "ccddeeff", "AccountInfo").unwrap();
+        let row = tx.api_key_insert("throttled", "ccddeeff", "AccountInfo", None).unwrap();
         tx.commit().unwrap();
         row.id
     };
@@ -240,7 +242,7 @@ fn touch_last_used_on_revoked_key_is_noop_not_error() {
 
     let id = {
         let mut tx = db.create_write_tx().unwrap();
-        let row = tx.api_key_insert("revoke-race", "abcdef", "AccountInfo").unwrap();
+        let row = tx.api_key_insert("revoke-race", "abcdef", "AccountInfo", None).unwrap();
         tx.commit().unwrap();
         row.id
     };
@@ -274,9 +276,9 @@ fn list_all_includes_active_and_revoked_in_useful_order() {
     // Insert three keys, revoke the middle one.
     let (_a, b, _c) = {
         let mut tx = db.create_write_tx().unwrap();
-        let a = tx.api_key_insert("key-a", "0a", "AccountInfo").unwrap();
-        let b = tx.api_key_insert("key-b", "0b", "AccountInfo").unwrap();
-        let c = tx.api_key_insert("key-c", "0c", "AccountInfo").unwrap();
+        let a = tx.api_key_insert("key-a", "0a", "AccountInfo", None).unwrap();
+        let b = tx.api_key_insert("key-b", "0b", "AccountInfo", None).unwrap();
+        let c = tx.api_key_insert("key-c", "0c", "AccountInfo", None).unwrap();
         tx.commit().unwrap();
         (a.id, b.id, c.id)
     };
@@ -288,12 +290,67 @@ fn list_all_includes_active_and_revoked_in_useful_order() {
     }
 
     let mut tx = db.create_write_tx().unwrap();
-    let listed = tx.api_key_list_all().unwrap();
-    assert_eq!(listed.len(), 3, "all three rows surface regardless of status");
+    let listed = tx.api_key_list(true).unwrap();
+    assert_eq!(listed.len(), 3, "with include_revoked=true, all three rows surface");
 
     // Active rows (revoked_at IS NULL) sort before revoked rows because
     // NULL precedes any value in SQLite's ASC ordering. Confirm the
     // revoked one ends up at the end.
     assert!(listed.last().unwrap().revoked_at.is_some());
     assert!(listed[0].revoked_at.is_none());
+
+    // Default `include_revoked=false` excludes the revoked row from the list.
+    let active_only = tx.api_key_list(false).unwrap();
+    assert_eq!(active_only.len(), 2, "active-only list omits the revoked row");
+    assert!(active_only.iter().all(|k| k.revoked_at.is_none()));
+}
+
+#[test]
+fn find_active_by_hash_excludes_expired_rows() {
+    // Once `expires_at` is in the past, the active filter must drop the
+    // row. The auth path returns `None` exactly as it would for an
+    // unknown or revoked key, so an attacker can't distinguish.
+    use time::{Duration as TimeDuration, OffsetDateTime, PrimitiveDateTime};
+
+    let db = open_store();
+    let now = OffsetDateTime::now_utc();
+    let past = now - TimeDuration::seconds(60);
+    let past = PrimitiveDateTime::new(past.date(), past.time());
+
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.api_key_insert("expired", "deadc0de", "AccountInfo", Some(past))
+            .unwrap();
+        tx.commit().unwrap();
+    }
+
+    let mut tx = db.create_write_tx().unwrap();
+    let found = tx.api_key_find_active_by_hash("deadc0de").unwrap();
+    assert!(found.is_none(), "expired key must not surface as active");
+
+    // Audit lookup (get_by_id) still returns it so admins can see the row.
+    let listed = tx.api_key_list(false).unwrap();
+    assert_eq!(listed.len(), 1, "expired keys still listed for audit");
+    assert!(listed[0].expires_at.is_some());
+}
+
+#[test]
+fn find_active_by_hash_returns_row_with_future_expiry() {
+    use time::{Duration as TimeDuration, OffsetDateTime, PrimitiveDateTime};
+
+    let db = open_store();
+    let future = OffsetDateTime::now_utc() + TimeDuration::seconds(3600);
+    let future = PrimitiveDateTime::new(future.date(), future.time());
+
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.api_key_insert("future", "beefcafe", "AccountInfo", Some(future))
+            .unwrap();
+        tx.commit().unwrap();
+    }
+
+    let mut tx = db.create_write_tx().unwrap();
+    let found = tx.api_key_find_active_by_hash("beefcafe").unwrap();
+    assert!(found.is_some(), "non-expired key must surface");
+    assert_eq!(found.unwrap().expires_at, Some(future));
 }

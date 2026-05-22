@@ -24,4 +24,11 @@ export type IssuedApiKey = {
    * the key has been revoked and is no longer usable.
    */
   revoked_at: bigint | null;
+  /**
+   * Unix timestamp (seconds). `None` means the key does not expire.
+   * Once the timestamp has passed, the auth shim's active-row filter
+   * stops surfacing the key — the agent gets the same opaque error as
+   * for a revoked key.
+   */
+  expires_at: bigint | null;
 };

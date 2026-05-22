@@ -249,7 +249,16 @@ pub trait WalletStoreWriter: CommittableStore {
     /// raw key bytes — the raw key itself is never passed to the storage
     /// layer. `permissions` is the textual `JrpcPermissions` form
     /// (comma-separated; the same format the JWT layer already uses).
-    fn api_key_insert(&mut self, name: &str, key_hash: &str, permissions: &str) -> Result<ApiKey, WalletStorageError>;
+    /// `expires_at` is `None` for a never-expiring key; otherwise the
+    /// `find_active_by_hash` filter excludes the row once that timestamp
+    /// has passed.
+    fn api_key_insert(
+        &mut self,
+        name: &str,
+        key_hash: &str,
+        permissions: &str,
+        expires_at: Option<time::PrimitiveDateTime>,
+    ) -> Result<ApiKey, WalletStorageError>;
     /// Bump `last_used_at` on a key after a successful authentication, only if
     /// the stored timestamp is at least `throttle` old (or NULL). Best-effort:
     /// callers should not let a write error abort the request — the auth

@@ -23,10 +23,13 @@ import { authCreateApiKey, authListApiKeys, authRevokeApiKey } from "@utils/json
 
 const API_KEYS_LIST_QUERY_KEY = ["api_keys_list"];
 
-export const useListApiKeys = () => {
+export const useListApiKeys = (includeRevoked: boolean = false) => {
   return useQuery({
-    queryKey: API_KEYS_LIST_QUERY_KEY,
-    queryFn: () => authListApiKeys({}),
+    // Include the toggle in the query key so React Query treats the two
+    // views as distinct caches — flipping the "show revoked" checkbox
+    // refetches against the daemon instead of reusing stale results.
+    queryKey: [...API_KEYS_LIST_QUERY_KEY, includeRevoked],
+    queryFn: () => authListApiKeys({ include_revoked: includeRevoked }),
   });
 };
 

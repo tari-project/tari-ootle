@@ -1,7 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 
 use super::ViewableBalanceProof;
 use crate::{
@@ -19,26 +19,36 @@ use crate::{
 /// - **encrypted_data** - the encrypted data that contains the encrypted mask and value.
 /// - **viewable_balance_proof** - an optional verifiable balance proof that must be provided and valid if the view key
 ///   is enabled for a resource.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct UnspentOutput {
+    #[n(0)]
     pub commitment: PedersenCommitmentBytes,
     /// Public nonce (R) that was used to generate the commitment mask
+    #[n(1)]
     pub sender_public_nonce: RistrettoPublicKeyBytes,
     /// Encrypted mask and value for the recipient.
+    #[n(2)]
     pub encrypted_data: EncryptedData,
+    #[n(3)]
     pub minimum_value_promise: u64,
     /// If the view key is enabled for a given resource, this proof MUST be provided, otherwise it MUST NOT.
+    #[n(4)]
     pub viewable_balance_proof: Option<ViewableBalanceProof>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthUnspentOutput {
+    #[n(0)]
     pub output: UnspentOutput,
+    #[n(1)]
     pub spend_condition: SpendCondition,
+    #[n(2)]
     pub tag: UtxoTag,
 }
 
@@ -48,14 +58,17 @@ impl StealthUnspentOutput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SpendCondition {
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
     /// selected by the client.
-    Signed(RistrettoPublicKeyBytes),
-    AccessRule(AccessRule),
+    #[n(0)]
+    Signed(#[n(0)] RistrettoPublicKeyBytes),
+    #[n(1)]
+    AccessRule(#[n(0)] AccessRule),
 }
 
 impl SpendCondition {

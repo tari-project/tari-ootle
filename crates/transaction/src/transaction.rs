@@ -36,10 +36,13 @@ use crate::{
     weight::TransactionWeight,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Transaction {
-    V1(TransactionV1),
+    #[n(0)]
+    V1(#[n(0)] TransactionV1),
 }
 
 impl Transaction {
@@ -331,10 +334,13 @@ impl Display for Transaction {
 ///
 /// Constructed only via `From<Transaction>` (which derives commitments from the full blobs and
 /// drops the payloads) or via deserialization of bytes previously written by the storage layer.
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum PrunedTransaction {
-    V1(crate::v1::PrunedTransactionV1),
+    #[n(0)]
+    V1(#[n(0)] crate::v1::PrunedTransactionV1),
 }
 
 impl PrunedTransaction {
@@ -466,16 +472,9 @@ mod tests {
     #[test]
     fn it_encodes_and_decodes_without_errors() {
         let (k, _) = create_key_pair();
-        // This test simply checks that there are no serde tags used that can cause encoding/decoding issues with
-        // tari_bor
         let subject = create_transaction().build_and_seal(&k);
         let encoded = tari_bor::encode(&subject).unwrap();
         let _decoded = tari_bor::decode::<Transaction>(&encoded).unwrap();
-
-        // bincode
-        let encoded = bincode::serde::encode_to_vec(&subject, bincode::config::standard()).unwrap();
-        let _decoded =
-            bincode::serde::decode_from_slice::<Transaction, _>(&encoded, bincode::config::standard()).unwrap();
     }
 
     #[test]

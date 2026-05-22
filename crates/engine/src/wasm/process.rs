@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use serde::{Serialize, de::DeserializeOwned};
 use tari_bor::{ByteCounter, decode_exact, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{CallInfo, EngineOp, FunctionDef, TemplateDef, func_hasher::hash_function_name, version};
@@ -45,6 +44,7 @@ use tari_template_lib::{
     types::{LogLevel, engine_args::SignatureInvokeArg},
 };
 use wasmer::{AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr, imports};
+use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points};
 
 use crate::{
     runtime::Runtime,
@@ -267,8 +267,8 @@ impl WasmProcess {
         f: fn(&mut Runtime, T) -> Result<U, E>,
     ) -> Result<WasmPtr<u8>, WasmExecutionError>
     where
-        T: DeserializeOwned,
-        U: Serialize,
+        T: for<'b> tari_bor::Decode<'b, ()>,
+        U: tari_bor::Encode<()> + tari_bor::CborLen<()>,
         WasmExecutionError: From<E>,
     {
         // SAFETY: WasmProcess is not used concurrently and templates are not able to spawn threads
@@ -337,8 +337,29 @@ impl Invokable<Store> for WasmProcess {
             Ok(())
         })?;
 
+        // Snapshot the metering counter so we can charge for the points this invocation consumes.
+        // The limit is set when the engine compiles the module (see `wasm::module::create_engine`);
+        // for any well-formed module this is `Remaining(limit)` here on the first call. We treat
+        // anything else as "already exhausted" → no points to charge.
+        let points_before = match get_remaining_points(store, &self.instance) {
+            MeteringPoints::Remaining(n) => n,
+            MeteringPoints::Exhausted => 0,
+        };
+
         // Call the contract entrypoint
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
+
+        let points_consumed = match get_remaining_points(store, &self.instance) {
+            MeteringPoints::Remaining(n) => points_before.saturating_sub(n),
+            // Out-of-gas trap: the meter says zero remaining. Charge for the entire pre-call
+            // budget — the host will report a runtime error and the partial work was already done.
+            MeteringPoints::Exhausted => points_before,
+        };
+        // Charging happens before we return the result so fees are recorded even on failure paths.
+        self.env
+            .state_mut()
+            .interface_mut()
+            .record_wasm_execution(points_consumed)?;
 
         match res {
             Ok(return_ptr) => {

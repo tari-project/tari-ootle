@@ -1,112 +1,98 @@
 ---
-name: Build docker images
+name: Build docker image
 
 'on':
   push:
-    paths-ignore:
-      - '**/*.md'
+    branches:
+      - development
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]*'
-    branches:
-      - 'development'
-      - 'build_dockers*'
-      - 'build-all-*'
-      - 'build-dockers-*'
-  schedule:
-    - cron: '05 00 * * 0-5'  # Nightly build, 5min past midnight, Sunday to Friday
+    paths-ignore:
+      - '**/*.md'
   workflow_dispatch:
-    inputs:
-      version:
-        type: string
-        description: 'override image tag/version'
-      tag_alias:
-        default: latest-adhoc
-        type: string
-        description: 'image tag alias'
-      platforms:
-        default: linux/amd64
-        description: 'docker target build platform(s)'
-        type: choice
-        options:
-          - linux/amd64
-          - linux/arm64
-          - linux/arm64, linux/amd64
-          # - linux/riscv64
-
-env:
-  toolchain_default: stable
-
-concurrency:
-  # https://docs.github.com/en/actions/examples/using-concurrency-expressions-and-a-test-matrix
-  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') || github.ref != 'refs/heads/development' || github.ref != 'refs/heads/nextnet' || github.ref != 'refs/heads/stagenet' }}
+  schedule:
+    # Nightly build, 5 min past midnight UTC, Sunday through Friday.
+    - cron: '05 00 * * 0-5'
 
 permissions:
   contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded runs on PR/adhoc branches.
+  # Never cancel release tag builds or development branch builds.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') && github.ref != 'refs/heads/development' }}
+
+env:
+  IMAGE_NAME: ootle
 
 jobs:
-  base_builds_envs_setup:
+  build:
+    name: Build and push ootle image (linux/amd64)
     runs-on: ubuntu-latest
 
-    outputs:
-      toolchain: ${{ steps.envs_setup.outputs.toolchain }}
-      platforms: ${{ steps.envs_setup.outputs.platforms }}
-      version: ${{ steps.envs_setup.outputs.version }}
-      tag_alias: ${{ steps.envs_setup.outputs.tag_alias }}
-
     steps:
-      - name: envs setup
-        id: envs_setup
-        shell: bash
-        run: |
-          echo "Workflow triggered by ${{ github.actor }} for ${{ github.event_name }}"
-          echo "SHA - ${GITHUB_SHA}"
-          VSHA_SHORT=${GITHUB_SHA::7}
-          echo "SHA short - ${VSHA_SHORT}"
-          echo "VSHA_SHORT=${VSHA_SHORT}" >> $GITHUB_ENV
-          TOOLCHAIN=${{ github.event.inputs.toolchain }}
-          echo "toolchain=${TOOLCHAIN:-${{ env.toolchain_default }}}" >> $GITHUB_OUTPUT
-          if [[ "${{ github.ref }}" =~ ^refs/tags/v* ]] && [ "${{ github.event_name }}" != "workflow_dispatch" ] ; then
-            echo "Tagged Build - Build everything"
-            VERSION="${{ github.ref_name }}"
-            echo "Version used - ${VERSION}"
-            echo "platforms=linux/arm64, linux/amd64" >> $GITHUB_OUTPUT
-            echo "version=${VERSION}" >> $GITHUB_OUTPUT
-            echo "tag_alias=latest" >> $GITHUB_OUTPUT
-          fi
-          if [[ "${{ github.ref }}" =~ ^refs/heads/build-dockers-* ]] || [[ "${{ github.ref }}" =~ ^refs/heads/build-all-* ]] ; then
-            echo "Branch Build - limited dual arch"
-            echo "platforms=linux/arm64, linux/amd64" >> $GITHUB_OUTPUT
-            echo "tag_alias=latest-adhoc" >> $GITHUB_OUTPUT
-          fi
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] ; then
-            echo "Manual Build - selective"
-            echo "platforms=${{ github.event.inputs.platforms }}" >> $GITHUB_OUTPUT
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-            echo "tag_alias=${{ github.event.inputs.tag_alias }}" >> $GITHUB_OUTPUT
-          fi
-          if [ "${{ github.event_name }}" == "schedule" ] ; then
-            echo "Scheduled builds"
-            if [[ $(date +%u) -eq 7 ]] ; then
-              echo "Weekly Build - limited dual arch"
-              echo "platforms=linux/arm64, linux/amd64" >> $GITHUB_OUTPUT
-              echo "tag_alias=latest-weekly" >> $GITHUB_OUTPUT
-            else
-              echo "Nightly Build - limited amd64"
-              echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
-              echo "tag_alias=latest-nightly" >> $GITHUB_OUTPUT
-            fi
-          fi
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-  builds_run:
-    permissions:
-      contents: read
-      packages: write
-    needs: base_builds_envs_setup
-    uses: ./.github/workflows/build_dockers_workflow.yml
-    secrets: inherit
-    with:
-      toolchain: ${{ needs.base_builds_envs_setup.outputs.toolchain }}
-      platforms: ${{ needs.base_builds_envs_setup.outputs.platforms }}
-      version: ${{ needs.base_builds_envs_setup.outputs.version }}
-      tag_alias: ${{ needs.base_builds_envs_setup.outputs.tag_alias }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=nightly,enable=${{ github.event_name == 'schedule' }}
+            type=sha
+          labels: |
+            org.opencontainers.image.vendor=Tari Labs
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.description=Tari Ootle binaries (walletd, indexer, validator_node, swarm_daemon, wallet_cli, watcher, validator_rollback)
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: ./docker/ootle.Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          # GHA cache: free, 10 GB/repo cap with LRU eviction.
+          # If eviction becomes a problem, switch to registry cache:
+          #   type=registry,ref=ghcr.io/${{ github.repository_owner }}/ootle-buildcache
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Summary
+        run: |
+          echo "## Built image" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tags:**" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

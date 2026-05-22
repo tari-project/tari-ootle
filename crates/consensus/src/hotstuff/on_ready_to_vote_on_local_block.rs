@@ -436,8 +436,8 @@ where TConsensusSpec: ConsensusSpec
             apply_leader_fee_to_substate_store(
                 &mut substate_store,
                 proposer_claim_public_key_bytes,
-                local_committee_info.shard_group().start(),
                 local_committee_info.num_preshards(),
+                local_committee_info.shard_group().start(),
                 total_leader_fee,
             )?;
         }

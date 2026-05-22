@@ -3,6 +3,7 @@
 
 use std::{collections::HashSet, fmt, fmt::Display};
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::LeafBlock;
 use tari_engine_types::{
@@ -29,16 +30,22 @@ use crate::{
     consensus_models::{SubstateLock, SubstateTransition, substate_update_batch::SubstateUpdateBatch},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateRecord {
+    #[n(0)]
     pub substate_id: SubstateId,
+    #[n(1)]
     pub version: u32,
+    #[n(2)]
     pub substate_value: Option<SubstateValue>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "ootle_serde::hex")]
+    #[n(3)]
     pub state_hash: Hash32,
+    #[n(4)]
     pub created: SubstateCreated,
+    #[n(5)]
     pub destroyed: Option<SubstateDestroyed>,
 }
 
@@ -291,27 +298,34 @@ impl SubstateDestroy {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateCreated {
+    #[n(0)]
     pub at_epoch: Epoch,
     // Note: This field not strictly necessary, since the shard can be derived from (SubstateId, Version) and
     // NumPreshards. But the cost is negligible, and it makes the metadata more self-contained.
+    #[n(1)]
     pub in_shard: Shard,
+    #[n(2)]
     pub at_state_version: Version,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateDestroyed {
+    #[n(0)]
     pub at_epoch: Epoch,
+    #[n(1)]
     pub at_state_version: Version,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub enum SubstateValueOrHash {
-    Value(Box<SubstateValue>),
-    Hash(Hash32),
+    #[n(0)]
+    Value(#[n(0)] Box<SubstateValue>),
+    #[n(1)]
+    Hash(#[n(0)] Hash32),
 }
 
 impl SubstateValueOrHash {

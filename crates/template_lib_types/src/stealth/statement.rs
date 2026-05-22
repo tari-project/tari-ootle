@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{prelude::*, vec};
 
 use super::StealthUnspentOutput;
@@ -12,17 +12,21 @@ use crate::{
 };
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthOutputsStatement {
     /// The stealth outputs that are to be created
+    #[n(0)]
     pub outputs: Vec<StealthUnspentOutput>,
     /// The amount of revealed funds to output. If this is a positive (non-zero) value, a bucket containing the
     /// revealed stealth funds is created.
+    #[n(1)]
     pub revealed_output_amount: Amount,
     /// Bulletproof range proof for the output commitments proving that values are in the range
     /// [minimum_value_promise, 2^64)
+    #[n(2)]
     pub agg_range_proof: RangeProofBytes,
 }
 
@@ -38,11 +42,13 @@ impl StealthOutputsStatement {
 }
 
 /// A statement for stealth outputs to spend as inputs.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthInput {
     /// The commitment of the unspent output being spent
+    #[n(0)]
     pub commitment: PedersenCommitmentBytes,
 }
 
@@ -70,13 +76,16 @@ impl From<&PedersenCommitmentBytes> for StealthInput {
 }
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthInputsStatement {
     /// The stealth inputs that are to be spent
+    #[n(0)]
     pub inputs: Vec<StealthInput>,
     /// The total amount of revealed funds being spent.
+    #[n(1)]
     pub revealed_amount: Amount,
 }
 
@@ -99,14 +108,18 @@ impl StealthInputsStatement {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthTransferStatement {
+    #[n(0)]
     pub inputs_statement: StealthInputsStatement,
+    #[n(1)]
     pub outputs_statement: StealthOutputsStatement,
     /// Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
     /// is valid). This may be None, if and only if, the transfer is revealed-only (i.e. no stealth inputs or outputs).
+    #[n(2)]
     pub balance_proof: Option<BalanceProofSignature>,
 }
 

@@ -10,14 +10,32 @@ use std::{
 };
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 use crate::{NumPreshards, SubstateAddress, shard::Shard, uint::U256};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    Encode,
+    Decode,
+    CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ShardGroup {
+    #[n(0)]
     start: Shard,
+    #[n(1)]
     end_inclusive: Shard,
 }
 
@@ -152,19 +170,15 @@ impl ShardGroup {
             return SubstateAddress::zero()..=SubstateAddress::max();
         }
 
-        let shard_size = U256::MAX >> num_shards.as_u32().trailing_zeros();
-        let start = if self.start.is_first() {
-            U256::ZERO
+        let num_shards = num_shards.as_u32();
+        let shard_size = (U256::MAX >> num_shards.trailing_zeros()) + U256::ONE;
+        let start = U256::from(self.start.as_u32() - 1) * shard_size;
+        let end = if self.end_inclusive.as_u32() == num_shards {
+            SubstateAddress::max()
         } else {
-            shard_size * U256::from(self.start.as_u32()) + U256::from(self.start.as_u32() - 1)
+            SubstateAddress::from_u256_zero_version(U256::from(self.end_inclusive.as_u32()) * shard_size - U256::ONE)
         };
-        if self.end_inclusive == num_shards.as_u32() {
-            return SubstateAddress::from_u256_zero_version(start)..=SubstateAddress::max();
-        }
-
-        let end =
-            shard_size * U256::from(self.end_inclusive.as_u32()) + shard_size + U256::from(self.end_inclusive.as_u32());
-        SubstateAddress::from_u256_zero_version(start)..=SubstateAddress::from_u256_zero_version(end - 1)
+        SubstateAddress::from_u256_zero_version(start)..=end
     }
 
     pub fn to_parsable_string(&self) -> String {

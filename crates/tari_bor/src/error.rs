@@ -31,8 +31,14 @@ impl fmt::Display for BorError {
 #[cfg(feature = "std")]
 impl std::error::Error for BorError {}
 
-impl From<ciborium::value::Error> for BorError {
-    fn from(value: ciborium::value::Error) -> Self {
+impl From<minicbor::decode::Error> for BorError {
+    fn from(value: minicbor::decode::Error) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl<E: fmt::Display> From<minicbor::encode::Error<E>> for BorError {
+    fn from(value: minicbor::encode::Error<E>) -> Self {
         Self(value.to_string())
     }
 }

@@ -71,8 +71,8 @@ mod template {
                 .with_divisibility(0)
                 .with_access_rules(
                     ResourceAccessRules::new()
-                        .mintable(contribute_and_redeem_rule.clone())
-                        .burnable(contribute_and_redeem_rule.clone()),
+                        .mintable(contribute_and_redeem_rule.clone(), LOCKED)
+                        .burnable(contribute_and_redeem_rule.clone(), LOCKED),
                 )
                 .with_owner_rule(owner_rule.clone())
                 .with_metadata(metadata)

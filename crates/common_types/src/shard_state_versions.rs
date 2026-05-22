@@ -9,7 +9,7 @@ use tari_bor::{Deserialize, Serialize};
 use crate::{NumPreshards, ShardGroup, StateVersion, shard::Shard};
 
 /// Maximum number of shards is one more than the maximum number of presharding options to allow for the global shard
-const MAX_SHARDS: usize = NumPreshards::MAX_SHARD.as_u32() as usize + 1;
+pub(crate) const MAX_SHARDS: usize = NumPreshards::MAX_SHARD.as_u32() as usize + 1;
 
 type BoundedVersionVec = BoundedVec<StateVersion, 1, MAX_SHARDS>;
 
@@ -25,6 +25,60 @@ type BoundedVersionVec = BoundedVec<StateVersion, 1, MAX_SHARDS>;
 pub struct ShardStateVersions {
     #[cfg_attr(feature = "ts", ts(type = "number[]"))]
     inner: BoundedVersionVec,
+}
+
+impl<C> minicbor::Encode<C> for ShardStateVersions {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        let slice = self.inner.as_slice();
+        e.array(slice.len() as u64)?;
+        for v in slice {
+            v.encode(e, ctx)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for ShardStateVersions {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?;
+        let vec: Vec<StateVersion> = match len {
+            Some(n) => {
+                let mut out = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    out.push(StateVersion::decode(d, ctx)?);
+                }
+                out
+            },
+            None => {
+                let mut out = Vec::new();
+                loop {
+                    if matches!(d.datatype()?, minicbor::data::Type::Break) {
+                        d.skip()?;
+                        break;
+                    }
+                    out.push(StateVersion::decode(d, ctx)?);
+                }
+                out
+            },
+        };
+        Self::from_vec(vec).map_err(|_| minicbor::decode::Error::message("ShardStateVersions length out of bounds"))
+    }
+}
+
+impl<C> minicbor::CborLen<C> for ShardStateVersions {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let slice = self.inner.as_slice();
+        let n = slice.len() as u64;
+        let mut total = <u64 as minicbor::CborLen<C>>::cbor_len(&n, ctx);
+        for v in slice {
+            total += v.cbor_len(ctx);
+        }
+        total
+    }
 }
 
 impl ShardStateVersions {

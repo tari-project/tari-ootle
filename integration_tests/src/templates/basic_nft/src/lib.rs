@@ -21,11 +21,6 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use tari_template_lib::prelude::*;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Sparkle {
-    pub brightness: u32,
-}
-
 #[template]
 mod sparkle_nft_template {
     use super::*;
@@ -33,14 +28,18 @@ mod sparkle_nft_template {
         resource_address: ResourceAddress,
         vault: Vault,
     }
+    pub struct Sparkle {
+        #[n(0)]
+        pub brightness: u32,
+    }
 
     impl SparkleNft {
         pub fn new() -> Component<Self> {
             let resource_address = ResourceBuilder::non_fungible()
                 .with_token_symbol("SPKL")
                 // AllowAll makes testing easier
-                .mintable(rule!(allow_all))
-                .burnable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
+                .burnable(rule!(allow_all), OWNER)
                 .build();
             let vault = Vault::new_empty(resource_address);
 
@@ -57,8 +56,8 @@ mod sparkle_nft_template {
             let bucket = ResourceBuilder::non_fungible()
                 .with_token_symbol("SPKL")
                 // AllowAll makes testing easier
-                .mintable(rule!(allow_all))
-                .burnable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
+                .burnable(rule!(allow_all), OWNER)
                 .initial_supply_with_data(Some((nft, (&(), &empty))));
 
             Component::new(Self {

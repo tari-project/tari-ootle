@@ -142,9 +142,8 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
         body: ComponentBody {
             state: cbor!({
                 "foo" => "bar",
-                "bytes" => bytes,
-            })
-            .unwrap(),
+                "bytes" => tari_bor::Value::Bytes(bytes.to_vec()),
+            }),
         },
     })
 }
@@ -229,9 +228,8 @@ pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
         body: ComponentBody {
             state: cbor!({
                 "baz" => "bar",
-                "bytes" => entity_id.as_bytes(),
-            })
-            .unwrap(),
+                "bytes" => tari_bor::Value::Bytes(entity_id.as_bytes().to_vec()),
+            }),
         },
     })
 }

@@ -43,6 +43,17 @@ pub trait RuntimeModule<TStore>: Send + Sync {
     ) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
+
+    /// Invoked after a WASM template invocation completes (or aborts) with the number of Wasmer
+    /// metering points consumed during that call. Aggregating multiple calls within a transaction
+    /// is the caller's responsibility (the runtime fans out one event per call).
+    fn on_wasm_execution(
+        &self,
+        _track: &mut StateTracker<TStore>,
+        _points_consumed: u64,
+    ) -> Result<(), RuntimeModuleError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -16,7 +16,7 @@ mod template {
 
     impl TemplateV1 {
         pub fn new(owner_rule: OwnerRule, signers: MaxVec<10, RistrettoPublicKeyBytes>) -> Component<Self> {
-            let resource_address = ResourceBuilder::non_fungible().mintable(rule!(allow_all)).build();
+            let resource_address = ResourceBuilder::non_fungible().mintable(rule!(allow_all), OWNER).build();
 
             Component::new(Self {
                 signers,

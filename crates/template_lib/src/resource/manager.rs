@@ -37,7 +37,7 @@
 //! let resource_manager = ResourceManager::get(my_resource_address);
 //! resource_manager.mint_fungible(1000);
 //! ```
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::to_value;
 use tari_template_abi::{
     EngineOp,
@@ -56,7 +56,7 @@ use tari_template_lib_types::{
     ResourceInfo,
     UtxoId,
     VaultId,
-    access_rules::ResourceAccessRules,
+    access_rules::{AccessRule, ResourceAccessRules, ResourceAuthAction},
     confidential::ConfidentialOutputStatement,
     crypto::StealthValueProof,
     stealth::StealthTransferStatement,
@@ -79,6 +79,7 @@ use crate::{
         ResourceUpdateNonFungibleDataArg,
         SetFreezeStealthUtxosArg,
         StealthTransferResourceArg,
+        UpdateAccessRuleArg,
         VaultFreezeFlags,
     },
     models::{Bucket, BucketId, NonFungible, ResourceAddressAllocation},
@@ -97,9 +98,11 @@ use crate::{
 /// let resource_manager = ResourceManager::get(my_resource_address);
 /// resource_manager.mint_fungible(1000);
 /// ```
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct ResourceManager {
+    #[n(0)]
     resource_address: ResourceAddress,
 }
 
@@ -344,7 +347,7 @@ impl ResourceManager {
     ///     &MyMutableData { views: 0 },
     /// );
     /// ```
-    pub fn mint_non_fungible<T: Serialize, U: Serialize>(
+    pub fn mint_non_fungible<T: Encode<()>, U: Encode<()>>(
         &self,
         id: NonFungibleId,
         metadata: &T,
@@ -398,7 +401,7 @@ impl ResourceManager {
     ///     10,
     /// );
     /// ```
-    pub fn mint_many_non_fungible<T: Serialize + ?Sized, U: Serialize + ?Sized>(
+    pub fn mint_many_non_fungible<T: Encode<()> + ?Sized, U: Encode<()> + ?Sized>(
         &self,
         metadata: &T,
         mutable_data: &U,
@@ -472,8 +475,8 @@ impl ResourceManager {
     /// ```
     pub fn mint_many_non_fungible_with<T, U, F>(&self, metadata: &T, mutable_data: &U, mut producer: F) -> Bucket
     where
-        T: Serialize + ?Sized,
-        U: Serialize + ?Sized,
+        T: Encode<()> + ?Sized,
+        U: Encode<()> + ?Sized,
         F: FnMut() -> Option<NonFungibleId>,
     {
         let token_data = (to_value(metadata).unwrap(), to_value(mutable_data).unwrap());
@@ -894,7 +897,7 @@ impl ResourceManager {
     ///
     /// ResourceManager::get("resource_xxx".parse().unwrap()).update_non_fungible_data(id, &data);
     /// ```
-    pub fn update_non_fungible_data<T: Serialize + ?Sized>(&self, id: NonFungibleId, data: &T) {
+    pub fn update_non_fungible_data<T: Encode<()> + ?Sized>(&self, id: NonFungibleId, data: &T) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
             action: ResourceAction::UpdateNonFungibleData,
@@ -907,34 +910,43 @@ impl ResourceManager {
         resp.decode().expect("[update_non_fungible_data] Failed")
     }
 
-    /// Updates access rules that determine who can operate the resource
+    /// Updates the access rule that gates a single resource action (mint, burn, recall, etc.).
     ///
-    /// The function allows the caller to overwrite the existing [`ResourceAccessRules`] for the resource with a new
-    /// set. This will replace the existing access rules entirely.
+    /// Authorization is gated by the per-field
+    /// [`UpdateRule`](tari_template_lib_types::access_rules::UpdateRule) configured for `action`:
+    ///
+    /// * [`UpdateRule::Locked`](tari_template_lib_types::access_rules::UpdateRule::Locked): the rule cannot be changed
+    ///   by anyone (not even the resource owner).
+    /// * [`UpdateRule::Owner`](tari_template_lib_types::access_rules::UpdateRule::Owner): only the resource owner can
+    ///   change the rule.
+    /// * [`UpdateRule::AccessRule`](tari_template_lib_types::access_rules::UpdateRule::AccessRule): the caller must
+    ///   satisfy the embedded [`AccessRule`].
+    ///
+    /// The updater rule itself is immutable once a resource is created.
     ///
     /// # Arguments
     ///
-    /// * `access_rules` - The new [`ResourceAccessRules`] to set for the resource.
+    /// * `action` - The [`ResourceAuthAction`] whose access rule should be replaced.
+    /// * `new_rule` - The new [`AccessRule`] for that action.
     ///
     /// # Panics
     ///
-    /// It will panic if:
-    /// - The caller does not have the necessary [`ResourceAccessRules`] or [`OwnerRule`] to update the access rules.
-    /// - The [`ResourceAccessRules`] are invalid or malformed.
+    /// Panics if the caller is not authorized to update the rule for `action`.
     ///
     /// # Examples
+    ///
     /// ```rust,ignore
-    /// let new_access_rules = ResourceAccessRules::default()
-    /// resource_manager.set_access_rules(new_access_rules);
+    /// use tari_template_lib::prelude::{ResourceAuthAction, rule};
+    /// resource_manager.update_access_rule(ResourceAuthAction::Mint, rule!(allow_all));
     /// ```
-    pub fn set_access_rules(&self, access_rules: ResourceAccessRules) {
+    pub fn update_access_rule(&self, action: ResourceAuthAction, new_rule: AccessRule) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
-            action: ResourceAction::UpdateAccessRules,
-            args: invoke_args![access_rules],
+            action: ResourceAction::UpdateAccessRule,
+            args: invoke_args![UpdateAccessRuleArg { action, new_rule }],
         });
 
-        resp.decode().expect("[set_access_rules] Failed")
+        resp.decode().expect("[update_access_rule] Failed")
     }
 
     /// Replaces the resource's metadata map.

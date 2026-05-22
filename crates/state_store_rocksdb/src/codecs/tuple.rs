@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use crate::{
     codecs::{DbDecoder, DbEncoder},
@@ -37,12 +37,12 @@ where
     CB: DbDecoder<B>,
     CC: DbDecoder<C>,
 {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<(A, B, C), RocksDbStorageError> {
+    fn decode(&self, bytes: &[u8]) -> Result<((A, B, C), usize), RocksDbStorageError> {
         let (ca, cb, cc) = &self;
-        let a = ca.decode_reader(reader)?;
-        let b = cb.decode_reader(reader)?;
-        let c = cc.decode_reader(reader)?;
-        Ok((a, b, c))
+        let (a, n_a) = ca.decode(bytes)?;
+        let (b, n_b) = cb.decode(&bytes[n_a..])?;
+        let (c, n_c) = cc.decode(&bytes[n_a + n_b..])?;
+        Ok(((a, b, c), n_a + n_b + n_c))
     }
 }
 
@@ -71,10 +71,10 @@ where
     CA: DbDecoder<A>,
     CB: DbDecoder<B>,
 {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<(A, B), RocksDbStorageError> {
+    fn decode(&self, bytes: &[u8]) -> Result<((A, B), usize), RocksDbStorageError> {
         let (ca, cb) = &self;
-        let a = ca.decode_reader(reader)?;
-        let b = cb.decode_reader(reader)?;
-        Ok((a, b))
+        let (a, n_a) = ca.decode(bytes)?;
+        let (b, n_b) = cb.decode(&bytes[n_a..])?;
+        Ok(((a, b), n_a + n_b))
     }
 }

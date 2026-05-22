@@ -56,19 +56,29 @@ pub fn derive_component_address_from_public_key(
     ComponentAddress::new(key)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Component {
+    #[n(0)]
     pub header: ComponentHeader,
+    #[n(1)]
     pub body: ComponentBody,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentHeader {
+    #[n(0)]
     pub template_address: TemplateAddress,
+    #[n(1)]
     pub owner_rule: SubstateOwnerRule,
+    #[n(2)]
     pub access_rules: ComponentAccessRules,
+    #[n(3)]
     pub entity_id: EntityId,
 }
 
@@ -135,9 +145,12 @@ impl Component {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentBody {
+    #[n(0)]
     #[serde(with = "ootle_serde::cbor_value")]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     #[borsh(serialize_with = "crate::borsh::serialize_cbor_value")]

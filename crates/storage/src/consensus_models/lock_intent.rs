@@ -3,6 +3,7 @@
 
 use std::{borrow::Borrow, fmt, hash::Hash};
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
@@ -13,11 +14,14 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct VersionedSubstateIdLockIntent {
+    #[n(0)]
     versioned_substate_id: VersionedSubstateId,
+    #[n(1)]
     lock_type: SubstateLockType,
+    #[n(2)]
     require_version: bool,
 }
 

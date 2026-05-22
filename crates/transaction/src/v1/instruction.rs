@@ -32,77 +32,145 @@ use crate::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Instruction {
+    #[n(0)]
     CreateAccount {
+        #[n(0)]
         owner_public_key: RistrettoPublicKeyBytes,
+        #[n(1)]
         owner_rule: Option<OwnerRule>,
+        #[n(2)]
         access_rules: Option<ComponentAccessRules>,
+        #[n(3)]
         bucket_workspace_id: Option<WorkspaceOffsetId>,
     },
+    #[n(1)]
     CallFunction {
+        #[n(0)]
         address: TemplateAddress,
+        #[n(1)]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         function: FunctionName,
+        #[n(2)]
         args: Vec<InstructionArg>,
     },
+    #[n(2)]
     CallMethod {
+        #[n(0)]
         call: ComponentReference,
+        #[n(1)]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         method: FunctionName,
+        #[n(2)]
         args: Vec<InstructionArg>,
     },
+    #[n(3)]
     PutLastInstructionOutputOnWorkspace {
+        #[n(0)]
         key: WorkspaceId,
     },
+    #[n(4)]
     EmitLog {
+        #[n(0)]
         level: LogLevel,
+        #[n(1)]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         message: MaxString<{ limits::ENGINE_LIMITS.max_log_size_bytes }>,
     },
+    #[n(5)]
     ClaimBurn {
+        #[n(0)]
         claim: Box<MinotariBurnClaimProof>,
+        #[n(1)]
         output_data: ClaimBurnOutputData,
     },
+    #[n(6)]
     ClaimValidatorFees {
+        #[n(0)]
         address: ValidatorFeePoolAddress,
     },
+    #[n(7)]
     DropAllProofsInWorkspace,
+    #[n(8)]
     Assert {
+        #[n(0)]
         key: WorkspaceOffsetId,
+        #[n(1)]
         assertion: Assertion,
     },
+    #[n(9)]
     TakeFromBucket {
+        #[n(0)]
         input_bucket: WorkspaceOffsetId,
+        #[n(1)]
         amount: Amount,
+        #[n(2)]
         output_bucket: WorkspaceId,
     },
+    #[n(10)]
     PublishTemplate {
         /// Index into the transaction's `blobs` list. The referenced blob's bytes are the WASM
         /// binary, which the engine resolves via the surrounding `Blobs` at execution time.
+        #[n(0)]
         binary: BlobIndex,
         /// Optional multihash of off-chain CBOR metadata
+        #[n(1)]
         #[serde(default)]
+        #[cbor(default)]
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
         metadata_hash: Option<MetadataHash>,
     },
+    #[n(11)]
     AllocateAddress {
+        #[n(0)]
         allocatable_type: AllocatableAddressType,
+        #[n(1)]
         workspace_id: WorkspaceId,
     },
+    #[n(12)]
     StealthTransfer {
+        #[n(0)]
         resource_address_ref: ResourceAddressRef,
+        #[n(1)]
         statement: StealthTransferStatement,
+        #[n(2)]
         revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
+    #[n(13)]
     PayFeeFromBucket {
+        #[n(0)]
         bucket: WorkspaceOffsetId,
     },
+    #[n(14)]
     UpdateComponentTemplate {
+        #[n(0)]
         component: ComponentReference,
+        #[n(1)]
         migrate: Option<MigrateFunction>,
+        #[n(2)]
         new_template: TemplateAddress,
+    },
+    /// Drains the bucket at `src` into the existing bucket at `dest`. The `src` workspace slot
+    /// remains bound but its bucket is consumed; reusing it for further bucket operations will
+    /// error at the bucket-state layer (matching `TakeFromBucket`'s slot semantics).
+    #[n(15)]
+    PutIntoBucket {
+        #[n(0)]
+        src: WorkspaceOffsetId,
+        #[n(1)]
+        dest: WorkspaceOffsetId,
     },
 }
 
@@ -148,6 +216,7 @@ impl Instruction {
             Self::DropAllProofsInWorkspace |
             Self::Assert { .. } |
             Self::TakeFromBucket { .. } |
+            Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } => {},
@@ -193,6 +262,7 @@ impl Instruction {
             Self::DropAllProofsInWorkspace |
             Self::Assert { .. } |
             Self::TakeFromBucket { .. } |
+            Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } => {},
@@ -254,6 +324,10 @@ impl Instruction {
                 *output_bucket = output_bucket
                     .checked_add(id_offset)
                     .expect("Workspace ID overflow during merge");
+            },
+            Self::PutIntoBucket { src, dest } => {
+                src.remap_id(id_offset);
+                dest.remap_id(id_offset);
             },
             Self::AllocateAddress { workspace_id, .. } => {
                 *workspace_id = workspace_id
@@ -373,6 +447,9 @@ impl Display for Instruction {
                     input_bucket, amount, output_bucket
                 )
             },
+            Self::PutIntoBucket { src, dest } => {
+                write!(f, "PutIntoBucket {{ src: {}, dest: {} }}", src, dest)
+            },
             Self::PublishTemplate { .. } => {
                 write!(f, "PublishTemplate")
             },
@@ -430,11 +507,23 @@ fn collect_arg_blob_ids(args: &[InstructionArg], out: &mut Vec<BlobIndex>) {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct MigrateFunction {
+    #[n(0)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub name: FunctionName,
+    #[n(1)]
     pub args: Vec<InstructionArg>,
 }
 
@@ -476,11 +565,18 @@ mod tests {
     }
 
     #[test]
-    fn decode_encode_bincode() {
+    fn decode_encode_minicbor() {
         let instruction = make_sample();
-        let encoded = bincode::serde::encode_to_vec(&instruction, bincode::config::standard()).unwrap();
-        let (decoded, _): (Instruction, usize) =
-            bincode::serde::decode_from_slice(&encoded, bincode::config::standard()).unwrap();
+        let encoded = tari_bor::encode(&instruction).unwrap();
+        let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
+        assert_eq!(instruction, decoded);
+
+        let instruction = Instruction::PutIntoBucket {
+            src: WorkspaceOffsetId::new(1),
+            dest: WorkspaceOffsetId::new(2),
+        };
+        let encoded = tari_bor::encode(&instruction).unwrap();
+        let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
         assert_eq!(instruction, decoded);
     }
 }

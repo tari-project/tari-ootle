@@ -4,6 +4,7 @@
 use std::{fmt, str::FromStr};
 
 use borsh::BorshSerialize;
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 
@@ -27,11 +28,14 @@ impl<T: LockIntent> ToSubstateAddress for T {
 }
 
 /// Substate lock flags
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, BorshSerialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateLockType {
+    #[n(0)]
     Read,
+    #[n(1)]
     Write,
+    #[n(2)]
     Output,
 }
 

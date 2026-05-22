@@ -33,7 +33,7 @@ mod faucet_template {
     impl ConfidentialFaucet {
         pub fn mint(confidential_proof: ConfidentialOutputStatement) -> Component<Self> {
             let coins = ResourceBuilder::confidential()
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
                 .initial_supply(confidential_proof);
 
             Component::new(Self {
@@ -48,7 +48,7 @@ mod faucet_template {
             view_key: RistrettoPublicKeyBytes,
         ) -> Component<Self> {
             let coins = ResourceBuilder::confidential()
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
                 .with_view_key(view_key)
                 .initial_supply(confidential_proof);
 

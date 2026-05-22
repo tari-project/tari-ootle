@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use tari_bor::cbor_value_encoding_fix::CborValueDeserializeFixWrapper;
+use tari_bor::Value;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use tari_template_lib_types::{NonFungibleId, ResourceAddress, VaultId};
 use time::PrimitiveDateTime;
@@ -29,22 +29,21 @@ impl NonFungibleToken {
         self,
         vault_id: VaultId,
     ) -> Result<tari_ootle_wallet_sdk::models::NonFungibleToken, WalletStorageError> {
-        let data: CborValueDeserializeFixWrapper =
-            serde_json::from_str(&self.data).map_err(|e| WalletStorageError::DecodingError {
-                operation: "try_from",
-                item: "non_fungible_tokens.data",
-                details: e.to_string(),
-            })?;
+        let data: Value = serde_json::from_str(&self.data).map_err(|e| WalletStorageError::DecodingError {
+            operation: "try_from",
+            item: "non_fungible_tokens.data",
+            details: e.to_string(),
+        })?;
 
-        let mutable_data: CborValueDeserializeFixWrapper =
+        let mutable_data: Value =
             serde_json::from_str(&self.mutable_data).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_from",
                 item: "non_fungible_tokens.data",
                 details: e.to_string(),
             })?;
         Ok(tari_ootle_wallet_sdk::models::NonFungibleToken {
-            data: data.into_inner(),
-            mutable_data: mutable_data.into_inner(),
+            data,
+            mutable_data,
             resource_address: ResourceAddress::from_str(&self.resource_address).map_err(|e| {
                 WalletStorageError::DecodingError {
                     operation: "try_from",

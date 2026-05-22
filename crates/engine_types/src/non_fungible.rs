@@ -1,12 +1,15 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use tari_bor::BorError;
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
+#[cbor(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct NonFungibleContainer(Option<NonFungible>);
+pub struct NonFungibleContainer(#[n(0)] Option<NonFungible>);
 
 impl NonFungibleContainer {
     pub fn no_data() -> Self {
@@ -34,13 +37,17 @@ impl NonFungibleContainer {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NonFungible {
+    #[n(0)]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     #[serde(with = "ootle_serde::cbor_value")]
     #[borsh(serialize_with = "crate::borsh::serialize_cbor_value")]
     data: tari_bor::Value,
+    #[n(1)]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     #[serde(with = "ootle_serde::cbor_value")]
     #[borsh(serialize_with = "crate::borsh::serialize_cbor_value")]
@@ -60,11 +67,13 @@ impl NonFungible {
         &self.mutable_data
     }
 
-    pub fn decode_mutable_data<T: DeserializeOwned>(&self) -> Result<T, BorError> {
+    pub fn decode_mutable_data<T>(&self) -> Result<T, BorError>
+    where T: for<'b> tari_bor::Decode<'b, ()> {
         tari_bor::from_value(&self.mutable_data)
     }
 
-    pub fn decode_data<T: DeserializeOwned>(&self) -> Result<T, BorError> {
+    pub fn decode_data<T>(&self) -> Result<T, BorError>
+    where T: for<'b> tari_bor::Decode<'b, ()> {
         tari_bor::from_value(&self.data)
     }
 

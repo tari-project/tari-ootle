@@ -1,18 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    fmt,
-    fmt::Display,
-    io::{Read, Write},
-};
+use std::{fmt, fmt::Display, io::Write};
 
 use anyhow::anyhow;
 
 use crate::{
     codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
-    utils::read_to_fixed,
+    utils::take_fixed,
 };
 
 /// A const key used to differentiate "columns" in a reused column family.
@@ -65,8 +61,8 @@ impl<const COL: u32> DbEncoder<Column<COL>> for ColumnCodec {
 }
 
 impl<const COL: u32> DbDecoder<Column<COL>> for ColumnCodec {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<Column<COL>, RocksDbStorageError> {
-        let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+    fn decode(&self, bytes: &[u8]) -> Result<(Column<COL>, usize), RocksDbStorageError> {
+        let arr: [u8; 4] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("Invalid bytes for ColumnCodec"),
         })?;
 
@@ -80,7 +76,7 @@ impl<const COL: u32> DbDecoder<Column<COL>> for ColumnCodec {
                 ),
             });
         }
-        Ok(Column)
+        Ok((Column, 4))
     }
 }
 
@@ -102,24 +98,21 @@ impl<const COL: u8> DbEncoder<ByteColumn<COL>> for ColumnCodec {
 }
 
 impl<const COL: u8> DbDecoder<ByteColumn<COL>> for ColumnCodec {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<ByteColumn<COL>, RocksDbStorageError> {
-        let mut buf = [0u8; 1];
-        reader
-            .read_exact(&mut buf)
-            .map_err(|e| RocksDbStorageError::MalformedData {
-                operation: "decode ByteColumn",
-                details: format!("Failed to read 1 byte for ColumnCodec: {e}"),
-            })?;
+    fn decode(&self, bytes: &[u8]) -> Result<(ByteColumn<COL>, usize), RocksDbStorageError> {
+        let byte = bytes.first().ok_or_else(|| RocksDbStorageError::MalformedData {
+            operation: "decode ByteColumn",
+            details: "Not enough bytes for ColumnCodec".to_string(),
+        })?;
 
-        if buf[0] != COL {
+        if *byte != COL {
             return Err(RocksDbStorageError::DecodeError {
                 source: anyhow!(
                     "Invalid byte column bytes '{}', ColumnCodec expected byte '{}'",
-                    buf[0],
+                    byte,
                     COL
                 ),
             });
         }
-        Ok(ByteColumn)
+        Ok((ByteColumn, 1))
     }
 }

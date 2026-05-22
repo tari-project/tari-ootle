@@ -22,11 +22,10 @@
 
 mod cli;
 
-use std::{fs, fs::OpenOptions, panic, time::SystemTime};
+use std::{fs, fs::OpenOptions, io::Write, panic, time::SystemTime};
 
 use clap::Parser;
 use log::*;
-use tari_bor::Write;
 use tari_common::initialize_logging;
 use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
 use tari_shutdown::Shutdown;

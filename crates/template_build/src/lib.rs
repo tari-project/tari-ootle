@@ -20,8 +20,14 @@
 //!     .expect("Failed to generate template metadata");
 //! ```
 
-use std::{collections::BTreeMap, path::PathBuf};
+mod doc_extract;
 
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
+
+pub use doc_extract::{DocExtractError, extract_function_docs};
 pub use tari_ootle_template_metadata;
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata, from_cargo_toml};
 use url::Url;
@@ -54,6 +60,7 @@ pub struct TemplateMetadataBuilder {
     license: Option<String>,
     logo_url: Option<String>,
     extra: Option<BTreeMap<String, String>>,
+    source_path: Option<PathBuf>,
 }
 
 impl Default for TemplateMetadataBuilder {
@@ -76,6 +83,7 @@ impl TemplateMetadataBuilder {
             license: None,
             logo_url: None,
             extra: None,
+            source_path: None,
         }
     }
 
@@ -147,6 +155,14 @@ impl TemplateMetadataBuilder {
         self
     }
 
+    /// Override the template source file used to extract function rustdoc.
+    ///
+    /// Relative paths are resolved against `CARGO_MANIFEST_DIR`. Defaults to `src/lib.rs`.
+    pub fn source_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.source_path = Some(path.into());
+        self
+    }
+
     /// Apply builder overrides to the given metadata.
     fn apply_overrides(&self, metadata: &mut TemplateMetadata) -> Result<(), TemplateBuildError> {
         if let Some(ref description) = self.description {
@@ -197,6 +213,11 @@ impl TemplateMetadataBuilder {
         let cargo_toml_path = PathBuf::from(manifest_dir).join("Cargo.toml");
         let mut metadata = from_cargo_toml(&cargo_toml_path)?;
 
+        let source_path = resolve_source_path(manifest_dir, self.source_path.as_deref());
+        if source_path.is_file() {
+            metadata.functions = extract_function_docs(&source_path)?;
+        }
+
         self.apply_overrides(&mut metadata)?;
 
         // Write CBOR
@@ -220,6 +241,9 @@ impl TemplateMetadataBuilder {
         // Emit cargo metadata
         println!("cargo::metadata=TEMPLATE_METADATA_HASH={}", hash);
         println!("cargo:rerun-if-changed=Cargo.toml");
+        if source_path.is_file() {
+            println!("cargo:rerun-if-changed={}", source_path.display());
+        }
 
         Ok(TemplateBuildOutput {
             hash,
@@ -227,6 +251,15 @@ impl TemplateMetadataBuilder {
             json_path,
             metadata,
         })
+    }
+}
+
+fn resolve_source_path(manifest_dir: &str, override_path: Option<&Path>) -> PathBuf {
+    let base = PathBuf::from(manifest_dir);
+    match override_path {
+        Some(p) if p.is_absolute() => p.to_path_buf(),
+        Some(p) => base.join(p),
+        None => base.join("src").join("lib.rs"),
     }
 }
 
@@ -240,6 +273,8 @@ pub enum TemplateBuildError {
     Metadata(#[from] tari_ootle_template_metadata::TemplateMetadataError),
     #[error("Invalid URL in field '{0}': {1}")]
     InvalidUrl(&'static str, url::ParseError),
+    #[error("Failed to extract template function docs: {0}")]
+    DocExtract(#[from] DocExtractError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -403,6 +438,91 @@ category = "utility"
             .unwrap();
 
         assert_ne!(output_original.hash, output_overridden.hash);
+    }
+
+    #[test]
+    fn build_extracts_function_docs_from_lib_rs() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_cargo_toml(dir.path());
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let lib_rs = r#"
+#[template]
+mod my_template {
+    pub struct My;
+    impl My {
+        /// Create a new instance.
+        pub fn new() -> Self { My }
+
+        /// Transfer to recipient.
+        /// Second line of doc.
+        pub fn transfer(&self) {}
+
+        pub fn no_doc(&self) {}
+
+        fn private(&self) {}
+    }
+}
+"#;
+        std::fs::write(src_dir.join("lib.rs"), lib_rs).unwrap();
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let output = TemplateMetadataBuilder::new()
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+
+        let fns = &output.metadata.functions;
+        assert_eq!(fns.len(), 3);
+        assert_eq!(fns[0].name, "new");
+        assert_eq!(fns[0].doc, "Create a new instance.");
+        assert_eq!(fns[1].name, "transfer");
+        assert_eq!(fns[1].doc, "Transfer to recipient.\nSecond line of doc.");
+        assert_eq!(fns[2].name, "no_doc");
+        assert_eq!(fns[2].doc, "");
+    }
+
+    #[test]
+    fn build_without_lib_rs_leaves_functions_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_cargo_toml(dir.path());
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let output = TemplateMetadataBuilder::new()
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+
+        assert!(output.metadata.functions.is_empty());
+    }
+
+    #[test]
+    fn source_path_override_is_honored() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_cargo_toml(dir.path());
+        let custom = dir.path().join("custom.rs");
+        let src = r#"
+#[template]
+mod tpl {
+    pub struct Tpl;
+    impl Tpl {
+        /// from custom path
+        pub fn alt() {}
+    }
+}
+"#;
+        std::fs::write(&custom, src).unwrap();
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let output = TemplateMetadataBuilder::new()
+            .source_path("custom.rs")
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+
+        assert_eq!(output.metadata.functions.len(), 1);
+        assert_eq!(output.metadata.functions[0].name, "alt");
+        assert_eq!(output.metadata.functions[0].doc, "from custom path");
     }
 
     #[test]

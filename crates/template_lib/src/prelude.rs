@@ -27,7 +27,7 @@ pub use tari_bor;
 #[expect(deprecated)]
 pub use tari_template_lib_types::constants::XTR;
 #[cfg(feature = "extra-maps")]
-pub use tari_template_lib_types::fast_hash::{FastMap, PrehashedMap};
+pub use tari_template_lib_types::fast_hash::{FastMap, PrehashedMap, indexmap_codec};
 pub use tari_template_lib_types::{
     AccessRule,
     AuthHookCaller,
@@ -44,7 +44,15 @@ pub use tari_template_lib_types::{
     UtxoAddress,
     UtxoId,
     VaultId,
-    access_rules::{ComponentAccessRules as AccessRules, RestrictedAccessRule::*, *},
+    access_rules::{
+        ComponentAccessRules as AccessRules,
+        LOCKED,
+        OWNER,
+        ResourceAuthAction,
+        RestrictedAccessRule::*,
+        UpdateRule,
+        *,
+    },
     bytes::Bytes,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},

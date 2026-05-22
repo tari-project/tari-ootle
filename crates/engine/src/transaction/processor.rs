@@ -51,7 +51,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
     invoke_args,
-    models::Bucket,
+    models::{Bucket, BucketId},
     types::{
         Amount,
         ComponentAddress,
@@ -362,6 +362,15 @@ where
                 }
 
                 runtime_mut.put_on_workspace(output_bucket, IndexedValue::from_value(bucket.into_value()?)?)?;
+                Ok(InstructionResult::empty())
+            },
+            Instruction::PutIntoBucket { src, dest } => {
+                let runtime_mut = runtime.interface_mut();
+                let src_item = runtime_mut.workspace_invoke(WorkspaceAction::Get, invoke_args![src].into())?;
+                let src_bucket_id: BucketId = src_item.decode()?;
+                let dest_item = runtime_mut.workspace_invoke(WorkspaceAction::Get, invoke_args![dest].into())?;
+                let dest_bucket_ref = BucketRef::Ref(dest_item.decode()?);
+                runtime_mut.bucket_invoke(dest_bucket_ref, BucketAction::Join, invoke_args![src_bucket_id].into())?;
                 Ok(InstructionResult::empty())
             },
             Instruction::PublishTemplate { binary, metadata_hash } => {

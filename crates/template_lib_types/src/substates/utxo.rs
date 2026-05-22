@@ -1,7 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::{BorTag, Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
+use tari_bor::BorTag;
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -15,12 +16,13 @@ use crate::{
     address_prefixes,
     crypto::PedersenCommitmentBytes,
     hex::{fixed_bytes_from_hex, write_hex_fmt},
-    serde_helpers,
 };
 
 const TAG: u64 = BinaryTag::Utxo.as_u64();
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoAddress(BorTag<UtxoAddressContents, TAG>);
 
@@ -73,11 +75,14 @@ impl From<UtxoAddressContents> for UtxoAddress {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoId(
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
+    #[cbor(with = "minicbor::bytes")]
     [u8; Self::LENGTH],
 );
 
@@ -125,11 +130,14 @@ impl Display for UtxoId {
 }
 
 /// A NonFungibleId namespaced by a ResourceAddress.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct UtxoAddressContents {
+    #[n(0)]
     pub resource_address: ResourceAddress,
+    #[n(1)]
     pub id: UtxoId,
 }
 

@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_ootle_transaction::TransactionId;
@@ -12,8 +13,11 @@ use crate::{
     traits::Cf,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct FinalizedTransactionLinkData {
+    // PrimitiveDateTime (from `time` crate) only implements serde, so bridge it.
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     pub finalized_at: PrimitiveDateTime,
 }
 

@@ -49,21 +49,25 @@ mod tests {
     use syn::parse2;
 
     use super::generate_definition;
-    use crate::template::ast::TemplateAst;
+    use crate::template::ast::{TemplateAst, inject_cbor_derives};
+
+    fn parse_and_inject(src: &str) -> TemplateAst {
+        let input = TokenStream::from_str(src).unwrap();
+        let mut ast = parse2::<TemplateAst>(input).unwrap();
+        inject_cbor_derives(&mut ast.module_content).unwrap();
+        ast
+    }
 
     #[test]
     fn test_codegen() {
-        let input = TokenStream::from_str(indoc! {"
+        let ast = parse_and_inject(indoc! {"
             mod foo {
                 use std::collections::HashMap as _;
 
                 pub struct Foo {}
                 impl Foo { }
             }
-        "})
-        .unwrap();
-
-        let ast = parse2::<TemplateAst>(input).unwrap();
+        "});
 
         let output = generate_definition(&ast);
 
@@ -72,8 +76,32 @@ mod tests {
             pub mod Foo_template {
                 use ::tari_template_lib::template_macro_deps::*;
                 use std::collections::HashMap as _;
-                #[derive(serde :: Serialize, serde :: Deserialize)]
-                #[serde(crate = "self::serde")]
+                #[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+                pub struct Foo { }
+                impl Foo {}
+            }
+        });
+    }
+
+    #[test]
+    fn skip_cbor_derives_leaves_struct_untouched() {
+        let input = TokenStream::from_str(indoc! {"
+            mod foo {
+                pub struct Foo {}
+                impl Foo { }
+            }
+        "})
+        .unwrap();
+
+        // Same as `test_codegen` but *without* the inject pass — emulates
+        // `#[template(skip_cbor_derives)]`.
+        let ast = parse2::<TemplateAst>(input).unwrap();
+        let output = generate_definition(&ast);
+
+        assert_code_eq(output, quote! {
+            #[allow(non_snake_case)]
+            pub mod Foo_template {
+                use ::tari_template_lib::template_macro_deps::*;
                 pub struct Foo { }
                 impl Foo {}
             }

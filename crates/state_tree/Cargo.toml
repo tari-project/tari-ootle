@@ -7,12 +7,14 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+tari_bor = { workspace = true, features = ["serde"] }
 tari_ootle_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_jellyfish = { workspace = true }
 tari_template_lib_types = { workspace = true }
 
 thiserror = { workspace = true }
+minicbor = { workspace = true, features = ["std", "derive"] }
 serde = { workspace = true, features = ["derive"] }
 log = { workspace = true }
 

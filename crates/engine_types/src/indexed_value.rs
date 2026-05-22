@@ -29,17 +29,19 @@ use crate::{published_template::PublishedTemplateAddress, substate::SubstateId};
 
 const MAX_VISITOR_DEPTH: usize = 50;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct IndexedValue {
+    #[n(0)]
     indexed: IndexedWellKnownTypes,
     #[serde(with = "ootle_serde::cbor_value")]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
+    #[n(1)]
     value: tari_bor::Value,
 }
 
 impl IndexedValue {
-    pub fn from_type<T: Serialize + ?Sized>(v: &T) -> Result<Self, IndexedValueError> {
+    pub fn from_type<T: tari_bor::Encode<()> + ?Sized>(v: &T) -> Result<Self, IndexedValueError> {
         let value = tari_bor::to_value(v)
             .map_err(|e| IndexedValueError::Custom(format!("from_type<{}>: {}", type_name::<T>(), e)))?;
         Self::from_value(value)
@@ -111,12 +113,12 @@ impl IndexedValue {
     }
 
     pub fn decoded<T>(&self) -> Result<T, IndexedValueError>
-    where for<'a> T: serde::Deserialize<'a> {
+    where T: for<'b> tari_bor::Decode<'b, ()> {
         tari_bor::from_value(&self.value).map_err(Into::into)
     }
 
     pub fn get_value<T>(&self, path: &str) -> Result<Option<T>, IndexedValueError>
-    where for<'a> T: serde::Deserialize<'a> {
+    where T: for<'b> tari_bor::Decode<'b, ()> {
         decode_value_at_path(&self.value, path)
     }
 
@@ -134,25 +136,42 @@ impl Default for IndexedValue {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Debug, Clone, Default, Serialize, Deserialize, PartialEq, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct IndexedWellKnownTypes {
+    #[n(0)]
     bucket_ids: Vec<BucketId>,
+    #[n(1)]
     proof_ids: Vec<ProofId>,
+    #[n(2)]
     component_addresses: Vec<ComponentAddress>,
+    #[n(3)]
     resource_addresses: Vec<ResourceAddress>,
+    #[n(4)]
     transaction_receipt_addresses: Vec<TransactionReceiptAddress>,
+    #[n(5)]
     non_fungible_addresses: Vec<NonFungibleAddress>,
+    #[n(6)]
     vault_ids: Vec<VaultId>,
+    #[n(7)]
     metadata: Vec<Metadata>,
+    #[n(8)]
     unclaimed_confidential_output_address: Vec<ClaimedOutputTombstoneAddress>,
+    #[n(9)]
     published_template_addresses: Vec<PublishedTemplateAddress>,
+    #[n(10)]
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
     #[serde(default)]
+    #[cbor(default)]
+    #[n(11)]
     utxos: Vec<UtxoAddress>,
     #[cfg_attr(feature = "ts", ts(type = "number[]"))]
+    #[n(12)]
     component_address_allocations: Vec<ComponentAddressAllocation>,
     #[cfg_attr(feature = "ts", ts(type = "number[]"))]
+    #[n(13)]
     resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
 
@@ -404,59 +423,59 @@ impl FromTagAndValue for WellKnownTariValue {
         let tag = BinaryTag::from_u64(tag).ok_or(IndexedValueError::InvalidTag(tag))?;
         match tag {
             BinaryTag::ComponentAddress => {
-                let component_address: ObjectKey = value.deserialized().map_err(BorError::from)?;
+                let component_address: ObjectKey = value.decoded()?;
                 Ok(Self::ComponentAddress(component_address.into()))
             },
             BinaryTag::BucketId => {
-                let bucket_id: u32 = value.deserialized().map_err(BorError::from)?;
+                let bucket_id: u32 = value.decoded()?;
                 Ok(Self::BucketId(bucket_id.into()))
             },
             BinaryTag::ResourceAddress => {
-                let resource_address: ObjectKey = value.deserialized().map_err(BorError::from)?;
+                let resource_address: ObjectKey = value.decoded()?;
                 Ok(Self::ResourceAddress(resource_address.into()))
             },
             BinaryTag::TransactionReceipt => {
-                let tx_receipt_hash: Hash32 = value.deserialized().map_err(BorError::from)?;
+                let tx_receipt_hash: Hash32 = value.decoded()?;
                 Ok(Self::TransactionReceiptAddress(tx_receipt_hash.into()))
             },
             BinaryTag::NonFungibleAddress => {
-                let non_fungible_address: NonFungibleAddressContents = value.deserialized().map_err(BorError::from)?;
+                let non_fungible_address: NonFungibleAddressContents = value.decoded()?;
                 Ok(Self::NonFungibleAddress(non_fungible_address.into()))
             },
             BinaryTag::Metadata => {
-                let metadata: BTreeMap<String, String> = value.deserialized().map_err(BorError::from)?;
+                let metadata: BTreeMap<String, String> = value.decoded()?;
                 Ok(Self::Metadata(metadata.into()))
             },
             BinaryTag::VaultId => {
-                let vault_id: ObjectKey = value.deserialized().map_err(BorError::from)?;
+                let vault_id: ObjectKey = value.decoded()?;
                 Ok(Self::VaultId(vault_id.into()))
             },
             BinaryTag::ProofId => {
-                let value: u32 = value.deserialized().map_err(BorError::from)?;
+                let value: u32 = value.decoded()?;
                 Ok(Self::ProofId(value.into()))
             },
             BinaryTag::ClaimedOutputTombstoneAddress => {
-                let value: ObjectKey = value.deserialized().map_err(BorError::from)?;
+                let value: ObjectKey = value.decoded()?;
                 Ok(Self::ClaimedOutputTombstoneAddress(value.into()))
             },
             BinaryTag::TemplateAddress => {
-                let value: Hash32 = value.deserialized().map_err(BorError::from)?;
+                let value: Hash32 = value.decoded()?;
                 Ok(Self::PublishedTemplateAddress(value.into()))
             },
             BinaryTag::ValidatorNodeFeePool => {
-                let value: [u8; 32] = value.deserialized().map_err(BorError::from)?;
+                let value: [u8; 32] = value.decoded()?;
                 Ok(Self::ValidatorNodeFeePool(value.into()))
             },
             BinaryTag::AllocatedComponentAddress => {
-                let value = value.deserialized().map_err(BorError::from)?;
+                let value = value.decoded()?;
                 Ok(Self::ComponentAddressAllocation(ComponentAddressAllocation::new(value)))
             },
             BinaryTag::AllocatedResourceAddress => {
-                let value = value.deserialized().map_err(BorError::from)?;
+                let value = value.decoded()?;
                 Ok(Self::ResourceAddressAllocation(ResourceAddressAllocation::new(value)))
             },
             BinaryTag::Utxo => {
-                let value: UtxoAddressContents = value.deserialized().map_err(BorError::from)?;
+                let value: UtxoAddressContents = value.decoded()?;
                 Ok(Self::Utxo(value.into()))
             },
         }
@@ -571,7 +590,7 @@ impl From<&str> for IndexedValueError {
 }
 
 pub fn decode_value_at_path<T>(value: &tari_bor::Value, path: &str) -> Result<Option<T>, IndexedValueError>
-where for<'a> T: serde::Deserialize<'a> {
+where T: for<'b> tari_bor::Decode<'b, ()> {
     get_value_by_path(value, path)
         .map(tari_bor::from_value)
         .transpose()
@@ -592,7 +611,10 @@ fn get_value_by_path<'a>(value: &'a tari_bor::Value, path: &str) -> Option<&'a t
                     .1;
             },
             tari_bor::Value::Array(list) => {
-                let index: usize = part.parse().expect("invalid index");
+                // With minicbor's integer-tagged encoding, struct fields land in an Array indexed by `#[n(N)]`.
+                // Non-numeric path segments simply have no match (rather than panicking) so callers using
+                // legacy string-keyed paths get a clean None instead of a crash.
+                let index: usize = part.parse().ok()?;
                 value = list.get(index)?;
             },
             _ => return None,
@@ -620,21 +642,31 @@ mod tests {
             .into()
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, minicbor::Encode, minicbor::Decode)]
     struct SubStruct {
+        #[n(0)]
         buckets: Vec<BucketId>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, minicbor::Encode, minicbor::Decode)]
     struct TestStruct {
+        #[n(0)]
         name: String,
+        #[n(1)]
         component: ComponentAddress,
+        #[n(2)]
         components: Vec<ComponentAddress>,
+        #[n(3)]
         resource_map: HashMap<ResourceAddress, ComponentAddress>,
+        #[n(4)]
         sub_struct: SubStruct,
+        #[n(5)]
         sub_structs: Vec<SubStruct>,
+        #[n(6)]
         vault_ids: Vec<VaultId>,
+        #[n(7)]
         non_fungible_id: Option<NonFungibleAddress>,
+        #[n(8)]
         metadata: Metadata,
     }
 
@@ -695,28 +727,23 @@ mod tests {
         assert!(indexed.bucket_ids().contains(&2.into()));
         assert_eq!(indexed.bucket_ids().len(), 6);
 
-        let buckets: Vec<BucketId> = indexed.get_value("$.sub_structs.1.buckets").unwrap().unwrap();
+        // TestStruct.sub_structs = #[n(5)], Vec index 1, then SubStruct.buckets = #[n(0)]
+        let buckets: Vec<BucketId> = indexed.get_value("$.5.1.0").unwrap().unwrap();
         assert_eq!(buckets, vec![1.into(), 2.into()]);
     }
 
     #[test]
     fn it_diffs_two_indexed_values() {
-        let v1 = IndexedWellKnownTypes::from_value(
-            &cbor!({
-                "bucket" => BucketId::from(1),
-                "proof1" => ProofId::from(1),
-                "proof2" => ProofId::from(2),
-            })
-            .unwrap(),
-        )
+        let v1 = IndexedWellKnownTypes::from_value(&cbor!({
+            "bucket" => tari_bor::to_value(&BucketId::from(1)).unwrap(),
+            "proof1" => tari_bor::to_value(&ProofId::from(1)).unwrap(),
+            "proof2" => tari_bor::to_value(&ProofId::from(2)).unwrap(),
+        }))
         .unwrap();
-        let v2 = IndexedWellKnownTypes::from_value(
-            &cbor!({
-                "buckets" => [BucketId::from(1), BucketId::from(2)],
-                "proofs" => [ProofId::from(2), ProofId::from(3), ProofId::from(4)],
-            })
-            .unwrap(),
-        )
+        let v2 = IndexedWellKnownTypes::from_value(&cbor!({
+            "buckets" => tari_bor::to_value(&vec![BucketId::from(1), BucketId::from(2)]).unwrap(),
+            "proofs" => tari_bor::to_value(&vec![ProofId::from(2), ProofId::from(3), ProofId::from(4)]).unwrap(),
+        }))
         .unwrap();
 
         let diff = v2.diff(&v1);

@@ -13,17 +13,23 @@ use core::{
 
 /// Represents the available Tari networks. The variants and assigned byte needs to match the L1 network enum.
 #[repr(u8)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Copy, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Copy, Hash, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Network {
+    #[n(0)]
     MainNet = 0x00,
+    #[n(1)]
     StageNet = 0x01,
+    #[n(2)]
     NextNet = 0x02,
+    #[n(3)]
     LocalNet = 0x10,
+    #[n(4)]
     Igor = 0x24,
     #[default]
+    #[n(5)]
     Esmeralda = 0x26,
 }
 

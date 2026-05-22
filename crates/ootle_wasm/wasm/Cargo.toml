@@ -13,9 +13,17 @@ readme = "../NPM_README.md"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ootle-wasm-core = { path = "../core", version = "0.30" }
+ootle-wasm-core = { path = "../core", version = "0.32" }
 wasm-bindgen = "0.2"
+# getrandom is pulled in transitively via `rand` and `tari_bulletproofs_plus`. The wasm32-unknown-unknown
+# target requires explicit feature opt-in for both major versions used in the graph.
+#
+# 0.2 stays in the graph transitively (aead 0.5 -> rand_core 0.6) and must keep its `js` feature or it
+# fails to compile for wasm32. No runtime path calls it though — all randomness routes through 0.4 — so
+# its JS env-detection backend is dead-code-eliminated and contributes zero host imports to the blob.
+# Keep this dep: dropping it breaks the build; reintroducing a 0.2 RNG call re-bloats the import surface.
 getrandom = { version = "0.2", features = ["js"] }
+getrandom_v04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 
 [features]
 default = []
@@ -27,8 +35,9 @@ optional = true
 
 [package.metadata.cargo-machete]
 ignored = [
-    # getrandom does not need to be imported in code
+    # getrandom is only needed to enable the js/wasm_js feature transitively
     "getrandom",
+    "getrandom_v04",
 ]
 
 

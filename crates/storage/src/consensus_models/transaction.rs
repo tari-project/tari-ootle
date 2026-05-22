@@ -7,6 +7,7 @@ use std::{
 };
 
 use log::*;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{
     NumPreshards,
@@ -35,9 +36,11 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::storage::consensus_models::transaction";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct TransactionRecord {
+    #[n(0)]
     pub id: TransactionId,
+    #[n(1)]
     pub transaction: Transaction,
 }
 

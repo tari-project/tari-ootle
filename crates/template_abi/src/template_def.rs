@@ -1,36 +1,21 @@
 //  Copyright 2022. The Tari Project
-//
-//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
-//  following conditions are met:
-//
-//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
-//  disclaimer.
-//
-//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
-//  following disclaimer in the documentation and/or other materials provided with the distribution.
-//
-//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
-//  products derived from this software without specific prior written permission.
-//
-//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//  SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 
+#[cfg(feature = "serde")]
+use crate::rust::ops;
 use crate::{
-    rust::{boxed::Box, ops, string::String, vec::Vec},
+    rust::{boxed::Box, string::String, vec::Vec},
     version::WasmAbiVersion,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TemplateDef {
-    V1(TemplateDefV1),
+    #[n(0)]
+    V1(#[n(0)] TemplateDefV1),
 }
 
 impl TemplateDef {
@@ -80,11 +65,15 @@ impl TemplateDef {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TemplateDefV1 {
+    #[n(0)]
     pub template_name: String,
+    #[n(1)]
     pub abi_version: WasmAbiVersion,
+    #[n(2)]
     pub functions: Vec<FunctionDef>,
 }
 
@@ -94,47 +83,76 @@ impl TemplateDefV1 {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FunctionDef {
+    #[n(0)]
     pub name: String,
+    #[n(1)]
     pub arguments: Vec<ArgDef>,
+    #[n(2)]
     pub output: Type,
+    #[n(3)]
     pub is_mut: bool,
-    #[serde(default, skip_serializing_if = "ops::Not::not")]
+    #[n(4)]
+    #[cbor(default)]
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "ops::Not::not"))]
     pub is_migration: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ArgDef {
+    #[n(0)]
     pub name: String,
+    #[n(1)]
     pub arg_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Type {
     #[default]
+    #[n(0)]
     Unit,
+    #[n(1)]
     Bool,
+    #[n(2)]
     I8,
+    #[n(3)]
     I16,
+    #[n(4)]
     I32,
+    #[n(5)]
     I64,
+    #[n(6)]
     I128,
+    #[n(7)]
     U8,
+    #[n(8)]
     U16,
+    #[n(9)]
     U32,
+    #[n(10)]
     U64,
+    #[n(11)]
     U128,
+    #[n(12)]
     String,
-    Vec(Box<Type>),
-    Tuple(Vec<Type>),
+    #[n(13)]
+    Vec(#[n(0)] Box<Type>),
+    #[n(14)]
+    Tuple(#[n(0)] Vec<Type>),
+    #[n(15)]
     Other {
+        #[n(0)]
         name: String,
     },
-    Option(Box<Type>),
+    #[n(16)]
+    Option(#[n(0)] Box<Type>),
 }
 
 impl Type {

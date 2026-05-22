@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision};
 use tari_ootle_common_types::{Epoch, NodeHeight};
@@ -39,18 +40,29 @@ use crate::{
     traits::{Cf, QueryCf},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct TransactionPoolStateUpdateData {
+    #[n(0)]
     pub block_id: BlockId,
+    #[n(1)]
     pub block_height: NodeHeight,
+    #[n(2)]
     pub transaction_id: TransactionId,
+    #[n(3)]
     pub evidence: Evidence,
+    #[n(4)]
     pub transaction_fee: u64,
+    #[n(5)]
     pub leader_fee: Option<LeaderFee>,
+    #[n(6)]
     pub stage: TransactionPoolStage,
+    #[n(7)]
     pub local_decision: Decision,
+    #[n(8)]
     pub remote_decision: Option<Decision>,
+    #[n(9)]
     pub locked_epoch: Option<LockedEpoch>,
+    #[n(10)]
     pub is_ready: bool,
 }
 

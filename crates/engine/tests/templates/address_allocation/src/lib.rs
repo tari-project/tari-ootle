@@ -36,8 +36,8 @@ mod template {
                 .with_token_symbol("AAFIT")
                 .with_address_allocation(resource)
                 // Allow minting and burning for tests
-                .mintable(rule!(allow_all))
-                .burnable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
+                .burnable(rule!(allow_all), OWNER)
                 .initial_supply(tokens);
 
             Component::new(Self {

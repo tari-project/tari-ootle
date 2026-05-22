@@ -28,27 +28,62 @@ use crate::{
 };
 
 /// Lightweight template metadata that can be exchanged without transmitting the full WASM binary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplateMetadata {
     /// Human-readable template name extracted from the WASM ABI.
+    #[n(0)]
     pub template_name: String,
     /// Author's public key.
+    #[n(1)]
     pub author_public_key: RistrettoPublicKeyBytes,
     /// SHA-256 hash of the WASM binary.
+    #[n(2)]
     pub binary_hash: Hash32,
     /// Epoch at which the template was published.
+    #[n(3)]
     pub at_epoch: u64,
     /// The author-provided off-chain metadata hash
+    #[n(4)]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub metadata_hash: Option<MetadataHash>,
 }
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
+)]
+#[cbor(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
+pub struct PublishedTemplateAddress(
+    #[n(0)]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    BorTag<ObjectKey, TAG>,
+);
 
 impl Tagged for PublishedTemplateAddress {
     const TAG: u64 = TAG;
@@ -119,22 +154,31 @@ pub type TemplateBlob = MaxBytes<{ limits::ENGINE_LIMITS.max_template_binary_siz
 
 pub type TemplateName = MaxString<{ limits::ENGINE_LIMITS.max_template_name_length }>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplate {
     /// Human-readable template name extracted from the WASM ABI.
+    #[n(0)]
+    #[cbor(default)]
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub template_name: TemplateName,
     /// Author's public key
+    #[n(1)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author: RistrettoPublicKeyBytes,
     /// Binary of the template
+    #[n(2)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub binary: TemplateBlob,
     /// Epoch at which the template was published
+    #[n(3)]
     pub at_epoch: u64,
     /// Optional multihash of off-chain CBOR metadata
+    #[n(4)]
+    #[cbor(default)]
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub metadata_hash: Option<MetadataHash>,

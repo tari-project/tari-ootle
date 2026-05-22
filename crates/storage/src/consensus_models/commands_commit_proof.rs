@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::anyhow;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
@@ -14,9 +15,10 @@ use crate::consensus_models::Command;
 
 pub type CheckVnFunc<'a> = dyn Fn(&RistrettoPublicKeyBytes) -> Result<VotePower, SidechainProofValidationError> + 'a;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Encode, Decode, CborLen)]
 pub enum CommandsCommitProof {
-    V1(CommandsCommitProofV1),
+    #[n(0)]
+    V1(#[n(0)] CommandsCommitProofV1),
 }
 
 impl CommandsCommitProof {
@@ -67,9 +69,12 @@ impl CommandsCommitProof {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Encode, Decode, CborLen)]
 pub struct CommandsCommitProofV1 {
+    #[n(0)]
     pub commands: Vec<CommandOrHash>,
+    #[n(1)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     pub commit_proof: SidechainBlockCommitProof,
 }
 
@@ -212,12 +217,18 @@ impl CommandsCommitProofV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Encode, Decode, CborLen)]
 pub enum CommandOrHash {
     /// The full command data
-    Command(Command),
+    #[n(0)]
+    Command(#[n(0)] Command),
     /// A hash of a command
-    Hash(FixedHash),
+    #[n(1)]
+    Hash(
+        #[n(0)]
+        #[cbor(with = "tari_bor::adapters::serde_bridge")]
+        FixedHash,
+    ),
 }
 
 impl CommandOrHash {

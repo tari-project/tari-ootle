@@ -225,22 +225,41 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 }
 
 // Ord: ensure that the enum variants are ordered in the order of their progression
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionPoolStage {
     /// Transaction has just come in and has never been proposed
+    #[n(0)]
     New,
     /// Transaction is prepared in response to a LocalPrepare command. We have proof that all local committees have
     /// prepared the transaction
+    #[n(1)]
     LocalPrepared,
     /// All (Commit), Some or None (Abort) of involved shard groups have prepared and all have pledged their local
     /// inputs The local shard group should accept the transaction
+    #[n(2)]
     LocalAccepted,
     /// All involved shard groups have accepted the transaction
+    #[n(3)]
     AllAccepted,
     /// Some involved shard groups have accepted the transaction, but one or more have decided to ABORT
+    #[n(4)]
     SomeAccepted,
     /// Only involves local shards. This transaction can be executed and accepted without cross-shard agreement.
+    #[n(5)]
     LocalOnly,
 }
 
@@ -332,29 +351,46 @@ impl FromStr for TransactionPoolConfirmedStage {
 #[error("Invalid TransactionPoolConfirmedStage string '{0}'")]
 pub struct TransactionPoolConfirmedStageFromStrErr(String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionPoolRecord {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[n(0)]
     transaction_id: TransactionId,
+    #[n(1)]
     evidence: Evidence,
+    #[n(2)]
     is_global: bool,
+    #[n(3)]
     transaction_fee: u64,
+    #[n(4)]
     leader_fee: Option<LeaderFee>,
+    #[n(5)]
     stage: TransactionPoolStage,
+    #[n(6)]
     pending_stage: Option<TransactionPoolStage>,
+    #[n(7)]
     original_decision: Decision,
+    #[n(8)]
     local_decision: Option<Decision>,
+    #[n(9)]
     remote_decision: Option<Decision>,
+    #[n(10)]
     is_ready: bool,
     /// The maximum epoch for which this transaction is valid.
     #[serde(default)]
+    #[n(11)]
     max_epoch: Option<Epoch>,
     /// Epoch to use when executing the transaction. This updates as foreign proposals are received
     /// until the transaction is executed.
+    #[n(12)]
     locked_epoch: Option<LockedEpoch>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    // time::OffsetDateTime is foreign (time crate) — bridge through serde.
+    #[n(13)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     last_updated: time::OffsetDateTime,
+    #[n(14)]
     last_updated_in_block: Option<BlockId>,
 }
 

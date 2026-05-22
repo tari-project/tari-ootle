@@ -115,10 +115,14 @@ fn another_account_pays_partially_for_fees() {
 
     test.enable_fees();
 
+    // Faucet's cap must be smaller than the total fee for this transaction so that
+    // account_fee2 is forced to cover the remainder (the point of this test).
+    const FAUCET_CAP: u64 = 100;
+
     let result = test.execute_expect_success(
         Transaction::builder_localnet()
             // Faucet pays a little
-            .pay_fee_from_component(account_fee, Amount::from(200u64))
+            .pay_fee_from_component(account_fee, Amount::from(FAUCET_CAP))
             // Account pays the rest
             .pay_fee_from_component(account_fee2, Amount::from(1000u64))
             .call_method(xtr_faucet_component(), "take", args![account])
@@ -139,10 +143,10 @@ fn another_account_pays_partially_for_fees() {
 
     assert_eq!(
         vault.balance(),
-        orig_balance + Amount::from(200u64) - Amount::from(payment.total_fees_charged())
+        orig_balance + Amount::from(FAUCET_CAP) - Amount::from(payment.total_fees_charged())
     );
     // Check that this test is charging more than just the faucet's portion
-    assert!(Amount::from(200u64) < payment.total_fees_charged());
+    assert!(Amount::from(FAUCET_CAP) < payment.total_fees_charged());
 
     // Check the rest of the transaction was committed
     let balance = test
@@ -201,10 +205,14 @@ fn fail_partial_paid_fees() {
     let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     test.enable_fees();
 
+    // Must cover the fee section's own cost (so the fee instructions succeed) yet stay smaller
+    // than the full transaction's fee (so InsufficientFeesPaid is triggered on commit).
+    const FEE_PAID: u64 = 100;
+
     let result = test.execute_expect_commit(
         Transaction::builder_localnet()
             // Pay less fees than the cost of the main transaction
-            .pay_fee_from_component(account, Amount::ONE_HUNDRED)
+            .pay_fee_from_component(account, Amount::from(FEE_PAID))
             // These instructions should not be applied
             .call_method(account2, "withdraw", args![
                     STEALTH_TARI_RESOURCE_ADDRESS,
@@ -219,9 +227,12 @@ fn fail_partial_paid_fees() {
     );
 
     let total_fees = result.finalize.fee_receipt.fee_breakdown().get_total();
-    // Check that the fee charged is more than the fee paid, but not too much more, since execution should stop once it
-    // determines the fees are insufficient
-    assert!(total_fees > 100 && total_fees < 150, "total fees: {total_fees}");
+    // The fee charged exceeds the fee paid (so the transaction is rejected), but should not be far above it
+    // since execution stops as soon as fees are determined insufficient.
+    assert!(
+        total_fees > FEE_PAID && total_fees < FEE_PAID * 3,
+        "total fees: {total_fees}"
+    );
     let reason = result.expect_failure();
     assert!(
         matches!(reason, RejectReason::InsufficientFeesPaid(_)),
@@ -238,7 +249,7 @@ fn fail_partial_paid_fees() {
         .get(&STEALTH_TARI_RESOURCE_ADDRESS)
         .unwrap()
         .balance();
-    assert_eq!(new_balance, orig_balance - Amount::ONE_HUNDRED);
+    assert_eq!(new_balance, orig_balance - Amount::from(FEE_PAID));
 }
 
 #[test]
@@ -286,7 +297,10 @@ fn fail_pay_less_fees_than_fee_transaction() {
                         .call_method(
                             account,
                             "pay_fee".to_string(),
-                            args![127],
+                            // Lands between the fee-instructions cost and the full transaction
+                            // cost, so the fee section is accepted while the rest fails for
+                            // InsufficientFeesPaid.
+                            args![150],
                         )
 
                 })
@@ -310,7 +324,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
     let (_, s) = diff.up_iter().find(|(id, _)| id.is_vault()).expect("Account not found");
     assert_eq!(
         s.substate_value().as_vault().unwrap().balance(),
-        orig_balance - Amount::from(127u64)
+        orig_balance - Amount::from(150u64)
     );
 
     // Fee was not deducted
@@ -323,16 +337,21 @@ fn fail_pay_less_fees_than_fee_transaction() {
         .balance();
     assert_eq!(new_balance, orig_balance);
 
-    // State was not updated
-    let text = test
-        .read_only_state_store()
-        .get_component(state)
-        .unwrap()
+    // State was not updated. minicbor encodes enums as `[variant_index, [fields...]]`,
+    // so State::Zero — a unit variant — is `[0, []]`.
+    let component_state = test.read_only_state_store().get_component(state).unwrap();
+    let arr = component_state
         .body
         .state
-        .into_text()
-        .unwrap();
-    assert_eq!(text, "Zero");
+        .as_array()
+        .expect("State should encode as a CBOR array");
+    assert_eq!(arr.len(), 2, "expected [variant_index, [fields]]");
+    assert_eq!(arr[0].as_integer(), Some(0), "expected the Zero variant tag");
+    assert_eq!(
+        arr[1].as_array().map(<[_]>::len),
+        Some(0),
+        "expected the unit variant to have an empty fields array"
+    );
 }
 
 #[test]
@@ -389,7 +408,7 @@ fn failure_pay_fee_in_main_instructions() {
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
             // Pay in fee intent, enough to pass this step
-            .pay_fee_from_component(account, 20u64)
+            .pay_fee_from_component(account, 100u64)
             // Call pay_fee in main instructions (outside fee instructions) not permitted
             .call_method(account, "pay_fee", args![100])
             .call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS])

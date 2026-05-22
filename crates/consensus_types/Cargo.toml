@@ -16,6 +16,8 @@ tari_template_lib = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_crypto = { workspace = true }
 ootle_serde = { workspace = true }
+tari_bor = { workspace = true, features = ["serde"] }
+minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 
 borsh = { workspace = true }
 serde = { workspace = true }

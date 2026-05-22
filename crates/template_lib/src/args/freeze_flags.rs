@@ -1,16 +1,17 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{fmt, fmt::Display, iter, ops};
 
 const ALL_FLAGS: u8 = VaultFreezeFlag::Deposits as u8 | VaultFreezeFlag::Withdrawals as u8;
 
-#[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, Copy, Default, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
-pub struct VaultFreezeFlags(u8);
+pub struct VaultFreezeFlags(#[n(0)] u8);
 
 impl VaultFreezeFlags {
     pub fn empty() -> Self {
@@ -73,10 +74,13 @@ impl Display for VaultFreezeFlags {
     }
 }
 
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum VaultFreezeFlag {
+    #[n(0)]
     Deposits = 1 << 0,
+    #[n(1)]
     Withdrawals = 1 << 1,
 }
 

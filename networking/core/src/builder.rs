@@ -112,7 +112,6 @@ where
             }
         }
 
-        config.swarm.enable_relay = config.swarm.enable_relay || !config.reachability_mode.is_private();
         config.swarm.enable_messaging = messaging_mode.is_enabled();
         let swarm = tari_swarm::create_swarm::<ProstCodec<TMsg::Message>>(
             identity.clone(),

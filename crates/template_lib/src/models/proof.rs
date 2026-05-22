@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::BorTag;
 use tari_template_abi::{
     EngineOp,
@@ -37,7 +37,9 @@ use crate::{
 const TAG: u64 = BinaryTag::ProofId.as_u64();
 
 /// The unique identification of a proof during a transaction execution
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, Copy, Encode, Decode, CborLen, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ProofId(BorTag<u32, TAG>);
 
@@ -55,9 +57,11 @@ impl fmt::Display for ProofId {
 
 /// Allows a user to prove ownership of a resource. Proofs only live during the execution of a transaction.
 /// The main use case is to prove that the user has a specific badge during cross-template calls
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct Proof {
+    #[n(0)]
     id: ProofId,
 }
 
@@ -157,12 +161,15 @@ impl Proof {
 }
 
 /// Returned when a proof cannot be authorized
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NotAuthorized;
 
 /// TODO: Clean this up
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProofAccess {
+    #[n(0)]
     pub id: ProofId,
 }
 
@@ -181,8 +188,10 @@ impl Drop for ProofAccess {
 
 /// A RAII type that holds a reference to a proof that is authorized for use.
 /// Once this is dropped the proof goes out of scope and can no longer be used.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProofAuth {
+    #[n(0)]
     pub id: ProofId,
 }
 

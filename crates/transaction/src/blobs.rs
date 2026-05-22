@@ -27,10 +27,24 @@ pub struct BlobIndexOverflow {
 ///
 /// JSON encoding is base64 (matches `PublishTemplate` binary today). Borsh and CBOR use the
 /// `Bytes` byte-array form.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
 pub struct Blob(
+    #[n(0)]
     #[serde(
         serialize_with = "ootle_serde::base64::serialize",
         deserialize_with = "ootle_serde::base64::deserialize"
@@ -105,9 +119,21 @@ pub fn hash_blob(blob: &Blob) -> Hash32 {
 
 /// Ordered collection of `Blob`s carried by a transaction. Index 0 corresponds to the first
 /// blob, etc. Instructions and arguments reference blobs by `BlobIndex` into this list.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct Blobs(Vec<Blob>);
+pub struct Blobs(#[n(0)] Vec<Blob>);
 
 impl Blobs {
     pub fn empty() -> Self {
@@ -165,10 +191,22 @@ impl Blobs {
 /// no `from_raw` constructor: anywhere a `BlobHashes` appears, it either originated from
 /// hashing real blobs or arrived via deserialization of bytes previously written by this
 /// crate's storage layer (and is bound by a signature, so tampering is detectable).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct BlobHashes(Vec<Hash32>);
+pub struct BlobHashes(#[n(0)] Vec<Hash32>);
 
 impl BlobHashes {
     pub fn empty() -> Self {

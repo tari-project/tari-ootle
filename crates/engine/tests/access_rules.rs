@@ -16,6 +16,7 @@ use tari_template_lib::{
         VaultId,
         access_rules::{
             ComponentAccessRules,
+            OWNER,
             RequireRule,
             ResourceAccessRules,
             ResourceAuthAction,
@@ -224,6 +225,7 @@ mod component_access_rules {
 }
 
 mod resource_access_rules {
+    use tari_engine::runtime::NativeAction;
     use tari_template_lib::{invoke_args, types::Amount};
 
     use super::*;
@@ -246,7 +248,7 @@ mod resource_access_rules {
                     // Component
                     ComponentAccessRules::new().default(AccessRule::AllowAll),
                     // Resource
-                    ResourceAccessRules::new().withdrawable(AccessRule::DenyAll),
+                    ResourceAccessRules::new().withdrawable(AccessRule::DenyAll, OWNER),
                     // Badge recall rule
                     AccessRule::DenyAll,
                 ])
@@ -283,8 +285,9 @@ mod resource_access_rules {
         // Owner gives user permission to withdraw tokens
         test.execute_expect_success(
             Transaction::builder_localnet()
-                .call_method(component_address, "set_tokens_access_rules", args![
-                    ResourceAccessRules::new().withdrawable(rule!(non_fungible(user_proof.clone())))
+                .call_method(component_address, "update_tokens_access_rule", args![
+                    ResourceAuthAction::Withdraw,
+                    rule!(non_fungible(user_proof.clone()))
                 ])
                 .build_and_seal(&owner_key),
             vec![owner_proof],
@@ -320,7 +323,7 @@ mod resource_access_rules {
                     // Component
                     ComponentAccessRules::new().default(AccessRule::AllowAll),
                     // Resource
-                    ResourceAccessRules::new().withdrawable(rule!(non_fungible(user_proof.clone()))),
+                    ResourceAccessRules::new().withdrawable(rule!(non_fungible(user_proof.clone())), OWNER),
                     // Badge recall rule
                     AccessRule::DenyAll
                 ])
@@ -345,13 +348,16 @@ mod resource_access_rules {
             vec![owner_proof.clone()],
         );
 
-        let badge_vault: VaultId = test.extract_component_value(component_address, "$.badges");
+        // AccessRulesTest field layout (minicbor `#[n(N)]` tags by declaration order):
+        // 0: value, 1: tokens, 2: badges, 3: allowed, 4: attack_component.
+        let badge_vault: VaultId = test.extract_component_value(component_address, "$.2");
         let badge_resource = *test
             .read_only_state_store()
             .get_vault(&badge_vault)
             .unwrap()
             .resource_address();
-        let vaults: HashMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.vaults");
+        // Account: 0: vaults, 1: approvals.
+        let vaults: HashMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.0");
         let user_badge_vault_id = vaults[&badge_resource];
 
         // Now try recall them. This won't succeed because recall only respects access rules not ownership, so the call
@@ -390,14 +396,15 @@ mod resource_access_rules {
         let component_address = result.finalize.execution_results[0]
             .decode::<ComponentAddress>()
             .unwrap();
-        let vault: VaultId = test.extract_component_value(component_address, "$.badges");
+        // AccessRulesTest field layout: 0=value, 1=tokens, 2=badges, 3=allowed, 4=attack_component.
+        let vault: VaultId = test.extract_component_value(component_address, "$.2");
         // Find the resource address for the badge from the output substates
         let badge_resource = *test
             .read_only_state_store()
             .get_vault(&vault)
             .unwrap()
             .resource_address();
-        let vault: VaultId = test.extract_component_value(component_address, "$.tokens");
+        let vault: VaultId = test.extract_component_value(component_address, "$.1");
         let token_resource = *test
             .read_only_state_store()
             .get_vault(&vault)
@@ -455,7 +462,7 @@ mod resource_access_rules {
         let badge_data = result.finalize.execution_results[2].decode::<Vec<Metadata>>().unwrap();
         assert!(badge_data.iter().all(|b| b.contains_key("colour")));
 
-        let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.vaults");
+        let vaults: BTreeMap<ResourceAddress, VaultId> = test.extract_component_value(user_account, "$.0");
         let user_badge_vault_id = vaults[&badge_resource];
 
         // Recall badge
@@ -1184,7 +1191,7 @@ mod resource_access_rules {
                 .call_function(access_rules_template, "with_configured_rules", args![
                     OwnerRule::OwnedBySigner,
                     ComponentAccessRules::new().default(AccessRule::AllowAll),
-                    ResourceAccessRules::new().update_metadata(rule!(non_fungible(user_proof.clone()))),
+                    ResourceAccessRules::new().update_metadata(rule!(non_fungible(user_proof.clone())), OWNER),
                     AccessRule::DenyAll,
                 ])
                 .build_and_seal(&owner_key),
@@ -1201,6 +1208,166 @@ mod resource_access_rules {
         test.execute_expect_success(
             Transaction::builder_localnet()
                 .call_method(component_address, "set_tokens_metadata", args![new_metadata])
+                .build_and_seal(&user_key),
+            vec![user_proof],
+        );
+    }
+
+    #[test]
+    fn owner_can_update_owner_gated_rule() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+        let (owner_account, _, _) = test.create_empty_account();
+        let (user_proof, _, user_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        // Withdraw starts denied; the updater is `OWNER`, so the owner can change the rule later.
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new().withdrawable(AccessRule::DenyAll, OWNER),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let component_address = result.finalize.execution_results[0]
+            .decode::<ComponentAddress>()
+            .unwrap();
+
+        // Owner relaxes the withdraw rule.
+        test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_method(component_address, "update_tokens_access_rule", args![
+                    ResourceAuthAction::Withdraw,
+                    rule!(non_fungible(user_proof.clone()))
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        // User holding the new badge can now withdraw and deposit.
+        test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_method(component_address, "take_tokens", args![10])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(owner_account, "deposit", args![Workspace("tokens")])
+                .build_and_seal(&user_key),
+            vec![user_proof],
+        );
+    }
+
+    #[test]
+    fn owner_cannot_update_locked_rule() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        // Default ResourceAccessRules leaves the mint updater as `Locked`, so even the owner
+        // cannot change the mint rule.
+        test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new(),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let (component_address, _) = test
+            .read_only_state_store()
+            .get_components_by_template_address(access_rules_template)
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet()
+                .call_method(component_address, "update_tokens_access_rule", args![
+                    ResourceAuthAction::Mint,
+                    AccessRule::AllowAll
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        assert_reject_reason(reason, RuntimeError::AccessDenied {
+            action_ident: ActionIdent::Native(NativeAction::UpdateResourceAccessRule(ResourceAuthAction::Mint)),
+        });
+    }
+
+    #[test]
+    fn badge_holder_can_update_access_rule_gated_rule() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+        let (owner_account, _, _) = test.create_empty_account();
+        let (user_proof, _, user_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        // Withdraw rule starts denied; the updater requires the user's badge — not the owner.
+        let updater_rule = rule!(non_fungible(user_proof.clone()));
+        test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new().withdrawable(AccessRule::DenyAll, updater_rule),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let (component_address, _) = test
+            .read_only_state_store()
+            .get_components_by_template_address(access_rules_template)
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        // Owner cannot update — they do not hold the badge.
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet()
+                .call_method(component_address, "update_tokens_access_rule", args![
+                    ResourceAuthAction::Withdraw,
+                    AccessRule::AllowAll
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+        assert_reject_reason(reason, RuntimeError::AccessDenied {
+            action_ident: ActionIdent::Native(NativeAction::UpdateResourceAccessRule(ResourceAuthAction::Withdraw)),
+        });
+
+        // Badge holder (the "user" identity) can update.
+        test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_method(component_address, "update_tokens_access_rule", args![
+                    ResourceAuthAction::Withdraw,
+                    AccessRule::AllowAll
+                ])
+                .build_and_seal(&user_key),
+            vec![user_proof.clone()],
+        );
+
+        // And the relaxed rule is in effect.
+        test.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_method(component_address, "take_tokens", args![10])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
             vec![user_proof],
         );

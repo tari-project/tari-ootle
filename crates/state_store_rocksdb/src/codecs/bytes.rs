@@ -1,17 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    any::type_name,
-    io::{Read, Write},
-};
+use std::{any::type_name, io::Write};
 
 use anyhow::anyhow;
 
 use crate::{
     codecs::{DbDecoder, DbEncoder, EncodeVec},
     error::RocksDbStorageError,
-    utils::read_to_fixed,
+    utils::take_fixed,
 };
 
 /// NOTE: you cannot use this codec with prefixes since it uses the entire reader to decode the bytes.
@@ -43,18 +40,11 @@ where
     for<'a> T: TryFrom<&'a [u8]>,
     for<'a> <T as TryFrom<&'a [u8]>>::Error: std::error::Error,
 {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
-        let mut bytes = Vec::new();
-        reader
-            .read_to_end(&mut bytes)
-            .map_err(|e| RocksDbStorageError::MalformedData {
-                operation: "decode bytes",
-                details: format!("Failed to read bytes for BytesCodec: {e}"),
-            })?;
-        let ret = T::try_from(bytes.as_slice()).map_err(|e| RocksDbStorageError::DecodeError {
+    fn decode(&self, bytes: &[u8]) -> Result<(T, usize), RocksDbStorageError> {
+        let ret = T::try_from(bytes).map_err(|e| RocksDbStorageError::DecodeError {
             source: anyhow!("{}: {}", type_name::<T>(), e),
         })?;
-        Ok(ret)
+        Ok((ret, bytes.len()))
     }
 }
 pub type FixedBytesCodec32 = FixedBytesCodec<32>;
@@ -85,11 +75,10 @@ impl<T: AsRef<[u8]>, const LEN: usize> DbEncoder<T> for FixedBytesCodec<LEN> {
 impl<T, const LEN: usize> DbDecoder<T> for FixedBytesCodec<LEN>
 where T: From<[u8; LEN]>
 {
-    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
-        let fixed = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
-            source: anyhow!("FixedBytesCodec: Expected {} bytes", LEN),
+    fn decode(&self, bytes: &[u8]) -> Result<(T, usize), RocksDbStorageError> {
+        let fixed: [u8; LEN] = take_fixed(bytes).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!("FixedBytesCodec: Expected {} bytes, got {}", LEN, bytes.len()),
         })?;
-        let ret = T::from(fixed);
-        Ok(ret)
+        Ok((T::from(fixed), LEN))
     }
 }

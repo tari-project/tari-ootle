@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{
     BlockId,
@@ -139,10 +140,13 @@ impl Cf for LastSentVoteCf {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct CommitBlock {
+    #[n(0)]
     pub height: NodeHeight,
+    #[n(1)]
     pub block_id: BlockId,
+    #[n(2)]
     pub parent_id: BlockId,
 }
 

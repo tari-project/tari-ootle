@@ -8,4 +8,9 @@ export type ClaimValidatorFeesRequest = {
   max_fee: bigint;
   shards: Array<Shard>;
   dry_run: boolean;
+  /**
+   * If true, claim into the account's revealed vault. If false (default), claim into a per-shard stealth UTXO
+   * addressed to the account's own owner key.
+   */
+  output_to_revealed: boolean;
 };

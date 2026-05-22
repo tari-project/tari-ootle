@@ -138,10 +138,23 @@ pub fn validate_elgamal_verifiable_balance_proof(
     }))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ElgamalVerifiableBalanceBytes {
+    #[n(0)]
     pub encrypted: RistrettoPublicKeyBytes,
+    #[n(1)]
     pub public_nonce: RistrettoPublicKeyBytes,
 }
 

@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "consensus_tests"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "fern",
  "futures 0.3.31",
@@ -2711,7 +2711,7 @@ dependencies = [
 
 [[package]]
 name = "db-inspector"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -4208,6 +4208,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
 name = "hashlink"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4712,7 +4718,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration 0.6.1",
  "tokio",
  "tower-service",
@@ -5101,7 +5107,7 @@ checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
 name = "integration_tests"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "config",
@@ -5883,7 +5889,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-messaging"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "async-trait",
  "futures-bounded 0.2.4",
@@ -6061,7 +6067,7 @@ dependencies = [
 
 [[package]]
 name = "libp2p-substream"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "libp2p",
  "prometheus-client",
@@ -6621,6 +6627,26 @@ dependencies = [
  "smallvec 1.15.1",
  "tagptr",
  "triomphe",
+]
+
+[[package]]
+name = "minicbor"
+version = "2.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b7a5041e12946f8b7d3f5a9d96383a19d694b9335457c522be7815b9abafb02"
+dependencies = [
+ "minicbor-derive",
+]
+
+[[package]]
+name = "minicbor-derive"
+version = "0.19.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c9303a7d70578b101a21b3043ade4ab825c59063bbcd89af1066729399b79c6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -7608,8 +7634,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "ootle-network"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
+ "minicbor",
  "serde",
  "thiserror 2.0.18",
  "ts-rs",
@@ -7617,7 +7644,7 @@ dependencies = [
 
 [[package]]
 name = "ootle-rs"
-version = "0.6.6"
+version = "0.8.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -7646,34 +7673,39 @@ dependencies = [
 
 [[package]]
 name = "ootle-wasm"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",
+ "getrandom 0.4.2",
  "ootle-wasm-core",
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "ootle-wasm-core"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "base64 0.22.1",
+ "hex",
+ "ootle-network",
  "ootle_byte_type",
  "rand 0.10.1",
  "serde",
  "serde_json",
  "tari_bor",
  "tari_crypto",
+ "tari_engine_types",
  "tari_ootle_address",
  "tari_ootle_transaction",
+ "tari_ootle_wallet_crypto",
  "tari_template_lib_types",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "ootle_byte_type"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "tari_crypto",
  "tari_template_lib_types",
@@ -7688,10 +7720,9 @@ dependencies = [
 
 [[package]]
 name = "ootle_serde"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
- "bincode 2.0.1",
  "hex",
  "serde",
  "serde_json",
@@ -7707,9 +7738,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openssl"
-version = "0.10.79"
+version = "0.10.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0b434746ee2832f4f0baf10137e1cabb18cbe6912c69e2e33263c45250f542"
+checksum = "a45fa2aa886c42762255da344f0a0d313e254066c46aad76f300c3d3da62d967"
 dependencies = [
  "bitflags 2.10.0",
  "cfg-if",
@@ -7753,9 +7784,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.115"
+version = "0.9.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "158fe5b292746440aa6e7a7e690e55aeb72d41505e2804c23c6973ad0e9c9781"
+checksum = "f28a22dc7140cda5f096e5e7724a6962ca81a7f8bfd2979f9b18c11af56318c4"
 dependencies = [
  "cc",
  "libc",
@@ -8457,9 +8488,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.105"
+version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "535d180e0ecab6268a3e718bb9fd44db66bbbc256257165fc699dadf70d16fe7"
+checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
@@ -8661,7 +8692,7 @@ dependencies = [
 
 [[package]]
 name = "proto_builder"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "prost-build 0.14.3",
  "sha2 0.10.9",
@@ -8807,7 +8838,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8845,16 +8876,16 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "quote"
-version = "1.0.43"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
+checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]
@@ -9330,13 +9361,13 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.8.13"
+version = "0.8.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b2e88acca7157d83d789836a3987dafc12bc3d88a050e54b8fe9ea4aaa29d20"
+checksum = "73389e0c99e664f919275ab5b5b0471391fe9a8de61e1dff9b1eaf56a90f16e3"
 dependencies = [
  "bytecheck",
  "bytes",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "indexmap 2.13.0",
  "munge",
  "ptr_meta",
@@ -9349,9 +9380,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv_derive"
-version = "0.8.13"
+version = "0.8.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f6dffea3c91fa91a3c0fc8a061b0e27fef25c6304728038a6d6bcb1c58ba9bd"
+checksum = "5d2ed0b54125315fb36bd021e82d314d1c126548f871634b483f46b31d13cac6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10539,7 +10570,7 @@ dependencies = [
 
 [[package]]
 name = "sqlite_message_logger"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "chrono",
  "diesel",
@@ -10911,7 +10942,7 @@ dependencies = [
 
 [[package]]
 name = "tari_base_node_client"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "futures-util",
  "log",
@@ -10932,12 +10963,11 @@ dependencies = [
 
 [[package]]
 name = "tari_bor"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
- "bincode 2.0.1",
  "borsh",
- "ciborium",
- "ciborium-io",
+ "indexmap 2.13.0",
+ "minicbor",
  "serde",
  "serde_json",
  "ts-rs",
@@ -11138,7 +11168,7 @@ dependencies = [
 
 [[package]]
 name = "tari_consensus"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "indexmap 2.13.0",
@@ -11163,11 +11193,13 @@ dependencies = [
 
 [[package]]
 name = "tari_consensus_types"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "borsh",
+ "minicbor",
  "ootle_serde",
  "serde",
+ "tari_bor",
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
@@ -11263,7 +11295,7 @@ dependencies = [
 
 [[package]]
 name = "tari_engine"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "blake2 0.10.6",
  "bytes",
@@ -11271,6 +11303,7 @@ dependencies = [
  "indexmap 2.13.0",
  "log",
  "memmap2 0.9.9",
+ "minicbor",
  "ootle_byte_type",
  "rand 0.10.1",
  "serde",
@@ -11294,9 +11327,8 @@ dependencies = [
 
 [[package]]
 name = "tari_engine_types"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
- "bincode 2.0.1",
  "blake2 0.10.6",
  "borsh",
  "bounded-vec",
@@ -11305,6 +11337,7 @@ dependencies = [
  "indexmap 2.13.0",
  "lazy_static",
  "log",
+ "minicbor",
  "newtype-ops",
  "ootle_byte_type",
  "ootle_serde",
@@ -11323,7 +11356,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_manager"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "log",
@@ -11343,7 +11376,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_oracles"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "blake2 0.10.6",
@@ -11397,7 +11430,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -11405,7 +11438,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum 0.8.8",
- "bincode 2.0.1",
  "bytes",
  "cacache",
  "clap 3.2.25",
@@ -11470,7 +11502,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_client"
-version = "0.30.2"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "bounded-vec",
@@ -11499,9 +11531,10 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_lib"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "log",
+ "minicbor",
  "prometheus-client",
  "serde",
  "tari_engine_types",
@@ -11527,7 +11560,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ledger_client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "borsh",
  "hex",
@@ -11603,7 +11636,7 @@ dependencies = [
 
 [[package]]
 name = "tari_networking"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11640,14 +11673,14 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_address"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bech32",
- "bincode 2.0.1",
  "ootle-network",
  "ootle_byte_type",
  "serde",
  "serde_json",
+ "tari_bor",
  "tari_crypto",
  "tari_template_lib_types",
  "thiserror 2.0.18",
@@ -11656,7 +11689,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_app_utilities"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "bincode 2.0.1",
@@ -11696,7 +11729,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_common_types"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "blake2 0.10.6",
  "borsh",
@@ -11704,6 +11737,7 @@ dependencies = [
  "digest 0.10.7",
  "ethnum",
  "indexmap 2.13.0",
+ "minicbor",
  "newtype-ops",
  "ootle-network",
  "ootle_byte_type",
@@ -11724,7 +11758,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_p2p"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "libp2p-identity 0.2.13 (git+https://github.com/tari-project/rust-libp2p.git?rev=76f31bc0ab4bd9f9f5383be6aa3fed873538e35a)",
@@ -11748,16 +11782,18 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_storage"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "bitflags 2.10.0",
  "borsh",
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "ootle_serde",
  "rand 0.10.1",
  "serde",
+ "tari_bor",
  "tari_common_types",
  "tari_consensus_types",
  "tari_crypto",
@@ -11775,7 +11811,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_storage_sqlite"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -11796,8 +11832,9 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_template_build"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
+ "syn 2.0.117",
  "tari_ootle_template_metadata",
  "tempfile",
  "thiserror 2.0.18",
@@ -11806,12 +11843,13 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_template_metadata"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "borsh",
  "cargo_toml 0.22.3",
  "gix-hash",
  "hex",
+ "minicbor",
  "multihash",
  "serde",
  "serde_json",
@@ -11826,13 +11864,13 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_transaction"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
- "bincode 2.0.1",
  "borsh",
  "hex",
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "ootle-network",
  "ootle_byte_type",
  "ootle_serde",
@@ -11852,7 +11890,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_cli"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -11881,7 +11919,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_crypto"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "argon2 0.5.3",
  "blake2 0.10.6",
@@ -11911,7 +11949,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -11946,7 +11984,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk_services"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -11973,7 +12011,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk_tests"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "digest 0.10.7",
  "ootle_byte_type",
@@ -11995,7 +12033,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_storage_sqlite"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -12018,7 +12056,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12084,7 +12122,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd_client"
-version = "0.30.1"
+version = "0.32.0"
 dependencies = [
  "hex",
  "ootle_serde",
@@ -12138,7 +12176,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_framework"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "async-trait",
  "bitflags 2.10.0",
@@ -12162,7 +12200,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_macros"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12171,7 +12209,7 @@ dependencies = [
 
 [[package]]
 name = "tari_rpc_state_sync"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -12249,14 +12287,14 @@ dependencies = [
 
 [[package]]
 name = "tari_state_store_rocksdb"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
- "bincode 2.0.1",
  "borsh",
  "hex",
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "rand 0.10.1",
  "rocksdb",
  "serde",
@@ -12281,11 +12319,13 @@ dependencies = [
 
 [[package]]
 name = "tari_state_tree"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "indexmap 2.13.0",
  "log",
+ "minicbor",
  "serde",
+ "tari_bor",
  "tari_engine_types",
  "tari_jellyfish",
  "tari_ootle_common_types",
@@ -12307,7 +12347,7 @@ dependencies = [
 
 [[package]]
 name = "tari_swarm"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "libp2p",
  "libp2p-messaging",
@@ -12318,7 +12358,7 @@ dependencies = [
 
 [[package]]
 name = "tari_swarm_daemon"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12362,9 +12402,10 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.16.1"
+version = "0.17.0"
 dependencies = [
  "hashbrown 0.13.2",
+ "minicbor",
  "serde",
  "tari_bor",
  "ts-rs",
@@ -12373,9 +12414,10 @@ dependencies = [
 
 [[package]]
 name = "tari_template_builtin"
-version = "0.30.4"
+version = "0.32.0"
 dependencies = [
  "anyhow",
+ "minicbor",
  "tari_engine_types",
  "tari_ootle_transaction",
  "tari_template_lib",
@@ -12385,11 +12427,11 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "borsh",
+ "minicbor",
  "serde",
- "serde_json",
  "tari_bor",
  "tari_template_abi",
  "tari_template_lib_types",
@@ -12399,12 +12441,12 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
- "bincode 2.0.1",
  "bnum",
  "borsh",
  "indexmap 2.13.0",
+ "minicbor",
  "num-integer",
  "serde",
  "serde_json",
@@ -12417,7 +12459,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.19.0"
+version = "0.20.1"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -12429,7 +12471,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_test_tooling"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "cargo_toml 0.22.3",
@@ -12542,7 +12584,7 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_manifest"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "proc-macro2",
  "serde_json",
@@ -12577,7 +12619,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -12643,7 +12685,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node_client"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "indexmap 2.13.0",
  "multiaddr 0.18.3",
@@ -12667,10 +12709,11 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_node_rpc"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
+ "minicbor",
  "prost 0.14.3",
  "proto_builder",
  "serde",
@@ -12690,7 +12733,7 @@ dependencies = [
 
 [[package]]
 name = "tari_validator_rollback"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "borsh",
@@ -12725,7 +12768,7 @@ dependencies = [
 
 [[package]]
 name = "tari_watcher"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "clap 3.2.25",
@@ -12754,7 +12797,7 @@ dependencies = [
 
 [[package]]
 name = "tariswap_bench"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "clap 4.5.54",
@@ -13434,7 +13477,7 @@ dependencies = [
 
 [[package]]
 name = "traffic-sim"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "clap 4.5.54",
@@ -13456,16 +13499,16 @@ dependencies = [
 
 [[package]]
 name = "transaction_generator"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
- "bincode 2.0.1",
  "bytes",
  "clap 4.5.54",
  "once_cell",
  "ootle_byte_type",
  "rand 0.10.1",
  "rayon",
+ "tari_bor",
  "tari_crypto",
  "tari_ootle_common_types",
  "tari_ootle_transaction",
@@ -13475,7 +13518,7 @@ dependencies = [
 
 [[package]]
 name = "transaction_submitter"
-version = "0.30.10"
+version = "0.32.0"
 dependencies = [
  "anyhow",
  "clap 4.5.54",

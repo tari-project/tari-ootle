@@ -282,12 +282,6 @@ mod tests {
             let cbor_deserialized: SubstateId = tari_bor::decode(&cbor_serialized)
                 .unwrap_or_else(|e| panic!("Failed to deserialize {id} from CBOR: {e}"));
             assert_eq!(cbor_deserialized, *id);
-
-            // bincode
-            let bincode_serialized = bincode::serde::encode_to_vec(id, bincode::config::standard()).unwrap();
-            let (bincode_deserialized, _): (SubstateId, _) =
-                bincode::serde::decode_from_slice(&bincode_serialized, bincode::config::standard()).unwrap();
-            assert_eq!(bincode_deserialized, *id);
         }
     }
 }

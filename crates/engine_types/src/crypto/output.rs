@@ -9,13 +9,28 @@ use tari_template_lib::types::{EncryptedData, crypto::RistrettoPublicKeyBytes};
 
 use crate::crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct OutputBody {
+    #[n(0)]
     pub public_nonce: RistrettoPublicKeyBytes,
+    #[n(1)]
     pub encrypted_data: EncryptedData,
+    #[n(2)]
     #[cfg_attr(feature = "ts", ts(type = "number | bigint"))]
     pub minimum_value_promise: u64,
+    #[n(3)]
     pub viewable_balance: Option<ElgamalVerifiableBalanceBytes>,
 }
 

@@ -191,30 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn encode_decode_cbor() {
-        let test_case = TestCase {
-            bytes: vec![1, 2, 3, 4, 5],
-            pk: RistrettoPublicKeyBytes::from([1; 32]),
-        };
-        let encoded = tari_bor::encode(&test_case).unwrap();
-        let decoded: TestCase = tari_bor::decode(&encoded).unwrap();
-
-        assert_eq!(test_case.bytes, decoded.bytes);
-        assert_eq!(test_case.pk, decoded.pk);
-
-        let cbor = tari_bor::to_value(&test_case).unwrap();
-        let decoded = tari_bor::from_value::<TestCase>(&cbor).unwrap();
-        assert_eq!(test_case.bytes, decoded.bytes);
-        assert_eq!(test_case.pk, decoded.pk);
-        // Check encoded as bytes
-        let bytes = cbor.as_map().unwrap().first().unwrap().1.as_bytes().unwrap();
-        assert_eq!(bytes, &test_case.bytes);
-        // Check encoded as public key
-        let pk = cbor.as_map().unwrap().get(1).unwrap().1.as_bytes().unwrap();
-        assert_eq!(pk, &test_case.pk.as_bytes());
-    }
-
-    #[test]
     fn decode_encode_json() {
         let test_case = TestCase {
             bytes: vec![1, 2, 3, 4, 5],
@@ -232,14 +208,5 @@ mod tests {
             json["pk"].as_str().expect("string"),
             "0101010101010101010101010101010101010101010101010101010101010101"
         );
-
-        let decoded = tari_bor::decode::<TestCase>(&tari_bor::encode(&test_case).unwrap()).unwrap();
-        assert_eq!(test_case.bytes, decoded.bytes);
-        assert_eq!(test_case.pk, decoded.pk);
-
-        let cbor = tari_bor::to_value(&test_case).unwrap();
-        let decoded = tari_bor::from_value::<TestCase>(&cbor).unwrap();
-        assert_eq!(test_case.bytes, decoded.bytes);
-        assert_eq!(test_case.pk, decoded.pk);
     }
 }

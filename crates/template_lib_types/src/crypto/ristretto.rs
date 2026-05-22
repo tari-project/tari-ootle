@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -9,14 +9,17 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::{KeyParseError, crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex, serde_helpers};
+use crate::{KeyParseError, crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex};
 
 /// A Ristretto public key byte contents
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct RistrettoPublicKeyBytes(
-    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cbor(with = "minicbor::bytes")]
     [u8; RistrettoPublicKeyBytes::length()],
 );
 
@@ -127,11 +130,16 @@ impl borsh::BorshDeserialize for RistrettoPublicKeyBytes {
 #[cfg(test)]
 mod tests {
 
+    use minicbor::{CborLen, Decode, Encode};
+    use serde::{Deserialize, Serialize};
+
     use super::*;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Encode, Decode, CborLen)]
     struct TestCase {
+        #[n(0)]
         a: u32,
+        #[n(1)]
         bytes: RistrettoPublicKeyBytes,
     }
 

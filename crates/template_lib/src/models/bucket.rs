@@ -19,7 +19,7 @@
 //  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::BorTag;
 use tari_template_abi::{
     EngineOp,
@@ -44,7 +44,9 @@ use crate::{
 const TAG: u64 = BinaryTag::BucketId.as_u64();
 
 /// A bucket identifier. This identifier is assigned at runtime.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, Copy, Encode, Decode, CborLen, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BucketId(BorTag<u32, TAG>);
 
@@ -62,9 +64,11 @@ impl fmt::Display for BucketId {
 
 /// A temporary container of resources. Buckets exist during a transaction execution. All buckets must be
 /// consumed (deposited into a vault, burned etc) before the end of the transaction or the entire transaction will fail.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct Bucket {
+    #[n(0)]
     id: BucketId,
 }
 

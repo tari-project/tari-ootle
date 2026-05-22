@@ -4,7 +4,6 @@
 use std::ops::Deref;
 
 use serde::Serialize;
-use tari_bor::cbor;
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
     resource::Resource,
@@ -24,12 +23,13 @@ use tari_ootle_storage::{
     consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch},
 };
 use tari_ootle_transaction::Network;
+use tari_template_builtin::{NftFaucetState, XtrFaucetState};
 use tari_template_lib::types::{
     EntityId,
     Metadata,
     ResourceType,
     SubstateOwnerRule,
-    access_rules::{ComponentAccessRules, ResourceAccessRules},
+    access_rules::{ComponentAccessRules, LOCKED, ResourceAccessRules},
     constants::{
         NFT_FAUCET_COMPONENT_ADDRESS,
         NFT_FAUCET_RESOURCE_ADDRESS,
@@ -103,10 +103,10 @@ where
             entity_id: EntityId::default(),
         },
         body: ComponentBody::from_cbor_value(
-            cbor!({
-                "vault" => XTR_FAUCET_VAULT_ADDRESS,
+            tari_bor::to_value(&XtrFaucetState {
+                vault: XTR_FAUCET_VAULT_ADDRESS,
             })
-            .unwrap(),
+            .expect("XtrFaucetState encode is infallible"),
         ),
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
@@ -117,8 +117,8 @@ where
         ResourceType::NonFungible,
         SubstateOwnerRule::None,
         ResourceAccessRules::new()
-            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)))
-            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS))),
+            .mintable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)), LOCKED)
+            .burnable(rule!(component(XTR_FAUCET_COMPONENT_ADDRESS)), LOCKED),
         Metadata::new(),
         None,
         None,
@@ -143,15 +143,15 @@ where
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
         },
-        body: ComponentBody {
-            state: cbor!({"serial_number" => 0u64}).unwrap(),
-        },
+        body: ComponentBody::from_cbor_value(
+            tari_bor::to_value(&NftFaucetState { serial_number: 0 }).expect("NftFaucetState encode is infallible"),
+        ),
     };
     create_substate(tx, num_preshards, NFT_FAUCET_COMPONENT_ADDRESS, value)?;
 
     let metadata = Metadata::from([("name", "NFT Faucet"), (TOKEN_SYMBOL, "tNFT")]);
 
-    let access_rules = ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)));
+    let access_rules = ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)), LOCKED);
     let value = Resource::new(
         ResourceType::NonFungible,
         SubstateOwnerRule::None,

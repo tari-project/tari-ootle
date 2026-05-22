@@ -98,17 +98,24 @@ impl MyComponent {
 
 Resources have various actions that can be performed on them. Each of these can be restricted by access rules as required.
 
--   **Minting:** Creating new units of a resource. Default access: DenyAll (only `OwnerRule` applies)
--   **Burning:** Destroying units of a resource. Default access: DenyAll (only `OwnerRule` applies)
--   **Depositing/Withdrawing:** Moving resources into or out of vaults. Default access: AllowAll (anyone can deposit or withdraw from vaults they control)
--   **Recall:** The resource owner can recall resources from any vault on the ledger. This is a powerful feature that
-can be used for regulatory compliance, recovering lost tokens, or implementing certain business logic. Explorers should
-make it clear when this is anything other than DenyAll. NOTE: An owner cannot recall if this is set to DenyAll.
--   **Freezable:** The resource owner can freeze resources in any vault on the ledger.
--   **Update Access Rule:** Defines an AccessRule that controls who can update the access rules of the resource. Default access: DenyAll (only `OwnerRule` applies)
--   **Update Non-Fungible Data:** Applies to non-fungible resources. Defines an AccessRule that controls who can update the mutable data of non-fungible tokens. Default access: DenyAll (only `OwnerRule` applies)
+Each action below is gated by **two** rules: an `AccessRule` that says who can perform the action today,
+and an `UpdateRule` that says who (if anyone) may change that access rule later. The updater is fixed at
+creation time. See the <a href={basePath("/guides/authorization-and-access/")}>Authorization guide</a> for the
+full `UpdateRule` semantics (`Locked`, `Owner`, `AccessRule`).
 
-These operations are typically exposed through methods on the `ResourceManager`.
+-   **Minting:** Creating new units of a resource. Default: `DenyAll`, updater `Locked`.
+-   **Burning:** Destroying units of a resource. Default: `DenyAll`, updater `Locked`.
+-   **Depositing/Withdrawing:** Moving resources into or out of vaults. Default: `AllowAll`, updater `Locked`.
+-   **Recall:** Lets a privileged caller withdraw resources from any vault on the ledger. Useful for regulatory
+compliance, recovering lost tokens, or implementing certain business logic. Explorers should make it clear when this is
+anything other than `DenyAll`. Default: `DenyAll`, updater `Locked` — once locked, even the owner cannot enable recall later.
+-   **Freezable:** Lets a privileged caller freeze resources in any vault on the ledger. Default: `DenyAll`, updater `Locked`.
+-   **Update Metadata:** Controls who can change the resource's metadata (the token symbol stays immutable). Default: `DenyAll`, updater `Owner`.
+-   **Update Non-Fungible Data:** Applies to non-fungible resources. Controls who can update the mutable data of non-fungible tokens. Default: `AllowAll`, updater `Owner`.
+
+These operations are typically exposed through methods on the `ResourceManager`. To change an individual access
+rule after creation, call `ResourceManager::update_access_rule(action, new_rule)`; the engine authorizes the
+caller against the field's `UpdateRule`.
 
 ### Vaults
 

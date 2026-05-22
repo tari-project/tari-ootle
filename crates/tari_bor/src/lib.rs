@@ -4,109 +4,173 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(not(feature = "std"))]
-use alloc::{fmt, format, string::ToString, vec::Vec};
-
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
-#[cfg(feature = "std")]
-use std::fmt;
+#[cfg(not(feature = "std"))]
+use alloc::{format, vec::Vec};
 
-mod tag;
-pub use tag::*;
-
-mod byte_counter;
-#[cfg(all(feature = "std", feature = "cbor_value_encoding_fix"))]
-pub mod cbor_value_encoding_fix;
+pub mod adapters;
 mod error;
+mod macros;
+#[cfg(feature = "serde")]
+pub mod serde_codec;
+mod tag;
+mod value;
+#[cfg(feature = "serde")]
+mod value_serde;
 mod walker;
 
-pub use ciborium::{cbor, value::Value};
-use ciborium::{de::from_reader, ser::into_writer};
-pub use ciborium_io::{Read, Write};
+mod byte_counter;
+
+pub use byte_counter::ByteCounter;
 pub use error::BorError;
+pub use macros::__cbor_macro;
+pub use minicbor::{self, CborLen, Decode, Encode};
+#[cfg(feature = "serde")]
 pub use serde::{self, Deserialize, Serialize, de::DeserializeOwned};
+pub use tag::*;
+pub use value::Value;
 pub use walker::*;
 
-pub use crate::byte_counter::ByteCounter;
+/// Encode a value into a freshly allocated `Vec<u8>` using the unit context.
+pub fn encode<T: Encode<()> + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
+    encode_with(val, &mut ())
+}
 
+/// Encode a value into a freshly allocated `Vec<u8>` using a user-provided context.
+pub fn encode_with<C, T: Encode<C> + ?Sized>(val: &T, ctx: &mut C) -> Result<Vec<u8>, BorError> {
+    minicbor::to_vec_with(val, ctx).map_err(BorError::from)
+}
+
+/// Encode a value into a [`std::io::Write`] sink using the unit context (std feature).
 #[cfg(feature = "std")]
 pub fn encode_into_writer<T, W>(val: &T, writer: &mut W) -> Result<(), BorError>
 where
-    T: Serialize + ?Sized,
+    T: Encode<()> + ?Sized,
     W: std::io::Write,
 {
-    into_writer(&val, writer).map_err(to_bor_error)
+    encode_into_writer_with(val, writer, &mut ())
 }
 
+/// Encode a value into a [`std::io::Write`] sink using a user-provided context (std feature).
+#[cfg(feature = "std")]
+pub fn encode_into_writer_with<C, T, W>(val: &T, writer: &mut W, ctx: &mut C) -> Result<(), BorError>
+where
+    T: Encode<C> + ?Sized,
+    W: std::io::Write,
+{
+    let writer = minicbor::encode::write::Writer::new(writer);
+    minicbor::encode_with(val, writer, ctx).map_err(BorError::from)
+}
+
+/// Encode a value into a [`minicbor::encode::Write`] sink using the unit context (no-std).
 #[cfg(not(feature = "std"))]
 pub fn encode_into_writer<T, W>(val: &T, writer: W) -> Result<(), BorError>
 where
-    T: Serialize + ?Sized,
-    W: Write,
-    W::Error: fmt::Debug,
+    T: Encode<()> + ?Sized,
+    W: minicbor::encode::Write,
+    W::Error: core::fmt::Display,
 {
-    into_writer(&val, writer).map_err(to_bor_error)
+    encode_into_writer_with(val, writer, &mut ())
 }
 
-pub fn encode<T: Serialize + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
-    let len = encoded_len(val)?;
-    let mut buf = Vec::with_capacity(len);
-    encode_into_writer(val, &mut buf)?;
-    Ok(buf)
-}
-
-pub fn encoded_len<T: Serialize + ?Sized>(val: &T) -> Result<usize, BorError> {
-    let mut counter = ByteCounter::new();
-    encode_into_writer(val, &mut counter)?;
-    Ok(counter.get())
-}
-pub fn encoded_len_with_limit<T: Serialize + ?Sized>(val: &T, limit: usize) -> Result<usize, BorError> {
-    let mut counter = ByteCounter::with_limit(limit);
-    encode_into_writer(val, &mut counter)?;
-    Ok(counter.get())
-}
-
-/// Encodes any Rust type using CBOR
-pub fn to_value<T: Serialize + ?Sized>(val: &T) -> Result<Value, BorError> {
-    Value::serialized(val).map_err(to_bor_error)
-}
-
-pub fn from_value<T: DeserializeOwned>(val: &Value) -> Result<T, BorError> {
-    Value::deserialized(val).map_err(to_bor_error)
-}
-
-pub fn decode<T: DeserializeOwned>(mut input: &[u8]) -> Result<T, BorError> {
-    decode_inner(&mut input)
-}
-
-fn decode_inner<T: DeserializeOwned>(input: &mut &[u8]) -> Result<T, BorError> {
-    let result = from_reader(input).map_err(to_bor_error)?;
-    Ok(result)
-}
-
-pub fn decode_from_reader<T, R>(reader: R) -> Result<T, BorError>
+/// Encode a value into a [`minicbor::encode::Write`] sink using a user-provided context (no-std).
+#[cfg(not(feature = "std"))]
+pub fn encode_into_writer_with<C, T, W>(val: &T, writer: W, ctx: &mut C) -> Result<(), BorError>
 where
-    T: DeserializeOwned,
-    R: Read,
-    R::Error: fmt::Debug,
+    T: Encode<C> + ?Sized,
+    W: minicbor::encode::Write,
+    W::Error: core::fmt::Display,
 {
-    let result = from_reader(reader).map_err(to_bor_error)?;
-    Ok(result)
+    minicbor::encode_with(val, writer, ctx).map_err(BorError::from)
 }
 
-pub fn decode_exact<T: DeserializeOwned>(mut input: &[u8]) -> Result<T, BorError> {
-    let val = decode_inner(&mut input)?;
-    if !input.is_empty() {
+/// Pre-calculate the encoded length in bytes of a value via [`minicbor::CborLen`] (unit context).
+///
+/// Types should `#[derive(CborLen)]` alongside `Encode`/`Decode` so this is O(1) over
+/// the type structure. The fallback path through [`ByteCounter`] is still available for
+/// types that haven't derived `CborLen` yet (see [`encoded_len_via_writer`]).
+///
+/// The `Result` return type is preserved for API compatibility — this function cannot
+/// actually fail today.
+pub fn encoded_len<T: CborLen<()> + ?Sized>(val: &T) -> Result<usize, BorError> {
+    encoded_len_with(val, &mut ())
+}
+
+/// Pre-calculate the encoded length in bytes via [`minicbor::CborLen`] using a user-provided context.
+pub fn encoded_len_with<C, T: CborLen<C> + ?Sized>(val: &T, ctx: &mut C) -> Result<usize, BorError> {
+    Ok(minicbor::len_with(val, ctx))
+}
+
+/// Pre-calculate the encoded length in bytes (unit context), returning an error if it exceeds `limit`.
+pub fn encoded_len_with_limit<T: CborLen<()> + ?Sized>(val: &T, limit: usize) -> Result<usize, BorError> {
+    encoded_len_with_limit_with(val, limit, &mut ())
+}
+
+/// Pre-calculate the encoded length in bytes using a user-provided context, returning an error if it exceeds `limit`.
+pub fn encoded_len_with_limit_with<C, T: CborLen<C> + ?Sized>(
+    val: &T,
+    limit: usize,
+    ctx: &mut C,
+) -> Result<usize, BorError> {
+    let n = minicbor::len_with(val, ctx);
+    if n > limit {
+        return Err(BorError::new(format!("encoded length {n} exceeds limit {limit}")));
+    }
+    Ok(n)
+}
+
+/// Fallback length calculation that drives the encoder. Use this for types that haven't
+/// derived [`CborLen`] yet (during the in-progress migration). Prefer [`encoded_len`].
+pub fn encoded_len_via_writer<T: Encode<()> + ?Sized>(val: &T) -> Result<usize, BorError> {
+    let mut counter = ByteCounter::new();
+    minicbor::encode(val, &mut counter).map_err(|e| BorError::new(format!("encoded_len failed: {e}")))?;
+    Ok(counter.get())
+}
+
+/// Encode a value into a dynamic [`Value`] tree (unit context).
+pub fn to_value<T: Encode<()> + ?Sized>(val: &T) -> Result<Value, BorError> {
+    let bytes = encode(val)?;
+    decode(&bytes)
+}
+
+/// Decode a value out of a dynamic [`Value`] tree by re-encoding to bytes and decoding via the
+/// target type. Useful for tests and dynamic conversion; for production paths prefer to
+/// `decode` the original bytes directly.
+pub fn from_value<T: for<'b> Decode<'b, ()>>(val: &Value) -> Result<T, BorError> {
+    let bytes = encode(val)?;
+    decode(&bytes)
+}
+
+/// Decode a single value from a byte slice (unit context). Extra trailing bytes are ignored.
+pub fn decode<T: for<'b> Decode<'b, ()>>(input: &[u8]) -> Result<T, BorError> {
+    minicbor::decode(input).map_err(BorError::from)
+}
+
+/// Decode a single value from a byte slice using a user-provided context. Extra trailing bytes are ignored.
+pub fn decode_with<C, T>(input: &[u8], ctx: &mut C) -> Result<T, BorError>
+where T: for<'b> Decode<'b, C> {
+    minicbor::decode_with(input, ctx).map_err(BorError::from)
+}
+
+/// Decode a single value from a byte slice (unit context). Returns an error if any bytes remain after
+/// decoding.
+pub fn decode_exact<T: for<'b> Decode<'b, ()>>(input: &[u8]) -> Result<T, BorError> {
+    decode_exact_with(input, &mut ())
+}
+
+/// Decode a single value from a byte slice using a user-provided context. Returns an error if any bytes
+/// remain after decoding.
+pub fn decode_exact_with<C, T>(input: &[u8], ctx: &mut C) -> Result<T, BorError>
+where T: for<'b> Decode<'b, C> {
+    let mut d = minicbor::Decoder::new(input);
+    let value = d.decode_with(ctx).map_err(BorError::from)?;
+    let consumed = d.position();
+    if consumed != input.len() {
         return Err(BorError::new(format!(
             "decode_exact: {} bytes remaining on input",
-            input.len()
+            input.len() - consumed
         )));
     }
-    Ok(val)
-}
-
-fn to_bor_error<E>(e: E) -> BorError
-where E: fmt::Display {
-    BorError::new(e.to_string())
+    Ok(value)
 }

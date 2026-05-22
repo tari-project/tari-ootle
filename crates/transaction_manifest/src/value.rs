@@ -20,7 +20,7 @@ pub enum ManifestValue {
 }
 
 impl ManifestValue {
-    pub fn new_value<T: Serialize>(value: &T) -> Result<Self, BorError> {
+    pub fn new_value<T: Serialize + tari_bor::Encode<()>>(value: &T) -> Result<Self, BorError> {
         Ok(Self::Value(tari_bor::to_value(value)?))
     }
 
@@ -66,12 +66,33 @@ pub fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
             "u16" => Ok(call_arg!(i.base10_parse::<u16>()?)),
             "u32" => Ok(call_arg!(i.base10_parse::<u32>()?)),
             "u64" => Ok(call_arg!(i.base10_parse::<u64>()?)),
-            "u128" => Ok(call_arg!(i.base10_parse::<u128>()?)),
             "i8" => Ok(call_arg!(i.base10_parse::<i8>()?)),
             "i16" => Ok(call_arg!(i.base10_parse::<i16>()?)),
             "i32" => Ok(call_arg!(i.base10_parse::<i32>()?)),
             "i64" => Ok(call_arg!(i.base10_parse::<i64>()?)),
-            "" | "i128" => Ok(call_arg!(i.base10_parse::<i128>()?)),
+            "" => Ok(call_arg!(i.base10_parse::<i64>()?)),
+            // 128-bit integer literals are emitted as `tari_bor::Value::Integer(i128)` and on the
+            // wire become a CBOR integer (Value's encoder accepts the i64::MIN..=u64::MAX range
+            // and errors at submission time for anything wider). This unblocks templates whose
+            // arg type is `tari_bor::Value` — they can read back via `Value::as_integer()`.
+            // Templates that take native `u128` / `i128` parameters still won't decode, because
+            // minicbor 2.2 has no `Decode` impl for those types (upstream PR
+            // <https://github.com/twittner/minicbor/pull/63> is pending); use the adapters in
+            // `tari_bor::adapters::{u128_codec, i128_codec}` on those fields in the meantime.
+            "u128" => {
+                let parsed = i.base10_parse::<u128>()?;
+                let as_i128 = i128::try_from(parsed).map_err(|_| {
+                    ManifestError::UnsupportedExpr(format!(
+                        "u128 literal {} exceeds i128 (tari_bor::Value::Integer) range",
+                        i.base10_digits()
+                    ))
+                })?;
+                Ok(InstructionArg::literal(tari_bor::Value::Integer(as_i128))?)
+            },
+            "i128" => {
+                let parsed = i.base10_parse::<i128>()?;
+                Ok(InstructionArg::literal(tari_bor::Value::Integer(parsed))?)
+            },
             _ => Err(ManifestError::UnsupportedExpr(format!(
                 r#"Unsupported integer suffix "{}""#,
                 i.suffix()

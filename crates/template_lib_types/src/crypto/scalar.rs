@@ -1,18 +1,20 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{fmt, ops::Deref};
 
-use crate::{crypto::InvalidByteLengthError, hex::write_hex_fmt, serde_helpers};
+use crate::{crypto::InvalidByteLengthError, hex::write_hex_fmt};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Scalar32Bytes(
-    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cbor(with = "minicbor::bytes")]
     [u8; Scalar32Bytes::length()],
 );
 

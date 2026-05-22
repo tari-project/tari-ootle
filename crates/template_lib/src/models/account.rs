@@ -1,7 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_bor::from_value;
 use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib_types::ResourceAddress;
@@ -15,8 +15,10 @@ use crate::models::Vault;
 /// let component_state = cbor!(); // .. get state e.g. by using caller.component_state() in a auth hook
 /// let account = Account::from_value(&component_state)?;
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Account {
+    #[n(0)]
     vaults: BTreeMap<ResourceAddress, Vault>,
 }
 

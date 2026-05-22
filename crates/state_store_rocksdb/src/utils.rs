@@ -20,24 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::io;
-
 use tari_ootle_storage::time::{OffsetDateTime, PrimitiveDateTime};
 
-pub(crate) fn read_to_fixed<const SZ: usize, T, R>(reader: &mut R) -> Option<T>
-where
-    [u8; SZ]: Into<T>,
-    R: io::Read,
-{
+/// Read a fixed-size array from the front of `bytes` and return it converted into `T`.
+/// Returns `None` if the slice is too short.
+pub(crate) fn take_fixed<const SZ: usize, T>(bytes: &[u8]) -> Option<T>
+where [u8; SZ]: Into<T> {
+    if bytes.len() < SZ {
+        return None;
+    }
     let mut array = [0u8; SZ];
-    reader.read_exact(&mut array).ok()?;
+    array.copy_from_slice(&bytes[..SZ]);
     Some(array.into())
-}
-
-pub(crate) fn read_n_bytes<R: io::Read>(reader: &mut R, n: usize) -> Option<Vec<u8>> {
-    let mut vec = vec![0u8; n];
-    reader.read_exact(&mut vec[..]).ok()?;
-    Some(vec)
 }
 
 pub(crate) fn now() -> PrimitiveDateTime {

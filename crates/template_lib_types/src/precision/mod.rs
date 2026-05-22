@@ -4,6 +4,7 @@
 mod amount;
 // mod macros;
 mod ops;
+#[cfg(feature = "serde")]
 mod serde;
 
 pub use amount::*;

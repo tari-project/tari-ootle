@@ -30,8 +30,9 @@ mod account_template {
     use super::*;
 
     pub struct Account {
+        #[cbor(with = "indexmap_codec")]
         vaults: VaultMap,
-        #[serde(default)]
+        #[cbor(with = "indexmap_codec", default)]
         /// Approvals for other accounts to withdraw from this account. The key is a tuple of (approved resource,
         /// required spender_badge), and the value is the approved amount.
         approvals: ApprovalMap,
@@ -59,7 +60,6 @@ mod account_template {
                     .add_method_rule("balance", rule!(allow_all))
                     .add_method_rule("get_balances", rule!(allow_all))
                     .add_method_rule("deposit", rule!(allow_all))
-                    .add_method_rule("deposit_all", rule!(allow_all))
                     .add_method_rule("withdraw_approved", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
                     .default(rule!(deny_all)),
@@ -139,12 +139,6 @@ mod account_template {
                 .entry(resource_address)
                 .or_insert_with(|| Vault::new_empty(resource_address));
             vault_mut.deposit(bucket);
-        }
-
-        pub fn deposit_all(&mut self, buckets: Vec<Bucket>) {
-            for bucket in buckets {
-                self.deposit(bucket);
-            }
         }
 
         fn get_vault(&self, resource: ResourceAddress) -> &Vault {

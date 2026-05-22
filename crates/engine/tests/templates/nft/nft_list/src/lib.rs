@@ -21,8 +21,9 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use tari_template_lib::prelude::*;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub struct Sparkle {
+    #[n(0)]
     pub brightness: u32,
 }
 
@@ -37,7 +38,7 @@ mod sparkle_nft_template {
         pub fn new() -> Component<Self> {
             let resource_address = ResourceBuilder::non_fungible()
                 .with_token_symbol("sparkle")
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
                 .build();
 
             Component::new(Self { resource_address })

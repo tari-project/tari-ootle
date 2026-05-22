@@ -15,7 +15,7 @@ mod template {
     impl Freeze {
         pub fn new(address: ComponentAddressAllocation) -> (Component<Self>, ResourceAddress) {
             let bucket = ResourceBuilder::confidential()
-                .freezable(rule!(allow_all))
+                .freezable(rule!(allow_all), OWNER)
                 .initial_supply(ConfidentialOutputStatement::mint_revealed(1_000_000u32));
 
             let resource_address = bucket.resource_address();

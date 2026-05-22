@@ -34,12 +34,26 @@ fn std_event(object_name: &str, action_name: &str) -> String {
     format!("{}{}.{}", STANDARD_TOPIC_PREFIX, object_name, action_name)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, borsh::BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Event {
+    #[n(0)]
     substate_id: Option<SubstateId>,
+    #[n(1)]
     template_address: TemplateAddress,
+    #[n(2)]
     topic: String,
+    #[n(3)]
     payload: Metadata,
 }
 

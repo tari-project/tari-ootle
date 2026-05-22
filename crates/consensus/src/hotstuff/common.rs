@@ -387,8 +387,8 @@ pub(crate) fn get_leader_for_view<
 pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
     store: &mut PendingSubstateStore<TStore>,
     claim_public_key_bytes: &RistrettoPublicKeyBytes,
-    shard: Shard,
     num_preshards: NumPreshards,
+    shard: Shard,
     total_leader_fee: u64,
 ) -> Result<(), HotStuffError> {
     // Basic defensive checks

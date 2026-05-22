@@ -14,6 +14,7 @@ tari_engine_types = { workspace = true }
 tari_validator_node_rpc = { workspace = true }
 
 log = { workspace = true }
+minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 

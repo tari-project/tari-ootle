@@ -10,6 +10,7 @@ use std::{
 
 use indexmap::IndexMap;
 use log::*;
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
@@ -87,28 +88,38 @@ pub enum BlockError {
     MerkleProofGenerationCommandIndexOutOfBounds { index: usize, len: usize },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Block {
+    #[n(0)]
     header: BlockHeader,
     /// Collection of signatures that justify a previous block and potentially a change to the next higher view.
+    #[n(1)]
     justify: ProposalCertificate,
     /// Commands in the block. These are in canonical order to ensure a deterministic block hash.
+    #[n(2)]
     commands: BTreeSet<Command>,
     /// The block's justification for a view timeout. This is only relevant if it is for a higher view height than the
     /// ProposalCertificate.
+    #[n(3)]
     timeout_certificate: Option<TimeoutCertificate>,
     // Metadata - not included in the block hash
     /// The QC that justified this block
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[n(4)]
     justify_qc_id: Option<PcId>,
     /// The QC that caused this block to be committed
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[n(5)]
     commit_qc_id: Option<PcId>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    #[n(6)]
     block_time: Option<u64>,
     /// Timestamp when was this stored.
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    // PrimitiveDateTime is foreign (time crate) — bridge through serde.
+    #[n(7)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     stored_at: Option<PrimitiveDateTime>,
 }
 

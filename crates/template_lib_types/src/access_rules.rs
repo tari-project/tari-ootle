@@ -2,22 +2,27 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 //! Access control rules for template-related data like component methods and resources
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
+use tari_bor::adapters::boxed_slice;
 use tari_template_abi::rust::{collections::BTreeMap, prelude::*};
 
 use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 /// Represents the types of possible access control rules over a component method or resource
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AccessRule {
     /// AccessRule always passes
+    #[n(0)]
     AllowAll,
     /// AccessRule always fails
+    #[n(1)]
     DenyAll,
     /// AccessRule that requires a specific condition to be met
-    Restricted(RestrictedAccessRule),
+    #[n(2)]
+    Restricted(#[n(0)] RestrictedAccessRule),
 }
 
 impl AccessRule {
@@ -43,16 +48,28 @@ impl AccessRule {
 }
 
 /// An enum that represents the possible ways to restrict access to components or resources
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RestrictedAccessRule {
     /// Requires a specific condition to be met
-    Require(RequireRule),
+    #[n(0)]
+    Require(#[n(0)] RequireRule),
     /// Requires any of the specified conditions to be met (logical OR)
-    AnyOf(Box<[RestrictedAccessRule]>),
+    #[n(1)]
+    AnyOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RestrictedAccessRule]>,
+    ),
     /// Requires all of the specified conditions to be met (logical AND)
-    AllOf(Box<[RestrictedAccessRule]>),
+    #[n(2)]
+    AllOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RestrictedAccessRule]>,
+    ),
 }
 
 impl RestrictedAccessRule {
@@ -66,18 +83,23 @@ impl RestrictedAccessRule {
 }
 
 /// Specifies a requirement for a [RequireRule].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RuleRequirement {
     /// Requires a proof of a specific resource
-    Resource(ResourceAddress),
+    #[n(0)]
+    Resource(#[n(0)] ResourceAddress),
     /// Requires a proof of a specific non-fungible token
-    NonFungibleAddress(NonFungibleAddress),
+    #[n(1)]
+    NonFungibleAddress(#[n(0)] NonFungibleAddress),
     /// Requires execution within a specific component
-    ScopedToComponent(ComponentAddress),
+    #[n(2)]
+    ScopedToComponent(#[n(0)] ComponentAddress),
     /// Requires execution within a specific template
-    ScopedToTemplate(TemplateAddress),
+    #[n(3)]
+    ScopedToTemplate(#[n(0)] TemplateAddress),
 }
 
 impl From<ResourceAddress> for RuleRequirement {
@@ -111,27 +133,48 @@ impl From<RistrettoPublicKeyBytes> for RuleRequirement {
 }
 
 /// A rule requiring specific condition(s) to be met
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RequireRule {
     /// Requires a specific condition to be met
-    Require(RuleRequirement),
+    #[n(0)]
+    Require(#[n(0)] RuleRequirement),
     /// Requires any of the specified conditions to be met (logical OR)
-    AnyOf(Box<[RuleRequirement]>),
+    #[n(1)]
+    AnyOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RuleRequirement]>,
+    ),
     /// Requires all of the specified conditions to be met (logical AND)
-    AllOf(Box<[RuleRequirement]>),
+    #[n(2)]
+    AllOf(
+        #[n(0)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RuleRequirement]>,
+    ),
     /// Requires N of the specified conditions to be met
-    MOfN(u16, Box<[RuleRequirement]>),
+    #[n(3)]
+    MOfN(
+        #[n(0)] u16,
+        #[n(1)]
+        #[cbor(with = "boxed_slice")]
+        Box<[RuleRequirement]>,
+    ),
 }
 
 /// Information needed to specify access rules to methods of a component
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct ComponentAccessRules {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, AccessRule>"))]
+    #[n(0)]
     method_access: BTreeMap<String, AccessRule>,
+    #[n(1)]
     default: AccessRule,
 }
 
@@ -194,17 +237,24 @@ impl Default for ComponentAccessRules {
 }
 
 /// An enum that represents all the possible actions that can be performed on a resource
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Encode, Decode, CborLen, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ResourceAuthAction {
+    #[n(0)]
     Mint,
+    #[n(1)]
     Burn,
+    #[n(2)]
     Recall,
+    #[n(3)]
     Withdraw,
+    #[n(4)]
     Deposit,
+    #[n(5)]
     UpdateNonFungibleData,
-    UpdateAccessRules,
+    #[n(6)]
     Freeze,
-    /// Appended at the end to keep bincode discriminants stable for prior variants.
+    #[n(7)]
     UpdateMetadata,
 }
 
@@ -214,23 +264,66 @@ impl ResourceAuthAction {
     }
 }
 
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum UpdateRule {
+    #[n(0)]
+    Locked,
+    #[n(1)]
+    Owner,
+    #[n(2)]
+    AccessRule(#[n(0)] AccessRule),
+}
+
+impl From<AccessRule> for UpdateRule {
+    fn from(rule: AccessRule) -> Self {
+        Self::AccessRule(rule)
+    }
+}
+
+pub const LOCKED: UpdateRule = UpdateRule::Locked;
+pub const OWNER: UpdateRule = UpdateRule::Owner;
+
 /// Information needed to specify access rules to a resource
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ResourceAccessRules {
-    mintable: AccessRule,
-    burnable: AccessRule,
-    recallable: AccessRule,
-    withdrawable: AccessRule,
-    depositable: AccessRule,
-    update_non_fungible_data: AccessRule,
-    update_access_rules: AccessRule,
+    #[n(0)]
+    mint: AccessRule,
+    #[n(1)]
+    mint_updater: UpdateRule,
+    #[n(2)]
+    burn: AccessRule,
+    #[n(3)]
+    burn_updater: UpdateRule,
+    #[n(4)]
+    recall: AccessRule,
+    #[n(5)]
+    recall_updater: UpdateRule,
+    #[n(6)]
+    withdraw: AccessRule,
+    #[n(7)]
+    withdraw_updater: UpdateRule,
+    #[n(8)]
+    deposit: AccessRule,
+    #[n(9)]
+    deposit_updater: UpdateRule,
+    #[n(10)]
+    update_nft_data: AccessRule,
+    #[n(11)]
+    nft_data_updater: UpdateRule,
+    #[n(12)]
     freeze: AccessRule,
-    /// Added post-launch. Appended last to keep bincode field positions stable for prior fields;
-    /// this is still a breaking change for pre-existing substates because bincode cannot read a
-    /// missing trailing field, so the chain must be reset or data migrated on upgrade.
+    #[n(13)]
+    freeze_updater: UpdateRule,
+    #[n(14)]
     update_metadata: AccessRule,
+    #[n(15)]
+    metadata_updater: UpdateRule,
 }
 
 impl ResourceAccessRules {
@@ -243,102 +336,147 @@ impl ResourceAccessRules {
     pub const fn new() -> Self {
         Self {
             // User should explicitly enable minting, burning etc
-            mintable: AccessRule::DenyAll,
-            burnable: AccessRule::DenyAll,
-            recallable: AccessRule::DenyAll,
-            update_access_rules: AccessRule::DenyAll,
-            update_metadata: AccessRule::DenyAll,
+            mint: AccessRule::DenyAll,
+            mint_updater: UpdateRule::Locked,
+            burn: AccessRule::DenyAll,
+            burn_updater: UpdateRule::Locked,
+            recall: AccessRule::DenyAll,
+            recall_updater: UpdateRule::Locked,
             freeze: AccessRule::DenyAll,
+            freeze_updater: UpdateRule::Locked,
+            update_metadata: AccessRule::DenyAll,
+            metadata_updater: UpdateRule::Owner,
             // But explicitly disable withdrawing, updating and/or depositing
-            withdrawable: AccessRule::AllowAll,
-            depositable: AccessRule::AllowAll,
-            update_non_fungible_data: AccessRule::AllowAll,
+            withdraw: AccessRule::AllowAll,
+            withdraw_updater: UpdateRule::Locked,
+            deposit: AccessRule::AllowAll,
+            deposit_updater: UpdateRule::Locked,
+            update_nft_data: AccessRule::AllowAll,
+            nft_data_updater: UpdateRule::Owner,
         }
     }
 
     /// Update the access rules so no one can perform any action on the resource after its creation
     pub fn deny_all() -> Self {
         Self {
-            mintable: AccessRule::DenyAll,
-            burnable: AccessRule::DenyAll,
-            recallable: AccessRule::DenyAll,
-            update_access_rules: AccessRule::DenyAll,
-            update_metadata: AccessRule::DenyAll,
-            withdrawable: AccessRule::DenyAll,
-            depositable: AccessRule::DenyAll,
-            update_non_fungible_data: AccessRule::DenyAll,
+            mint: AccessRule::DenyAll,
+            mint_updater: UpdateRule::Locked,
+            burn: AccessRule::DenyAll,
+            burn_updater: UpdateRule::Locked,
+            recall: AccessRule::DenyAll,
+            recall_updater: UpdateRule::Locked,
+            withdraw: AccessRule::DenyAll,
+            withdraw_updater: UpdateRule::Locked,
+            deposit: AccessRule::DenyAll,
+            deposit_updater: UpdateRule::Locked,
+            update_nft_data: AccessRule::DenyAll,
+            nft_data_updater: UpdateRule::Locked,
             freeze: AccessRule::DenyAll,
+            freeze_updater: UpdateRule::Locked,
+            update_metadata: AccessRule::DenyAll,
+            metadata_updater: UpdateRule::Locked,
         }
     }
 
     /// Sets up who can mint new tokens of the resource
-    pub fn mintable(mut self, rule: AccessRule) -> Self {
-        self.mintable = rule;
+    pub fn mintable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.mint = rule;
+        self.mint_updater = updater.into();
         self
     }
 
     /// Sets up who can burn (destroy) tokens of the resource
-    pub fn burnable(mut self, rule: AccessRule) -> Self {
-        self.burnable = rule;
+    pub fn burnable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.burn = rule;
+        self.burn_updater = updater.into();
         self
     }
 
     /// Sets up who can recall tokens of the resource.
     /// A recall is the forceful withdrawal of tokens from any external vault
-    pub fn recallable(mut self, rule: AccessRule) -> Self {
-        self.recallable = rule;
+    pub fn recallable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.recall = rule;
+        self.recall_updater = updater.into();
         self
     }
 
     /// Sets up who can freeze a vault (or UTXO in the case of stealth) containing this resource, preventing
     /// withdrawals.
-    pub fn freezable(mut self, rule: AccessRule) -> Self {
+    pub fn freezable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
         self.freeze = rule;
+        self.freeze_updater = updater.into();
         self
     }
 
     /// Sets up who can withdraw tokens of the resource from any vault
-    pub fn withdrawable(mut self, rule: AccessRule) -> Self {
-        self.withdrawable = rule;
+    pub fn withdrawable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.withdraw = rule;
+        self.withdraw_updater = updater.into();
         self
     }
 
     /// Sets up who can deposit tokens of the resource into any vault
-    pub fn depositable(mut self, rule: AccessRule) -> Self {
-        self.depositable = rule;
-        self
-    }
-
-    /// Sets up who can update the access rules of the resource
-    pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
-        self.update_access_rules = rule;
+    pub fn depositable<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.deposit = rule;
+        self.deposit_updater = updater.into();
         self
     }
 
     /// Sets up who can update the mutable data of the tokens in the resource
-    pub fn update_non_fungible_data(mut self, rule: AccessRule) -> Self {
-        self.update_non_fungible_data = rule;
+    pub fn update_non_fungible_data<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.update_nft_data = rule;
+        self.nft_data_updater = updater.into();
         self
     }
 
     /// Sets up who can update the resource's metadata. The token symbol remains immutable once set.
-    pub fn update_metadata(mut self, rule: AccessRule) -> Self {
+    pub fn update_metadata<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
         self.update_metadata = rule;
+        self.metadata_updater = updater.into();
         self
     }
 
     /// Returns a reference to the access rule for the specified action
     pub fn get_access_rule(&self, action: &ResourceAuthAction) -> &AccessRule {
         match action {
-            ResourceAuthAction::Mint => &self.mintable,
-            ResourceAuthAction::Burn => &self.burnable,
-            ResourceAuthAction::Recall => &self.recallable,
-            ResourceAuthAction::Withdraw => &self.withdrawable,
-            ResourceAuthAction::Deposit => &self.depositable,
-            ResourceAuthAction::UpdateNonFungibleData => &self.update_non_fungible_data,
-            ResourceAuthAction::UpdateAccessRules => &self.update_access_rules,
+            ResourceAuthAction::Mint => &self.mint,
+            ResourceAuthAction::Burn => &self.burn,
+            ResourceAuthAction::Recall => &self.recall,
+            ResourceAuthAction::Withdraw => &self.withdraw,
+            ResourceAuthAction::Deposit => &self.deposit,
+            ResourceAuthAction::UpdateNonFungibleData => &self.update_nft_data,
             ResourceAuthAction::UpdateMetadata => &self.update_metadata,
             ResourceAuthAction::Freeze => &self.freeze,
+        }
+    }
+
+    /// Returns a reference to the updater rule that governs who may change the access rule for the
+    /// specified action.
+    pub fn get_updater(&self, action: &ResourceAuthAction) -> &UpdateRule {
+        match action {
+            ResourceAuthAction::Mint => &self.mint_updater,
+            ResourceAuthAction::Burn => &self.burn_updater,
+            ResourceAuthAction::Recall => &self.recall_updater,
+            ResourceAuthAction::Withdraw => &self.withdraw_updater,
+            ResourceAuthAction::Deposit => &self.deposit_updater,
+            ResourceAuthAction::UpdateNonFungibleData => &self.nft_data_updater,
+            ResourceAuthAction::UpdateMetadata => &self.metadata_updater,
+            ResourceAuthAction::Freeze => &self.freeze_updater,
+        }
+    }
+
+    /// Replaces the access rule for the specified action without changing its updater rule.
+    /// The caller is responsible for verifying that the change is authorized.
+    pub fn set_access_rule(&mut self, action: ResourceAuthAction, rule: AccessRule) {
+        match action {
+            ResourceAuthAction::Mint => self.mint = rule,
+            ResourceAuthAction::Burn => self.burn = rule,
+            ResourceAuthAction::Recall => self.recall = rule,
+            ResourceAuthAction::Withdraw => self.withdraw = rule,
+            ResourceAuthAction::Deposit => self.deposit = rule,
+            ResourceAuthAction::UpdateNonFungibleData => self.update_nft_data = rule,
+            ResourceAuthAction::UpdateMetadata => self.update_metadata = rule,
+            ResourceAuthAction::Freeze => self.freeze = rule,
         }
     }
 }

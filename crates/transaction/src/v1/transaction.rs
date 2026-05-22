@@ -30,10 +30,14 @@ const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
 static XTR_REQUIREMENT: SubstateRequirement = SubstateRequirement::new(SubstateId::Resource(TARI_TOKEN), None);
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionV1 {
+    #[n(0)]
     body: UnsealedTransactionV1,
+    #[n(1)]
     seal_signature: TransactionSealSignature,
 }
 
@@ -266,6 +270,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::Assert { .. } => 1,
         Instruction::TakeFromBucket { .. } => 1,
+        Instruction::PutIntoBucket { .. } => 1,
         // The binary's bytes are charged at the transaction-level via `calc_blobs_weight`,
         // uniformly with any other blob references. The instruction itself is a fixed cost.
         Instruction::PublishTemplate { .. } => 1,

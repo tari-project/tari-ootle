@@ -1,15 +1,15 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-mod bincode;
 mod block_diff;
-mod byte_counter;
 mod bytes;
 mod column;
+mod minicbor;
 mod misc;
 #[macro_use]
 mod prefixed;
 mod public_key;
+mod serde_bridge_codec;
 mod shard_group;
 mod small_bytes;
 mod state_tree;
@@ -20,13 +20,14 @@ mod versioned;
 
 use std::io;
 
-pub use bincode::*;
 pub use block_diff::*;
 pub use bytes::*;
 pub use column::*;
+pub use minicbor::*;
 pub use misc::*;
 pub use prefixed::*;
 pub use public_key::*;
+pub use serde_bridge_codec::*;
 pub use shard_group::ShardGroupCodec;
 pub use state_tree::*;
 pub use substate_id::*;
@@ -61,13 +62,27 @@ pub trait DbEncoder<T> {
 }
 
 pub trait DbDecoder<T> {
-    fn decode(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-        let reader = &mut &bytes[..];
-        self.decode_reader(reader)
-    }
+    /// Decode a value from the front of `bytes`, returning the value together with
+    /// the number of bytes consumed. Composable codecs (e.g. tuples) chain by
+    /// advancing the slice past the returned length.
+    fn decode(&self, bytes: &[u8]) -> Result<(T, usize), RocksDbStorageError>;
 
-    fn decode_reader<R: io::Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError>;
+    /// Decode and assert that the entire slice was consumed.
+    fn decode_exact(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
+        let (value, consumed) = self.decode(bytes)?;
+        if consumed != bytes.len() {
+            return Err(RocksDbStorageError::MalformedData {
+                operation: "decode_exact",
+                details: format!(
+                    "trailing {} bytes after decoding type {}",
+                    bytes.len() - consumed,
+                    std::any::type_name::<T>(),
+                ),
+            });
+        }
+        Ok(value)
+    }
 }
 
-pub type DefaultCodec<T> = Bincode<T>;
+pub type DefaultCodec<T> = Minicbor<T>;
 pub type DefaultVersionedCodec<T> = VersionedCodec<DefaultCodec<T>, T>;

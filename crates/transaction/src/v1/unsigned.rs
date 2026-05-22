@@ -14,25 +14,38 @@ use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPu
 
 use crate::{Blobs, ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsignedTransactionV1 {
+    #[n(0)]
     pub network: u8,
+    #[n(1)]
     pub fee_instructions: Vec<Instruction>,
+    #[n(2)]
     pub instructions: Vec<Instruction>,
 
     /// Input objects that may be read/write
+    #[n(3)]
+    #[cbor(with = "tari_bor::adapters::indexset_codec")]
     pub inputs: IndexSet<SubstateRequirement>,
+    #[n(4)]
     pub min_epoch: Option<Epoch>,
+    #[n(5)]
     pub max_epoch: Option<Epoch>,
+    #[n(6)]
     pub is_seal_signer_authorized: bool,
+    #[n(7)]
     pub dry_run: bool,
 
     /// Prunable side-channel of opaque payloads referenced by instructions via `BlobIndex`.
     /// Only the per-blob commitments (`blobs.hashes()`) participate in the signing domain —
     /// raw blob bytes are excluded so that storage layers can drop them without affecting
     /// signature verifiability or transaction id.
+    #[n(8)]
     #[serde(default)]
+    #[cbor(default)]
     pub blobs: Blobs,
 }
 

@@ -1,16 +1,21 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
 
 use crate::{BlockId, LeafBlock};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct LastProposed {
+    #[n(0)]
     pub height: NodeHeight,
+    #[n(1)]
     pub block_id: BlockId,
+    #[n(2)]
     pub epoch: Epoch,
+    #[n(3)]
     pub shard_group: ShardGroup,
 }
 impl LastProposed {

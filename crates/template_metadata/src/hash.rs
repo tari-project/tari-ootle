@@ -116,6 +116,33 @@ impl borsh::BorshSerialize for MetadataHash {
     }
 }
 
+impl<C> minicbor::Encode<C> for MetadataHash {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        let bytes = self.to_bytes();
+        e.bytes(&bytes)?;
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for MetadataHash {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        MetadataHash::from_bytes(bytes)
+            .ok_or_else(|| minicbor::decode::Error::message("invalid MetadataHash multihash bytes"))
+    }
+}
+
+impl<C> minicbor::CborLen<C> for MetadataHash {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        let bytes = self.to_bytes();
+        <[u8] as minicbor::CborLen<C>>::cbor_len(bytes.as_slice(), ctx)
+    }
+}
+
 /// A domain-separated SHA-256 hasher that implements [`std::io::Write`].
 ///
 /// CBOR (or any data) can be written directly into this without intermediate allocation.

@@ -22,8 +22,8 @@ mod template {
         ) -> Component<Self> {
             let signer = NonFungibleAddress::from_public_key(CallerContext::transaction_signer_public_key());
             let bucket = ResourceBuilder::stealth()
-                .mintable(rule!(allow_all))
-                .freezable(rule!(non_fungible(signer)))
+                .mintable(rule!(allow_all), OWNER)
+                .freezable(rule!(non_fungible(signer)), OWNER)
                 .with_view_key_opt(view_key)
                 .initial_supply(initial_supply);
 

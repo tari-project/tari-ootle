@@ -39,10 +39,10 @@ mod template {
 
         pub fn with_address_and_supply(alloc: ComponentAddressAllocation, supply: Amount) -> Component<Self> {
             let fungible = ResourceBuilder::public_fungible()
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
                 .initial_supply(supply);
             let confidential = ResourceBuilder::confidential()
-                .mintable(rule!(allow_all))
+                .mintable(rule!(allow_all), OWNER)
                 .initial_supply(ConfidentialOutputStatement::mint_revealed(supply));
 
             Component::new(Self {

@@ -20,16 +20,19 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use tari_bor::BorError;
 use tari_template_abi::Type;
 
 use crate::indexed_value::{IndexedValue, IndexedValueError};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct InstructionResult {
+    #[n(0)]
     pub indexed: IndexedValue,
+    #[n(1)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
     pub return_type: Type,
 }
 
@@ -41,11 +44,13 @@ impl InstructionResult {
         }
     }
 
-    pub fn decode<T: DeserializeOwned>(&self) -> Result<T, BorError> {
+    pub fn decode<T>(&self) -> Result<T, BorError>
+    where T: for<'b> tari_bor::Decode<'b, ()> {
         tari_bor::from_value(self.indexed.value())
     }
 
-    pub fn get_value<T: DeserializeOwned>(&self, path: &str) -> Result<Option<T>, IndexedValueError> {
+    pub fn get_value<T>(&self, path: &str) -> Result<Option<T>, IndexedValueError>
+    where T: for<'b> tari_bor::Decode<'b, ()> {
         self.indexed.get_value(path)
     }
 }

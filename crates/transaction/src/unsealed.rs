@@ -7,10 +7,13 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{IntoSigned, Signable, Transaction, TransactionSealSignature, TransactionSignature, UnsealedTransactionV1};
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum UnsealedTransaction {
-    V1(UnsealedTransactionV1),
+    #[n(0)]
+    V1(#[n(0)] UnsealedTransactionV1),
 }
 
 impl UnsealedTransaction {

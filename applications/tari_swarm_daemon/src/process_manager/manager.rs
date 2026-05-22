@@ -95,15 +95,24 @@ impl ProcessManager {
         let mut clients = vec![];
         let mut ids = vec![];
         for vn in self.instance_manager.validator_nodes_mut() {
+            let name = vn.instance().name().to_string();
+            if let Err(err) = vn.wait_for_startup(Duration::from_secs(30)).await {
+                log::error!("Validator node {name} did not become ready, skipping: {err}");
+                continue;
+            }
             match vn.connect_client() {
-                Ok(mut client) => {
-                    info!("🟢 Validator node {} connected", vn.instance().name());
-                    let id = client.get_identity().await?;
-                    clients.push(client);
-                    ids.push(id);
+                Ok(mut client) => match client.get_identity().await {
+                    Ok(id) => {
+                        info!("🟢 Validator node {name} connected");
+                        clients.push(client);
+                        ids.push(id);
+                    },
+                    Err(err) => {
+                        log::error!("Failed to get identity for validator node {name}, skipping: {err}");
+                    },
                 },
                 Err(err) => {
-                    log::error!("Failed to connect to validator node {}: {}", vn.instance().name(), err);
+                    log::error!("Failed to connect to validator node {name}: {err}");
                 },
             }
         }

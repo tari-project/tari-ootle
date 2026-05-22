@@ -234,6 +234,18 @@ impl ManifestInstructionGenerator {
                 })?,
             }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
+            ManifestIntent::PutIntoBucket(p) => {
+                let resolve = |name: &Ident| {
+                    let name_str = name.to_string();
+                    self.workspace_ids
+                        .get(&name_str)
+                        .copied()
+                        .ok_or(ManifestError::UndefinedVariable { name: name_str })
+                };
+                let src = resolve(&p.src)?;
+                let dest = resolve(&p.dest)?;
+                Ok(vec![Instruction::PutIntoBucket { src, dest }])
+            },
             ManifestIntent::PublishTemplate(pt) => {
                 // Reuse the same blob-resolution path as `blob!(name)` — the binary is
                 // registered in the output Blobs on first reference and assigned the next
@@ -394,7 +406,8 @@ impl ManifestInstructionGenerator {
         }
     }
 
-    fn extract_from_global<T: tari_bor::DeserializeOwned>(&self, name: &str) -> Result<T, ManifestError> {
+    fn extract_from_global<T>(&self, name: &str) -> Result<T, ManifestError>
+    where T: tari_bor::DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         let value = self
             .global_aliases
             .get(name)

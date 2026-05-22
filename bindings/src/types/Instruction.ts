@@ -59,4 +59,5 @@ export type Instruction =
   | { PayFeeFromBucket: { bucket: WorkspaceOffsetId } }
   | {
       UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash32 };
-    };
+    }
+  | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } };

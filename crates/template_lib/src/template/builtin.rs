@@ -20,16 +20,19 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::{EngineOp, call_engine};
 use tari_template_lib_types::TemplateAddress;
 
 use crate::args::{BuiltinTemplateAction, BuiltinTemplateInvokeArg, InvokeResult};
 
 /// All the templates that are included by default in the Tari network
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BuiltinTemplate {
+    #[n(0)]
     Account,
+    #[n(1)]
     AccountNft,
 }
 

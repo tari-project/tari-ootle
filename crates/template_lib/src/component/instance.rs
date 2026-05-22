@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::Encode;
 use tari_template_abi::rust::marker::PhantomData;
 use tari_template_lib_types::{ComponentAddress, OwnerRule, access_rules::ComponentAccessRules};
 
@@ -70,7 +71,7 @@ impl<T> ComponentBuilder<T> {
     }
 }
 
-impl<T: serde::Serialize> ComponentBuilder<T> {
+impl<T: Encode<()>> ComponentBuilder<T> {
     /// Creates the new component and returns it
     pub fn create(self) -> Component<T> {
         let address = engine().create_component(
@@ -84,15 +85,42 @@ impl<T: serde::Serialize> ComponentBuilder<T> {
 }
 
 /// A newly created component, typically used as a return value from template constructor functions
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct Component<T> {
     address: ComponentAddress,
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     _component: PhantomData<T>,
 }
 
-impl<T: serde::Serialize> Component<T> {
+// Encode/Decode/CborLen are hand-rolled so the wire format matches ComponentAddress
+// (transparent over the only non-skipped field).
+impl<C, T> minicbor::Encode<C> for Component<T> {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        self.address.encode(e, ctx)
+    }
+}
+
+impl<'b, C, T> minicbor::Decode<'b, C> for Component<T> {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        Ok(Self {
+            address: ComponentAddress::decode(d, ctx)?,
+            _component: PhantomData,
+        })
+    }
+}
+
+impl<C, T> minicbor::CborLen<C> for Component<T> {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        self.address.cbor_len(ctx)
+    }
+}
+
+impl<T: Encode<()>> Component<T> {
     /// Returns a new component builder for the specified data
     #[allow(clippy::new_ret_no_self)]
     pub fn new(component: T) -> ComponentBuilder<T> {

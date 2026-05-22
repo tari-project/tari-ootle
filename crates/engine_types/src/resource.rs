@@ -33,24 +33,34 @@ use tari_template_lib::{
         Metadata,
         ResourceType,
         SubstateOwnerRule,
-        access_rules::ResourceAccessRules,
+        access_rules::{AccessRule, ResourceAccessRules, ResourceAuthAction},
         crypto::RistrettoPublicKeyBytes,
     },
 };
 
 use crate::ownership::Ownership;
 
-#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Resource {
+    #[n(0)]
     resource_type: ResourceType,
+    #[n(1)]
     owner_rule: SubstateOwnerRule,
+    #[n(2)]
     access_rules: ResourceAccessRules,
+    #[n(3)]
     metadata: Metadata,
     /// The total supply of the resource. None means total_supply tracking is disabled.
+    #[n(4)]
     total_supply: Option<Amount>,
+    #[n(5)]
     view_key: Option<RistrettoPublicKeyBytes>,
+    #[n(6)]
     auth_hook: Option<AuthHook>,
+    #[n(7)]
     divisibility: u8,
 }
 
@@ -149,6 +159,13 @@ impl Resource {
 
     pub fn set_access_rules(&mut self, access_rules: ResourceAccessRules) {
         self.access_rules = access_rules;
+    }
+
+    /// Replaces the access rule for a single resource action. The caller is responsible for
+    /// authorizing the change against the field's
+    /// [`UpdateRule`](tari_template_lib::types::access_rules::UpdateRule).
+    pub fn update_access_rule(&mut self, action: ResourceAuthAction, new_rule: AccessRule) {
+        self.access_rules.set_access_rule(action, new_rule);
     }
 
     /// Returns `true` if the resource has enabled supply tracking, otherwise `false`

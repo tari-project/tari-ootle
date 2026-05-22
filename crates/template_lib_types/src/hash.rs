@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize};
+use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -29,19 +29,18 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::{
-    hex::{fixed_bytes_from_hex, write_hex_fmt},
-    serde_helpers,
-};
+use crate::hex::{fixed_bytes_from_hex, write_hex_fmt};
 
 /// Representation of a 32-byte hash value
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Encode, Decode, CborLen)]
+#[cbor(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
-#[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Hash32(
-    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_helpers::fixed_hex"))]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cbor(with = "minicbor::bytes")]
     [u8; Self::LENGTH],
 );
 

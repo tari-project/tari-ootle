@@ -26,23 +26,23 @@ mod template {
             ResourceAddress,
         ) {
             let fungible = ResourceBuilder::public_fungible()
-                .recallable(rule!(allow_all))
+                .recallable(rule!(allow_all), OWNER)
                 .initial_supply(1_000_000u32);
 
             let fungible_resource = fungible.resource_address();
 
             let non_fungible = ResourceBuilder::non_fungible()
-                .recallable(rule!(allow_all))
+                .recallable(rule!(allow_all), OWNER)
                 .initial_supply((1..=10).map(NonFungibleId::from_u32));
             let non_fungible_resource = non_fungible.resource_address();
 
             let confidential = ResourceBuilder::confidential()
-                .recallable(rule!(allow_all))
+                .recallable(rule!(allow_all), OWNER)
                 .initial_supply(confidential_supply);
             let confidential_resource = confidential.resource_address();
 
             let stealth = ResourceBuilder::stealth()
-                .recallable(rule!(allow_all))
+                .recallable(rule!(allow_all), OWNER)
                 .initial_supply(1_000_000u32);
             let stealth_resource = stealth.resource_address();
 

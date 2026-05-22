@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 use tari_ootle_storage::consensus_models::{Block, ForeignProposal};
@@ -31,9 +32,11 @@ use crate::{
     traits::Cf,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct ParkedBlockData {
+    #[n(0)]
     pub block: Block,
+    #[n(1)]
     pub foreign_proposals: Vec<ForeignProposal>,
 }
 
@@ -53,8 +56,10 @@ impl Cf for ParkedBlockCf {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Encode, CborLen)]
 pub struct ParkedBlockDataRef<'a> {
+    #[b(0)]
     pub block: &'a Block,
+    #[b(1)]
     pub foreign_proposals: &'a [ForeignProposal],
 }

@@ -79,6 +79,18 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     // Slot-allocation premium for newly-created substates, on top of `per_byte_storage_cost`.
     // ~25 µT per new substate (~equivalent to 100 bytes of storage at the effective per-byte rate).
     per_substate_create_cost: 25,
+    // µT charged per `wasm_points_cost_divisor` Wasmer metering points. Opcode → point mapping
+    // lives in `wasm/metering.rs` (most arithmetic = 1, calls = 4, heavy ops up to 40). Starts at
+    // 1 µT per 1000 points; revisit once we have hardware-benchmarked numbers.
+    per_wasm_point_cost: 1,
+    // Divides the raw `per_byte_storage_cost × bytes` storage charge. `1` charges the full byte
+    // cost — storage is the only indefinite-liability category, so we don't haircut it further
+    // until a proper rent/endowment model lands.
+    storage_cost_divisor: 1,
+    // 3 KB = 1 template-load unit. Lower values increase the load fee.
+    template_load_bytes_cost_divisor: 3000,
+    // 1 µT per 1000 Wasmer points. Lower values make metering more aggressive.
+    wasm_points_cost_divisor: 1000,
 };
 
 /// MainNet fee table - production values.
@@ -103,6 +115,10 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     per_signature_verification_cost: 10,
     per_template_load_cost_unit: 10,
     per_substate_create_cost: 25,
+    per_wasm_point_cost: 1,
+    storage_cost_divisor: 1,
+    template_load_bytes_cost_divisor: 3000,
+    wasm_points_cost_divisor: 1000,
 };
 
 /// Returns the appropriate fee table for the specified network.

@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 
@@ -12,8 +13,9 @@ use crate::{
 };
 
 prefixed!(DiagnosticsNoVotePrefix, KeyPrefix::DiagnosticsNoVotes);
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode, CborLen)]
 pub struct DiagnosticsNoVoteData {
+    #[n(0)]
     pub reason: Box<str>,
 }
 

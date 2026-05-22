@@ -45,7 +45,9 @@ where TSpec: ConsensusSpec
             Err(err @ HotStuffError::FallenBehind { .. }) |
             Err(err @ HotStuffError::ProposalValidationError(ProposalValidationError::FutureEpoch { .. })) => {
                 info!(target: LOG_TARGET, "⚠️ Behind peers, starting sync ({err})");
-                Ok(ConsensusStateEvent::NeedSync)
+                // From the Running state we have no specific target — re-enter CheckSync to
+                // resolve one via the probe/oracle.
+                Ok(ConsensusStateEvent::NeedSync { target_epoch: None })
             },
             Err(err) => {
                 error!(target: LOG_TARGET, "HotStuff crashed: {}", err);

@@ -43,12 +43,15 @@ pub struct PrometheusEpochOracleMetrics {
     /// liveness signal — a stuck oracle stops bumping this even if the validator node is
     /// otherwise healthy.
     last_event_epoch: UnsignedGauge,
-    errors_total: Counter,
-    epoch_changed_total: Counter,
-    active_validator_set_changed_total: Counter,
-    new_validator_registered_total: Counter,
-    new_validator_exit_total: Counter,
-    done_for_now_total: Counter,
+    // Counter names are registered without a `_total` suffix: prometheus-client appends
+    // `_total` itself during text/OpenMetrics encoding, so e.g. `epoch_changed` is exported
+    // as `epoch_changed_total`. This matches the existing consensus/mempool metric structs.
+    errors: Counter,
+    epoch_changed: Counter,
+    active_validator_set_changed: Counter,
+    new_validator_registered: Counter,
+    new_validator_exit: Counter,
+    done_for_now: Counter,
 }
 
 impl PrometheusEpochOracleMetrics {
@@ -60,33 +63,33 @@ impl PrometheusEpochOracleMetrics {
                 "Highest epoch observed across all events emitted by the epoch oracle",
                 registry,
             ),
-            errors_total: Counter::default().register_at(
-                "errors_total",
+            errors: Counter::default().register_at(
+                "errors",
                 "Number of Error events emitted by the epoch oracle",
                 registry,
             ),
-            epoch_changed_total: Counter::default().register_at(
-                "epoch_changed_total",
+            epoch_changed: Counter::default().register_at(
+                "epoch_changed",
                 "Number of EpochChanged events emitted by the epoch oracle",
                 registry,
             ),
-            active_validator_set_changed_total: Counter::default().register_at(
-                "active_validator_set_changed_total",
+            active_validator_set_changed: Counter::default().register_at(
+                "active_validator_set_changed",
                 "Number of ActiveValidatorNodeSetChanged events emitted by the epoch oracle",
                 registry,
             ),
-            new_validator_registered_total: Counter::default().register_at(
-                "new_validator_registered_total",
+            new_validator_registered: Counter::default().register_at(
+                "new_validator_registered",
                 "Number of NewValidatorRegistered events emitted by the epoch oracle",
                 registry,
             ),
-            new_validator_exit_total: Counter::default().register_at(
-                "new_validator_exit_total",
+            new_validator_exit: Counter::default().register_at(
+                "new_validator_exit",
                 "Number of NewValidatorNodeExit events emitted by the epoch oracle",
                 registry,
             ),
-            done_for_now_total: Counter::default().register_at(
-                "done_for_now_total",
+            done_for_now: Counter::default().register_at(
+                "done_for_now",
                 "Number of DoneForNow events emitted by the epoch oracle",
                 registry,
             ),
@@ -96,26 +99,26 @@ impl PrometheusEpochOracleMetrics {
     fn record(&self, event: &EpochEvent) {
         match event {
             EpochEvent::Error(_) => {
-                self.errors_total.inc();
+                self.errors.inc();
             },
             EpochEvent::ActiveValidatorNodeSetChanged { epoch, .. } => {
-                self.active_validator_set_changed_total.inc();
+                self.active_validator_set_changed.inc();
                 self.last_event_epoch.set(epoch.as_u64());
             },
             EpochEvent::NewValidatorRegistered { epoch, .. } => {
-                self.new_validator_registered_total.inc();
+                self.new_validator_registered.inc();
                 self.last_event_epoch.set(epoch.as_u64());
             },
             EpochEvent::NewValidatorNodeExit { epoch, .. } => {
-                self.new_validator_exit_total.inc();
+                self.new_validator_exit.inc();
                 self.last_event_epoch.set(epoch.as_u64());
             },
             EpochEvent::EpochChanged { epoch, .. } => {
-                self.epoch_changed_total.inc();
+                self.epoch_changed.inc();
                 self.last_event_epoch.set(epoch.as_u64());
             },
             EpochEvent::DoneForNow { epoch, .. } => {
-                self.done_for_now_total.inc();
+                self.done_for_now.inc();
                 self.last_event_epoch.set(epoch.as_u64());
             },
         }

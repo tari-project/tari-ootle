@@ -59,6 +59,21 @@ pub struct ConsensusConstants {
 }
 
 impl ConsensusConstants {
+    pub const fn mainnet() -> Self {
+        Self {
+            base_layer_confirmations: 1000,
+            committee_size_per_shard_group: 40,
+            num_preshards: NumPreshards::current(),
+            pacemaker_block_time: Duration::from_secs(10),
+            missed_proposal_suspend_threshold: 5,
+            missed_proposal_evict_threshold: 10,
+            missed_proposal_recovery_threshold: 5,
+            max_number_commands_in_block: 500,
+            fee_exhaust_divisor: 20, // 1/20 = 5%
+            epoch_end_spread_blocks: 10,
+        }
+    }
+
     pub const fn devnet(committee_size: u32) -> Self {
         Self {
             base_layer_confirmations: 3,
@@ -108,7 +123,7 @@ impl ConsensusConstants {
 impl From<Network> for ConsensusConstants {
     fn from(network: Network) -> Self {
         match network {
-            Network::MainNet => unimplemented!("Mainnet consensus constants not implemented"),
+            Network::MainNet => Self::mainnet(),
             // Allow committee size to be overridden for LocalNet
             Network::LocalNet => Self::devnet(
                 env::var("TARI_DEVNET_COMMITTEE_SIZE")

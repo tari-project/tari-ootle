@@ -175,6 +175,9 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
     ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, Self::Error>;
 
+    /// Upserts the epoch hash for `epoch`. Overwrites an existing row so the epoch manager can apply
+    /// an oracle hash correction for an epoch it has already persisted (only done while the epoch is
+    /// unlocked; locked epochs are guarded in `EpochManagerService::activate_epoch`).
     fn insert_epoch(
         &self,
         tx: &mut Self::DbTransaction<'_>,

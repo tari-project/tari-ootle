@@ -79,6 +79,8 @@ use tokio::{
 
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
+#[cfg(feature = "metrics")]
+use crate::epoch_metrics::{EpochManagerCollector, MeteredEpochOracle, PrometheusEpochOracleMetrics};
 use crate::{
     ApplicationConfig,
     ValidatorNodeEpochManagerSpec,
@@ -244,8 +246,19 @@ pub async fn spawn_services(
         num_preshards: consensus_constants.num_preshards,
     };
 
-    // Epoch event scanner
+    // All Tari-side metrics live under the `tari` sub-registry. Sub-registries from this
+    // point on (consensus, mempool, epoch_oracle, epoch_manager) are derived from it.
+    #[cfg(feature = "metrics")]
+    let tari_metrics_registry = metrics_registry.sub_registry_with_prefix("tari");
+
+    // Epoch event scanner. When metrics are enabled, wrap the oracle so every event it
+    // produces is counted on its way into the epoch manager.
     let epoch_event_oracle = create_epoch_oracle(&config, global_db.clone(), &consensus_constants).await?;
+    #[cfg(feature = "metrics")]
+    let epoch_event_oracle = MeteredEpochOracle::new(
+        epoch_event_oracle,
+        PrometheusEpochOracleMetrics::register(tari_metrics_registry),
+    );
 
     let layer_one_transaction_submitter = FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path());
 
@@ -261,6 +274,12 @@ pub async fn spawn_services(
         );
 
     handles.push(epoch_manager_join_handle);
+
+    // Register the epoch manager's current-epoch collector now that we have a handle. The
+    // collector reads the handle's atomic on every scrape, so it always reflects whatever
+    // the epoch manager currently believes the epoch to be.
+    #[cfg(feature = "metrics")]
+    EpochManagerCollector::new(epoch_manager.clone()).register(tari_metrics_registry);
 
     let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
 
@@ -316,8 +335,6 @@ pub async fn spawn_services(
         create_consensus_transaction_validator(config.network, template_provider.clone()).boxed(),
     );
 
-    #[cfg(feature = "metrics")]
-    let tari_metrics_registry = metrics_registry.sub_registry_with_prefix("tari");
     #[cfg(feature = "metrics")]
     let metrics = PrometheusConsensusMetrics::register(tari_metrics_registry);
     #[cfg(not(feature = "metrics"))]

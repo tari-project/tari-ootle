@@ -12,7 +12,7 @@
 //! [`MeteredEpochOracle`], which counts the events it forwards and tracks the highest
 //! epoch ever seen across all event variants.
 
-use std::{fmt, future::Future};
+use std::fmt;
 
 use prometheus_client::{
     collector::Collector,
@@ -43,7 +43,7 @@ pub struct PrometheusEpochOracleMetrics {
     /// liveness signal — a stuck oracle stops bumping this even if the validator node is
     /// otherwise healthy.
     last_event_epoch: UnsignedGauge,
-    errors: Counter,
+    errors_total: Counter,
     epoch_changed_total: Counter,
     active_validator_set_changed_total: Counter,
     new_validator_registered_total: Counter,
@@ -60,8 +60,8 @@ impl PrometheusEpochOracleMetrics {
                 "Highest epoch observed across all events emitted by the epoch oracle",
                 registry,
             ),
-            errors: Counter::default().register_at(
-                "errors",
+            errors_total: Counter::default().register_at(
+                "errors_total",
                 "Number of Error events emitted by the epoch oracle",
                 registry,
             ),
@@ -96,7 +96,7 @@ impl PrometheusEpochOracleMetrics {
     fn record(&self, event: &EpochEvent) {
         match event {
             EpochEvent::Error(_) => {
-                self.errors.inc();
+                self.errors_total.inc();
             },
             EpochEvent::ActiveValidatorNodeSetChanged { epoch, .. } => {
                 self.active_validator_set_changed_total.inc();
@@ -140,14 +140,12 @@ impl<O> MeteredEpochOracle<O> {
 }
 
 impl<O: EpochEventOracle + Send> EpochEventOracle for MeteredEpochOracle<O> {
-    fn next_epoch_event(&mut self) -> impl Future<Output = Option<EpochEvent>> + Send {
-        async {
-            let event = self.inner.next_epoch_event().await;
-            if let Some(ref e) = event {
-                self.metrics.record(e);
-            }
-            event
+    async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
+        let event = self.inner.next_epoch_event().await;
+        if let Some(ref e) = event {
+            self.metrics.record(e);
         }
+        event
     }
 
     fn is_within_epoch_end_spread(&self, current_epoch: Epoch) -> bool {

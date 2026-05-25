@@ -25,6 +25,8 @@ mod bootstrap;
 mod cmap_semaphore;
 mod config;
 pub mod consensus;
+#[cfg(feature = "metrics")]
+mod epoch_metrics;
 mod event_subscription;
 mod file_l1_submitter;
 mod genesis_state;
@@ -228,7 +230,13 @@ pub struct ValidatorNodeEpochManagerSpec;
 
 impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
     type Addr = PeerAddress;
+    // When metrics are enabled, the oracle is wrapped by MeteredEpochOracle so it records every
+    // event it forwards to the epoch manager. When disabled, the raw oracle is used directly.
+    #[cfg(not(feature = "metrics"))]
     type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
+    #[cfg(feature = "metrics")]
+    type EpochEventOracle =
+        crate::epoch_metrics::MeteredEpochOracle<EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>>;
     type LayerOneSubmitter = FileLayerOneSubmitter;
 }
 

@@ -21,6 +21,10 @@ pub struct PrometheusConsensusMetrics {
     blocks_committed: Counter,
     blocks_validation_failed: Counter,
     commit_height: UnsignedGauge,
+    /// Epoch of the most recently committed local block. Tracks consensus' view of the
+    /// active epoch, which can lag the epoch manager's view across an epoch boundary
+    /// until the first block of the new epoch is committed.
+    current_epoch: UnsignedGauge,
 
     commands_count: UnsignedGauge,
     published_templates_count: Counter,
@@ -50,6 +54,11 @@ impl PrometheusConsensusMetrics {
             commit_height: UnsignedGauge::default().register_at(
                 "commit_height",
                 "Current block commit height",
+                registry,
+            ),
+            current_epoch: UnsignedGauge::default().register_at(
+                "current_epoch",
+                "Epoch of the most recently committed local block",
                 registry,
             ),
             commands_count: UnsignedGauge::default().register_at("num_commands", "Number of commands added", registry),
@@ -107,6 +116,7 @@ impl ConsensusHooks for PrometheusConsensusMetrics {
     fn on_local_block_committed(&mut self, block: &ValidBlock) {
         self.blocks_committed.inc();
         self.commit_height.set(block.block().height().as_u64());
+        self.current_epoch.set(block.block().epoch().as_u64());
         self.commands_count.inc_by(block.block().commands().len() as u64);
     }
 

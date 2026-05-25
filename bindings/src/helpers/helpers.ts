@@ -160,13 +160,13 @@ export function permissionToString(permission: Permission): string {
   // Unscoped CRUD resources: { Keys: "Read" } -> "keys:read".
   if ("Keys" in permission) return `keys:${permission.Keys.toLowerCase()}`;
   if ("Templates" in permission) return `templates:${permission.Templates.toLowerCase()}`;
+  if ("Transactions" in permission) return `transactions:${permission.Transactions.toLowerCase()}`;
   if ("Validators" in permission) return `validators:${permission.Validators.toLowerCase()}`;
   if ("Settings" in permission) return `settings:${permission.Settings.toLowerCase()}`;
   if ("AddressBook" in permission) return `address_book:${permission.AddressBook.toLowerCase()}`;
 
   // Scoped CRUD resources: { Accounts: ["Read", "component_abc..." | null] }.
   if ("Accounts" in permission) return scoped("accounts", permission.Accounts);
-  if ("Transactions" in permission) return scoped("transactions", permission.Transactions);
   if ("Transfer" in permission) return scoped("transfer", permission.Transfer);
   if ("Nfts" in permission) return scoped("nfts", permission.Nfts);
   if ("Confidential" in permission) return scoped("confidential", permission.Confidential);

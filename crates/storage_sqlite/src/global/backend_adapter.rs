@@ -822,11 +822,19 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     ) -> Result<(), Self::Error> {
         use crate::global::schema::epochs;
 
+        // Upsert: the base-layer scanner re-emits EpochChanged for an epoch it has already persisted
+        // when a reorg near the epoch boundary surfaces a different boundary-block hash. The epoch
+        // manager only forwards such a correction while the epoch is still unlocked (see
+        // EpochManagerService::activate_epoch), so overwriting the stored hash here is the intended
+        // self-heal. A plain INSERT would hit the UNIQUE(epoch) constraint and abort the correction.
         diesel::insert_into(epochs::table)
             .values((
                 epochs::epoch.eq(epoch.as_u64() as i64),
                 epochs::epoch_hash.eq(epoch_hash.as_slice()),
             ))
+            .on_conflict(epochs::epoch)
+            .do_update()
+            .set(epochs::epoch_hash.eq(epoch_hash.as_slice()))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

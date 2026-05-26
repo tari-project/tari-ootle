@@ -1281,6 +1281,34 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 justify_block,
                 ..
             }) => (justify_block.epoch(), justify_block.height()),
+            HotStuffError::ProposalValidationError(ProposalValidationError::InvalidEpochHash {
+                epoch,
+                local_epoch_hash,
+                invalid_epoch_hash,
+                ..
+            }) => {
+                // A locked epoch hash can no longer be corrected by the oracle (see
+                // EpochManager::lock_epoch), so a persistent mismatch against peers means this node
+                // committed a different base-layer boundary block than the rest of the committee —
+                // almost always a base-layer reorg deeper than `base_layer_confirmations` straddling
+                // the epoch boundary. Consensus cannot recover from this automatically yet (epoch
+                // state rollback + resync is a follow-up), so raise a single loud alarm per distinct
+                // divergence rather than swallowing one warning per rejected proposal.
+                let divergence = (*epoch, *local_epoch_hash, *invalid_epoch_hash);
+                if self.worker_state.last_epoch_hash_alarm != Some(divergence) {
+                    self.worker_state.last_epoch_hash_alarm = Some(divergence);
+                    error!(
+                        target: LOG_TARGET,
+                        "🚨 Epoch hash divergence at {epoch}: this node committed {local_epoch_hash} but peers are \
+                         proposing against {invalid_epoch_hash}. Consensus is stalled on this node. It can only \
+                         recover once the rest of the committee reaches quorum on the other hash and advances past \
+                         this epoch (a higher-epoch QC then triggers state sync); if the committee is split with no \
+                         quorum, manual recovery is required. Likely cause: a base-layer reorg deeper than the \
+                         confirmation depth at the epoch boundary."
+                    );
+                }
+                return Ok(());
+            },
             HotStuffError::ProposalValidationError(err) => {
                 warn!(
                     target: LOG_TARGET,
@@ -1431,6 +1459,9 @@ struct WorkerState<TAddr> {
     /// to request more.
     pub catch_up: Option<CatchUp<TAddr>>,
     pub has_processed_first_block: bool,
+    /// Last (epoch, local_hash, remote_hash) we raised an epoch-hash divergence alarm for, used to
+    /// emit a single loud alarm per distinct divergence instead of once per rejected proposal.
+    pub last_epoch_hash_alarm: Option<(Epoch, FixedHash, FixedHash)>,
 }
 
 impl<TAddr> WorkerState<TAddr> {
@@ -1444,6 +1475,7 @@ impl<TAddr> Default for WorkerState<TAddr> {
         Self {
             catch_up: None,
             has_processed_first_block: false,
+            last_epoch_hash_alarm: None,
         }
     }
 }

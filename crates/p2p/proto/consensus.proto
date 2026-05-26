@@ -119,8 +119,12 @@ message Command {
 
     ForeignProposalAtom foreign_proposal = 6;
     EvictNodeAtom evict_node = 8;
-    bool end_epoch = 9;
+    EndEpochAtom end_epoch = 9;
   }
+}
+
+message EndEpochAtom {
+  bytes next_epoch_hash = 1;
 }
 
 message ForeignProposalAtom {

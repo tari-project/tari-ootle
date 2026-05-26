@@ -551,7 +551,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 proposed_block_change_set.set_next_transaction_update(tx_rec)?;
             },
             // Should never receive this
-            Command::EndEpoch => {
+            Command::EndEpoch(_) => {
                 warn!(
                     target: LOG_TARGET,
                     "❓️ NEVER HAPPEN: Foreign proposal received {} contains an EndEpoch command. This is invalid behaviour but continuing anyway.",

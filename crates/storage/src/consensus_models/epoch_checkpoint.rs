@@ -250,10 +250,26 @@ fn convert_sidechain_shard_group_to_shard_group(
 #[derive(
     Debug, Clone, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize, Encode, Decode, CborLen,
 )]
-pub struct EndOfEpochCommand;
+pub struct EndOfEpochCommand {
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
+    next_epoch_hash: FixedHash,
+}
+
+impl EndOfEpochCommand {
+    pub fn new(next_epoch_hash: FixedHash) -> Self {
+        Self { next_epoch_hash }
+    }
+
+    pub fn next_epoch_hash(&self) -> &FixedHash {
+        &self.next_epoch_hash
+    }
+}
 
 impl ToCommand for EndOfEpochCommand {
     fn to_command(&self) -> tari_sidechain::Command {
-        tari_sidechain::Command::EndEpoch
+        // Must match the dan-side `Command::EndEpoch(EndEpochAtom)` byte-for-byte so the command hash
+        // (and thus the inclusion proof against the committed block's command merkle root) verifies.
+        tari_sidechain::Command::EndEpoch(tari_sidechain::EndEpochAtom::new(self.next_epoch_hash))
     }
 }

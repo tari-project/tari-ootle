@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use tari_common_types::types::FixedHash;
 use tari_consensus::hotstuff::{HotStuffError, HotstuffEvent};
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
@@ -111,30 +112,29 @@ async fn multishard_epoch_change() {
     epoch_change(test).await;
 }
 
-/// Reproduces the wedge described in `consensus-epoch-change-race-cond`:
+/// A validator whose base-layer oracle has not yet observed the next epoch's boundary block must
+/// **not** vote for the EndEpoch block — it cannot ratify a next-epoch hash it has never seen.
 ///
-/// One validator's base-layer oracle is still behind when consensus commits the EndEpoch
-/// block. `process_end_of_epoch` then asks the local epoch manager for `next_epoch`'s hash to
-/// stamp into the new genesis; the lookup fails with `NoEpochFound`. Before the fix, that error
-/// killed the worker and left the node permanently stuck on the old epoch — even after the
-/// oracle eventually caught up, no code path retried the deferred work. After the fix, the
-/// work is parked in `pending_end_of_epoch`, the worker keeps running, and the next
-/// `EpochChanged` event (or the next worker startup) retries the transition.
+/// This is the safety half of carrying the next epoch's hash in the EndEpoch command: voting is how
+/// the committee ratifies that hash, so a node that votes without having observed the boundary block
+/// would be lending quorum to a value it cannot verify. Combined with a base-layer reorg that splits
+/// the committee, a permissive vote here could push a non-canonical hash to quorum and lock it — the
+/// very wedge we are preventing. So the voter no-votes with `NoVoteReason::EndOfEpochHashNotObserved`
+/// and waits until its (lagged, reorg-stable) oracle catches up.
 ///
 /// The test:
 ///   1. Runs four validators in a single committee.
-///   2. Caps validator "1"'s oracle at `Epoch(1)` so `get_epoch_hash(Epoch(2))` returns `NoEpochFound`. (The cap
-///      intentionally does NOT override `current_epoch()` — the vote-time check uses that, and we want the chain to
-///      commit the EOE on every node so `process_end_of_epoch` actually runs and trips the failure mode.)
-///   3. Drives an epoch change to `Epoch(2)`. All four nodes vote on the EOE, the chain commits it via 3-chain, and
-///      `process_end_of_epoch` runs on each. Three succeed and advance to Epoch(2); validator "1" defers instead of
-///      crashing.
-///   4. Asserts the other three have advanced to `Epoch(2)` while validator "1"'s pacemaker is still on `Epoch(1)` with
-///      a committed EOE block in its chain.
-///   5. Clears the lag and refires `EpochChanged(2)` (modeling the oracle catching up).
-///   6. Asserts validator "1" then advances to `Epoch(2)`.
+///   2. Caps validator "1"'s oracle at `Epoch(1)` so `get_epoch_hash(Epoch(2))` returns `NoEpochFound` for it only.
+///   3. Drives an epoch change to `Epoch(2)`. The three observers ratify and commit the EOE (3 = quorum) and advance;
+///      validator "1" no-votes the EOE (it has no Epoch(2) hash to check against).
+///   4. Asserts the three observers reached `Epoch(2)` while validator "1" stayed on `Epoch(1)` with no leaf in
+///      `Epoch(2)` — i.e. it never lent quorum to, or locked, an unobserved hash.
+///
+/// (A lagged node recovers in production via state sync once it sees an authenticated future-epoch
+/// QC — see `epoch_change_no_vote_wedge_escalates_on_future_qc`. End-to-end self-healing after a
+/// committee split is covered by `epoch_change_hash_divergence_self_heals`.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn epoch_change_with_lagging_oracle() {
+async fn epoch_change_unobserved_next_hash_is_not_voted() {
     setup_logger();
     let mut test = Test::builder()
         .modify_config(|cfg| {
@@ -144,7 +144,7 @@ async fn epoch_change_with_lagging_oracle() {
             c.pacemaker_block_time = Duration::from_secs(2);
         })
         .with_test_timeout(Duration::from_secs(60))
-        // 4 validators so 3 honest votes-yes is enough for quorum without the lagged one.
+        // 4 validators so the 3 observers reach quorum without the lagged one.
         .add_committee(0, vec!["1", "2", "3", "4"])
         .start()
         .await;
@@ -159,80 +159,62 @@ async fn epoch_change_with_lagging_oracle() {
     }
 
     // Cap the lagged validator's oracle BEFORE the epoch transition. After this,
-    // `get_epoch_hash(Epoch(2))` returns `NoEpochFound` for this validator only.
+    // `get_epoch_hash(Epoch(2))` returns `NoEpochFound` for this validator only, so at vote time it
+    // has no next-epoch hash to ratify the EndEpoch command against.
     test.get_validator(&lagging_addr)
         .epoch_manager
         .set_oracle_visible_epoch(Epoch(1));
 
-    // Trigger the epoch change. All four workers receive `EpochChanged(2)` and set
-    // `next_epoch`. Voting on the EOE block goes through normally (we deliberately do
-    // not cap `current_epoch()` so the lagged node still votes Yes), so quorum is
-    // reached and the chain commits the EOE on every node via the 3-chain rule. This
-    // is exactly the state the production bug ends up in once a lagged node catches
-    // up via sync — the EOE is committed locally, but `process_end_of_epoch` then
-    // tries to look up `next_epoch`'s hash and fails.
+    // Trigger the epoch change. All four workers receive `EpochChanged(2)`. The three observers
+    // ratify the EOE's next-epoch hash against their oracle and vote; validator "1" no-votes with
+    // `EndOfEpochHashNotObserved`. Three votes is quorum, so the EOE still commits and the observers
+    // advance — without the lagged node's vote.
     test.start_epoch(Epoch(2)).await;
 
-    // Drive the chain so the EOE 3-chain commits and the non-lagged validators run
-    // process_end_of_epoch successfully (creating the next epoch's genesis and advancing
-    // their pacemakers to Epoch(2)). Sending more transactions keeps the leaders proposing.
+    // Keep the leaders proposing so the EOE 3-chain commits on the observers.
     for _ in 0..3 {
         test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
     }
 
-    // Wait until the three non-lagged validators have advanced to Epoch(2). Don't include
-    // the lagged validator — under the fix it stays on Epoch(1) until the oracle catches up.
+    // The three observers advance to Epoch(2); the lagged one is excluded.
     wait_for_validators_at_epoch(&mut test, &lagging_addr, Epoch(2), Duration::from_secs(30)).await;
 
-    // Confirm the bug condition is reproduced on the lagged validator:
+    // The lagged validator must NOT have advanced or locked an unobserved hash:
     //   (a) its pacemaker is still on Epoch(1)
-    //   (b) the EOE block is committed in its chain (process_end_of_epoch was reached)
-    //   (c) it has no leaf in Epoch(2) (next genesis was deferred)
+    //   (b) it has no leaf in Epoch(2) (it never created the next genesis)
     let lagged = test.get_validator(&lagging_addr);
     assert_eq!(
         lagged._current_view.get_epoch(),
         Epoch(1),
-        "lagged validator's pacemaker must remain on Epoch(1) before recovery"
+        "lagged validator must remain on Epoch(1): it cannot ratify an unobserved next-epoch hash"
     );
 
     let has_committed_eoe = lagged
         .state_store
         .with_read_tx(|tx| chain_has_committed_epoch_end(tx, Epoch(1)))
         .unwrap();
-    assert!(
-        has_committed_eoe,
-        "lagged validator should have committed the EOE block via 3-chain (process_end_of_epoch must have run and \
-         deferred)"
-    );
 
     let leaf_at_2 = lagged
         .state_store
         .with_read_tx(|tx| LeafBlock::get(tx, Epoch(2)))
         .optional()
         .unwrap();
+    log::info!(
+        "🔬 lagged state: epoch={:?} committed_eoe={} leaf_at_2={:?}",
+        lagged._current_view.get_epoch(),
+        has_committed_eoe,
+        leaf_at_2
+    );
     assert!(
         leaf_at_2.is_none(),
-        "lagged validator must NOT have a leaf in Epoch(2) before the oracle catches up; got {leaf_at_2:?}"
+        "lagged validator must NOT have a leaf in Epoch(2): it no-voted the EOE and never transitioned; got \
+         {leaf_at_2:?}"
     );
 
-    log::info!("✅ bug condition reproduced: lagged validator stuck at Epoch(1) with committed EOE");
-
-    // Now simulate the oracle catching up: clear the lag and re-publish `EpochChanged(2)`.
-    // The worker's `on_epoch_manager_event` sees `has_pending_end_of_epoch` and calls
-    // `try_resume_pending_end_of_epoch`, which re-runs `process_end_of_epoch`. With the
-    // oracle now current, `get_epoch_hash(Epoch(2))` succeeds, the next genesis is created
-    // and the pacemaker advances.
-    let lagged_sg = lagged.shard_group;
-    lagged.epoch_manager.clear_oracle_lag();
-    test.get_validator_mut(&lagging_addr)
-        .epoch_manager
-        .set_current_epoch(Epoch(2), lagged_sg)
-        .await;
-
-    // Assert recovery: the lagged validator now reaches Epoch(2).
-    wait_for_single_validator_at_epoch(&mut test, &lagging_addr, Epoch(2), Duration::from_secs(15)).await;
-
-    log::info!("✅ recovery confirmed: lagged validator advanced to Epoch(2) after oracle caught up");
+    log::info!(
+        "✅ gate held: validator with an unobserved next-epoch hash no-voted the EOE; the observers reached quorum \
+         without it"
+    );
 
     test.stop();
     test.assert_clean_shutdown().await;
@@ -277,20 +259,17 @@ async fn wait_for_validators_at_epoch(test: &mut Test, excluded: &TestAddress, e
     panic!("Timed out waiting for non-excluded validators to reach {epoch}");
 }
 
-/// Waits until `addr`'s pacemaker reaches `epoch`.
-async fn wait_for_single_validator_at_epoch(test: &mut Test, addr: &TestAddress, epoch: Epoch, timeout: Duration) {
+/// Waits until *every* validator's pacemaker reaches `epoch`.
+async fn wait_for_all_validators_at_epoch(test: &mut Test, epoch: Epoch, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         let _unused = tokio::time::timeout(Duration::from_millis(100), test.on_block_committed()).await;
 
-        if test.get_validator(addr)._current_view.get_epoch() >= epoch {
+        if test.validators_iter().all(|v| v._current_view.get_epoch() >= epoch) {
             return;
         }
     }
-    panic!(
-        "Timed out waiting for {addr} to reach {epoch} (currently on {})",
-        test.get_validator(addr)._current_view.get_epoch()
-    );
+    panic!("Timed out waiting for all validators to reach {epoch}");
 }
 
 /// Reproduces the second variant of the epoch-change wedge described in the
@@ -536,4 +515,151 @@ async fn epoch_change_multi_epoch_lag_escalates_on_future_qc() {
         outcome.contains("Epoch(3)"),
         "escalation reason should reference the Epoch(3) QC across the multi-epoch gap; got: {outcome}"
     );
+}
+
+/// Reproduces the base-layer-reorg committee split from the incident logs and shows the committee
+/// self-heals once oracles re-converge — the property the EndEpoch-hash-in-command change buys us.
+///
+/// Production scenario: a base-layer reorg deeper than the confirmation depth straddled an epoch
+/// boundary, so 2/4 validators' oracles reported boundary hash A for the next epoch and the other
+/// 2 reported hash B. Before the fix, each node stamped and *locked* its own hash into the next
+/// epoch's genesis, the committee split into two irreconcilable halves, and every cross-half
+/// proposal was rejected with `InvalidEpochHash` — a permanent wedge with no quorum on either hash.
+///
+/// With the next epoch's hash carried in the `EndEpoch` command and ratified at vote time against
+/// each voter's own oracle, the divergence can no longer be locked: an EOE proposed with hash A
+/// only collects the two A-votes (and B only the two B-votes), so neither reaches the 3-vote
+/// quorum. The transition simply stalls — no node advances or locks. Once the base layer settles
+/// and every oracle re-converges on the canonical boundary block, the EOE is ratified by all four,
+/// commits, and the committee advances together. No manual recovery, no permanent wedge.
+///
+/// Test flow:
+/// 1. Four validators, single committee. Run a few transactions in Epoch(1).
+/// 2. Split the committee's oracle view of Epoch(2)'s hash: "1"/"2" see hash A, "3"/"4" see hash B.
+/// 3. Trigger Epoch(2). Assert the stall: every validator stays on Epoch(1) with no leaf in Epoch(2) (neither hash can
+///    muster quorum, so nothing commits or locks).
+/// 4. Re-converge every oracle on hash B (the base layer settles on the surviving chain).
+/// 5. Assert recovery: all four validators commit the EOE and advance to Epoch(2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn epoch_change_hash_divergence_self_heals() {
+    setup_logger();
+    let mut test = Test::builder()
+        .modify_config(|cfg| {
+            cfg.epoch_end_grace_period = Duration::from_millis(10);
+        })
+        .modify_consensus_constants(|c| {
+            c.pacemaker_block_time = Duration::from_secs(1);
+        })
+        .with_test_timeout(Duration::from_secs(120))
+        // 4 validators: quorum is 3, so a 2/2 hash split can never reach it.
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .start()
+        .await;
+
+    // Two distinct, non-default boundary hashes standing in for the two sides of the reorg.
+    let hash_a = FixedHash::from([0x0a; 32]);
+    let hash_b = FixedHash::from([0x0b; 32]);
+
+    test.start_epoch(Epoch(1)).await;
+
+    // Move the chain in Epoch(1) and let it settle before the boundary.
+    for _ in 0..3 {
+        test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !test.is_all_submitted_transactions_finalized() {
+        if Instant::now() > deadline {
+            panic!("Epoch(1) transactions did not finalize");
+        }
+        let _unused = tokio::time::timeout(Duration::from_millis(500), test.on_block_committed()).await;
+    }
+
+    // Split the committee's oracle view of Epoch(2)'s boundary hash BEFORE the transition, so the
+    // EOE proposer and voters read divergent next-epoch hashes — exactly the reorg-at-boundary state.
+    for addr in ["1", "2"] {
+        test.get_validator(&TestAddress::new(addr))
+            .epoch_manager
+            .set_oracle_epoch_hash(hash_a);
+    }
+    for addr in ["3", "4"] {
+        test.get_validator(&TestAddress::new(addr))
+            .epoch_manager
+            .set_oracle_epoch_hash(hash_b);
+    }
+
+    // Trigger the transition. Every worker sees em_epoch == Epoch(2) and starts proposing EndEpoch,
+    // but each EOE carries the proposer's hash and is ratified against each voter's oracle: A gets
+    // only the two A-votes, B only the two B-votes — never the 3 needed for quorum.
+    test.start_epoch(Epoch(2)).await;
+
+    // Let the chain repeatedly attempt (and fail to commit) the EOE. No transactions needed — the
+    // pacemaker proposes the EOE on its own once past the boundary.
+    let drain_until = Instant::now() + Duration::from_secs(12);
+    while Instant::now() < drain_until {
+        let _unused = tokio::time::timeout(Duration::from_millis(200), test.on_block_committed()).await;
+    }
+
+    // Assert the stall: because neither hash reached quorum, no node committed the EOE, advanced, or
+    // locked Epoch(2). This is the key property — a divergent hash can no longer be locked unilaterally.
+    for vn in test.validators_iter() {
+        assert_eq!(
+            vn._current_view.get_epoch(),
+            Epoch(1),
+            "validator {} must remain on Epoch(1) while the committee is split on the epoch hash",
+            vn.address
+        );
+        let leaf_at_2 = vn
+            .state_store
+            .with_read_tx(|tx| LeafBlock::get(tx, Epoch(2)))
+            .optional()
+            .unwrap();
+        assert!(
+            leaf_at_2.is_none(),
+            "validator {} must NOT have a leaf in Epoch(2) during the split; got {leaf_at_2:?}",
+            vn.address
+        );
+    }
+    log::info!(
+        "✅ split reproduced: committee divided on the Epoch(2) hash, EOE cannot reach quorum, no node advanced or \
+         locked"
+    );
+
+    // The base layer settles: every oracle re-converges on the canonical surviving boundary block.
+    for addr in ["1", "2", "3", "4"] {
+        test.get_validator(&TestAddress::new(addr))
+            .epoch_manager
+            .set_oracle_epoch_hash(hash_b);
+    }
+
+    // With agreement restored, the next EOE (carrying hash B) is ratified by all four, commits via
+    // the 3-chain, and the committee rolls over to Epoch(2) together.
+    wait_for_all_validators_at_epoch(&mut test, Epoch(2), Duration::from_secs(45)).await;
+
+    // And every validator must have stamped the *ratified* hash (hash_b) into its Epoch(2) genesis —
+    // including the former-A minority ("1"/"2"), which adopts the committee's hash from the committed
+    // EndEpoch command rather than its own earlier (diverged) view. All blocks in an epoch inherit the
+    // genesis epoch_hash, so reading the leaf is sufficient.
+    for vn in test.validators_iter() {
+        let epoch_hash = vn
+            .state_store
+            .with_read_tx(|tx| {
+                let leaf = LeafBlock::get(tx, Epoch(2))?;
+                let block = Block::get(tx, leaf.block_id())?;
+                Ok::<_, HotStuffError>(*block.epoch_hash())
+            })
+            .unwrap();
+        assert_eq!(
+            epoch_hash, hash_b,
+            "validator {} must have stamped the ratified hash_b into Epoch(2), got {epoch_hash}",
+            vn.address
+        );
+    }
+
+    log::info!(
+        "✅ self-heal confirmed: after oracles re-converged on the canonical hash, the committee committed the EOE \
+         and advanced to Epoch(2) with epoch_hash=hash_b on every validator"
+    );
+
+    test.stop();
+    test.assert_clean_shutdown().await;
 }

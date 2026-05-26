@@ -112,7 +112,7 @@ pub enum Command {
     #[n(6)]
     EvictNode(#[n(0)] EvictNodeAtom),
     #[n(7)]
-    EndEpoch,
+    EndEpoch(#[n(0)] EndEpochAtom),
 }
 
 /// Defines the order in which commands should be processed in a block. "Smallest" comes first and "largest" comes last.
@@ -133,7 +133,7 @@ impl Command {
             Command::AllAccept(tx) |
             Command::SomeAccept(tx) |
             Command::LocalOnly(tx) => Some(tx),
-            Command::ForeignProposal(_) | Command::EvictNode(_) | Command::EndEpoch => None,
+            Command::ForeignProposal(_) | Command::EvictNode(_) | Command::EndEpoch(_) => None,
         }
     }
 
@@ -149,7 +149,7 @@ impl Command {
                 CommandOrdering::ForeignProposal(foreign_proposal.shard_group, &foreign_proposal.block_id)
             },
             Command::EvictNode(_) => CommandOrdering::EvictNode,
-            Command::EndEpoch => CommandOrdering::EndEpoch,
+            Command::EndEpoch(_) => CommandOrdering::EndEpoch,
         }
     }
 
@@ -192,6 +192,13 @@ impl Command {
         }
     }
 
+    pub fn end_epoch(&self) -> Option<&EndEpochAtom> {
+        match self {
+            Command::EndEpoch(atom) => Some(atom),
+            _ => None,
+        }
+    }
+
     pub fn all_accept(&self) -> Option<&TransactionAtom> {
         match self {
             Command::AllAccept(tx) => Some(tx),
@@ -230,7 +237,7 @@ impl Command {
     }
 
     pub fn is_epoch_end(&self) -> bool {
-        matches!(self, Command::EndEpoch)
+        matches!(self, Command::EndEpoch(_))
     }
 
     pub fn is_local_prepare(&self) -> bool {
@@ -264,7 +271,7 @@ impl Display for Command {
             Command::SomeAccept(tx) => write!(f, "SomeAccept({}, {})", tx.id, tx.decision),
             Command::ForeignProposal(fp) => write!(f, "ForeignProposal {}", fp.block_id),
             Command::EvictNode(atom) => write!(f, "EvictNode({atom})"),
-            Command::EndEpoch => write!(f, "EndEpoch"),
+            Command::EndEpoch(atom) => write!(f, "EndEpoch({atom})"),
         }
     }
 }
@@ -305,6 +312,55 @@ impl Display for EvictNodeAtom {
     }
 }
 
+/// The atom committed by an [`Command::EndEpoch`] command.
+///
+/// Carries the base-layer boundary-block hash of the *next* epoch. Because the hash is part of the
+/// command, it is committed in the block's command merkle root and ratified by the quorum that
+/// commits the end-of-epoch block: a validator only votes for the EOE block if `next_epoch_hash`
+/// matches its own (lagged, reorg-stable) oracle view. This prevents a node from unilaterally
+/// locking an epoch hash the committee never agreed on — the failure mode that wedges consensus when
+/// a base-layer reorg deeper than the confirmation depth straddles an epoch boundary.
+///
+/// The Borsh layout (a single 32-byte hash) is identical to [`tari_sidechain::EndEpochAtom`] so the
+/// layer-2 `command_hasher` output matches what L1 recomputes during checkpoint inclusion-proof
+/// verification.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
+pub struct EndEpochAtom {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
+    #[n(0)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
+    pub next_epoch_hash: FixedHash,
+}
+
+impl EndEpochAtom {
+    pub fn new(next_epoch_hash: FixedHash) -> Self {
+        Self { next_epoch_hash }
+    }
+
+    pub fn next_epoch_hash(&self) -> &FixedHash {
+        &self.next_epoch_hash
+    }
+}
+
+impl Display for EndEpochAtom {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "next_epoch_hash={}", self.next_epoch_hash)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -327,7 +383,7 @@ mod tests {
         assert!(CommandOrdering::TransactionId(&tx_id) < CommandOrdering::EndEpoch);
         let mut set = BTreeSet::new();
         let cmds = [
-            Command::EndEpoch,
+            Command::EndEpoch(EndEpochAtom::new(FixedHash::zero())),
             Command::AllAccept(TransactionAtom {
                 id: TransactionId::new([1; 32]),
                 decision: Decision::Commit,

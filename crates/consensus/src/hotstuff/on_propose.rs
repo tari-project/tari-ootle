@@ -9,6 +9,7 @@ use std::{
 
 use log::*;
 use ootle_byte_type::ToByteType;
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_engine_types::commit_result::RejectReason;
@@ -29,6 +30,7 @@ use tari_ootle_storage::{
         BlockTransactionExecution,
         BookkeepingModel,
         Command,
+        EndEpochAtom,
         EvictNodeAtom,
         ForeignProposal,
         ForeignProposalRecord,
@@ -136,6 +138,27 @@ where TConsensusSpec: ConsensusSpec
         let local_committee = epoch_state.local_committee();
         let _timer = TraceTimer::info(LOG_TARGET, "OnPropose");
 
+        // The EndEpoch command commits the committee to the *next* epoch's boundary hash. Only propose
+        // it once our (lagged, reorg-stable) oracle has actually observed that epoch — otherwise we have
+        // no hash to commit to and would be locking a value the committee hasn't ratified. If the oracle
+        // hasn't crossed the boundary yet, defer the EOE proposal; a later round proposes it once the
+        // boundary block is scanned.
+        let next_epoch_hash = if propose_epoch_end {
+            let next_epoch = epoch + Epoch(1);
+            match self.epoch_manager.get_epoch_hash(next_epoch).await.optional()? {
+                Some(hash) => Some(hash),
+                None => {
+                    info!(
+                        target: LOG_TARGET,
+                        "⏳ Not proposing EndEpoch for {epoch}: oracle has not yet observed the boundary block for {next_epoch}"
+                    );
+                    None
+                },
+            }
+        } else {
+            None
+        };
+
         let on_propose = self.clone();
 
         let (next_block, foreign_proposals) = task::spawn_blocking(move || {
@@ -152,7 +175,7 @@ where TConsensusSpec: ConsensusSpec
                     &local_committee_info,
                     &local_claim_public_key,
                     propose_high_tc,
-                    propose_epoch_end,
+                    next_epoch_hash,
                 )?;
 
                 let NextBlock {
@@ -317,7 +340,8 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         propose_high_tc: Option<TimeoutCertificate>,
-        can_propose_epoch_end: bool,
+        // `Some(hash)` if we are proposing an end-of-epoch block; carries the next epoch's boundary hash.
+        end_epoch_hash: Option<FixedHash>,
     ) -> Result<NextBlock, HotStuffError> {
         let high_qc_id = high_qc_certificate.calculate_id();
         let justify_block = Block::get_justified_block(tx, &high_qc_certificate, epoch)?;
@@ -326,7 +350,7 @@ where TConsensusSpec: ConsensusSpec
         let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;
         let is_end_of_epoch_in_chain = highest_seen_block.is_epoch_end_proposed_in_chain(tx)?;
 
-        let should_not_propose_commands = is_end_of_epoch_in_chain || can_propose_epoch_end || {
+        let should_not_propose_commands = is_end_of_epoch_in_chain || end_epoch_hash.is_some() || {
             // TODO: prevent proposers from proposing transactions after an epoch end command is in the justified
             // pending chain, regardless of whether we see the end of epoch or not (race condition).
             // If the last justified/parent block is an epoch end block, we dont propose commands since the block will
@@ -367,8 +391,8 @@ where TConsensusSpec: ConsensusSpec
 
         let mut commands = if is_end_of_epoch_in_chain {
             BTreeSet::from_iter([])
-        } else if can_propose_epoch_end {
-            BTreeSet::from_iter([Command::EndEpoch])
+        } else if let Some(next_epoch_hash) = end_epoch_hash {
+            BTreeSet::from_iter([Command::EndEpoch(EndEpochAtom::new(next_epoch_hash))])
         } else {
             BTreeSet::from_iter(
                 batch

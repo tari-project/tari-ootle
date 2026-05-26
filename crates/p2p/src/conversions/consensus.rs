@@ -67,6 +67,7 @@ use tari_ootle_storage::{
     consensus_models,
     consensus_models::{
         Command,
+        EndEpochAtom,
         EvictNodeAtom,
         Evidence,
         ForeignProposal,
@@ -637,7 +638,7 @@ impl From<&Command> for proto::consensus::Command {
                 proto::consensus::command::Command::ForeignProposal(foreign_proposal.into())
             },
             Command::EvictNode(atom) => proto::consensus::command::Command::EvictNode(atom.into()),
-            Command::EndEpoch => proto::consensus::command::Command::EndEpoch(true),
+            Command::EndEpoch(atom) => proto::consensus::command::Command::EndEpoch(atom.into()),
         };
 
         Self { command: Some(command) }
@@ -659,7 +660,7 @@ impl TryFrom<proto::consensus::Command> for Command {
                 Command::ForeignProposal(foreign_proposal.try_into()?)
             },
             proto::consensus::command::Command::EvictNode(atom) => Command::EvictNode(atom.try_into()?),
-            proto::consensus::command::Command::EndEpoch(_) => Command::EndEpoch,
+            proto::consensus::command::Command::EndEpoch(atom) => Command::EndEpoch(atom.try_into()?),
         })
     }
 }
@@ -761,6 +762,30 @@ impl TryFrom<proto::consensus::EvictNodeAtom> for EvictNodeAtom {
                 .as_slice()
                 .try_into()
                 .map_err(|e| anyhow!("EvictNodeAtom failed to decode public key: {e}"))?,
+        })
+    }
+}
+
+// -------------------------------- EndEpochAtom -------------------------------- //
+
+impl From<&EndEpochAtom> for proto::consensus::EndEpochAtom {
+    fn from(value: &EndEpochAtom) -> Self {
+        Self {
+            next_epoch_hash: value.next_epoch_hash.as_slice().to_vec(),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::EndEpochAtom> for EndEpochAtom {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::EndEpochAtom) -> Result<Self, Self::Error> {
+        Ok(Self {
+            next_epoch_hash: value
+                .next_epoch_hash
+                .as_slice()
+                .try_into()
+                .map_err(|e| anyhow!("EndEpochAtom failed to decode next_epoch_hash: {e}"))?,
         })
     }
 }

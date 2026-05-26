@@ -5,6 +5,7 @@ pub mod helpers;
 
 use helpers::{assert_eq_debug, create_rocksdb};
 use indexmap::IndexMap;
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     BlockId,
     HighPc,
@@ -191,7 +192,11 @@ fn miscellaneous_rocksdb() {
         },
         proof_elements: vec![],
     };
-    let proof = CommandCommitProof::new(EndOfEpochCommand, commit_proof, inclusion_proof);
+    let proof = CommandCommitProof::new(
+        EndOfEpochCommand::new(FixedHash::default()),
+        commit_proof,
+        inclusion_proof,
+    );
     let epoch_checkpoint = EpochCheckpoint::new(proof, shard_summary);
 
     tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();

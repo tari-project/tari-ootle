@@ -17,7 +17,7 @@ use tari_consensus_types::{
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
 };
-use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
+use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
@@ -303,6 +303,18 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             em_epoch > current_epoch || self.epoch_manager.is_within_epoch_end_spread(current_epoch).await?;
         let is_epoch_end = valid_block.block().is_epoch_end();
 
+        // Our own oracle's view of the next epoch's boundary hash, used by the voter to ratify the hash
+        // carried in an EndEpoch command. `None` if our oracle has not yet observed the next epoch — in
+        // which case the voter abstains rather than lending quorum to an unratified hash.
+        let expected_next_epoch_hash = if is_epoch_end {
+            self.epoch_manager
+                .get_epoch_hash(current_epoch + Epoch(1))
+                .await
+                .optional()?
+        } else {
+            None
+        };
+
         let mut on_ready_to_vote_on_local_block = self.on_ready_to_vote_on_local_block.clone();
 
         // Reusing the change set allocated memory (pointers in the Vec types are passed onto the thread stack).
@@ -325,6 +337,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     &local_committee_info,
                     &proposer_claim_public_key_bytes,
                     can_propose_epoch_end,
+                    expected_next_epoch_hash,
                     &mut change_set,
                 )?;
 
@@ -465,6 +478,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         Ok(block_decision.no_vote_reason)
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn process_end_of_epoch(
         &mut self,
         eoe_block: Block,
@@ -475,28 +489,46 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let prev_epoch = eoe_block.epoch();
         let next_epoch = prev_epoch + Epoch(1);
 
-        // Pre-flight: confirm the local oracle has observed `next_epoch`. If not, the EOE has been
-        // committed (peers attest with 2f+1) but we cannot stamp a deterministic genesis yet.
-        // Defer until the oracle catches up; `try_resume_pending_end_of_epoch` will retry from
-        // `on_epoch_manager_event` or worker startup.
-        let epoch_hash = match self.epoch_manager.get_epoch_hash(next_epoch).await {
-            Ok(hash) => hash,
-            Err(EpochManagerError::NoEpochFound(_)) => {
-                warn!(
-                    target: LOG_TARGET,
-                    "⏳ EOE block {} committed but local oracle has not observed {next_epoch}. \
-                     Deferring next-epoch genesis until oracle catches up.",
+        // The next epoch's boundary hash is taken from the committed EndEpoch command, NOT re-derived
+        // from our local oracle. Because the EOE block only commits with 2f+1 votes and voters ratify
+        // this hash against their own oracle (see the EndEpoch arm in on_ready_to_vote), the value here
+        // is quorum-agreed. A node that diverged on the boundary block (e.g. a base-layer reorg deeper
+        // than the confirmation depth) therefore adopts the committee's hash instead of wedging on its
+        // own. `lock_epoch(next_epoch)` below thus locks a hash the committee has agreed on.
+        let epoch_hash = match eoe_block.commands().iter().find_map(|c| c.end_epoch()) {
+            Some(atom) => *atom.next_epoch_hash(),
+            None => {
+                return Err(HotStuffError::InvariantError(format!(
+                    "EOE block {} does not contain an EndEpoch command",
                     eoe_block.id()
-                );
-                self.pending_end_of_epoch = Some(PendingEndOfEpoch {
-                    eoe_block,
-                    commit_qc,
-                    next_genesis_state_merkle_root,
-                });
-                return Ok(());
+                )));
             },
-            Err(err) => return Err(err.into()),
         };
+
+        // We still need the local oracle to have observed `next_epoch` to assign its committee /
+        // validator set. If it has not yet (rare, given the base-layer scan lag keeps the boundary
+        // block buried), defer; `try_resume_pending_end_of_epoch` retries from `on_epoch_manager_event`
+        // or worker startup.
+        if self
+            .epoch_manager
+            .get_epoch_hash(next_epoch)
+            .await
+            .optional()?
+            .is_none()
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⏳ EOE block {} committed but local oracle has not observed {next_epoch}. \
+                 Deferring next-epoch genesis until oracle catches up.",
+                eoe_block.id()
+            );
+            self.pending_end_of_epoch = Some(PendingEndOfEpoch {
+                eoe_block,
+                commit_qc,
+                next_genesis_state_merkle_root,
+            });
+            return Ok(());
+        }
 
         // We're registered for the next epoch. Checkpoint and create a new genesis block.
         let num_committees = self.epoch_manager.get_num_committees(next_epoch).await?;

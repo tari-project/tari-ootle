@@ -1,6 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
 use tari_ootle_common_types::ShardGroup;
 use tari_ootle_transaction::TransactionId;
@@ -77,6 +78,12 @@ pub enum NoVoteReason {
     NotEndOfEpoch,
     #[error("The node is not at the end of the epoch and other commands are present")]
     EndOfEpochWithOtherCommands,
+    #[error("End-of-epoch next-epoch hash mismatch. Local oracle: {local}, proposed: {proposed}")]
+    EndOfEpochHashMismatch { local: FixedHash, proposed: FixedHash },
+    #[error(
+        "End-of-epoch next-epoch hash cannot be ratified: local oracle has not observed the next epoch boundary block"
+    )]
+    EndOfEpochHashNotObserved,
     #[error("The state Merkle root does not match")]
     StateMerkleRootMismatch,
     #[error("The command Merkle root does not match")]
@@ -130,6 +137,8 @@ impl NoVoteReason {
             Self::ForeignProposalProcessingFailed => "ForeignProposalProcessingFailed",
             Self::NotEndOfEpoch => "NotEndOfEpoch",
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
+            Self::EndOfEpochHashMismatch { .. } => "EndOfEpochHashMismatch",
+            Self::EndOfEpochHashNotObserved => "EndOfEpochHashNotObserved",
             Self::TotalLeaderFeeDisagreement => "TotalLeaderFeeDisagreement",
             Self::StateMerkleRootMismatch => "StateMerkleRootMismatch",
             Self::CommandMerkleRootMismatch => "CommandMerkleRootMismatch",

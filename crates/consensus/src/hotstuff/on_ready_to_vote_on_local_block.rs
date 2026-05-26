@@ -4,6 +4,7 @@
 use std::num::NonZeroU64;
 
 use log::*;
+use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
@@ -105,6 +106,10 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         mut can_propose_epoch_end: bool,
+        // The local oracle's view of the next epoch's boundary hash, if it has observed it. Used to
+        // ratify the hash carried in an EndEpoch command before voting. `None` means our oracle has
+        // not yet crossed the boundary, so we cannot ratify and must abstain.
+        expected_next_epoch_hash: Option<FixedHash>,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -176,6 +181,7 @@ where TConsensusSpec: ConsensusSpec
                 local_committee_info,
                 proposer_claim_public_key_bytes,
                 can_propose_epoch_end,
+                expected_next_epoch_hash,
                 change_set,
             )?;
         } else {
@@ -245,6 +251,7 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         can_propose_epoch_end: bool,
+        expected_next_epoch_hash: Option<FixedHash>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
         // Store used for transactions that have inputs without specific versions.
@@ -382,7 +389,7 @@ where TConsensusSpec: ConsensusSpec
                     );
                     proposed_block_change_set.add_evict_node(atom.public_key);
                 },
-                Command::EndEpoch => {
+                Command::EndEpoch(atom) => {
                     if !can_propose_epoch_end {
                         warn!(
                             target: LOG_TARGET,
@@ -400,6 +407,38 @@ where TConsensusSpec: ConsensusSpec
                         );
                         proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochWithOtherCommands);
                         return Ok(());
+                    }
+
+                    // Ratify the next epoch's hash against our own (lagged, reorg-stable) oracle. Voting
+                    // for the EOE block is how the committee agrees on the next epoch's boundary hash;
+                    // by gating on the LOCAL oracle (not on the majority signal that may have set
+                    // can_propose_epoch_end above), a node never lends quorum to a hash it has not
+                    // itself observed. If our oracle has not crossed the boundary, abstain until it has.
+                    match expected_next_epoch_hash {
+                        Some(local) if local == *atom.next_epoch_hash() => {},
+                        Some(local) => {
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ NO VOTE: EndEpoch in block {} proposes next-epoch hash {} but our oracle has {}",
+                                block.id(),
+                                atom.next_epoch_hash(),
+                                local,
+                            );
+                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochHashMismatch {
+                                local,
+                                proposed: *atom.next_epoch_hash(),
+                            });
+                            return Ok(());
+                        },
+                        None => {
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ NO VOTE: EndEpoch in block {} but our oracle has not yet observed the next epoch boundary block",
+                                block.id(),
+                            );
+                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochHashNotObserved);
+                            return Ok(());
+                        },
                     }
 
                     continue;

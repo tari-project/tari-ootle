@@ -86,9 +86,25 @@ pub fn generate_end_of_epoch_commit_proof<TTx: StateStoreReadTransaction>(
         )));
     }
 
+    // The single command is the EndEpoch command; its atom carries the next epoch's hash. Rebuild the
+    // proof command from it so its hash matches the committed block's command merkle root.
+    let end_epoch_atom = committed_block
+        .commands()
+        .iter()
+        .find_map(|cmd| cmd.end_epoch())
+        .ok_or_else(|| {
+            HotStuffError::InvariantError(format!(
+                "End-of-epoch block {committed_block} does not contain an EndEpoch command"
+            ))
+        })?;
+
     let proof = generate_block_commit_proof(tx, commit_qc, committed_block)?;
     let inclusion_proof = committed_block.compute_command_inclusion_proof(0)?;
-    let command_commit_proof = CommandCommitProof::new(EndOfEpochCommand, proof, inclusion_proof);
+    let command_commit_proof = CommandCommitProof::new(
+        EndOfEpochCommand::new(*end_epoch_atom.next_epoch_hash()),
+        proof,
+        inclusion_proof,
+    );
     Ok(command_commit_proof)
 }
 

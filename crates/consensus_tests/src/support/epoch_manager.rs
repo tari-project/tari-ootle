@@ -49,6 +49,12 @@ pub struct TestEpochManager {
     /// `oracle_visible_epoch`, this *does* lag the vote-time `em_epoch > current_epoch`
     /// check — used to reproduce the wedge where a validator no-votes the EOE block.
     oracle_current_epoch_cap: Arc<StdMutex<Option<Epoch>>>,
+    /// Overrides the boundary hash this validator's oracle reports from `get_epoch_hash`. When
+    /// `Some(hash)`, simulates a base-layer reorg that left this node on a different epoch-boundary
+    /// block than its peers (the committee-split scenario). `None` = report the shared
+    /// `last_epoch_hash`. Like the lag fields, a fresh `Arc` is allocated per validator by
+    /// `clone_for`.
+    oracle_epoch_hash_override: Arc<StdMutex<Option<FixedHash>>>,
 }
 
 impl TestEpochManager {
@@ -60,6 +66,7 @@ impl TestEpochManager {
             current_epoch: Epoch(1),
             oracle_visible_epoch: Arc::new(StdMutex::new(None)),
             oracle_current_epoch_cap: Arc::new(StdMutex::new(None)),
+            oracle_epoch_hash_override: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -74,11 +81,6 @@ impl TestEpochManager {
     /// once a node catches up via sync.
     pub fn set_oracle_visible_epoch(&self, epoch: Epoch) {
         *self.oracle_visible_epoch.lock().unwrap() = Some(epoch);
-    }
-
-    /// Remove the oracle lag for this validator.
-    pub fn clear_oracle_lag(&self) {
-        *self.oracle_visible_epoch.lock().unwrap() = None;
     }
 
     fn oracle_visible_epoch(&self) -> Option<Epoch> {
@@ -101,6 +103,18 @@ impl TestEpochManager {
 
     fn oracle_current_epoch_cap(&self) -> Option<Epoch> {
         *self.oracle_current_epoch_cap.lock().unwrap()
+    }
+
+    /// Override the boundary hash this validator's oracle reports from `get_epoch_hash`, for every
+    /// epoch. Used to model a base-layer reorg that splits the committee across two boundary-block
+    /// hashes: set different overrides on different validators and they will disagree on the next
+    /// epoch's hash, just like the production divergence.
+    pub fn set_oracle_epoch_hash(&self, hash: FixedHash) {
+        *self.oracle_epoch_hash_override.lock().unwrap() = Some(hash);
+    }
+
+    fn oracle_epoch_hash_override(&self) -> Option<FixedHash> {
+        *self.oracle_epoch_hash_override.lock().unwrap()
     }
 
     pub async fn set_current_epoch(&mut self, current_epoch: Epoch, shard_group: ShardGroup) -> &Self {
@@ -135,6 +149,7 @@ impl TestEpochManager {
         // this same validator share via the cheap `Clone` impl.
         copy.oracle_visible_epoch = Arc::new(StdMutex::new(None));
         copy.oracle_current_epoch_cap = Arc::new(StdMutex::new(None));
+        copy.oracle_epoch_hash_override = Arc::new(StdMutex::new(None));
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
@@ -288,6 +303,9 @@ impl EpochManagerReader for TestEpochManager {
             epoch > cap
         {
             return Err(EpochManagerError::NoEpochFound(epoch));
+        }
+        if let Some(hash) = self.oracle_epoch_hash_override() {
+            return Ok(hash);
         }
         Ok(self.inner.lock().await.last_epoch_hash)
     }

@@ -24,6 +24,47 @@ use crate::{
     v1::pruned::{PrunedUnsealedTransactionV1, PrunedUnsignedTransactionV1},
 };
 
+/// Identifies a field of the canonical signing preimage, in chain order.
+///
+/// The discriminants are the on-the-wire field tags used to stream a transaction to a hardware
+/// signer (e.g. the Ootle Ledger app). The signer reconstructs the exact byte sequence chained
+/// into the message digest by concatenating each segment's bytes in ascending field order
+/// (`SealSigner` only present for an authorization signature; `Signatures` only for a seal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PreimageField {
+    SchemaVersion = 0,
+    SealSigner = 1,
+    Network = 2,
+    FeeInstructions = 3,
+    Instructions = 4,
+    Inputs = 5,
+    MinEpoch = 6,
+    MaxEpoch = 7,
+    IsSealSignerAuthorized = 8,
+    DryRun = 9,
+    BlobHashes = 10,
+    Signatures = 11,
+}
+
+/// One ordered segment of the canonical signing preimage: the exact borsh bytes chained into the
+/// message digest for `field`. Concatenating every segment's `bytes` in order yields the precise
+/// byte sequence that `create_message_v1` feeds into the domain-separated hasher (after the
+/// domain-separation preamble, which the signer prepends itself).
+#[derive(Debug, Clone)]
+pub struct PreimageSegment {
+    pub field: PreimageField,
+    pub bytes: Vec<u8>,
+}
+
+fn preimage_segment<T: borsh::BorshSerialize + ?Sized>(field: PreimageField, value: &T) -> PreimageSegment {
+    PreimageSegment {
+        field,
+        // BorshSerialize is infallible for these types; the hasher relies on the same guarantee.
+        bytes: borsh::to_vec(value).expect("BorshSerialize is infallible for transaction fields"),
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -105,6 +146,33 @@ impl TransactionSealSignature {
             &blob_hashes,
             transaction.signatures(),
         )
+    }
+
+    /// The ordered borsh segments chained into the seal ("SealSignature") message digest.
+    ///
+    /// Single source of truth for streaming a seal signing request to a hardware signer: the
+    /// concatenation of the returned segment bytes is byte-identical to what
+    /// [`Self::create_message_v1`] feeds into the hasher (after the domain-separation preamble for
+    /// label `"SealSignature"`). Keep this in lock-step with `create_message_v1_inner`.
+    pub fn signing_preimage_v1(transaction: &UnsealedTransactionV1) -> Vec<PreimageSegment> {
+        let unsigned = transaction.unsigned_transaction();
+        let blob_hashes = unsigned.blobs.hashes();
+        vec![
+            preimage_segment(PreimageField::SchemaVersion, &transaction.schema_version()),
+            preimage_segment(PreimageField::Network, &unsigned.network),
+            preimage_segment(PreimageField::FeeInstructions, unsigned.fee_instructions.as_slice()),
+            preimage_segment(PreimageField::Instructions, unsigned.instructions.as_slice()),
+            preimage_segment(PreimageField::Inputs, &unsigned.inputs),
+            preimage_segment(PreimageField::MinEpoch, &unsigned.min_epoch),
+            preimage_segment(PreimageField::MaxEpoch, &unsigned.max_epoch),
+            preimage_segment(
+                PreimageField::IsSealSignerAuthorized,
+                &unsigned.is_seal_signer_authorized,
+            ),
+            preimage_segment(PreimageField::DryRun, &unsigned.dry_run),
+            preimage_segment(PreimageField::BlobHashes, &blob_hashes),
+            preimage_segment(PreimageField::Signatures, transaction.signatures()),
+        ]
     }
 
     /// Pruned-form seal message. Uses the stored `BlobHashes` and produces the same digest as
@@ -240,6 +308,35 @@ impl TransactionSignature {
         )
     }
 
+    /// The ordered borsh segments chained into the authorization ("Signature") message digest.
+    ///
+    /// This is the single source of truth for streaming an authorization signing request to a
+    /// hardware signer: the concatenation of the returned segment bytes is byte-identical to what
+    /// [`Self::create_message_v1`] feeds into the hasher (after the domain-separation preamble for
+    /// label `"Signature"`). Keep this in lock-step with `create_message_v1_inner`.
+    pub fn signing_preimage_v1(
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &UnsignedTransactionV1,
+    ) -> Vec<PreimageSegment> {
+        let blob_hashes = transaction.blobs.hashes();
+        vec![
+            preimage_segment(PreimageField::SchemaVersion, &transaction.schema_version()),
+            preimage_segment(PreimageField::SealSigner, seal_signer),
+            preimage_segment(PreimageField::Network, &transaction.network),
+            preimage_segment(PreimageField::FeeInstructions, transaction.fee_instructions.as_slice()),
+            preimage_segment(PreimageField::Instructions, transaction.instructions.as_slice()),
+            preimage_segment(PreimageField::Inputs, &transaction.inputs),
+            preimage_segment(PreimageField::MinEpoch, &transaction.min_epoch),
+            preimage_segment(PreimageField::MaxEpoch, &transaction.max_epoch),
+            preimage_segment(
+                PreimageField::IsSealSignerAuthorized,
+                &transaction.is_seal_signer_authorized,
+            ),
+            preimage_segment(PreimageField::DryRun, &transaction.dry_run),
+            preimage_segment(PreimageField::BlobHashes, &blob_hashes),
+        ]
+    }
+
     /// Pruned-form extra-signer message. Uses the stored `BlobHashes`.
     pub fn create_message_v1_pruned(
         seal_signer: &RistrettoPublicKeyBytes,
@@ -344,6 +441,7 @@ impl<'a> From<&'a PrunedUnsignedTransactionV1> for TransactionSignatureFields<'a
 
 #[cfg(test)]
 mod tests {
+    use borsh::BorshSerialize;
     use tari_crypto::keys::SecretKey;
     use tari_engine_types::substate::SubstateId;
     use tari_template_lib_types::ComponentAddress;
@@ -634,6 +732,52 @@ mod tests {
         assert_ne!(seal_msg(&with_sig1), seal_msg(&with_sig2), "content");
         assert_ne!(seal_msg(&with_sig1), seal_msg(&ab), "count (1 vs 2)");
         assert_ne!(seal_msg(&ab), seal_msg(&ba), "order");
+    }
+
+    /// The streamed preimage segments must concatenate to exactly the byte sequence that
+    /// `TransactionSignature::create_message_v1_inner` chains into the hasher. If this drifts, a
+    /// hardware signer would compute a different digest and produce signatures that fail to verify.
+    #[test]
+    fn signature_preimage_matches_chain_order() {
+        let signer = sample_seal_signer();
+        let tx = sample_unsigned();
+
+        let reconstructed: Vec<u8> = TransactionSignature::signing_preimage_v1(&signer, &tx)
+            .iter()
+            .flat_map(|s| s.bytes.clone())
+            .collect();
+
+        // Mirror create_message_v1_inner exactly: schema_version, seal_signer, fields, blob_hashes.
+        let mut expected = Vec::new();
+        BorshSerialize::serialize(&tx.schema_version(), &mut expected).unwrap();
+        BorshSerialize::serialize(&signer, &mut expected).unwrap();
+        BorshSerialize::serialize(&TransactionSignatureFields::from(&tx), &mut expected).unwrap();
+        BorshSerialize::serialize(&tx.blobs.hashes(), &mut expected).unwrap();
+
+        assert_eq!(reconstructed, expected);
+    }
+
+    /// As above, for the seal ("SealSignature") preimage: schema_version, fields, blob_hashes,
+    /// signatures.
+    #[test]
+    fn seal_preimage_matches_chain_order() {
+        let seal_signer = sample_seal_signer();
+        let unsigned = sample_unsigned();
+        let sig = random_signature(&unsigned, &seal_signer);
+        let unsealed = unsealed_with(unsigned.clone(), vec![sig]);
+
+        let reconstructed: Vec<u8> = TransactionSealSignature::signing_preimage_v1(&unsealed)
+            .iter()
+            .flat_map(|s| s.bytes.clone())
+            .collect();
+
+        let mut expected = Vec::new();
+        BorshSerialize::serialize(&unsealed.schema_version(), &mut expected).unwrap();
+        BorshSerialize::serialize(&TransactionSignatureFields::from(&unsigned), &mut expected).unwrap();
+        BorshSerialize::serialize(&unsigned.blobs.hashes(), &mut expected).unwrap();
+        BorshSerialize::serialize(&unsealed.signatures(), &mut expected).unwrap();
+
+        assert_eq!(reconstructed, expected);
     }
 
     #[test]

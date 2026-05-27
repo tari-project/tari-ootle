@@ -10,7 +10,7 @@ set -e
 # 🎯 Ledger App Builder
 # Builds the Ledger app using Docker for a given target device.
 
-SUPPORTED_TARGETS=("nanosplus" "nanox" "nanos" "stax" "flex")
+SUPPORTED_TARGETS=("nanosplus" "nanox" "stax" "flex")
 
 usage() {
   echo ""
@@ -58,11 +58,20 @@ echo "🚀 Building Ledger app for target: $TARGET"
 echo "📁 Using source directory: $SCRIPT_DIR"
 echo ""
 
+# NBGL targets (Stax/Flex) need the `nbgl` cargo feature, which enables the SDK's
+# `io_new` + `nano_nbgl`. BAGL targets (Nano S+/X) build with default features.
+EXTRA=""
+case "$TARGET" in
+  stax | flex) EXTRA="-- --features nbgl" ;;
+esac
+
+# Mount the ledger workspace root (parent of this app crate) so the `../common` path
+# dependency resolves inside the container; build from the app crate directory.
 docker run --rm -it \
-  -v "$SCRIPT_DIR:/app" \
+  -v "$SCRIPT_DIR/..:/app" \
   -w /app/app \
   ghcr.io/ledgerhq/ledger-app-builder/ledger-app-builder \
-  cargo ledger setup && cargo ledger build "$TARGET"
+  bash -lc "cargo ledger build $TARGET $EXTRA"
 
 echo ""
 echo "✅ Build complete for target: $TARGET"

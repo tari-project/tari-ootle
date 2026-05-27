@@ -13,16 +13,17 @@ pub struct SpeculosTransport {
 }
 
 impl SpeculosTransport {
+    /// Connects to the Speculos REST `/apdu` endpoint at the default `http://localhost:5000`.
     pub fn new() -> Self {
-        Self {
-            inner: reqwest::Client::new(),
-            url: "http://localhost:5000/apdu".to_string(),
-        }
+        Self::with_base_url("http://localhost:5000")
     }
 
-    pub fn with_url(mut self, url: String) -> Self {
-        self.url = url;
-        self
+    /// Connects to the Speculos REST `/apdu` endpoint at `base_url`; `/apdu` is appended.
+    pub fn with_base_url(base_url: &str) -> Self {
+        Self {
+            inner: reqwest::Client::new(),
+            url: format!("{}/apdu", base_url.trim_end_matches('/')),
+        }
     }
 }
 

@@ -147,7 +147,8 @@ impl BaseNodeClient for GrpcBaseNodeClient {
     async fn get_validator_nodes(
         &mut self,
         height: u64,
-    ) -> Result<impl Stream<Item = Result<BaseLayerValidatorNode, BaseNodeClientError>>, BaseNodeClientError> {
+    ) -> Result<impl Stream<Item = Result<BaseLayerValidatorNode, BaseNodeClientError>> + Send, BaseNodeClientError>
+    {
         let inner = self.connection().await?;
 
         // SidechainId is empty because we need all the sidechain nodes to create the merkle root
@@ -248,7 +249,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         &mut self,
         from_height: u64,
         limit: u64,
-    ) -> Result<impl Stream<Item = Result<BlockHeader, BaseNodeClientError>> + Unpin, BaseNodeClientError> {
+    ) -> Result<impl Stream<Item = Result<BlockHeader, BaseNodeClientError>> + Unpin + Send, BaseNodeClientError> {
         let inner = self.connection().await?;
         let request = grpc::ListHeadersRequest {
             from_height,

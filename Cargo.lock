@@ -7645,7 +7645,7 @@ dependencies = [
 
 [[package]]
 name = "ootle-rs"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -11406,6 +11406,7 @@ dependencies = [
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
  "tari_template_lib",
+ "tari_template_lib_types",
  "tari_transaction_components",
  "thiserror 2.0.18",
  "time",

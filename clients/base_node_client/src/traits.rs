@@ -29,7 +29,10 @@ pub trait BaseNodeClient: Send + Sync + Clone {
         &mut self,
         height: u64,
     ) -> impl Future<
-        Output = Result<impl Stream<Item = Result<BaseLayerValidatorNode, BaseNodeClientError>>, BaseNodeClientError>,
+        Output = Result<
+            impl Stream<Item = Result<BaseLayerValidatorNode, BaseNodeClientError>> + Send,
+            BaseNodeClientError,
+        >,
     > + Send;
     fn get_template_registrations(
         &mut self,
@@ -45,7 +48,10 @@ pub trait BaseNodeClient: Send + Sync + Clone {
         from_height: u64,
         limit: u64,
     ) -> impl Future<
-        Output = Result<impl Stream<Item = Result<BlockHeader, BaseNodeClientError>> + Unpin, BaseNodeClientError>,
+        Output = Result<
+            impl Stream<Item = Result<BlockHeader, BaseNodeClientError>> + Unpin + Send,
+            BaseNodeClientError,
+        >,
     > + Send;
     fn get_consensus_constants(
         &mut self,

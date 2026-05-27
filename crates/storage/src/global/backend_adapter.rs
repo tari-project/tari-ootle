@@ -209,4 +209,9 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
     ) -> Result<BlockHeaderModel, Self::Error>;
+
+    /// Deletes every stored block header with a height strictly greater than `height`. Used to discard
+    /// base-layer headers orphaned by a reorg so the canonical headers can be re-scanned in their place.
+    /// Returns the number of rows deleted.
+    fn delete_block_headers_above(&self, tx: &mut Self::DbTransaction<'_>, height: u64) -> Result<usize, Self::Error>;
 }

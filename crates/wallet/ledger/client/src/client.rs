@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(version, "0.1.0");
 
         let app_name = client.get_app_name().await.unwrap();
-        assert_eq!(app_name, "Ootle Ledger App");
+        assert_eq!(app_name, "Tari Ootle");
 
         let public_key = client.get_public_key(0, 0, KeyType::Transaction).await.unwrap();
         assert_eq!(public_key.len(), 32);

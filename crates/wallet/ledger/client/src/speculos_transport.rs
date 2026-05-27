@@ -13,10 +13,14 @@ pub struct SpeculosTransport {
 }
 
 impl SpeculosTransport {
+    /// Connects to the Speculos REST `/apdu` endpoint. Honors the `SPECULOS_URL` environment
+    /// variable (e.g. `http://localhost:5001`) so the host port can be changed — handy on macOS
+    /// where port 5000 is taken by AirPlay. Defaults to `http://localhost:5000`.
     pub fn new() -> Self {
+        let base = std::env::var("SPECULOS_URL").unwrap_or_else(|_| "http://localhost:5000".to_string());
         Self {
             inner: reqwest::Client::new(),
-            url: "http://localhost:5000/apdu".to_string(),
+            url: format!("{}/apdu", base.trim_end_matches('/')),
         }
     }
 

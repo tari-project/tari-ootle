@@ -20,20 +20,20 @@ use alloc::{
 
 use borsh::BorshDeserialize;
 use ootle_ledger_common::{
+    OotleStatusWord,
     arg_types::{
         FrameKind,
         KeyType,
+        SEGMENT_LAST_CHUNK,
         SignMode,
         SignTransactionHeader,
         SignTransactionResponse,
         SigningField,
-        SEGMENT_LAST_CHUNK,
     },
-    OotleStatusWord,
 };
 
 use crate::{
-    hashing::{sign_message, MessageHasher},
+    hashing::{MessageHasher, sign_message},
     key_derive::derive_from_bip32_key,
     state::{SigningState, State, TxDisplay},
     status::AppStatus,

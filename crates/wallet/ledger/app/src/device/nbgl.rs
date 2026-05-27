@@ -6,11 +6,10 @@ use alloc::{borrow::Cow, vec::Vec};
 use borsh::{BorshDeserialize, BorshSerialize};
 use ledger_device_sdk::{
     include_gif,
-    io::{Comm, CommError, Command, Reply, StatusWords},
+    io::{Comm, CommError, CommStorage, Command, Reply, StatusWords, init_comm},
     nbgl::{
         Field,
         NbglGlyph,
-        init_comm,
         nbgl_home_and_settings::NbglHomeAndSettings,
         nbgl_review::NbglReview,
         nbgl_status::NbglStatus,
@@ -19,15 +18,24 @@ use ledger_device_sdk::{
 use ootle_ledger_common::OotleStatusWord;
 
 use crate::{
-    constants::LEDGER_APP_NAME,
+    constants::{CLA, LEDGER_APP_NAME},
     handlers::{self, ChunkResult, SignReview},
     request::{Instruction, Request},
     state::State,
     status::AppStatus,
 };
 
-pub fn init<const N: usize>(comm: &mut Comm<N>) {
-    init_comm(comm);
+/// Set up the comm (io_new model: a static `CommStorage` handed to `init_comm`), show the home
+/// screen, and run the APDU loop. Entry point from `main`.
+pub fn run(state: &mut State) {
+    static COMM_STORAGE: CommStorage = CommStorage::new();
+    let comm = init_comm(&COMM_STORAGE);
+    comm.set_expected_cla(CLA);
+    show_menu_main(comm);
+    loop {
+        let command = comm.next_command();
+        handle_apdu_request(state, command);
+    }
 }
 
 pub fn command_fail<const N: usize, E: Into<AppStatus>>(comm: &mut Comm<N>, e: E) {
@@ -35,12 +43,12 @@ pub fn command_fail<const N: usize, E: Into<AppStatus>>(comm: &mut Comm<N>, e: E
         AppStatus::OotleStatusWord(status) => comm.begin_response().send(Reply(status.to_status())),
         AppStatus::StatusWords(status) => comm.begin_response().send(status),
         AppStatus::StatusWithMessage { message, status } => {
-            NbglStatus::new().text(&message).show(false);
+            NbglStatus::new().text(&message).show(comm, false);
             comm.begin_response().send(status)
         },
-        AppStatus::OotleStatusWithMessages { messages, status, .. } => {
+        AppStatus::OotleStatusWithMessages { messages, status } => {
             for msg in messages {
-                NbglStatus::new().text(&msg).show(false);
+                NbglStatus::new().text(&msg).show(comm, false);
             }
             comm.begin_response().send(Reply(status.to_status()))
         },
@@ -50,10 +58,6 @@ pub fn command_fail<const N: usize, E: Into<AppStatus>>(comm: &mut Comm<N>, e: E
         // If sending the response fails, there's not much we can do. Panic
         panic!("Failed to send response: {:?}", e);
     }
-}
-
-pub fn next_command<const N: usize>(comm: &mut Comm<N>) -> Option<Command<'_, N>> {
-    Some(comm.next_command())
 }
 
 pub fn handle<T, R, F, const N: usize>(state_mut: &mut State, mut command: Command<N>, handler: F)
@@ -73,6 +77,7 @@ where
         },
     }
 }
+
 fn handle_inner<T, R, F, const N: usize>(
     state_mut: &mut State,
     command: &mut Command<N>,
@@ -84,7 +89,7 @@ where
     F: FnOnce(&mut State, T) -> Result<R, AppStatus>,
 {
     let data = command.get_data();
-    let payload = match T::try_from_slice(&data) {
+    let payload = match T::try_from_slice(data) {
         Ok(p) => p,
         Err(_) => return Err(AppStatus::OotleStatusWord(OotleStatusWord::BadRequest)),
     };
@@ -110,14 +115,11 @@ pub fn handle_apdu_request<const N: usize>(state_mut: &mut State, command: Comma
 
 /// Streaming `SignTransaction` handler. Intermediate chunks reply with an empty OK; the final
 /// chunk shows the NBGL review and, on approval, replies with the signature.
-fn handle_sign<const N: usize>(state_mut: &mut State, mut command: Command<N>, request: &Request) {
+fn handle_sign<const N: usize>(state_mut: &mut State, command: Command<N>, request: &Request) {
     let p1 = request.header.p1;
     let p2 = request.header.p2;
 
-    let outcome = {
-        let data = command.get_data();
-        handlers::process_chunk(state_mut, p1, p2, &data)
-    };
+    let outcome = handlers::process_chunk(state_mut, p1, p2, command.get_data());
 
     match outcome {
         Ok(ChunkResult::Ack) => {
@@ -126,18 +128,18 @@ fn handle_sign<const N: usize>(state_mut: &mut State, mut command: Command<N>, r
                 .unwrap_or_else(|e| panic!("Failed to send response: {:?}", e));
         },
         Ok(ChunkResult::ReadyToSign(review)) => {
-            if !confirm_sign(&review) {
-                command_fail(
-                    command.into_comm(),
-                    AppStatus::OotleStatusWord(OotleStatusWord::UserRejected),
-                );
+            let comm = command.into_comm();
+            if !confirm_sign(comm, &review) {
+                command_fail(comm, AppStatus::OotleStatusWord(OotleStatusWord::UserRejected));
                 return;
             }
             match build_response(&review) {
-                Ok(bytes) => command
-                    .reply(&bytes, StatusWords::Ok)
-                    .unwrap_or_else(|e| panic!("Failed to send response: {:?}", e)),
-                Err(e) => command_fail(command.into_comm(), e),
+                Ok(bytes) => {
+                    if let Err(e) = comm.send(&bytes, StatusWords::Ok) {
+                        command_fail(comm, e);
+                    }
+                },
+                Err(e) => command_fail(comm, e),
             }
         },
         Err(e) => command_fail(command.into_comm(), e),
@@ -150,7 +152,7 @@ fn build_response(review: &SignReview) -> Result<Vec<u8>, AppStatus> {
 }
 
 /// NBGL tag/value review of the transaction summary, returning whether the user approved.
-fn confirm_sign(review: &SignReview) -> bool {
+fn confirm_sign<const N: usize>(comm: &mut Comm<N>, review: &SignReview) -> bool {
     let rows = handlers::review_fields(review);
     let fields: Vec<Field> = rows
         .iter()
@@ -162,7 +164,7 @@ fn confirm_sign(review: &SignReview) -> bool {
 
     NbglReview::new()
         .titles("Review transaction", "", "Sign transaction?")
-        .show(&fields)
+        .show(comm, &fields)
 }
 
 impl From<CommError> for AppStatus {
@@ -180,22 +182,16 @@ impl From<CommError> for AppStatus {
     }
 }
 
-pub fn ui_menu_main<const N: usize>(_: &mut Comm<N>) -> NbglHomeAndSettings {
+fn ui_menu_main<const N: usize>(_: &mut Comm<N>) -> NbglHomeAndSettings {
     // Load glyph from 64x64 4bpp gif file with include_gif macro. Creates an NBGL compatible glyph.
     const TARI: NbglGlyph = NbglGlyph::from_include(include_gif!("images/key_64x64.gif", NBGL));
 
     const APP_AUTHOR: &str = "The Tari Project";
-    // Display the home screen.
     NbglHomeAndSettings::new()
         .glyph(&TARI)
         .infos(LEDGER_APP_NAME, env!("CARGO_PKG_VERSION"), APP_AUTHOR)
 }
 
-#[allow(dead_code)]
-pub fn debug(msg: &str) {
-    NbglStatus::new().text(msg).show(false);
-}
-
-pub fn show_menu_main(comm: &mut Comm) {
+pub fn show_menu_main<const N: usize>(comm: &mut Comm<N>) {
     ui_menu_main(comm).show_and_return()
 }

@@ -16,12 +16,24 @@ use ledger_device_sdk::{
 use ootle_ledger_common::OotleStatusWord;
 
 use crate::{
-    constants::LEDGER_APP_NAME,
+    constants::{CLA, LEDGER_APP_NAME},
     handlers::{self, ChunkResult, SignReview},
     request::{Instruction, Request},
     state::State,
     status::AppStatus,
 };
+
+/// Set up the comm, show the home menu, and run the APDU loop. Entry point from `main`.
+pub fn run(state: &mut State) {
+    let mut comm = Comm::new().set_expected_cla(CLA);
+    init(&mut comm);
+    show_menu_main(&mut comm);
+    loop {
+        if let Some(req) = next_command(&mut comm) {
+            handle_apdu_request(state, req);
+        }
+    }
+}
 
 pub fn init(_comm: &mut Comm) {}
 

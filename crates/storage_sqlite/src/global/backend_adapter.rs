@@ -954,7 +954,14 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn delete_block_headers_above(&self, tx: &mut Self::DbTransaction<'_>, height: u64) -> Result<usize, Self::Error> {
         use crate::global::schema::block_headers;
 
-        let num_deleted = diesel::delete(block_headers::table.filter(block_headers::height.gt(height as i64)))
+        // Convert with try_from rather than `as`: a height above i64::MAX would wrap negative and the
+        // `height > N` filter would then match every row, deleting all stored headers. No stored height
+        // can exceed i64::MAX, so a height that large means there is nothing above it to delete.
+        let Ok(height) = i64::try_from(height) else {
+            return Ok(0);
+        };
+
+        let num_deleted = diesel::delete(block_headers::table.filter(block_headers::height.gt(height)))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

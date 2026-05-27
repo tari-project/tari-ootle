@@ -1,6 +1,7 @@
 // Copyright 2026 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { useAddressBookAdd, useAddressBookList } from "@api/hooks/useAddressBook";
 import CopyToClipboard from "@components/CopyToClipboard";
 import {
@@ -17,17 +18,21 @@ import {
 } from "@mui/material";
 import { shortenString } from "@utils/helpers";
 import { useState } from "react";
-import { MdCheckCircle, MdPersonAdd } from "react-icons/md";
+import { MdCheckCircle, MdPerson, MdPersonAdd } from "react-icons/md";
 
 export function SenderAddress({ address }: { address: string }) {
-  const { data } = useAddressBookList();
+  const { data: addressBook } = useAddressBookList();
+  const { data: accountsData } = useAccountsList(0, 100);
   const addMutation = useAddressBookAdd();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const existing = data?.entries?.find((entry) => entry.address === address);
+  // The sender may be one of the wallet's own accounts (e.g. a self-transfer or change) — there's nothing to
+  // "add to contacts" in that case.
+  const ownAccount = accountsData?.accounts?.find((a) => a.address === address);
+  const existing = addressBook?.entries?.find((entry) => entry.address === address);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -51,7 +56,13 @@ export function SenderAddress({ address }: { address: string }) {
         <span>{shortenString(address)}</span>
       </Tooltip>
       <CopyToClipboard copy={address} />
-      {existing ? (
+      {ownAccount ? (
+        <Tooltip title="This is one of your own accounts">
+          <Typography variant="body2" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <MdPerson /> {ownAccount.account.name ?? "Your account"}
+          </Typography>
+        </Tooltip>
+      ) : existing ? (
         <Tooltip title={`Saved as "${existing.name}"`}>
           <Typography variant="body2" color="success.main" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
             <MdCheckCircle /> {existing.name}

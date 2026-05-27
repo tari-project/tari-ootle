@@ -10,6 +10,8 @@ pub use client::*;
 pub use error::*;
 #[cfg(feature = "hid-transport")]
 pub use hid::*;
+// Re-exported so downstream signers (e.g. ootle-rs) can name the transport bound.
+pub use ledger_transport::{self, Exchange};
 
 mod decode;
 #[cfg(feature = "speculos-transport")]

@@ -1,0 +1,163 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+//! On-device reproduction of the Ootle transaction signing message and `tari_crypto` Schnorr
+//! signature.
+//!
+//! The host streams the canonical preimage bytes (see `tari_ootle_transaction`'s
+//! `signing_preimage_v1`); the device feeds them, in order, into a domain-separated Blake2b-512
+//! hasher seeded here, recomputes the 64-byte message itself, and produces a Schnorr signature
+//! that verifies under `tari_crypto`. The byte recipe is pinned by the host reference test in the
+//! ledger client crate and the constants in `ootle_ledger_common::signing`.
+
+use curve25519_dalek::Scalar;
+use ledger_device_sdk::hash::{HashError, HashInit, blake2::Blake2b_512};
+use ootle_ledger_common::{
+    arg_types::SignMode,
+    signing::{
+        NONCE_DOMAIN,
+        SCHNORR_DOMAIN,
+        SCHNORR_DOMAIN_VERSION,
+        SCHNORR_LABEL,
+        TX_DOMAIN,
+        TX_DOMAIN_VERSION,
+        TX_LABEL_SEAL,
+        TX_LABEL_SIGNATURE,
+    },
+};
+use zeroize::Zeroizing;
+
+use crate::{crypto::public_key_from_scalar, status::AppStatus};
+
+/// Streaming Blake2b-512 hasher seeded with the transaction message domain-separation preamble.
+///
+/// Wraps the SDK hasher so the streaming state machine can feed preimage segments incrementally
+/// across multiple APDUs and finalize the 64-byte message at the end.
+pub struct MessageHasher {
+    hasher: Blake2b_512,
+}
+
+impl MessageHasher {
+    /// Start a message hasher for the given signing procedure, writing the domain-separation
+    /// preamble for the corresponding label (`"Signature"` or `"SealSignature"`).
+    pub fn new(mode: SignMode) -> Result<Self, HashError> {
+        let label = match mode {
+            SignMode::AddSigner => TX_LABEL_SIGNATURE,
+            SignMode::Seal => TX_LABEL_SEAL,
+        };
+        let mut hasher = Blake2b_512::new();
+        add_domain_separation_tag(&mut hasher, TX_DOMAIN, TX_DOMAIN_VERSION, label)?;
+        Ok(Self { hasher })
+    }
+
+    /// Feed raw canonical (borsh) preimage bytes into the message digest.
+    pub fn update(&mut self, data: &[u8]) -> Result<(), HashError> {
+        self.hasher.update(data)
+    }
+
+    /// Finalize and return the 64-byte signing message.
+    pub fn finalize(mut self) -> Result<[u8; 64], HashError> {
+        let mut out = [0u8; 64];
+        self.hasher.finalize(&mut out)?;
+        Ok(out)
+    }
+}
+
+/// Sign a 64-byte transaction message with `secret`, producing the compressed public key and the
+/// `SchnorrSignatureBytes` layout `R(32) || s(32)`.
+pub fn sign_message(secret: &Scalar, message: &[u8; 64]) -> Result<([u8; 32], [u8; 64]), AppStatus> {
+    let public_key = public_key_from_scalar(secret).compress().0;
+
+    // Deterministic (synthetic) nonce: immune to a weak RNG, never reused for a given (key, message).
+    let nonce = Zeroizing::new(deterministic_nonce(secret, message).map_err(hash_err)?);
+    let public_nonce = public_key_from_scalar(&nonce).compress().0;
+
+    // e = H_challenge(R, P, m); s = e*k + r  (matches tari_crypto RistrettoSchnorr::sign_raw_uniform)
+    let e = schnorr_challenge(&public_nonce, &public_key, message).map_err(hash_err)?;
+    let s = e * secret + *nonce;
+
+    let mut signature = [0u8; 64];
+    signature[..32].copy_from_slice(&public_nonce);
+    signature[32..].copy_from_slice(s.as_bytes());
+
+    Ok((public_key, signature))
+}
+
+/// `e = Scalar::from_uniform_bytes(DomainSep("challenge") || len(R)||R || len(P)||P || len(m)||m)`,
+/// reproducing `tari_crypto`'s `construct_domain_separated_challenge::<Blake2b<U64>>`. Note the
+/// challenge hasher length-prefixes each chunk (unlike the borsh-fed message hasher).
+fn schnorr_challenge(public_nonce: &[u8; 32], public_key: &[u8; 32], message: &[u8; 64]) -> Result<Scalar, HashError> {
+    let mut hasher = Blake2b_512::new();
+    add_domain_separation_tag(&mut hasher, SCHNORR_DOMAIN, SCHNORR_DOMAIN_VERSION, SCHNORR_LABEL)?;
+    update_length_prefixed(&mut hasher, public_nonce)?;
+    update_length_prefixed(&mut hasher, public_key)?;
+    update_length_prefixed(&mut hasher, message)?;
+    let mut out = Zeroizing::new([0u8; 64]);
+    hasher.finalize(out.as_mut())?;
+    Ok(Scalar::from_bytes_mod_order_wide(&out))
+}
+
+fn deterministic_nonce(secret: &Scalar, message: &[u8; 64]) -> Result<Scalar, HashError> {
+    let mut hasher = Blake2b_512::new();
+    hasher.update(NONCE_DOMAIN)?;
+    hasher.update(secret.as_bytes())?;
+    hasher.update(message)?;
+    let mut out = Zeroizing::new([0u8; 64]);
+    hasher.finalize(out.as_mut())?;
+    Ok(Scalar::from_bytes_mod_order_wide(&out))
+}
+
+/// `DomainSeparatedHasher::update`-style length-prefixed chunk: `u64_le(len) || data`.
+fn update_length_prefixed(hasher: &mut Blake2b_512, data: &[u8]) -> Result<(), HashError> {
+    hasher.update(&(data.len() as u64).to_le_bytes())?;
+    hasher.update(data)
+}
+
+/// Writes a `tari_crypto` domain-separation tag: `u64_le(len) || domain || ".v" || version_ascii
+/// || ["." || label]`. Mirrors `tari_crypto::hashing::DomainSeparation::add_domain_separation_tag`
+/// byte-for-byte.
+fn add_domain_separation_tag(
+    hasher: &mut Blake2b_512,
+    domain: &str,
+    version: u8,
+    label: &str,
+) -> Result<(), HashError> {
+    let (version_offset, version_ascii) = byte_to_decimal_ascii_bytes(version);
+    let version_len = 3 - version_offset;
+    let len = if label.is_empty() {
+        domain.len() + version_len + 2
+    } else {
+        domain.len() + version_len + label.len() + 3
+    };
+    hasher.update(&(len as u64).to_le_bytes())?;
+    hasher.update(domain.as_bytes())?;
+    hasher.update(b".v")?;
+    hasher.update(&version_ascii[version_offset..])?;
+    if !label.is_empty() {
+        hasher.update(b".")?;
+        hasher.update(label.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Big-endian decimal ASCII of a byte. Returns `(offset_of_most_significant_digit, [_, _, _])`.
+/// Mirrors `tari_crypto`'s private helper of the same name.
+fn byte_to_decimal_ascii_bytes(mut byte: u8) -> (usize, [u8; 3]) {
+    const ZERO_ASCII_CHAR: u8 = 48;
+    let mut bytes = [0u8, 0u8, ZERO_ASCII_CHAR];
+    let mut pos = 3usize;
+    if byte == 0 {
+        return (2, bytes);
+    }
+    while byte > 0 {
+        let rem = byte % 10;
+        byte /= 10;
+        bytes[pos - 1] = ZERO_ASCII_CHAR + rem;
+        pos -= 1;
+    }
+    (pos, bytes)
+}
+
+fn hash_err(_e: HashError) -> AppStatus {
+    AppStatus::OotleStatusWord(ootle_ledger_common::OotleStatusWord::HashFail)
+}

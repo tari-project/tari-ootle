@@ -1,6 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use alloc::vec::Vec;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use ledger_device_sdk::{
     exit_app,
@@ -8,14 +10,14 @@ use ledger_device_sdk::{
     io::{Comm, Event, Reply},
     ui::{
         bitmaps::{BACK, CERTIFICATE, DASHBOARD_X, Glyph},
-        gadgets::{EventOrPageIndex, MultiPageMenu, Page, popup},
+        gadgets::{EventOrPageIndex, Field, MultiFieldReview, MultiPageMenu, Page, popup},
     },
 };
 use ootle_ledger_common::OotleStatusWord;
 
 use crate::{
     constants::LEDGER_APP_NAME,
-    handlers,
+    handlers::{self, ChunkResult, SignReview},
     request::{Instruction, Request},
     state::State,
     status::AppStatus,
@@ -76,13 +78,65 @@ pub fn handle_apdu_request(state_mut: &mut State, (comm, req): (&mut Comm, Reque
         Instruction::GetVersion => handle(state_mut, comm, handlers::get_version),
         Instruction::GetAppName => handle(state_mut, comm, handlers::get_app_name),
         Instruction::GetPublicKey => handle(state_mut, comm, handlers::get_public_key),
-        Instruction::SignTransaction => handle(state_mut, comm, handlers::sign_transaction),
+        Instruction::SignTransaction => handle_sign(state_mut, comm, &req),
     };
 
     match res {
         Ok(_) => {},
         Err(e) => command_fail(comm, e),
     }
+}
+
+/// Streaming `SignTransaction` handler. Intermediate chunks reply with an empty OK; the final
+/// chunk shows the review screen and, on approval, replies with the signature.
+fn handle_sign(state_mut: &mut State, comm: &mut Comm, req: &Request) -> Result<(), AppStatus> {
+    let p1 = req.header.p1;
+    let p2 = req.header.p2;
+
+    let outcome = {
+        let data = comm.get_data().map_err(|_| OotleStatusWord::BadRequest)?;
+        handlers::process_chunk(state_mut, p1, p2, data)?
+    };
+
+    match outcome {
+        ChunkResult::Ack => {
+            comm.reply_ok();
+            Ok(())
+        },
+        ChunkResult::ReadyToSign(review) => {
+            if !confirm_sign(&review) {
+                return Err(AppStatus::OotleStatusWord(OotleStatusWord::UserRejected));
+            }
+            let response = handlers::sign_approved(&review)?;
+            let bytes = borsh::to_vec(&response).map_err(|_| OotleStatusWord::EncodeResponseFail)?;
+            comm.append(&bytes);
+            comm.reply_ok();
+            Ok(())
+        },
+    }
+}
+
+/// Paged review of the transaction summary, with approve/reject validation.
+fn confirm_sign(review: &SignReview) -> bool {
+    let rows = handlers::review_fields(review);
+    let fields: Vec<Field> = rows
+        .iter()
+        .map(|(name, value)| Field {
+            name: name.as_str(),
+            value: value.as_str(),
+        })
+        .collect();
+
+    MultiFieldReview::new(
+        &fields,
+        &["Review", "Transaction"],
+        None::<&Glyph>,
+        "Sign",
+        None::<&Glyph>,
+        "Reject",
+        None::<&Glyph>,
+    )
+    .show()
 }
 
 fn ui_about_menu(comm: &mut Comm) -> Event<Request> {

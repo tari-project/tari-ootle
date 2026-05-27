@@ -18,6 +18,7 @@ use crate::state::State;
 mod device;
 
 mod crypto;
+mod hashing;
 mod key_derive;
 mod state;
 

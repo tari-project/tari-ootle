@@ -23,6 +23,12 @@ borsh = { workspace = true, default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Host reference test that proves the device signing recipe verifies under tari_crypto.
+tari_ootle_transaction = { workspace = true }
+curve25519-dalek = { version = "4", features = ["rand_core"] }
+blake2 = { workspace = true }
+rand = { workspace = true }
+indexmap = { workspace = true }
 
 [features]
 speculos-transport = ["serde", "reqwest", "hex"]

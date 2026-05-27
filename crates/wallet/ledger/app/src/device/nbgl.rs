@@ -7,14 +7,22 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use ledger_device_sdk::{
     include_gif,
     io::{Comm, CommError, Command, Reply, StatusWords},
-    nbgl::{NbglGlyph, init_comm, nbgl_home_and_settings::NbglHomeAndSettings, nbgl_status::NbglStatus},
+    nbgl::{
+        Field,
+        NbglGlyph,
+        init_comm,
+        nbgl_home_and_settings::NbglHomeAndSettings,
+        nbgl_review::NbglReview,
+        nbgl_status::NbglStatus,
+    },
 };
 use ootle_ledger_common::OotleStatusWord;
 
 use crate::{
     constants::LEDGER_APP_NAME,
-    handlers,
+    handlers::{self, ChunkResult, SignReview},
     request::{Instruction, Request},
+    state::State,
     status::AppStatus,
 };
 
@@ -92,12 +100,69 @@ pub fn handle_apdu_request<const N: usize>(state_mut: &mut State, command: Comma
             Instruction::GetVersion => handle(state_mut, command, handlers::get_version),
             Instruction::GetAppName => handle(state_mut, command, handlers::get_app_name),
             Instruction::GetPublicKey => handle(state_mut, command, handlers::get_public_key),
-            Instruction::SignTransaction => handle(state_mut, command, handlers::sign_transaction),
+            Instruction::SignTransaction => handle_sign(state_mut, command, &request),
         },
         Err(e) => {
             command.into_response().send(e).unwrap();
         },
     }
+}
+
+/// Streaming `SignTransaction` handler. Intermediate chunks reply with an empty OK; the final
+/// chunk shows the NBGL review and, on approval, replies with the signature.
+fn handle_sign<const N: usize>(state_mut: &mut State, mut command: Command<N>, request: &Request) {
+    let p1 = request.header.p1;
+    let p2 = request.header.p2;
+
+    let outcome = {
+        let data = command.get_data();
+        handlers::process_chunk(state_mut, p1, p2, &data)
+    };
+
+    match outcome {
+        Ok(ChunkResult::Ack) => {
+            command
+                .reply(&[], StatusWords::Ok)
+                .unwrap_or_else(|e| panic!("Failed to send response: {:?}", e));
+        },
+        Ok(ChunkResult::ReadyToSign(review)) => {
+            if !confirm_sign(&review) {
+                command_fail(
+                    command.into_comm(),
+                    AppStatus::OotleStatusWord(OotleStatusWord::UserRejected),
+                );
+                return;
+            }
+            match build_response(&review) {
+                Ok(bytes) => command
+                    .reply(&bytes, StatusWords::Ok)
+                    .unwrap_or_else(|e| panic!("Failed to send response: {:?}", e)),
+                Err(e) => command_fail(command.into_comm(), e),
+            }
+        },
+        Err(e) => command_fail(command.into_comm(), e),
+    }
+}
+
+fn build_response(review: &SignReview) -> Result<Vec<u8>, AppStatus> {
+    let response = handlers::sign_approved(review)?;
+    borsh::to_vec(&response).map_err(|_| AppStatus::OotleStatusWord(OotleStatusWord::EncodeResponseFail))
+}
+
+/// NBGL tag/value review of the transaction summary, returning whether the user approved.
+fn confirm_sign(review: &SignReview) -> bool {
+    let rows = handlers::review_fields(review);
+    let fields: Vec<Field> = rows
+        .iter()
+        .map(|(name, value)| Field {
+            name: name.as_str(),
+            value: value.as_str(),
+        })
+        .collect();
+
+    NbglReview::new()
+        .titles("Review transaction", "", "Sign transaction?")
+        .show(&fields)
 }
 
 impl From<CommError> for AppStatus {

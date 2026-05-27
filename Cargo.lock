@@ -11393,7 +11393,6 @@ dependencies = [
  "anyhow",
  "blake2 0.10.6",
  "log",
- "minotari_app_grpc",
  "ootle-network",
  "ootle_serde",
  "serde",
@@ -11412,7 +11411,6 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
- "tonic 0.13.1",
 ]
 
 [[package]]

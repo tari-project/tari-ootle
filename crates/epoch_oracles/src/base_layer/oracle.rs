@@ -317,8 +317,11 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
     /// orphaned boundary hash carried over from a chain-shortening reorg — the re-scan resumes *above* the
     /// fork point and so never re-crosses the fork epoch's own boundary to correct it.
     ///
-    /// If that boundary block sits below our scan range (so we never emitted it), there is nothing to
-    /// recover from the store and the existing value is left as-is.
+    /// If that boundary block sits below our scan range (so we never emitted it), there is no stored hash
+    /// to restore. We clear `last_epoch_hash` rather than leave it: in that case it can only hold a
+    /// boundary from an epoch *above* the fork epoch (the fork epoch's own boundary is below the floor and
+    /// was never crossed), which a chain-shortening reorg has orphaned. `None` is the same "unknown"
+    /// sentinel used at startup, and the re-scan re-populates it on the next boundary it crosses.
     fn reset_last_epoch_hash_to_boundary(
         &mut self,
         fork_epoch: Epoch,
@@ -336,8 +339,9 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             _ => {
                 debug!(
                     target: LOG_TARGET,
-                    "Fork epoch {fork_epoch} boundary block is not within the scan range; leaving last_epoch_hash unchanged"
+                    "Fork epoch {fork_epoch} boundary block is not within the scan range; clearing last_epoch_hash"
                 );
+                self.last_epoch_hash = None;
             },
         }
         Ok(())
@@ -351,11 +355,14 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
     }
 
     /// Resets the in-memory scan position to the start of our scan range, as on a fresh start. The
-    /// persisted position is corrected by the next successful `set_last_scanned_block`.
+    /// persisted position is corrected by the next successful `set_last_scanned_block`. `last_epoch_hash`
+    /// is cleared too so a reorg that orphaned the last boundary we crossed does not leave a stale hash;
+    /// the re-scan re-emits every boundary above the floor and re-populates it.
     fn rewind_to_floor(&mut self) {
         self.last_scanned_height = self.lag_start_height();
         self.last_scanned_hash = None;
         self.last_scanned_validator_node_mr = None;
+        self.last_epoch_hash = None;
     }
 
     #[allow(clippy::too_many_lines)]
@@ -772,12 +779,13 @@ mod tests {
         time::Duration,
     };
 
-    use minotari_app_grpc::tari_rpc::ValidatorNodeChange;
     use ootle_network::Network;
     use tari_base_node_client::{
         BaseNodeClient,
         BaseNodeClientError,
+        ValidatorNodeChange,
         futures_util::stream::{self, Stream},
+        tonic,
         types::{BaseLayerConsensusConstants, BaseLayerMetadata, BaseLayerValidatorNode, SideChainUtxos},
     };
     use tari_common_types::types::FixedHash;

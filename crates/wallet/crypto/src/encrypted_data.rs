@@ -81,6 +81,24 @@ fn inner_encrypted_data_kdf_aead(
 
 const ENCRYPTED_DATA_TAG: &[u8] = b"TARI_AAD_VALUE_AND_MASK_EXTEND_NONCE_VARIANT";
 
+/// A memo's ciphertext is padded up to the next size tier so that the on-chain length only reveals a
+/// coarse bucket rather than the exact memo length. Tiers are memo-region sizes (the bytes following
+/// value+mask); a no-memo output uses `min_size` (tier 0) and is handled separately. The largest tier
+/// equals `EncryptedData::MAX_MEMO_SIZE`, so every encoded memo fits in some tier.
+const MEMO_SIZE_TIERS: [usize; 4] = [32, 64, 128, EncryptedData::MAX_MEMO_SIZE];
+
+/// Returns the padded memo-region size (>= `encoded_len`) for the smallest tier that fits the memo.
+const fn padded_memo_region_size(encoded_len: usize) -> usize {
+    let mut i = 0;
+    while i < MEMO_SIZE_TIERS.len() {
+        if encoded_len <= MEMO_SIZE_TIERS[i] {
+            return MEMO_SIZE_TIERS[i];
+        }
+        i += 1;
+    }
+    EncryptedData::MAX_MEMO_SIZE
+}
+
 fn encrypt_data_inner(
     encryption_key: &RistrettoSecretKey,
     commitment: &PedersenCommitmentBytes,
@@ -116,12 +134,28 @@ fn encrypt_data_inner(
     let aead_key = inner_encrypted_data_kdf_aead(encryption_key, commitment);
     let cipher = XChaCha20Poly1305::new(GenericArray::from_slice(aead_key.reveal()));
 
+    // Encode the memo (if any) up front so we can pad to a size tier instead of always reserving the
+    // maximum memo size. The decoder is self-describing (tag + length prefix) and discards trailing
+    // bytes, so the zero padding is recoverable and only the coarse tier — not the exact memo length —
+    // is visible on-chain. A no-memo output stays at `min_size`.
+    let encoded_memo = memo
+        .map(|m| {
+            let mut buf = Vec::new();
+            m.encode_into(&mut buf)
+                .map_err(|e| WalletCryptoError::FailedEncryptData {
+                    details: format!("Failed to encode memo: {}", e),
+                })?;
+            Ok::<_, WalletCryptoError>(buf)
+        })
+        .transpose()?;
+
+    let memo_region = encoded_memo
+        .as_ref()
+        .map(|m| padded_memo_region_size(m.len()))
+        .unwrap_or(0);
+
     // Encode the value and mask
-    let mut bytes = vec![
-        0;
-        memo.map(|_| EncryptedData::max_size())
-            .unwrap_or(EncryptedData::min_size())
-    ];
+    let mut bytes = vec![0; EncryptedData::min_size() + memo_region];
     let payload_mut = payload_slice_mut(&mut bytes);
     payload_mut
         .get_mut(..EncryptedData::SIZE_VALUE)
@@ -132,14 +166,13 @@ fn encrypt_data_inner(
         .unwrap()
         .copy_from_slice(mask.as_bytes());
 
-    if let Some(m) = memo {
-        let mut memo_slice_mut = payload_mut
+    if let Some(encoded_memo) = encoded_memo {
+        payload_mut
             .get_mut(EncryptedData::SIZE_VALUE + EncryptedData::SIZE_MASK..)
-            .expect("invariant violation: bytes length is less than SIZE_VALUE + SIZE_MASK");
-        m.encode_into(&mut memo_slice_mut)
-            .map_err(|e| WalletCryptoError::FailedEncryptData {
-                details: format!("Failed to encode memo: {}", e),
-            })?;
+            .expect("invariant violation: bytes length is less than SIZE_VALUE + SIZE_MASK")
+            .get_mut(..encoded_memo.len())
+            .expect("invariant: memo region sized to fit encoded memo")
+            .copy_from_slice(&encoded_memo);
     }
 
     // Encrypt in place
@@ -280,6 +313,77 @@ mod tests {
         assert_eq!(value, amount);
         assert_eq!(msk, mask);
         assert_eq!(decrypted_memo.unwrap(), memo);
+    }
+
+    #[test]
+    fn memo_is_padded_to_size_tiers_not_the_max() {
+        let key = RistrettoSecretKey::random(&mut rand::rng());
+        let amount = 100;
+        let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
+
+        // "Big deposit" encodes to 13 bytes (tag + len + 11), landing in the 32-byte tier.
+        let memo = Memo::new_message("Big deposit").unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        assert_eq!(encrypted.len(), EncryptedData::min_size() + 32);
+        assert!(encrypted.len() < EncryptedData::max_size());
+
+        // A memo that overflows a tier rounds up to the next one (here 33 encoded bytes -> 64-byte tier).
+        let memo = Memo::new_bytes(vec![0u8; 31]).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        assert_eq!(encrypted.len(), EncryptedData::min_size() + 64);
+
+        // A maximum-length memo still uses the top tier (== max_size).
+        let memo = Memo::new_bytes(vec![0u8; Memo::MAX_BYTES_LENGTH]).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        assert_eq!(encrypted.len(), EncryptedData::max_size());
+
+        // Round-trip still works through the padding.
+        let (value, msk, decoded) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
+        assert_eq!(value, amount);
+        assert_eq!(msk, mask);
+        assert_eq!(decoded.unwrap(), memo);
+    }
+
+    #[test]
+    fn it_decrypts_legacy_max_padded_data() {
+        // Backward compatibility: data produced by the old encoder was always padded to max_size.
+        // The decoder must still recover the memo from a max-sized buffer.
+        let key = RistrettoSecretKey::random(&mut rand::rng());
+        let amount = 100;
+        let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let memo = Memo::new_message("Big deposit").unwrap();
+
+        // Hand-build a max-sized payload exactly as the old encoder did.
+        let nonce_bytes = [7u8; EncryptedData::SIZE_NONCE];
+        let nonce = XNonce::from_slice(&nonce_bytes);
+        let aead_key = inner_encrypted_data_kdf_aead(&key, &commitment);
+        let cipher = XChaCha20Poly1305::new(GenericArray::from_slice(aead_key.reveal()));
+
+        let mut bytes = vec![0u8; EncryptedData::max_size()];
+        let payload = &mut bytes[EncryptedData::payload_offset()..];
+        payload[..EncryptedData::SIZE_VALUE].copy_from_slice(amount.to_le_bytes().as_ref());
+        payload[EncryptedData::SIZE_VALUE..EncryptedData::SIZE_VALUE + EncryptedData::SIZE_MASK]
+            .copy_from_slice(mask.as_bytes());
+        let mut memo_slice = &mut payload[EncryptedData::SIZE_VALUE + EncryptedData::SIZE_MASK..];
+        memo.encode_into(&mut memo_slice).unwrap();
+
+        let payload = &mut bytes[EncryptedData::payload_offset()..];
+        let tag = cipher
+            .encrypt_in_place_detached(nonce, ENCRYPTED_DATA_TAG, payload)
+            .unwrap();
+        bytes[..EncryptedData::SIZE_TAG].copy_from_slice(&tag);
+        bytes[EncryptedData::SIZE_TAG..EncryptedData::SIZE_TAG + EncryptedData::SIZE_NONCE]
+            .copy_from_slice(&nonce_bytes);
+
+        let legacy = EncryptedData::try_from(bytes).unwrap();
+        assert_eq!(legacy.len(), EncryptedData::max_size());
+
+        let (value, msk, decoded) = decrypt_inner(&key, &commitment, &legacy, false).unwrap();
+        assert_eq!(value, amount);
+        assert_eq!(msk, mask);
+        assert_eq!(decoded.unwrap(), memo);
     }
 
     #[test]

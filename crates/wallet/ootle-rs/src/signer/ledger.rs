@@ -3,18 +3,22 @@
 
 //! Ledger hardware-wallet signer.
 //!
-//! [`LedgerSigner`] implements [`TransactionSigner`] and [`TransactionSealSigner`] by streaming the
-//! canonical signing preimage to an Ootle Ledger device, which recomputes the signing message,
-//! displays a summary for the user to approve, and returns a Ristretto Schnorr signature. The two
-//! procedures map to the device's two signing modes:
+//! [`LedgerSigner`] implements [`TransactionSigner`], [`TransactionSealSigner`] and
+//! [`TransactionStealthKeySigner`] by streaming the canonical signing preimage to an Ootle Ledger
+//! device, which recomputes the signing message, displays a summary for the user to approve, and
+//! returns a Ristretto Schnorr signature. The two procedures map to the device's two signing modes:
 //!   - [`TransactionSigner::sign_authorization`] → [`SignMode::AddSigner`]
 //!   - [`TransactionSigner::sign_transaction`] / [`TransactionSealSigner::seal_transaction`] → [`SignMode::Seal`]
 //!
 //! Transactions are signed with the account key branch ([`KeyType::Account`]), matching the
-//! address returned by [`LedgerSigner::address`].
+//! address returned by [`LedgerSigner::address`]. For a confidential (stealth) transfer, the
+//! [`TransactionStealthKeySigner`] methods pass the spent UTXO's sender public nonce so the device
+//! signs with the stealth-derived key `c + k` instead; the preimage and modes are otherwise
+//! identical to the public path.
 
 use async_trait::async_trait;
 use ootle_ledger_common::arg_types::{KeyType, SignMode, SigningField};
+use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_ledger_client::{Exchange, LedgerClient, LedgerClientError};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_transaction::{
@@ -33,7 +37,7 @@ use crate::{
     Address,
     Network,
     signer::{self, SignerError},
-    transaction::{TransactionSealSigner, TransactionSigner},
+    transaction::{TransactionSealSigner, TransactionSigner, TransactionStealthKeySigner},
     wallet::TransactionAuthorization,
 };
 
@@ -82,9 +86,13 @@ where
     }
 
     /// Stream a preimage to the device and parse the returned public key + signature.
+    ///
+    /// `stealth_public_nonce` is `Some` for a confidential transfer, signing with the stealth key
+    /// `c + k` derived from the spent UTXO's sender public nonce.
     async fn stream(
         &self,
         mode: SignMode,
+        stealth_public_nonce: Option<[u8; 32]>,
         segments: Vec<PreimageSegment>,
     ) -> signer::Result<(RistrettoPublicKeyBytes, SchnorrSignatureBytes)> {
         let refs: Vec<(SigningField, &[u8])> = segments
@@ -94,7 +102,14 @@ where
 
         let response = self
             .client
-            .sign_transaction(self.account, self.index, KeyType::Account, mode, &refs)
+            .sign_transaction(
+                self.account,
+                self.index,
+                KeyType::Account,
+                mode,
+                stealth_public_nonce,
+                &refs,
+            )
             .await
             .map_err(map_client_err)?;
 
@@ -118,7 +133,7 @@ where
     async fn sign_transaction(&self, message: &UnsealedTransaction) -> signer::Result<TransactionSealSignature> {
         let UnsealedTransaction::V1(unsealed) = message;
         let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
-        let (public_key, signature) = self.stream(SignMode::Seal, segments).await?;
+        let (public_key, signature) = self.stream(SignMode::Seal, None, segments).await?;
         Ok(TransactionSealSignature::new(public_key, signature))
     }
 
@@ -129,8 +144,42 @@ where
     ) -> signer::Result<TransactionAuthorization> {
         let UnsignedTransaction::V1(unsigned) = tx;
         let segments = TransactionSignature::signing_preimage_v1(seal_signer, unsigned);
-        let (public_key, signature) = self.stream(SignMode::AddSigner, segments).await?;
+        let (public_key, signature) = self.stream(SignMode::AddSigner, None, segments).await?;
         Ok(TransactionSignature::new(public_key, signature).into())
+    }
+}
+
+#[async_trait]
+impl<T> TransactionStealthKeySigner for LedgerSigner<T>
+where
+    T: Exchange + Send + Sync,
+    T::Error: core::fmt::Display + Send + Sync,
+{
+    async fn sign_authorization_with_stealth(
+        &self,
+        public_nonce: &RistrettoPublicKey,
+        seal_signer: &RistrettoPublicKeyBytes,
+        tx: &UnsignedTransaction,
+    ) -> signer::Result<TransactionAuthorization> {
+        let UnsignedTransaction::V1(unsigned) = tx;
+        let segments = TransactionSignature::signing_preimage_v1(seal_signer, unsigned);
+        let (public_key, signature) = self
+            .stream(SignMode::AddSigner, Some(nonce_bytes(public_nonce)), segments)
+            .await?;
+        Ok(TransactionSignature::new(public_key, signature).into())
+    }
+
+    async fn seal_transaction_with_stealth(
+        &self,
+        public_nonce: &RistrettoPublicKey,
+        message: &UnsealedTransaction,
+    ) -> signer::Result<TransactionSealSignature> {
+        let UnsealedTransaction::V1(unsealed) = message;
+        let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
+        let (public_key, signature) = self
+            .stream(SignMode::Seal, Some(nonce_bytes(public_nonce)), segments)
+            .await?;
+        Ok(TransactionSealSignature::new(public_key, signature))
     }
 }
 
@@ -148,6 +197,13 @@ where
 
 fn map_client_err<E: core::fmt::Display>(err: LedgerClientError<E>) -> SignerError {
     SignerError::other(err.to_string())
+}
+
+/// Compressed 32-byte encoding of a public nonce for the device's stealth-key derivation.
+fn nonce_bytes(public_nonce: &RistrettoPublicKey) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(public_nonce.as_bytes());
+    bytes
 }
 
 /// Map a transaction-crate preimage field to its on-the-wire protocol tag. The numeric equivalence

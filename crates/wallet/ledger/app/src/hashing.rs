@@ -10,19 +10,25 @@
 //! that verifies under `tari_crypto`. The byte recipe is pinned by the host reference test in the
 //! ledger client crate and the constants in `ootle_ledger_common::signing`.
 
-use curve25519_dalek::Scalar;
+use alloc::format;
+
+use curve25519_dalek::{Scalar, ristretto::CompressedRistretto};
 use ledger_device_sdk::hash::{HashError, HashInit, blake2::Blake2b_512};
 use ootle_ledger_common::{
+    OotleStatusWord,
     arg_types::SignMode,
     signing::{
         NONCE_DOMAIN,
         SCHNORR_DOMAIN,
         SCHNORR_DOMAIN_VERSION,
         SCHNORR_LABEL,
+        STEALTH_OWNER_LABEL,
         TX_DOMAIN,
         TX_DOMAIN_VERSION,
         TX_LABEL_SEAL,
         TX_LABEL_SIGNATURE,
+        WALLET_DOMAIN,
+        WALLET_DOMAIN_VERSION,
     },
 };
 use zeroize::Zeroizing;
@@ -81,6 +87,34 @@ pub fn sign_message(secret: &Scalar, message: &[u8; 64]) -> Result<([u8; 32], [u
     signature[32..].copy_from_slice(s.as_bytes());
 
     Ok((public_key, signature))
+}
+
+/// Derive the stealth signing scalar `c + k` for a confidential transfer, where
+/// `c = H_stealth_owner(network, k·R)` and `R` is the spent UTXO's sender public nonce. Mirrors
+/// `tari_ootle_wallet_crypto::kdfs::owner_stealth_dh_secret`: the DH point `k·R` is compressed and
+/// fed borsh-encoded (`u32_le(len) || bytes`) into a `com.tari.ootle.wallet` / `stealth_owner.n{net}`
+/// domain-separated Blake2b-512. Pinned by the host reference test in the ledger client crate.
+pub fn derive_stealth_secret(
+    network_byte: u8,
+    account_secret: &Scalar,
+    public_nonce: &[u8; 32],
+) -> Result<Scalar, AppStatus> {
+    let r = CompressedRistretto(*public_nonce)
+        .decompress()
+        .ok_or(AppStatus::OotleStatusWord(OotleStatusWord::BadRequest))?;
+    let dh = (account_secret * r).compress().0;
+
+    let label = format!("{STEALTH_OWNER_LABEL}.n{network_byte}");
+    let mut hasher = Blake2b_512::new();
+    add_domain_separation_tag(&mut hasher, WALLET_DOMAIN, WALLET_DOMAIN_VERSION, &label).map_err(hash_err)?;
+    // borsh length-prefixes a byte slice with a little-endian u32.
+    hasher.update(&(dh.len() as u32).to_le_bytes()).map_err(hash_err)?;
+    hasher.update(&dh).map_err(hash_err)?;
+    let mut out = Zeroizing::new([0u8; 64]);
+    hasher.finalize(out.as_mut()).map_err(hash_err)?;
+    let c = Scalar::from_bytes_mod_order_wide(&out);
+
+    Ok(c + account_secret)
 }
 
 /// `e = Scalar::from_uniform_bytes(DomainSep("challenge") || len(R)||R || len(P)||P || len(m)||m)`,

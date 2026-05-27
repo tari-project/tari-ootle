@@ -23,6 +23,14 @@ pub mod signing {
     pub const SCHNORR_DOMAIN_VERSION: u8 = 1;
     pub const SCHNORR_LABEL: &str = "challenge";
 
+    /// Domain for Ootle wallet key-derivation KDFs, mirroring `OotleWalletHashDomain` in
+    /// `tari_ootle_wallet_crypto::hashers`. Used to derive the stealth owner signing key on-device.
+    pub const WALLET_DOMAIN: &str = "com.tari.ootle.wallet";
+    pub const WALLET_DOMAIN_VERSION: u8 = 1;
+    /// Base label for the stealth owner-secret KDF (`stealth_owner_hasher64`). The full label
+    /// appends `.n{network_byte}`, matching `wallet_hasher64`.
+    pub const STEALTH_OWNER_LABEL: &str = "stealth_owner";
+
     /// Device-internal domain tag for deterministic (synthetic) nonce derivation. Not part of any
     /// network format — only the resulting signature must verify — so this is chosen freely.
     pub const NONCE_DOMAIN: &[u8] = b"com.tari.ootle.ledger.schnorr_nonce.v1";

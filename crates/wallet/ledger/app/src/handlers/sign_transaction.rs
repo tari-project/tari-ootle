@@ -33,7 +33,7 @@ use ootle_ledger_common::{
 };
 
 use crate::{
-    hashing::{MessageHasher, sign_message},
+    hashing::{MessageHasher, derive_stealth_secret, sign_message},
     key_derive::derive_from_bip32_key,
     state::{SigningState, State, TxDisplay},
     status::AppStatus,
@@ -85,6 +85,7 @@ pub struct SignReview {
     pub index: u64,
     pub key_type: KeyType,
     pub mode: SignMode,
+    pub stealth_public_nonce: Option<[u8; 32]>,
     pub display: TxDisplay,
 }
 
@@ -131,6 +132,7 @@ fn start_stream(state: &mut State, data: &[u8]) -> Result<(), AppStatus> {
         index: header.index,
         key_type: header.key_type,
         mode: header.mode,
+        stealth_public_nonce: header.stealth_public_nonce,
         field_cursor: 0,
         in_field: None,
         display: TxDisplay::default(),
@@ -239,6 +241,7 @@ fn finalize(state: &mut State) -> Result<ChunkResult, AppStatus> {
         index: signing.index,
         key_type: signing.key_type,
         mode: signing.mode,
+        stealth_public_nonce: signing.stealth_public_nonce,
         display: signing.display,
     }))
 }
@@ -247,9 +250,11 @@ fn finalize(state: &mut State) -> Result<ChunkResult, AppStatus> {
 /// layers render these into their respective field widgets.
 pub fn review_fields(review: &SignReview) -> Vec<(String, String)> {
     let mut fields = Vec::new();
-    let operation = match review.mode {
-        SignMode::AddSigner => "Authorize",
-        SignMode::Seal => "Seal",
+    let operation = match (review.mode, review.stealth_public_nonce.is_some()) {
+        (SignMode::AddSigner, false) => "Authorize",
+        (SignMode::AddSigner, true) => "Authorize (confidential)",
+        (SignMode::Seal, false) => "Seal",
+        (SignMode::Seal, true) => "Seal (confidential)",
     };
     fields.push(("Operation".to_string(), operation.to_string()));
     fields.push(("Network".to_string(), review.display.network.to_string()));
@@ -279,9 +284,15 @@ fn to_hex(bytes: &[u8]) -> String {
     s
 }
 
-/// Derive the signing key and sign the reviewed message. Called only after the user approves.
+/// Derive the signing key and sign the reviewed message. Called only after the user approves. For a
+/// confidential transfer (`stealth_public_nonce` set) the account key is tweaked to the stealth key
+/// `c + k` before signing, so the returned public key is the stealth address.
 pub fn sign_approved(review: &SignReview) -> Result<SignTransactionResponse, AppStatus> {
-    let secret = zeroize::Zeroizing::new(derive_from_bip32_key(review.account, review.index, review.key_type)?);
+    let account_secret = zeroize::Zeroizing::new(derive_from_bip32_key(review.account, review.index, review.key_type)?);
+    let secret = match review.stealth_public_nonce {
+        Some(nonce) => zeroize::Zeroizing::new(derive_stealth_secret(review.display.network, &account_secret, &nonce)?),
+        None => account_secret,
+    };
     let (public_key, signature) = sign_message(&secret, &review.message)?;
     Ok(SignTransactionResponse { public_key, signature })
 }

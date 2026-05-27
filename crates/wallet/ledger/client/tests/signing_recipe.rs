@@ -14,17 +14,20 @@
 //! APDU transport remain to be exercised on Speculos.
 
 use blake2::{Blake2b512, Digest};
-use curve25519_dalek::{Scalar, constants::RISTRETTO_BASEPOINT_TABLE};
+use curve25519_dalek::{Scalar, constants::RISTRETTO_BASEPOINT_TABLE, ristretto::CompressedRistretto};
 use indexmap::IndexSet;
 use ootle_ledger_common::signing::{
     NONCE_DOMAIN,
     SCHNORR_DOMAIN,
     SCHNORR_DOMAIN_VERSION,
     SCHNORR_LABEL,
+    STEALTH_OWNER_LABEL,
     TX_DOMAIN,
     TX_DOMAIN_VERSION,
     TX_LABEL_SEAL,
     TX_LABEL_SIGNATURE,
+    WALLET_DOMAIN,
+    WALLET_DOMAIN_VERSION,
 };
 use rand::Rng;
 use tari_ootle_transaction::{
@@ -123,6 +126,28 @@ fn sign(secret: &Scalar, m: &[u8; 64]) -> ([u8; 32], [u8; 64]) {
     sig[..32].copy_from_slice(&r);
     sig[32..].copy_from_slice(s.as_bytes());
     (pk, sig)
+}
+
+/// The stealth signing-key tweak applied before signing a confidential transfer (mirrors
+/// `derive_stealth_secret` in `src/hashing.rs`): `c + k` where `c = H_stealth_owner(network, k·R)`
+/// and `R` is the spent UTXO's sender public nonce. The DH point is compressed and fed
+/// borsh-encoded (`u32_le(len) || bytes`), matching `DomainSeparatedBorshHasher::update_consensus_encode`
+/// on a byte slice in `tari_ootle_wallet_crypto::kdfs::dh_kdf_aead`.
+fn derive_stealth_secret(network_byte: u8, account_secret: &Scalar, public_nonce: &[u8; 32]) -> Scalar {
+    let r = CompressedRistretto(*public_nonce)
+        .decompress()
+        .expect("public nonce is a valid Ristretto point");
+    let dh = (account_secret * r).compress().0;
+
+    let label = format!("{STEALTH_OWNER_LABEL}.n{network_byte}");
+    let mut h = Blake2b512::new();
+    add_domain_separation_tag(&mut h, WALLET_DOMAIN, WALLET_DOMAIN_VERSION, &label);
+    h.update((dh.len() as u32).to_le_bytes());
+    h.update(dh);
+    let mut out = [0u8; 64];
+    out.copy_from_slice(&h.finalize());
+    let c = Scalar::from_bytes_mod_order_wide(&out);
+    c + account_secret
 }
 
 // ---- helpers ------------------------------------------------------------------------------------
@@ -249,4 +274,54 @@ fn seal_recipe_matches_and_verifies() {
     let (pk, sig) = sign(&seal_signer, &m);
     let seal = TransactionSealSignature::new(RistrettoPublicKeyBytes::from_bytes(&pk).unwrap(), sig_bytes(&sig));
     assert!(seal.verify_v1(&unsealed), "seal signature failed to verify");
+}
+
+#[test]
+fn stealth_recipe_matches_and_verifies() {
+    use ootle_network::Network;
+    use tari_crypto::{
+        keys::{PublicKey, SecretKey},
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+        tari_utilities::ByteArray,
+    };
+    use tari_ootle_wallet_crypto::kdfs::{owner_stealth_dh_secret, owner_stealth_dh_stealth_address};
+
+    let network = Network::LocalNet;
+    let mut rng = rand::rng();
+    // Account spend key k, and the sender ephemeral nonce (r, R) carried by the spent UTXO.
+    let k = RistrettoSecretKey::random(&mut rng);
+    let k_pub = RistrettoPublicKey::from_secret_key(&k);
+    let r = RistrettoSecretKey::random(&mut rng);
+    let r_pub = RistrettoPublicKey::from_secret_key(&r);
+
+    // Device inputs: the account scalar and the compressed public nonce R.
+    let k_scalar = Scalar::from_bytes_mod_order(<[u8; 32]>::try_from(k.as_bytes()).unwrap());
+    let r_bytes = <[u8; 32]>::try_from(r_pub.as_bytes()).unwrap();
+
+    // (1) device tweak == owner_stealth_dh_secret
+    let got = derive_stealth_secret(network.as_byte(), &k_scalar, &r_bytes);
+    let expected = owner_stealth_dh_secret(network, &k, &r_pub);
+    assert_eq!(&got.as_bytes()[..], expected.as_bytes(), "stealth secret mismatch");
+
+    // (2) returned public key == the recipient-derivable stealth address C = c.G + k.G
+    let stealth_address = owner_stealth_dh_stealth_address(network, &k_pub, &r);
+    assert_eq!(
+        public_key(&got),
+        <[u8; 32]>::try_from(stealth_address.as_bytes()).unwrap(),
+        "stealth address mismatch"
+    );
+
+    // (3) an authorization signature produced with the stealth key verifies under tari_crypto
+    let seal_signer = pk_bytes(&random_scalar());
+    let tx = sample_unsigned();
+    let m = message(
+        TX_LABEL_SIGNATURE,
+        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+    );
+    let (pk, sig) = sign(&got, &m);
+    let signature = TransactionSignature::new(RistrettoPublicKeyBytes::from_bytes(&pk).unwrap(), sig_bytes(&sig));
+    assert!(
+        signature.verify_v1(&seal_signer, &tx),
+        "stealth authorization signature failed to verify"
+    );
 }

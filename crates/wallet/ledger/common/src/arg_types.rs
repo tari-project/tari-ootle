@@ -142,12 +142,18 @@ impl TryFrom<u8> for SigningField {
 ///
 /// Identifies the signing key (same derivation params as [`GetPublicKeyRequest`]) and the
 /// procedure. The transaction fields themselves follow as `Segment` frames.
+///
+/// `stealth_public_nonce` is set for confidential (stealth) transfers: when present, the device
+/// signs with the stealth-derived key `c + k` (`c = H_stealth_owner(network, k·R)`, `R` the spent
+/// UTXO's sender public nonce) instead of the raw account key. It is a key-derivation parameter
+/// only — not part of the signed message — so the message recipe is identical to the public path.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignTransactionHeader {
     pub account: u64,
     pub index: u64,
     pub key_type: KeyType,
     pub mode: SignMode,
+    pub stealth_public_nonce: Option<[u8; 32]>,
 }
 
 /// Response returned on the `Finalize` frame once the user approves.

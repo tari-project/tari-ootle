@@ -98,12 +98,17 @@ impl<T: Exchange> LedgerClient<T> {
     /// fields in chain order — see `tari_ootle_transaction::TransactionSignature::signing_preimage_v1`
     /// / `TransactionSealSignature::signing_preimage_v1`. The device recomputes the signing message
     /// from these bytes itself; nothing here is trusted as a precomputed hash.
+    ///
+    /// `stealth_public_nonce` is `Some` for a confidential (stealth) transfer: the spent UTXO's
+    /// sender public nonce `R`, which the device uses to sign with the stealth key `c + k` rather
+    /// than the raw account key. It is not part of the signed message.
     pub async fn sign_transaction(
         &self,
         account: u64,
         index: u64,
         key_type: KeyType,
         mode: SignMode,
+        stealth_public_nonce: Option<[u8; 32]>,
         segments: &[SegmentRef<'_>],
     ) -> LedgerClientResult<SignTransactionResponse, T::Error> {
         let header = SignTransactionHeader {
@@ -111,6 +116,7 @@ impl<T: Exchange> LedgerClient<T> {
             index,
             key_type,
             mode,
+            stealth_public_nonce,
         };
         let header_bytes =
             borsh::to_vec(&header).map_err(|e| LedgerClientError::InvalidResponse { details: e.to_string() })?;
@@ -268,6 +274,7 @@ mod tests {
                 index,
                 KeyType::Account,
                 SignMode::AddSigner,
+                None,
                 &to_refs(&segments),
             )
             .await
@@ -292,7 +299,14 @@ mod tests {
         let unsealed = UnsealedTransactionV1::new(sample_unsigned(), vec![]);
         let segments = TransactionSealSignature::signing_preimage_v1(&unsealed);
         let response = client
-            .sign_transaction(account, index, KeyType::Account, SignMode::Seal, &to_refs(&segments))
+            .sign_transaction(
+                account,
+                index,
+                KeyType::Account,
+                SignMode::Seal,
+                None,
+                &to_refs(&segments),
+            )
             .await
             .unwrap();
 
@@ -301,5 +315,71 @@ mod tests {
             SchnorrSignatureBytes::try_from(&response.signature[..]).unwrap(),
         );
         assert!(seal.verify_v1(&unsealed), "device seal signature did not verify");
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires Speculos to be running with the ootle ledger app."]
+    async fn sign_stealth_roundtrip() {
+        use ootle_network::Network;
+        use tari_crypto::{
+            keys::{PublicKey, SecretKey},
+            ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+            tari_utilities::ByteArray,
+        };
+        use tari_ootle_wallet_crypto::kdfs::owner_stealth_dh_stealth_address;
+
+        let client = LedgerClient::new(speculos_transport());
+        let (account, index) = (0u64, 0u64);
+
+        // The device's account public key, and a fresh sender ephemeral nonce (r, R) standing in for
+        // the sender nonce of a received stealth UTXO being spent.
+        let account_pk_bytes = client.get_public_key(account, index, KeyType::Account).await.unwrap();
+        let account_pk = RistrettoPublicKey::from_canonical_bytes(&account_pk_bytes[..]).unwrap();
+        let r = RistrettoSecretKey::random(&mut rand::rng());
+        let r_pub = RistrettoPublicKey::from_secret_key(&r);
+        let mut nonce = [0u8; 32];
+        nonce.copy_from_slice(r_pub.as_bytes());
+
+        // Any public key works as the seal-signer context for an authorization signature.
+        let seal_signer = account_pk_bytes;
+        let tx = sample_unsigned();
+        let segments = TransactionSignature::signing_preimage_v1(&seal_signer, &tx);
+
+        let response = client
+            .sign_transaction(
+                account,
+                index,
+                KeyType::Account,
+                SignMode::AddSigner,
+                Some(nonce),
+                &to_refs(&segments),
+            )
+            .await
+            .unwrap();
+
+        // The device must sign with the stealth key, not the raw account key.
+        assert_ne!(
+            response.public_key, *account_pk_bytes,
+            "device signed with the account key"
+        );
+
+        // The returned key must equal the recipient-derivable stealth address for this network.
+        let network = Network::try_from(tx.network).unwrap();
+        let expected = owner_stealth_dh_stealth_address(network, &account_pk, &r);
+        assert_eq!(
+            &response.public_key[..],
+            expected.as_bytes(),
+            "unexpected stealth address"
+        );
+
+        // And the stealth signature verifies under tari_crypto.
+        let signature = TransactionSignature::new(
+            RistrettoPublicKeyBytes::from(response.public_key),
+            SchnorrSignatureBytes::try_from(&response.signature[..]).unwrap(),
+        );
+        assert!(
+            signature.verify_v1(&seal_signer, &tx),
+            "device stealth signature did not verify"
+        );
     }
 }

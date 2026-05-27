@@ -1407,6 +1407,10 @@ pub struct StealthTransfer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_memo: Option<Memo>,
     pub pay_to: PayTo,
+    /// If set, the sender's Ootle address is attached as the output memo so the recipient can identify and save
+    /// the sender as a contact. Mutually exclusive with `output_memo` (the sender address takes precedence).
+    #[serde(default)]
+    pub attach_sender_address: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1447,6 +1451,9 @@ pub struct UtxoInfo {
     pub value: Amount,
     pub status: OutputStatus,
     pub memo: Option<Memo>,
+    /// The sender's Ootle address, resolved from the memo when it is a `SenderAddress` variant, using the
+    /// wallet's configured network. `None` for all other memo types.
+    pub sender_address: Option<OotleAddress>,
     pub spend_condition: SpendCondition,
     pub is_burnt: bool,
     pub is_frozen: bool,

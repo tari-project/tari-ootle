@@ -20,6 +20,10 @@ export function Memo({ memo }: MemoProps) {
   if ("Bytes" in memo) {
     return <span>{memo ? Buffer.from(memo.Bytes).toString("hex") : "No Memo"}</span>;
   }
+  if ("SenderAddress" in memo) {
+    // The resolved Ootle address is surfaced separately (see StealthUtxoList); show a label if we end up here.
+    return <span>Sender address</span>;
+  }
   if ("PayRefAndBytes" in memo) {
     try {
       const bytes = hexToU8(memo.PayRefAndBytes);

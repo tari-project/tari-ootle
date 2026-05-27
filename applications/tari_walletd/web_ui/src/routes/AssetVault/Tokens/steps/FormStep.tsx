@@ -23,16 +23,7 @@
 import AddressAutocomplete from "@components/AddressAutocomplete";
 import CopyAddress from "@components/CopyAddress";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import {
-  Alert,
-  Chip,
-  CircularProgress,
-  Divider,
-  InputAdornment,
-  InputLabel,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Alert, Chip, CircularProgress, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
@@ -62,6 +53,7 @@ export interface SendMoneyFormState {
   fee: string;
   badge: string | null;
   memo: string;
+  attachSenderAddress: boolean;
   swapPoolAddress: string;
   // Calculated from fee estimate + pool ratio, not user-entered
   swapInputAmount: string;
@@ -270,7 +262,7 @@ export default function FormStep({
               </Typography>
             )}
 
-            {transferFormState.outputToRevealed ? null : (
+            {transferFormState.outputToRevealed || transferFormState.attachSenderAddress ? null : (
               <TextField
                 name="memo"
                 label="Memo message (optional, max 253 characters)"
@@ -281,6 +273,19 @@ export default function FormStep({
                 onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
                 style={{ flexGrow: 1 }}
                 disabled={disabled}
+              />
+            )}
+            {isStealth && !transferFormState.outputToRevealed && (
+              <FormControlLabel
+                control={
+                  <CheckBox
+                    name="attachSenderAddress"
+                    checked={transferFormState.attachSenderAddress}
+                    onChange={onCheckboxFormValueChange}
+                    disabled={disabled}
+                  />
+                }
+                label="Attach my Ootle address (lets the recipient save you as a contact; replaces the memo)"
               />
             )}
             <InputLabel id="select-input-selection">Input Selection</InputLabel>

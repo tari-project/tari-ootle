@@ -10,4 +10,9 @@ export type StealthTransfer = {
   revealed_output_amount: Amount;
   output_memo?: Memo | null;
   pay_to: PayTo;
+  /**
+   * If set, the sender's Ootle address is attached as the output memo so the recipient can identify and save
+   * the sender as a contact. Mutually exclusive with `output_memo` (the sender address takes precedence).
+   */
+  attach_sender_address: boolean;
 };

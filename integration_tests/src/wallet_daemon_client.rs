@@ -133,6 +133,7 @@ pub async fn transfer_stealth(
                 revealed_output_amount: Default::default(),
                 output_memo: None,
                 pay_to: PayTo::StealthPublicKey,
+                attach_sender_address: false,
             }],
             max_fee: 2000,
             dry_run: false,

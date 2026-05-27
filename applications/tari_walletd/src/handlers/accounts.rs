@@ -1088,44 +1088,74 @@ pub async fn handle_stealth_transfer(
         ));
     };
 
+    // The sender's own address keys (account public key + view public key), used when an output opts in to
+    // attaching the sender address as its memo. Network is omitted; the recipient implies it from its own wallet.
+    let sender_address_memo = {
+        let addr = owner_account.address();
+        let account_key: [u8; 32] = addr
+            .account_public_key()
+            .as_bytes()
+            .try_into()
+            .expect("account public key is 32 bytes");
+        let view_key: [u8; 32] = addr
+            .view_only_key()
+            .as_bytes()
+            .try_into()
+            .expect("view public key is 32 bytes");
+        let pay_ref = addr.pay_ref().map(|p| p.as_bytes()).unwrap_or(&[]);
+        Memo::new_sender_address(account_key, view_key, pay_ref)
+            .expect("pay reference length bounded by OotleAddress (<= PayRef::MAX_LEN)")
+    };
+
     let outputs = req
         .transfers
         .into_iter()
-        .map(|transfer| match transfer.destination_address.pay_ref() {
-            Some(pay_ref) => {
-                let memo = transfer.output_memo.unwrap_or_else(|| Memo::new_message("").unwrap());
-                if memo.as_pay_ref().is_some() {
-                    warn!(
-                        target: LOG_TARGET,
-                        "❗️ Overwriting existing pay ref in memo for transfer to address {}",
-                        transfer.destination_address
-                    );
-                }
-
-                // Try to add the pay ref to the memo
-                let memo_bytes = memo
-                    .as_memo_message()
-                    .map(|s| s.as_bytes())
-                    .or_else(|| memo.as_memo_bytes())
-                    .ok_or_else(|| invalid_params("pay ref", Some("can only include pay ref in message memo")))?;
-                let memo = Memo::new_pay_ref_and_bytes_truncate(pay_ref, memo_bytes)
-                    .expect("PayRef guaranteed to fit within the memo");
-
-                Ok(TransferOutput {
+        .map(|transfer| {
+            if transfer.attach_sender_address {
+                return Ok(TransferOutput {
                     address: transfer.destination_address,
                     blinded_amount: transfer.blinded_output_amount,
                     revealed_amount: transfer.revealed_output_amount,
-                    memo: Some(memo),
+                    memo: Some(sender_address_memo.clone()),
                     pay_to: transfer.pay_to,
-                })
-            },
-            None => Ok(TransferOutput {
-                address: transfer.destination_address,
-                blinded_amount: transfer.blinded_output_amount,
-                revealed_amount: transfer.revealed_output_amount,
-                memo: transfer.output_memo,
-                pay_to: transfer.pay_to,
-            }),
+                });
+            }
+            match transfer.destination_address.pay_ref() {
+                Some(pay_ref) => {
+                    let memo = transfer.output_memo.unwrap_or_else(|| Memo::new_message("").unwrap());
+                    if memo.as_pay_ref().is_some() {
+                        warn!(
+                            target: LOG_TARGET,
+                            "❗️ Overwriting existing pay ref in memo for transfer to address {}",
+                            transfer.destination_address
+                        );
+                    }
+
+                    // Try to add the pay ref to the memo
+                    let memo_bytes = memo
+                        .as_memo_message()
+                        .map(|s| s.as_bytes())
+                        .or_else(|| memo.as_memo_bytes())
+                        .ok_or_else(|| invalid_params("pay ref", Some("can only include pay ref in message memo")))?;
+                    let memo = Memo::new_pay_ref_and_bytes_truncate(pay_ref, memo_bytes)
+                        .expect("PayRef guaranteed to fit within the memo");
+
+                    Ok(TransferOutput {
+                        address: transfer.destination_address,
+                        blinded_amount: transfer.blinded_output_amount,
+                        revealed_amount: transfer.revealed_output_amount,
+                        memo: Some(memo),
+                        pay_to: transfer.pay_to,
+                    })
+                },
+                None => Ok(TransferOutput {
+                    address: transfer.destination_address,
+                    blinded_amount: transfer.blinded_output_amount,
+                    revealed_amount: transfer.revealed_output_amount,
+                    memo: transfer.output_memo,
+                    pay_to: transfer.pay_to,
+                }),
+            }
         })
         .collect::<anyhow::Result<_>>()?;
 

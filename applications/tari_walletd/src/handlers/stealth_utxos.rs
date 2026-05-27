@@ -8,7 +8,8 @@ use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::{info, warn};
 use tari_engine_types::crypto::ValueLookupTable;
-use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup};
+use tari_ootle_address::{Network, OotleAddress, PayRef};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup, memo::Memo};
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
@@ -19,7 +20,7 @@ use tari_ootle_walletd_client::{
         UtxoInfo,
     },
 };
-use tari_template_lib_types::UtxoAddress;
+use tari_template_lib_types::{UtxoAddress, crypto::RistrettoPublicKeyBytes};
 use tokio::{
     task::{AbortHandle, spawn_blocking},
     time::Instant,
@@ -36,6 +37,8 @@ pub async fn handle_list(
 ) -> Result<StealthUtxosListResponse, anyhow::Error> {
     context.authorize(token, &[Permission::StealthUtxos(Crud::Read, req.account_address)])?;
 
+    let network = context.wallet_sdk().network();
+
     let utxos = context.wallet_sdk().stealth_outputs_api().utxos_get_many(
         &req.resource_address,
         req.account_address.as_ref(),
@@ -49,6 +52,7 @@ pub async fn handle_list(
                 address: o.to_utxo_address(),
                 value: o.value.into(),
                 status: o.status,
+                sender_address: resolve_sender_address(o.memo.as_ref(), network),
                 memo: o.memo,
                 spend_condition: o.spend_condition,
                 is_burnt: o.is_burnt,
@@ -57,6 +61,19 @@ pub async fn handle_list(
             })
             .collect(),
     })
+}
+
+/// Reconstructs the sender's [`OotleAddress`] from a `SenderAddress` memo using the wallet's network, including
+/// any attached pay reference. Returns `None` for any other memo variant or if the embedded keys are malformed.
+fn resolve_sender_address(memo: Option<&Memo>, network: Network) -> Option<OotleAddress> {
+    let (account_key, view_key, pay_ref) = memo?.as_sender_address()?;
+    let account_key = RistrettoPublicKeyBytes::from_bytes(account_key).ok()?;
+    let view_key = RistrettoPublicKeyBytes::from_bytes(view_key).ok()?;
+    let mut address = OotleAddress::new(network, view_key, account_key);
+    if let Some(pay_ref) = PayRef::from_bytes(pay_ref) {
+        address = address.with_pay_ref(pay_ref);
+    }
+    Some(address)
 }
 
 #[allow(clippy::too_many_lines)]

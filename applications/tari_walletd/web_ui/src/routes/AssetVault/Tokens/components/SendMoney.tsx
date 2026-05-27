@@ -63,6 +63,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     fee: "",
     badge: null,
     memo: "",
+    attachSenderAddress: false,
     swapPoolAddress: "",
     swapInputAmount: "",
   };
@@ -294,7 +295,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         output_to_revealed: transferFormState.outputToRevealed,
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
-        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
+        output_memo:
+          transferFormState.memo && !transferFormState.attachSenderAddress
+            ? { Message: transferFormState.memo }
+            : undefined,
+        attach_sender_address: transferFormState.attachSenderAddress,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: dryRunSwapInputAmount,
       };
@@ -403,7 +408,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         output_to_revealed: transferFormState.outputToRevealed,
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
-        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
+        output_memo:
+          transferFormState.memo && !transferFormState.attachSenderAddress
+            ? { Message: transferFormState.memo }
+            : undefined,
+        attach_sender_address: transferFormState.attachSenderAddress,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: transferFormState.swapInputAmount ? BigInt(transferFormState.swapInputAmount) : null,
       };

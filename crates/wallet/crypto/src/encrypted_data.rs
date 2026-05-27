@@ -313,6 +313,22 @@ mod tests {
         assert_eq!(value, amount);
         assert_eq!(msk, mask);
         assert_eq!(decrypted_memo.unwrap(), memo);
+
+        // With a sender address (no pay ref)
+        let memo = Memo::new_sender_address([1u8; 32], [2u8; 32], &[]).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
+        assert_eq!(value, amount);
+        assert_eq!(msk, mask);
+        assert_eq!(decrypted_memo.unwrap(), memo);
+
+        // With a sender address that carries a max-length pay ref (lands in the largest tier)
+        let memo = Memo::new_sender_address([3u8; 32], [4u8; 32], &[5u8; 64]).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
+        assert_eq!(value, amount);
+        assert_eq!(msk, mask);
+        assert_eq!(decrypted_memo.unwrap(), memo);
     }
 
     #[test]

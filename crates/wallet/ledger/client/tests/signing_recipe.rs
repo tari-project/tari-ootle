@@ -31,6 +31,7 @@ use tari_ootle_transaction::{
     Blob,
     Blobs,
     Instruction,
+    PreimageSegment,
     TransactionSealSignature,
     TransactionSignature,
     UnsealedTransactionV1,
@@ -73,11 +74,14 @@ fn add_domain_separation_tag(h: &mut Blake2b512, domain: &str, version: u8, labe
     }
 }
 
-/// Recompute the transaction message: domain preamble + raw borsh preimage bytes.
-fn message(label: &str, preimage: &[u8]) -> [u8; 64] {
+/// Recompute the transaction message: domain preamble, then each preimage segment fed straight
+/// into the hasher (mirrors the device, which streams chunks without buffering the whole preimage).
+fn message(label: &str, segments: &[PreimageSegment]) -> [u8; 64] {
     let mut h = Blake2b512::new();
     add_domain_separation_tag(&mut h, TX_DOMAIN, TX_DOMAIN_VERSION, label);
-    h.update(preimage);
+    for segment in segments {
+        h.update(&segment.bytes);
+    }
     let mut out = [0u8; 64];
     out.copy_from_slice(&h.finalize());
     out
@@ -137,10 +141,6 @@ fn sig_bytes(sig: &[u8; 64]) -> SchnorrSignatureBytes {
     SchnorrSignatureBytes::try_from(&sig[..]).unwrap()
 }
 
-fn preimage(segments: Vec<tari_ootle_transaction::PreimageSegment>) -> Vec<u8> {
-    segments.into_iter().flat_map(|s| s.bytes).collect()
-}
-
 fn sample_unsigned() -> UnsignedTransactionV1 {
     let mut blobs = Blobs::empty();
     blobs.push(Blob::from(vec![1u8, 2, 3])).unwrap();
@@ -198,8 +198,10 @@ fn add_signer_recipe_matches_and_verifies() {
     let tx = sample_unsigned();
 
     // (1) message recipe == create_message_v1
-    let preimage = preimage(TransactionSignature::signing_preimage_v1(&seal_signer, &tx));
-    let m = message(TX_LABEL_SIGNATURE, &preimage);
+    let m = message(
+        TX_LABEL_SIGNATURE,
+        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+    );
     assert_eq!(
         m,
         TransactionSignature::create_message_v1(&seal_signer, &tx),
@@ -225,7 +227,7 @@ fn seal_recipe_matches_and_verifies() {
     let signer = random_scalar();
     let auth_msg = message(
         TX_LABEL_SIGNATURE,
-        &preimage(TransactionSignature::signing_preimage_v1(&seal_signer_pk, &unsigned)),
+        &TransactionSignature::signing_preimage_v1(&seal_signer_pk, &unsigned),
     );
     let (auth_pk, auth_sig) = sign(&signer, &auth_msg);
     let prior = TransactionSignature::new(
@@ -236,10 +238,7 @@ fn seal_recipe_matches_and_verifies() {
     let unsealed = UnsealedTransactionV1::new(unsigned, vec![prior]);
 
     // (1) seal message recipe == create_message_v1
-    let m = message(
-        TX_LABEL_SEAL,
-        &preimage(TransactionSealSignature::signing_preimage_v1(&unsealed)),
-    );
+    let m = message(TX_LABEL_SEAL, &TransactionSealSignature::signing_preimage_v1(&unsealed));
     assert_eq!(
         m,
         TransactionSealSignature::create_message_v1(&unsealed),

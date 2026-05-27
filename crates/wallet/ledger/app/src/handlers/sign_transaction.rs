@@ -155,7 +155,7 @@ fn process_segment(state: &mut State, p1: u8, data: &[u8]) -> Result<(), AppStat
             if field != expected {
                 return Err(stream_err());
             }
-            capture_display(&mut signing.display, field, data);
+            capture_display(&mut signing.display, field, data)?;
             signing.hasher.update(data).map_err(|_| hash_fail())?;
             if is_last {
                 signing.field_cursor += 1;
@@ -179,41 +179,45 @@ fn process_segment(state: &mut State, p1: u8, data: &[u8]) -> Result<(), AppStat
 }
 
 /// Parse the displayable summary fields from a field's first chunk. All values are derived from
-/// the exact bytes hashed, never from a separate host-declared header.
-fn capture_display(display: &mut TxDisplay, field: SigningField, data: &[u8]) {
+/// the exact bytes hashed, never from a separate host-declared header. A first chunk too short to
+/// hold the field's header is rejected, so a truncated stream cannot spoof the displayed summary
+/// (show `0`/`None`) while the full data is hashed in later chunks.
+fn capture_display(display: &mut TxDisplay, field: SigningField, data: &[u8]) -> Result<(), AppStatus> {
     match field {
-        SigningField::Network => {
-            if let Some(&b) = data.first() {
-                display.network = b;
-            }
-        },
+        SigningField::Network => display.network = *data.first().ok_or_else(bad_request)?,
         // Vec/IndexSet borsh: leading u32 little-endian length is the element count.
-        SigningField::FeeInstructions => display.fee_instruction_count = read_u32(data),
-        SigningField::Instructions => display.instruction_count = read_u32(data),
-        SigningField::Inputs => display.input_count = read_u32(data),
+        SigningField::FeeInstructions => display.fee_instruction_count = read_u32(data)?,
+        SigningField::Instructions => display.instruction_count = read_u32(data)?,
+        SigningField::Inputs => display.input_count = read_u32(data)?,
         // Option<Epoch> borsh: 1-byte tag, then a u64 little-endian if present.
-        SigningField::MinEpoch => display.min_epoch = read_option_u64(data),
-        SigningField::MaxEpoch => display.max_epoch = read_option_u64(data),
+        SigningField::MinEpoch => display.min_epoch = read_option_u64(data)?,
+        SigningField::MaxEpoch => display.max_epoch = read_option_u64(data)?,
         _ => {},
     }
+    Ok(())
 }
 
-fn read_u32(data: &[u8]) -> u32 {
-    if data.len() >= 4 {
-        u32::from_le_bytes([data[0], data[1], data[2], data[3]])
-    } else {
-        0
-    }
+fn read_u32(data: &[u8]) -> Result<u32, AppStatus> {
+    let bytes: [u8; 4] = data
+        .get(..4)
+        .ok_or_else(bad_request)?
+        .try_into()
+        .map_err(|_| bad_request())?;
+    Ok(u32::from_le_bytes(bytes))
 }
 
-fn read_option_u64(data: &[u8]) -> Option<u64> {
+fn read_option_u64(data: &[u8]) -> Result<Option<u64>, AppStatus> {
     match data.first() {
-        Some(1) if data.len() >= 9 => {
-            let mut b = [0u8; 8];
-            b.copy_from_slice(&data[1..9]);
-            Some(u64::from_le_bytes(b))
+        Some(0) => Ok(None),
+        Some(1) => {
+            let bytes: [u8; 8] = data
+                .get(1..9)
+                .ok_or_else(bad_request)?
+                .try_into()
+                .map_err(|_| bad_request())?;
+            Ok(Some(u64::from_le_bytes(bytes)))
         },
-        _ => None,
+        _ => Err(bad_request()),
     }
 }
 
@@ -277,7 +281,7 @@ fn to_hex(bytes: &[u8]) -> String {
 
 /// Derive the signing key and sign the reviewed message. Called only after the user approves.
 pub fn sign_approved(review: &SignReview) -> Result<SignTransactionResponse, AppStatus> {
-    let secret = derive_from_bip32_key(review.account, review.index, review.key_type)?;
+    let secret = zeroize::Zeroizing::new(derive_from_bip32_key(review.account, review.index, review.key_type)?);
     let (public_key, signature) = sign_message(&secret, &review.message)?;
     Ok(SignTransactionResponse { public_key, signature })
 }

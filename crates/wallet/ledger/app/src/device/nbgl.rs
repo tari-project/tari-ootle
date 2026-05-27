@@ -123,9 +123,8 @@ fn handle_sign<const N: usize>(state_mut: &mut State, command: Command<N>, reque
 
     match outcome {
         Ok(ChunkResult::Ack) => {
-            command
-                .reply(&[], StatusWords::Ok)
-                .unwrap_or_else(|e| panic!("Failed to send response: {:?}", e));
+            // Best-effort ack; a failed reply means the link is already gone, so don't halt the device.
+            let _ = command.reply(&[], StatusWords::Ok);
         },
         Ok(ChunkResult::ReadyToSign(review)) => {
             let comm = command.into_comm();

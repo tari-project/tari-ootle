@@ -178,11 +178,19 @@ mod tests {
     use super::*;
     use crate::speculos_transport::SpeculosTransport;
 
+    /// Build a Speculos transport, with the base URL overridable via `SPECULOS_URL` (default
+    /// `http://localhost:5000`).
+    fn speculos_transport() -> SpeculosTransport {
+        match std::env::var("SPECULOS_URL") {
+            Ok(base) => SpeculosTransport::with_base_url(&base),
+            Err(_) => SpeculosTransport::new(),
+        }
+    }
+
     #[tokio::test]
     #[ignore = "Requires Speculos to be running with the ootle ledger app."]
     async fn basic_instructions() {
-        let transport = SpeculosTransport::new();
-        let client = LedgerClient::new(transport);
+        let client = LedgerClient::new(speculos_transport());
 
         let version = client.get_app_version().await.unwrap();
         assert_eq!(version, "0.1.0");
@@ -246,7 +254,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "Requires Speculos to be running with the ootle ledger app."]
     async fn sign_authorization_roundtrip() {
-        let client = LedgerClient::new(SpeculosTransport::new());
+        let client = LedgerClient::new(speculos_transport());
         let (account, index) = (0u64, 0u64);
 
         // Any public key works as the seal-signer context for an authorization signature.
@@ -278,7 +286,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "Requires Speculos to be running with the ootle ledger app."]
     async fn seal_roundtrip() {
-        let client = LedgerClient::new(SpeculosTransport::new());
+        let client = LedgerClient::new(speculos_transport());
         let (account, index) = (0u64, 0u64);
 
         let unsealed = UnsealedTransactionV1::new(sample_unsigned(), vec![]);

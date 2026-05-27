@@ -889,9 +889,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         use crate::global::schema::block_headers;
 
         // Idempotent insert: the base-layer scanner may re-scan previously seen heights after a
-        // base-layer reorg (see base_layer/oracle.rs::scan_blockchain's Reorged branch), in which
-        // case this insert would otherwise fail the UNIQUE(block_hash, epoch) constraint and abort
-        // the scan. Swallowing duplicates is safe because (block_hash, epoch) identifies the row.
+        // base-layer reorg (see base_layer/oracle.rs::handle_reorg, which rewinds the scan position
+        // to the fork point), in which case this insert would otherwise fail the UNIQUE(block_hash,
+        // epoch) constraint and abort the scan. Swallowing duplicates is safe because (block_hash,
+        // epoch) identifies the row.
         diesel::insert_into(block_headers::table)
             .values((
                 block_headers::epoch.eq(header.epoch.as_u64() as i64),
@@ -948,6 +949,19 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             })?;
 
         header.try_into()
+    }
+
+    fn delete_block_headers_above(&self, tx: &mut Self::DbTransaction<'_>, height: u64) -> Result<usize, Self::Error> {
+        use crate::global::schema::block_headers;
+
+        let num_deleted = diesel::delete(block_headers::table.filter(block_headers::height.gt(height as i64)))
+            .execute(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "delete::block_headers_above",
+            })?;
+
+        Ok(num_deleted)
     }
 }
 

@@ -15,7 +15,7 @@ use tari_base_node_client::{
     BaseNodeClientError,
     futures_util::TryStreamExt,
     grpc::GrpcBaseNodeClient,
-    types::BaseLayerMetadata,
+    types::{BaseLayerConsensusConstants, BaseLayerMetadata},
 };
 use tari_common_types::types::FixedHash;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
@@ -157,14 +157,12 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
                 self.sync_blockchain(tip).await
             },
             BlockchainProgression::Reorged => {
-                error!(
+                warn!(
                     target: LOG_TARGET,
-                    "⚠️ Base layer reorg detected. Rescanning from genesis."
+                    "⚠️ Base layer reorg detected at scanned height {}. Locating fork point.",
+                    self.last_scanned_height
                 );
-                // TODO: we need to figure out where the fork happened, and delete data after the fork if able.
-                self.last_scanned_hash = None;
-                self.last_scanned_validator_node_mr = None;
-                self.last_scanned_height = 0;
+                self.handle_reorg(&tip).await?;
                 self.has_attempted_scan = true;
                 self.sync_blockchain(tip).await
             },
@@ -219,6 +217,138 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore> BaseLayerOracleInner<
             },
             None => Ok(BlockchainProgression::Progressed),
         }
+    }
+
+    /// Recovers from a detected base-layer reorg by rewinding the scanner to the fork point.
+    ///
+    /// Walks backwards from the deepest height we scanned, asking the base node for the block on the
+    /// (new) canonical chain at each height. The fork point is the highest such height whose canonical
+    /// block we have already stored — everything above it was built on the orphaned chain. We delete
+    /// those stale headers and rewind our scan position to the fork point, so the subsequent
+    /// `sync_blockchain` re-fetches and stores the canonical headers in their place. The epoch database
+    /// therefore converges on the correct chain rather than accumulating orphaned headers.
+    ///
+    /// We only attempt surgical recovery for reorgs within the confirmation depth (`height_lag`); a reorg
+    /// deeper than that is treated as unrecoverable — we discard all stored headers and rescan from the
+    /// start height. This both matches the confirmation-depth guarantee (boundaries are only emitted once
+    /// `height_lag`-buried) and bounds the backward probe below to at most `height_lag` base-node calls.
+    async fn handle_reorg(&mut self, tip: &BaseLayerMetadata) -> Result<(), BaseLayerOracleError> {
+        let floor = self.lag_start_height();
+
+        // Without persisted headers there is nothing in the epoch DB to repair; rewind to the start of
+        // our range and let the normal scan re-emit events on the new chain.
+        if !self.config.features.sync_headers {
+            self.rewind_to_floor();
+            return Ok(());
+        }
+
+        let constants = self
+            .base_node_client
+            .get_consensus_constants(tip.height_of_longest_chain)
+            .await?;
+        // Bound the lookup epoch by the tip epoch (never excludes a stored header, even if the L1
+        // epoch_length constant changed since the header was stored).
+        let max_epoch = constants.height_to_epoch(tip.height_of_longest_chain);
+
+        // The fork point cannot be above the new canonical tip, nor above the deepest height we scanned.
+        // We only walk back `height_lag` blocks: a deeper fork is treated as unrecoverable below.
+        let mut height = self.last_scanned_height.min(tip.height_of_longest_chain);
+        let search_floor = self
+            .last_scanned_height
+            .saturating_sub(self.config.height_lag)
+            .max(floor);
+        while height > search_floor {
+            let epoch = constants.height_to_epoch(height);
+            // The block on the new canonical chain at this height (None if the chain is now shorter).
+            let Some(canonical) = self.fetch_canonical_header_at(height).await? else {
+                height -= 1;
+                continue;
+            };
+            let canonical_hash = hash_header(self.network, &canonical);
+            if self
+                .store
+                .find_block_header_by_hash(max_epoch, &canonical_hash)
+                .map_err(BaseLayerOracleError::StoreError)?
+                .is_some()
+            {
+                let num_deleted = self
+                    .store
+                    .delete_block_headers_above(height)
+                    .map_err(BaseLayerOracleError::StoreError)?;
+                info!(
+                    target: LOG_TARGET,
+                    "⚓ Base layer fork point at height {height} ({canonical_hash}). Deleted {num_deleted} stale \
+                     header(s) above it; rewinding scanner."
+                );
+                self.last_scanned_height = height;
+                self.last_scanned_hash = Some(canonical_hash);
+                self.last_scanned_validator_node_mr = Some(canonical.validator_node_mr);
+                self.reset_last_epoch_hash_to_boundary(epoch, &constants)?;
+                return Ok(());
+            }
+            height -= 1;
+        }
+
+        // No common ancestor within the recoverable range: discard everything and rebuild from the start
+        // height. The re-scan re-crosses (and re-emits) every epoch boundary above the floor, so the epoch
+        // hashes self-correct.
+        let num_deleted = self
+            .store
+            .delete_block_headers_above(floor)
+            .map_err(BaseLayerOracleError::StoreError)?;
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ Base layer reorg deeper than the recoverable range (start height {floor}). Deleted {num_deleted} \
+             header(s); rescanning from the start."
+        );
+        self.rewind_to_floor();
+        Ok(())
+    }
+
+    /// After rewinding to a fork point in `fork_epoch`, points `last_epoch_hash` back at the boundary block
+    /// that opened that epoch. Boundaries at or below the fork point are canonical, so this discards any
+    /// orphaned boundary hash carried over from a chain-shortening reorg — the re-scan resumes *above* the
+    /// fork point and so never re-crosses the fork epoch's own boundary to correct it.
+    ///
+    /// If that boundary block sits below our scan range (so we never emitted it), there is nothing to
+    /// recover from the store and the existing value is left as-is.
+    fn reset_last_epoch_hash_to_boundary(
+        &mut self,
+        fork_epoch: Epoch,
+        constants: &BaseLayerConsensusConstants,
+    ) -> Result<(), BaseLayerOracleError> {
+        let boundary_height = fork_epoch.as_u64().saturating_mul(constants.epoch_length());
+        match self
+            .store
+            .get_first_block_header_in_epoch(fork_epoch)
+            .map_err(BaseLayerOracleError::StoreError)?
+        {
+            Some(boundary) if boundary.height == boundary_height => {
+                self.last_epoch_hash = Some(boundary.block_hash);
+            },
+            _ => {
+                debug!(
+                    target: LOG_TARGET,
+                    "Fork epoch {fork_epoch} boundary block is not within the scan range; leaving last_epoch_hash unchanged"
+                );
+            },
+        }
+        Ok(())
+    }
+
+    /// Fetches the block header on the canonical chain at the given height, or `None` if the chain does
+    /// not (yet) extend to it.
+    async fn fetch_canonical_header_at(&mut self, height: u64) -> Result<Option<BlockHeader>, BaseLayerOracleError> {
+        let mut stream = self.base_node_client.stream_headers(height, 1).await?;
+        Ok(stream.try_next().await?)
+    }
+
+    /// Resets the in-memory scan position to the start of our scan range, as on a fresh start. The
+    /// persisted position is corrected by the next successful `set_last_scanned_block`.
+    fn rewind_to_floor(&mut self) {
+        self.last_scanned_height = self.lag_start_height();
+        self.last_scanned_hash = None;
+        self.last_scanned_validator_node_mr = None;
     }
 
     #[allow(clippy::too_many_lines)]

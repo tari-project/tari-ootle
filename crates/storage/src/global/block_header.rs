@@ -50,6 +50,12 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> BlockHeaderDb<'a, 'tx, TGlobalD
     ) -> Result<BlockHeaderModel, TGlobalDbAdapter::Error> {
         self.backend.get_first_block_header_by_epoch(self.tx, epoch)
     }
+
+    /// Deletes every stored header with a height strictly greater than `height`, returning the number of
+    /// rows removed. Used to discard headers orphaned by a base-layer reorg.
+    pub fn delete_above(&mut self, height: u64) -> Result<usize, TGlobalDbAdapter::Error> {
+        self.backend.delete_block_headers_above(self.tx, height)
+    }
 }
 
 #[derive(Debug, Clone)]

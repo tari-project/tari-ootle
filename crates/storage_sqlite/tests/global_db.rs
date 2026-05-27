@@ -108,9 +108,9 @@ fn change_committee_shard_group() {
 
 #[test]
 fn block_header_insert_is_idempotent() {
-    // The base-layer scanner rescans from genesis on reorg detection, which re-inserts
-    // already-seen (block_hash, epoch) rows. These must be swallowed rather than erroring out the
-    // scan.
+    // On reorg detection the base-layer scanner rewinds to the fork point and re-scans, which can
+    // re-insert already-seen (block_hash, epoch) rows. These must be swallowed rather than erroring
+    // out the scan.
     let db = create_db();
     let mut tx = db.create_transaction().unwrap();
     let mut headers = db.block_headers(&mut tx);
@@ -134,4 +134,31 @@ fn block_header_insert_is_idempotent() {
         validator_node_merkle_root: FixedHash::from([5u8; 32]),
     };
     headers.insert(other_epoch).unwrap();
+}
+
+#[test]
+fn delete_block_headers_above_removes_higher_headers() {
+    // On reorg recovery the scanner deletes every header above the fork point so the canonical
+    // headers can be re-scanned in their place (see base_layer/oracle.rs::handle_reorg).
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut headers = db.block_headers(&mut tx);
+    for height in [100u64, 101, 102, 103] {
+        headers
+            .insert(BlockHeaderModel {
+                epoch: Epoch(1),
+                height,
+                block_hash: FixedHash::from([height as u8; 32]),
+                kernel_merkle_root: FixedHash::from([2u8; 32]),
+                validator_node_merkle_root: FixedHash::from([3u8; 32]),
+            })
+            .unwrap();
+    }
+
+    // Heights 102 and 103 sit above the fork point at 101 and must be removed.
+    assert_eq!(headers.delete_above(101).unwrap(), 2);
+    // The fork-point block and everything below it are retained.
+    assert_eq!(headers.delete_above(0).unwrap(), 2);
+    // Nothing left to delete.
+    assert_eq!(headers.delete_above(0).unwrap(), 0);
 }

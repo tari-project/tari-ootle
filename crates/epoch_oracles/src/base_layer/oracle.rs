@@ -228,17 +228,21 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
 
     /// Recovers from a detected base-layer reorg by rewinding the scanner to the fork point.
     ///
-    /// Walks backwards from the deepest height we scanned, asking the base node for the block on the
-    /// (new) canonical chain at each height. The fork point is the highest such height whose canonical
-    /// block we have already stored — everything above it was built on the orphaned chain. We delete
-    /// those stale headers and rewind our scan position to the fork point, so the subsequent
-    /// `sync_blockchain` re-fetches and stores the canonical headers in their place. The epoch database
-    /// therefore converges on the correct chain rather than accumulating orphaned headers.
+    /// The fork point is the highest height whose canonical block we have already stored — everything
+    /// above it was built on the orphaned chain. We delete those stale headers and rewind our scan
+    /// position to the fork point, so the subsequent `sync_blockchain` re-fetches and stores the canonical
+    /// headers in their place. The epoch database therefore converges on the correct chain rather than
+    /// accumulating orphaned headers.
     ///
     /// We only attempt surgical recovery for reorgs within the confirmation depth (`height_lag`); a reorg
     /// deeper than that is treated as unrecoverable — we discard all stored headers and rescan from the
-    /// start height. This both matches the confirmation-depth guarantee (boundaries are only emitted once
-    /// `height_lag`-buried) and bounds the backward probe below to at most `height_lag` base-node calls.
+    /// start height. This matches the confirmation-depth guarantee (boundaries are only emitted once
+    /// `height_lag`-buried) and bounds the candidate window to `height_lag` heights.
+    ///
+    /// The whole candidate window is fetched in a single `stream_headers` call (one round-trip rather than
+    /// one per height) and the fork point is then located locally. "Canonical block at height `h` is in
+    /// our store" is monotonic — true at and below the fork, false above it — so scanning the window from
+    /// the top down stops at the fork.
     async fn handle_reorg(&mut self, tip: &BaseLayerMetadata) -> Result<(), BaseLayerOracleError> {
         let floor = self.lag_start_height();
 
@@ -257,43 +261,58 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         // epoch_length constant changed since the header was stored).
         let max_epoch = constants.height_to_epoch(tip.height_of_longest_chain);
 
-        // The fork point cannot be above the new canonical tip, nor above the deepest height we scanned.
-        // We only walk back `height_lag` blocks: a deeper fork is treated as unrecoverable below.
-        let mut height = self.last_scanned_height.min(tip.height_of_longest_chain);
+        // Candidate window is (search_floor, top]: the fork cannot be above the new canonical tip nor above
+        // the deepest height we scanned, and we only recover within `height_lag` of our scan position.
+        let top = self.last_scanned_height.min(tip.height_of_longest_chain);
         let search_floor = self
             .last_scanned_height
             .saturating_sub(self.config.height_lag)
             .max(floor);
-        while height > search_floor {
-            let epoch = constants.height_to_epoch(height);
-            // The block on the new canonical chain at this height (None if the chain is now shorter).
-            let Some(canonical) = self.fetch_canonical_header_at(height).await? else {
-                height -= 1;
-                continue;
+        if top > search_floor {
+            // Fetch the whole candidate window in one streamed request (the base node returns up to its
+            // new tip, so a chain-shortening reorg simply yields fewer headers). `window_len` is bounded by
+            // `height_lag`. Scoped so the stream (which borrows the base node client) is dropped before the
+            // store lookups below.
+            let window_len = top - search_floor;
+            let canonical = {
+                let mut stream = self
+                    .base_node_client
+                    .stream_headers(search_floor + 1, window_len)
+                    .await?;
+                let mut headers = Vec::with_capacity(window_len as usize);
+                while let Some(header) = stream.try_next().await? {
+                    headers.push(header);
+                }
+                headers
             };
-            let canonical_hash = hash_header(self.network, &canonical);
-            if self
-                .store
-                .find_block_header_by_hash(max_epoch, &canonical_hash)
-                .map_err(BaseLayerOracleError::StoreError)?
-                .is_some()
-            {
-                let num_deleted = self
+
+            // Highest stored canonical block is the fork point (predicate is monotonic, so the first hit
+            // from the top is the answer).
+            for header in canonical.into_iter().rev() {
+                let canonical_hash = hash_header(self.network, &header);
+                if self
                     .store
-                    .delete_block_headers_above(height)
-                    .map_err(BaseLayerOracleError::StoreError)?;
-                info!(
-                    target: LOG_TARGET,
-                    "⚓ Base layer fork point at height {height} ({canonical_hash}). Deleted {num_deleted} stale \
-                     header(s) above it; rewinding scanner."
-                );
-                self.last_scanned_height = height;
-                self.last_scanned_hash = Some(canonical_hash);
-                self.last_scanned_validator_node_mr = Some(canonical.validator_node_mr);
-                self.reset_last_epoch_hash_to_boundary(epoch, &constants)?;
-                return Ok(());
+                    .find_block_header_by_hash(max_epoch, &canonical_hash)
+                    .map_err(BaseLayerOracleError::StoreError)?
+                    .is_some()
+                {
+                    let fork_height = header.height;
+                    let num_deleted = self
+                        .store
+                        .delete_block_headers_above(fork_height)
+                        .map_err(BaseLayerOracleError::StoreError)?;
+                    info!(
+                        target: LOG_TARGET,
+                        "⚓ Base layer fork point at height {fork_height} ({canonical_hash}). Deleted \
+                         {num_deleted} stale header(s) above it; rewinding scanner."
+                    );
+                    self.last_scanned_height = fork_height;
+                    self.last_scanned_hash = Some(canonical_hash);
+                    self.last_scanned_validator_node_mr = Some(header.validator_node_mr);
+                    self.reset_last_epoch_hash_to_boundary(constants.height_to_epoch(fork_height), &constants)?;
+                    return Ok(());
+                }
             }
-            height -= 1;
         }
 
         // No common ancestor within the recoverable range: discard everything and rebuild from the start
@@ -345,13 +364,6 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             },
         }
         Ok(())
-    }
-
-    /// Fetches the block header on the canonical chain at the given height, or `None` if the chain does
-    /// not (yet) extend to it.
-    async fn fetch_canonical_header_at(&mut self, height: u64) -> Result<Option<BlockHeader>, BaseLayerOracleError> {
-        let mut stream = self.base_node_client.stream_headers(height, 1).await?;
-        Ok(stream.try_next().await?)
     }
 
     /// Resets the in-memory scan position to the start of our scan range, as on a fresh start. The

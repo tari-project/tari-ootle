@@ -737,14 +737,10 @@ impl JsonRpcHandlers {
             .epoch_manager
             .get_local_committee_info(epoch)
             .await
-            .map(Some)
-            .or_else(|err| {
-                if err.is_not_registered_error() {
-                    Ok(None)
-                } else {
-                    Err(internal_error(answer_id.clone())(err))
-                }
-            })?;
+            // None when the VN is not registered or the epoch is not yet established (NoEpochFound
+            // during startup); a genuine error otherwise.
+            .optional()
+            .map_err(internal_error(answer_id.clone()))?;
         let height = self.consensus.current_view().get_height();
         let state = self.consensus.get_current_state();
         let state_versions = committee_info

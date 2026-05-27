@@ -32,6 +32,9 @@ time = { workspace = true, features = ["serde", "serde-human-readable"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["time", "macros", "rt"] }
 serde_json = { workspace = true }
+# Used by the base_layer reorg tests to mock the base node client (see base_layer::oracle::tests).
+minotari_app_grpc = { workspace = true }
+tonic = { workspace = true }
 
 [features]
 base_layer = [

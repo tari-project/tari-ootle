@@ -14,6 +14,7 @@ enum MemoTag {
     Message = 0x10,
     Bytes = 0x11,
     PayRefAndBytes = 0x12,
+    SenderAddress = 0x13,
 }
 
 impl MemoTag {
@@ -23,12 +24,20 @@ impl MemoTag {
             0x10 => Some(Self::Message),
             0x11 => Some(Self::Bytes),
             0x12 => Some(Self::PayRefAndBytes),
+            0x13 => Some(Self::SenderAddress),
             _ => None,
         }
     }
 }
 
 const MAX_BYTES_LENGTH: usize = 253;
+
+/// Length of the key portion of a sender address memo body: account public key (32) + view public key (32).
+const SENDER_ADDRESS_KEYS_LENGTH: usize = 64;
+/// Maximum pay reference length carried by a sender address memo. Matches `tari_ootle_address::PayRef::MAX_LEN`.
+const SENDER_ADDRESS_MAX_PAY_REF_LENGTH: usize = 64;
+/// Maximum encoded sender address body: keys (64) + pay-ref length prefix (1) + pay reference (<= 64).
+const SENDER_ADDRESS_MAX_LENGTH: usize = SENDER_ADDRESS_KEYS_LENGTH + 1 + SENDER_ADDRESS_MAX_PAY_REF_LENGTH;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -45,6 +54,11 @@ pub enum Memo {
     /// Payment reference and bytes delimited by a single byte length prefix.
     /// Length-delimited format: [pay_ref_len][pay_ref][arb bytes (typically utf-8 message)]
     PayRefAndBytes(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<MAX_BYTES_LENGTH>),
+    /// The sender's Ootle address, allowing the recipient to identify and save the sender as a contact.
+    /// Encoded like an `OotleAddress` without the leading network byte (the network is implied by the wallet that
+    /// decrypts the memo): account public key (32) ++ view public key (32) ++ pay-ref length (1) ++ pay reference
+    /// (0-64). The pay reference is optional.
+    SenderAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<SENDER_ADDRESS_MAX_LENGTH>),
 }
 
 impl Memo {
@@ -54,6 +68,21 @@ impl Memo {
     pub fn new_u256(value: [u8; 32]) -> Self {
         let b = MaxBytes::new_checked(value).expect("32 < MAX_BYTES_LENGTH");
         Self::U256(b)
+    }
+
+    /// Create a new `Memo::SenderAddress` from the sender's account public key, view public key and an optional
+    /// pay reference. Returns `None` if `pay_ref` exceeds the maximum pay reference length (64 bytes).
+    pub fn new_sender_address(account_key: [u8; 32], view_key: [u8; 32], pay_ref: &[u8]) -> Option<Self> {
+        if pay_ref.len() > SENDER_ADDRESS_MAX_PAY_REF_LENGTH {
+            return None;
+        }
+        let mut body = Vec::with_capacity(SENDER_ADDRESS_KEYS_LENGTH + 1 + pay_ref.len());
+        body.extend_from_slice(&account_key);
+        body.extend_from_slice(&view_key);
+        body.push(pay_ref.len() as u8); // <= 64, fits in u8
+        body.extend_from_slice(pay_ref);
+        let b = MaxBytes::new_checked(body)?;
+        Some(Self::SenderAddress(b))
     }
 
     pub fn new_message(s: impl Into<Box<str>>) -> Option<Self> {
@@ -116,6 +145,7 @@ impl Memo {
             Self::Bytes(b) => b.len(),
             Self::PayRefAndBytes(b) => b.len(),
             Self::U256(b) => b.len(),
+            Self::SenderAddress(b) => b.len(),
         }
     }
 
@@ -133,27 +163,27 @@ impl Memo {
                 let (_, msg_bytes) = split_len_prefixed(body)?;
                 str::from_utf8(msg_bytes).ok()
             },
-            Self::U256(_) => None,
+            Self::U256(_) | Self::SenderAddress(_) => None,
         }
     }
 
     pub fn as_memo_message(&self) -> Option<&str> {
         match self {
             Self::Message(s) => Some(s),
-            Self::Bytes(_) | Self::PayRefAndBytes(_) | Self::U256(_) => None,
+            Self::Bytes(_) | Self::PayRefAndBytes(_) | Self::U256(_) | Self::SenderAddress(_) => None,
         }
     }
 
     pub fn as_memo_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Bytes(b) => Some(b.as_ref()),
-            Self::Message(_) | Self::PayRefAndBytes(_) | Self::U256(_) => None,
+            Self::Message(_) | Self::PayRefAndBytes(_) | Self::U256(_) | Self::SenderAddress(_) => None,
         }
     }
 
     pub fn as_pay_ref(&self) -> Option<&[u8]> {
         match self {
-            Self::U256(_) | Self::Message(_) | Self::Bytes(_) => None,
+            Self::U256(_) | Self::Message(_) | Self::Bytes(_) | Self::SenderAddress(_) => None,
             Self::PayRefAndBytes(body) => split_len_prefixed(body).map(|(pay_ref, _)| pay_ref),
         }
     }
@@ -167,7 +197,7 @@ impl Memo {
 
     pub fn as_pay_ref_and_bytes(&self) -> Option<(&[u8], &[u8])> {
         match self {
-            Self::U256(_) | Self::Message(_) | Self::Bytes(_) => None,
+            Self::U256(_) | Self::Message(_) | Self::Bytes(_) | Self::SenderAddress(_) => None,
             Self::PayRefAndBytes(body) => {
                 let (pay_ref, msg_bytes) = split_len_prefixed(body)?;
                 Some((pay_ref, msg_bytes))
@@ -178,7 +208,17 @@ impl Memo {
     pub fn as_u256_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::U256(b) => Some(b.as_ref()),
-            Self::Message(_) | Self::Bytes(_) | Self::PayRefAndBytes(_) => None,
+            Self::Message(_) | Self::Bytes(_) | Self::PayRefAndBytes(_) | Self::SenderAddress(_) => None,
+        }
+    }
+
+    /// Returns the sender's `(account_public_key, view_public_key, pay_ref)` byte slices if this is a
+    /// `SenderAddress` memo. The account and view keys are 32 bytes each; `pay_ref` is 0-64 bytes (empty when no
+    /// pay reference was attached).
+    pub fn as_sender_address(&self) -> Option<(&[u8], &[u8], &[u8])> {
+        match self {
+            Self::SenderAddress(b) => split_sender_address(b.as_ref()),
+            Self::U256(_) | Self::Message(_) | Self::Bytes(_) | Self::PayRefAndBytes(_) => None,
         }
     }
 
@@ -209,6 +249,12 @@ impl Memo {
                 writer.write_all(&[len])?;
                 writer.write_all(b.as_ref())?;
             },
+            Self::SenderAddress(b) => {
+                // The body is self-delimiting (fixed-size keys + internal pay-ref length prefix), so we do not
+                // write an outer length prefix.
+                writer.write_all(&[MemoTag::SenderAddress as u8])?;
+                writer.write_all(b.as_ref())?;
+            },
         }
         Ok(())
     }
@@ -231,6 +277,28 @@ impl Memo {
                 let mut arr = [0u8; 32];
                 reader.read_exact(&mut arr)?;
                 Ok(Self::new_u256(arr))
+            },
+            MemoTag::SenderAddress => {
+                // Read the fixed-size keys and the pay-ref length prefix, then the pay reference itself.
+                let mut head = [0u8; SENDER_ADDRESS_KEYS_LENGTH + 1];
+                reader.read_exact(&mut head)?;
+                let pay_ref_len = head[SENDER_ADDRESS_KEYS_LENGTH] as usize;
+                if pay_ref_len > SENDER_ADDRESS_MAX_PAY_REF_LENGTH {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Sender address pay reference length {} exceeds maximum {}",
+                            pay_ref_len, SENDER_ADDRESS_MAX_PAY_REF_LENGTH
+                        ),
+                    ));
+                }
+                let mut body = Vec::with_capacity(head.len() + pay_ref_len);
+                body.extend_from_slice(&head);
+                let mut pay_ref = vec![0u8; pay_ref_len];
+                reader.read_exact(&mut pay_ref)?;
+                body.extend_from_slice(&pay_ref);
+                let b = MaxBytes::new_checked(body).expect("length checked (body <= SENDER_ADDRESS_MAX_LENGTH)");
+                Ok(Self::SenderAddress(b))
             },
             MemoTag::Message => {
                 let len = read_len_prefix(reader)?;
@@ -286,6 +354,20 @@ impl Display for Memo {
                 write_hex_fmt(f, msg_bytes)?;
                 write!(f, ")")
             },
+            Self::SenderAddress(b) => {
+                let Some((account_key, view_key, pay_ref)) = split_sender_address(b) else {
+                    return write!(f, "SenderAddress(<invalid encoding>)");
+                };
+                write!(f, "SenderAddress(account_key: ")?;
+                write_hex_fmt(f, account_key)?;
+                write!(f, ", view_key: ")?;
+                write_hex_fmt(f, view_key)?;
+                if !pay_ref.is_empty() {
+                    write!(f, ", pay_ref: ")?;
+                    write_hex_fmt(f, pay_ref)?;
+                }
+                write!(f, ")")
+            },
         }
     }
 }
@@ -325,6 +407,19 @@ fn read_len_prefix<R: io::Read>(reader: &mut R) -> io::Result<usize> {
         ));
     }
     Ok(len)
+}
+
+/// Splits a `SenderAddress` body into `(account_public_key, view_public_key, pay_ref)`. The body layout is
+/// `account(32) ++ view(32) ++ pay_ref_len(1) ++ pay_ref`. Returns `None` if the body is malformed.
+fn split_sender_address(body: &[u8]) -> Option<(&[u8], &[u8], &[u8])> {
+    if body.len() < SENDER_ADDRESS_KEYS_LENGTH + 1 {
+        return None;
+    }
+    let account_key = &body[..32];
+    let view_key = &body[32..SENDER_ADDRESS_KEYS_LENGTH];
+    let pay_ref_len = body[SENDER_ADDRESS_KEYS_LENGTH] as usize;
+    let pay_ref = body.get(SENDER_ADDRESS_KEYS_LENGTH + 1..SENDER_ADDRESS_KEYS_LENGTH + 1 + pay_ref_len)?;
+    Some((account_key, view_key, pay_ref))
 }
 
 fn split_len_prefixed(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -462,6 +557,65 @@ mod tests {
         memo.encode_into(&mut buf).unwrap();
         // We want the encoded memo to fit in the max size of an EncryptedData payload (i.e 255 bytes)
         assert!(buf.len() <= EncryptedData::max_size() - EncryptedData::min_size());
+    }
+
+    #[test]
+    fn it_encodes_and_decodes_sender_address_without_pay_ref() {
+        let account_key = [7u8; 32];
+        let view_key = [9u8; 32];
+        let original = Memo::new_sender_address(account_key, view_key, &[]).unwrap();
+
+        let mut buf = Vec::new();
+        original.encode_into(&mut buf).unwrap();
+        // tag (1) + account_key (32) + view_key (32) + pay_ref_len (1)
+        assert_eq!(buf.len(), 1 + SENDER_ADDRESS_KEYS_LENGTH + 1);
+        assert_eq!(buf[0], MemoTag::SenderAddress as u8);
+
+        let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
+        assert_eq!(original, decoded);
+
+        let (decoded_account, decoded_view, decoded_pay_ref) = decoded.as_sender_address().unwrap();
+        assert_eq!(decoded_account, &account_key);
+        assert_eq!(decoded_view, &view_key);
+        assert!(decoded_pay_ref.is_empty());
+    }
+
+    #[test]
+    fn it_encodes_and_decodes_sender_address_with_pay_ref() {
+        let account_key = [7u8; 32];
+        let view_key = [9u8; 32];
+        let pay_ref = vec![3u8; SENDER_ADDRESS_MAX_PAY_REF_LENGTH];
+        let original = Memo::new_sender_address(account_key, view_key, &pay_ref).unwrap();
+
+        let mut buf = Vec::new();
+        original.encode_into(&mut buf).unwrap();
+        // tag (1) + keys (64) + pay_ref_len (1) + pay_ref (64)
+        assert_eq!(buf.len(), 1 + SENDER_ADDRESS_KEYS_LENGTH + 1 + pay_ref.len());
+
+        let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
+        assert_eq!(original, decoded);
+
+        let (decoded_account, decoded_view, decoded_pay_ref) = decoded.as_sender_address().unwrap();
+        assert_eq!(decoded_account, &account_key);
+        assert_eq!(decoded_view, &view_key);
+        assert_eq!(decoded_pay_ref, pay_ref.as_slice());
+    }
+
+    #[test]
+    fn it_rejects_sender_address_pay_ref_that_is_too_long() {
+        let too_long = vec![1u8; SENDER_ADDRESS_MAX_PAY_REF_LENGTH + 1];
+        assert!(Memo::new_sender_address([0u8; 32], [0u8; 32], &too_long).is_none());
+    }
+
+    #[test]
+    fn it_decodes_sender_address_ignoring_trailing_padding() {
+        let original = Memo::new_sender_address([1u8; 32], [2u8; 32], &[42, 43, 44]).unwrap();
+        let mut buf = Vec::new();
+        original.encode_into(&mut buf).unwrap();
+        // Simulate the zero padding that the EncryptedData encoder appends after the memo.
+        buf.extend_from_slice(&[0u8; 63]);
+        let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
+        assert_eq!(original, decoded);
     }
 
     #[test]

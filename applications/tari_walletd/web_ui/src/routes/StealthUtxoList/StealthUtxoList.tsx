@@ -28,6 +28,7 @@ import {
 import { useState } from "react";
 import { useParams } from "react-router";
 import PlaceHolder from "./components/PlaceHolder";
+import { SenderAddress } from "./components/SenderAddress";
 import SortableHeader from "./components/SortableHeader";
 import StatusChip from "./components/StatusChip";
 
@@ -109,7 +110,11 @@ function StealthUtxoList({ account }: { account: Account }) {
                         <StatusChip status={utxo.status} tooltip={JSON.stringify(utxo.spend_condition)} />
                       </DataTableCell>
                       <DataTableCell>
-                        <Memo memo={utxo.memo} />
+                        {utxo.sender_address ? (
+                          <SenderAddress address={utxo.sender_address} />
+                        ) : (
+                          <Memo memo={utxo.memo} />
+                        )}
                       </DataTableCell>
                       <DataTableCell>{utxo.is_burnt ? "Yes" : "No"}</DataTableCell>
                       <DataTableCell>{utxo.is_frozen ? "Yes" : "No"}</DataTableCell>

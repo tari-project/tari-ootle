@@ -15,6 +15,7 @@ import { useCreateApiKey, useListApiKeys, useRevokeApiKey } from "@api/hooks/use
 import CopyToClipboard from "@components/CopyToClipboard";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { StyledPaper } from "@components/StyledComponents";
+import type { SelectChangeEvent } from "@mui/material";
 import {
   Alert,
   Box,
@@ -35,8 +36,6 @@ import {
   OutlinedInput,
   Select,
   Stack,
-  ToggleButton,
-  ToggleButtonGroup,
   Table,
   TableBody,
   TableCell,
@@ -44,9 +43,10 @@ import {
   TableHead,
   TableRow,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
-import type { SelectChangeEvent } from "@mui/material";
 import { permissionToString, type AuthCreateApiKeyResponse, type IssuedApiKey } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
@@ -343,11 +343,7 @@ export default function ApiKeys() {
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <FormControlLabel
           control={
-            <Checkbox
-              size="small"
-              checked={includeRevoked}
-              onChange={(e) => setIncludeRevoked(e.target.checked)}
-            />
+            <Checkbox size="small" checked={includeRevoked} onChange={(e) => setIncludeRevoked(e.target.checked)} />
           }
           label={<Typography variant="body2">Show revoked</Typography>}
         />

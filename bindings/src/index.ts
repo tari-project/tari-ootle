@@ -44,6 +44,7 @@ export * from "./types/DiffSummary";
 export * from "./types/ElgamalVerifiableBalanceBytes";
 export * from "./types/EncodedMerkleProof";
 export * from "./types/EncryptedData";
+export * from "./types/EndEpochAtom";
 export * from "./types/EntityId";
 export * from "./types/Epoch";
 export * from "./types/Era";

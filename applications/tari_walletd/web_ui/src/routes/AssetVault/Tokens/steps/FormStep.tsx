@@ -23,16 +23,7 @@
 import AddressAutocomplete from "@components/AddressAutocomplete";
 import CopyAddress from "@components/CopyAddress";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import {
-  Alert,
-  Chip,
-  CircularProgress,
-  Divider,
-  InputAdornment,
-  InputLabel,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Alert, Chip, CircularProgress, Divider, InputAdornment, InputLabel, Stack, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
@@ -62,6 +53,8 @@ export interface SendMoneyFormState {
   fee: string;
   badge: string | null;
   memo: string;
+  attachSenderAddress: boolean;
+  payRef: string;
   swapPoolAddress: string;
   // Calculated from fee estimate + pool ratio, not user-entered
   swapInputAmount: string;
@@ -168,13 +161,18 @@ export default function FormStep({
     poolRate !== null &&
     (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
+  // Pay reference is capped at 64 bytes whether it's embedded in a PayRefAndBytes or a SenderAddress memo.
+  const payRefByteLength = new TextEncoder().encode(transferFormState.payRef).length;
+  const payRefTooLong = payRefByteLength > 64;
+
   const isFormValid =
     !isNaNAmount &&
     validateOotleAddress(transferFormState.address) &&
     transferFormState.amount &&
     !hasInsufficientFunds &&
     !poolError &&
-    !poolHasNoLiquidity;
+    !poolHasNoLiquidity &&
+    !payRefTooLong;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -270,10 +268,10 @@ export default function FormStep({
               </Typography>
             )}
 
-            {transferFormState.outputToRevealed ? null : (
+            {transferFormState.outputToRevealed || transferFormState.attachSenderAddress ? null : (
               <TextField
                 name="memo"
-                label="Memo message (optional, max 253 characters)"
+                label="Encrypted Memo (optional, max 253 characters)"
                 slotProps={{
                   htmlInput: { maxLength: 253 },
                 }}
@@ -281,6 +279,34 @@ export default function FormStep({
                 onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
                 style={{ flexGrow: 1 }}
                 disabled={disabled}
+              />
+            )}
+            {isStealth && !transferFormState.outputToRevealed && (
+              <TextField
+                name="payRef"
+                label="Encrypted Pay ref (optional, max 64 bytes)"
+                value={transferFormState.payRef}
+                onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
+                error={payRefTooLong}
+                helperText={
+                  payRefTooLong
+                    ? `Too long: ${payRefByteLength} bytes (max 64)`
+                    : "Auto-filled from the destination address if it has one."
+                }
+                disabled={disabled}
+              />
+            )}
+            {isStealth && !transferFormState.outputToRevealed && (
+              <FormControlLabel
+                control={
+                  <CheckBox
+                    name="attachSenderAddress"
+                    checked={transferFormState.attachSenderAddress}
+                    onChange={onCheckboxFormValueChange}
+                    disabled={disabled}
+                  />
+                }
+                label="Attach my Ootle address"
               />
             )}
             <InputLabel id="select-input-selection">Input Selection</InputLabel>

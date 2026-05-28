@@ -1,6 +1,16 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-import { Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, useTheme } from "@mui/material";
+import {
+  Chip,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tooltip,
+  useTheme,
+} from "@mui/material";
 import { NestedCell } from "@routes/Templates/components/StyledTableComponents";
 import { FunctionDef, Type as FuncType } from "@tari-project/ootle-ts-bindings";
 

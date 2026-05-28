@@ -1,16 +1,14 @@
 // Copyright 2026 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import PageHeading from "@components/PageHeading";
-import { StyledPaper } from "@components/StyledComponents";
 import {
   useAddressBookAdd,
   useAddressBookDelete,
   useAddressBookList,
   useAddressBookUpdate,
 } from "@api/hooks/useAddressBook";
-import type { AddressBookEntry } from "@tari-project/ootle-ts-bindings";
-import { validateOotleAddress } from "@tari-project/ootle-ts-bindings";
+import PageHeading from "@components/PageHeading";
+import { StyledPaper } from "@components/StyledComponents";
 import {
   Alert,
   Box,
@@ -26,6 +24,8 @@ import {
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import { DataGrid, GridColDef, GridRenderCellParams } from "@mui/x-data-grid";
+import type { AddressBookEntry } from "@tari-project/ootle-ts-bindings";
+import { validateOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { MdAdd, MdDelete, MdEdit } from "react-icons/md";
 

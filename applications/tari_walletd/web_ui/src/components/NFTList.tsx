@@ -24,7 +24,12 @@ import type { ApiError } from "@api/helpers/types";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
-import { convertCborValue, type ListNftsResponse, type NonFungibleId, type NonFungibleToken } from "@tari-project/ootle-ts-bindings";
+import {
+  convertCborValue,
+  type ListNftsResponse,
+  type NonFungibleId,
+  type NonFungibleToken,
+} from "@tari-project/ootle-ts-bindings";
 import { renderJson, shortenString, shortenSubstateId, toHexString } from "@utils/helpers";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
 

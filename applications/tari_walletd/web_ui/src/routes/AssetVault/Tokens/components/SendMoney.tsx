@@ -29,6 +29,7 @@ import useAccountStore from "@store/accountStore";
 import {
   BadgeUsage,
   BalanceEntry,
+  decodeOotleAddressOrNull,
   rejectReasonToString,
   ResourceAddress,
   ResourceType,
@@ -63,6 +64,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     fee: "",
     badge: null,
     memo: "",
+    attachSenderAddress: false,
+    payRef: "",
     swapPoolAddress: "",
     swapInputAmount: "",
   };
@@ -106,6 +109,18 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         .finally(() => setIsLoadingPools(false));
     }
   }, [props.open, props.resource_type, props.resource_address]);
+
+  // Pre-fill the pay-ref input from the destination address's embedded pay-ref (if any). The pay-ref is
+  // decoupled from the "attach sender address" toggle: it drives either a PayRefAndBytes memo or, when sender
+  // address is attached, the pay-ref slot inside the SenderAddress memo. Skips when the user has already typed
+  // something or the destination's pay-ref is non-UTF-8 bytes.
+  useEffect(() => {
+    if (!transferFormState.address) return;
+    const decoded = decodeOotleAddressOrNull(transferFormState.address);
+    if (!decoded || typeof decoded.payRef !== "string" || decoded.payRef.length === 0) return;
+    const prefill = decoded.payRef;
+    setTransferFormState((prev) => (prev.payRef ? prev : { ...prev, payRef: prefill }));
+  }, [transferFormState.address]);
 
   const fetchPoolRate = useCallback(async (poolAddress: string) => {
     if (!poolAddress) {
@@ -294,7 +309,12 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         output_to_revealed: transferFormState.outputToRevealed,
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
-        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
+        output_memo:
+          transferFormState.memo && !transferFormState.attachSenderAddress
+            ? { Message: transferFormState.memo }
+            : undefined,
+        attach_sender_address: transferFormState.attachSenderAddress,
+        pay_ref: transferFormState.payRef || null,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: dryRunSwapInputAmount,
       };
@@ -403,7 +423,12 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         output_to_revealed: transferFormState.outputToRevealed,
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
-        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
+        output_memo:
+          transferFormState.memo && !transferFormState.attachSenderAddress
+            ? { Message: transferFormState.memo }
+            : undefined,
+        attach_sender_address: transferFormState.attachSenderAddress,
+        pay_ref: transferFormState.payRef || null,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: transferFormState.swapInputAmount ? BigInt(transferFormState.swapInputAmount) : null,
       };

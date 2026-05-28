@@ -26,11 +26,15 @@ import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
 import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
-import { SelectChangeEvent } from "@mui/material/Select";
+import Select, { SelectChangeEvent } from "@mui/material/Select";
 import TextField from "@mui/material/TextField";
 import { useNftTransferStore } from "@store/nftTransferStore";
-import { convertCborValue, type Account, type NonFungibleId, type NonFungibleToken } from "@tari-project/ootle-ts-bindings";
+import {
+  convertCborValue,
+  type Account,
+  type NonFungibleId,
+  type NonFungibleToken,
+} from "@tari-project/ootle-ts-bindings";
 import { validateOotleAddress } from "@tari-project/ootle-ts-bindings/dist/helpers/ootleAddress";
 import { displayNftId, substateIdToString } from "@utils/helpers";
 import { FormEvent, useMemo, useState } from "react";
@@ -196,9 +200,7 @@ export default function FormStep({
                 const imageUrl = mutableData?.image_url;
                 return (
                   <MenuItem key={nftIdToString(nft.nft_id)} value={JSON.stringify(nft.nft_id)}>
-                    <Checkbox
-                      checked={selectedNftIds.has(nftIdToString(nft.nft_id))}
-                    />
+                    <Checkbox checked={selectedNftIds.has(nftIdToString(nft.nft_id))} />
                     <Avatar
                       src={imageUrl}
                       variant="rounded"

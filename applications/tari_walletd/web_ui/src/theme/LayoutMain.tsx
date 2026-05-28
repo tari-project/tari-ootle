@@ -22,7 +22,6 @@
 
 import "@tari-project/ootle-web-ui-theming/overrides.ts";
 
-
 import { breadcrumbRoutes } from "@/App";
 import Logo from "@assets/Logo";
 import Breadcrumbs from "@components/Breadcrumbs";

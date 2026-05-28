@@ -23,7 +23,12 @@
 import CopyAddress from "@components/CopyAddress";
 import { Avatar, Box, Button, Divider, Stack, Typography } from "@mui/material";
 import { useNftTransferStore } from "@store/nftTransferStore";
-import { convertCborValue, type Account, type NonFungibleId, type NonFungibleToken } from "@tari-project/ootle-ts-bindings";
+import {
+  convertCborValue,
+  type Account,
+  type NonFungibleId,
+  type NonFungibleToken,
+} from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { displayNftId, formatCurrency, substateIdToString } from "@utils/helpers";
 

@@ -174,7 +174,11 @@ export default function TransactionDetails() {
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
                     <DataTableCell>
-                      {data.final_fee != null ? formatCurrency(data.final_fee, XTR_CURRENCY) : feeReceipt ? formatCurrency(feeReceipt.total_fees_paid, XTR_CURRENCY) : "0"}
+                      {data.final_fee != null
+                        ? formatCurrency(data.final_fee, XTR_CURRENCY)
+                        : feeReceipt
+                          ? formatCurrency(feeReceipt.total_fees_paid, XTR_CURRENCY)
+                          : "0"}
                       {feeReceipt?.total_fee_overcharge ? (
                         <>
                           {" "}
@@ -352,9 +356,7 @@ export default function TransactionDetails() {
           </Accordion>
           <Accordion expanded={expandedPanels.includes("panel10")} onChange={handleChange("panel10")}>
             <AccordionSummary aria-controls="panel10bh-content" id="panel10bh-header">
-              <Typography variant="h5">
-                Blobs ({transaction?.blob_hashes?.length ?? 0})
-              </Typography>
+              <Typography variant="h5">Blobs ({transaction?.blob_hashes?.length ?? 0})</Typography>
             </AccordionSummary>
             <AccordionDetails>
               <Blobs hashes={transaction?.blob_hashes || []} sizes={transaction?.blob_sizes || []} />

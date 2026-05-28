@@ -79,14 +79,17 @@ export default function NFTList(props: NftListProps) {
     return `${nft.resource_address}:${nftIdToString(nft.nft_id)}`;
   }, []);
 
-  const toggleSelect = useCallback((nft: NonFungibleToken) => {
-    setSelectedMap((prev) => {
-      const key = nftKey(nft);
-      const next = new Map(prev);
-      next.has(key) ? next.delete(key) : next.set(key, nft);
-      return next;
-    });
-  }, [nftKey]);
+  const toggleSelect = useCallback(
+    (nft: NonFungibleToken) => {
+      setSelectedMap((prev) => {
+        const key = nftKey(nft);
+        const next = new Map(prev);
+        next.has(key) ? next.delete(key) : next.set(key, nft);
+        return next;
+      });
+    },
+    [nftKey],
+  );
 
   const isSelectDisabled = useCallback(
     (nft: NonFungibleToken) => {

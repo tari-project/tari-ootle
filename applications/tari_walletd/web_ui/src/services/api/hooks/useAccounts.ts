@@ -128,6 +128,8 @@ export interface TransferParams {
   badge_usage: BadgeUsage;
   dry_run: boolean;
   output_memo?: Memo;
+  attach_sender_address?: boolean;
+  pay_ref?: string | null;
   swap_pool_address?: string | null;
   swap_input_amount?: bigint | null;
 }
@@ -183,6 +185,8 @@ export const useAccountsTransfer = () => {
               revealed_output_amount: params.output_to_revealed ? params.amount : 0,
               output_memo: params.output_memo || null,
               pay_to: "StealthPublicKey" as PayTo,
+              attach_sender_address: params.attach_sender_address ?? false,
+              pay_ref: params.pay_ref ?? null,
             },
           ],
           max_fee,

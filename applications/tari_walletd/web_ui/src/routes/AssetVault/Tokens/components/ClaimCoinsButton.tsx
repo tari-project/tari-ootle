@@ -20,7 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useCallback, useEffect, useState } from "react";
 import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
 import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
 import { useWalletInfo } from "@api/hooks/useWalletInfo";
@@ -32,6 +31,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { settingsGet, settingsSet } from "@utils/json_rpc";
+import { useCallback, useEffect, useState } from "react";
 
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();

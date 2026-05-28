@@ -76,12 +76,7 @@ export function SenderAddress({ address }: { address: string }) {
       <CopyToClipboard copy={address} />
       {payRefText && (
         <Tooltip title={`Pay reference: ${payRefText}`}>
-          <Chip
-            size="small"
-            color="info"
-            variant="outlined"
-            label={`Pay ref: ${shortenString(payRefText)}`}
-          />
+          <Chip size="small" color="info" variant="outlined" label={`Pay ref: ${shortenString(payRefText)}`} />
         </Tooltip>
       )}
       {ownAccount ? (

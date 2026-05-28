@@ -68,6 +68,26 @@ pub fn owner_stealth_dh_secret(
     c + private_key
 }
 
+/// L1-compatible derivation of the stealth claim secret `s = H(p·R) + p` for an L1 burn claim.
+///
+/// `H` mirrors the L1 wallet's `diffie_hellman_stealth_domain_hasher`:
+/// `WalletHasher::new_with_label("stealth_address")` over the raw 32-byte compressed DH product.
+/// This MUST stay byte-identical to the L1 derivation — see
+/// `tari/base_layer/transaction_components/src/transaction_components/one_sided.rs` and
+/// `key_manager/manager.rs::compute_stealth_claim_public_key`.
+pub fn burn_claim_stealth_secret(
+    account_secret: &RistrettoSecretKey,
+    sender_offset_public_key: &RistrettoPublicKey,
+) -> RistrettoSecretKey {
+    let shared_secret = dh(sender_offset_public_key, account_secret);
+    let hash = tari_hashing::WalletHasher::new_with_label("stealth_address")
+        .chain(shared_secret.as_bytes())
+        .finalize();
+    let scalar = RistrettoSecretKey::from_uniform_bytes(hash.as_ref())
+        .expect("Blake2b<U64> produces 64 bytes which is valid uniform input");
+    scalar + account_secret
+}
+
 fn stealth_owner_dh(
     network: Network,
     public_key: &RistrettoPublicKey,

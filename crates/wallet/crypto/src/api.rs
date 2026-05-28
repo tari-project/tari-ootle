@@ -108,6 +108,17 @@ impl StealthCryptoApi {
         kdfs::owner_stealth_dh_secret(network, secret_key, public_nonce)
     }
 
+    /// Derive `s = H(p·R) + p` using L1's exact `stealth_address` hash domain. Use only on L1
+    /// burn-claim paths where the L1 wallet signed the ownership proof against the matching
+    /// stealth address `C = s·G`.
+    pub fn derive_burn_claim_stealth_secret(
+        &self,
+        account_secret: &RistrettoSecretKey,
+        sender_offset_public_key: &RistrettoPublicKey,
+    ) -> RistrettoSecretKey {
+        kdfs::burn_claim_stealth_secret(account_secret, sender_offset_public_key)
+    }
+
     pub fn encrypt_value_and_mask(
         &self,
         amount: u64,

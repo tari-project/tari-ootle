@@ -39,7 +39,9 @@ export default function TemplateItem({ template, isOpen = false }: TemplateItemP
     <TableRow>
       <FluidTableCell colSpan={4} style={{ borderBottom: "none" }}>
         <Collapse in={isOpen} timeout="auto" unmountOnExit>
-          <Typography variant="h6" component="h3" sx={{ mt: 2 }}>Functions</Typography>
+          <Typography variant="h6" component="h3" sx={{ mt: 2 }}>
+            Functions
+          </Typography>
           {functionTable}
         </Collapse>
       </FluidTableCell>

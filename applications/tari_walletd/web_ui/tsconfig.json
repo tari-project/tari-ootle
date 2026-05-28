@@ -29,7 +29,7 @@
       "@api/*": ["./src/services/api/*"],
       "@store/*": ["./src/services/store/*"],
       "@theme/*": ["./src/theme/*"]
-    },
+    }
   },
   "include": ["src"],
   "references": [

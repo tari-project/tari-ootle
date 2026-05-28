@@ -26,7 +26,7 @@ import type { ResourceAddress, ResourceType } from "@tari-project/ootle-ts-bindi
 import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency } from "@utils/helpers";
-import { SendMoneyFormState, PoolRateInfo } from "./FormStep";
+import { PoolRateInfo, SendMoneyFormState } from "./FormStep";
 
 interface ConfirmationStepProps {
   resource_address?: ResourceAddress;

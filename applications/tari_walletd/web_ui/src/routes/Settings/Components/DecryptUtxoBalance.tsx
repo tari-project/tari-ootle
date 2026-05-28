@@ -26,7 +26,11 @@ import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { KeyBranch, StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse } from "@tari-project/ootle-ts-bindings";
+import {
+  KeyBranch,
+  StealthUtxosDecryptValueRequest,
+  StealthUtxosDecryptValueResponse,
+} from "@tari-project/ootle-ts-bindings";
 import { stealthDecryptUtxoBalance } from "@utils/json_rpc";
 import { useState } from "react";
 

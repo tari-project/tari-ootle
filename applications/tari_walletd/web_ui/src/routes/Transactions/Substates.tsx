@@ -27,7 +27,13 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { Box, Chip, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { convertCborValue, Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/ootle-ts-bindings";
+import {
+  convertCborValue,
+  Substate,
+  SubstateId,
+  substateIdToString,
+  TransactionResult,
+} from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 
@@ -61,43 +67,47 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
 
         {(() => {
           const entries = cborObjectEntries(nft.data);
-          return entries && (
-            <Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Immutable Data:
-              </Typography>
-              <Box sx={{ pl: 2 }}>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {entries.map(([key, val], index) => (
-                    <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Chip label={key} size="small" color="primary" variant="outlined" />
-                      <Typography variant="body2">{val}</Typography>
-                    </Box>
-                  ))}
+          return (
+            entries && (
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Immutable Data:
+                </Typography>
+                <Box sx={{ pl: 2 }}>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {entries.map(([key, val], index) => (
+                      <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Chip label={key} size="small" color="primary" variant="outlined" />
+                        <Typography variant="body2">{val}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
                 </Box>
               </Box>
-            </Box>
+            )
           );
         })()}
 
         {(() => {
           const entries = cborObjectEntries(nft.mutable_data);
-          return entries && (
-            <Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Mutable Data:
-              </Typography>
-              <Box sx={{ pl: 2 }}>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {entries.map(([key, val], index) => (
-                    <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Chip label={key} size="small" color="secondary" variant="outlined" />
-                      <Typography variant="body2">{val}</Typography>
-                    </Box>
-                  ))}
+          return (
+            entries && (
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Mutable Data:
+                </Typography>
+                <Box sx={{ pl: 2 }}>
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {entries.map(([key, val], index) => (
+                      <Box key={index} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Chip label={key} size="small" color="secondary" variant="outlined" />
+                        <Typography variant="body2">{val}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
                 </Box>
               </Box>
-            </Box>
+            )
           );
         })()}
       </Box>

@@ -41,6 +41,15 @@ import type {
   AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  AddressBookAddRequest,
+  AddressBookAddResponse,
+  AddressBookDeleteRequest,
+  AddressBookDeleteResponse,
+  AddressBookGetRequest,
+  AddressBookGetResponse,
+  AddressBookListResponse,
+  AddressBookUpdateRequest,
+  AddressBookUpdateResponse,
   AuthCreateApiKeyRequest,
   AuthCreateApiKeyResponse,
   AuthGetMethodResponse,
@@ -124,15 +133,6 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
-  AddressBookAddRequest,
-  AddressBookAddResponse,
-  AddressBookListResponse,
-  AddressBookGetRequest,
-  AddressBookGetResponse,
-  AddressBookUpdateRequest,
-  AddressBookUpdateResponse,
-  AddressBookDeleteRequest,
-  AddressBookDeleteResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import { jwtDecode } from "jwt-decode";
@@ -331,8 +331,9 @@ export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<Stea
   client().then((c) => c.stealthUtxosList(request));
 
 // swap pools
-export const swapPoolGetExchangeRate = (request: SwapPoolGetExchangeRateRequest): Promise<SwapPoolGetExchangeRateResponse> =>
-  client().then((c) => c.swapPoolGetExchangeRate(request));
+export const swapPoolGetExchangeRate = (
+  request: SwapPoolGetExchangeRateRequest,
+): Promise<SwapPoolGetExchangeRateResponse> => client().then((c) => c.swapPoolGetExchangeRate(request));
 
 export const swapPoolsList = (request: SwapPoolsListRequest): Promise<SwapPoolsListResponse> =>
   client().then((c) => c.swapPoolsList(request));
@@ -341,8 +342,7 @@ export const swapPoolsList = (request: SwapPoolsListRequest): Promise<SwapPoolsL
 export const addressBookAdd = (request: AddressBookAddRequest): Promise<AddressBookAddResponse> =>
   client().then((c) => c.addressBookAdd(request));
 
-export const addressBookList = (): Promise<AddressBookListResponse> =>
-  client().then((c) => c.addressBookList());
+export const addressBookList = (): Promise<AddressBookListResponse> => client().then((c) => c.addressBookList());
 
 export const addressBookGet = (request: AddressBookGetRequest): Promise<AddressBookGetResponse> =>
   client().then((c) => c.addressBookGet(request));

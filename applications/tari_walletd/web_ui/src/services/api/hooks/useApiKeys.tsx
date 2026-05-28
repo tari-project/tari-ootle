@@ -33,9 +33,7 @@ export const useListApiKeys = (includeRevoked: boolean = false) => {
   });
 };
 
-export const useCreateApiKey = (
-  onSuccess: (response: AuthCreateApiKeyResponse) => void,
-) => {
+export const useCreateApiKey = (onSuccess: (response: AuthCreateApiKeyResponse) => void) => {
   return useMutation({
     mutationFn: (request: AuthCreateApiKeyRequest) => authCreateApiKey(request),
     onSuccess,

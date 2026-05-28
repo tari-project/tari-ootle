@@ -45,12 +45,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import IconButton from "@mui/material/IconButton";
-import type {
-  AuthSessionInfo,
-  Permission,
-  Permissions,
-  RefreshTokenHash,
-} from "@tari-project/ootle-ts-bindings";
+import type { AuthSessionInfo, Permission, Permissions, RefreshTokenHash } from "@tari-project/ootle-ts-bindings";
 import { permissionToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoCloseCircleOutline } from "react-icons/io5";

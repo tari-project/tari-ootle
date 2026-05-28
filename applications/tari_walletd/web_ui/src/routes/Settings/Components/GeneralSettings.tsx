@@ -53,7 +53,9 @@ function GeneralSettings() {
     },
     {
       label: "Indexer Url",
-      content: <IndexerSettings indexerUrl={settings?.indexer_url ?? ""} walletNetwork={settings?.network.name ?? ""} />,
+      content: (
+        <IndexerSettings indexerUrl={settings?.indexer_url ?? ""} walletNetwork={settings?.network.name ?? ""} />
+      ),
     },
   ];
 

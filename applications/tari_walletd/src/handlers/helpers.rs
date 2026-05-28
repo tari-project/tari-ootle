@@ -240,7 +240,6 @@ pub(crate) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> 
             },
             value: proof.claim_proof.value,
             sender_offset_public_key: proof.claim_proof.sender_offset_public_key.to_byte_type(),
-            stealth_claim_public_key: proof.claim_proof.stealth_claim_public_key.to_byte_type(),
         },
         encrypted_data,
     })

@@ -38,12 +38,6 @@ pub struct MinotariBurnClaimProof {
     pub value: u64,
     #[n(6)]
     pub sender_offset_public_key: RistrettoPublicKeyBytes,
-    /// Stealth claim public key `C = H(r·P)·G + P`. The L1 burn proof's `ownership_proof` Schnorr
-    /// signature binds the commitment to `C`, and the L2 wallet spends the claim with the matching
-    /// stealth secret `s = H(R·p) + p`. `P` (the L2 account public key) never appears on chain or
-    /// in this proof.
-    #[n(7)]
-    pub stealth_claim_public_key: RistrettoPublicKeyBytes,
 }
 
 impl Display for MinotariBurnClaimProof {
@@ -51,14 +45,13 @@ impl Display for MinotariBurnClaimProof {
         write!(
             f,
             "MinotariBurnClaimProof (burn_public_key: {}, commitment: {}, ownership_proof: {}, encoded_merkle_proof: \
-             {} bytes, kernel: {}, value: {}, stealth_claim_public_key: {})",
+             {} bytes, kernel: {}, value: {})",
             self.burn_public_key,
             self.commitment,
             self.ownership_proof,
             self.encoded_merkle_proof.encoded_merkle_proof.len(),
             self.kernel.excess_sig,
             self.value,
-            self.stealth_claim_public_key,
         )
     }
 }

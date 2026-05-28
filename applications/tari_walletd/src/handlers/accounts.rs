@@ -515,14 +515,28 @@ pub(crate) async fn execute_claim_burn(
     // level stealth output api that takes care of keys but assumes that this is a regular transfer.
     let account_owner_key = sdk.key_manager_api().get_key(account_owner_key_id)?;
 
-    // The L1 ownership proof binds the commitment to the stealth claim public key `C` carried in
-    // the proof — not to the L2 account pubkey `P` — so we validate against `C`.
+    // Get the sender_offset_public_key (R) and use it to create a DH with the account owner key
+    let sender_offset_pub_key: RistrettoPublicKey = claim_proof
+        .sender_offset_public_key
+        .try_from_byte_type()
+        .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
+
+    // Stealth spend secret `s = H(R·p) + p`. The L1 ownership proof commits the burn to `C = s·G`,
+    // so this is the only key that can sign the claim transaction and satisfy the spend condition
+    // on the just-minted burn UTXO.
+    let stealth_secret = sdk.stealth_crypto_api().derive_stealth_owner_secret(
+        network,
+        account_owner_key.secret(),
+        &sender_offset_pub_key,
+    );
+    let stealth_claim_pk = RistrettoPublicKey::from_secret_key(&stealth_secret).to_byte_type();
+
     if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
         network,
         &claim_proof.ownership_proof,
         &claim_proof.commitment,
         claim_proof.value,
-        &claim_proof.stealth_claim_public_key,
+        &stealth_claim_pk,
     ) {
         return Err(invalid_params(
             "claim_proof.ownership_proof",
@@ -532,16 +546,10 @@ pub(crate) async fn execute_claim_burn(
 
     info!(
         target: LOG_TARGET,
-        "ℹ️ Signing claim burn for account {} (stealth claim pk on proof: {})",
+        "ℹ️ Signing claim burn for account {} (stealth claim pk: {})",
         account_owner_key.to_public_key().to_byte_type(),
-        claim_proof.stealth_claim_public_key,
+        stealth_claim_pk,
     );
-
-    // Get the sender_offset_public_key and use it to create a DH with the claim_nonce_key
-    let sender_offset_pub_key: RistrettoPublicKey = claim_proof
-        .sender_offset_public_key
-        .try_from_byte_type()
-        .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
 
     let decrypted = sdk.stealth_crypto_api().decrypt_utxo_data(
         &claimed_encrypted_data,
@@ -631,13 +639,6 @@ pub(crate) async fn execute_claim_burn(
         .with_dry_run(is_dry_run)
         .finish();
 
-    // Spend secret is `s = H(R·p) + p`. The L1 ownership proof commits the burn to `s·G` (= C),
-    // so this is the only key that can spend the just-minted UTXO.
-    let stealth_secret = sdk.stealth_crypto_api().derive_stealth_owner_secret(
-        network,
-        account_owner_key.secret(),
-        &sender_offset_pub_key,
-    );
     let transaction = sdk.signer_api().sign_with_explicit_key(&stealth_secret, transaction)?;
 
     if is_dry_run {

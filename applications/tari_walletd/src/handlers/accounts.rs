@@ -1107,19 +1107,22 @@ pub async fn handle_stealth_transfer(
         .transfers
         .into_iter()
         .map(|transfer| {
+            // Resolve the effective pay reference for this transfer. The explicit `pay_ref` request field wins
+            // when present; an explicit empty string disables any pay-ref. When the field is unset, fall back to
+            // the destination address's bech32-embedded pay-ref so non-frontend callers keep the historical
+            // behaviour.
+            let effective_pay_ref: Option<Vec<u8>> = match transfer.pay_ref.as_deref() {
+                Some("") => None,
+                Some(s) => Some(s.as_bytes().to_vec()),
+                None => transfer.destination_address.pay_ref().map(|p| p.as_bytes().to_vec()),
+            };
+
             if transfer.attach_sender_address {
-                // Per-output pay reference: explicit request value takes precedence so callers (incl. the web UI)
-                // can attach the destination's pay reference inside the SenderAddress memo instead of letting the
-                // destination's bech32 pay-ref be silently dropped. Falls back to the sender account's own
-                // pay-ref for non-frontend callers that don't set this field.
-                let pay_ref_bytes: Vec<u8> = match transfer.sender_address_pay_ref.as_deref() {
-                    Some(s) => s.as_bytes().to_vec(),
-                    None => owner_fallback_pay_ref.clone(),
-                };
-                let memo =
-                    Memo::new_sender_address(sender_account_key, sender_view_key, &pay_ref_bytes).ok_or_else(|| {
-                        invalid_params("sender_address_pay_ref", Some("pay reference too long (max 64 bytes)"))
-                    })?;
+                let pay_ref_bytes = effective_pay_ref
+                    .as_deref()
+                    .unwrap_or_else(|| owner_fallback_pay_ref.as_slice());
+                let memo = Memo::new_sender_address(sender_account_key, sender_view_key, pay_ref_bytes)
+                    .ok_or_else(|| invalid_params("pay_ref", Some("pay reference too long (max 64 bytes)")))?;
                 return Ok(TransferOutput {
                     address: transfer.destination_address,
                     blinded_amount: transfer.blinded_output_amount,
@@ -1128,7 +1131,8 @@ pub async fn handle_stealth_transfer(
                     pay_to: transfer.pay_to,
                 });
             }
-            match transfer.destination_address.pay_ref() {
+
+            match effective_pay_ref {
                 Some(pay_ref) => {
                     let memo = transfer.output_memo.unwrap_or_else(|| Memo::new_message("").unwrap());
                     if memo.as_pay_ref().is_some() {
@@ -1139,14 +1143,13 @@ pub async fn handle_stealth_transfer(
                         );
                     }
 
-                    // Try to add the pay ref to the memo
                     let memo_bytes = memo
                         .as_memo_message()
                         .map(|s| s.as_bytes())
                         .or_else(|| memo.as_memo_bytes())
-                        .ok_or_else(|| invalid_params("pay ref", Some("can only include pay ref in message memo")))?;
-                    let memo = Memo::new_pay_ref_and_bytes_truncate(pay_ref, memo_bytes)
-                        .expect("PayRef guaranteed to fit within the memo");
+                        .ok_or_else(|| invalid_params("pay_ref", Some("can only include pay ref in message memo")))?;
+                    let memo = Memo::new_pay_ref_and_bytes_truncate(&pay_ref, memo_bytes)
+                        .ok_or_else(|| invalid_params("pay_ref", Some("pay reference too long (max 64 bytes)")))?;
 
                     Ok(TransferOutput {
                         address: transfer.destination_address,

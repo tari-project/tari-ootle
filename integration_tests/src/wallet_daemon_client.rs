@@ -134,7 +134,7 @@ pub async fn transfer_stealth(
                 output_memo: None,
                 pay_to: PayTo::StealthPublicKey,
                 attach_sender_address: false,
-                sender_address_pay_ref: None,
+                pay_ref: None,
             }],
             max_fee: 2000,
             dry_run: false,

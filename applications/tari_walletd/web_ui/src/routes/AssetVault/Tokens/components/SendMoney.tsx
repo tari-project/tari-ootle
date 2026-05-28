@@ -110,16 +110,17 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
   }, [props.open, props.resource_type, props.resource_address]);
 
-  // When the user opts in to attaching their address, pre-fill the pay-ref input from the destination address's
-  // embedded pay-ref (if any) so it isn't silently lost. Skips when the user has already typed something or the
-  // destination's pay-ref is non-UTF-8 bytes.
+  // Pre-fill the pay-ref input from the destination address's embedded pay-ref (if any). The pay-ref is
+  // decoupled from the "attach sender address" toggle: it drives either a PayRefAndBytes memo or, when sender
+  // address is attached, the pay-ref slot inside the SenderAddress memo. Skips when the user has already typed
+  // something or the destination's pay-ref is non-UTF-8 bytes.
   useEffect(() => {
-    if (!transferFormState.attachSenderAddress || !transferFormState.address) return;
+    if (!transferFormState.address) return;
     const decoded = decodeOotleAddressOrNull(transferFormState.address);
     if (!decoded || typeof decoded.payRef !== "string" || decoded.payRef.length === 0) return;
     const prefill = decoded.payRef;
     setTransferFormState((prev) => (prev.payRef ? prev : { ...prev, payRef: prefill }));
-  }, [transferFormState.attachSenderAddress, transferFormState.address]);
+  }, [transferFormState.address]);
 
   const fetchPoolRate = useCallback(async (poolAddress: string) => {
     if (!poolAddress) {
@@ -313,8 +314,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             ? { Message: transferFormState.memo }
             : undefined,
         attach_sender_address: transferFormState.attachSenderAddress,
-        sender_address_pay_ref:
-          transferFormState.attachSenderAddress && transferFormState.payRef ? transferFormState.payRef : null,
+        pay_ref: transferFormState.payRef || null,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: dryRunSwapInputAmount,
       };
@@ -428,8 +428,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             ? { Message: transferFormState.memo }
             : undefined,
         attach_sender_address: transferFormState.attachSenderAddress,
-        sender_address_pay_ref:
-          transferFormState.attachSenderAddress && transferFormState.payRef ? transferFormState.payRef : null,
+        pay_ref: transferFormState.payRef || null,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: transferFormState.swapInputAmount ? BigInt(transferFormState.swapInputAmount) : null,
       };

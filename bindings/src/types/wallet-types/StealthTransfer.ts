@@ -12,14 +12,15 @@ export type StealthTransfer = {
   pay_to: PayTo;
   /**
    * If set, the sender's Ootle address is attached as the output memo so the recipient can identify and save
-   * the sender as a contact. Mutually exclusive with `output_memo` (the sender address takes precedence).
+   * the sender as a contact. Replaces `output_memo` (the sender address takes precedence). Composes with
+   * `pay_ref`, which is embedded inside the SenderAddress memo when set.
    */
   attach_sender_address: boolean;
   /**
-   * Optional pay reference (UTF-8) to embed inside the sender-address memo when `attach_sender_address` is
-   * true. Use this to forward the destination's expected pay reference so it isn't silently dropped. Maximum
-   * 64 bytes; longer values are rejected with an `invalid_params` error. If unset, the sender account's own
-   * pay reference is used (if any).
+   * Optional pay reference (UTF-8, max 64 bytes). When `attach_sender_address` is true it is embedded inside
+   * the SenderAddress memo; otherwise it builds a `PayRefAndBytes` memo combined with any `output_memo`. If
+   * unset, the destination address's bech32-embedded pay reference (if any) is used as a fallback for
+   * backward compatibility.
    */
-  sender_address_pay_ref?: string | null;
+  pay_ref?: string | null;
 };

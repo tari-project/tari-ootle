@@ -232,7 +232,7 @@ impl TrafficSim {
                     output_memo: Some(Memo::new_message(format!("Transfer {id}: {amount_to_send}")).unwrap()),
                     pay_to: PayTo::StealthPublicKey,
                     attach_sender_address: false,
-                    sender_address_pay_ref: None,
+                    pay_ref: None,
                 }],
                 max_fee: 1000,
                 dry_run: false,

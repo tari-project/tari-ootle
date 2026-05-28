@@ -32,6 +32,15 @@ function formatPayRef(payRef: string | Uint8Array | null | undefined): string | 
     .join("");
 }
 
+// Identity key for "is this the same account?" comparisons. We drop the optional pay-ref so an incoming
+// SenderAddress with a pay-ref still matches the wallet's own account address (which has no pay-ref) or an
+// address-book entry stored without one.
+function identityKey(address: string): string | null {
+  const decoded = decodeOotleAddressOrNull(address);
+  if (!decoded) return null;
+  return `${decoded.accountPublicKey}:${decoded.viewOnlyKey}`;
+}
+
 export function SenderAddress({ address }: { address: string }) {
   const { data: addressBook } = useAddressBookList();
   const { data: accountsData } = useAccountsList(0, 100);
@@ -42,9 +51,18 @@ export function SenderAddress({ address }: { address: string }) {
   const [formError, setFormError] = useState<string | null>(null);
 
   // The sender may be one of the wallet's own accounts (e.g. a self-transfer or change) — there's nothing to
-  // "add to contacts" in that case.
-  const ownAccount = accountsData?.accounts?.find((a) => a.address === address);
-  const existing = addressBook?.entries?.find((entry) => entry.address === address);
+  // "add to contacts" in that case. We compare on the (account_key, view_key) identity so a SenderAddress that
+  // carries a pay-ref still matches the bare account or address-book entry.
+  const senderIdentity = useMemo(() => identityKey(address), [address]);
+  const ownAccount = useMemo(
+    () => accountsData?.accounts?.find((a) => senderIdentity !== null && identityKey(a.address) === senderIdentity),
+    [accountsData, senderIdentity],
+  );
+  const existing = useMemo(
+    () =>
+      addressBook?.entries?.find((entry) => senderIdentity !== null && identityKey(entry.address) === senderIdentity),
+    [addressBook, senderIdentity],
+  );
   const payRefText = useMemo(() => formatPayRef(decodeOotleAddressOrNull(address)?.payRef ?? null), [address]);
 
   const handleClose = () => {
@@ -76,7 +94,7 @@ export function SenderAddress({ address }: { address: string }) {
       <CopyToClipboard copy={address} />
       {payRefText && (
         <Tooltip title={`Pay reference: ${payRefText}`}>
-          <Chip size="small" color="info" variant="outlined" label={`Pay ref: ${shortenString(payRefText)}`} />
+          <Chip size="small" color="info" variant="outlined" label={`ref: ${shortenString(payRefText)}`} />
         </Tooltip>
       )}
       {ownAccount ? (

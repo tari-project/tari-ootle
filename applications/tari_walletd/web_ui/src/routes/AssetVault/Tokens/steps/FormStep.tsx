@@ -161,9 +161,9 @@ export default function FormStep({
     poolRate !== null &&
     (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
-  // Pay reference is encoded as UTF-8 bytes inside the SenderAddress memo and is capped at 64 bytes.
+  // Pay reference is capped at 64 bytes whether it's embedded in a PayRefAndBytes or a SenderAddress memo.
   const payRefByteLength = new TextEncoder().encode(transferFormState.payRef).length;
-  const payRefTooLong = transferFormState.attachSenderAddress && payRefByteLength > 64;
+  const payRefTooLong = payRefByteLength > 64;
 
   const isFormValid =
     !isNaNAmount &&
@@ -271,13 +271,28 @@ export default function FormStep({
             {transferFormState.outputToRevealed || transferFormState.attachSenderAddress ? null : (
               <TextField
                 name="memo"
-                label="Memo message (optional, max 253 characters)"
+                label="Encrypted Memo (optional, max 253 characters)"
                 slotProps={{
                   htmlInput: { maxLength: 253 },
                 }}
                 value={transferFormState.memo}
                 onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
                 style={{ flexGrow: 1 }}
+                disabled={disabled}
+              />
+            )}
+            {isStealth && !transferFormState.outputToRevealed && (
+              <TextField
+                name="payRef"
+                label="Encrypted Pay ref (optional, max 64 bytes)"
+                value={transferFormState.payRef}
+                onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
+                error={payRefTooLong}
+                helperText={
+                  payRefTooLong
+                    ? `Too long: ${payRefByteLength} bytes (max 64)`
+                    : "Auto-filled from the destination address if it has one."
+                }
                 disabled={disabled}
               />
             )}
@@ -292,21 +307,6 @@ export default function FormStep({
                   />
                 }
                 label="Attach my Ootle address"
-              />
-            )}
-            {isStealth && transferFormState.attachSenderAddress && (
-              <TextField
-                name="payRef"
-                label="Payment reference (optional, max 64 bytes)"
-                value={transferFormState.payRef}
-                onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
-                error={payRefTooLong}
-                helperText={
-                  payRefTooLong
-                    ? `Too long: ${payRefByteLength} bytes (max 64)`
-                    : "Carried inside the sender-address memo. Auto-filled from the destination address if it has one."
-                }
-                disabled={disabled}
               />
             )}
             <InputLabel id="select-input-selection">Input Selection</InputLabel>

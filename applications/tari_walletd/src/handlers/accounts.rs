@@ -1120,7 +1120,7 @@ pub async fn handle_stealth_transfer(
             if transfer.attach_sender_address {
                 let pay_ref_bytes = effective_pay_ref
                     .as_deref()
-                    .unwrap_or_else(|| owner_fallback_pay_ref.as_slice());
+                    .unwrap_or(owner_fallback_pay_ref.as_slice());
                 let memo = Memo::new_sender_address(sender_account_key, sender_view_key, pay_ref_bytes)
                     .ok_or_else(|| invalid_params("pay_ref", Some("pay reference too long (max 64 bytes)")))?;
                 return Ok(TransferOutput {

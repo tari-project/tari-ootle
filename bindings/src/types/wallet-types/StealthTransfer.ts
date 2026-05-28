@@ -15,4 +15,11 @@ export type StealthTransfer = {
    * the sender as a contact. Mutually exclusive with `output_memo` (the sender address takes precedence).
    */
   attach_sender_address: boolean;
+  /**
+   * Optional pay reference (UTF-8) to embed inside the sender-address memo when `attach_sender_address` is
+   * true. Use this to forward the destination's expected pay reference so it isn't silently dropped. Maximum
+   * 64 bytes; longer values are rejected with an `invalid_params` error. If unset, the sender account's own
+   * pay reference is used (if any).
+   */
+  sender_address_pay_ref?: string | null;
 };

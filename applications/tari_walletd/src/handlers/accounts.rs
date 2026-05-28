@@ -1090,33 +1090,41 @@ pub async fn handle_stealth_transfer(
 
     // The sender's own address keys (account public key + view public key), used when an output opts in to
     // attaching the sender address as its memo. Network is omitted; the recipient implies it from its own wallet.
-    let sender_address_memo = {
-        let addr = owner_account.address();
-        let account_key: [u8; 32] = addr
-            .account_public_key()
-            .as_bytes()
-            .try_into()
-            .expect("account public key is 32 bytes");
-        let view_key: [u8; 32] = addr
-            .view_only_key()
-            .as_bytes()
-            .try_into()
-            .expect("view public key is 32 bytes");
-        let pay_ref = addr.pay_ref().map(|p| p.as_bytes()).unwrap_or(&[]);
-        Memo::new_sender_address(account_key, view_key, pay_ref)
-            .expect("pay reference length bounded by OotleAddress (<= PayRef::MAX_LEN)")
-    };
+    let owner_addr = owner_account.address();
+    let sender_account_key: [u8; 32] = owner_addr
+        .account_public_key()
+        .as_bytes()
+        .try_into()
+        .map_err(|_| invalid_params("owner_account", Some("invalid account public key length")))?;
+    let sender_view_key: [u8; 32] = owner_addr
+        .view_only_key()
+        .as_bytes()
+        .try_into()
+        .map_err(|_| invalid_params("owner_account", Some("invalid view public key length")))?;
+    let owner_fallback_pay_ref: Vec<u8> = owner_addr.pay_ref().map(|p| p.as_bytes().to_vec()).unwrap_or_default();
 
     let outputs = req
         .transfers
         .into_iter()
         .map(|transfer| {
             if transfer.attach_sender_address {
+                // Per-output pay reference: explicit request value takes precedence so callers (incl. the web UI)
+                // can attach the destination's pay reference inside the SenderAddress memo instead of letting the
+                // destination's bech32 pay-ref be silently dropped. Falls back to the sender account's own
+                // pay-ref for non-frontend callers that don't set this field.
+                let pay_ref_bytes: Vec<u8> = match transfer.sender_address_pay_ref.as_deref() {
+                    Some(s) => s.as_bytes().to_vec(),
+                    None => owner_fallback_pay_ref.clone(),
+                };
+                let memo =
+                    Memo::new_sender_address(sender_account_key, sender_view_key, &pay_ref_bytes).ok_or_else(|| {
+                        invalid_params("sender_address_pay_ref", Some("pay reference too long (max 64 bytes)"))
+                    })?;
                 return Ok(TransferOutput {
                     address: transfer.destination_address,
                     blinded_amount: transfer.blinded_output_amount,
                     revealed_amount: transfer.revealed_output_amount,
-                    memo: Some(sender_address_memo.clone()),
+                    memo: Some(memo),
                     pay_to: transfer.pay_to,
                 });
             }

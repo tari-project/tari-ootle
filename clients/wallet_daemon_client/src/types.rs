@@ -1411,6 +1411,12 @@ pub struct StealthTransfer {
     /// the sender as a contact. Mutually exclusive with `output_memo` (the sender address takes precedence).
     #[serde(default)]
     pub attach_sender_address: bool,
+    /// Optional pay reference (UTF-8) to embed inside the sender-address memo when `attach_sender_address` is
+    /// true. Use this to forward the destination's expected pay reference so it isn't silently dropped. Maximum
+    /// 64 bytes; longer values are rejected with an `invalid_params` error. If unset, the sender account's own
+    /// pay reference is used (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_address_pay_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

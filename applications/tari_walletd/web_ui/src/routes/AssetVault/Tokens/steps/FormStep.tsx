@@ -54,6 +54,7 @@ export interface SendMoneyFormState {
   badge: string | null;
   memo: string;
   attachSenderAddress: boolean;
+  payRef: string;
   swapPoolAddress: string;
   // Calculated from fee estimate + pool ratio, not user-entered
   swapInputAmount: string;
@@ -160,13 +161,18 @@ export default function FormStep({
     poolRate !== null &&
     (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
+  // Pay reference is encoded as UTF-8 bytes inside the SenderAddress memo and is capped at 64 bytes.
+  const payRefByteLength = new TextEncoder().encode(transferFormState.payRef).length;
+  const payRefTooLong = transferFormState.attachSenderAddress && payRefByteLength > 64;
+
   const isFormValid =
     !isNaNAmount &&
     validateOotleAddress(transferFormState.address) &&
     transferFormState.amount &&
     !hasInsufficientFunds &&
     !poolError &&
-    !poolHasNoLiquidity;
+    !poolHasNoLiquidity &&
+    !payRefTooLong;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -285,7 +291,22 @@ export default function FormStep({
                     disabled={disabled}
                   />
                 }
-                label="Attach my Ootle address (lets the recipient save you as a contact; replaces the memo)"
+                label="Attach my Ootle address"
+              />
+            )}
+            {isStealth && transferFormState.attachSenderAddress && (
+              <TextField
+                name="payRef"
+                label="Payment reference (optional, max 64 bytes)"
+                value={transferFormState.payRef}
+                onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
+                error={payRefTooLong}
+                helperText={
+                  payRefTooLong
+                    ? `Too long: ${payRefByteLength} bytes (max 64)`
+                    : "Carried inside the sender-address memo. Auto-filled from the destination address if it has one."
+                }
+                disabled={disabled}
               />
             )}
             <InputLabel id="select-input-selection">Input Selection</InputLabel>

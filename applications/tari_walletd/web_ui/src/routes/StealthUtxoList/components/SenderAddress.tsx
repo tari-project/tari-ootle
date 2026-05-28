@@ -7,6 +7,7 @@ import CopyToClipboard from "@components/CopyToClipboard";
 import {
   Alert,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -16,9 +17,20 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import { decodeOotleAddressOrNull } from "@tari-project/ootle-ts-bindings";
 import { shortenString } from "@utils/helpers";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { MdCheckCircle, MdPerson, MdPersonAdd } from "react-icons/md";
+
+function formatPayRef(payRef: string | Uint8Array | null | undefined): string | null {
+  if (!payRef) return null;
+  if (typeof payRef === "string") return payRef.length > 0 ? payRef : null;
+  if (payRef.length === 0) return null;
+  // Non-UTF-8 bytes: show as hex so the user can still copy/identify the value.
+  return Array.from(payRef)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 export function SenderAddress({ address }: { address: string }) {
   const { data: addressBook } = useAddressBookList();
@@ -33,6 +45,14 @@ export function SenderAddress({ address }: { address: string }) {
   // "add to contacts" in that case.
   const ownAccount = accountsData?.accounts?.find((a) => a.address === address);
   const existing = addressBook?.entries?.find((entry) => entry.address === address);
+  const payRefText = useMemo(() => formatPayRef(decodeOotleAddressOrNull(address)?.payRef ?? null), [address]);
+
+  const handleClose = () => {
+    setDialogOpen(false);
+    setName("");
+    setNote("");
+    setFormError(null);
+  };
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -41,9 +61,7 @@ export function SenderAddress({ address }: { address: string }) {
     }
     try {
       await addMutation.mutateAsync({ name: name.trim(), address, note: note.trim() || null });
-      setDialogOpen(false);
-      setName("");
-      setNote("");
+      handleClose();
     } catch (e: any) {
       const msg = e?.cause?.message || e?.message || "Failed to add contact";
       setFormError(msg.includes("DuplicateName") ? "An entry with this name already exists" : msg);
@@ -56,6 +74,16 @@ export function SenderAddress({ address }: { address: string }) {
         <span>{shortenString(address)}</span>
       </Tooltip>
       <CopyToClipboard copy={address} />
+      {payRefText && (
+        <Tooltip title={`Pay reference: ${payRefText}`}>
+          <Chip
+            size="small"
+            color="info"
+            variant="outlined"
+            label={`Pay ref: ${shortenString(payRefText)}`}
+          />
+        </Tooltip>
+      )}
       {ownAccount ? (
         <Tooltip title="This is one of your own accounts">
           <Typography variant="body2" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -82,7 +110,7 @@ export function SenderAddress({ address }: { address: string }) {
         </Button>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={handleClose} maxWidth="sm" fullWidth>
         <DialogTitle>Add to Contacts</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
@@ -107,7 +135,7 @@ export function SenderAddress({ address }: { address: string }) {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleClose}>Cancel</Button>
           <Button onClick={handleSave} variant="contained" disabled={addMutation.isPending}>
             Add
           </Button>

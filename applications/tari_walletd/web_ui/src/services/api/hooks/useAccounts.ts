@@ -129,6 +129,7 @@ export interface TransferParams {
   dry_run: boolean;
   output_memo?: Memo;
   attach_sender_address?: boolean;
+  sender_address_pay_ref?: string | null;
   swap_pool_address?: string | null;
   swap_input_amount?: bigint | null;
 }
@@ -185,6 +186,7 @@ export const useAccountsTransfer = () => {
               output_memo: params.output_memo || null,
               pay_to: "StealthPublicKey" as PayTo,
               attach_sender_address: params.attach_sender_address ?? false,
+              sender_address_pay_ref: params.sender_address_pay_ref ?? null,
             },
           ],
           max_fee,

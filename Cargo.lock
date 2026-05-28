@@ -11718,6 +11718,7 @@ dependencies = [
  "anyhow",
  "bincode 2.0.1",
  "blake2 0.10.6",
+ "bounded-vec",
  "clap 3.2.25",
  "config",
  "dirs-next 2.0.0",

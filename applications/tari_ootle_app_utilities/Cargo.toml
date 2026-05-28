@@ -43,6 +43,9 @@ url = { workspace = true, features = ["serde"] }
 toml = { workspace = true }
 config = { workspace = true }
 
+[dev-dependencies]
+bounded-vec = { workspace = true }
+
 [features]
 p2p = ["tari_networking", "tari_ootle_p2p", "libp2p-identity", "multiaddr"]
 epoch_oracle = ["tari_epoch_oracles"]

@@ -148,19 +148,21 @@ impl StealthCryptoApi {
         Ok(decrypted)
     }
 
+    /// `claimant_pk` is the stealth claim public key `C = H(r·P)·G + P` carried in the L1 burn
+    /// proof — the key the `ownership_proof` Schnorr signature commits to.
     pub fn validate_burn_claim_ownership_proof(
         &self,
         network: Network,
         ownership_proof: &SchnorrSignatureBytes,
         commitment: &PedersenCommitmentBytes,
         value: u64,
-        account_owner_pk: &RistrettoPublicKeyBytes,
+        claimant_pk: &RistrettoPublicKeyBytes,
     ) -> bool {
         // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
         // length bytes of size 32
         let message = ownership_proof_hasher64(network)
             .chain(&commitment.as_bytes())
-            .chain(&account_owner_pk.as_bytes())
+            .chain(&claimant_pk.as_bytes())
             .finalize();
 
         let Ok(commitment) = PedersenCommitment::convert_from_byte_type(commitment) else {

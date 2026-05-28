@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, fs, iter, path::Path, time::Duration};
+use std::{collections::HashSet, iter, path::Path, time::Duration};
 
 use anyhow::{Context, anyhow};
 use axum_extra::headers::authorization::Bearer;
@@ -106,6 +106,7 @@ use crate::handlers::{
         invalid_request,
         not_found,
         transaction_rejected,
+        validate_burn_proof_file_name,
         wait_for_result,
         wait_for_result_and_account,
     },
@@ -473,7 +474,7 @@ pub async fn handle_claim_burn(
     let proof_dir = context.config().get_burn_proof_dir(network);
     let proof_contents = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
         error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
-        invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
+        invalid_request(format!("Could not resolve claim proof: {e}"))
     })?;
 
     execute_claim_burn(
@@ -524,11 +525,9 @@ pub(crate) async fn execute_claim_burn(
     // Stealth spend secret `s = H(R·p) + p`. The L1 ownership proof commits the burn to `C = s·G`,
     // so this is the only key that can sign the claim transaction and satisfy the spend condition
     // on the just-minted burn UTXO.
-    let stealth_secret = sdk.stealth_crypto_api().derive_stealth_owner_secret(
-        network,
-        account_owner_key.secret(),
-        &sender_offset_pub_key,
-    );
+    let stealth_secret = sdk
+        .stealth_crypto_api()
+        .derive_burn_claim_stealth_secret(account_owner_key.secret(), &sender_offset_pub_key);
     let stealth_claim_pk = RistrettoPublicKey::from_secret_key(&stealth_secret).to_byte_type();
 
     if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
@@ -664,6 +663,10 @@ pub(crate) async fn execute_claim_burn(
     })
 }
 
+/// Burn proofs are small fixed-size JSON. Cap reads at 1 MiB so a caller can't point us
+/// at `/dev/zero` (or a huge attacker-planted file) and exhaust memory.
+const MAX_BURN_PROOF_BYTES: u64 = 1 << 20;
+
 async fn resolve_claim_proof<P: AsRef<Path>>(
     base_path: P,
     proof: ClaimBurnProof,
@@ -671,10 +674,18 @@ async fn resolve_claim_proof<P: AsRef<Path>>(
     match proof {
         ClaimBurnProof::Contents(contents) => Ok(*contents),
         ClaimBurnProof::FromFile { file_name } => {
-            let file_name = base_path.as_ref().join(file_name);
-            let mut file = fs::File::open(&file_name)
-                .with_context(|| format!("Failed to open claim proof file: {}", file_name.display()))?;
-            let proof = serde_json::from_reader(&mut file)?;
+            validate_burn_proof_file_name(&file_name)?;
+            let path = base_path.as_ref().join(&file_name);
+            let metadata = tokio::fs::metadata(&path)
+                .await
+                .map_err(|_| anyhow!("Burn proof file not found: {file_name}"))?;
+            if metadata.len() > MAX_BURN_PROOF_BYTES {
+                return Err(anyhow!("Burn proof file too large: {file_name}"));
+            }
+            let bytes = tokio::fs::read(&path)
+                .await
+                .map_err(|_| anyhow!("Burn proof file not found: {file_name}"))?;
+            let proof = serde_json::from_slice(&bytes).map_err(|_| anyhow!("Invalid burn proof file: {file_name}"))?;
             complete_burn_proof_to_contents(proof)
         },
     }

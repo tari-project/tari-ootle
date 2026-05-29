@@ -219,6 +219,9 @@ impl ClaimProofVerifier for KnowledgeProofVerifier {
             ..
         } = claim;
 
+        // `claimant` is the stealth claim public key `C = H(r·P)·G + P`. The runtime supplies it
+        // via `seal_signer_public_key`: the L2 wallet signs the claim transaction with
+        // `s = H(R·p) + p`, so the transaction's seal-signer pubkey is `s·G = C`.
         // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
         // length bytes of size 32
         let message = ownership_proof_hasher64(self.network)
@@ -246,5 +249,92 @@ impl ClaimProofVerifier for KnowledgeProofVerifier {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ootle_byte_type::ToByteType;
+    use tari_crypto::{
+        commitment::HomomorphicCommitmentFactory,
+        keys::{PublicKey as _, SecretKey as _},
+        ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    };
+    use tari_engine::traits::ClaimProofVerifier;
+    use tari_engine_types::{
+        confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof},
+        crypto::get_commitment_factory,
+    };
+    use tari_ootle_common_types::{Epoch, base_layer_hashing::ownership_proof_hasher64};
+    use tari_ootle_transaction::Network;
+    use tari_template_lib::types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+
+    use super::KnowledgeProofVerifier;
+
+    /// Mints a `MinotariBurnClaimProof` whose `ownership_proof` Schnorr signature is bound to
+    /// `claimant_pk` (the key the message commits to in `H(commitment ‖ claimant_pk)`).
+    fn build_proof(network: Network, value: u64, claimant_pk: RistrettoPublicKeyBytes) -> MinotariBurnClaimProof {
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let commitment = get_commitment_factory().commit_value(&mask, value);
+        let commitment_bytes = commitment.to_byte_type();
+
+        let message = ownership_proof_hasher64(network)
+            .chain(&commitment_bytes.as_bytes())
+            .chain(&claimant_pk.as_bytes())
+            .finalize();
+        let signature = RistrettoSchnorr::sign(&mask, &message[..], &mut rand::rng()).expect("sign with random nonce");
+
+        // Dummy merkle proof / kernel — KnowledgeProofVerifier doesn't read them.
+        let encoded_merkle_proof = EncodedMerkleProof {
+            block_hash: Default::default(),
+            encoded_merkle_proof: bounded_vec::BoundedVec::<u8, 1, 4096>::from_vec(vec![0]).expect("valid bounded vec"),
+            leaf_index: 0,
+        };
+        let kernel = AbridgedTransactionKernel {
+            version: 0,
+            fee: 0,
+            lock_height: 0,
+            excess: PedersenCommitmentBytes::zero(),
+            excess_sig: SchnorrSignatureBytes::zero(),
+        };
+
+        MinotariBurnClaimProof {
+            burn_public_key: RistrettoPublicKeyBytes::zero(),
+            commitment: commitment_bytes,
+            ownership_proof: signature.to_byte_type(),
+            encoded_merkle_proof,
+            kernel,
+            value,
+            sender_offset_public_key: RistrettoPublicKeyBytes::zero(),
+        }
+    }
+
+    #[test]
+    fn verifies_against_caller_supplied_claimant() {
+        let network = Network::LocalNet;
+        // The runtime feeds the transaction's seal-signer pubkey as the claimant. For stealth
+        // claims the wallet signs with `s = H(R·p) + p`, so this is `C = s·G`.
+        let (_c_sec, c_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+
+        let proof = build_proof(network, 2_000, c_pub.to_byte_type());
+        let verifier = KnowledgeProofVerifier::new(network);
+
+        verifier
+            .verify_claim_proof(Epoch(0), &c_pub.to_byte_type(), &proof)
+            .expect("proof should verify against the seal signer C");
+    }
+
+    #[test]
+    fn rejects_when_claimant_does_not_match_signed_binding() {
+        let network = Network::LocalNet;
+        let (_c_sec, c_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_wrong_sec, wrong_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+
+        // Signed against c_pub but the runtime passes wrong_pub.
+        let proof = build_proof(network, 3_000, c_pub.to_byte_type());
+
+        let verifier = KnowledgeProofVerifier::new(network);
+        let result = verifier.verify_claim_proof(Epoch(0), &wrong_pub.to_byte_type(), &proof);
+        assert!(result.is_err(), "expected verification to reject mismatched claimant");
     }
 }

@@ -1,8 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::path::Path;
-
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use log::*;
@@ -18,7 +16,10 @@ use tari_ootle_walletd_client::{
 };
 use tari_sidechain::CompleteClaimBurnProof;
 
-use super::{context::HandlerContext, helpers::complete_burn_proof_to_contents};
+use super::{
+    context::HandlerContext,
+    helpers::{complete_burn_proof_to_contents, validate_burn_proof_file_name},
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::burn_proofs";
 
@@ -117,11 +118,7 @@ pub async fn handle_get(
     context.authorize(token, &[Permission::BurnProofs(ReadOnly::Read)])?;
     let dir = context.config().get_burn_proof_dir(context.wallet_sdk().network());
 
-    // Prevent path traversal
-    let file_name = Path::new(&req.file_name);
-    if file_name.components().count() != 1 || req.file_name.contains("..") {
-        return Err(anyhow!("Invalid file name"));
-    }
+    validate_burn_proof_file_name(&req.file_name)?;
 
     let path = dir.join(&req.file_name);
     let bytes = tokio::fs::read(&path).await.map_err(|e| {

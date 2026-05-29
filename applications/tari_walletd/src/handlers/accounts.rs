@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, fs, iter, path::Path, time::Duration};
+use std::{collections::HashSet, iter, path::Path, time::Duration};
 
 use anyhow::{Context, anyhow};
 use axum_extra::headers::authorization::Bearer;
@@ -106,6 +106,7 @@ use crate::handlers::{
         invalid_request,
         not_found,
         transaction_rejected,
+        validate_burn_proof_file_name,
         wait_for_result,
         wait_for_result_and_account,
     },
@@ -473,7 +474,7 @@ pub async fn handle_claim_burn(
     let proof_dir = context.config().get_burn_proof_dir(network);
     let proof_contents = resolve_claim_proof(&proof_dir, claim_proof).await.map_err(|e| {
         error!(target: LOG_TARGET, "Error resolving claim proof: {}", e);
-        invalid_request(format!("Could not resolve claim proof. {e} Is the file name correct?"))
+        invalid_request(format!("Could not resolve claim proof: {e}"))
     })?;
 
     execute_claim_burn(
@@ -513,16 +514,28 @@ pub(crate) async fn execute_claim_burn(
     let network = sdk.config_api().get_network()?;
     // We derive secrets directly here because claim burn is a unique case, making it difficult to use the higher
     // level stealth output api that takes care of keys but assumes that this is a regular transfer.
-    let claim_key_id = account_owner_key_id;
-    let claim_key = sdk.key_manager_api().get_key(claim_key_id)?;
-    let claim_public_key = claim_key.to_public_key().to_byte_type();
+    let account_owner_key = sdk.key_manager_api().get_key(account_owner_key_id)?;
+
+    // Get the sender_offset_public_key (R) and use it to create a DH with the account owner key
+    let sender_offset_pub_key: RistrettoPublicKey = claim_proof
+        .sender_offset_public_key
+        .try_from_byte_type()
+        .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
+
+    // Stealth spend secret `s = H(R·p) + p`. The L1 ownership proof commits the burn to `C = s·G`,
+    // so this is the only key that can sign the claim transaction and satisfy the spend condition
+    // on the just-minted burn UTXO.
+    let stealth_secret = sdk
+        .stealth_crypto_api()
+        .derive_burn_claim_stealth_secret(account_owner_key.secret(), &sender_offset_pub_key);
+    let stealth_claim_pk = RistrettoPublicKey::from_secret_key(&stealth_secret).to_byte_type();
 
     if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
         network,
         &claim_proof.ownership_proof,
         &claim_proof.commitment,
         claim_proof.value,
-        &claim_public_key,
+        &stealth_claim_pk,
     ) {
         return Err(invalid_params(
             "claim_proof.ownership_proof",
@@ -532,29 +545,15 @@ pub(crate) async fn execute_claim_burn(
 
     info!(
         target: LOG_TARGET,
-        "ℹ️ Signing claim burn with key {}. NOTE: This must be the same as the claiming key (owner_nonce_key_index) used in the burn transaction for this to succeed.",
-        claim_public_key
+        "ℹ️ Signing claim burn for account {} (stealth claim pk: {})",
+        account_owner_key.to_public_key().to_byte_type(),
+        stealth_claim_pk,
     );
-
-    if claim_proof.burn_public_key != claim_public_key {
-        warn!(
-            target: LOG_TARGET,
-            "⚠️ The provided reciprocal claim public key ({}) does not match the derived claim public key ({}). The claim will likely fail.",
-            claim_proof.burn_public_key,
-            claim_public_key
-        );
-    }
-
-    // Get the sender_offset_public_key and use it to create a DH with the claim_nonce_key
-    let sender_offset_pub_key: RistrettoPublicKey = claim_proof
-        .sender_offset_public_key
-        .try_from_byte_type()
-        .map_err(|e| invalid_params("claim_proof.sender_offset_public_key", Some(e)))?;
 
     let decrypted = sdk.stealth_crypto_api().decrypt_utxo_data(
         &claimed_encrypted_data,
         &claim_proof.commitment,
-        claim_key.secret(),
+        account_owner_key.secret(),
         &sender_offset_pub_key,
         true,
     )?;
@@ -639,8 +638,7 @@ pub(crate) async fn execute_claim_burn(
         .with_dry_run(is_dry_run)
         .finish();
 
-    // Add the required spend signature to the transaction
-    let transaction = sdk.signer_api().sign(*claim_key.key_id(), transaction)?;
+    let transaction = sdk.signer_api().sign_with_explicit_key(&stealth_secret, transaction)?;
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
@@ -665,6 +663,10 @@ pub(crate) async fn execute_claim_burn(
     })
 }
 
+/// Burn proofs are small fixed-size JSON. Cap reads at 1 MiB so a caller can't point us
+/// at `/dev/zero` (or a huge attacker-planted file) and exhaust memory.
+const MAX_BURN_PROOF_BYTES: u64 = 1 << 20;
+
 async fn resolve_claim_proof<P: AsRef<Path>>(
     base_path: P,
     proof: ClaimBurnProof,
@@ -672,10 +674,18 @@ async fn resolve_claim_proof<P: AsRef<Path>>(
     match proof {
         ClaimBurnProof::Contents(contents) => Ok(*contents),
         ClaimBurnProof::FromFile { file_name } => {
-            let file_name = base_path.as_ref().join(file_name);
-            let mut file = fs::File::open(&file_name)
-                .with_context(|| format!("Failed to open claim proof file: {}", file_name.display()))?;
-            let proof = serde_json::from_reader(&mut file)?;
+            validate_burn_proof_file_name(&file_name)?;
+            let path = base_path.as_ref().join(&file_name);
+            let metadata = tokio::fs::metadata(&path)
+                .await
+                .map_err(|_| anyhow!("Burn proof file not found: {file_name}"))?;
+            if metadata.len() > MAX_BURN_PROOF_BYTES {
+                return Err(anyhow!("Burn proof file too large: {file_name}"));
+            }
+            let bytes = tokio::fs::read(&path)
+                .await
+                .map_err(|_| anyhow!("Burn proof file not found: {file_name}"))?;
+            let proof = serde_json::from_slice(&bytes).map_err(|_| anyhow!("Invalid burn proof file: {file_name}"))?;
             complete_burn_proof_to_contents(proof)
         },
     }

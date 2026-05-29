@@ -10,6 +10,8 @@ use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
 use tokio::sync::broadcast;
 
+use crate::handlers::helpers::validate_burn_proof_file_name;
+
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::claim_burn_monitor";
 
 /// Monitors wallet events to move burn proof files to the "claimed" directory
@@ -117,6 +119,13 @@ impl ClaimBurnMonitor {
     }
 
     async fn mark_as_claimed(&self, file_name: &str) {
+        if let Err(e) = validate_burn_proof_file_name(file_name) {
+            warn!(
+                target: LOG_TARGET,
+                "Refusing to move burn proof with unsafe file name {file_name}: {e}"
+            );
+            return;
+        }
         let claimed_dir = self.burn_proof_dir.join("claimed");
         if let Err(e) = tokio::fs::create_dir_all(&claimed_dir).await {
             warn!(

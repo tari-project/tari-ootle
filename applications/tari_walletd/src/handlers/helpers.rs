@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, fmt::Display};
+use std::{collections::HashSet, fmt::Display, path::Path};
 
 use anyhow::anyhow;
 use ootle_byte_type::ToByteType;
@@ -202,6 +202,16 @@ pub(super) fn faucet_already_claimed() -> anyhow::Error {
 
 pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
     application_error(ApplicationErrorCode::GeneralError, details)
+}
+
+/// Reject anything that isn't a single, non-`..` path component, so caller-supplied
+/// names cannot escape the burn-proof directory via `Path::join`.
+pub(crate) fn validate_burn_proof_file_name(file_name: &str) -> anyhow::Result<()> {
+    let p = Path::new(file_name);
+    if p.components().count() != 1 || file_name.contains("..") {
+        return Err(anyhow!("Invalid file name"));
+    }
+    Ok(())
 }
 
 /// Converts a `CompleteClaimBurnProof` (the L1 burn proof file format) into the

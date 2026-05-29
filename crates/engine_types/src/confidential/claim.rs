@@ -51,7 +51,7 @@ impl Display for MinotariBurnClaimProof {
             self.ownership_proof,
             self.encoded_merkle_proof.encoded_merkle_proof.len(),
             self.kernel.excess_sig,
-            self.value
+            self.value,
         )
     }
 }

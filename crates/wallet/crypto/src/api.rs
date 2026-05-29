@@ -108,6 +108,17 @@ impl StealthCryptoApi {
         kdfs::owner_stealth_dh_secret(network, secret_key, public_nonce)
     }
 
+    /// Derive `s = H(p·R) + p` using L1's exact `stealth_address` hash domain. Use only on L1
+    /// burn-claim paths where the L1 wallet signed the ownership proof against the matching
+    /// stealth address `C = s·G`.
+    pub fn derive_burn_claim_stealth_secret(
+        &self,
+        account_secret: &RistrettoSecretKey,
+        sender_offset_public_key: &RistrettoPublicKey,
+    ) -> RistrettoSecretKey {
+        kdfs::burn_claim_stealth_secret(account_secret, sender_offset_public_key)
+    }
+
     pub fn encrypt_value_and_mask(
         &self,
         amount: u64,
@@ -148,19 +159,21 @@ impl StealthCryptoApi {
         Ok(decrypted)
     }
 
+    /// `claimant_pk` is the stealth claim public key `C = H(r·P)·G + P` carried in the L1 burn
+    /// proof — the key the `ownership_proof` Schnorr signature commits to.
     pub fn validate_burn_claim_ownership_proof(
         &self,
         network: Network,
         ownership_proof: &SchnorrSignatureBytes,
         commitment: &PedersenCommitmentBytes,
         value: u64,
-        account_owner_pk: &RistrettoPublicKeyBytes,
+        claimant_pk: &RistrettoPublicKeyBytes,
     ) -> bool {
         // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
         // length bytes of size 32
         let message = ownership_proof_hasher64(network)
             .chain(&commitment.as_bytes())
-            .chain(&account_owner_pk.as_bytes())
+            .chain(&claimant_pk.as_bytes())
             .finalize();
 
         let Ok(commitment) = PedersenCommitment::convert_from_byte_type(commitment) else {

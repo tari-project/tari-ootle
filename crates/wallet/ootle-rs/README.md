@@ -15,6 +15,7 @@ experience for those transitioning from Ethereum or generic blockchain developme
 * **Alloy-like API:** Uses the familiar `Provider`, `Signer`, and `Transport` architecture found in `alloy`.
 * **Ootle Native:** First-class support for Tari Ootle
 * **Type-Safe:** Strongly typed interactions with Tari's confidential assets.
+* **Confidential & Cross-Layer:** Stealth transfers and claiming Layer 1 (minotari) burns (`claim_burn::ClaimBurn`).
 * **Async/Await:** Built on `tokio` for high-performance, non-blocking I/O.
 
 ## 📦 Installation
@@ -23,7 +24,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ootle-rs = "0.1.0"
+ootle-rs = "0.10.0"
 ```
 
 ## 🚀 Quick Start

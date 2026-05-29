@@ -12429,7 +12429,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "hashbrown 0.13.2",
  "minicbor",

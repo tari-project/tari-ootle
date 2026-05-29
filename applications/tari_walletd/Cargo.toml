@@ -49,7 +49,7 @@ humantime-serde = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
 indexmap = { workspace = true }
-jsonwebtoken = { workspace = true, features = ["hmac", "sha2", "rand"] }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true }
 log4rs = { workspace = true, features = [

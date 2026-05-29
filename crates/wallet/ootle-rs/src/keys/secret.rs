@@ -10,15 +10,15 @@ use tari_crypto::{
 };
 use tari_ootle_address::{Network, OotleAddress};
 use tari_ootle_common_types::{base_layer_hashing::encrypted_data_hasher, engine_types::crypto::OutputBody};
-use tari_ootle_wallet_crypto::{DecryptedData, encrypted_data, kdfs};
-use tari_template_lib_types::crypto::PedersenCommitmentBytes;
+use tari_ootle_wallet_crypto::{DecryptedData, StealthCryptoApi, encrypted_data, kdfs};
+use tari_template_lib_types::{EncryptedData, crypto::PedersenCommitmentBytes};
 
 use crate::{
     key_provider,
     key_provider::{DiffieHellmanKdfKeyProvider, LocalKeyProvider, OutputMaskProvider},
     signer,
     signer::StealthKeyPrehashSigner,
-    stealth::{InputDecryptor, StealthProviderError, StealthResult},
+    stealth::{BurnClaimKeyProvider, InputDecryptor, StealthProviderError, StealthResult},
 };
 
 #[derive(Clone)]
@@ -145,6 +145,35 @@ where Self: DiffieHellmanKdfKeyProvider
             details: e.to_string(),
         })?;
 
+        Ok(decrypted)
+    }
+}
+
+#[async_trait]
+impl BurnClaimKeyProvider for LocalKeyProvider<OotleSecretKey> {
+    async fn derive_burn_claim_secret(
+        &self,
+        sender_offset_public_key: &RistrettoPublicKey,
+    ) -> StealthResult<RistrettoSecretKey> {
+        Ok(StealthCryptoApi::new()
+            .derive_burn_claim_stealth_secret(self.credentials().account_secret(), sender_offset_public_key))
+    }
+
+    async fn decrypt_burn_claim_output(
+        &self,
+        encrypted_data: &EncryptedData,
+        commitment: &PedersenCommitmentBytes,
+        sender_offset_public_key: &RistrettoPublicKey,
+    ) -> StealthResult<DecryptedData> {
+        // The L1 burn output's value/mask are bound to the account secret (not the view-only key), so we
+        // decrypt with the account secret. `skip_memo` because the L1 output carries no memo we need here.
+        let decrypted = StealthCryptoApi::new().decrypt_utxo_data(
+            encrypted_data,
+            commitment,
+            self.credentials().account_secret(),
+            sender_offset_public_key,
+            true,
+        )?;
         Ok(decrypted)
     }
 }

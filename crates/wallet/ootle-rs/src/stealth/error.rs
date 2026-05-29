@@ -32,6 +32,10 @@ pub enum StealthProviderError {
         commitment: PedersenCommitmentBytes,
         details: String,
     },
+    #[error("L1 burn claim ownership proof validation failed")]
+    BurnClaimOwnershipProofInvalid,
+    #[error("L1 burn claim fee ({max_fee}) is greater than or equal to the claimed amount ({claimed})")]
+    BurnClaimFeeTooHigh { claimed: u64, max_fee: u64 },
 }
 
 #[derive(Debug, thiserror::Error)]

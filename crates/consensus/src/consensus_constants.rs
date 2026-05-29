@@ -68,7 +68,7 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 500,
+            max_number_commands_in_block: 100,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 10,
         }
@@ -83,7 +83,7 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 500,
+            max_number_commands_in_block: 100,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 1,
         }
@@ -98,7 +98,7 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 500,
+            max_number_commands_in_block: 100,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }
@@ -113,7 +113,7 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 500,
+            max_number_commands_in_block: 100,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }

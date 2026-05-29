@@ -31,6 +31,7 @@ use tari_ootle_wallet_sdk::{
         NewAccountData,
         StealthUtxoSpendKeyId,
         TransactionContext,
+        TransactionContextKind,
         TransactionSubmittedEvent,
     },
 };
@@ -651,9 +652,14 @@ pub(crate) async fn execute_claim_burn(
         });
     }
 
-    let tx_context = proof_file_name.map(|file_name| TransactionContext::ClaimBurn { file_name });
+    // Link the transaction to the account the burn is claimed into, and (if present) carry the proof
+    // file name so the claim-burn monitor can track it.
+    let mut tx_context = TransactionContext::with_accounts([*account.component_address()]);
+    if let Some(file_name) = proof_file_name {
+        tx_context = tx_context.with_kind(TransactionContextKind::ClaimBurn { file_name });
+    }
     let tx_id = transaction_service
-        .submit_transaction_with_opts(transaction, tx_context, None)
+        .submit_transaction_with_opts(transaction, Some(tx_context), None)
         .await?;
 
     Ok(ClaimBurnResponse {
@@ -786,17 +792,17 @@ pub async fn handle_create_free_test_coins(
     );
 
     let mut events = context.notifier().subscribe();
+    // Always link the transaction to the funded account. The NewAccount kind is only attached once the
+    // account is confirmed on-chain (unchanged behaviour for the account monitor).
+    let mut tx_context = TransactionContext::with_accounts([*account.component_address()]);
+    if account.is_confirmed_on_chain() {
+        tx_context = tx_context.with_kind(TransactionContextKind::NewAccount(NewAccountData {
+            address: *account.component_address(),
+        }));
+    }
     let tx_id = context
         .transaction_service()
-        .submit_transaction_with_opts(
-            transaction,
-            account.is_confirmed_on_chain().then(|| {
-                TransactionContext::NewAccount(NewAccountData {
-                    address: *account.component_address(),
-                })
-            }),
-            None,
-        )
+        .submit_transaction_with_opts(transaction, Some(tx_context), None)
         .await?;
 
     // Wait for the monitor to pick up the new or updated account
@@ -992,9 +998,26 @@ pub async fn handle_transfer(
         return Ok(AccountsTransferResponse { transaction_id });
     }
 
-    // Otherwise submit and wait for a result
+    // Otherwise submit and wait for a result. Link the source account, and the destination too if it
+    // is one of the wallet's own accounts (so a self-transfer shows under both).
+    let mut linked_accounts = vec![source_account_address];
+    if sdk
+        .accounts_api()
+        .get_account_by_address(&destination_account_address)
+        .optional()?
+        .is_some()
+    {
+        linked_accounts.push(destination_account_address);
+    }
     let mut events = context.notifier().subscribe();
-    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction_with_opts(
+            transaction,
+            Some(TransactionContext::with_accounts(linked_accounts)),
+            None,
+        )
+        .await?;
 
     let finalized = wait_for_result(&mut events, tx_id).await?;
 
@@ -1040,10 +1063,19 @@ pub async fn handle_confidential_transfer(
     // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
     // cause funds to remain locked indefinitely.
     task::spawn(async move {
+        let source_account_address = *account.component_address();
+        // Tag the destination too if it is one of the wallet's own accounts (resolved before the address
+        // is consumed by the transfer below).
+        let owned_destination = sdk
+            .accounts_api()
+            .get_account_by_public_key(req.destination_address.account_public_key())
+            .optional()?
+            .map(|a| a.account.component_address);
+
         let transfer = sdk
             .confidential_transfer_api()
             .transfer(ConfidentialTransferParams {
-                from_account: *account.component_address(),
+                from_account: source_account_address,
                 input_selection: req.input_selection,
                 amount: req.amount,
                 destination_address: req.destination_address,
@@ -1064,7 +1096,15 @@ pub async fn handle_confidential_transfer(
             return Ok(ConfidentialTransferResponse { transaction_id });
         }
 
-        let tx_id = transaction_service.submit_transaction(transfer.transaction).await?;
+        let mut linked_accounts = vec![source_account_address];
+        linked_accounts.extend(owned_destination);
+        let tx_id = transaction_service
+            .submit_transaction_with_opts(
+                transfer.transaction,
+                Some(TransactionContext::with_accounts(linked_accounts)),
+                None,
+            )
+            .await?;
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
@@ -1112,6 +1152,19 @@ pub async fn handle_stealth_transfer(
         .try_into()
         .map_err(|_| invalid_params("owner_account", Some("invalid view public key length")))?;
     let owner_fallback_pay_ref: Vec<u8> = owner_addr.pay_ref().map(|p| p.as_bytes().to_vec()).unwrap_or_default();
+
+    // Link the source account, plus any recipients that are the wallet's own accounts. Resolved before
+    // `req.transfers` is consumed below and before `owner_account` is moved into the transfer task.
+    let mut linked_accounts = vec![*owner_account.component_address()];
+    for transfer in &req.transfers {
+        if let Some(acc) = sdk
+            .accounts_api()
+            .get_account_by_public_key(transfer.destination_address.account_public_key())
+            .optional()?
+        {
+            linked_accounts.push(acc.account.component_address);
+        }
+    }
 
     let outputs = req
         .transfers
@@ -1234,7 +1287,11 @@ pub async fn handle_stealth_transfer(
         }
 
         let tx_id = transaction_service
-            .submit_transaction_with_opts(transaction, None, Some(lock.id()))
+            .submit_transaction_with_opts(
+                transaction,
+                Some(TransactionContext::with_accounts(linked_accounts)),
+                Some(lock.id()),
+            )
             .await
             .context("Transaction failed to submit")?;
 

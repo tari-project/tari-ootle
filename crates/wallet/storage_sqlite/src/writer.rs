@@ -422,10 +422,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         &mut self,
         transaction: &Transaction,
         new_account_info: Option<&NewAccountData>,
+        linked_accounts: &[ComponentAddress],
         is_dry_run: bool,
     ) -> Result<(), WalletStorageError> {
-        use crate::schema::transactions;
+        use crate::schema::{accounts, transaction_accounts, transactions};
 
+        let transaction_id = serialize_hex(transaction.calculate_id());
         let ref_components = transaction
             .as_referenced_components()
             .map(|c| c.to_string())
@@ -438,7 +440,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .collect::<Vec<_>>();
         diesel::insert_into(transactions::table)
             .values((
-                transactions::transaction_id.eq(serialize_hex(transaction.calculate_id())),
+                transactions::transaction_id.eq(transaction_id.as_str()),
                 transactions::transaction_json.eq(serialize_json(transaction)?),
                 transactions::referenced_components.eq(serialize_json(&ref_components)?),
                 transactions::signers.eq(serialize_json(&signers)?),
@@ -448,6 +450,35 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("transactions_insert", e))?;
+
+        // Link the transaction to the wallet account(s) it involves so the list can be filtered
+        // per account. Dry-run transactions are never surfaced in the list, so they are not linked.
+        if !is_dry_run {
+            let mut seen = HashSet::new();
+            for account_address in linked_accounts {
+                let address = account_address.to_string();
+                if !seen.insert(address.clone()) {
+                    continue;
+                }
+                let account_id: Option<i32> = accounts::table
+                    .select(accounts::id)
+                    .filter(accounts::address.eq(&address))
+                    .first(self.connection())
+                    .optional()
+                    .map_err(|e| WalletStorageError::general("transactions_insert account lookup", e))?;
+                // The account may not be known to this wallet (e.g. an external recipient); skip it.
+                let Some(account_id) = account_id else {
+                    continue;
+                };
+                diesel::insert_into(transaction_accounts::table)
+                    .values((
+                        transaction_accounts::transaction_id.eq(transaction_id.as_str()),
+                        transaction_accounts::account_id.eq(account_id),
+                    ))
+                    .execute(self.connection())
+                    .map_err(|e| WalletStorageError::general("transactions_insert link account", e))?;
+            }
+        }
 
         Ok(())
     }

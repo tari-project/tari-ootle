@@ -131,16 +131,40 @@ pub struct NewAccountData {
     pub address: ComponentAddress,
 }
 
+/// Extra context attached to a transaction at submission time and broadcast to transaction monitors.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TransactionContext {
+    /// Wallet account(s) this transaction involves. Persisted at insert so the transaction list can be
+    /// filtered per account. Accounts not owned by this wallet are ignored when linking.
+    pub linked_accounts: Vec<ComponentAddress>,
+    /// Additional typed context consumed by transaction monitors (e.g. new-account / claim-burn flows).
+    pub kind: Option<TransactionContextKind>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TransactionContext {
+pub enum TransactionContextKind {
     NewAccount(NewAccountData),
     ClaimBurn { file_name: String },
 }
 
 impl TransactionContext {
+    /// Context linking a transaction to the given wallet account(s), with no monitor-specific kind.
+    pub fn with_accounts<I: IntoIterator<Item = ComponentAddress>>(accounts: I) -> Self {
+        Self {
+            linked_accounts: accounts.into_iter().collect(),
+            kind: None,
+        }
+    }
+
+    /// Sets the monitor-specific kind, returning self for chaining.
+    pub fn with_kind(mut self, kind: TransactionContextKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
     pub fn new_account_data(&self) -> Option<&NewAccountData> {
-        match self {
-            TransactionContext::NewAccount(data) => Some(data),
+        match &self.kind {
+            Some(TransactionContextKind::NewAccount(data)) => Some(data),
             _ => None,
         }
     }

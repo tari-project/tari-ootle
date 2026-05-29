@@ -71,6 +71,7 @@ pub trait WalletStoreWriter: CommittableStore {
         &mut self,
         transaction: &Transaction,
         new_account_info: Option<&NewAccountData>,
+        linked_accounts: &[ComponentAddress],
         is_dry_run: bool,
     ) -> Result<(), WalletStorageError>;
     fn transactions_update(&mut self, update: WalletTransactionUpdate<'_>) -> Result<(), WalletStorageError>;

@@ -20,14 +20,32 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useAccountsList } from "@api/hooks/useAccounts";
 import PageHeading from "@components/PageHeading";
 import { StyledPaper } from "@components/StyledComponents";
+import FormControl from "@mui/material/FormControl";
 import Grid from "@mui/material/Grid";
-import useAccountStore from "@store/accountStore";
+import InputLabel from "@mui/material/InputLabel";
+import MenuItem from "@mui/material/MenuItem";
+import Select, { SelectChangeEvent } from "@mui/material/Select";
+import Stack from "@mui/material/Stack";
+import { Account } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
 import Transactions from "./Transactions";
 
+// Empty value represents the "All accounts" option (no account filter).
+const ALL_ACCOUNTS = "";
+
 function TransactionsLayout() {
-  const { account } = useAccountStore();
+  const { data } = useAccountsList(0, 100);
+  const [selected, setSelected] = useState<string>(ALL_ACCOUNTS);
+
+  const accounts = data?.accounts ?? [];
+  const selectedAccount: Account | null =
+    accounts.find((a) => a.account.component_address === selected)?.account ?? null;
+
+  const onChange = (e: SelectChangeEvent) => setSelected(e.target.value);
+
   return (
     <>
       <Grid size={12}>
@@ -35,7 +53,25 @@ function TransactionsLayout() {
       </Grid>
       <Grid size={12}>
         <StyledPaper>
-          <Transactions account={account!} />
+          <Stack direction="row" justifyContent="flex-end" sx={{ mb: 2 }}>
+            <FormControl size="small" style={{ minWidth: 240 }}>
+              <InputLabel id="transactions-account-filter">Account</InputLabel>
+              <Select
+                labelId="transactions-account-filter"
+                label="Account"
+                value={selected}
+                onChange={onChange}
+              >
+                <MenuItem value={ALL_ACCOUNTS}>All accounts</MenuItem>
+                {accounts.map(({ account }) => (
+                  <MenuItem key={account.component_address} value={account.component_address}>
+                    {account.name || account.component_address}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+          <Transactions account={selectedAccount} />
         </StyledPaper>
       </Grid>
     </>

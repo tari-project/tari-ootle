@@ -10,7 +10,10 @@ use log::*;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::{Epoch, optional::Optional, response_status::ResponseErrorStatus};
 use tari_ootle_transaction::args;
-use tari_ootle_wallet_sdk::{apis::transaction::TransactionApiError, models::WalletEvent};
+use tari_ootle_wallet_sdk::{
+    apis::transaction::TransactionApiError,
+    models::{TransactionContext, WalletEvent},
+};
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
@@ -34,6 +37,7 @@ use tari_ootle_walletd_client::{
         TransactionWaitResultResponse,
     },
 };
+use tari_template_lib_types::ComponentAddress;
 use tari_transaction_manifest::parse_manifest;
 use tokio::time;
 
@@ -89,7 +93,7 @@ pub async fn handle_submit_instruction(
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],
     };
-    submit_inner(context, request).await
+    submit_inner(context, request, vec![*fee_account.component_address()]).await
 }
 
 pub async fn handle_submit(
@@ -102,12 +106,29 @@ pub async fn handle_submit(
     // hold a narrower capability (transfer family, publish_template) call
     // `submit_inner` directly with their own scoped check upstream.
     context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
-    submit_inner(context, req).await
+    let sdk = context.wallet_sdk();
+    // Best-effort: tag the transaction with the account that seals (pays for) it, so it can be filtered
+    // per account. The seal signer may not map to a known account (e.g. an imported key) — that is fine.
+    let linked_accounts = sdk
+        .key_manager_api()
+        .get_public_key(req.seal_signer)
+        .ok()
+        .and_then(|pk| {
+            sdk.accounts_api()
+                .get_account_by_public_key(&pk.public_key.to_byte_type())
+                .optional()
+                .ok()
+                .flatten()
+        })
+        .map(|acc| vec![acc.account.component_address])
+        .unwrap_or_default();
+    submit_inner(context, req, linked_accounts).await
 }
 
 async fn submit_inner(
     context: &HandlerContext,
     req: TransactionSubmitRequest,
+    linked_accounts: Vec<ComponentAddress>,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     req.transaction
@@ -181,9 +202,12 @@ async fn submit_inner(
         transaction.calculate_id()
     );
 
+    // Link the transaction to the involved account(s) (if any are known) so the list can be filtered per
+    // account.
+    let tx_context = (!linked_accounts.is_empty()).then(|| TransactionContext::with_accounts(linked_accounts));
     let transaction_id = context
         .transaction_service()
-        .submit_transaction(transaction)
+        .submit_transaction_with_opts(transaction, tx_context, None)
         .await
         .map_err(map_transaction_submission_error)?;
 
@@ -436,11 +460,10 @@ pub async fn handle_get_all(
     req: TransactionGetAllRequest,
 ) -> Result<TransactionGetAllResponse, anyhow::Error> {
     context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
-    let transactions =
-        context
-            .wallet_sdk()
-            .transaction_api()
-            .fetch_all(req.status, req.component, req.signer_public_key)?;
+    let transactions = context
+        .wallet_sdk()
+        .transaction_api()
+        .fetch_all(req.status, req.account)?;
     Ok(TransactionGetAllResponse { transactions })
 }
 
@@ -615,7 +638,7 @@ pub async fn handle_publish_template(
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],
     };
-    let resp = submit_inner(context, request).await?;
+    let resp = submit_inner(context, request, vec![*fee_account.component_address()]).await?;
     Ok(PublishTemplateResponse {
         transaction_id: resp.transaction_id,
         dry_run_fee: None,

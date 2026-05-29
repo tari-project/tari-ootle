@@ -45,18 +45,16 @@ import { Link } from "react-router";
 import TimeChip from "./TimeChip";
 
 interface TransactionsProps {
-  account?: Account;
+  account?: Account | null;
 }
-export default function Transactions({ account: _ }: TransactionsProps) {
+export default function Transactions({ account }: TransactionsProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const { data, isLoading, error, isError, isRefetching } = useGetAllTransactions({
     status: null,
-    // Some stealth transactions cannot be identified by component/public key in the wallet - so we fetch all transactions.
-    // If this feature is badly needed, we can "tag" transactions as involving a specific account when they are created.
-    component: null, //: account ? substateIdToString(account.address) : null,
-    // Stealth transaction are not able to be identified by signer public key, so for simplicity we fetch all transactions.
-    signer_public_key: null,
+    // Transactions are linked to the account(s) they involve at submission time, so filtering by account
+    // works even for stealth transactions. When no account is given, all transactions are shown.
+    account: account?.component_address ?? null,
   });
 
   const theme = useTheme();

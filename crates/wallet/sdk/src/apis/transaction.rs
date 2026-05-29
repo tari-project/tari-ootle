@@ -14,7 +14,7 @@ use tari_ootle_common_types::{
     response_status::{ResponseErrorStatus, TransactionStatusResponseError},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_template_lib::types::{ComponentAddress, constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{ComponentAddress, constants::TARI_TOKEN};
 
 use crate::{
     models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},
@@ -49,15 +49,20 @@ where
     }
 
     /// Inserts a new transaction into the wallet database with status `New`.
+    ///
+    /// `linked_accounts` are the wallet account(s) this transaction involves; they are persisted so the
+    /// transaction list can be filtered per account. Accounts not known to this wallet are ignored.
     pub fn insert_new_transaction(
         &self,
         transaction: Transaction,
         new_account_info: Option<NewAccountData>,
+        linked_accounts: &[ComponentAddress],
         is_dry_run: bool,
     ) -> Result<TransactionId, TransactionApiError> {
         let tx_id = transaction.calculate_id();
-        self.store
-            .with_write_tx(|tx| tx.transactions_insert(&transaction, new_account_info.as_ref(), is_dry_run))?;
+        self.store.with_write_tx(|tx| {
+            tx.transactions_insert(&transaction, new_account_info.as_ref(), linked_accounts, is_dry_run)
+        })?;
 
         Ok(tx_id)
     }
@@ -127,7 +132,7 @@ where
         }
 
         self.store
-            .with_write_tx(|tx| tx.transactions_insert(&transaction, None, true))?;
+            .with_write_tx(|tx| tx.transactions_insert(&transaction, None, &[], true))?;
 
         let tx_id = transaction.calculate_id();
         let result = self.network_interface.submit_dry_run_transaction(transaction).await;
@@ -185,11 +190,10 @@ where
     pub fn fetch_all(
         &self,
         status: Option<TransactionStatus>,
-        component: Option<ComponentAddress>,
-        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
+        account: Option<ComponentAddress>,
     ) -> Result<Vec<WalletTransaction>, TransactionApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let transactions = tx.transactions_fetch_all(status, component, signed_by_public_key)?;
+        let transactions = tx.transactions_fetch_all(status, account)?;
         Ok(transactions)
     }
 

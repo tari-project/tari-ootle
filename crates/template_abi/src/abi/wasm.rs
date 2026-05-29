@@ -20,6 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+// As of Rust 1.96, the `wasm32-unknown-unknown` target no longer passes `--allow-undefined` to the linker, so
+// undefined symbols are hard linker errors instead of being implicitly turned into imports. These functions are
+// resolved at runtime by the engine host, which provides them under the "env" module (see the wasmer `imports!`
+// wiring in the engine crate), so we declare that import module explicitly.
+// https://blog.rust-lang.org/2026/04/04/changes-to-webassembly-targets-and-handling-undefined-symbols/
+#[link(wasm_import_module = "env")]
 unsafe extern "C" {
     pub fn tari_engine(op: i32, input_ptr: *const u8, input_len: usize) -> *mut u8;
     pub fn tari_debug(input_ptr: *const u8, input_len: usize);

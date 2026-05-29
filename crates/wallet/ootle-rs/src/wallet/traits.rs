@@ -7,7 +7,7 @@ use tari_ootle_transaction::{Transaction, UnsignedTransaction};
 
 use crate::{
     Address,
-    stealth::{InputDecryptor, StealthOutputStatementFactory},
+    stealth::{BurnClaimKeyProvider, InputDecryptor, StealthOutputStatementFactory},
     transaction::{TransactionSigner, TransactionStealthKeySigner},
     wallet::WalletResult,
 };
@@ -21,12 +21,17 @@ pub trait NetworkWallet {
 }
 
 /// A key provider that can sign transactions, derive stealth keys, generate output
-/// statements, and decrypt stealth inputs. Automatically implemented for any type
-/// implementing all four constituent traits.
+/// statements, decrypt stealth inputs, and claim Layer 1 burns. Automatically implemented
+/// for any type implementing all constituent traits.
 pub trait WalletKeyProvider:
-    TransactionSigner + TransactionStealthKeySigner + StealthOutputStatementFactory + InputDecryptor
+    TransactionSigner + TransactionStealthKeySigner + StealthOutputStatementFactory + InputDecryptor + BurnClaimKeyProvider
 {
 }
 
-impl<T> WalletKeyProvider for T where T: TransactionSigner + TransactionStealthKeySigner + StealthOutputStatementFactory + InputDecryptor
-{}
+impl<T> WalletKeyProvider for T where T: TransactionSigner
+        + TransactionStealthKeySigner
+        + StealthOutputStatementFactory
+        + InputDecryptor
+        + BurnClaimKeyProvider
+{
+}

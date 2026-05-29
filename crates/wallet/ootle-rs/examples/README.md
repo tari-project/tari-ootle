@@ -23,6 +23,22 @@ and verify balances.
 Confidential stealth transfers with input/output commitments, encrypted memos,
 change handling, and stealth spending authorizers.
 
+### `claim_burn`
+
+Claim a Layer 1 (minotari) burn into an Ootle account.
+
+Claiming is a two-step process because the L1 burn must be addressed to a claim key
+derived from the claiming account. Run it with no arguments to print the claim public
+key (it uses a fixed, demo-only secret), burn tTARI on the L1 wallet to that key, then
+re-run with the burn proof JSON as the first argument to claim:
+
+```bash
+cargo run -p ootle-rs --example claim_burn                       # prints the claim key
+cargo run -p ootle-rs --example claim_burn -- ./burn_proof.json  # claims the burn
+```
+
+See the example file header for the full flow.
+
 ### `balance_query`
 
 Query account balances and decrypt stealth UTXO values using ElGamal view keys.

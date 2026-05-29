@@ -10,6 +10,7 @@ use tari_ootle_transaction::{IntoSigned, Transaction, TransactionSignature, Unse
 use tari_ootle_wallet_crypto::DecryptedData;
 use tari_template_lib_types::{
     Amount,
+    EncryptedData,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     stealth::StealthOutputsStatement,
 };
@@ -146,6 +147,44 @@ impl OotleWallet {
             })?;
         let (statement, agg_output_mask) = signer.generate_outputs_statement(specs, revealed_output_amount).await?;
         Ok((statement, agg_output_mask))
+    }
+
+    /// Derive the L1 burn-claim stealth secret `s = H(p·R) + p` using the default key provider.
+    /// See [`crate::stealth::BurnClaimKeyProvider::derive_burn_claim_secret`].
+    pub async fn derive_burn_claim_secret(
+        &self,
+        sender_offset_public_key: &RistrettoPublicKey,
+    ) -> WalletResult<RistrettoSecretKey> {
+        let address = self.default_address();
+        let signer = self
+            .key_providers
+            .get(address)
+            .ok_or_else(|| WalletError::KeyProviderNotFound {
+                address: address.clone(),
+            })?;
+        let secret = signer.derive_burn_claim_secret(sender_offset_public_key).await?;
+        Ok(secret)
+    }
+
+    /// Decrypt an L1 burn output's value and mask using the default key provider.
+    /// See [`crate::stealth::BurnClaimKeyProvider::decrypt_burn_claim_output`].
+    pub async fn decrypt_burn_claim_output(
+        &self,
+        encrypted_data: &EncryptedData,
+        commitment: &PedersenCommitmentBytes,
+        sender_offset_public_key: &RistrettoPublicKey,
+    ) -> WalletResult<DecryptedData> {
+        let address = self.default_address();
+        let signer = self
+            .key_providers
+            .get(address)
+            .ok_or_else(|| WalletError::KeyProviderNotFound {
+                address: address.clone(),
+            })?;
+        let decrypted = signer
+            .decrypt_burn_claim_output(encrypted_data, commitment, sender_offset_public_key)
+            .await?;
+        Ok(decrypted)
     }
 
     pub fn stealth_authorizer(&self, required_signatures: SignatureRequirements) -> WalletStealthAuthorizer<'_, Self> {

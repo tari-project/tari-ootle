@@ -718,14 +718,15 @@ where TConsensusSpec: ConsensusSpec
                         })?;
 
                         if let Err(err) = substate_store.put_diff(diff) {
-                            error!(
+                            // A lock failure or DOWN input is an expected conflict under contention - skip the
+                            // transaction this round. Any other store error is fatal and must be propagated.
+                            let lock_err = err.ok_lock_failed()?;
+                            warn!(
                                 target: LOG_TARGET,
-                                "🔒 Failed to write to temporary state store for transaction {} for LocalOnly: {}. Skipping proposing this transaction...",
+                                "🔒 Skipping LocalOnly transaction {} while proposing due to input conflict: {}",
                                 pool_tx.id(),
-                                err,
+                                lock_err,
                             );
-                            // Only error if it is not related to lock errors
-                            let _err = err.ok_lock_failed()?;
                             return Ok(None);
                         }
                     }
@@ -928,14 +929,15 @@ where TConsensusSpec: ConsensusSpec
         })?;
         let filtered_diff = filter_diff_for_committee(local_committee_info, diff);
         if let Err(err) = substate_store.put_diff(&filtered_diff) {
-            error!(
+            // A lock failure or DOWN input is an expected conflict under contention - skip the transaction this
+            // round. Any other store error is fatal and must be propagated.
+            let lock_err = err.ok_lock_failed()?;
+            warn!(
                 target: LOG_TARGET,
-                "🔒 Failed to write to temporary state store for transaction {} for Accept: {}. Skipping proposing this transaction...",
+                "🔒 Skipping Accept transaction {} while proposing due to input conflict: {}",
                 tx_rec.id(),
-                err,
+                lock_err,
             );
-            // Only error if it is not related to lock errors
-            let _err = err.ok_lock_failed()?;
             return Ok(None);
         }
         let atom = self.get_transaction_atom_with_leader_fee(tx_rec)?;

@@ -208,6 +208,19 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     assert_eq!(n, 2);
 }
 
+#[test]
+fn substate_is_down_is_classified_as_a_skippable_lock_failure() {
+    // A DOWN substate (e.g. surfaced by put_diff at propose time when an input version was already spent)
+    // must be classified as a recoverable lock failure. The proposer relies on ok_lock_failed() to skip such
+    // transactions instead of propagating the error, which would otherwise crash consensus.
+    let id = VersionedSubstateId::new(new_substate_id(0), 0);
+    let err = SubstateStoreError::SubstateIsDown { id };
+    assert!(matches!(
+        err.ok_lock_failed(),
+        Ok(LockFailedError::SubstateIsDown { .. })
+    ));
+}
+
 fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateId {
     let id = new_substate_id(seed);
     let value = new_substate_value(seed);

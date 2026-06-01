@@ -38,6 +38,10 @@ impl SubstateStoreError {
     pub fn ok_lock_failed(self) -> Result<LockFailedError, Self> {
         match self {
             SubstateStoreError::LockFailed(err) => Ok(err),
+            // A substate that is DOWN is an expected conflict (its version was already spent by an earlier
+            // transaction), not a fatal store error. Treat it as a lock failure so callers can skip or abort the
+            // transaction rather than aborting consensus.
+            SubstateStoreError::SubstateIsDown { id } => Ok(LockFailedError::SubstateIsDown { id }),
             other => Err(other),
         }
     }

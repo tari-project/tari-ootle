@@ -292,15 +292,14 @@ impl WalletStoreReader for ReadTransaction<'_> {
             query = query.filter(transactions::status.eq(status.as_key_str()));
         }
         if let Some(account) = account {
-            // Transactions are linked to the account(s) they involve at submission time. Resolve the
-            // ids of transactions linked to this account and restrict the result to them. An unknown or
-            // unlinked account simply yields no transactions.
-            let linked_tx_ids: Vec<String> = transaction_accounts::table
+            // Transactions are linked to the account(s) they involve at submission time. Restrict the
+            // result to transactions linked to this account using a subquery, so the filtering stays in
+            // the database and avoids SQLite's bound-parameter limit for accounts with many transactions.
+            // An unknown or unlinked account simply yields no transactions.
+            let linked_tx_ids = transaction_accounts::table
                 .inner_join(accounts::table)
                 .select(transaction_accounts::transaction_id)
-                .filter(accounts::address.eq(account.to_string()))
-                .load(self.connection())
-                .map_err(|e| WalletStorageError::general("transactions_fetch_all linked ids", e))?;
+                .filter(accounts::address.eq(account.to_string()));
             query = query.filter(transactions::transaction_id.eq_any(linked_tx_ids));
         }
         let rows = query

@@ -65,7 +65,6 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         Ok(exists)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn insert_new(
         &self,
         tx: &mut TStateStore::WriteTransaction<'_>,

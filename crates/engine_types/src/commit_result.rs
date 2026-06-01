@@ -265,11 +265,7 @@ impl FinalizeResult {
         self.any_accept()
             .into_iter()
             .flat_map(|diff| diff.up_iter())
-            .filter_map(|(id, s)| {
-                s.substate_value()
-                    .as_resource()
-                    .and_then(|r| id.as_resource_address().map(|a| (a, r)))
-            })
+            .filter_map(|(id, s)| id.as_resource_address().zip(s.substate_value().as_resource()))
     }
 }
 

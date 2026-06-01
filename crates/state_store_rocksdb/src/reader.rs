@@ -652,28 +652,31 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             return Ok(exec);
         }
 
-        let block_ids = self.get_pending_chain_until(from_block.block_id())?;
-        debug!(
-            target: LOG_TARGET,
-            "{OPERATION}: No execution found for {transaction_id} in pending chain ({} blocks)",
-            block_ids.len(),
-        );
-
+        // Collect every execution recorded for this transaction.
         let query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
-        let mut max_height_key = None;
-        for result in iter {
-            let (tx_id, block_id, height) = result?;
 
-            if max_height_key
-                .as_ref()
-                .is_none_or(|(_, block_id, current_height)| *current_height < height && block_ids.contains(block_id))
-            {
-                max_height_key = Some((tx_id, block_id, height));
+        // An execution may only be reused if it was recorded on an ancestor of `from_block`. This is determined with
+        // index lookups only - no blocks are loaded:
+        //  - a block on `from_block`'s pending chain is an uncommitted ancestor, so reusable;
+        //  - a block no longer in the pending-chain index has been committed, and because the committed chain is final
+        //    and linear every committed block is an ancestor, so reusable;
+        //  - a block still in the pending-chain index but not on `from_block`'s chain is an uncommitted
+        //    orphan/abandoned branch (e.g. left over across a restart) and must NOT be reused - its execution is pinned
+        //    to already-spent input versions.
+        let pending_chain = self.get_pending_chain_until(from_block.block_id())?;
+        let pending_index = self.db().cf(chain::PendingChainIndex)?;
+
+        let mut best: Option<(TransactionId, BlockId, NodeHeight)> = None;
+        let candidates = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
+        for res in candidates {
+            let (tx_id, block_id, height) = res?;
+            let is_ancestor = pending_chain.contains(&block_id) || !pending_index.exists(&block_id, OPERATION)?;
+            if is_ancestor && best.as_ref().is_none_or(|(_, _, h)| *h < height) {
+                best = Some((tx_id, block_id, height));
             }
         }
 
-        if let Some((tx_id, block_id, height)) = max_height_key {
+        if let Some((tx_id, block_id, height)) = best {
             debug!(
                 target: LOG_TARGET,
                 "{OPERATION}: Found execution for {transaction_id} in {block_id} {height}",

@@ -284,6 +284,7 @@ mod transaction_execution_operations {
         );
         tx.block_transaction_executions_insert_or_ignore(&exec1).unwrap();
 
+        // A committed ancestor of the queried block - its execution is still reusable (e.g. multishard accept).
         let committed_block = chain[6].clone();
         // insert transaction executions
         let exec2 = BlockTransactionExecution::new(
@@ -335,6 +336,74 @@ mod transaction_execution_operations {
         // block_transaction_executions_lock_any_for_block
         tx.block_transaction_executions_lock_any_for_block(&not_committed_block.as_leaf())
             .unwrap();
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn it_excludes_orphan_block_executions_rocksdb() {
+        let (db, _tmp) = create_rocksdb();
+        it_excludes_orphan_block_executions(db);
+    }
+
+    // Regression: an execution recorded on a block that is NOT part of the queried block's pending chain (e.g. an
+    // abandoned/orphan branch left over across a restart) must never be returned, otherwise a stale execution pinned
+    // to already-spent input versions can be reused.
+    fn it_excludes_orphan_block_executions(db: impl StateStore) {
+        use tari_ootle_storage::StorageError;
+
+        use crate::helpers::create_block_with_qc;
+
+        let mut tx = db.create_write_tx().unwrap();
+
+        let tx1 = TransactionRecord::new(
+            Transaction::builder_localnet()
+                .add_instruction(Instruction::DropAllProofsInWorkspace)
+                .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
+                .build_and_seal(&PrivateKey::default()),
+        );
+        tx.transactions_insert(&tx1).unwrap();
+
+        let chain = create_chain(10);
+        commit_chain(&mut tx, &chain);
+        let leaf = chain.last().unwrap().as_leaf();
+
+        // Fork off an in-chain block: this block is not on `leaf`'s parent chain, so it is an orphan w.r.t. `leaf`.
+        let orphan_block = create_block_with_qc(&chain[5].as_leaf());
+        orphan_block.insert(&mut tx).unwrap();
+
+        // The transaction's only execution lives on the orphan block.
+        let exec = BlockTransactionExecution::new(
+            orphan_block.as_leaf(),
+            *tx1.id(),
+            ExecuteResult {
+                finalize: FinalizeResult::new(
+                    Hash32::default(),
+                    vec![],
+                    vec![],
+                    TransactionResult::Accept(SubstateDiff::new()),
+                    FeeReceiptBuilder {
+                        total_fee_payment: 0,
+                        total_fees_paid: 0,
+                        total_fee_overcharge: 0,
+                        cost_breakdown: FeeBreakdown::default(),
+                    }
+                    .build(),
+                ),
+                execution_time: Duration::from_secs(1),
+                execute_epoch: None,
+            },
+            vec![],
+            vec![],
+        );
+        assert!(tx.block_transaction_executions_insert_or_ignore(&exec).unwrap());
+
+        // It must not be returned for the canonical chain leaf - it belongs to an abandoned branch.
+        let res = tx.block_transaction_executions_get_pending_for_block(tx1.id(), &leaf);
+        assert!(
+            matches!(res, Err(StorageError::NotFound { .. })),
+            "orphan-branch execution must not be reused, got {res:?}"
+        );
 
         tx.rollback().unwrap();
     }

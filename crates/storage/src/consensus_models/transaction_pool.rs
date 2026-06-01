@@ -65,6 +65,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         Ok(exists)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_new(
         &self,
         tx: &mut TStateStore::WriteTransaction<'_>,
@@ -74,8 +75,17 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         is_ready: bool,
         is_global: bool,
         max_epoch: Option<Epoch>,
+        transaction_weight: u64,
     ) -> Result<(), TransactionPoolError> {
-        tx.transaction_pool_insert_new(tx_id, decision, initial_evidence, is_ready, is_global, max_epoch)?;
+        tx.transaction_pool_insert_new(
+            tx_id,
+            decision,
+            initial_evidence,
+            is_ready,
+            is_global,
+            max_epoch,
+            transaction_weight,
+        )?;
         Ok(())
     }
 
@@ -94,6 +104,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
                 is_ready,
                 transaction.transaction().is_global(),
                 transaction.transaction().max_epoch(),
+                transaction.transaction().calculate_transaction_weight().as_u64(),
             )?;
         }
         Ok(())
@@ -108,16 +119,22 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         Ok(recs)
     }
 
+    /// Fetch ready transactions for the next block, bounded by a weight budget and a hard command
+    /// count cap. Records are accumulated in order until either their cumulative
+    /// [`TransactionPoolRecord::proposal_weight`] would exceed `weight_budget` or `max_count` records
+    /// have been collected. At least one ready record is always returned (if any exist) so that a
+    /// single transaction heavier than the whole budget still makes progress.
     pub fn get_batch_for_next_block(
         &self,
         tx: &TStateStore::ReadTransaction<'_>,
-        max: usize,
+        weight_budget: u64,
+        max_count: usize,
         block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, TransactionPoolError> {
-        if max == 0 {
+        if weight_budget == 0 || max_count == 0 {
             return Ok(Vec::new());
         }
-        let recs = tx.transaction_pool_get_many_ready(max, block_id)?;
+        let recs = tx.transaction_pool_get_many_ready(weight_budget, max_count, block_id)?;
         Ok(recs)
     }
 
@@ -291,6 +308,26 @@ impl TransactionPoolStage {
     pub fn is_finalising(&self) -> bool {
         self.is_local_only() || self.is_all_accepted() || self.is_some_accepted()
     }
+
+    /// Heuristic cost (as a percentage of the transaction's static weight) of proposing the next
+    /// command for a record at this stage. Phases that execute the transaction and/or carry its full
+    /// footprint cost full weight; finalisation phases reuse an already-computed execution and only
+    /// carry a small atom, so they are discounted. Used purely as a local block-packing heuristic.
+    pub fn proposal_weight_percent(&self) -> u64 {
+        match self {
+            // Prepare phase. May execute (LocalOnly / output-only) or only resolve+pledge local inputs,
+            // but the command carries the transaction's full footprint either way. Charged in full.
+            TransactionPoolStage::New => 100,
+            // Accept phase: executes the transaction with all gathered pledges.
+            TransactionPoolStage::LocalPrepared => 100,
+            // Finalisation phases: reuse the prior execution and apply its diff (or abort). No
+            // re-execution and only a compact atom is proposed.
+            TransactionPoolStage::LocalAccepted |
+            TransactionPoolStage::AllAccepted |
+            TransactionPoolStage::SomeAccepted |
+            TransactionPoolStage::LocalOnly => 35,
+        }
+    }
 }
 
 impl Display for TransactionPoolStage {
@@ -392,6 +429,13 @@ pub struct TransactionPoolRecord {
     last_updated: time::OffsetDateTime,
     #[n(14)]
     last_updated_in_block: Option<BlockId>,
+    /// Static transaction weight (`Transaction::calculate_transaction_weight`), cached here so block
+    /// proposal can budget by weight without loading the full transaction body. Computed once when the
+    /// record is created.
+    #[serde(default)]
+    #[cbor(default)]
+    #[n(15)]
+    transaction_weight: u64,
 }
 
 impl TransactionPoolRecord {
@@ -412,6 +456,7 @@ impl TransactionPoolRecord {
             locked_epoch: None,
             last_updated: time::OffsetDateTime::now_utc(),
             last_updated_in_block: None,
+            transaction_weight: transaction.calculate_transaction_weight().as_u64(),
         }
     }
 
@@ -431,6 +476,7 @@ impl TransactionPoolRecord {
         locked_epoch: Option<LockedEpoch>,
         last_updated: time::OffsetDateTime,
         last_updated_in_block: Option<BlockId>,
+        transaction_weight: u64,
     ) -> Self {
         Self {
             transaction_id: id,
@@ -448,6 +494,7 @@ impl TransactionPoolRecord {
             locked_epoch,
             last_updated,
             last_updated_in_block,
+            transaction_weight,
         }
     }
 
@@ -537,6 +584,20 @@ impl TransactionPoolRecord {
 
     pub fn stage(&self) -> TransactionPoolStage {
         self.stage
+    }
+
+    /// The cached static transaction weight (see `Transaction::calculate_transaction_weight`).
+    pub fn transaction_weight(&self) -> u64 {
+        self.transaction_weight
+    }
+
+    /// The weight this record contributes to a block when proposing its next command. It is the static
+    /// transaction weight scaled by the per-phase cost of the next command (see
+    /// [`TransactionPoolStage::proposal_weight_percent`]). Always at least 1 so every command consumes
+    /// some of the block weight budget. This is a local proposing heuristic, not a consensus rule.
+    pub fn proposal_weight(&self) -> u64 {
+        let percent = self.current_stage().proposal_weight_percent();
+        self.transaction_weight.saturating_mul(percent).div_ceil(100).max(1)
     }
 
     pub fn leader_fee(&self) -> Option<&LeaderFee> {
@@ -968,6 +1029,69 @@ mod tests {
         }
     }
 
+    mod proposal_weight {
+        use super::*;
+
+        fn record_with_weight_and_stage(weight: u64, stage: TransactionPoolStage) -> TransactionPoolRecord {
+            TransactionPoolRecord {
+                transaction_id: TransactionId::new([0; 32]),
+                original_decision: Decision::Commit,
+                evidence: Default::default(),
+                transaction_fee: 0,
+                leader_fee: None,
+                stage,
+                is_global: false,
+                pending_stage: None,
+                local_decision: None,
+                remote_decision: None,
+                is_ready: true,
+                max_epoch: None,
+                locked_epoch: None,
+                last_updated: time::OffsetDateTime::now_utc(),
+                last_updated_in_block: None,
+                transaction_weight: weight,
+            }
+        }
+
+        #[test]
+        fn executing_phases_cost_full_weight() {
+            assert_eq!(TransactionPoolStage::New.proposal_weight_percent(), 100);
+            assert_eq!(TransactionPoolStage::LocalPrepared.proposal_weight_percent(), 100);
+
+            let rec = record_with_weight_and_stage(200, TransactionPoolStage::New);
+            assert_eq!(rec.proposal_weight(), 200);
+        }
+
+        #[test]
+        fn finalisation_phases_are_discounted() {
+            // Finalisation phases reuse a prior execution and carry only a compact atom.
+            for stage in [
+                TransactionPoolStage::LocalAccepted,
+                TransactionPoolStage::AllAccepted,
+                TransactionPoolStage::SomeAccepted,
+                TransactionPoolStage::LocalOnly,
+            ] {
+                assert!(
+                    stage.proposal_weight_percent() < 100,
+                    "{stage} should be discounted relative to an executing phase"
+                );
+                let rec = record_with_weight_and_stage(200, stage);
+                assert!(
+                    rec.proposal_weight() < 200,
+                    "{stage} proposal weight should be discounted"
+                );
+            }
+        }
+
+        #[test]
+        fn proposal_weight_is_at_least_one() {
+            // A zero-weight (e.g. legacy/empty) record still consumes some budget so the count cap
+            // is the only thing bounding it, never an unbounded fill.
+            let rec = record_with_weight_and_stage(0, TransactionPoolStage::New);
+            assert_eq!(rec.proposal_weight(), 1);
+        }
+    }
+
     mod calculate_leader_fee {
 
         use super::*;
@@ -989,6 +1113,7 @@ mod tests {
                 locked_epoch: None,
                 last_updated: time::OffsetDateTime::now_utc(),
                 last_updated_in_block: None,
+                transaction_weight: 0,
             }
         }
 

@@ -5,6 +5,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     fmt::Display,
     num::NonZeroU64,
+    time::Instant,
 };
 
 use log::*;
@@ -458,12 +459,41 @@ where TConsensusSpec: ConsensusSpec
         );
 
         // batch is empty for is_empty, is_epoch_end and is_epoch_start blocks
-        let timer = TraceTimer::info(LOG_TARGET, "Generating commands").with_iterations(batch.transactions.len());
+        let batch_size = batch.transactions.len();
+        let timer = TraceTimer::info(LOG_TARGET, "Generating commands").with_iterations(batch_size);
         let mut lock_conflicts = TransactionLockConflicts::new();
-        for mut transaction in batch.transactions {
+        // Local proposing heuristic (not a consensus rule, so no fork risk): stop executing transactions
+        // once roughly half the block time has been spent, so that a batch of heavy transactions cannot
+        // push proposing past the block time. The static weight budget bounds block size; this bounds the
+        // actual execution latency that the static estimate cannot perfectly predict. Deferred
+        // transactions remain in the pool and are proposed in a later block.
+        let propose_exec_deadline = self.config.consensus_constants.pacemaker_block_time / 2;
+        let propose_started_at = Instant::now();
+        // Accumulated to log observed execution throughput (weight/s) for calibrating `max_block_weight`
+        // against the block time. See the calibration log emitted after the loop.
+        let mut executed_weight = 0u64;
+        let mut num_executed = 0usize;
+        for (idx, mut transaction) in batch.transactions.into_iter().enumerate() {
+            // Always attempt at least the first transaction before honouring the deadline so we make
+            // progress even when a single transaction is slow to execute.
+            if idx > 0 && propose_started_at.elapsed() >= propose_exec_deadline {
+                warn!(
+                    target: LOG_TARGET,
+                    "⏱️ PROPOSE: execution soft deadline ({:.1?}) reached after {} of {} transaction(s); deferring {} to a later block",
+                    propose_exec_deadline,
+                    idx,
+                    batch_size,
+                    batch_size - idx,
+                );
+                break;
+            }
             // Apply the transaction updates (if any) that occurred as a result of the justified block.
             // This allows us to propose evidence in the next block that relates to transactions in the justified block.
             change_set.apply_transaction_update(&mut transaction);
+            // Capture before the record is moved. The processing work below (incl. execution) is incurred
+            // whether or not a command is produced, so accumulate for every processed transaction.
+            executed_weight += transaction.proposal_weight();
+            num_executed += 1;
             if let Some(command) = self.transaction_pool_record_to_command(
                 &start_of_chain_block.as_leaf(),
                 // This locked epoch is used to set the transaction LockedEpoch if necessary
@@ -499,6 +529,28 @@ where TConsensusSpec: ConsensusSpec
             }
         }
         timer.done();
+
+        // Calibration signal: observed propose-time execution throughput and the time a full
+        // `max_block_weight` block would take at that rate. Use this (from real traffic, at debug level)
+        // to tune `max_block_weight` so a full block executes well within the block time.
+        let exec_elapsed = propose_started_at.elapsed();
+        let exec_secs = exec_elapsed.as_secs_f64();
+        if executed_weight > 0 && exec_secs > 0.0 {
+            let weight_per_sec = executed_weight as f64 / exec_secs;
+            let projected_full_block_secs = self.config.consensus_constants.max_block_weight as f64 / weight_per_sec;
+            debug!(
+                target: LOG_TARGET,
+                "📊 PROPOSE calibration: executed {} command(s) / {} weight in {:.2?} (~{:.0} weight/s); a full \
+                 max_block_weight={} block projects to ~{:.2}s of execution (block_time={:.0?})",
+                num_executed,
+                executed_weight,
+                exec_elapsed,
+                weight_per_sec,
+                self.config.consensus_constants.max_block_weight,
+                projected_full_block_secs,
+                self.config.consensus_constants.pacemaker_block_time,
+            );
+        }
 
         debug!(
             target: LOG_TARGET,
@@ -571,15 +623,21 @@ where TConsensusSpec: ConsensusSpec
         start_of_chain_block: HighestSeenBlock,
     ) -> Result<ProposalBatch, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
-        // Foreign proposals are weighted by 10x. Each foreign proposal can contain max_number_commands_in_block*inputs
-        // substate pledges. TODO: this is a loosey goosey upper bound. We need to evaluate this, find an acceptable
-        // upper bound or perhaps re-design how foreign proposals work
-        const FP_WEIGHT_MULTIPLIER: usize = 10;
-        let foreign_proposals = ForeignProposalRecord::get_all_new(
-            tx,
-            start_of_chain_block.block_id(),
-            self.config.consensus_constants.max_number_commands_in_block / FP_WEIGHT_MULTIPLIER,
-        )?;
+        // A block is budgeted by total command weight (`max_block_weight`), not a flat command count.
+        // Foreign proposals and evict nodes consume part of that budget before local transactions fill the
+        // rest. A foreign proposal is weighted by the substate pledges it carries (the dominant processing
+        // cost when applying it at propose time), on the same scale as transaction input weight, rather
+        // than a flat 10x multiplier.
+        const MAX_FOREIGN_PROPOSALS_PER_BLOCK: usize = 10;
+        const FP_BASE_WEIGHT: u64 = 50;
+        const FP_PLEDGE_WEIGHT: u64 = 15;
+        const EVICT_NODE_WEIGHT: u64 = 50;
+
+        let max_block_weight = self.config.consensus_constants.max_block_weight;
+        let max_commands = self.config.consensus_constants.max_commands_in_block;
+
+        let foreign_proposals =
+            ForeignProposalRecord::get_all_new(tx, start_of_chain_block.block_id(), MAX_FOREIGN_PROPOSALS_PER_BLOCK)?;
 
         if !foreign_proposals.is_empty() {
             debug!(
@@ -589,22 +647,24 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        let mut remaining_block_size = subtract_block_size_checked(
-            Some(self.config.consensus_constants.max_number_commands_in_block),
-            foreign_proposals.len() * FP_WEIGHT_MULTIPLIER,
-        );
+        let foreign_proposal_weight: u64 = foreign_proposals
+            .iter()
+            .map(|fp| FP_BASE_WEIGHT + fp.block_pledge().len() as u64 * FP_PLEDGE_WEIGHT)
+            .sum();
 
-        let evict_nodes = remaining_block_size
+        let mut remaining_weight = subtract_weight_checked(Some(max_block_weight), foreign_proposal_weight);
+
+        let evict_nodes = remaining_weight
             // Disable eviction proposals if not enabled in config
             .filter(|_| self.config.enable_eviction_proposal)
-            .map(|max| {
+            .map(|remaining| {
                 let num_evicted =
                     ValidatorConsensusStats::count_number_evicted_nodes(tx, start_of_chain_block.epoch())?;
                 // TODO: technically, we should not evict more than 1/3 of the voting power, not the number of nodes
                 // (but this is currently the same thing)
                 let max_allowed_to_evict = u64::from(local_committee_info.max_failure_shard_group_members())
                     .saturating_sub(num_evicted)
-                    .min(max as u64);
+                    .min(remaining / EVICT_NODE_WEIGHT);
                 ValidatorConsensusStats::get_nodes_to_evict(
                     tx,
                     start_of_chain_block.block_id(),
@@ -623,12 +683,21 @@ where TConsensusSpec: ConsensusSpec
             )
         }
 
-        remaining_block_size = subtract_block_size_checked(remaining_block_size, evict_nodes.len());
+        remaining_weight = subtract_weight_checked(remaining_weight, evict_nodes.len() as u64 * EVICT_NODE_WEIGHT);
 
-        let transactions = remaining_block_size
-            .map(|size| {
-                self.transaction_pool
-                    .get_batch_for_next_block(tx, size, start_of_chain_block.block_id())
+        // Bound the transaction count so the total command count (foreign proposals + evict + transactions)
+        // stays under the hard command cap regardless of how light the transactions are.
+        let max_tx_count = max_commands.saturating_sub(foreign_proposals.len() + evict_nodes.len());
+
+        let transactions = remaining_weight
+            .filter(|_| max_tx_count > 0)
+            .map(|weight_budget| {
+                self.transaction_pool.get_batch_for_next_block(
+                    tx,
+                    weight_budget,
+                    max_tx_count,
+                    start_of_chain_block.block_id(),
+                )
             })
             .transpose()?
             .unwrap_or_default();
@@ -1022,8 +1091,33 @@ impl Display for ProposalBatch {
     }
 }
 
-fn subtract_block_size_checked(remaining_block_size: Option<usize>, by: usize) -> Option<usize> {
-    remaining_block_size
-        .and_then(|sz| sz.checked_sub(by))
-        .filter(|sz| *sz > 0)
+/// Subtract `by` from the remaining block weight budget, returning `None` once the budget is
+/// exhausted (i.e. drops to zero or would underflow). Mirrors the previous count-based helper but
+/// operates on the weight budget.
+fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64> {
+    remaining_weight.and_then(|w| w.checked_sub(by)).filter(|w| *w > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod subtract_weight_checked {
+        use super::*;
+
+        #[test]
+        fn it_subtracts_within_budget() {
+            assert_eq!(subtract_weight_checked(Some(100), 40), Some(60));
+        }
+
+        #[test]
+        fn it_returns_none_when_exhausted_or_underflowing() {
+            // Reaching exactly zero exhausts the budget.
+            assert_eq!(subtract_weight_checked(Some(100), 100), None);
+            // Underflow (subtracting more than remaining) also exhausts it.
+            assert_eq!(subtract_weight_checked(Some(40), 100), None);
+            // Once None, it stays None.
+            assert_eq!(subtract_weight_checked(None, 1), None);
+        }
+    }
 }

@@ -1239,7 +1239,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn transaction_pool_get_many_ready(
         &self,
-        max_txs: usize,
+        weight_budget: u64,
+        max_count: usize,
         block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError> {
         const OPERATION: &str = "transaction_pool_get_many_ready";
@@ -1272,6 +1273,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         let mut transactions = Vec::new();
+        let mut accumulated_weight = 0u64;
         let iter = cf.value_iterator(Ordering::default(), OPERATION);
 
         for result in iter {
@@ -1287,9 +1289,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 update.merge_into(&mut tx);
             }
             if tx.is_ready() {
+                // Always include at least one ready record so a transaction heavier than the whole
+                // budget still makes progress, then stop once the budget or count cap is reached.
+                let next_weight = accumulated_weight.saturating_add(tx.proposal_weight());
+                if !transactions.is_empty() && next_weight > weight_budget {
+                    break;
+                }
+                accumulated_weight = next_weight;
                 transactions.push(tx);
 
-                if transactions.len() >= max_txs {
+                if transactions.len() >= max_count {
                     break;
                 }
             }

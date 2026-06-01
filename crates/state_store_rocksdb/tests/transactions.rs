@@ -86,11 +86,11 @@ mod confirm_all_transitions {
         block1.as_locked().set(&mut tx).unwrap();
         block1.as_leaf().set(&mut tx).unwrap();
 
-        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, None)
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, None, 0)
             .unwrap();
-        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false, None)
+        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false, None, 0)
             .unwrap();
-        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false, None)
+        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false, None, 0)
             .unwrap();
         let block_id = *block1.id();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
@@ -118,7 +118,7 @@ mod confirm_all_transitions {
         tx.transaction_pool_add_pending_update(&block1.as_leaf(), &TransactionPoolStatusUpdate::new(tx_3, true))
             .unwrap();
 
-        let rec = tx.transaction_pool_get_many_ready(10, &block_id).unwrap();
+        let rec = tx.transaction_pool_get_many_ready(u64::MAX, 10, &block_id).unwrap();
         assert_eq!(rec.len(), 3);
 
         let rec = tx.transaction_pool_get_for_blocks(&block_id, &atom1.id).unwrap();
@@ -319,7 +319,7 @@ mod transaction_execution_operations {
         assert_eq_debug(&res, &exec1);
 
         // transactions_finalize_all
-        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None)
+        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
             .unwrap();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
         assert_eq!(transactions.len(), 1);
@@ -406,5 +406,99 @@ mod transaction_execution_operations {
         );
 
         tx.rollback().unwrap();
+    }
+}
+
+mod get_many_ready_weight_budget {
+    use tari_consensus_types::BlockId;
+    use tari_ootle_transaction::Network;
+    use tari_template_lib_types::crypto::SchnorrSignatureBytes;
+
+    use super::*;
+    use crate::helpers::num_preshards;
+
+    /// Insert `weights.len()` ready (New stage) transactions with the given static weights and return
+    /// the block id to query against.
+    fn setup_ready_pool(db: &impl StateStore, weights: &[u64]) -> BlockId {
+        let mut tx = db.create_write_tx().unwrap();
+        let network = Network::LocalNet;
+        let zero_block = Block::zero_block(network, num_preshards());
+        zero_block.insert(&mut tx).unwrap();
+        tx.proposal_certificates_save(zero_block.justify()).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
+            .unwrap();
+        let shard_group = zero_block.shard_group();
+
+        let atoms: Vec<_> = weights.iter().map(|_| create_tx_atom()).collect();
+        let block1 = Block::create(
+            network,
+            *zero_block.id(),
+            zero_block.justify().clone(),
+            None,
+            NodeHeight(1),
+            Epoch(0),
+            shard_group,
+            Default::default(),
+            // Need at least one command so the block causes a state change and is queryable.
+            [Command::LocalPrepare(atoms[0].clone())].into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            SchnorrSignatureBytes::zero(),
+            EpochTime::now().as_u64(),
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::default(),
+        )
+        .unwrap();
+        block1.insert(&mut tx).unwrap();
+        block1.as_locked().set(&mut tx).unwrap();
+        block1.as_leaf().set(&mut tx).unwrap();
+
+        for (atom, weight) in atoms.iter().zip(weights) {
+            tx.transaction_pool_insert_new(atom.id, atom.decision, &Evidence::empty(), true, false, None, *weight)
+                .unwrap();
+        }
+        let block_id = *block1.id();
+        tx.commit().unwrap();
+        block_id
+    }
+
+    #[test]
+    fn it_stops_when_weight_budget_exhausted_rocksdb() {
+        let (db, _tmp) = create_rocksdb();
+        // Three New-stage transactions, each weight 100 (proposal_weight == 100 at New stage).
+        let block_id = setup_ready_pool(&db, &[100, 100, 100]);
+        let tx = db.create_read_tx().unwrap();
+
+        // Budget for 2 (100 + 100 = 200 <= 250; the third would push to 300 > 250).
+        let recs = tx.transaction_pool_get_many_ready(250, 10, &block_id).unwrap();
+        assert_eq!(recs.len(), 2);
+
+        // Generous budget fits all three.
+        let recs = tx.transaction_pool_get_many_ready(u64::MAX, 10, &block_id).unwrap();
+        assert_eq!(recs.len(), 3);
+    }
+
+    #[test]
+    fn it_always_returns_at_least_one_rocksdb() {
+        let (db, _tmp) = create_rocksdb();
+        // A single transaction heavier than the whole budget must still be returned so consensus
+        // makes progress.
+        let block_id = setup_ready_pool(&db, &[1000, 1000]);
+        let tx = db.create_read_tx().unwrap();
+
+        let recs = tx.transaction_pool_get_many_ready(10, 10, &block_id).unwrap();
+        assert_eq!(recs.len(), 1);
+    }
+
+    #[test]
+    fn it_respects_the_hard_count_cap_rocksdb() {
+        let (db, _tmp) = create_rocksdb();
+        let block_id = setup_ready_pool(&db, &[1, 1, 1, 1]);
+        let tx = db.create_read_tx().unwrap();
+
+        // Weight is effectively unbounded but the count cap limits the batch.
+        let recs = tx.transaction_pool_get_many_ready(u64::MAX, 2, &block_id).unwrap();
+        assert_eq!(recs.len(), 2);
     }
 }

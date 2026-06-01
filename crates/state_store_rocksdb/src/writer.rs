@@ -816,6 +816,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         is_ready: bool,
         is_global: bool,
         max_epoch: Option<Epoch>,
+        transaction_weight: u64,
     ) -> Result<(), StorageError> {
         let value = TransactionPoolRecord::load(
             tx_id,
@@ -833,6 +834,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             None,
             time::OffsetDateTime::now_utc(),
             None,
+            transaction_weight,
         );
 
         self.db()

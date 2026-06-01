@@ -244,7 +244,8 @@ pub trait StateStoreReadTransaction: Sized {
     fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError>;
     fn transaction_pool_get_many_ready(
         &self,
-        max_txs: usize,
+        weight_budget: u64,
+        max_count: usize,
         block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError>;
     fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError>;
@@ -466,6 +467,7 @@ pub trait StateStoreWriteTransaction {
         is_ready: bool,
         is_global: bool,
         max_epoch: Option<Epoch>,
+        transaction_weight: u64,
     ) -> Result<(), StorageError>;
     fn transaction_pool_add_pending_update(
         &mut self,

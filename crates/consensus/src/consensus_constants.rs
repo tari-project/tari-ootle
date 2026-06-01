@@ -56,6 +56,14 @@ pub struct ConsensusConstants {
     /// on-the-wire/`BTreeSet` overhead so a flood of near-zero-weight commands cannot bloat a block.
     /// Like `max_block_weight`, this is a propose-time heuristic and is not validated on receive.
     pub max_commands_in_block: usize,
+    /// The maximum total transaction execution weight a block may contain to be considered valid. Unlike
+    /// `max_block_weight` (a local proposing heuristic) this IS enforced when receiving/voting on a block:
+    /// a block whose transaction execution weight exceeds this — and that contains more than one
+    /// transaction command — is rejected (no-vote). It bounds how long a replica can be made to spend
+    /// executing a block, preventing a misbehaving leader from pushing replicas past the block time.
+    /// Set above `max_block_weight` so honest proposals are never rejected. CONSENSUS RULE: must be
+    /// uniform network-wide, otherwise nodes diverge on block validity.
+    pub max_block_validation_weight: u64,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
     /// Number of base-layer blocks of leeway a voter is allowed when accepting `EndEpoch` proposals.
@@ -86,6 +94,10 @@ impl ConsensusConstants {
             // calibrate to single-core throughput.
             max_block_weight: 10_000,
             max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 10,
         }
@@ -110,6 +122,10 @@ impl ConsensusConstants {
             // calibrate to single-core throughput.
             max_block_weight: 10_000,
             max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 1,
         }
@@ -134,6 +150,10 @@ impl ConsensusConstants {
             // calibrate to single-core throughput.
             max_block_weight: 10_000,
             max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }
@@ -158,6 +178,10 @@ impl ConsensusConstants {
             // calibrate to single-core throughput.
             max_block_weight: 10_000,
             max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }

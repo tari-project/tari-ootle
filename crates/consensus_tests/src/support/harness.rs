@@ -668,6 +668,9 @@ impl TestBuilder {
                     // count-limited (as before) unless a test specifically exercises the weight budget.
                     max_block_weight: 1_000_000,
                     max_commands_in_block: 500,
+                    // Effectively disable the validation-time weight cap by default; tests that exercise
+                    // it set a low value explicitly.
+                    max_block_validation_weight: u64::MAX,
                     fee_exhaust_divisor: 20,
                     epoch_end_spread_blocks: 0,
                 },

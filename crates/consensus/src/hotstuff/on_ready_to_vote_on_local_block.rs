@@ -254,6 +254,38 @@ where TConsensusSpec: ConsensusSpec
         expected_next_epoch_hash: Option<FixedHash>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
+        // Reject (no-vote) a block whose total transaction execution weight exceeds the network cap,
+        // before executing any of its commands. This bounds how long a replica can be made to spend
+        // executing a single block, so a misbehaving leader cannot push replicas past the block time by
+        // packing more than the propose-time budget. A block with a single transaction command is exempt
+        // so an individually-heavy transaction stays committable (its static weight also over-estimates
+        // its execution). CONSENSUS RULE: `max_block_validation_weight` must be uniform network-wide.
+        let max_validation_weight = self.config.consensus_constants.max_block_validation_weight;
+        let mut block_execution_weight = 0u64;
+        let mut num_transaction_commands = 0usize;
+        for cmd in block.commands() {
+            let Some(atom) = cmd.transaction() else {
+                continue;
+            };
+            num_transaction_commands += 1;
+            let weight = atom
+                .get_transaction(tx)?
+                .transaction()
+                .calculate_transaction_weight()
+                .as_u64();
+            block_execution_weight =
+                block_execution_weight.saturating_add(weight.saturating_mul(cmd.execution_weight_percent()) / 100);
+        }
+        if exceeds_block_validation_weight(block_execution_weight, num_transaction_commands, max_validation_weight) {
+            let reason = NoVoteReason::BlockWeightExceeded {
+                total_weight: block_execution_weight,
+                max_weight: max_validation_weight,
+            };
+            warn!(target: LOG_TARGET, "❌ NO VOTE: {reason}");
+            proposed_block_change_set.set_no_vote(reason);
+            return Ok(());
+        }
+
         // Store used for transactions that have inputs without specific versions.
         // It lives through the entire block so multiple transactions can be sequenced together in the same block
         let mut substate_store =
@@ -1694,5 +1726,47 @@ where TConsensusSpec: ConsensusSpec
         block.clear_leader_failure_count(tx)?;
 
         Ok(finalized_transactions)
+    }
+}
+
+/// Consensus rule: a block is rejected (no-vote) when its total transaction execution weight exceeds
+/// `max_validation_weight`, EXCEPT when it carries at most one transaction command. The single-command
+/// exemption preserves liveness: an individually-heavy transaction must remain committable (and the
+/// static weight over-estimates its real execution). This bounds the work a leader can force replicas to
+/// do per block. Must be evaluated identically on every node — keep it a pure function of these inputs.
+fn exceeds_block_validation_weight(
+    block_execution_weight: u64,
+    num_transaction_commands: usize,
+    max_validation_weight: u64,
+) -> bool {
+    num_transaction_commands > 1 && block_execution_weight > max_validation_weight
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod exceeds_block_validation_weight {
+        use super::*;
+
+        #[test]
+        fn within_budget_is_allowed() {
+            assert!(!exceeds_block_validation_weight(10_000, 50, 15_000));
+            // Exactly at the cap is allowed.
+            assert!(!exceeds_block_validation_weight(15_000, 50, 15_000));
+        }
+
+        #[test]
+        fn over_budget_with_multiple_commands_is_rejected() {
+            assert!(exceeds_block_validation_weight(15_001, 2, 15_000));
+            assert!(exceeds_block_validation_weight(31_000, 500, 15_000));
+        }
+
+        #[test]
+        fn single_heavy_transaction_is_always_allowed() {
+            // A single transaction heavier than the whole cap must stay committable (liveness).
+            assert!(!exceeds_block_validation_weight(1_000_000, 1, 15_000));
+            assert!(!exceeds_block_validation_weight(0, 0, 15_000));
+        }
     }
 }

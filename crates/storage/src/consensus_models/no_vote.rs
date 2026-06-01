@@ -100,6 +100,8 @@ pub enum NoVoteReason {
     NotAllInputsOutputsAccepted,
     #[error("Invalid evidence")]
     InvalidEvidence { reason: InvalidEvidenceReason },
+    #[error("Block transaction execution weight {total_weight} exceeds the maximum {max_weight}")]
+    BlockWeightExceeded { total_weight: u64, max_weight: u64 },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -148,6 +150,7 @@ impl NoVoteReason {
             Self::CannotEvictNodeBelowQuorumThreshold => "CannotSuspendNodeBelowQuorumThreshold",
             Self::NotAllInputsOutputsAccepted => "NotAllInputsOutputsAccepted",
             Self::InvalidEvidence { .. } => "InvalidEvidence",
+            Self::BlockWeightExceeded { .. } => "BlockWeightExceeded",
         }
     }
 }

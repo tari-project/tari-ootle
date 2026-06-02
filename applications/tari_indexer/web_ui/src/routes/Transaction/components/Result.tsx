@@ -43,7 +43,7 @@ import type {
 import { useQueryClient } from "@tanstack/react-query";
 import { saveAs } from "file-saver";
 import { useState } from "react";
-import { useGetTransactionResult } from "../../../api/hooks/useTransactions";
+import { useGetTransaction, useGetTransactionResult } from "../../../api/hooks/useTransactions";
 import {
   Accordion,
   AccordionDetails,
@@ -85,7 +85,14 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
 
   const queryClient = useQueryClient();
   const cachedList = queryClient.getQueryData<ListRecentTransactionsResponse>(["recent_transactions"]);
-  const txEntry = cachedList?.transactions?.find((tx) => tx.transaction_id === normalizedId);
+  const cachedEntry = cachedList?.transactions?.find((tx) => tx.transaction_id === normalizedId);
+
+  // The recent-transactions list cache is only populated when arriving from the list page. On a fresh
+  // page load / direct navigation it's empty, so fetch the transaction body directly as a fallback. The
+  // result endpoint never carries instructions, hence this separate fetch.
+  const { data: fetchedTransaction } = useGetTransaction(normalizedId, isValidHash && !cachedEntry);
+
+  const txEntry = cachedEntry ?? fetchedTransaction?.transaction;
   const txV1 = txEntry?.transaction?.V1;
   const txBody = txV1?.body;
   const transaction = txBody?.transaction;

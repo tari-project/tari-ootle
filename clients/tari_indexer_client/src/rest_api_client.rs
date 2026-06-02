@@ -6,6 +6,7 @@ use std::time::Duration;
 use reqwest::{IntoUrl, Url, header, header::HeaderMap};
 use serde::{Serialize, de::DeserializeOwned};
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_transaction::TransactionId;
 use tari_template_lib_types::{ResourceAddress, TemplateAddress, TransactionReceiptAddress};
 
 use crate::{
@@ -28,6 +29,7 @@ use crate::{
         GetSubstatesResponse,
         GetTemplateDefinitionResponse,
         GetTransactionReceiptResponse,
+        GetTransactionResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
         GetUtxoUpdatesRequest,
@@ -133,6 +135,13 @@ impl IndexerRestApiClient {
         req: SubmitTransactionRequest,
     ) -> Result<SubmitTransactionDryRunResponse, IndexerRestClientError> {
         self.send_post("transactions/dry-run", req).await
+    }
+
+    pub async fn get_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<GetTransactionResponse, IndexerRestClientError> {
+        self.send_get(format!("transactions/{transaction_id}"), ()).await
     }
 
     pub async fn get_transaction_result(

@@ -19,6 +19,7 @@ import type {
   IndexerGetIdentityResponse,
   IndexerGetSubstateRequest,
   IndexerGetSubstateResponse,
+  IndexerGetTransactionResponse,
   IndexerGetTransactionResultResponse,
   IndexerReadyResponse,
   ListRecentTransactionsRequest,
@@ -130,6 +131,10 @@ export class IndexerClient {
 
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {
     return this.transport.sendPost(`transactions`, params);
+  }
+
+  public getTransaction(transaction_id: TransactionId): Promise<IndexerGetTransactionResponse> {
+    return this.transport.sendGet(`transactions/${encodeURIComponent(transaction_id)}`, {});
   }
 
   public getTransactionResult(transaction_id: TransactionId): Promise<IndexerGetTransactionResultResponse> {

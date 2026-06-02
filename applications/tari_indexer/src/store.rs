@@ -129,6 +129,10 @@ pub trait IndexerStoreReadTransaction {
         limit: usize,
     ) -> Result<Vec<TransactionEntry>, StorageError>;
 
+    /// Fetch a single transaction (with its instructions) by ID. Returns `None` if the transaction
+    /// was not submitted through this indexer.
+    fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<Option<TransactionEntry>, StorageError>;
+
     // -------------------------------- Transaction Receipts -------------------------------- //
     fn list_transaction_receipts(
         &mut self,

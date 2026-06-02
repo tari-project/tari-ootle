@@ -9,6 +9,7 @@ use axum::{
 };
 use log::*;
 use tari_indexer_client::types::{
+    GetTransactionResponse,
     GetTransactionResultResponse,
     IndexerTransactionFinalizedResult,
     ListRecentTransactionsRequest,
@@ -167,6 +168,39 @@ pub async fn list_recent_transactions(
         .map_err(ErrorResponse::anyhow)?;
 
     Ok(context.apply_cache_control(Json(ListRecentTransactionsResponse { transactions }), 30))
+}
+
+#[utoipa::path(
+    get,
+    path = "/transactions/{transaction_id}",
+    description = "Get a transaction (including its instructions, fee instructions and signatures) by transaction ID.\n\n\
+        NOTE: This only returns transactions that were submitted through *this* indexer; it reads from the indexer's \
+        local transaction store and is not synced from the network. A transaction submitted via a different indexer or \
+        wallet will return 404 here even after it has been finalized. This differs from transaction receipts (see the \
+        /transaction-receipts endpoints), which are synced from the network. For the execution result of any \
+        transaction regardless of where it was submitted, use /transactions/{transaction_id}/result.",
+    responses(
+        (status = 200, description = "Transaction found", body = GetTransactionResponse),
+        (status = 404, description = "Transaction not found (not submitted through this indexer)", body = ErrorResponse),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch transaction", body = ErrorResponse),
+    )
+)]
+pub async fn get_transaction(
+    Extension(context): Extension<HandlerContext>,
+    Path(transaction_id): Path<TransactionId>,
+) -> HandlerResult<Json<GetTransactionResponse>> {
+    let transaction = context
+        .transaction_manager()
+        .get_transaction(transaction_id)
+        .await
+        .map_err(ErrorResponse::anyhow)?
+        .ok_or_else(|| {
+            ErrorResponse::not_found(format!(
+                "Transaction {transaction_id} was not submitted through this indexer"
+            ))
+        })?;
+
+    Ok(Json(GetTransactionResponse { transaction }))
 }
 
 #[utoipa::path(

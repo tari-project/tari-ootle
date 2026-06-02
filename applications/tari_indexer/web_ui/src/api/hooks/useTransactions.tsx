@@ -23,6 +23,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   listRecentTransactions,
+  getTransaction,
   getTransactionResult,
 } from "../../utils/api";
 
@@ -49,5 +50,13 @@ export const useGetTransactionResult = (transaction_id: string) => {
     queryKey: ["transaction_result", transaction_id],
     queryFn: () => getTransactionResult({ transaction_id }),
     enabled: !!transaction_id,
+  });
+};
+
+export const useGetTransaction = (transaction_id: string, enabled: boolean) => {
+  return useQuery({
+    queryKey: ["transaction", transaction_id],
+    queryFn: () => getTransaction(transaction_id),
+    enabled: enabled && !!transaction_id,
   });
 };

@@ -205,6 +205,7 @@ where TConsensusSpec: ConsensusSpec
             is_ready,
             transaction.transaction().is_global(),
             transaction.transaction().max_epoch(),
+            transaction.transaction().calculate_transaction_weight().as_u64(),
         )?;
         Ok(())
     }

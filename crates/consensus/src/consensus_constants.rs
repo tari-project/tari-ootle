@@ -46,8 +46,24 @@ pub struct ConsensusConstants {
     /// `missed_proposal_recovery_threshold`) is decremented for each block that they participate (vote) in. Once
     /// this reaches zero, the node is considered stable and out of suspension.
     pub missed_proposal_recovery_threshold: u64,
-    /// The maximum number of commands that a block may contain.
-    pub max_number_commands_in_block: usize,
+    /// The maximum total weight of commands a leader will pack into a single block. This is a budget
+    /// of transaction weight (see `Transaction::calculate_transaction_weight`) rather than a flat
+    /// command count, so heavy transactions consume more of a block than light ones. This is a local
+    /// proposing heuristic only — it is not validated when receiving/voting on a block, so it carries
+    /// no fork risk and nodes may run different values.
+    pub max_block_weight: u64,
+    /// A hard upper bound on the number of commands in a block, independent of weight. Bounds the
+    /// on-the-wire/`BTreeSet` overhead so a flood of near-zero-weight commands cannot bloat a block.
+    /// Like `max_block_weight`, this is a propose-time heuristic and is not validated on receive.
+    pub max_commands_in_block: usize,
+    /// The maximum total transaction execution weight a block may contain to be considered valid. Unlike
+    /// `max_block_weight` (a local proposing heuristic) this IS enforced when receiving/voting on a block:
+    /// a block whose transaction execution weight exceeds this — and that contains more than one
+    /// transaction command — is rejected (no-vote). It bounds how long a replica can be made to spend
+    /// executing a block, preventing a misbehaving leader from pushing replicas past the block time.
+    /// Set above `max_block_weight` so honest proposals are never rejected. CONSENSUS RULE: must be
+    /// uniform network-wide, otherwise nodes diverge on block validity.
+    pub max_block_validation_weight: u64,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
     /// Number of base-layer blocks of leeway a voter is allowed when accepting `EndEpoch` proposals.
@@ -68,7 +84,20 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 100,
+            // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
+            // transactions (~62 weight each, ~31k weight) executed in ~11.5s — i.e. ~2.7k weight/s.
+            // A 10000 budget (~160 of those commands) therefore projects to ~3.7s of propose-time
+            // execution, comfortably within the 10s block time and under the 5s execution circuit
+            // breaker, while heavier transactions naturally consume more of the budget. The breaker in
+            // on_propose is the backstop for outliers the static weight under-estimates. NOTE:
+            // propose-time execution is sequential, so more cores does not raise this proportionally —
+            // calibrate to single-core throughput.
+            max_block_weight: 10_000,
+            max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 10,
         }
@@ -83,7 +112,20 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 100,
+            // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
+            // transactions (~62 weight each, ~31k weight) executed in ~11.5s — i.e. ~2.7k weight/s.
+            // A 10000 budget (~160 of those commands) therefore projects to ~3.7s of propose-time
+            // execution, comfortably within the 10s block time and under the 5s execution circuit
+            // breaker, while heavier transactions naturally consume more of the budget. The breaker in
+            // on_propose is the backstop for outliers the static weight under-estimates. NOTE:
+            // propose-time execution is sequential, so more cores does not raise this proportionally —
+            // calibrate to single-core throughput.
+            max_block_weight: 10_000,
+            max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 1,
         }
@@ -98,7 +140,20 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 100,
+            // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
+            // transactions (~62 weight each, ~31k weight) executed in ~11.5s — i.e. ~2.7k weight/s.
+            // A 10000 budget (~160 of those commands) therefore projects to ~3.7s of propose-time
+            // execution, comfortably within the 10s block time and under the 5s execution circuit
+            // breaker, while heavier transactions naturally consume more of the budget. The breaker in
+            // on_propose is the backstop for outliers the static weight under-estimates. NOTE:
+            // propose-time execution is sequential, so more cores does not raise this proportionally —
+            // calibrate to single-core throughput.
+            max_block_weight: 10_000,
+            max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }
@@ -113,7 +168,20 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_number_commands_in_block: 100,
+            // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
+            // transactions (~62 weight each, ~31k weight) executed in ~11.5s — i.e. ~2.7k weight/s.
+            // A 10000 budget (~160 of those commands) therefore projects to ~3.7s of propose-time
+            // execution, comfortably within the 10s block time and under the 5s execution circuit
+            // breaker, while heavier transactions naturally consume more of the budget. The breaker in
+            // on_propose is the backstop for outliers the static weight under-estimates. NOTE:
+            // propose-time execution is sequential, so more cores does not raise this proportionally —
+            // calibrate to single-core throughput.
+            max_block_weight: 10_000,
+            max_commands_in_block: 1000,
+            // 1.5x the proposal budget: honest blocks (<= max_block_weight) are never rejected, while a
+            // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
+            // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
+            max_block_validation_weight: 15_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }

@@ -137,6 +137,20 @@ impl Command {
         }
     }
 
+    /// The percentage of a transaction's static weight that proposing/processing this command costs,
+    /// reflecting whether the command executes the transaction. Phases that execute (or carry the
+    /// transaction's full footprint) cost 100%; finalisation phases reuse a prior execution and only
+    /// apply its diff, so they are discounted. Mirrors [`TransactionPoolStage::proposal_weight_percent`]
+    /// keyed on the command rather than the pool stage, so a block's execution weight is computable
+    /// deterministically from its commands alone. Non-transaction commands contribute 0.
+    pub fn execution_weight_percent(&self) -> u64 {
+        match self {
+            Command::LocalOnly(_) | Command::LocalPrepare(_) | Command::LocalAccept(_) => 100,
+            Command::AllAccept(_) | Command::SomeAccept(_) => 35,
+            Command::ForeignProposal(_) | Command::EvictNode(_) | Command::EndEpoch(_) => 0,
+        }
+    }
+
     fn as_ordering(&self) -> CommandOrdering<'_> {
         match self {
             Command::LocalPrepare(tx) |
@@ -412,5 +426,36 @@ mod tests {
             let next = iter.next().unwrap();
             assert_eq!(next, exp);
         }
+    }
+
+    #[test]
+    fn execution_weight_percent() {
+        let atom = || TransactionAtom {
+            id: TransactionId::default(),
+            decision: Decision::Commit,
+            evidence: Evidence::default(),
+            transaction_fee: 0,
+            leader_fee: None,
+        };
+        // Executing phases charge the full transaction weight.
+        assert_eq!(Command::LocalOnly(atom()).execution_weight_percent(), 100);
+        assert_eq!(Command::LocalPrepare(atom()).execution_weight_percent(), 100);
+        assert_eq!(Command::LocalAccept(atom()).execution_weight_percent(), 100);
+        // Finalisation phases reuse a prior execution and are discounted.
+        assert_eq!(Command::AllAccept(atom()).execution_weight_percent(), 35);
+        assert_eq!(Command::SomeAccept(atom()).execution_weight_percent(), 35);
+        // Non-transaction commands carry no transaction execution weight.
+        assert_eq!(
+            Command::ForeignProposal(ForeignProposalAtom {
+                block_id: BlockId::zero(),
+                shard_group: ShardGroup::new(0, 64),
+            })
+            .execution_weight_percent(),
+            0
+        );
+        assert_eq!(
+            Command::EndEpoch(EndEpochAtom::new(FixedHash::zero())).execution_weight_percent(),
+            0
+        );
     }
 }

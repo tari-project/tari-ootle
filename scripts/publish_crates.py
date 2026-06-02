@@ -21,10 +21,12 @@ import time
 import urllib.request
 import urllib.error
 
-# Version tiers:
-#   1 = Stable/foundational — independently versioned, rarely changes
-#   2 = Template authoring & client SDK — independently versioned
-#   3 = Workspace-versioned — moves with the release
+# Version tiers (concern domains). Tier 3 is the only workspace-versioned cohort;
+# every other tier is independently versioned (each crate carries its own version):
+#   1 = Stable/foundational — shared primitives, rarely change
+#   2 = Template — template authoring crates
+#   3 = Core — workspace-versioned (shares [workspace.package].version), moves together
+#   4 = Wallet — wallet SDK, clients & storage, decoupled from the core version
 #
 # Topological publish order — dependencies before dependents.
 # (crate_name, crate_directory, tier)
@@ -43,24 +45,24 @@ CRATES = [
     ("tari_ootle_template_build", "crates/template_build", 2),
     ("tari_engine_types", "crates/engine_types", 3),
     ("tari_ootle_common_types", "crates/common_types", 3),
-    ("tari_ootle_wallet_crypto", "crates/wallet/crypto", 3),
+    ("tari_ootle_wallet_crypto", "crates/wallet/crypto", 4),
     ("tari_ootle_address", "crates/ootle_address", 1),
     ("tari_ootle_transaction", "crates/transaction", 3),
     ("tari_template_builtin", "crates/template_builtin", 3),
     ("tari_transaction_manifest", "crates/transaction_manifest", 3),
     ("tari_engine", "crates/engine", 3),
     ("tari_consensus_types", "crates/consensus_types", 3),
-    ("tari_indexer_client", "clients/tari_indexer_client", 3),
+    ("tari_indexer_client", "clients/tari_indexer_client", 4),
     ("ootle-wasm-core", "crates/ootle_wasm/core", 3),
     ("ootle-wasm", "crates/ootle_wasm/wasm", 3),
     ("tari_template_test_tooling", "crates/template_test_tooling", 3),
-    ("ootle-rs", "crates/wallet/ootle-rs", 2),
-    ("tari_ootle_wallet_sdk", "crates/wallet/sdk", 3),
-    ("tari_ootle_wallet_storage_sqlite", "crates/wallet/storage_sqlite", 3),
-    ("tari_ootle_walletd_client", "clients/wallet_daemon_client", 3),
+    ("ootle-rs", "crates/wallet/ootle-rs", 4),
+    ("tari_ootle_wallet_sdk", "crates/wallet/sdk", 4),
+    ("tari_ootle_wallet_storage_sqlite", "crates/wallet/storage_sqlite", 4),
+    ("tari_ootle_walletd_client", "clients/wallet_daemon_client", 4),
 ]
 
-TIER_LABELS = {1: "stable", 2: "template/sdk", 3: "workspace"}
+TIER_LABELS = {1: "stable", 2: "template", 3: "core", 4: "wallet"}
 
 WAIT_SECS = 20
 

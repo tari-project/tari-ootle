@@ -11439,7 +11439,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_client"
-version = "0.32.1"
+version = "0.32.2"
 dependencies = [
  "anyhow",
  "bounded-vec",
@@ -11896,7 +11896,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk"
-version = "0.33.2"
+version = "0.33.3"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -12071,7 +12071,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd_client"
-version = "0.33.0"
+version = "0.33.1"
 dependencies = [
  "hex",
  "ootle_serde",

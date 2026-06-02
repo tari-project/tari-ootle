@@ -43,7 +43,7 @@ export const useTransactionDetails = (hash: string) => {
 
 export const useGetAllTransactions = (req: TransactionGetAllRequest) => {
   return useQuery({
-    queryKey: ["transactions", req.status],
+    queryKey: ["transactions", req.status, req.account],
     queryFn: () => transactionsGetAll(req),
     refetchInterval: 5000,
     placeholderData: (previousData) => previousData,

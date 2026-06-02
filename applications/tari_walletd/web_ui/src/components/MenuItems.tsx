@@ -29,7 +29,16 @@ import ListItemText from "@mui/material/ListItemText";
 import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
 import useSettingsStore from "@store/settingsStore";
-import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
+import {
+  IoHome,
+  IoHomeOutline,
+  IoReceipt,
+  IoReceiptOutline,
+  IoSettings,
+  IoSettingsOutline,
+  IoTerminal,
+  IoTerminalOutline,
+} from "react-icons/io5";
 import { LuBookOpen, LuKeyRound, LuLayoutTemplate } from "react-icons/lu";
 import { NavLink } from "react-router";
 
@@ -54,6 +63,12 @@ function MainListItems() {
       icon: <IoHomeOutline style={iconStyle} />,
       activeIcon: <IoHome style={activeIconStyle} />,
       link: "/",
+    },
+    {
+      title: "Transactions",
+      icon: <IoReceiptOutline style={iconStyle} />,
+      activeIcon: <IoReceipt style={activeIconStyle} />,
+      link: "transactions",
     },
     {
       title: "Templates",

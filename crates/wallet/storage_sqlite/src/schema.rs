@@ -190,6 +190,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    transaction_accounts (id) {
+        id -> Integer,
+        transaction_id -> Text,
+        account_id -> Integer,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     transactions (id) {
         id -> Integer,
         transaction_id -> Text,
@@ -293,6 +302,7 @@ diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
 diesel::joinable!(shard_state_versions -> accounts (account_id));
 diesel::joinable!(shard_state_versions -> resources (resource_id));
 diesel::joinable!(stealth_outputs -> accounts (owner_account_id));
+diesel::joinable!(transaction_accounts -> accounts (account_id));
 diesel::joinable!(utxo_process_queue -> accounts (account_id));
 diesel::joinable!(vault_locks -> locks (lock_id));
 diesel::joinable!(vault_locks -> vaults (vault_id));
@@ -315,6 +325,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     shard_state_versions,
     stealth_outputs,
     substates,
+    transaction_accounts,
     transactions,
     utxo_process_queue,
     vault_locks,

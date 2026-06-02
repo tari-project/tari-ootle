@@ -12,6 +12,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdkSpec,
     models::{
         TransactionContext,
+        TransactionContextKind,
         TransactionFinalizedEvent,
         TransactionInvalidEvent,
         TransactionStatus,
@@ -165,7 +166,12 @@ where
     ) -> Result<TransactionId, TransactionServiceError> {
         let transaction_api = self.wallet_sdk.transaction_api();
         let new_account_info = context.as_ref().and_then(|c| c.new_account_data()).cloned();
-        let transaction_id = transaction_api.insert_new_transaction(transaction, new_account_info, false)?;
+        let linked_accounts = context
+            .as_ref()
+            .map(|c| c.linked_accounts.as_slice())
+            .unwrap_or_default();
+        let transaction_id =
+            transaction_api.insert_new_transaction(transaction, new_account_info, linked_accounts, false)?;
 
         if let Some(lock_id) = lock_id {
             transaction_api.locks_set_transaction_id(lock_id, transaction_id)?;
@@ -238,7 +244,7 @@ where
         notify: &Notify<WalletEvent>,
     ) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.transaction_api();
-        let new_transactions = transaction_api.fetch_all(Some(TransactionStatus::New), None, None)?;
+        let new_transactions = transaction_api.fetch_all(Some(TransactionStatus::New), None)?;
         let log_level = if new_transactions.is_empty() {
             Level::Debug
         } else {
@@ -263,7 +269,9 @@ where
                 // restarts, that context is lost and the caller must retry.
                 notify.notify(TransactionSubmittedEvent {
                     transaction_id,
-                    context: transaction.new_account_info.map(TransactionContext::NewAccount),
+                    context: transaction
+                        .new_account_info
+                        .map(|data| TransactionContext::default().with_kind(TransactionContextKind::NewAccount(data))),
                 });
             } else {
                 notify.notify(TransactionInvalidEvent {
@@ -282,7 +290,7 @@ where
         notify: &Notify<WalletEvent>,
     ) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.transaction_api();
-        let pending_transactions = transaction_api.fetch_all(Some(TransactionStatus::Pending), None, None)?;
+        let pending_transactions = transaction_api.fetch_all(Some(TransactionStatus::Pending), None)?;
         let log_level = if pending_transactions.is_empty() {
             Level::Debug
         } else {

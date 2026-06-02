@@ -261,8 +261,9 @@ pub struct TransactionGetResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionGetAllRequest {
     pub status: Option<TransactionStatus>,
-    pub component: Option<ComponentAddress>,
-    pub signer_public_key: Option<RistrettoPublicKeyBytes>,
+    /// Filter to transactions involving this account. Transactions are linked to the account(s) they
+    /// involve at submission time, so this works even for stealth transactions.
+    pub account: Option<ComponentAddress>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

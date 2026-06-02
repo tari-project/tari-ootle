@@ -11987,6 +11987,7 @@ dependencies = [
  "hex",
  "libsqlite3-sys",
  "log",
+ "ootle_byte_type",
  "serde",
  "serde_json",
  "tari_bor",
@@ -12070,7 +12071,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_walletd_client"
-version = "0.32.2"
+version = "0.33.0"
 dependencies = [
  "hex",
  "ootle_serde",

@@ -5,7 +5,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use log::*;
 use tari_ootle_transaction::TransactionId;
-use tari_ootle_wallet_sdk::models::{TransactionContext, WalletEvent};
+use tari_ootle_wallet_sdk::models::{TransactionContextKind, WalletEvent};
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
 use tokio::sync::broadcast;
@@ -73,7 +73,7 @@ impl ClaimBurnMonitor {
     async fn on_event(&mut self, event: WalletEvent) {
         match event {
             WalletEvent::TransactionSubmitted(event) => {
-                if let Some(TransactionContext::ClaimBurn { file_name }) = event.context {
+                if let Some(TransactionContextKind::ClaimBurn { file_name }) = event.context.and_then(|c| c.kind) {
                     info!(
                         target: LOG_TARGET,
                         "Tracking claim burn transaction {} for proof file {}",

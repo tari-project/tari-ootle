@@ -283,29 +283,24 @@ impl WalletStoreReader for ReadTransaction<'_> {
     fn transactions_fetch_all(
         &mut self,
         status: Option<TransactionStatus>,
-        component: Option<ComponentAddress>,
-        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
+        account: Option<ComponentAddress>,
     ) -> Result<Vec<WalletTransaction>, WalletStorageError> {
-        use crate::schema::transactions;
+        use crate::schema::{accounts, transaction_accounts, transactions};
 
         let mut query = transactions::table.into_boxed().filter(transactions::dry_run.eq(false));
         if let Some(status) = status {
             query = query.filter(transactions::status.eq(status.as_key_str()));
         }
-        if let Some(component) = component {
-            if let Some(public_key) = signed_by_public_key {
-                query = query.filter(
-                    transactions::referenced_components
-                        .like(format!("%{}%", component))
-                        .or(transactions::signers.like(format!("%{}%", serialize_hex(public_key)))),
-                );
-            } else {
-                query = query.filter(transactions::referenced_components.like(format!("%{}%", component)));
-            }
-        } else if let Some(public_key) = signed_by_public_key {
-            query = query.filter(transactions::signers.like(format!("%{}%", serialize_hex(public_key))));
-        } else {
-            // No filter
+        if let Some(account) = account {
+            // Transactions are linked to the account(s) they involve at submission time. Restrict the
+            // result to transactions linked to this account using a subquery, so the filtering stays in
+            // the database and avoids SQLite's bound-parameter limit for accounts with many transactions.
+            // An unknown or unlinked account simply yields no transactions.
+            let linked_tx_ids = transaction_accounts::table
+                .inner_join(accounts::table)
+                .select(transaction_accounts::transaction_id)
+                .filter(accounts::address.eq(account.to_string()));
+            query = query.filter(transactions::transaction_id.eq_any(linked_tx_ids));
         }
         let rows = query
             .order(transactions::created_at.desc())

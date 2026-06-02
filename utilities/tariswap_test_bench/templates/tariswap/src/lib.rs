@@ -36,8 +36,8 @@ mod tariswap {
     }
 
     impl TariSwapPool {
-        // Initialises a new pool component for the pool A - B
-        // the fees is represented as a per-mil quantity (e.g. "1" represents "0.1%")
+        /// Initialises a new pool component for the pool A - B
+        /// the fees is represented as a per-mil quantity (e.g. "1" represents "0.1%")
         pub fn new(a_addr: ResourceAddress, b_addr: ResourceAddress, fee: u16) -> Component<Self> {
             // check that the resource pair is correct
             assert_ne!(a_addr, b_addr, "The resources of the pair must be different");
@@ -67,7 +67,7 @@ mod tariswap {
             .create()
         }
 
-        // swap A tokens for B tokens or vice versa
+        /// swap A tokens for B tokens or vice versa
         pub fn swap(&mut self, input_bucket: Bucket, output_resource: ResourceAddress) -> Bucket {
             // check that the parameters are correct
             let input_resource = input_bucket.resource_address();
@@ -113,6 +113,7 @@ mod tariswap {
                 .withdraw(output_bucket_amount)
         }
 
+        /// Contribute A and B liquiidity to the pool, returning LP tokens
         pub fn add_liquidity(&mut self, a_bucket: Bucket, b_bucket: Bucket) -> Bucket {
             // check that the buckets are correct
             let a_resource = a_bucket.resource_address();
@@ -138,6 +139,7 @@ mod tariswap {
             ResourceManager::get(self.lp_resource).mint_fungible(new_lp_amount)
         }
 
+        /// Exchange LP token for (token A, token B) at the current exchange rate
         pub fn remove_liquidity(&mut self, lp_bucket: Bucket) -> (Bucket, Bucket) {
             assert_eq!(lp_bucket.resource_address(), self.lp_resource, "Invalid LP resource");
 
@@ -162,11 +164,11 @@ mod tariswap {
             (a_bucket, b_bucket)
         }
 
-        pub fn get_a_resource(&self) -> ResourceAddress {
+        fn get_a_resource(&self) -> ResourceAddress {
             *self.pools.keys().nth(0).unwrap()
         }
 
-        pub fn get_b_resource(&self) -> ResourceAddress {
+        fn get_b_resource(&self) -> ResourceAddress {
             *self.pools.keys().nth(1).unwrap()
         }
 
@@ -180,6 +182,7 @@ mod tariswap {
             balances
         }
 
+        /// Returns the amount of tokens in the pool for A or B
         pub fn get_pool_balance(&self, resource_address: ResourceAddress) -> Amount {
             let vault = self
                 .pools
@@ -188,6 +191,7 @@ mod tariswap {
             vault.balance()
         }
 
+        /// Get amount * floor(1/balance_of(resource))
         pub fn get_pool_ratio(&self, resource: ResourceAddress, amount: Amount) -> Amount {
             let balance = self.get_pool_balance(resource);
 
@@ -198,15 +202,15 @@ mod tariswap {
             }
         }
 
-        pub fn lp_resource(&self) -> ResourceAddress {
+        fn lp_resource(&self) -> ResourceAddress {
             self.lp_resource
         }
 
-        pub fn lp_total_supply(&self) -> Amount {
+        fn lp_total_supply(&self) -> Amount {
             ResourceManager::get(self.lp_resource).total_supply()
         }
 
-        pub fn fee(&self) -> u16 {
+        fn fee(&self) -> u16 {
             self.fee
         }
 

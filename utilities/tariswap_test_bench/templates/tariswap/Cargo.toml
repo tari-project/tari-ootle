@@ -3,6 +3,11 @@
 name = "tariswap"
 version = "0.1.0"
 edition = "2024"
+description = "Swap template used for stress testing"
+
+[package.metadata.tari-template]
+tags = ["defi"]
+category = "defi"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,3 +17,6 @@ tari_template_lib = { path = "../../../../crates/template_lib" }
 
 [lib]
 crate-type = ["cdylib"]
+
+[build-dependencies]
+tari_ootle_template_build = "0.7"

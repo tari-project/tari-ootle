@@ -28,6 +28,7 @@ import type {
   GetNonFungiblesResponse,
   GetTransactionReceiptResponse,
   IndexerGetSubstateResponse,
+  IndexerGetTransactionResponse,
   IndexerGetTransactionResultRequest,
   IndexerGetTransactionResultResponse,
   ListRecentTransactionsRequest,
@@ -103,6 +104,9 @@ export const getSubstate = (
   );
 export const getNonFungibles = (request: GetNonFungiblesRequest): Promise<GetNonFungiblesResponse> =>
   client().then((c) => c.getNonFungibles(request));
+
+export const getTransaction = (transaction_id: string): Promise<IndexerGetTransactionResponse> =>
+  client().then((c) => c.getTransaction(transaction_id));
 
 export const getTransactionResult = (
   request: IndexerGetTransactionResultRequest,

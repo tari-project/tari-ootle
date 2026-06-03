@@ -8,7 +8,10 @@ use ootle_byte_type::ToByteType;
 use tari_engine_types::indexed_value::IndexedWellKnownTypes;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::args;
-use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
+use tari_ootle_wallet_sdk::{
+    apis::accounts::derive_account_address_from_public_key,
+    models::{Account, KeyBranch, KeyId},
+};
 use tari_template_lib_types::{
     Amount,
     ResourceType,
@@ -99,59 +102,68 @@ impl Runner {
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        // Submit all account-creation transactions concurrently.
-        let mut pending = Vec::with_capacity(num_accounts);
-        for (owner_key, account_key) in &owners {
-            let owner_public_key = owner_key.public_key.to_byte_type();
+        let default_account = self.sdk.accounts_api().get_default()?;
+        let fee_vault = self
+            .sdk
+            .accounts_api()
+            .get_vault_by_resource(default_account.component_address(), &TARI_TOKEN)?;
+        let default_acc_secret = self
+            .sdk
+            .key_manager_api()
+            .get_key(default_account.owner_key_id().expect("default acc no owner key"))?;
 
-            let transaction = self
-                .new_transaction_builder()
-                .with_fee_instructions_builder(|builder| {
-                    builder
-                        .create_account(owner_public_key)
-                        .put_last_instruction_output_on_workspace("account")
-                        .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("account")])
-                        .pay_fee_from_component("account", 2000u64)
-                })
-                .with_inputs([
-                    SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
-                    SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
-                    SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
-                ])
-                .build_and_seal(&account_key.key);
+        let transaction = self
+            .new_transaction_builder()
+            .fold(owners.iter().enumerate(), |builder, (i, (account, _))| {
+                let component = format!("account_{i}");
+                builder
+                    .create_account(account.public_key().to_byte_type())
+                    .put_last_instruction_output_on_workspace(&component)
+                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace(component)])
+            })
+            .pay_fee_from_component(
+                *default_account.component_address(),
+                Amount::from(1000 * num_accounts as u64),
+            )
+            .with_inputs([
+                SubstateRequirement::unversioned(*default_account.component_address()),
+                SubstateRequirement::unversioned(fee_vault.id),
+                SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
+                SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
+                SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
+            ])
+            .build_and_seal(default_acc_secret.secret());
 
-            let tx_id = self.submit_transaction(transaction).await?;
-            pending.push((tx_id, owner_key));
-        }
+        let finalize = self.submit_transaction_and_wait(transaction).await?;
+        let diff = finalize.result.any_accept().unwrap();
 
-        // Wait for all transactions and register accounts.
+        let account_addrs = diff.up_iter().filter_map(|(addr, substate)| {
+            // up_iter also yields non-owner components (the fee-paying account, the faucet), so skip
+            // anything that isn't one of our newly created owner accounts rather than panicking.
+            let addr = addr.as_component_address()?;
+            let key_id = owners
+                .iter()
+                .find(|(pk, _)| addr == derive_account_address_from_public_key(&pk.public_key().to_byte_type()))
+                .map(|(pk, _)| pk.key_id)?;
+            let component = substate.substate_value().component()?;
+            let indexed = component.body().to_indexed_well_known_types().ok()?;
+            let vault_id = indexed
+                .vault_ids()
+                .iter()
+                .find(|id| **id != XTR_FAUCET_VAULT_ADDRESS)
+                .copied()?;
+
+            Some((addr, vault_id, key_id))
+        });
+
         let mut accounts = Vec::with_capacity(num_accounts);
-        for (tx_id, owner_key) in pending {
-            let finalize = self.wait_for_transaction(tx_id).await?;
-            let diff = finalize.result.any_accept().unwrap();
-
-            let account_addr = diff
-                .up_iter()
-                .find_map(|(addr, _)| addr.as_component_address())
-                .expect("New account not found in diff");
-            let vault = diff
-                .up_iter()
-                .filter_map(|(addr, _)| addr.as_vault_id())
-                .find(|vault_id| *vault_id != XTR_FAUCET_VAULT_ADDRESS)
-                .expect("New vault not found in diff");
-
-            self.sdk.accounts_api().add_account(
-                None,
-                &account_addr,
-                owner_key.key_id,
-                owner_key.key_id,
-                Epoch::zero(),
-                true,
-                false,
-            )?;
+        for (account_addr, vault_id, key_id) in account_addrs {
+            self.sdk
+                .accounts_api()
+                .add_account(None, &account_addr, key_id, key_id, Epoch::zero(), true, false)?;
             self.sdk.accounts_api().add_vault(
                 account_addr,
-                vault,
+                vault_id,
                 TARI_TOKEN,
                 ResourceType::Stealth,
                 Some("tTARI".to_string()),

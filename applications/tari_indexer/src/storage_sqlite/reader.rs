@@ -459,6 +459,30 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         .collect()
     }
 
+    fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<Option<TransactionEntry>, StorageError> {
+        use crate::storage_sqlite::schema::transactions;
+
+        let row = transactions::table
+            .select((transactions::body, transactions::created_at))
+            .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
+            .first::<(String, PrimitiveDateTime)>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("get_transaction: {e}"),
+            })?;
+
+        row.map(|(body, created_at)| {
+            let full: Transaction = deserialize_json(&body)?;
+            Ok(TransactionEntry {
+                // The row was looked up by this id, so it matches full.calculate_id() without recomputing it.
+                transaction_id,
+                created_at,
+                transaction: full.into(),
+            })
+        })
+        .transpose()
+    }
+
     fn list_transaction_receipts(
         &mut self,
         last_id: Option<TransactionReceiptAddress>,

@@ -38,18 +38,22 @@ Every crate in the publish set is `0.y.z`. Cargo's pre-1.0 SemVer rules:
 | **patch**  | `0.y.z → 0.y.(z+1)`        | Auto-picked up by `^0.y` pins. No republish needed. |
 | **minor**  | `0.y.z → 0.(y+1).0`        | **Breaks** `^0.y` pins. Every direct dependent updates its pin and republishes. |
 
-Crates fall into one of three tiers (see `publish_crates.py::TIER_LABELS`):
+Crates fall into one of four tiers, grouped by concern (see
+`publish_crates.py::TIER_LABELS`). Tier 3 is the **only** workspace-versioned
+cohort; every other tier is independently versioned (each crate carries its own
+`version` in its `Cargo.toml`):
 
-| Tier | Label          | Policy |
-|------|----------------|--------|
-| 1    | `stable`       | Independent versions, rarely change (e.g. `tari_bor`, `ootle-network`, `ootle_byte_type`, `ootle_serde`, `tari_ootle_address`). |
-| 2    | `template/sdk` | Independent versions for the template-authoring API and client SDK (`tari_template_*`, `tari_ootle_template_*`, `ootle-rs`). |
-| 3    | `workspace`    | Share `[workspace.package].version` in the root `Cargo.toml`. **Move together.** A breaking bump on any tier-3 crate moves the entire cohort. |
+| Tier | Label      | Policy |
+|------|------------|--------|
+| 1    | `stable`   | Shared primitives, rarely change (e.g. `tari_bor`, `ootle-network`, `ootle_byte_type`, `ootle_serde`, `tari_ootle_address`). |
+| 2    | `template` | The template-authoring API (`tari_template_*`, `tari_ootle_template_*`). |
+| 3    | `core`     | Share `[workspace.package].version` in the root `Cargo.toml`. **Move together.** A breaking bump on any tier-3 crate moves the entire cohort. |
+| 4    | `wallet`   | Wallet SDK, clients & storage (`tari_ootle_wallet_*`, `tari_*_client`, `ootle-rs`). Decoupled from the core version. |
 
 **Key consequence:** if a tier-3 crate has a breaking change, the workspace
 version bumps and **every** tier-3 crate republishes — even the ones whose own
-public API didn't change. Tier-1/2 crates only republish if they actually
-depend on something that moved.
+public API didn't change. Independent (tier 1/2/4) crates only republish if they
+actually depend on something that moved.
 
 ---
 
@@ -97,13 +101,13 @@ the full bump plan.
 
 For a **breaking** bump, output is structured as:
 
-1. **Tier 3 cohort** — every tier-3 crate's new version (because the workspace
+1. **Tier 3 (core) cohort** — every tier-3 crate's new version (because the workspace
    `[workspace.package].version` moves), plus the exact `version = "0.31" →
    "0.32"` pin updates required in `[workspace.dependencies]`.
-2. **Tier 1/2 minor bumps** — the crate itself (and any other independently-versioned
-   crate that ends up minor-bumped in this round).
-3. **Tier 1/2 pin updates** — independently-versioned crates that don't
-   minor-bump themselves but still need to update pins and republish at least
+2. **Independent (non-core) minor bumps** — the crate itself (and any other
+   independently-versioned crate that ends up minor-bumped in this round).
+3. **Independent (non-core) pin updates** — independently-versioned crates that
+   don't minor-bump themselves but still need to update pins and republish at least
    a patch. The output lists which pin(s) to bump and a *patch vs minor*
    recommendation (patch is safe; minor is required only if the crate's own
    public API re-exposes the upstream's changed types).
@@ -165,8 +169,8 @@ When asked to bump a crate / cut a release:
 3. **Apply the bumps the script printed:**
    - If a tier-3 crate moved, update `[workspace.package].version` and every
      `version = "<old>"` pin in `[workspace.dependencies]` for tier-3 crates.
-   - For each tier-1/2 crate the script listed, update its own `Cargo.toml`
-     `version` (patch or minor as advised) and any pin(s) on the bumped deps.
+   - For each independent (non-core) crate the script listed, update its own
+     `Cargo.toml` `version` (patch or minor as advised) and any pin(s) on the bumped deps.
 4. **Format:**
    ```sh
    cargo +nightly-2025-06-25 fmt --all

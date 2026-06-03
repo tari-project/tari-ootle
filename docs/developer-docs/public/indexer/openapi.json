@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.30.4"
+    "version": "0.33.2"
   },
   "paths": {
     "/epoch-checkpoints": {
@@ -1010,6 +1010,47 @@
         }
       }
     },
+    "/transactions/{transaction_id}": {
+      "get": {
+        "tags": [
+          "handlers::transactions"
+        ],
+        "description": "Get a transaction (including its instructions, fee instructions and signatures) by transaction ID.\n\nNOTE: This only returns transactions that were submitted through *this* indexer; it reads from the indexer's local transaction store and is not synced from the network. A transaction submitted via a different indexer or wallet will return 404 here even after it has been finalized. This differs from transaction receipts (see the /transaction-receipts endpoints), which are synced from the network. For the execution result of any transaction regardless of where it was submitted, use /transactions/{transaction_id}/result.",
+        "operationId": "get_transaction",
+        "responses": {
+          "200": {
+            "description": "Transaction found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTransactionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transaction not found (not submitted through this indexer)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/transactions/{transaction_id}/result": {
       "get": {
         "tags": [
@@ -1467,6 +1508,18 @@
         "properties": {
           "receipt": {
             "type": "object"
+          }
+        }
+      },
+      "GetTransactionResponse": {
+        "type": "object",
+        "required": [
+          "transaction"
+        ],
+        "properties": {
+          "transaction": {
+            "$ref": "#/components/schemas/TransactionEntry",
+            "description": "The stored transaction, including its instructions, fee instructions and signatures."
           }
         }
       },

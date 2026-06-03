@@ -43,10 +43,10 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
     info!("⏳️ Creating other accounts...");
 
     let mut accounts = vec![];
-    for i in 0..20 {
+    for i in 0..40 {
         // We have to break up the transactions into batches due to log and event limits
-        let start = i * 50;
-        let end = start + 50;
+        let start = i * 25;
+        let end = start + 25;
         accounts.extend(runner.create_accounts(start + 1..=end).await?);
         info!("⏳️ Created {}/1000 accounts...", end);
     }

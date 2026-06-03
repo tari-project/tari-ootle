@@ -57,6 +57,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::transactions::submit_transaction,
     handlers::transactions::submit_transaction_dry_run,
     handlers::transactions::list_recent_transactions,
+    handlers::transactions::get_transaction,
     handlers::transactions::get_transaction_result,
     handlers::templates::get_template_definition,
     handlers::templates::list_cached_templates,
@@ -182,6 +183,11 @@ impl Server {
                 .route(
                     "/{transaction_id}/result",
                     get(handlers::transactions::get_transaction_result)
+                    .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
+                )
+                .route(
+                    "/{transaction_id}",
+                    get(handlers::transactions::get_transaction)
                     .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
                 )
                 .route("/events", get(handlers::transactions::query_transaction_events))

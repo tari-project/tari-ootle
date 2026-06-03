@@ -277,6 +277,18 @@ pub struct GetTransactionResultResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "tari-indexer-client/", rename = "IndexerGetTransactionResponse")
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetTransactionResponse {
+    /// The stored transaction, including its instructions, fee instructions and signatures.
+    pub transaction: TransactionEntry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct QueryTransactionEventsRequest {

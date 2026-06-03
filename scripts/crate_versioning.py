@@ -13,10 +13,12 @@ Usage:
     ./scripts/crate_versioning.py dependents <crate> [--transitive]
     ./scripts/crate_versioning.py impact <crate> [--breaking]
 
-Tier semantics (mirrors publish_crates.py):
-  1 = stable/foundational, independently versioned, rarely changes
-  2 = template/sdk, independently versioned
-  3 = workspace-versioned, all share workspace.package.version
+Tier semantics (mirrors publish_crates.py). Tier 3 is the only workspace-versioned
+cohort; every other tier is independently versioned:
+  1 = stable/foundational, rarely changes
+  2 = template authoring crates
+  3 = core, all share workspace.package.version (move together)
+  4 = wallet (SDK, clients, storage), decoupled from the core version
 
 SemVer rules for 0.y.z crates:
   patch (0.y.z -> 0.y.(z+1)) — non-breaking. Dependents auto-pick-up via ^0.y.
@@ -211,7 +213,7 @@ def cmd_impact(args):
 
     # Render tier-3 cohort.
     if minor_set & tier3_crates:
-        print(f"{BOLD}Tier 3 (workspace) — all republish at the new workspace version:{NC}")
+        print(f"{BOLD}Tier 3 (core) — all republish at the new workspace version:{NC}")
         ws_ver = workspace_version()
         new_ws = bump(ws_ver, "minor")
         print(f"  Set [workspace.package].version = \"{new_ws}\" in root Cargo.toml.")
@@ -222,22 +224,22 @@ def cmd_impact(args):
             print(f"  {marker} {c} {versions[c]} -> {new_ws}")
         print()
 
-    # Render non-tier-3 minor bumps (target if tier 1/2, plus any other tier
-    # 1/2 crates that were elevated to minor — typically none unless target is tier 1/2).
+    # Render independent (non-core) minor bumps (target if independent, plus any
+    # other independent crate elevated to minor — typically none unless target is).
     non_t3_minor = sorted(c for c in minor_set if TIER_OF[c] != 3)
     if non_t3_minor:
-        print(f"{BOLD}Tier 1/2 — minor (breaking) bump required:{NC}")
+        print(f"{BOLD}Independent (non-core) — minor (breaking) bump required:{NC}")
         for c in non_t3_minor:
             marker = "*" if c == target else " "
             print(f"  {marker} {c} {versions[c]} -> {bump(versions[c], 'minor')}")
         print()
 
-    # Render pin-update set (tier 1/2 that must republish).
-    pin_t1t2 = sorted(c for c in pin_update_set if TIER_OF[c] != 3)
-    if pin_t1t2:
-        print(f"{BOLD}Tier 1/2 — must update pin(s) and republish "
+    # Render pin-update set (independent crates that must republish).
+    pin_independent = sorted(c for c in pin_update_set if TIER_OF[c] != 3)
+    if pin_independent:
+        print(f"{BOLD}Independent (non-core) — must update pin(s) and republish "
               f"(patch min, minor if API re-exposes changed types):{NC}")
-        for c in pin_t1t2:
+        for c in pin_independent:
             cur = versions[c]
             # Which deps of c are bumping?
             bumping_deps = sorted(deps[c] & minor_set)
@@ -269,12 +271,12 @@ def cmd_impact(args):
         print(f"  {step}. Update tier-3 pins in [workspace.dependencies].")
         step += 1
     if non_t3_minor:
-        print(f"  {step}. Bump these tier-1/2 crates in their own Cargo.toml:")
+        print(f"  {step}. Bump these independent crates in their own Cargo.toml:")
         for c in non_t3_minor:
             print(f"       {c} -> {bump(versions[c], 'minor')}")
         step += 1
-    if pin_t1t2:
-        print(f"  {step}. For each tier-1/2 dependent above, "
+    if pin_independent:
+        print(f"  {step}. For each independent dependent above, "
               f"update pin(s) and choose patch-vs-minor based on API surface.")
         step += 1
     print(f"  {step}. cargo +nightly-2025-06-25 fmt --all, then "

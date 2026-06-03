@@ -546,7 +546,10 @@ where
 pub enum TransactionApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
-    #[error("Network interface error: {status} {message}")]
+    // `status` is the categorized variant used by callers to map to a response; `message` is the full
+    // detail. Only `message` is shown here because `status`'s Display embeds the same message, which
+    // would otherwise print the error twice.
+    #[error("Network interface error: {message}")]
     NetworkInterfaceError {
         status: ResponseErrorStatus,
         message: String,

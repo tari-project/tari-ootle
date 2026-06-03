@@ -95,4 +95,17 @@ where
             .await?;
         Ok(transactions)
     }
+
+    /// Fetch a single transaction (with its instructions) by ID. Returns `None` if the transaction
+    /// was not submitted through this indexer.
+    pub async fn get_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<Option<TransactionEntry>, TransactionManagerError> {
+        let transaction = self
+            .store
+            .with_read_tx(move |tx| tx.get_transaction(transaction_id))
+            .await?;
+        Ok(transaction)
+    }
 }

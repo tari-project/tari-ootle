@@ -3,6 +3,11 @@
 name = "faucet"
 version = "0.1.0"
 edition = "2024"
+description = "A faucet used for stress testing"
+
+[package.metadata.tari-template]
+tags = ["token", "fungible"]
+category = "token"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -18,3 +23,6 @@ strip = "debuginfo" # Strip debug info.
 
 [lib]
 crate-type = ["cdylib"]
+
+[build-dependencies]
+tari_ootle_template_build = "0.7"

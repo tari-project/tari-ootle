@@ -241,7 +241,7 @@ pub async fn spawn_services(
             .committee_size_per_shard_group
             .try_into()
             .context("committee size must be non-zero")?,
-        validator_node_sidechain_id: config.validator_node.validator_node_sidechain_id.to_byte_type(),
+        validator_node_sidechain_id: config.validator_node.sidechain_id.to_byte_type(),
         fee_claim_public_key: config.validator_node.fee_claim_public_key.to_byte_type(),
         num_preshards: consensus_constants.num_preshards,
     };
@@ -328,7 +328,11 @@ pub async fn spawn_services(
         template_provider.clone(),
         fee_table.clone(),
         false,
-        Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
+        Arc::new(TariClaimBurnProofVerifier::new(
+            config.network,
+            config.validator_node.sidechain_id.as_ref().map(|pk| pk.to_byte_type()),
+            global_db.clone(),
+        )),
     );
     let transaction_executor = TariBlockTransactionExecutor::new(
         transaction_processor,
@@ -340,11 +344,7 @@ pub async fn spawn_services(
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
-    let sidechain_id = config
-        .validator_node
-        .validator_node_sidechain_id
-        .as_ref()
-        .map(|pk| pk.to_byte_type());
+    let sidechain_id = config.validator_node.sidechain_id.as_ref().map(|pk| pk.to_byte_type());
 
     // Consensus
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
@@ -570,11 +570,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
             start_height: config.epoch_oracle.base_layer.start_height,
             height_lag: consensus_constants.base_layer_confirmations,
             scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
-            sidechain_id: config
-                .validator_node
-                .validator_node_sidechain_id
-                .as_ref()
-                .map(|p| p.to_byte_type()),
+            sidechain_id: config.validator_node.sidechain_id.as_ref().map(|p| p.to_byte_type()),
             features,
             epoch_end_spread_blocks: consensus_constants.epoch_end_spread_blocks,
         },

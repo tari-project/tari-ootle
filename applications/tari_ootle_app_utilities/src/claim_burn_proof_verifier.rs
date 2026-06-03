@@ -37,9 +37,13 @@ pub struct TariClaimBurnProofVerifier<TGlobalBackend> {
 }
 
 impl<TGlobalBackend> TariClaimBurnProofVerifier<TGlobalBackend> {
-    pub fn new(network: Network, global_db: GlobalDb<TGlobalBackend>) -> Self {
+    pub fn new(
+        network: Network,
+        sidechain_id: Option<RistrettoPublicKeyBytes>,
+        global_db: GlobalDb<TGlobalBackend>,
+    ) -> Self {
         Self {
-            knowledge_proof: KnowledgeProofVerifier { network },
+            knowledge_proof: KnowledgeProofVerifier { network, sidechain_id },
             kernel_merkle_proof: KernelMerkleProofVerifier { global_db, network },
         }
     }
@@ -197,11 +201,15 @@ where
 
 pub struct KnowledgeProofVerifier {
     network: Network,
+    /// This chain's own burnt-utxo sidechain id (the L1 deployment key's public key), bound into
+    /// the ownership-proof challenge so a proof signed for another sidechain cannot be replayed
+    /// here. `None` for the default chain that has no deployment key. See tari-ootle#445.
+    sidechain_id: Option<RistrettoPublicKeyBytes>,
 }
 
 impl KnowledgeProofVerifier {
-    pub fn new(network: Network) -> Self {
-        Self { network }
+    pub fn new(network: Network, sidechain_id: Option<RistrettoPublicKeyBytes>) -> Self {
+        Self { network, sidechain_id }
     }
 }
 
@@ -222,11 +230,18 @@ impl ClaimProofVerifier for KnowledgeProofVerifier {
         // `claimant` is the stealth claim public key `C = H(r·P)·G + P`. The runtime supplies it
         // via `seal_signer_public_key`: the L2 wallet signs the claim transaction with
         // `s = H(R·p) + p`, so the transaction's seal-signer pubkey is `s·G = C`.
+        //
+        // `sidechain_id` binds the proof to THIS chain's configured burnt-utxo sidechain id, so a
+        // proof signed for another sidechain/application cannot be replayed here (tari-ootle#445).
+        // It is the verifier's own identity, never taken from the (attacker-supplied) proof. The
+        // `Option<&[u8]>` encoding mirrors the L1 signer's `Option<CompressedPublicKey>` borsh.
         // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
         // length bytes of size 32
+        let sidechain_id = self.sidechain_id.as_ref().map(|id| id.as_bytes());
         let message = ownership_proof_hasher64(self.network)
             .chain(&commitment.as_bytes())
             .chain(&claimant.as_bytes())
+            .chain(&sidechain_id)
             .finalize();
 
         let commitment = PedersenCommitment::convert_from_byte_type(commitment).map_err(|e| {
@@ -272,15 +287,23 @@ mod tests {
     use super::KnowledgeProofVerifier;
 
     /// Mints a `MinotariBurnClaimProof` whose `ownership_proof` Schnorr signature is bound to
-    /// `claimant_pk` (the key the message commits to in `H(commitment ‖ claimant_pk)`).
-    fn build_proof(network: Network, value: u64, claimant_pk: RistrettoPublicKeyBytes) -> MinotariBurnClaimProof {
+    /// `claimant_pk` (the key the message commits to in `H(commitment ‖ claimant_pk ‖ sidechain_id)`)
+    /// and to the target `sidechain_id`.
+    fn build_proof(
+        network: Network,
+        value: u64,
+        claimant_pk: RistrettoPublicKeyBytes,
+        sidechain_id: Option<&RistrettoPublicKeyBytes>,
+    ) -> MinotariBurnClaimProof {
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let commitment = get_commitment_factory().commit_value(&mask, value);
         let commitment_bytes = commitment.to_byte_type();
 
+        let sidechain_id = sidechain_id.map(|id| id.as_bytes());
         let message = ownership_proof_hasher64(network)
             .chain(&commitment_bytes.as_bytes())
             .chain(&claimant_pk.as_bytes())
+            .chain(&sidechain_id)
             .finalize();
         let signature = RistrettoSchnorr::sign(&mask, &message[..], &mut rand::rng()).expect("sign with random nonce");
 
@@ -316,8 +339,8 @@ mod tests {
         // claims the wallet signs with `s = H(R·p) + p`, so this is `C = s·G`.
         let (_c_sec, c_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
-        let proof = build_proof(network, 2_000, c_pub.to_byte_type());
-        let verifier = KnowledgeProofVerifier::new(network);
+        let proof = build_proof(network, 2_000, c_pub.to_byte_type(), None);
+        let verifier = KnowledgeProofVerifier::new(network, None);
 
         verifier
             .verify_claim_proof(Epoch(0), &c_pub.to_byte_type(), &proof)
@@ -331,10 +354,58 @@ mod tests {
         let (_wrong_sec, wrong_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
         // Signed against c_pub but the runtime passes wrong_pub.
-        let proof = build_proof(network, 3_000, c_pub.to_byte_type());
+        let proof = build_proof(network, 3_000, c_pub.to_byte_type(), None);
 
-        let verifier = KnowledgeProofVerifier::new(network);
+        let verifier = KnowledgeProofVerifier::new(network, None);
         let result = verifier.verify_claim_proof(Epoch(0), &wrong_pub.to_byte_type(), &proof);
         assert!(result.is_err(), "expected verification to reject mismatched claimant");
+    }
+
+    #[test]
+    fn verifies_with_matching_sidechain_id() {
+        let network = Network::LocalNet;
+        let (_c_sec, c_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_sc_sec, sc_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let sidechain_id = sc_pub.to_byte_type();
+
+        let proof = build_proof(network, 4_000, c_pub.to_byte_type(), Some(&sidechain_id));
+        let verifier = KnowledgeProofVerifier::new(network, Some(sidechain_id));
+
+        verifier
+            .verify_claim_proof(Epoch(0), &c_pub.to_byte_type(), &proof)
+            .expect("proof bound to this chain's sidechain id should verify");
+    }
+
+    #[test]
+    fn rejects_replay_onto_a_different_sidechain() {
+        let network = Network::LocalNet;
+        let (_c_sec, c_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_signed_sec, signed_sc) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_other_sec, other_sc) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+
+        // Proof signed for `signed_sc`, but this chain's verifier is configured with `other_sc`.
+        let proof = build_proof(network, 5_000, c_pub.to_byte_type(), Some(&signed_sc.to_byte_type()));
+        let verifier = KnowledgeProofVerifier::new(network, Some(other_sc.to_byte_type()));
+
+        let result = verifier.verify_claim_proof(Epoch(0), &c_pub.to_byte_type(), &proof);
+        assert!(result.is_err(), "replay onto a different sidechain must be rejected");
+    }
+
+    #[test]
+    fn rejects_unbound_proof_when_chain_expects_a_sidechain_id() {
+        let network = Network::LocalNet;
+        let (_c_sec, c_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_sc_sec, sc_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+
+        // Proof carries no sidechain binding (None) but this chain expects one: the `Option` tag
+        // alone must change the challenge.
+        let proof = build_proof(network, 6_000, c_pub.to_byte_type(), None);
+        let verifier = KnowledgeProofVerifier::new(network, Some(sc_pub.to_byte_type()));
+
+        let result = verifier.verify_claim_proof(Epoch(0), &c_pub.to_byte_type(), &proof);
+        assert!(
+            result.is_err(),
+            "an unbound proof must not verify on a chain that expects a sidechain id"
+        );
     }
 }

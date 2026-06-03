@@ -150,7 +150,7 @@ impl JsonRpcHandlers {
     }
 
     pub fn sidechain_id(&self) -> Option<&RistrettoPublicKey> {
-        self.config.validator_node.validator_node_sidechain_id.as_ref()
+        self.config.validator_node.sidechain_id.as_ref()
     }
 
     pub fn networking_is_active(&self) -> bool {

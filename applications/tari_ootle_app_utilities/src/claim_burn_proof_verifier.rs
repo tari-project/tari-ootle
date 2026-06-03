@@ -43,8 +43,8 @@ impl<TGlobalBackend> TariClaimBurnProofVerifier<TGlobalBackend> {
         global_db: GlobalDb<TGlobalBackend>,
     ) -> Self {
         Self {
-            knowledge_proof: KnowledgeProofVerifier { network, sidechain_id },
-            kernel_merkle_proof: KernelMerkleProofVerifier { global_db, network },
+            knowledge_proof: KnowledgeProofVerifier::new(network, sidechain_id),
+            kernel_merkle_proof: KernelMerkleProofVerifier::new(global_db, network),
         }
     }
 }

@@ -473,8 +473,8 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
         row.map(|(body, created_at)| {
             let full: Transaction = deserialize_json(&body)?;
-            let transaction_id = full.calculate_id();
             Ok(TransactionEntry {
+                // The row was looked up by this id, so it matches full.calculate_id() without recomputing it.
                 transaction_id,
                 created_at,
                 transaction: full.into(),

@@ -22,8 +22,12 @@
 
 [epoch_oracle.configured]
 
-# The configured epoch oracle's toml or json configuration file path.
-# E.g
+# The configured epoch oracle config can be supplied in one of two ways:
+#
+# 1. As a path to a separate toml, json or json5 file (`config_file`), or
+# 2. Inline as a JSON (json5-compatible) string (`config_json`).
+#
+# Set exactly one of `config_file` or `config_json` (setting both is an error). The config has the following shape:
 #{
 # "epoch_time: 120,
 # "initial_epoch": 3,
@@ -34,13 +38,26 @@
 #    "registration_epoch": 5
 #  }]
 #}
+#
+# Load it from a file:
 #config_file = "epoch_oracle_config.toml"
+#
+# Or embed it directly (note the TOML multi-line """ string):
+#config_json = """
+#{
+#    "epoch_time": 120,
+#    "initial_epoch": 3,
+#    "base_time": "2026-02-23T13:08:42+0000",
+#    "validators": []
+#}
+#"""
 
 [esmeralda.epoch_oracle]
 oracle = "Hybrid"
 
 [esmeralda.epoch_oracle.base_layer]
 base_node_grpc_url = "https://grpc.esmeralda.tari.com"
+# This is the "birthday" height if the current esme testnet for ootle
 start_height = 669506
 
 [esmeralda.epoch_oracle.configured]
@@ -88,5 +105,6 @@ config_json = """
             "registration_epoch": 8367
         }
     ]
+}
 """
 

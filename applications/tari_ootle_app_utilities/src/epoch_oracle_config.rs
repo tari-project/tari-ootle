@@ -75,21 +75,38 @@ impl Display for BaseLayerOracleConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConfiguredOracleConfig {
-    /// Absolute or relative (to current working dir) path to the ConfiguredEpochOracle config
-    pub config_file: PathBuf,
+    /// Absolute or relative (to current working dir) path to the ConfiguredEpochOracle config file (toml, json or
+    /// json5). Mutually exclusive with `config_json`.
+    #[serde(default)]
+    pub config_file: Option<PathBuf>,
+    /// Inline JSON (json5-compatible) configuration for the ConfiguredEpochOracle, embedded directly in the node
+    /// config instead of a separate file. Mutually exclusive with `config_file`.
+    #[serde(default)]
+    pub config_json: Option<String>,
 }
 
 impl ConfiguredOracleConfig {
     pub async fn load(&self) -> anyhow::Result<configured::Config> {
-        let ext = self
-            .config_file
+        let config_file = match (self.config_file.as_ref(), self.config_json.as_deref()) {
+            (Some(_), Some(_)) => {
+                bail!("Both `config_file` and `config_json` are set for the configured oracle; set only one")
+            },
+            (None, None) => {
+                bail!("No configured oracle source set: specify either `config_file` or `config_json`")
+            },
+            (None, Some(json)) => {
+                return serde_json5::from_str(json).context("Failed to parse inline oracle `config_json`");
+            },
+            (Some(config_file), None) => config_file,
+        };
+        let ext = config_file
             .extension()
-            .ok_or_else(|| anyhow!("Oracle config_file {} is not a file", self.config_file.display()))?;
-        let mut file = File::open(&self.config_file)
+            .ok_or_else(|| anyhow!("Oracle config_file {} is not a file", config_file.display()))?;
+        let mut file = File::open(config_file)
             .await
-            .with_context(|| format!("Failed to open config file {}", self.config_file.display()))?;
+            .with_context(|| format!("Failed to open config file {}", config_file.display()))?;
         let config = match ext.to_str().context("extension not utf8")? {
             "toml" => {
                 let mut s = String::with_capacity(1024);
@@ -109,10 +126,69 @@ impl ConfiguredOracleConfig {
     }
 }
 
-impl Default for ConfiguredOracleConfig {
-    fn default() -> Self {
-        Self {
-            config_file: PathBuf::from("data/oracle-config.toml"),
+#[cfg(test)]
+mod tests {
+    use config::{Config, File, FileFormat};
+    use tari_common::DefaultConfigLoader;
+
+    use super::*;
+
+    /// The embedded epoch oracle preset, which defines the `[esmeralda.epoch_oracle]` network override.
+    const PRESET: &str = include_str!("../config_presets/f_epoch_oracle.toml");
+
+    fn load(override_from: Option<&str>) -> EpochOracleConfig {
+        let mut builder = Config::builder().add_source(File::from_str(PRESET, FileFormat::Toml));
+        if let Some(network) = override_from {
+            builder = builder.set_override("epoch_oracle.override_from", network).unwrap();
         }
+        let cfg = builder.build().unwrap();
+        EpochOracleConfig::load_from(&cfg).unwrap()
+    }
+
+    #[tokio::test]
+    async fn esmeralda_override_loads_inline_config_json() {
+        let config = load(Some("esmeralda"));
+        assert!(matches!(config.oracle_type, EpochOracleType::Hybrid));
+        assert!(config.configured.config_json.is_some());
+        assert!(config.configured.config_file.is_none());
+
+        let oracle = config.configured.load().await.unwrap();
+        assert_eq!(oracle.validators.len(), 4);
+        assert_eq!(oracle.epoch_time, Some(Duration::from_secs(1200)));
+    }
+
+    #[tokio::test]
+    async fn without_override_falls_back_to_base_layer_default() {
+        // Without `epoch_oracle.override_from` set, the `[esmeralda.epoch_oracle]` section must not be applied.
+        let config = load(None);
+        assert!(matches!(config.oracle_type, EpochOracleType::BaseLayer));
+        assert!(config.configured.config_json.is_none());
+    }
+
+    #[tokio::test]
+    async fn inline_config_json_loads() {
+        let configured = ConfiguredOracleConfig {
+            config_file: None,
+            config_json: Some(
+                r#"{ "initial_epoch": 7, "base_time": "2026-02-23T13:08:42+0000", "validators": [] }"#.to_string(),
+            ),
+        };
+        let oracle = configured.load().await.unwrap();
+        assert_eq!(oracle.initial_epoch, tari_ootle_common_types::Epoch(7));
+    }
+
+    #[tokio::test]
+    async fn setting_both_sources_is_an_error() {
+        let configured = ConfiguredOracleConfig {
+            config_file: Some(PathBuf::from("oracle.toml")),
+            config_json: Some(r#"{ "initial_epoch": 7, "base_time": "2026-02-23T13:08:42+0000" }"#.to_string()),
+        };
+        assert!(configured.load().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn setting_no_source_is_an_error() {
+        let configured = ConfiguredOracleConfig::default();
+        assert!(configured.load().await.is_err());
     }
 }

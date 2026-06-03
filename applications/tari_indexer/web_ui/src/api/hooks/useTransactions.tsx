@@ -21,11 +21,16 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery } from "@tanstack/react-query";
+import type { IndexerGetTransactionResultResponse } from "@tari-project/ootle-ts-bindings";
 import {
   listRecentTransactions,
   getTransaction,
   getTransactionResult,
 } from "../../utils/api";
+
+// A finalized result is `{ Finalized: {...} }`; a pending one is the string "Pending".
+const isFinalizedResult = (data: IndexerGetTransactionResultResponse | undefined): boolean =>
+  data?.result != null && typeof data.result === "object" && "Finalized" in data.result;
 
 interface UseListRecentTransactionsProps {
   last_id: string | null;
@@ -50,6 +55,10 @@ export const useGetTransactionResult = (transaction_id: string) => {
     queryKey: ["transaction_result", transaction_id],
     queryFn: () => getTransactionResult({ transaction_id }),
     enabled: !!transaction_id,
+    // Once a transaction is finalized (Accept/Abort) its result is immutable, so treat it as
+    // permanently fresh — React Query then never auto-refetches it (no polling, window-focus or
+    // remount refresh). Pending results keep the default so they still update.
+    staleTime: (query) => (isFinalizedResult(query.state.data) ? Infinity : 0),
   });
 };
 
@@ -58,5 +67,7 @@ export const useGetTransaction = (transaction_id: string, enabled: boolean) => {
     queryKey: ["transaction", transaction_id],
     queryFn: () => getTransaction(transaction_id),
     enabled: enabled && !!transaction_id,
+    // The transaction body never changes, so never auto-refetch it.
+    staleTime: Infinity,
   });
 };

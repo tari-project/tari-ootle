@@ -38,8 +38,10 @@ peer_seeds = [
 dns_seeds = ["seeds.esmeralda.tari.com"]
 # Custom specified peer seed nodes
 peer_seeds = [
-    #"a062ae2345b0db0df9fb1504b99511e23d98f8513f9b5503efcc6dad8eca7e47::/onion3/rhoqxfbzz3uidp23erxu4mkwwexc2gg4q45rcxfpbhb35ycdv4ex2fid:18141",
-    #"a062ae2345b0db0df9fb1504b99511e23d98f8513f9b5503efcc6dad8eca7e47::/ip4/54.77.66.39/tcp/18189",
+	"d6da35adba3642e7d1343985d5e4f123f5230a74c5480bf2857aabe50bcd6362::/ip4/51.68.16.179/udp/50123/quic-v1",
+	"568adadd2744c7bb3ae4c58e26e83a49a5b5af3380edfcd6b5d7af315580552f::/ip4/217.182.93.8/udp/50123/quic-v1",
+	"10780fe1b4d31f8350e4b881dccd8f8210ce056050ac6dd8cca88ca16710b044::/ip4/217.182.93.72/udp/50123/quic-v1",
+	"c480fe3a76f03dcdce8d7c85ac7d0001ec97b667260172709b23818c8707e503::/ip4/217.182.93.147/udp/50123/quic-v1"
 ]
 
 

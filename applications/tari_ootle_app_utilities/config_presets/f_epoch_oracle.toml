@@ -36,3 +36,57 @@
 #}
 #config_file = "epoch_oracle_config.toml"
 
+[esmeralda.epoch_oracle]
+oracle = "Hybrid"
+
+[esmeralda.epoch_oracle.base_layer]
+base_node_grpc_url = "https://grpc.esmeralda.tari.com"
+start_height = 669506
+
+[esmeralda.epoch_oracle.configured]
+
+config_json = """
+{
+    "epoch_time": 1200,
+    "base_time": "2026-02-23T13:08:42+0000",
+    "initial_epoch": 0,
+    "validators": [
+        {
+            "public_key": "d6da35adba3642e7d1343985d5e4f123f5230a74c5480bf2857aabe50bcd6362",
+            "claim_key": "3c6eebdcb2939ebad646a9d464874005aa979f1e575b72cd2a690289f10e5e50",
+            "shard_group": {
+                "start": 1,
+                "end_inclusive": 256
+            },
+            "registration_epoch": 8367
+        },
+        {
+            "public_key": "568adadd2744c7bb3ae4c58e26e83a49a5b5af3380edfcd6b5d7af315580552f",
+            "claim_key": "3c6eebdcb2939ebad646a9d464874005aa979f1e575b72cd2a690289f10e5e50",
+            "shard_group": {
+                "start": 1,
+                "end_inclusive": 256
+            },
+            "registration_epoch": 8367
+        },
+        {
+            "public_key": "10780fe1b4d31f8350e4b881dccd8f8210ce056050ac6dd8cca88ca16710b044",
+            "claim_key": "3c6eebdcb2939ebad646a9d464874005aa979f1e575b72cd2a690289f10e5e50",
+            "shard_group": {
+                "start": 1,
+                "end_inclusive": 256
+            },
+            "registration_epoch": 8367
+        },
+        {
+            "public_key": "c480fe3a76f03dcdce8d7c85ac7d0001ec97b667260172709b23818c8707e503",
+            "claim_key": "3c6eebdcb2939ebad646a9d464874005aa979f1e575b72cd2a690289f10e5e50",
+            "shard_group": {
+                "start": 1,
+                "end_inclusive": 256
+            },
+            "registration_epoch": 8367
+        }
+    ]
+"""
+

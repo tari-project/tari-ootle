@@ -362,6 +362,34 @@ mod tests {
     }
 
     #[test]
+    fn known_answer_challenge_matches_l1_encoding() {
+        // Cross-repo encoding guard. This challenge MUST byte-match the L1 signer
+        // (tari's `commitment_signature` ConfidentialOutputHasher) for identical inputs, or
+        // burn-claim ownership proofs will silently fail to verify. The expected hash below was
+        // produced by an equivalent known-answer test in the tari repo. Inputs: commitment =
+        // claimant = Ristretto basepoint, sidechain_id = None, network byte 0x26 (Esmeralda).
+        const BP: [u8; 32] = [
+            0xe2, 0xf2, 0xae, 0x0a, 0x6a, 0xbc, 0x4e, 0x71, 0xa8, 0x84, 0xa9, 0x61, 0xc5, 0x00, 0x51, 0x5f, 0x58,
+            0xe3, 0x0b, 0x6a, 0xa5, 0x82, 0xdd, 0x8d, 0xb6, 0xa6, 0x59, 0x45, 0xe0, 0x8d, 0x2d, 0x76,
+        ];
+        let commitment = PedersenCommitmentBytes::from(BP);
+        let claimant = RistrettoPublicKeyBytes::from_bytes(&BP).unwrap();
+        let sidechain_id: Option<RistrettoPublicKeyBytes> = None;
+        let sc = sidechain_id.as_ref().map(|id| id.as_bytes());
+        let challenge = ownership_proof_hasher64(Network::Esmeralda)
+            .chain(&commitment.as_bytes())
+            .chain(&claimant.as_bytes())
+            .chain(&sc)
+            .finalize();
+        let hex: String = challenge.iter().map(|b| format!("{:02x}", b)).collect();
+        assert_eq!(
+            hex,
+            "cd025aa3c5331a92927850d9fd5ac3581419b7da8b6ef42dda57fcad07d49b76e0629ccad07ad85568a92e4cec5560fe380c60db2800b9d2407fb68fa3a892a7",
+            "burn-claim ownership-proof challenge encoding drifted from the L1 signer"
+        );
+    }
+
+    #[test]
     fn verifies_with_matching_sidechain_id() {
         let network = Network::LocalNet;
         let (_c_sec, c_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());

@@ -138,20 +138,20 @@ impl Runner {
         let diff = finalize.result.any_accept().unwrap();
 
         let account_addrs = diff.up_iter().filter_map(|(addr, substate)| {
+            // up_iter also yields non-owner components (the fee-paying account, the faucet), so skip
+            // anything that isn't one of our newly created owner accounts rather than panicking.
             let addr = addr.as_component_address()?;
             let key_id = owners
                 .iter()
                 .find(|(pk, _)| addr == derive_account_address_from_public_key(&pk.public_key().to_byte_type()))
-                .map(|(pk, _)| pk.key_id)
-                .expect("no acc key id find");
-            let component = substate.substate_value().component().expect("component");
-            let indexed = component.body().to_indexed_well_known_types().unwrap();
+                .map(|(pk, _)| pk.key_id)?;
+            let component = substate.substate_value().component()?;
+            let indexed = component.body().to_indexed_well_known_types().ok()?;
             let vault_id = indexed
                 .vault_ids()
                 .iter()
                 .find(|id| **id != XTR_FAUCET_VAULT_ADDRESS)
-                .copied()
-                .expect("no vault");
+                .copied()?;
 
             Some((addr, vault_id, key_id))
         });

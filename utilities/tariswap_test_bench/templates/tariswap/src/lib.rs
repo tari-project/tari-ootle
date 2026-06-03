@@ -202,16 +202,8 @@ mod tariswap {
             }
         }
 
-        fn lp_resource(&self) -> ResourceAddress {
-            self.lp_resource
-        }
-
         fn lp_total_supply(&self) -> Amount {
             ResourceManager::get(self.lp_resource).total_supply()
-        }
-
-        fn fee(&self) -> u16 {
-            self.fee
         }
 
         fn check_pool_resources(&self, a_resource: ResourceAddress, b_resource: ResourceAddress) {

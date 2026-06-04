@@ -12579,7 +12579,6 @@ dependencies = [
  "config",
  "console-subscriber",
  "dashmap 5.5.3",
- "either",
  "futures 0.3.31",
  "include_dir",
  "indexmap 2.13.0",

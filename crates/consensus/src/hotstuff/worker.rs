@@ -1030,6 +1030,29 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
+    /// Remove all records from the transaction pool, returning the number removed.
+    ///
+    /// Called after a state sync. State sync only rewrites the state store, not the (persisted)
+    /// consensus transaction pool, so the pool can be left holding transactions the freshly-synced
+    /// state has already finalised. Re-proposing such a transaction breaks liveness: the rest of the
+    /// committee finalised and removed it, so it can never gather a QC again and every block carrying
+    /// it is rejected (`TransactionNotInPool`). Clearing lets the node rebuild its pool from fresh
+    /// mempool/consensus activity against the synced state.
+    // TODO: the transaction pool only holds pending (derived) state and should not be persisted at
+    //       all — that would remove this whole class of pool-vs-state-store divergence.
+    pub fn clear_transaction_pool(&self) -> Result<usize, HotStuffError> {
+        self.state_store.with_write_tx(|tx| {
+            let ids = self
+                .transaction_pool
+                .get_all(&**tx, usize::MAX)?
+                .iter()
+                .map(|rec| *rec.id())
+                .collect::<Vec<_>>();
+            let removed = self.transaction_pool.remove_all(tx, &ids)?;
+            Ok::<_, HotStuffError>(removed.len())
+        })
+    }
+
     async fn propose_now(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
@@ -1063,17 +1086,23 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Ok(());
         }
 
-        // We use the highest seen block - specifically to handle the case where a block is proposed and locally
-        // accepted, however, for whatever reason, a new certificate could not be created for it. We still use
-        // it at the parent for this block, subsequent certificates will justify it.
+        // The parent of the next block must be a block every honest node provably shares: either the
+        // HighQC's justified block, or a deterministic dummy chain extending it. Building directly on
+        // `highest_block` is correct ONLY when it *is* the HighQC (the steady-state case): a block can
+        // be locally accepted without a certificate forming for it, and we still build on it so a
+        // subsequent QC justifies it. But when the highest seen block sits *above* the HighQC
+        // (`leaf > HighPC` — accepted locally yet never certified), we must NOT extend it on a recovery
+        // proposal. Validators reconstruct the post-timeout chain from the HighQC carried in our
+        // proposal and would reject a real parent at the gap height as "does not extend justify",
+        // forking the committee. So on a timeout (or a height gap) we anchor on the HighQC and fill the
+        // gap with dummy blocks instead — exactly what validators recompute.
         let highest_block = self
             .state_store
             .with_read_tx(|tx| HighestSeenBlock::get(tx, epoch_state.epoch()))?;
 
-        // If there are timeout "gaps", we need to fill them in with dummy blocks
         let mut dummy_block = None;
         let mut propose_high_tc = None;
-        if next_height > highest_block.height + NodeHeight(1) {
+        if is_timeout || next_height > highest_block.height + NodeHeight(1) {
             let (high_qc, high_tc, justify_block) = self.state_store.with_read_tx(|tx| {
                 let high_qc = HighPc::get(tx, epoch_state.epoch())?;
                 let high_qc = ProposalCertificate::get(tx, high_qc.epoch(), high_qc.id())?;
@@ -1087,40 +1116,36 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             propose_high_tc = high_tc;
 
-            info!(
-                target: LOG_TARGET,
-                "⚠️ Leader Failure: Next height is {next_height} but the highest block is {highest_block}. Proposing with dummy blocks to fill the gap.",
-            );
+            // Fill [justify_block.height + 1, next_height - 1] with dummy blocks anchored on the HighQC,
+            // so our parent matches what every validator deterministically recomputes from the QC. When
+            // next_height == justify_block.height + 1 there is no gap: the parent is the HighQC block
+            // itself, which in that case is also the highest seen block, so on_propose's fallback to
+            // highest_block is correct.
+            if next_height > justify_block.height() + NodeHeight(1) {
+                info!(
+                    target: LOG_TARGET,
+                    "⚠️ Leader Failure: proposing at {next_height} anchored on HighQC (height {}); highest seen is {highest_block}. Filling the gap with dummy blocks.",
+                    justify_block.height(),
+                );
 
-            if let Some(dummy) = calculate_last_dummy_block(
-                justify_block.height(),
-                next_height,
-                self.config.network,
-                epoch_state.epoch(),
-                justify_block.shard_group(),
-                *justify_block.id(),
-                &high_qc,
-                *justify_block.state_merkle_root(),
-                &self.leader_strategy,
-                epoch_state.local_committee(),
-                justify_block.timestamp(),
-                *justify_block.header().accumulated_data(),
-                *justify_block.epoch_hash(),
-            ) {
-                dummy_block = Some(dummy);
+                if let Some(dummy) = calculate_last_dummy_block(
+                    justify_block.height(),
+                    next_height,
+                    self.config.network,
+                    epoch_state.epoch(),
+                    justify_block.shard_group(),
+                    *justify_block.id(),
+                    &high_qc,
+                    *justify_block.state_merkle_root(),
+                    &self.leader_strategy,
+                    epoch_state.local_committee(),
+                    justify_block.timestamp(),
+                    *justify_block.header().accumulated_data(),
+                    *justify_block.epoch_hash(),
+                ) {
+                    dummy_block = Some(dummy);
+                }
             }
-        } else if is_timeout {
-            // If this is a timeout (without dummies because the highest block is the parent), we need to propose with
-            // the highest timeout certificate
-            let high_tc = self.state_store.with_read_tx(|tx| {
-                let high_tc = HighTc::get(tx, epoch_state.epoch()).optional()?;
-                high_tc
-                    .map(|tc| TimeoutCertificate::get(tx, tc.epoch(), tc.id()))
-                    .transpose()
-            })?;
-            propose_high_tc = high_tc;
-        } else {
-            // Nothing to do
         }
 
         if propose_epoch_end {

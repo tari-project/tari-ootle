@@ -29,7 +29,14 @@
 #state_scanning_interval=60
 
 [indexer.p2p]
-#transport = "tor"
+#enable_mdns = true
+# Run a rendezvous server on this node so other nodes can use it for peer discovery. This is the SERVER side only - the
+# rendezvous client is always active, so every node already registers with and queries its seed peers for the peer list
+# regardless of this setting. Enable this on seed/bootstrap nodes. (default: false)
+#enable_rendezvous = false
+#listener_port = 0
+#reachability_mode = "auto"
+#enable_relay = false
 
 
 # List of filters for events that we want to persist in the indexer database

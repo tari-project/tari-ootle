@@ -32,19 +32,40 @@ const LOG_TARGET: &str = "tari::ootle::epoch_oracles::base_layer_scanner";
 
 /// Maximum number of `get_validator_node_changes` requests issued concurrently after a header batch
 /// has been streamed. These per-epoch fetches are independent of one another, so they are pipelined
-/// rather than being awaited one at a time mid-stream (see `sync_blockchain`).
+/// rather than being awaited one at a time mid-stream (see `resolve_changes_and_commit`).
 const VALIDATOR_NODE_CHANGE_FETCH_CONCURRENCY: usize = 10;
 
-/// An event produced while streaming a header batch.
+/// Maximum number of epoch-boundary headers fetched concurrently in the boundary-only scan path
+/// (see `scan_epoch_boundaries`).
+const BOUNDARY_HEADER_FETCH_CONCURRENCY: usize = 16;
+
+/// Maximum number of epoch boundaries scanned per batch in the boundary-only path. Bounds memory and
+/// the number of concurrent header fetches for very long catch-ups; the remainder is picked up by
+/// the next scan round via the normal `has_more` loop.
+const MAX_BOUNDARIES_PER_BATCH: u64 = 2_000;
+
+/// An event produced while scanning a batch of base-layer blocks.
 ///
 /// `ValidatorNodeChanges` is a placeholder for an `ActiveValidatorNodeSetChanged` event whose
-/// `get_validator_node_changes` fetch is deferred until the whole header stream has been drained.
-/// Issuing that unary RPC inside the stream loop stalls the header server-stream on every epoch
-/// boundary; recording a placeholder lets us resolve all the fetches concurrently afterwards while
-/// preserving the exact position the event must occupy in the emitted order.
+/// `get_validator_node_changes` fetch is deferred until the whole batch has been scanned. Issuing
+/// that unary RPC inside the scan loop stalls it on every epoch boundary; recording a placeholder
+/// lets us resolve all the fetches concurrently afterwards while preserving the exact position the
+/// event must occupy in the emitted order.
 enum PendingScanEvent {
     Ready(EpochEvent),
     ValidatorNodeChanges { epoch: Epoch },
+}
+
+/// The in-memory result of scanning one batch of base-layer blocks, before the deferred
+/// validator-node-change fetches are resolved and the scan position is committed
+/// (see `resolve_changes_and_commit`).
+struct BatchScan {
+    scan_events: Vec<PendingScanEvent>,
+    last_validator_node_mr: Option<FixedHash>,
+    last_epoch_hash: Option<FixedHash>,
+    last_scanned_hash: Option<FixedHash>,
+    last_scanned_height: u64,
+    scan_epoch: Epoch,
 }
 
 type TaskOutput<TStore, TClient> = (
@@ -441,181 +462,20 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             .await?;
         self.cached_epoch_length = Some(constants.epoch_length());
 
-        // We'll buffer 1000 headers at a time
-        // note: 10_000 is the maximum permitted by the base node gRPC service
-        let limit = 1_000.min(num_blocks);
+        // Acquire and scan this batch's blocks. The validator node needs every header (e.g. for
+        // burn-proof validation), so it streams and stores the full contiguous range. The indexer
+        // only needs epoch boundaries (and the validator-node MR sampled at them), so it fetches
+        // just the boundary headers — skipping the bulk of the range and the per-header stream cost.
+        let batch = if self.config.features.sync_headers {
+            self.scan_full_headers(&constants, start_scan_height, num_blocks)
+                .await?
+        } else {
+            self.scan_epoch_boundaries(&constants, start_scan_height, num_blocks)
+                .await?
+        };
 
-        let mut base_node_client = self.base_node_client.clone();
-        info!(
-            target: LOG_TARGET,
-            "⛓️Starting header stream from {}-{}", start_scan_height, start_scan_height + limit
-        );
-        let mut header_stream = base_node_client.stream_headers(start_scan_height, limit).await?;
-
-        if let Some(additional) = usize::try_from(limit)
-            .ok()
-            .and_then(|l| l.checked_sub(self.header_buf.capacity()))
-        {
-            self.header_buf.reserve(additional);
-        }
-
-        // ── Pass 1: drain the header stream doing ONLY in-memory work ───────────────────────────
-        // The header server-stream must not be stalled by per-epoch unary RPCs, so the only network
-        // call this loop used to make — `get_validator_node_changes` — is deferred. We record a
-        // `ValidatorNodeChanges` placeholder at the exact position its `ActiveValidatorNodeSetChanged`
-        // event must occupy, and resolve all such fetches concurrently in pass 2.
-        //
-        // Scan state evolves in locals here and is only committed to `self`/the store once the
-        // deferred fetches succeed (pass 2). This makes the batch atomic: a failed fetch leaves the
-        // persisted scan position untouched, so the whole batch is safely re-scanned next round
-        // (header inserts are idempotent). `header_buf` is cleared so a re-scan after such a failure
-        // does not accumulate the previous attempt's (unflushed) headers.
-        self.header_buf.clear();
-        let mut scan_events: Vec<PendingScanEvent> = Vec::new();
-        let mut last_validator_node_mr = self.last_scanned_validator_node_mr;
-        let mut last_epoch_hash = self.last_epoch_hash;
-        let mut last_scanned_hash = self.last_scanned_hash;
-        let mut last_scanned_height = self.last_scanned_height;
-        let mut scan_epoch = constants.height_to_epoch(start_scan_height);
-        while let Some(header) = header_stream.try_next().await? {
-            let current_epoch = constants.height_to_epoch(header.height);
-            let header_height = header.height;
-            // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
-            let header_hash = hash_header(self.network, &header);
-            let current_validator_node_mr = header.validator_node_mr;
-            if self.config.features.sync_headers {
-                self.header_buf.push((current_epoch, header_hash, header));
-            }
-
-            // Record validator node MR changes BEFORE epoch changes so that new registrations are
-            // ordered ahead of the boundary's EpochChanged — assign_validators_for_epoch must see
-            // them first. This matters when the base layer updates the validator_node_mr at epoch
-            // boundary blocks.
-            if last_validator_node_mr != Some(current_validator_node_mr) {
-                debug!(
-                    target: LOG_TARGET,
-                    "⛓️ last_scanned_validator_node_mr = {} current = {}", last_validator_node_mr.display(), current_validator_node_mr
-                );
-
-                if self.config.features.sync_validator_node_changes {
-                    // Deferred: the actual fetch happens in pass 2. Here we only mark where the
-                    // resulting event belongs in the emitted order.
-                    scan_events.push(PendingScanEvent::ValidatorNodeChanges { epoch: current_epoch });
-                }
-                last_validator_node_mr = Some(current_validator_node_mr);
-            }
-
-            if header_height % constants.epoch_length() == 0 {
-                info!(
-                    target: LOG_TARGET,
-                    "🟩 New epoch block {} {} {}", current_epoch, header_height, header_hash
-                );
-                last_epoch_hash = Some(header_hash);
-
-                // TODO: we do not handle consensus constants changing during scan here for performance reasons.
-                // constants = self.base_node_client.get_consensus_constants(header_height).await?;
-
-                // Emit EpochChanged for every boundary so every (epoch, epoch_hash) pair is persisted
-                // by the epoch manager. Consensus's get_epoch_hash(epoch) lookup depends on that
-                // row being present for any epoch it may transition into — including epochs
-                // crossed during a long catch-up.
-                info!(
-                    target: LOG_TARGET,
-                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
-                );
-                scan_events.push(PendingScanEvent::Ready(EpochEvent::EpochChanged {
-                    epoch: current_epoch,
-                    // Set above
-                    epoch_hash: last_epoch_hash.unwrap_or_default(),
-                }));
-                scan_epoch = current_epoch;
-            }
-
-            last_scanned_hash = Some(header_hash);
-            last_scanned_height = header_height;
-        }
-        // End the header server-stream before pass 2 issues its own requests.
-        drop(header_stream);
-
-        // ── Pass 2: resolve the deferred validator-node-change fetches concurrently ─────────────
-        // Each fetch is keyed only by epoch (sidechain_id is fixed for the whole scan) and is
-        // independent of the rest, so they are pipelined with bounded concurrency instead of being
-        // awaited serially. The header stream is already drained, so nothing is stalled on them.
-        let fetch_targets: Vec<(usize, Epoch)> = scan_events
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, event)| match event {
-                PendingScanEvent::ValidatorNodeChanges { epoch } => Some((idx, *epoch)),
-                PendingScanEvent::Ready(_) => None,
-            })
-            .collect();
-
-        let mut fetched_changes: HashMap<usize, Vec<ValidatorNodeChange>> = HashMap::new();
-        if !fetch_targets.is_empty() {
-            let base_client = self.base_node_client.clone();
-            let sidechain_id = self.config.sidechain_id;
-            fetched_changes = stream::iter(fetch_targets)
-                .map(move |(idx, epoch)| {
-                    let mut client = base_client.clone();
-                    async move {
-                        let node_changes = client
-                            .get_validator_node_changes(epoch, sidechain_id.as_ref())
-                            .await
-                            .map_err(BaseLayerOracleError::BaseNodeError)?;
-                        let node_changes = node_changes
-                            .into_iter()
-                            .map(TryInto::try_into)
-                            .collect::<Result<Vec<ValidatorNodeChange>, _>>()
-                            .map_err(|e| {
-                                BaseLayerOracleError::InvalidBaseNodeResponse(format!(
-                                    "Failed to convert validator node change: {}",
-                                    e
-                                ))
-                            })?;
-                        Ok::<_, BaseLayerOracleError>((idx, node_changes))
-                    }
-                })
-                .buffer_unordered(VALIDATOR_NODE_CHANGE_FETCH_CONCURRENCY)
-                .try_collect()
-                .await?;
-        }
-
-        // Replay the batch's events in stream order, splicing in each resolved validator-node-change
-        // set. A set may be empty when the MR changed because of *other* sidechains — drop those, as
-        // the inline version did.
-        for (idx, event) in scan_events.into_iter().enumerate() {
-            match event {
-                PendingScanEvent::Ready(event) => self.pending_events.push_back(event),
-                PendingScanEvent::ValidatorNodeChanges { epoch } => {
-                    if let Some(node_changes) = fetched_changes.remove(&idx) &&
-                        !node_changes.is_empty()
-                    {
-                        self.pending_events
-                            .push_back(EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes });
-                    }
-                },
-            }
-        }
-
-        // ── Commit: persist headers and advance the scan position now the batch is complete ─────
-        // `last_scanned_tip` is set by set_last_scanned_block once the whole batch is persisted; it
-        // is intentionally not advanced earlier, so an interrupted sync re-scans rather than letting
-        // get_blockchain_progression short-circuit and silently skip the remaining headers.
-        if !self.header_buf.is_empty() {
-            self.store
-                .add_block_headers(self.header_buf.drain(..))
-                .map_err(BaseLayerOracleError::StoreError)?;
-        }
-        self.last_scanned_validator_node_mr = last_validator_node_mr;
-        self.set_last_scanned_block(
-            last_scanned_hash.unwrap_or_else(FixedHash::zero),
-            last_scanned_height,
-            tip.tip_hash,
-        )?;
-
-        if let Some(hash) = last_epoch_hash {
-            self.set_last_epoch_block(hash)?;
-        }
+        let scan_epoch = batch.scan_epoch;
+        self.resolve_changes_and_commit(batch, &tip).await?;
 
         // let scan_height = constants.epoch_to_height(scan_epoch);
         // if self.last_scanned_validator_node_mr.is_none() {
@@ -664,6 +524,316 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             });
             Ok(false)
         }
+    }
+
+    /// Scans a contiguous batch of up to 1000 headers, buffering every header for storage. Used when
+    /// `sync_headers` is enabled (validator node), which needs the full header set (e.g. for
+    /// burn-proof validation).
+    ///
+    /// The single network call this loop used to make — `get_validator_node_changes` — is deferred:
+    /// a `ValidatorNodeChanges` placeholder is recorded at the exact position its
+    /// `ActiveValidatorNodeSetChanged` event must occupy, and the fetch is resolved later in
+    /// [`resolve_changes_and_commit`] so it never stalls the header server-stream.
+    #[allow(clippy::too_many_lines)]
+    async fn scan_full_headers(
+        &mut self,
+        constants: &BaseLayerConsensusConstants,
+        start_scan_height: u64,
+        num_blocks: u64,
+    ) -> Result<BatchScan, BaseLayerOracleError> {
+        // We'll buffer 1000 headers at a time
+        // note: 10_000 is the maximum permitted by the base node gRPC service
+        let limit = 1_000.min(num_blocks);
+
+        let mut base_node_client = self.base_node_client.clone();
+        info!(
+            target: LOG_TARGET,
+            "⛓️Starting header stream from {}-{}", start_scan_height, start_scan_height + limit
+        );
+        let mut header_stream = base_node_client.stream_headers(start_scan_height, limit).await?;
+
+        if let Some(additional) = usize::try_from(limit)
+            .ok()
+            .and_then(|l| l.checked_sub(self.header_buf.capacity()))
+        {
+            self.header_buf.reserve(additional);
+        }
+
+        // Scan state evolves in locals here and is only committed to `self`/the store once the
+        // deferred fetches succeed. This makes the batch atomic: a failed fetch leaves the persisted
+        // scan position untouched, so the whole batch is safely re-scanned next round (header inserts
+        // are idempotent). `header_buf` is cleared so a re-scan after such a failure does not
+        // accumulate the previous attempt's (unflushed) headers.
+        self.header_buf.clear();
+        let mut scan_events: Vec<PendingScanEvent> = Vec::new();
+        let mut last_validator_node_mr = self.last_scanned_validator_node_mr;
+        let mut last_epoch_hash = self.last_epoch_hash;
+        let mut last_scanned_hash = self.last_scanned_hash;
+        let mut last_scanned_height = self.last_scanned_height;
+        let mut scan_epoch = constants.height_to_epoch(start_scan_height);
+        while let Some(header) = header_stream.try_next().await? {
+            let current_epoch = constants.height_to_epoch(header.height);
+            let header_height = header.height;
+            // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
+            let header_hash = hash_header(self.network, &header);
+            let current_validator_node_mr = header.validator_node_mr;
+            self.header_buf.push((current_epoch, header_hash, header));
+
+            // Record validator node MR changes BEFORE epoch changes so that new registrations are
+            // ordered ahead of the boundary's EpochChanged — assign_validators_for_epoch must see
+            // them first. This matters when the base layer updates the validator_node_mr at epoch
+            // boundary blocks.
+            if last_validator_node_mr != Some(current_validator_node_mr) {
+                debug!(
+                    target: LOG_TARGET,
+                    "⛓️ last_scanned_validator_node_mr = {} current = {}", last_validator_node_mr.display(), current_validator_node_mr
+                );
+
+                if self.config.features.sync_validator_node_changes {
+                    // Deferred: the actual fetch happens in resolve_changes_and_commit. Here we only
+                    // mark where the resulting event belongs in the emitted order.
+                    scan_events.push(PendingScanEvent::ValidatorNodeChanges { epoch: current_epoch });
+                }
+                last_validator_node_mr = Some(current_validator_node_mr);
+            }
+
+            if header_height % constants.epoch_length() == 0 {
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 New epoch block {} {} {}", current_epoch, header_height, header_hash
+                );
+                last_epoch_hash = Some(header_hash);
+
+                // Emit EpochChanged for every boundary so every (epoch, epoch_hash) pair is persisted
+                // by the epoch manager. Consensus's get_epoch_hash(epoch) lookup depends on that
+                // row being present for any epoch it may transition into — including epochs
+                // crossed during a long catch-up.
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
+                );
+                scan_events.push(PendingScanEvent::Ready(EpochEvent::EpochChanged {
+                    epoch: current_epoch,
+                    // Set above
+                    epoch_hash: last_epoch_hash.unwrap_or_default(),
+                }));
+                scan_epoch = current_epoch;
+            }
+
+            last_scanned_hash = Some(header_hash);
+            last_scanned_height = header_height;
+        }
+        // End the header server-stream before the deferred fetches issue their own requests.
+        drop(header_stream);
+
+        Ok(BatchScan {
+            scan_events,
+            last_validator_node_mr,
+            last_epoch_hash,
+            last_scanned_hash,
+            last_scanned_height,
+            scan_epoch,
+        })
+    }
+
+    /// Scans only the epoch-boundary headers in the next batch window, fetching them concurrently
+    /// instead of streaming every header. Used when `sync_headers` is disabled (indexer): only epoch
+    /// boundaries — and the validator-node MR sampled at them — are needed, so the non-boundary
+    /// headers (the bulk of the range, and the per-header stream-delivery cost) are never fetched.
+    ///
+    /// Relies on the base-layer invariant that `validator_node_mr` only changes at epoch-boundary
+    /// blocks, so sampling the MR at boundaries catches every validator-set change. The boundary's
+    /// epoch then drives the same deferred `get_validator_node_changes` fetch as the full path. A
+    /// trailing position-only header (the window end) advances the scan position when the window
+    /// ends mid-epoch; it carries no events and is not MR-sampled (its MR equals its epoch
+    /// boundary's, already handled).
+    async fn scan_epoch_boundaries(
+        &mut self,
+        constants: &BaseLayerConsensusConstants,
+        start_scan_height: u64,
+        num_blocks: u64,
+    ) -> Result<BatchScan, BaseLayerOracleError> {
+        let epoch_length = constants.epoch_length().max(1);
+        // Bound the window so very long catch-ups split across batches via the has_more loop.
+        let limit = MAX_BOUNDARIES_PER_BATCH.saturating_mul(epoch_length).min(num_blocks);
+        let window_end = start_scan_height + limit - 1;
+
+        // Every epoch boundary in [start_scan_height, window_end], plus window_end itself so the scan
+        // position (and its reorg-detection hash) advances to the window even when it ends mid-epoch.
+        let first_boundary = start_scan_height.div_ceil(epoch_length).saturating_mul(epoch_length);
+        let mut fetch_heights: Vec<u64> = (first_boundary..=window_end).step_by(epoch_length as usize).collect();
+        if fetch_heights.last() != Some(&window_end) {
+            fetch_heights.push(window_end);
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "⛓️ Fetching {} epoch-boundary header(s) in {}-{}", fetch_heights.len(), start_scan_height, window_end
+        );
+
+        // Fetch the targeted headers concurrently; they are independent.
+        let base_client = self.base_node_client.clone();
+        let mut headers: Vec<(u64, BlockHeader)> = stream::iter(fetch_heights)
+            .map(move |height| {
+                let mut client = base_client.clone();
+                async move {
+                    let mut header_stream = client.stream_headers(height, 1).await?;
+                    let header = header_stream.try_next().await?.ok_or_else(|| {
+                        BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+                            "base node returned no header at height {height}"
+                        ))
+                    })?;
+                    Ok::<_, BaseLayerOracleError>((height, header))
+                }
+            })
+            .buffer_unordered(BOUNDARY_HEADER_FETCH_CONCURRENCY)
+            .try_collect()
+            .await?;
+        headers.sort_unstable_by_key(|(height, _)| *height);
+
+        let mut scan_events: Vec<PendingScanEvent> = Vec::new();
+        let mut last_validator_node_mr = self.last_scanned_validator_node_mr;
+        let mut last_epoch_hash = self.last_epoch_hash;
+        let mut last_scanned_hash = self.last_scanned_hash;
+        let mut last_scanned_height = self.last_scanned_height;
+        let mut scan_epoch = constants.height_to_epoch(start_scan_height);
+        for (height, header) in headers {
+            let header_hash = hash_header(self.network, &header);
+
+            // Only boundary headers carry epoch changes / MR samples. A non-boundary header here is
+            // the trailing window-end marker, used solely to advance the scan position.
+            if height % epoch_length == 0 {
+                let current_epoch = constants.height_to_epoch(height);
+                let current_validator_node_mr = header.validator_node_mr;
+                if last_validator_node_mr != Some(current_validator_node_mr) {
+                    if self.config.features.sync_validator_node_changes {
+                        scan_events.push(PendingScanEvent::ValidatorNodeChanges { epoch: current_epoch });
+                    }
+                    last_validator_node_mr = Some(current_validator_node_mr);
+                }
+                last_epoch_hash = Some(header_hash);
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, height, header_hash
+                );
+                scan_events.push(PendingScanEvent::Ready(EpochEvent::EpochChanged {
+                    epoch: current_epoch,
+                    epoch_hash: header_hash,
+                }));
+                scan_epoch = current_epoch;
+            }
+
+            last_scanned_hash = Some(header_hash);
+            last_scanned_height = height;
+        }
+
+        Ok(BatchScan {
+            scan_events,
+            last_validator_node_mr,
+            last_epoch_hash,
+            last_scanned_hash,
+            last_scanned_height,
+            scan_epoch,
+        })
+    }
+
+    /// Resolves the batch's deferred validator-node-change fetches concurrently, emits the batch's
+    /// events in order, persists any buffered headers, and advances the scan position. Shared by the
+    /// full and boundary scan paths.
+    async fn resolve_changes_and_commit(
+        &mut self,
+        batch: BatchScan,
+        tip: &BaseLayerMetadata,
+    ) -> Result<(), BaseLayerOracleError> {
+        let BatchScan {
+            scan_events,
+            last_validator_node_mr,
+            last_epoch_hash,
+            last_scanned_hash,
+            last_scanned_height,
+            scan_epoch: _,
+        } = batch;
+
+        // Resolve the deferred fetches concurrently. Each is keyed only by epoch (sidechain_id is
+        // fixed for the whole scan) and is independent of the rest, so they are pipelined with
+        // bounded concurrency instead of being awaited serially.
+        let fetch_targets: Vec<(usize, Epoch)> = scan_events
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, event)| match event {
+                PendingScanEvent::ValidatorNodeChanges { epoch } => Some((idx, *epoch)),
+                PendingScanEvent::Ready(_) => None,
+            })
+            .collect();
+
+        let mut fetched_changes: HashMap<usize, Vec<ValidatorNodeChange>> = HashMap::new();
+        if !fetch_targets.is_empty() {
+            let base_client = self.base_node_client.clone();
+            let sidechain_id = self.config.sidechain_id;
+            fetched_changes = stream::iter(fetch_targets)
+                .map(move |(idx, epoch)| {
+                    let mut client = base_client.clone();
+                    async move {
+                        let node_changes = client
+                            .get_validator_node_changes(epoch, sidechain_id.as_ref())
+                            .await
+                            .map_err(BaseLayerOracleError::BaseNodeError)?;
+                        let node_changes = node_changes
+                            .into_iter()
+                            .map(TryInto::try_into)
+                            .collect::<Result<Vec<ValidatorNodeChange>, _>>()
+                            .map_err(|e| {
+                                BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+                                    "Failed to convert validator node change: {}",
+                                    e
+                                ))
+                            })?;
+                        Ok::<_, BaseLayerOracleError>((idx, node_changes))
+                    }
+                })
+                .buffer_unordered(VALIDATOR_NODE_CHANGE_FETCH_CONCURRENCY)
+                .try_collect()
+                .await?;
+        }
+
+        // Replay the batch's events in order, splicing in each resolved validator-node-change set. A
+        // set may be empty when the MR changed because of *other* sidechains — drop those, as the
+        // inline version did.
+        for (idx, event) in scan_events.into_iter().enumerate() {
+            match event {
+                PendingScanEvent::Ready(event) => self.pending_events.push_back(event),
+                PendingScanEvent::ValidatorNodeChanges { epoch } => {
+                    if let Some(node_changes) = fetched_changes.remove(&idx) &&
+                        !node_changes.is_empty()
+                    {
+                        self.pending_events
+                            .push_back(EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes });
+                    }
+                },
+            }
+        }
+
+        // Persist headers and advance the scan position now the batch is complete. `last_scanned_tip`
+        // is set by set_last_scanned_block once the whole batch is persisted; it is intentionally not
+        // advanced earlier, so an interrupted sync re-scans rather than letting
+        // get_blockchain_progression short-circuit and silently skip the remaining headers.
+        if !self.header_buf.is_empty() {
+            self.store
+                .add_block_headers(self.header_buf.drain(..))
+                .map_err(BaseLayerOracleError::StoreError)?;
+        }
+        self.last_scanned_validator_node_mr = last_validator_node_mr;
+        self.set_last_scanned_block(
+            last_scanned_hash.unwrap_or_else(FixedHash::zero),
+            last_scanned_height,
+            tip.tip_hash,
+        )?;
+
+        if let Some(hash) = last_epoch_hash {
+            self.set_last_epoch_block(hash)?;
+        }
+
+        Ok(())
     }
 
     fn set_last_scanned_block(
@@ -1399,5 +1569,127 @@ mod tests {
             store.heights().is_empty(),
             "no headers may be persisted from a failed batch"
         );
+    }
+
+    /// Indexer mode: `sync_headers` disabled, so only epoch boundaries are scanned.
+    fn make_inner_boundary_mode(
+        store: InMemoryStore,
+        client: MockBaseNode,
+        height_lag: u64,
+    ) -> BaseLayerOracleInner<InMemoryStore, MockBaseNode> {
+        let mut inner = make_inner(store, client, height_lag);
+        inner.config.features.sync_headers = false;
+        inner
+    }
+
+    /// Indexer mode that also resolves validator-node changes at the boundaries it crosses.
+    fn make_inner_boundary_mode_syncing_vn(
+        store: InMemoryStore,
+        client: MockBaseNode,
+        height_lag: u64,
+    ) -> BaseLayerOracleInner<InMemoryStore, MockBaseNode> {
+        let mut inner = make_inner_boundary_mode(store, client, height_lag);
+        inner.config.features.sync_validator_node_changes = true;
+        inner
+    }
+
+    /// Drives the scanner to the tip, collecting every emitted event (mirrors the poll loop draining
+    /// `pending_events` between scan rounds).
+    async fn run_scan_collecting_events(
+        inner: &mut BaseLayerOracleInner<InMemoryStore, MockBaseNode>,
+    ) -> Vec<EpochEvent> {
+        let mut events = Vec::new();
+        let mut has_more = false;
+        loop {
+            has_more = inner.scan_blockchain(has_more).await.unwrap();
+            events.extend(inner.pending_events.drain(..));
+            if !has_more {
+                break;
+            }
+        }
+        events
+    }
+
+    fn epoch_changes(events: &[EpochEvent]) -> Vec<(u64, FixedHash)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                EpochEvent::EpochChanged { epoch, epoch_hash } => Some((epoch.as_u64(), *epoch_hash)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The boundary-only path (indexer) must emit exactly the same `EpochChanged` events — same
+    /// epochs and same boundary hashes — as the full streaming path (validator node), while storing
+    /// no headers.
+    #[tokio::test]
+    async fn boundary_scan_emits_same_epoch_changes_as_full_scan() {
+        // height_lag = 5, tip = 20 -> scans heights 1..=15, crossing boundaries at 5, 10, 15.
+        let chain = linear_chain(0..=20);
+
+        let full_store = InMemoryStore::default();
+        let mut full = make_inner(full_store.clone(), MockBaseNode::new(chain.clone()), 5);
+        let full_events = run_scan_collecting_events(&mut full).await;
+
+        let boundary_store = InMemoryStore::default();
+        let mut boundary = make_inner_boundary_mode(boundary_store.clone(), MockBaseNode::new(chain), 5);
+        let boundary_events = run_scan_collecting_events(&mut boundary).await;
+
+        // Same epoch boundaries with identical hashes.
+        assert_eq!(
+            epoch_changes(&full_events).iter().map(|(e, _)| *e).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(epoch_changes(&full_events), epoch_changes(&boundary_events));
+
+        // Full mode stored every header; boundary mode stored none.
+        assert_eq!(full_store.heights(), (1..=15).collect::<Vec<_>>());
+        assert!(boundary_store.heights().is_empty());
+
+        // Both reached the lagged tip (no runaway has_more loop).
+        assert_eq!(full.last_scanned_height, 15);
+        assert_eq!(boundary.last_scanned_height, 15);
+    }
+
+    /// Boundary mode still resolves validator-node changes — deferred and concurrent — for each
+    /// boundary it crosses, ordered ahead of that epoch's `EpochChanged`.
+    #[tokio::test]
+    async fn boundary_scan_detects_validator_changes_at_boundaries() {
+        let store = InMemoryStore::default();
+        let client = MockBaseNode::new(chain_with_epoch_mr(0..=20));
+        let mut changes = HashMap::new();
+        for epoch in 1..=3u64 {
+            changes.insert(epoch, vec![vn_remove()]);
+        }
+        client.set_vn_changes(changes);
+
+        let mut inner = make_inner_boundary_mode_syncing_vn(store.clone(), client.clone(), 5);
+        let events = run_scan_collecting_events(&mut inner).await;
+
+        let ordered: Vec<(&str, u64)> = events
+            .iter()
+            .filter_map(|e| match e {
+                EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes } => {
+                    assert!(!node_changes.is_empty());
+                    Some(("vn", epoch.as_u64()))
+                },
+                EpochEvent::EpochChanged { epoch, .. } => Some(("epoch", epoch.as_u64())),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(ordered, vec![
+            ("vn", 1),
+            ("epoch", 1),
+            ("vn", 2),
+            ("epoch", 2),
+            ("vn", 3),
+            ("epoch", 3),
+        ]);
+        // Boundary mode samples the MR only at boundaries, so it queries the epochs it crosses
+        // (1, 2, 3) — not the pre-start epoch 0 that the full path samples at its mid-epoch start.
+        assert_eq!(client.vn_call_epochs_sorted(), vec![1, 2, 3]);
+        assert!(store.heights().is_empty());
     }
 }

@@ -235,7 +235,7 @@ fn target_high_pc(test: &Test, target: &TestAddress) -> NodeHeight {
         .state_store()
         .with_read_tx(|tx| HighPc::get(tx, Epoch(1)))
         .map(|h| h.height())
-        .unwrap_or_else(|_| NodeHeight::zero())
+        .expect("Failed to retrieve HighPc from state store")
 }
 
 fn target_highest_seen(test: &Test, target: &TestAddress) -> NodeHeight {
@@ -243,5 +243,5 @@ fn target_highest_seen(test: &Test, target: &TestAddress) -> NodeHeight {
         .state_store()
         .with_read_tx(|tx| HighestSeenBlock::get(tx, Epoch(1)))
         .map(|h| h.height())
-        .unwrap_or_else(|_| NodeHeight::zero())
+        .expect("Failed to retrieve HighestSeenBlock from state store")
 }

@@ -55,7 +55,6 @@ axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 clap = { workspace = true, features = ["env"] }
 config = { workspace = true }
 dashmap = { workspace = true }
-either = { workspace = true }
 time = { workspace = true, features = ["formatting"] }
 lazy_static = { workspace = true }
 futures = { workspace = true }

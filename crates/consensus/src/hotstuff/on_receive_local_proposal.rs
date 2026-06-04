@@ -1099,37 +1099,34 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     }
     info!(
         target: LOG_TARGET,
-        "🌐 FOREIGN PROPOSE: new commit block to {} foreign shard group(s). {}",
-        non_local_shard_groups.len(),
+        "🌐 FOREIGN PROPOSE: Broadcasting new commit block {} notification to {} foreign shard group(s).",
         block,
+        non_local_shard_groups.len(),
     );
 
-    for shard_group in non_local_shard_groups {
-        info!(
+    // The notification is gossiped on a single network-wide topic, so it only needs to be published once. The target
+    // shard groups are carried in the message and receivers that are not in the audience ignore it.
+    // TODO: all local VNs will broadcast this. Perhaps we can reduce this to $f+1$.
+    // The shard groups are sorted so that the encoded payload is deterministic: every local VN produces identical
+    // bytes for the same block, allowing gossipsub's content-addressed message id to deduplicate the broadcasts.
+    let mut shard_groups = non_local_shard_groups.into_iter().collect::<Vec<_>>();
+    shard_groups.sort_by_key(|sg| sg.encode_as_u32());
+    if let Err(err) = outbound_messaging
+        .broadcast(HotstuffMessage::ForeignProposalNotification(
+            ForeignProposalNotificationMessage {
+                block_id: *block.id(),
+                epoch: block.epoch(),
+                shard_groups,
+            },
+        ))
+        .await
+    {
+        error!(
             target: LOG_TARGET,
-            "🌐 FOREIGN PROPOSE: Broadcasting commit block {} notification to shard group {}.",
-            &block,
-            shard_group,
+            "❌ Error broadcasting foreign proposal notification for block {}: {}",
+            block,
+            err
         );
-        // TODO: all local VNs will broadcast this. This message only needs to be published once. Perhaps we can reduce
-        // this to $f+1$.
-        if let Err(err) = outbound_messaging
-            .broadcast(
-                shard_group,
-                HotstuffMessage::ForeignProposalNotification(ForeignProposalNotificationMessage {
-                    block_id: *block.id(),
-                    epoch: block.epoch(),
-                }),
-            )
-            .await
-        {
-            error!(
-                target: LOG_TARGET,
-                "❌ Error broadcasting foreign proposal notification to shard group {}: {}",
-                shard_group,
-                err
-            );
-        }
     }
 
     Ok(())

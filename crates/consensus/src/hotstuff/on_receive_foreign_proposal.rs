@@ -147,6 +147,18 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
+        // The notification is gossiped on a single network-wide topic, so every validator receives it. Only fetch the
+        // foreign proposal if our shard group is in the intended audience.
+        if !message.shard_groups.contains(&local_committee_info.shard_group()) {
+            debug!(
+                target: LOG_TARGET,
+                "🌐 FOREIGN PROPOSAL: notification for block {} does not target our shard group {}. Ignoring.",
+                message.block_id,
+                local_committee_info.shard_group(),
+            );
+            return Ok(());
+        }
+
         // Check if the source is in a foreign committee
         let foreign_committee_info = self
             .epoch_manager

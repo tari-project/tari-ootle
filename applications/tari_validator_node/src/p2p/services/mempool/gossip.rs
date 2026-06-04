@@ -1,14 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
-
-use either::Either;
 use libp2p::{PeerId, gossipsub};
 use log::*;
-use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::{NetworkingHandle, NetworkingService};
-use tari_ootle_common_types::{Epoch, ShardGroup};
 use tari_ootle_p2p::{NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec, proto};
 use tari_swarm::messaging::{Codec, prost::ProstCodec};
 use tokio::sync::mpsc;
@@ -17,6 +12,9 @@ use crate::p2p::services::mempool::MempoolError;
 
 const LOG_TARGET: &str = "tari::validator_node::mempool::gossip";
 
+/// All transactions are gossiped on a single network-wide topic. Using one topic (rather than a topic per shard group)
+/// keeps the gossipsub mesh stable across epoch boundaries, since validators never need to unsubscribe and resubscribe
+/// when they are shuffled into a different shard group.
 pub const TOPIC_PREFIX: &str = "transactions";
 
 #[derive(Debug)]
@@ -47,23 +45,20 @@ impl MempoolGossipCodec {
 }
 
 #[derive(Debug)]
-pub(super) struct MempoolGossip<TAddr> {
-    epoch_manager: EpochManagerHandle<TAddr>,
-    is_subscribed: Option<ShardGroup>,
+pub(super) struct MempoolGossip {
+    is_subscribed: bool,
     networking: NetworkingHandle<TariMessagingSpec>,
     rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
     codec: MempoolGossipCodec,
 }
 
-impl MempoolGossip<PeerAddress> {
+impl MempoolGossip {
     pub fn new(
-        epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
     ) -> Self {
         Self {
-            epoch_manager,
-            is_subscribed: None,
+            is_subscribed: false,
             networking,
             rx_gossip,
             codec: MempoolGossipCodec::new(),
@@ -85,48 +80,21 @@ impl MempoolGossip<PeerAddress> {
         }
     }
 
-    pub async fn subscribe(&mut self, shard_group: ShardGroup) -> Result<(), MempoolError> {
-        match self.is_subscribed {
-            Some(b) if b == shard_group => {
-                return Ok(());
-            },
-            Some(_) => {
-                self.unsubscribe().await?;
-            },
-            None => {},
+    pub async fn subscribe(&mut self) -> Result<(), MempoolError> {
+        if self.is_subscribed {
+            return Ok(());
         }
 
-        self.networking
-            .subscribe_topic(shard_group_to_topic(shard_group))
-            .await?;
-        self.is_subscribed = Some(shard_group);
+        self.networking.subscribe_topic(topic()).await?;
+        self.is_subscribed = true;
         Ok(())
     }
 
     pub async fn unsubscribe(&mut self) -> Result<(), MempoolError> {
-        if let Some(sg) = self.is_subscribed {
-            self.networking.unsubscribe_topic(shard_group_to_topic(sg)).await?;
-            self.is_subscribed = None;
+        if self.is_subscribed {
+            self.networking.unsubscribe_topic(topic()).await?;
+            self.is_subscribed = false;
         }
-        Ok(())
-    }
-
-    pub async fn forward_to_local_replicas(&mut self, epoch: Epoch, msg: TariMessage) -> Result<(), MempoolError> {
-        let committee = self.epoch_manager.get_local_committee_info(epoch).await?;
-
-        let topic = shard_group_to_topic(committee.shard_group());
-        debug!(
-            target: LOG_TARGET,
-            "forward_to_local_replicas: topic: {}", topic,
-        );
-
-        let msg = self
-            .codec
-            .encode(msg)
-            .await
-            .map_err(|e| MempoolError::InvalidMessage(e.into()))?;
-        self.networking.publish_gossip(topic, msg).await?;
-
         Ok(())
     }
 
@@ -134,61 +102,24 @@ impl MempoolGossip<PeerAddress> {
         self.rx_gossip.len()
     }
 
-    pub async fn forward_to_foreign_replicas(
-        &mut self,
-        epoch: Epoch,
-        msg: NewTransactionMessage,
-        exclude_shard_group: Option<ShardGroup>,
-    ) -> Result<(), MempoolError> {
-        let n = self.epoch_manager.get_num_committees(epoch).await?;
-        let committee_info = self.epoch_manager.get_local_committee_info(epoch).await?;
-        let local_shard_group = committee_info.shard_group();
-        let shard_groups = if msg.transaction.is_global() {
-            Either::Left(
-                committee_info
-                    .all_shard_groups_iter()
-                    .filter(|sg| exclude_shard_group.as_ref() != Some(sg) && sg != &local_shard_group),
-            )
-        } else {
-            let shard_groups = msg
-                .transaction
-                .involved_substate_addresses_iter()
-                .map(|s| s.to_shard_group(committee_info.num_preshards(), n))
-                .filter(|sg| exclude_shard_group.as_ref() != Some(sg) && sg != &local_shard_group)
-                .collect::<HashSet<_>>();
-            // If the only shard group involved is the excluded one.
-            if shard_groups.is_empty() {
-                return Ok(());
-            }
-            Either::Right(shard_groups.into_iter())
-        };
-
+    /// Gossip a transaction to the rest of the network. Since transactions are published on a single network-wide
+    /// topic, gossipsub delivers the transaction to every validator with one publish; replicas in the involved shard
+    /// groups pick it up directly and no per-shard-group forwarding is required.
+    pub async fn forward(&mut self, msg: NewTransactionMessage) -> Result<(), MempoolError> {
+        debug!(target: LOG_TARGET, "forward transaction on topic: {}", topic());
         let msg = self
             .codec
             .encode(msg.into())
             .await
             .map_err(|e| MempoolError::InvalidMessage(e.into()))?;
-
-        for sg in shard_groups {
-            let topic = shard_group_to_topic(sg);
-            debug!(
-                target: LOG_TARGET,
-                "forward_to_foreign_replicas: topic: {}", topic,
-            );
-            self.networking.publish_gossip(topic, msg.clone()).await?;
-        }
+        self.networking.publish_gossip(topic(), msg).await?;
 
         Ok(())
     }
 }
 
-fn shard_group_to_topic(shard_group: ShardGroup) -> String {
-    format!(
-        "{}-{}-{}",
-        TOPIC_PREFIX,
-        shard_group.start().as_u32(),
-        shard_group.end().as_u32()
-    )
+fn topic() -> String {
+    TOPIC_PREFIX.to_string()
 }
 
 pub struct IncomingMessage {

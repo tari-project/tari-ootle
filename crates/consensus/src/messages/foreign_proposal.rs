@@ -53,14 +53,24 @@ impl Display for ForeignProposalMessage {
 pub struct ForeignProposalNotificationMessage {
     pub block_id: BlockId,
     pub epoch: Epoch,
+    /// The shard groups this notification is intended for. The notification is gossiped on a single network-wide
+    /// topic, so every validator receives it; only validators whose shard group is listed here need to fetch the
+    /// foreign proposal.
+    pub shard_groups: Vec<ShardGroup>,
 }
 
 impl Display for ForeignProposalNotificationMessage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ForeignProposalNotificationMessage({}, {})",
-            self.epoch, self.block_id,
+            "ForeignProposalNotificationMessage({}, {}, [{}])",
+            self.epoch,
+            self.block_id,
+            self.shard_groups
+                .iter()
+                .map(|sg| sg.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
         )
     }
 }

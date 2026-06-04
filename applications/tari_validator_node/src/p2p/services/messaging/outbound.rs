@@ -25,7 +25,6 @@
 
 use tari_consensus::{messages::HotstuffMessage, traits::OutboundMessagingError};
 use tari_networking::{NetworkingHandle, NetworkingService};
-use tari_ootle_common_types::ShardGroup;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, proto};
 use tokio::sync::mpsc;
 
@@ -124,12 +123,12 @@ impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
         Ok(())
     }
 
-    async fn broadcast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    async fn broadcast<T>(&mut self, message: T) -> Result<(), OutboundMessagingError>
     where T: Into<HotstuffMessage> + Send {
         let message = message.into();
 
         self.consensus_gossip
-            .publish(shard_group, message)
+            .publish(message)
             .await
             .map_err(OutboundMessagingError::from_error)?;
 

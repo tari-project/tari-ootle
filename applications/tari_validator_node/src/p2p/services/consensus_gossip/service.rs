@@ -25,7 +25,6 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::{NetworkingHandle, NetworkingService};
-use tari_ootle_common_types::ShardGroup;
 use tari_ootle_p2p::{TariMessagingSpec, proto};
 use tari_swarm::messaging::{Codec, prost::ProstCodec};
 use tokio::sync::{broadcast, mpsc};
@@ -34,13 +33,16 @@ use super::ConsensusGossipError;
 
 const LOG_TARGET: &str = "tari::validator_node::consensus_gossip::service";
 
+/// All consensus gossip is published on a single network-wide topic. Using one topic (rather than a topic per shard
+/// group) keeps the gossipsub mesh stable across epoch boundaries, since validators never need to unsubscribe and
+/// resubscribe when they are shuffled into a different shard group.
 pub const TOPIC_PREFIX: &str = "consensus";
 
 #[derive(Debug)]
 pub(super) struct ConsensusGossipService {
     epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
     consensus_events: broadcast::Receiver<HotstuffEvent>,
-    is_subscribed: Option<ShardGroup>,
+    is_subscribed: bool,
     networking: NetworkingHandle<TariMessagingSpec>,
     codec: ProstCodec<proto::consensus::HotStuffMessage>,
     rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
@@ -58,7 +60,7 @@ impl ConsensusGossipService {
         Self {
             epoch_manager_events,
             consensus_events,
-            is_subscribed: None,
+            is_subscribed: false,
             networking,
             codec: ProstCodec::default(),
             rx_gossip,
@@ -71,8 +73,10 @@ impl ConsensusGossipService {
         loop {
             tokio::select! {
                 Ok(HotstuffEvent::EpochChanged{ registered_shard_group, .. }) = self.consensus_events.recv() => {
-                    if let Some(shard_group) = registered_shard_group{
-                        self.subscribe(shard_group).await?;
+                    if registered_shard_group.is_some() {
+                        self.subscribe().await?;
+                    } else {
+                        self.unsubscribe().await?;
                     }
                 },
                 Some(msg) = self.rx_gossip.recv() => {
@@ -81,11 +85,10 @@ impl ConsensusGossipService {
                     }
                 },
                 Ok(EpochManagerEvent::EpochChanged{ registered_shard_group, .. }) = self.epoch_manager_events.recv() => {
-                    if !initial_subscription_complete
-                        && let Some(shard_group) = registered_shard_group {
-                            self.subscribe(shard_group).await?;
-                            initial_subscription_complete = true;
-                        }
+                    if !initial_subscription_complete && registered_shard_group.is_some() {
+                        self.subscribe().await?;
+                        initial_subscription_complete = true;
+                    }
                 },
                 else => {
                     info!(target: LOG_TARGET, "Consensus gossip service shutting down");
@@ -119,42 +122,28 @@ impl ConsensusGossipService {
         Ok(())
     }
 
-    async fn subscribe(&mut self, shard_group: ShardGroup) -> Result<(), ConsensusGossipError> {
-        match self.is_subscribed {
-            Some(sg) if sg == shard_group => {
-                debug!(target: LOG_TARGET, "🌬️ Consensus gossip already subscribed to messages for {shard_group}");
-                return Ok(());
-            },
-            Some(_) => {
-                self.unsubscribe().await?;
-            },
-            None => {},
+    async fn subscribe(&mut self) -> Result<(), ConsensusGossipError> {
+        if self.is_subscribed {
+            return Ok(());
         }
 
-        info!(target: LOG_TARGET, "🌬️ Consensus gossip service subscribing messages for {shard_group}");
-        let topic = shard_group_to_topic(shard_group);
-        self.networking.subscribe_topic(topic).await?;
-        self.is_subscribed = Some(shard_group);
+        info!(target: LOG_TARGET, "🌬️ Consensus gossip service subscribing to {}", topic());
+        self.networking.subscribe_topic(topic()).await?;
+        self.is_subscribed = true;
 
         Ok(())
     }
 
     async fn unsubscribe(&mut self) -> Result<(), ConsensusGossipError> {
-        if let Some(sg) = self.is_subscribed {
-            let topic = shard_group_to_topic(sg);
-            self.networking.unsubscribe_topic(topic).await?;
-            self.is_subscribed = None;
+        if self.is_subscribed {
+            self.networking.unsubscribe_topic(topic()).await?;
+            self.is_subscribed = false;
         }
 
         Ok(())
     }
 }
 
-pub(super) fn shard_group_to_topic(shard_group: ShardGroup) -> String {
-    format!(
-        "{}-{}-{}",
-        TOPIC_PREFIX,
-        shard_group.start().as_u32(),
-        shard_group.end().as_u32()
-    )
+pub(super) fn topic() -> String {
+    TOPIC_PREFIX.to_string()
 }

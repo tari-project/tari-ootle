@@ -27,7 +27,7 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{ShardGroup, optional::Optional};
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_p2p::{NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::TransactionRecord};
 use tari_ootle_transaction::{Transaction, TransactionId};
@@ -57,7 +57,7 @@ pub struct MempoolService<TValidator, TStateStore> {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     before_execute_validator: TValidator,
     state_store: TStateStore,
-    gossip: MempoolGossip<PeerAddress>,
+    gossip: MempoolGossip,
     consensus_handle: ConsensusHandle,
     #[cfg(feature = "metrics")]
     metrics: PrometheusMempoolMetrics,
@@ -79,7 +79,7 @@ where
         #[cfg(feature = "metrics")] metrics: PrometheusMempoolMetrics,
     ) -> Self {
         Self {
-            gossip: MempoolGossip::new(epoch_manager.clone(), networking, rx_gossip),
+            gossip: MempoolGossip::new(networking, rx_gossip),
             transactions: Default::default(),
             mempool_requests,
             epoch_manager,
@@ -121,9 +121,9 @@ where
                 event = consensus_events.recv() => {
                     match event {
                         Ok(HotstuffEvent::EpochChanged { epoch, registered_shard_group})  => {
-                            if let Some(shard_group) = registered_shard_group {
-                                info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
-                                self.gossip.subscribe(shard_group).await?;
+                            if registered_shard_group.is_some() {
+                                info!(target: LOG_TARGET, "Mempool service subscribing to transaction gossip in {epoch}");
+                                self.gossip.subscribe().await?;
                             } else {
                                 info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
                                 self.gossip.unsubscribe().await?;
@@ -189,7 +189,7 @@ where
             "🎱 Received NEW transaction from local: {transaction}",
         );
 
-        self.handle_new_transaction(transaction, None, self.gossip.get_num_incoming_messages())
+        self.handle_new_transaction(transaction, true, self.gossip.get_num_incoming_messages())
             .await?;
 
         Ok(())
@@ -229,19 +229,7 @@ where
             transaction
         );
 
-        let current_epoch = self.consensus_handle.current_view().get_epoch();
-        let maybe_sender_committee_info = self
-            .epoch_manager
-            .get_committee_info_by_validator_address(current_epoch, &from)
-            .await
-            .optional()?;
-
-        self.handle_new_transaction(
-            transaction,
-            maybe_sender_committee_info.map(|c| c.shard_group()),
-            num_pending,
-        )
-        .await?;
+        self.handle_new_transaction(transaction, false, num_pending).await?;
 
         Ok(())
     }
@@ -250,7 +238,7 @@ where
     async fn handle_new_transaction(
         &mut self,
         transaction: Transaction,
-        sender_shard_group: Option<ShardGroup>,
+        is_local: bool,
         num_pending: usize,
     ) -> Result<(), MempoolError> {
         #[cfg(feature = "metrics")]
@@ -276,29 +264,6 @@ where
                 .notify_new_transaction(transaction.clone(), num_pending)
                 .await
                 .map_err(|_| MempoolError::ConsensusChannelClosed)?;
-
-            // If we received the message from gossip (sender_shard_group is Some), we don't need to gossip it again on
-            // the topic (prevents Duplicate errors)
-            if sender_shard_group.is_none() {
-                // This validator is involved, we to send the transaction to local replicas
-                if let Err(e) = self
-                    .gossip
-                    .forward_to_local_replicas(
-                        current_epoch,
-                        NewTransactionMessage {
-                            transaction: transaction.clone(),
-                        }
-                        .into(),
-                    )
-                    .await
-                {
-                    warn!(
-                        target: LOG_TARGET,
-                        "⚠️ Failed to propagate transaction to local replicas: {}",
-                        e
-                    );
-                }
-            }
         } else {
             debug!(
                 target: LOG_TARGET,
@@ -306,22 +271,24 @@ where
             );
         }
 
-        debug!(
-            target: LOG_TARGET,
-            "🎱 Propagating transaction {} ({} input(s))",
-            tx_id,
-            transaction.num_inputs(),
-        );
-        if let Err(e) = self
-            .gossip
-            .forward_to_foreign_replicas(current_epoch, NewTransactionMessage { transaction }, sender_shard_group)
-            .await
-        {
-            warn!(
+        // Transactions are gossiped on a single network-wide topic, so a single publish reaches every validator
+        // (including all involved shard groups). Only the node that first introduces the transaction (received from a
+        // local client) needs to publish it; transactions received from gossip are already seen by the whole network,
+        // so re-publishing them would only produce Duplicate errors.
+        if is_local {
+            debug!(
                 target: LOG_TARGET,
-                "⚠️ Failed to propagate transaction to foreign committee: {}",
-                e
+                "🎱 Propagating transaction {} ({} input(s))",
+                tx_id,
+                transaction.num_inputs(),
             );
+            if let Err(e) = self.gossip.forward(NewTransactionMessage { transaction }).await {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Failed to propagate transaction {tx_id}: {}",
+                    e
+                );
+            }
         }
 
         Ok(())

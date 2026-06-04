@@ -279,6 +279,7 @@ impl From<&ForeignProposalNotificationMessage> for proto::consensus::ForeignProp
         Self {
             block_id: value.block_id.as_bytes().to_vec(),
             epoch: value.epoch.as_u64(),
+            shard_groups: value.shard_groups.iter().map(|sg| sg.encode_as_u32()).collect(),
         }
     }
 }
@@ -290,6 +291,14 @@ impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalN
         Ok(Self {
             block_id: BlockId::try_from(value.block_id)?,
             epoch: Epoch(value.epoch),
+            shard_groups: value
+                .shard_groups
+                .into_iter()
+                .map(|sg| {
+                    ShardGroup::decode_from_u32(sg)
+                        .ok_or_else(|| anyhow!("Invalid shard group in foreign proposal notification: {sg}"))
+                })
+                .collect::<Result<_, _>>()?,
         })
     }
 }

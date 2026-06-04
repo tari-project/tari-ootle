@@ -104,10 +104,11 @@ impl ConfiguredOracleConfig {
         let ext = config_file
             .extension()
             .ok_or_else(|| anyhow!("Oracle config_file {} is not a file", config_file.display()))?;
+        let ext = ext.to_str().context("extension not utf8")?.to_ascii_lowercase();
         let mut file = File::open(config_file)
             .await
             .with_context(|| format!("Failed to open config file {}", config_file.display()))?;
-        let config = match ext.to_str().context("extension not utf8")? {
+        let config = match ext.as_str() {
             "toml" => {
                 let mut s = String::with_capacity(1024);
                 file.read_to_string(&mut s)
@@ -170,11 +171,13 @@ mod tests {
         let configured = ConfiguredOracleConfig {
             config_file: None,
             config_json: Some(
-                r#"{ "initial_epoch": 7, "base_time": "2026-02-23T13:08:42+0000", "validators": [] }"#.to_string(),
+                r#"{ "epoch_time": 120, "initial_epoch": 7, "base_time": "2026-02-23T13:08:42+0000", "validators": [] }"#
+                    .to_string(),
             ),
         };
         let oracle = configured.load().await.unwrap();
         assert_eq!(oracle.initial_epoch, tari_ootle_common_types::Epoch(7));
+        assert_eq!(oracle.epoch_time, Some(Duration::from_secs(120)));
     }
 
     #[tokio::test]

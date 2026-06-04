@@ -24,7 +24,6 @@ use std::{collections::HashSet, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{Context, anyhow};
 use libp2p::identity;
-use log::warn;
 use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
@@ -86,8 +85,6 @@ use crate::{
     transaction_manager::TransactionManager,
 };
 
-const LOG_TARGET: &str = "tari_indexer::bootstrap";
-
 #[allow(clippy::too_many_lines)]
 pub async fn spawn_services(
     config: &ApplicationConfig,
@@ -129,7 +126,9 @@ pub async fn spawn_services(
                     .expect("Failed to parse listener address"),
             ],
             swarm: SwarmConfig {
-                protocol_version: format!("/tari/{}/0.0.1", config.network).parse().expect("Failed to parse protocol version"),
+                protocol_version: format!("/tari/{}/0.0.1", config.network)
+                    .parse()
+                    .expect("Failed to parse protocol version"),
                 user_agent: format!("/tari/indexer/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.indexer.p2p.enable_mdns,
                 enable_relay: true,
@@ -140,29 +139,10 @@ pub async fn spawn_services(
             },
             reachability_mode: config.indexer.p2p.reachability_mode.into(),
             announce: false,
-            rendezvous_namespace: format!(
-                "tari-{}",
-                config.network.to_string().to_lowercase()
-            ),
+            rendezvous_namespace: format!("tari-{}", config.network.to_string().to_lowercase()),
             ..Default::default()
         })
-        .with_seed_peers(seed_peers)
-        .then(|builder| {
-            match config.peer_seeds.rendezvous_server.as_ref() {
-                Some(server) => {
-                    let server = SeedPeer::from_str(server)
-                        .expect("Failed to parse rendezvous server seed peer");
-                    if let Some(peer_id) = server.to_peer_id() {
-                        let addr = server.address().clone();
-                        builder.with_rendezvous_server(peer_id, addr)
-                    } else{
-                        warn!(target: LOG_TARGET, "Rendezvous server peer ID is not set, skipping rendezvous server configuration");
-                        builder
-                    }
-                },
-                None => builder,
-            }
-        });
+        .with_seed_peers(seed_peers);
     #[cfg(feature = "metrics")]
     let network_builder = network_builder.with_metrics(metrics_registry);
 

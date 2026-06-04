@@ -76,8 +76,6 @@ pub struct PeerSeedsConfig {
     /// DNS seeds hosts. The DNS TXT records are queried from these hosts and the resulting peers added to the comms
     /// peer list.
     pub dns_seeds: StringList,
-    /// Specify a rendezvous server used for peer discovery.
-    pub rendezvous_server: Option<String>,
     // TODO
     // #[serde(
     //     deserialize_with = "deserialize_string_or_struct",

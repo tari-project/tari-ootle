@@ -115,9 +115,16 @@ where
         config: crate::Config,
         known_relay_nodes: Vec<(PeerId, Multiaddr)>,
         seed_peers: Vec<(Option<PeerId>, Multiaddr)>,
-        rendezvous_server: Option<(PeerId, Multiaddr)>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
+        // Rendezvous servers are assumed to be the configured seed peers that have a known peer id. This is
+        // best-effort: seed peers that do not run a rendezvous server simply yield failed (and harmless)
+        // register/discover attempts.
+        let rendezvous_state = RendezvousState::new(
+            seed_peers
+                .iter()
+                .filter_map(|(peer_id, addr)| Some(((*peer_id)?, addr.clone()))),
+        );
         Self {
             _keypair: keypair,
             rx_request,
@@ -129,7 +136,7 @@ where
             pending_dial_requests: HashMap::new(),
             relays: RelayState::new(known_relay_nodes),
             topic_peers: HashMap::new(),
-            rendezvous_state: RendezvousState::new(rendezvous_server),
+            rendezvous_state,
             seed_peers,
             swarm,
             config,
@@ -386,24 +393,9 @@ where
 
     async fn bootstrap(&mut self) -> Result<(), NetworkingError> {
         if !self.is_initial_bootstrap_complete {
-            if let Some((peer_id, addr)) = self.rendezvous_state.get_peer_and_address() {
-                info!(target: LOG_TARGET, "🥾BOOTSTRAP: dialing rendezvous peer {peer_id} at address {addr}");
-                let opts = DialOpts::peer_id(peer_id)
-                    .addresses(vec![addr.clone()])
-                    .condition(PeerCondition::DisconnectedAndNotDialing)
-                    .extend_addresses_through_behaviour()
-                    .build();
-
-                self.swarm.dial(opts).or_else(|err| {
-                    // Peer already has pending dial or established connection - OK
-                    if matches!(&err, DialError::DialPeerConditionFalse(_)) {
-                        Ok(())
-                    } else {
-                        Err(err)
-                    }
-                })?;
-            }
-
+            // NOTE: rendezvous servers are a subset of the seed peers (those with a known peer id), so they are dialed
+            // by the loop below. Reconnection (e.g. after an idle timeout) is handled in
+            // `discover_rendezvous_peers`.
             info!(target: LOG_TARGET, "🥾 BOOTSTRAP: dialing {} seed peers", self.seed_peers.len());
             for (peer, addr) in self.seed_peers.drain(..) {
                 let opts = match peer {
@@ -464,9 +456,8 @@ where
             self.is_initial_bootstrap_complete = true;
         }
 
-        // Periodically refresh the peer list from the rendezvous server (if configured) to pick up newly-registered
-        // peers.
-        self.discover_rendezvous_peers();
+        // Periodically refresh the peer list from the rendezvous servers (if any) to pick up newly-registered peers.
+        self.discover_rendezvous_peers(None);
 
         Ok(())
     }
@@ -536,7 +527,7 @@ where
                 }
 
                 if matches!(error, DialError::NoAddresses) {
-                    self.discover_rendezvous_peers();
+                    self.discover_rendezvous_peers(None);
                 }
             },
             SwarmEvent::ExternalAddrConfirmed { address } => {
@@ -715,7 +706,7 @@ where
                     }
                 }
 
-                self.rendezvous_state.set_cookie(cookie);
+                self.rendezvous_state.set_cookie(&rendezvous_node, cookie);
             },
             RendezvousClient(rendezvous::client::Event::Registered {
                 rendezvous_node,
@@ -726,8 +717,8 @@ where
                     target: LOG_TARGET,
                     "🌐 Registered with rendezvous server {rendezvous_node} on namespace '{namespace}' (ttl={ttl}s). Discovering peers",
                 );
-                // Now that we're registered, pull the current peer list from the server.
-                self.discover_rendezvous_peers();
+                // Now that we're registered, pull the current peer list from this server.
+                self.discover_rendezvous_peers(Some(rendezvous_node));
             },
             RendezvousClient(event) => {
                 info!(target: LOG_TARGET, "ℹ️ RendezvousClient event: {:?}", event);
@@ -916,11 +907,7 @@ where
             return Ok(());
         }
 
-        if self
-            .rendezvous_state
-            .peer_and_address()
-            .is_some_and(|(p, _)| *p == peer_id)
-        {
+        if self.rendezvous_state.contains(&peer_id) {
             info!(target: LOG_TARGET, "Connected to rendezvous server {}. Registering", peer_id);
             let ns = self.get_rendezvous_namespace();
             if let Err(err) = self
@@ -1097,38 +1084,45 @@ where
         Namespace::new(self.config.rendezvous_namespace.clone()).expect("configuration error")
     }
 
-    /// Requests the peer list registered at our configured rendezvous server (if any). The discovered registrations are
-    /// handled in the [`RendezvousClient(Discovered)`] event. No-op if no rendezvous server is configured.
-    fn discover_rendezvous_peers(&mut self) {
-        let Some((rendezvous_peer_id, cookie)) = self.rendezvous_state.get_peer_and_cookie() else {
+    /// Requests the peer list registered at our rendezvous servers (the seed peers). Pass `only` to query a single
+    /// server, or `None` to query all of them. Discovered registrations are handled in the
+    /// [`RendezvousClient(Discovered)`] event. No-op if no rendezvous servers are configured.
+    ///
+    /// This is best-effort: a seed peer that does not run a rendezvous server simply yields a harmless failed request.
+    fn discover_rendezvous_peers(&mut self, only: Option<PeerId>) {
+        if self.rendezvous_state.is_empty() {
             return;
-        };
-
-        // The rendezvous server is only dialed during initial bootstrap. If that connection has since dropped (e.g.
-        // idle timeout), re-dial it so the discovery request below can be delivered.
-        if !self.active_connections.contains_key(&rendezvous_peer_id) {
-            if let Some((_, addr)) = self.rendezvous_state.get_peer_and_address() {
-                debug!(target: LOG_TARGET, "🌐 Not connected to rendezvous server {rendezvous_peer_id}. Dialing");
-                let opts = DialOpts::peer_id(rendezvous_peer_id)
+        }
+        let servers = self
+            .rendezvous_state
+            .servers()
+            .filter(|(peer_id, ..)| only.is_none_or(|o| o == *peer_id))
+            .collect::<Vec<_>>();
+        let ns = self.get_rendezvous_namespace();
+        for (peer_id, addr, cookie) in servers {
+            // Rendezvous servers are dialed at bootstrap, but if a connection has since dropped (e.g. idle timeout)
+            // re-dial it so the discovery request can be delivered.
+            if !self.active_connections.contains_key(&peer_id) {
+                debug!(target: LOG_TARGET, "🌐 Not connected to rendezvous server {peer_id}. Dialing");
+                let opts = DialOpts::peer_id(peer_id)
                     .addresses(vec![addr])
                     .condition(PeerCondition::DisconnectedAndNotDialing)
                     .extend_addresses_through_behaviour()
                     .build();
-                if let Err(err) = self.swarm.dial(opts) {
-                    if !matches!(&err, DialError::DialPeerConditionFalse(_)) {
-                        warn!(target: LOG_TARGET, "🚨 Failed to dial rendezvous server {rendezvous_peer_id}: {err}");
-                    }
+                if let Err(err) = self.swarm.dial(opts) &&
+                    !matches!(&err, DialError::DialPeerConditionFalse(_))
+                {
+                    warn!(target: LOG_TARGET, "🚨 Failed to dial rendezvous server {peer_id}: {err}");
                 }
             }
-        }
 
-        let ns = self.get_rendezvous_namespace();
-        self.swarm.behaviour_mut().rendezvous_client.discover(
-            Some(ns),
-            cookie,
-            self.config.rendezvous_peer_limit,
-            rendezvous_peer_id,
-        );
+            self.swarm.behaviour_mut().rendezvous_client.discover(
+                Some(ns.clone()),
+                cookie,
+                self.config.rendezvous_peer_limit,
+                peer_id,
+            );
+        }
     }
 }
 

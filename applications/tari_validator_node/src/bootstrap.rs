@@ -191,29 +191,10 @@ pub async fn spawn_services(
             },
             reachability_mode: config.validator_node.p2p.reachability_mode.into(),
             announce: true,
-            rendezvous_namespace: format!(
-                "tari-{}",
-                config.network.to_string().to_lowercase()
-            ),
+            rendezvous_namespace: format!("tari-{}", config.network.to_string().to_lowercase()),
             ..Default::default()
         })
-        .with_seed_peers(seed_peers)
-        .then(|builder| {
-            match config.peer_seeds.rendezvous_server.as_ref() {
-                Some(server) => {
-                    let server = SeedPeer::from_str(server)
-                        .expect("Failed to parse rendezvous server seed peer");
-                    if let Some(peer_id) = server.to_peer_id() {
-                        let addr = server.address().clone();
-                        builder.with_rendezvous_server(peer_id, addr)
-                    } else {
-                        warn!(target: LOG_TARGET, "Rendezvous server peer ID is not set, skipping rendezvous server configuration");
-                        builder
-                    }
-                }
-                None => builder,
-            }
-        });
+        .with_seed_peers(seed_peers);
 
     #[cfg(feature = "metrics")]
     {

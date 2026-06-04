@@ -10,6 +10,7 @@ use tari_common::{SubConfigPath, configuration::StringList};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct P2pConfig {
+    override_from: Option<String>,
     pub enable_mdns: bool,
     pub enable_rendezvous: bool,
     pub listener_port: u16,
@@ -20,12 +21,19 @@ pub struct P2pConfig {
 impl Default for P2pConfig {
     fn default() -> Self {
         Self {
+            override_from: None,
             enable_mdns: true,
             enable_rendezvous: false,
             listener_port: 0,
             reachability_mode: ReachabilityMode::default(),
             enable_relay: false,
         }
+    }
+}
+
+impl SubConfigPath for P2pConfig {
+    fn main_key_prefix() -> &'static str {
+        "p2p"
     }
 }
 
@@ -76,8 +84,6 @@ pub struct PeerSeedsConfig {
     /// DNS seeds hosts. The DNS TXT records are queried from these hosts and the resulting peers added to the comms
     /// peer list.
     pub dns_seeds: StringList,
-    /// Specify a rendezvous server used for peer discovery.
-    pub rendezvous_server: Option<String>,
     // TODO
     // #[serde(
     //     deserialize_with = "deserialize_string_or_struct",

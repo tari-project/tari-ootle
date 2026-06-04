@@ -19,7 +19,6 @@ pub struct Builder<'a, TMsg: MessageSpec> {
     messaging_mode: MessagingMode<TMsg>,
     config: crate::Config,
     seed_peers: Vec<(Option<PeerId>, Multiaddr)>,
-    rendezvous_server: Option<(PeerId, Multiaddr)>,
     #[cfg(feature = "metrics")]
     registry: Option<&'a mut libp2p::metrics::Registry>,
     #[cfg(not(feature = "metrics"))]
@@ -40,7 +39,6 @@ where
             messaging_mode: MessagingMode::Disabled,
             config: crate::Config::default(),
             seed_peers: Vec::new(),
-            rendezvous_server: None,
             #[cfg(feature = "metrics")]
             registry: None,
             #[cfg(not(feature = "metrics"))]
@@ -54,7 +52,6 @@ where
             messaging_mode: mode,
             config: self.config,
             seed_peers: self.seed_peers,
-            rendezvous_server: self.rendezvous_server,
             #[cfg(feature = "metrics")]
             registry: self.registry,
             #[cfg(not(feature = "metrics"))]
@@ -82,14 +79,6 @@ where
         self
     }
 
-    pub fn with_rendezvous_server(mut self, peer_id: PeerId, addr: Multiaddr) -> Self {
-        if !is_supported_multiaddr(&addr) {
-            panic!("Unsupported rendezvous server multi-address: {}", addr);
-        }
-        self.rendezvous_server = Some((peer_id, addr));
-        self
-    }
-
     pub fn spawn(
         self,
         shutdown_signal: ShutdownSignal,
@@ -99,7 +88,6 @@ where
             messaging_mode,
             mut config,
             seed_peers,
-            rendezvous_server,
             #[cfg(feature = "metrics")]
             registry,
             #[cfg(not(feature = "metrics"))]
@@ -135,7 +123,6 @@ where
                 .filter_map(|(peer_id, addr)| Some(((*peer_id)?, addr.clone())))
                 .collect(),
             seed_peers,
-            rendezvous_server,
             shutdown_signal,
         );
         #[cfg(feature = "metrics")]

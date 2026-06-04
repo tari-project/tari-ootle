@@ -90,6 +90,7 @@ impl ConfigOverrideProvider for Cli {
         overrides.push(("network".to_string(), network.to_string()));
         overrides.push(("indexer.override_from".to_string(), network.to_string()));
         overrides.push(("epoch_oracle.override_from".to_string(), network.to_string()));
+        overrides.push(("p2p.override_from".to_string(), network.to_string()));
         overrides.push(("p2p.seeds.override_from".to_string(), network.to_string()));
 
         if let Some(ref addr) = self.api_listen_address {

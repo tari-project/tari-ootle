@@ -19,8 +19,8 @@ use tari_base_node_client::{
 };
 use tari_common_types::types::FixedHash;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
-use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
+use tari_ootle_storage::global::BlockHeaderModel;
 use tokio::time;
 
 use crate::{
@@ -100,7 +100,10 @@ struct BaseLayerOracleInner<TStore, TClient> {
     base_node_client: TClient,
     has_attempted_scan: bool,
     pending_events: VecDeque<EpochEvent>,
-    header_buf: Vec<(Epoch, FixedHash, BlockHeader)>,
+    // Stores the minimal `BlockHeaderModel` (all `Copy` fields) rather than the full `BlockHeader`,
+    // so the heavy parts of a header — notably `pow.pow_data` — are dropped right after hashing
+    // instead of being held for the whole batch.
+    header_buf: Vec<BlockHeaderModel>,
     network: Network,
     /// Epoch length in base-layer blocks, cached from consensus constants on the first scan
     /// that obtains them. `None` until the first scan completes.
@@ -577,7 +580,15 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
             let header_hash = hash_header(self.network, &header);
             let current_validator_node_mr = header.validator_node_mr;
-            self.header_buf.push((current_epoch, header_hash, header));
+            // Keep only the fields the store persists; the full `header` (incl. its pow_data blob)
+            // is dropped at the end of this iteration.
+            self.header_buf.push(BlockHeaderModel {
+                epoch: current_epoch,
+                height: header_height,
+                block_hash: header_hash,
+                kernel_merkle_root: header.kernel_mr,
+                validator_node_merkle_root: header.validator_node_mr,
+            });
 
             // Record validator node MR changes BEFORE epoch changes so that new registrations are
             // ordered ahead of the boundary's EpochChanged — assign_validators_for_epoch must see
@@ -671,9 +682,12 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             "⛓️ Fetching {} epoch-boundary header(s) in {}-{}", fetch_heights.len(), start_scan_height, window_end
         );
 
-        // Fetch the targeted headers concurrently; they are independent.
+        // Fetch the targeted headers concurrently; they are independent. Each task extracts only the
+        // hash and validator-node MR the scan needs, so the full header (incl. its pow_data blob) is
+        // dropped immediately rather than collecting up to MAX_BOUNDARIES_PER_BATCH of them.
         let base_client = self.base_node_client.clone();
-        let mut headers: Vec<(u64, BlockHeader)> = stream::iter(fetch_heights)
+        let network = self.network;
+        let mut samples: Vec<(u64, FixedHash, FixedHash)> = stream::iter(fetch_heights)
             .map(move |height| {
                 let mut client = base_client.clone();
                 async move {
@@ -683,13 +697,14 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                             "base node returned no header at height {height}"
                         ))
                     })?;
-                    Ok::<_, BaseLayerOracleError>((height, header))
+                    let header_hash = hash_header(network, &header);
+                    Ok::<_, BaseLayerOracleError>((height, header_hash, header.validator_node_mr))
                 }
             })
             .buffer_unordered(BOUNDARY_HEADER_FETCH_CONCURRENCY)
             .try_collect()
             .await?;
-        headers.sort_unstable_by_key(|(height, _)| *height);
+        samples.sort_unstable_by_key(|(height, _, _)| *height);
 
         let mut scan_events: Vec<PendingScanEvent> = Vec::new();
         let mut last_validator_node_mr = self.last_scanned_validator_node_mr;
@@ -697,19 +712,16 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         let mut last_scanned_hash = self.last_scanned_hash;
         let mut last_scanned_height = self.last_scanned_height;
         let mut scan_epoch = constants.height_to_epoch(start_scan_height);
-        for (height, header) in headers {
-            let header_hash = hash_header(self.network, &header);
-
-            // Only boundary headers carry epoch changes / MR samples. A non-boundary header here is
+        for (height, header_hash, validator_node_mr) in samples {
+            // Only boundary headers carry epoch changes / MR samples. A non-boundary sample here is
             // the trailing window-end marker, used solely to advance the scan position.
             if height % epoch_length == 0 {
                 let current_epoch = constants.height_to_epoch(height);
-                let current_validator_node_mr = header.validator_node_mr;
-                if last_validator_node_mr != Some(current_validator_node_mr) {
+                if last_validator_node_mr != Some(validator_node_mr) {
                     if self.config.features.sync_validator_node_changes {
                         scan_events.push(PendingScanEvent::ValidatorNodeChanges { epoch: current_epoch });
                     }
-                    last_validator_node_mr = Some(current_validator_node_mr);
+                    last_validator_node_mr = Some(validator_node_mr);
                 }
                 last_epoch_hash = Some(header_hash);
                 info!(
@@ -1109,23 +1121,17 @@ mod tests {
     }
 
     impl BaseLayerBlockHeaderStore for InMemoryStore {
-        fn add_block_headers<I: IntoIterator<Item = (Epoch, FixedHash, BlockHeader)>>(
-            &self,
-            headers: I,
-        ) -> anyhow::Result<()> {
+        fn add_block_headers<I: IntoIterator<Item = BlockHeaderModel>>(&self, headers: I) -> anyhow::Result<()> {
             let mut stored = self.headers.lock().unwrap();
-            for (epoch, block_hash, header) in headers {
+            for header in headers {
                 // Mirror the SQL on_conflict(block_hash, epoch).do_nothing() idempotency.
-                if stored.iter().any(|m| m.block_hash == block_hash && m.epoch == epoch) {
+                if stored
+                    .iter()
+                    .any(|m| m.block_hash == header.block_hash && m.epoch == header.epoch)
+                {
                     continue;
                 }
-                stored.push(BlockHeaderModel {
-                    epoch,
-                    height: header.height,
-                    block_hash,
-                    kernel_merkle_root: header.kernel_mr,
-                    validator_node_merkle_root: header.validator_node_mr,
-                });
+                stored.push(header);
             }
             Ok(())
         }

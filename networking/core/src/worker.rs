@@ -704,6 +704,9 @@ where
                     let addresses = registration.record.addresses();
                     debug!(target: LOG_TARGET, "🌐 Discovered peer {peer_id} with {} address(es) via rendezvous", addresses.len());
                     for address in addresses {
+                        if !is_supported_multiaddr(address) {
+                            continue;
+                        }
                         self.swarm
                             .behaviour_mut()
                             .peer_store
@@ -1100,6 +1103,25 @@ where
         let Some((rendezvous_peer_id, cookie)) = self.rendezvous_state.get_peer_and_cookie() else {
             return;
         };
+
+        // The rendezvous server is only dialed during initial bootstrap. If that connection has since dropped (e.g.
+        // idle timeout), re-dial it so the discovery request below can be delivered.
+        if !self.active_connections.contains_key(&rendezvous_peer_id) {
+            if let Some((_, addr)) = self.rendezvous_state.get_peer_and_address() {
+                debug!(target: LOG_TARGET, "🌐 Not connected to rendezvous server {rendezvous_peer_id}. Dialing");
+                let opts = DialOpts::peer_id(rendezvous_peer_id)
+                    .addresses(vec![addr])
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .extend_addresses_through_behaviour()
+                    .build();
+                if let Err(err) = self.swarm.dial(opts) {
+                    if !matches!(&err, DialError::DialPeerConditionFalse(_)) {
+                        warn!(target: LOG_TARGET, "🚨 Failed to dial rendezvous server {rendezvous_peer_id}: {err}");
+                    }
+                }
+            }
+        }
+
         let ns = self.get_rendezvous_namespace();
         self.swarm.behaviour_mut().rendezvous_client.discover(
             Some(ns),

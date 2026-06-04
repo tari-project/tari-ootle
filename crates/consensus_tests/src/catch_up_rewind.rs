@@ -39,6 +39,7 @@ use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use crate::support::{Test, TestAddress, TestVnDestination, logging::setup_logger};
 
+#[expect(clippy::too_many_lines)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn catch_up_rewind_below_leaf_recovers() {
     setup_logger();

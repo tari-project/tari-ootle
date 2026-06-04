@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::{Future, poll_fn},
     pin::Pin,
     task::{Context, Poll},
@@ -13,12 +13,12 @@ use ootle_network::Network;
 use tari_base_node_client::{
     BaseNodeClient,
     BaseNodeClientError,
-    futures_util::TryStreamExt,
+    futures_util::{StreamExt, TryStreamExt, stream},
     grpc::GrpcBaseNodeClient,
     types::{BaseLayerConsensusConstants, BaseLayerMetadata},
 };
 use tari_common_types::types::FixedHash;
-use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
+use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
 use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
 use tokio::time;
@@ -29,6 +29,23 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::epoch_oracles::base_layer_scanner";
+
+/// Maximum number of `get_validator_node_changes` requests issued concurrently after a header batch
+/// has been streamed. These per-epoch fetches are independent of one another, so they are pipelined
+/// rather than being awaited one at a time mid-stream (see `sync_blockchain`).
+const VALIDATOR_NODE_CHANGE_FETCH_CONCURRENCY: usize = 10;
+
+/// An event produced while streaming a header batch.
+///
+/// `ValidatorNodeChanges` is a placeholder for an `ActiveValidatorNodeSetChanged` event whose
+/// `get_validator_node_changes` fetch is deferred until the whole header stream has been drained.
+/// Issuing that unary RPC inside the stream loop stalls the header server-stream on every epoch
+/// boundary; recording a placeholder lets us resolve all the fetches concurrently afterwards while
+/// preserving the exact position the event must occupy in the emitted order.
+enum PendingScanEvent {
+    Ready(EpochEvent),
+    ValidatorNodeChanges { epoch: Epoch },
+}
 
 type TaskOutput<TStore, TClient> = (
     Result<bool, BaseLayerOracleError>,
@@ -433,7 +450,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             target: LOG_TARGET,
             "⛓️Starting header stream from {}-{}", start_scan_height, start_scan_height + limit
         );
-        let mut stream = base_node_client.stream_headers(start_scan_height, limit).await?;
+        let mut header_stream = base_node_client.stream_headers(start_scan_height, limit).await?;
 
         if let Some(additional) = usize::try_from(limit)
             .ok()
@@ -442,8 +459,25 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             self.header_buf.reserve(additional);
         }
 
+        // ── Pass 1: drain the header stream doing ONLY in-memory work ───────────────────────────
+        // The header server-stream must not be stalled by per-epoch unary RPCs, so the only network
+        // call this loop used to make — `get_validator_node_changes` — is deferred. We record a
+        // `ValidatorNodeChanges` placeholder at the exact position its `ActiveValidatorNodeSetChanged`
+        // event must occupy, and resolve all such fetches concurrently in pass 2.
+        //
+        // Scan state evolves in locals here and is only committed to `self`/the store once the
+        // deferred fetches succeed (pass 2). This makes the batch atomic: a failed fetch leaves the
+        // persisted scan position untouched, so the whole batch is safely re-scanned next round
+        // (header inserts are idempotent). `header_buf` is cleared so a re-scan after such a failure
+        // does not accumulate the previous attempt's (unflushed) headers.
+        self.header_buf.clear();
+        let mut scan_events: Vec<PendingScanEvent> = Vec::new();
+        let mut last_validator_node_mr = self.last_scanned_validator_node_mr;
+        let mut last_epoch_hash = self.last_epoch_hash;
+        let mut last_scanned_hash = self.last_scanned_hash;
+        let mut last_scanned_height = self.last_scanned_height;
         let mut scan_epoch = constants.height_to_epoch(start_scan_height);
-        while let Some(header) = stream.try_next().await? {
+        while let Some(header) = header_stream.try_next().await? {
             let current_epoch = constants.height_to_epoch(header.height);
             let header_height = header.height;
             // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
@@ -453,42 +487,22 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                 self.header_buf.push((current_epoch, header_hash, header));
             }
 
-            // Check validator node MR changes BEFORE epoch changes so that new registrations
-            // are processed before assign_validators_for_epoch runs. This matters when the base
-            // layer updates the validator_node_mr at epoch boundary blocks.
-            if self.last_scanned_validator_node_mr != Some(current_validator_node_mr) {
+            // Record validator node MR changes BEFORE epoch changes so that new registrations are
+            // ordered ahead of the boundary's EpochChanged — assign_validators_for_epoch must see
+            // them first. This matters when the base layer updates the validator_node_mr at epoch
+            // boundary blocks.
+            if last_validator_node_mr != Some(current_validator_node_mr) {
                 debug!(
                     target: LOG_TARGET,
-                    "⛓️ last_scanned_validator_node_mr = {} current = {}", self.last_scanned_validator_node_mr.display(), current_validator_node_mr
+                    "⛓️ last_scanned_validator_node_mr = {} current = {}", last_validator_node_mr.display(), current_validator_node_mr
                 );
 
                 if self.config.features.sync_validator_node_changes {
-                    let node_changes = self
-                        .base_node_client
-                        .get_validator_node_changes(current_epoch, self.config.sidechain_id.as_ref())
-                        .await
-                        .map_err(BaseLayerOracleError::BaseNodeError)?;
-                    let node_changes = node_changes
-                        .into_iter()
-                        .map(TryInto::try_into)
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|e| {
-                            BaseLayerOracleError::InvalidBaseNodeResponse(format!(
-                                "Failed to convert validator node change: {}",
-                                e
-                            ))
-                        })?;
-
-                    // This maybe empty if the MR changed as a result of other side chain IDs
-                    if !node_changes.is_empty() {
-                        self.pending_events
-                            .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
-                                epoch: current_epoch,
-                                node_changes,
-                            });
-                    }
+                    // Deferred: the actual fetch happens in pass 2. Here we only mark where the
+                    // resulting event belongs in the emitted order.
+                    scan_events.push(PendingScanEvent::ValidatorNodeChanges { epoch: current_epoch });
                 }
-                self.last_scanned_validator_node_mr = Some(current_validator_node_mr);
+                last_validator_node_mr = Some(current_validator_node_mr);
             }
 
             if header_height % constants.epoch_length() == 0 {
@@ -496,7 +510,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                     target: LOG_TARGET,
                     "🟩 New epoch block {} {} {}", current_epoch, header_height, header_hash
                 );
-                self.last_epoch_hash = Some(header_hash);
+                last_epoch_hash = Some(header_hash);
 
                 // TODO: we do not handle consensus constants changing during scan here for performance reasons.
                 // constants = self.base_node_client.get_consensus_constants(header_height).await?;
@@ -509,36 +523,97 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                     target: LOG_TARGET,
                     "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
                 );
-                self.pending_events.push_back(EpochEvent::EpochChanged {
+                scan_events.push(PendingScanEvent::Ready(EpochEvent::EpochChanged {
                     epoch: current_epoch,
                     // Set above
-                    epoch_hash: self.last_epoch_hash.unwrap_or_default(),
-                });
+                    epoch_hash: last_epoch_hash.unwrap_or_default(),
+                }));
                 scan_epoch = current_epoch;
             }
 
-            // Track incremental progress of hash/height so a mid-loop failure can resume from the
-            // last processed header. `last_scanned_tip` is intentionally NOT updated here — it
-            // represents the un-lagged tip we've fully caught up to, and is set only by
-            // set_last_scanned_block below once the whole batch has been persisted. Otherwise an
-            // interrupted sync would cause get_blockchain_progression to short-circuit on the next
-            // round and silently skip the remaining headers.
-            self.last_scanned_hash = Some(header_hash);
-            self.last_scanned_height = header_height;
+            last_scanned_hash = Some(header_hash);
+            last_scanned_height = header_height;
+        }
+        // End the header server-stream before pass 2 issues its own requests.
+        drop(header_stream);
+
+        // ── Pass 2: resolve the deferred validator-node-change fetches concurrently ─────────────
+        // Each fetch is keyed only by epoch (sidechain_id is fixed for the whole scan) and is
+        // independent of the rest, so they are pipelined with bounded concurrency instead of being
+        // awaited serially. The header stream is already drained, so nothing is stalled on them.
+        let fetch_targets: Vec<(usize, Epoch)> = scan_events
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, event)| match event {
+                PendingScanEvent::ValidatorNodeChanges { epoch } => Some((idx, *epoch)),
+                PendingScanEvent::Ready(_) => None,
+            })
+            .collect();
+
+        let mut fetched_changes: HashMap<usize, Vec<ValidatorNodeChange>> = HashMap::new();
+        if !fetch_targets.is_empty() {
+            let base_client = self.base_node_client.clone();
+            let sidechain_id = self.config.sidechain_id;
+            fetched_changes = stream::iter(fetch_targets)
+                .map(move |(idx, epoch)| {
+                    let mut client = base_client.clone();
+                    async move {
+                        let node_changes = client
+                            .get_validator_node_changes(epoch, sidechain_id.as_ref())
+                            .await
+                            .map_err(BaseLayerOracleError::BaseNodeError)?;
+                        let node_changes = node_changes
+                            .into_iter()
+                            .map(TryInto::try_into)
+                            .collect::<Result<Vec<ValidatorNodeChange>, _>>()
+                            .map_err(|e| {
+                                BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+                                    "Failed to convert validator node change: {}",
+                                    e
+                                ))
+                            })?;
+                        Ok::<_, BaseLayerOracleError>((idx, node_changes))
+                    }
+                })
+                .buffer_unordered(VALIDATOR_NODE_CHANGE_FETCH_CONCURRENCY)
+                .try_collect()
+                .await?;
         }
 
+        // Replay the batch's events in stream order, splicing in each resolved validator-node-change
+        // set. A set may be empty when the MR changed because of *other* sidechains — drop those, as
+        // the inline version did.
+        for (idx, event) in scan_events.into_iter().enumerate() {
+            match event {
+                PendingScanEvent::Ready(event) => self.pending_events.push_back(event),
+                PendingScanEvent::ValidatorNodeChanges { epoch } => {
+                    if let Some(node_changes) = fetched_changes.remove(&idx) &&
+                        !node_changes.is_empty()
+                    {
+                        self.pending_events
+                            .push_back(EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes });
+                    }
+                },
+            }
+        }
+
+        // ── Commit: persist headers and advance the scan position now the batch is complete ─────
+        // `last_scanned_tip` is set by set_last_scanned_block once the whole batch is persisted; it
+        // is intentionally not advanced earlier, so an interrupted sync re-scans rather than letting
+        // get_blockchain_progression short-circuit and silently skip the remaining headers.
         if !self.header_buf.is_empty() {
             self.store
                 .add_block_headers(self.header_buf.drain(..))
                 .map_err(BaseLayerOracleError::StoreError)?;
         }
+        self.last_scanned_validator_node_mr = last_validator_node_mr;
         self.set_last_scanned_block(
-            self.last_scanned_hash.unwrap_or_else(FixedHash::zero),
-            self.last_scanned_height,
+            last_scanned_hash.unwrap_or_else(FixedHash::zero),
+            last_scanned_height,
             tip.tip_hash,
         )?;
 
-        if let Some(hash) = self.last_epoch_hash {
+        if let Some(hash) = last_epoch_hash {
             self.set_last_epoch_block(hash)?;
         }
 
@@ -801,6 +876,7 @@ mod tests {
         types::{BaseLayerConsensusConstants, BaseLayerMetadata, BaseLayerValidatorNode, SideChainUtxos},
     };
     use tari_common_types::types::FixedHash;
+    use tari_epoch_manager::epoch_event_oracle::EpochEvent;
     use tari_node_components::blocks::BlockHeader;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_storage::global::BlockHeaderModel;
@@ -922,17 +998,41 @@ mod tests {
     #[derive(Clone)]
     struct MockBaseNode {
         chain: Arc<Mutex<Vec<BlockHeader>>>,
+        /// Validator-node changes served per epoch by `get_validator_node_changes`. Empty by default.
+        vn_changes: Arc<Mutex<HashMap<u64, Vec<ValidatorNodeChange>>>>,
+        /// Epochs `get_validator_node_changes` was called with. The deferred fetches run concurrently,
+        /// so the recorded order is non-deterministic — assert against the sorted set.
+        vn_calls: Arc<Mutex<Vec<u64>>>,
+        /// When true, `get_validator_node_changes` returns an error instead of data.
+        vn_fail: Arc<Mutex<bool>>,
     }
 
     impl MockBaseNode {
         fn new(chain: Vec<BlockHeader>) -> Self {
             Self {
                 chain: Arc::new(Mutex::new(chain)),
+                vn_changes: Arc::new(Mutex::new(HashMap::new())),
+                vn_calls: Arc::new(Mutex::new(Vec::new())),
+                vn_fail: Arc::new(Mutex::new(false)),
             }
         }
 
         fn set_chain(&self, chain: Vec<BlockHeader>) {
             *self.chain.lock().unwrap() = chain;
+        }
+
+        fn set_vn_changes(&self, changes: HashMap<u64, Vec<ValidatorNodeChange>>) {
+            *self.vn_changes.lock().unwrap() = changes;
+        }
+
+        fn fail_vn_changes(&self) {
+            *self.vn_fail.lock().unwrap() = true;
+        }
+
+        fn vn_call_epochs_sorted(&self) -> Vec<u64> {
+            let mut calls = self.vn_calls.lock().unwrap().clone();
+            calls.sort_unstable();
+            calls
         }
     }
 
@@ -956,10 +1056,23 @@ mod tests {
 
         async fn get_validator_node_changes(
             &mut self,
-            _epoch: Epoch,
+            epoch: Epoch,
             _sidechain_id: Option<&RistrettoPublicKeyBytes>,
         ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError> {
-            Ok(Vec::new())
+            self.vn_calls.lock().unwrap().push(epoch.as_u64());
+            if *self.vn_fail.lock().unwrap() {
+                return Err(BaseNodeClientError::GrpcStatus {
+                    code: tonic::Code::Internal,
+                    message: "injected validator node change failure".to_string(),
+                });
+            }
+            Ok(self
+                .vn_changes
+                .lock()
+                .unwrap()
+                .get(&epoch.as_u64())
+                .cloned()
+                .unwrap_or_default())
         }
 
         async fn get_validator_nodes(
@@ -1164,5 +1277,127 @@ mod tests {
         assert!(store.heights().is_empty());
         assert_eq!(inner.last_scanned_height, 0);
         assert_eq!(inner.last_scanned_hash, None);
+    }
+
+    fn make_inner_syncing_vn_changes(
+        store: InMemoryStore,
+        client: MockBaseNode,
+        height_lag: u64,
+    ) -> BaseLayerOracleInner<InMemoryStore, MockBaseNode> {
+        let mut inner = make_inner(store, client, height_lag);
+        inner.config.features.sync_validator_node_changes = true;
+        inner
+    }
+
+    /// Linear chain whose `validator_node_mr` is a function of the epoch, so the MR changes exactly
+    /// at each epoch boundary — the trigger for a deferred `get_validator_node_changes` fetch.
+    fn chain_with_epoch_mr(heights: std::ops::RangeInclusive<u64>) -> Vec<BlockHeader> {
+        heights
+            .map(|h| {
+                let mut header = make_header(h, h);
+                header.validator_node_mr = FixedHash::from([(h / EPOCH_LENGTH) as u8; 32]);
+                header
+            })
+            .collect()
+    }
+
+    /// A minimal, convertible grpc validator-node-change (a Remove with a valid 32-byte key).
+    fn vn_remove() -> ValidatorNodeChange {
+        use minotari_app_grpc::tari_rpc;
+        tari_rpc::ValidatorNodeChange {
+            change: Some(tari_rpc::validator_node_change::Change::Remove(
+                tari_rpc::ValidatorNodeChangeRemove {
+                    public_key: vec![0u8; 32],
+                },
+            )),
+        }
+    }
+
+    /// The deferred fetches (pass 2) must still produce `ActiveValidatorNodeSetChanged` events in the
+    /// same stream order as the inline version did — each one immediately ahead of its epoch's
+    /// `EpochChanged`, with empty change sets dropped.
+    #[tokio::test]
+    async fn validator_node_changes_are_emitted_in_order_before_each_epoch_change() {
+        // height_lag = 5, tip = 20 -> lagged tip = 15. One batch scans heights 1..=15, crossing epoch
+        // boundaries at heights 5, 10, 15 (epochs 1, 2, 3). The MR also changes at height 1 (epoch 0).
+        let store = InMemoryStore::default();
+        let client = MockBaseNode::new(chain_with_epoch_mr(0..=20));
+        // Serve changes for epochs 1..=3; epoch 0 is intentionally left empty to exercise the path
+        // where the MR changed (because of other sidechains) but our change set is empty -> dropped.
+        let mut changes = HashMap::new();
+        for epoch in 1..=3u64 {
+            changes.insert(epoch, vec![vn_remove()]);
+        }
+        client.set_vn_changes(changes);
+
+        let mut inner = make_inner_syncing_vn_changes(store, client.clone(), 5);
+
+        // The whole range fits in a single batch (15 < the 1000-header batch limit).
+        inner.scan_blockchain(false).await.unwrap();
+
+        let ordered: Vec<(&str, u64)> = inner
+            .pending_events
+            .iter()
+            .filter_map(|e| match e {
+                EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes } => {
+                    assert!(
+                        !node_changes.is_empty(),
+                        "empty change sets must be dropped, not emitted"
+                    );
+                    Some(("vn", epoch.as_u64()))
+                },
+                EpochEvent::EpochChanged { epoch, .. } => Some(("epoch", epoch.as_u64())),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            ordered,
+            vec![
+                ("vn", 1),
+                ("epoch", 1),
+                ("vn", 2),
+                ("epoch", 2),
+                ("vn", 3),
+                ("epoch", 3),
+            ],
+            "each ActiveValidatorNodeSetChanged must immediately precede its epoch's EpochChanged"
+        );
+
+        // Every MR change (epochs 0,1,2,3) triggered exactly one fetch — including epoch 0, whose
+        // empty result was dropped above.
+        assert_eq!(client.vn_call_epochs_sorted(), vec![0, 1, 2, 3]);
+    }
+
+    /// A failed deferred fetch must abort the batch atomically: because the fetch now happens after
+    /// the whole header stream is drained, the scan position must not be advanced (and no events may
+    /// leak), so the entire batch is safely re-scanned on the next round.
+    #[tokio::test]
+    async fn failed_validator_node_change_fetch_leaves_scan_position_unadvanced() {
+        let store = InMemoryStore::default();
+        let client = MockBaseNode::new(chain_with_epoch_mr(0..=20));
+        client.fail_vn_changes();
+        let mut inner = make_inner_syncing_vn_changes(store.clone(), client.clone(), 5);
+
+        let result = inner.scan_blockchain(false).await;
+        assert!(
+            result.is_err(),
+            "a failed validator-node-change fetch must fail the scan"
+        );
+
+        assert_eq!(
+            inner.last_scanned_height, 0,
+            "scan position must not advance on failure"
+        );
+        assert_eq!(inner.last_scanned_hash, None);
+        assert!(inner.last_scanned_validator_node_mr.is_none());
+        assert!(
+            inner.pending_events.is_empty(),
+            "no events may leak from a failed batch"
+        );
+        assert!(
+            store.heights().is_empty(),
+            "no headers may be persisted from a failed batch"
+        );
     }
 }

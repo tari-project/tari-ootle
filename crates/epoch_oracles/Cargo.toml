@@ -32,6 +32,8 @@ time = { workspace = true, features = ["serde", "serde-human-readable"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["time", "macros", "rt"] }
 serde_json = { workspace = true }
+# Used only by the base_layer scanner tests to build grpc ValidatorNodeChange fixtures.
+minotari_app_grpc = { workspace = true }
 
 [features]
 base_layer = [

@@ -11317,6 +11317,7 @@ dependencies = [
  "anyhow",
  "blake2 0.10.6",
  "log",
+ "minotari_app_grpc",
  "ootle-network",
  "ootle_serde",
  "serde",

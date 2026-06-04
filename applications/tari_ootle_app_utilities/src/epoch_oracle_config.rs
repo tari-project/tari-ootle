@@ -88,6 +88,14 @@ pub struct ConfiguredOracleConfig {
 }
 
 impl ConfiguredOracleConfig {
+    /// Forces the configured oracle to load from `path`, clearing any inline `config_json`. Used when an explicit
+    /// oracle config file is given on the command line: the CLI path takes precedence over both `config_file` and
+    /// `config_json` from the config, and does not trigger the "both set" error.
+    pub fn set_config_file_override(&mut self, path: PathBuf) {
+        self.config_file = Some(path);
+        self.config_json = None;
+    }
+
     pub async fn load(&self) -> anyhow::Result<configured::Config> {
         let config_file = match (self.config_file.as_ref(), self.config_json.as_deref()) {
             (Some(_), Some(_)) => {
@@ -193,5 +201,26 @@ mod tests {
     async fn setting_no_source_is_an_error() {
         let configured = ConfiguredOracleConfig::default();
         assert!(configured.load().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn config_file_override_replaces_inline_json() {
+        let mut configured = ConfiguredOracleConfig {
+            config_file: None,
+            config_json: Some(
+                r#"{ "epoch_time": 120, "initial_epoch": 0, "base_time": "2026-02-23T13:08:42+0000", "validators": [] }"#
+                    .to_string(),
+            ),
+        };
+        configured.set_config_file_override(PathBuf::from("/does/not/exist/oracle.json"));
+        assert_eq!(
+            configured.config_file,
+            Some(PathBuf::from("/does/not/exist/oracle.json"))
+        );
+        assert!(configured.config_json.is_none());
+
+        // load() now attempts to read the file (and fails to open it) instead of raising the "both set" error.
+        let err = configured.load().await.unwrap_err().to_string();
+        assert!(err.contains("Failed to open config file"), "unexpected error: {err}");
     }
 }

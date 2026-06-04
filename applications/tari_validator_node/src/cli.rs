@@ -143,15 +143,8 @@ impl ConfigOverrideProvider for Cli {
                 url.to_string(),
             ));
         }
-        if let Some(ref config_path) = self.epoch_oracle_config {
-            overrides.push((
-                "epoch_oracle.configured.config_file".to_string(),
-                config_path
-                    .to_str()
-                    .expect("epoch_oracle_config must be a UTF-8 string")
-                    .to_string(),
-            ));
-        }
+        // `epoch_oracle_config` is applied after the config is loaded (see main) so it can override an inline
+        // `config_json` shipped in a network preset without tripping the "both set" error.
         overrides
     }
 }

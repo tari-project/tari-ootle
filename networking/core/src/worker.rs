@@ -464,6 +464,10 @@ where
             self.is_initial_bootstrap_complete = true;
         }
 
+        // Periodically refresh the peer list from the rendezvous server (if configured) to pick up newly-registered
+        // peers.
+        self.discover_rendezvous_peers();
+
         Ok(())
     }
 
@@ -531,16 +535,8 @@ where
                     let _ignore = waiter.send(Err(NetworkingError::OutgoingConnectionError(error.to_string())));
                 }
 
-                if matches!(error, DialError::NoAddresses) &&
-                    let Some((peer_id, cookie)) = self.rendezvous_state.get_peer_and_cookie()
-                {
-                    let ns = self.get_rendezvous_namespace();
-                    self.swarm.behaviour_mut().rendezvous_client.discover(
-                        Some(ns),
-                        cookie,
-                        self.config.rendezvous_peer_limit,
-                        peer_id,
-                    );
+                if matches!(error, DialError::NoAddresses) {
+                    self.discover_rendezvous_peers();
                 }
             },
             SwarmEvent::ExternalAddrConfirmed { address } => {
@@ -698,7 +694,37 @@ where
                     registrations.len(),
                     cookie.namespace().map(|s| format!("'{s}'")).unwrap_or_else(|| "''".to_string()),
                 );
+
+                let local_peer_id = *self.swarm.local_peer_id();
+                for registration in &registrations {
+                    let peer_id = registration.record.peer_id();
+                    if peer_id == local_peer_id {
+                        continue;
+                    }
+                    let addresses = registration.record.addresses();
+                    debug!(target: LOG_TARGET, "🌐 Discovered peer {peer_id} with {} address(es) via rendezvous", addresses.len());
+                    for address in addresses {
+                        self.swarm
+                            .behaviour_mut()
+                            .peer_store
+                            .store_mut()
+                            .add_address(&peer_id, address);
+                    }
+                }
+
                 self.rendezvous_state.set_cookie(cookie);
+            },
+            RendezvousClient(rendezvous::client::Event::Registered {
+                rendezvous_node,
+                ttl,
+                namespace,
+            }) => {
+                info!(
+                    target: LOG_TARGET,
+                    "🌐 Registered with rendezvous server {rendezvous_node} on namespace '{namespace}' (ttl={ttl}s). Discovering peers",
+                );
+                // Now that we're registered, pull the current peer list from the server.
+                self.discover_rendezvous_peers();
             },
             RendezvousClient(event) => {
                 info!(target: LOG_TARGET, "ℹ️ RendezvousClient event: {:?}", event);
@@ -1066,6 +1092,21 @@ where
     fn get_rendezvous_namespace(&self) -> Namespace {
         // Panic: namespace MUST be less than 255 characters
         Namespace::new(self.config.rendezvous_namespace.clone()).expect("configuration error")
+    }
+
+    /// Requests the peer list registered at our configured rendezvous server (if any). The discovered registrations are
+    /// handled in the [`RendezvousClient(Discovered)`] event. No-op if no rendezvous server is configured.
+    fn discover_rendezvous_peers(&mut self) {
+        let Some((rendezvous_peer_id, cookie)) = self.rendezvous_state.get_peer_and_cookie() else {
+            return;
+        };
+        let ns = self.get_rendezvous_namespace();
+        self.swarm.behaviour_mut().rendezvous_client.discover(
+            Some(ns),
+            cookie,
+            self.config.rendezvous_peer_limit,
+            rendezvous_peer_id,
+        );
     }
 }
 

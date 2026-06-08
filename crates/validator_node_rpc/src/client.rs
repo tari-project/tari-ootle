@@ -47,6 +47,14 @@ pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
         substate_req: SubstateRequirementRef<'_>,
     ) -> impl Future<Output = Result<SubstateResult, ValidatorNodeRpcClientError>> + Send;
 
+    /// Like [`get_substate`](Self::get_substate) but additionally requests a verifiable proof. The
+    /// raw proof bytes are returned for the caller (which has the committee) to verify; `None` if the
+    /// responder did not include one.
+    fn get_substate_with_proof(
+        &mut self,
+        substate_req: SubstateRequirementRef<'_>,
+    ) -> impl Future<Output = Result<(SubstateResult, Option<SubstateProofData>), ValidatorNodeRpcClientError>> + Send;
+
     fn get_substates_batch(
         &mut self,
         substate_reqs: &[&SubstateId],
@@ -106,6 +114,19 @@ impl SubstateResult {
             _ => None,
         }
     }
+}
+
+/// Raw (unverified) proof bytes accompanying a substate result, returned by a validator when a proof
+/// was requested. Verification happens in the indexer, which has the shard group committee.
+#[derive(Debug, Clone)]
+pub struct SubstateProofData {
+    /// CBOR-encoded SubstateValueProof for the substate's leaf within the shard-group state.
+    pub substate_value_proof: Vec<u8>,
+    /// CBOR-encoded CommittedBlockProof anchoring the trusted shard-group state merkle root.
+    pub commit_proof: Vec<u8>,
+    /// Epoch the substate value hash was computed at; needed to re-derive the leaf value hash when
+    /// verifying an inclusion proof.
+    pub proof_epoch: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -240,6 +261,51 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
             SubstateStatus::Down => Ok(SubstateResult::Down { version: resp.version }),
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
+    }
+
+    async fn get_substate_with_proof(
+        &mut self,
+        substate_req: SubstateRequirementRef<'_>,
+    ) -> Result<(SubstateResult, Option<SubstateProofData>), ValidatorNodeRpcClientError> {
+        let mut client = self.client_connection().await?;
+
+        let request = proto::rpc::GetSubstateRequest {
+            substate_requirement: Some(substate_req.into()),
+            include_proof: true,
+        };
+
+        let resp = client.get_substate(request).await?;
+        let status = SubstateStatus::try_from(resp.status).map_err(|e| {
+            ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                "Node returned invalid substate status {}: {e}",
+                resp.status
+            ))
+        })?;
+
+        // The responder omits the commit proof when it has nothing committed to anchor against.
+        let proof = if resp.commit_proof.is_empty() {
+            None
+        } else {
+            Some(SubstateProofData {
+                substate_value_proof: resp.substate_value_proof,
+                commit_proof: resp.commit_proof,
+                proof_epoch: resp.proof_epoch,
+            })
+        };
+
+        let result = match status {
+            SubstateStatus::Up => {
+                let substate = SubstateValue::from_bytes(&resp.substate)
+                    .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
+                SubstateResult::Up {
+                    substate: Box::new(Substate::new(resp.version, substate)),
+                }
+            },
+            SubstateStatus::Down => SubstateResult::Down { version: resp.version },
+            SubstateStatus::DoesNotExist => SubstateResult::DoesNotExist,
+        };
+
+        Ok((result, proof))
     }
 
     async fn get_substates_batch(

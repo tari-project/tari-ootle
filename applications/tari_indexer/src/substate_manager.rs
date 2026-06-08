@@ -95,6 +95,16 @@ impl SubstateManager {
         self
     }
 
+    pub fn with_substate_proof_verification(mut self, enabled: bool) -> Self {
+        self.cache_manager = self.cache_manager.with_substate_proof_verification(enabled);
+        self
+    }
+
+    /// Whether substates served by this manager are verified against the shard group committee.
+    pub fn verifies_substates(&self) -> bool {
+        self.cache_manager.verifies_substates()
+    }
+
     #[cfg(feature = "metrics")]
     pub fn with_metrics(self, registry_mut: &mut prometheus_client::registry::Registry) -> Self {
         let cached_substates = self.cache_manager.with_metrics(registry_mut);

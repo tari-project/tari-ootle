@@ -26,7 +26,7 @@ use std::{
 };
 
 use log::*;
-use tari_engine_types::substate::{Substate, SubstateId};
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -36,9 +36,16 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateRequirementRef,
     ToSubstateAddress,
+    VotePower,
     displayable::Displayable,
 };
-use tari_validator_node_rpc::client::{SubstateResult, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
+use tari_ootle_storage::{consensus_models::CommittedBlockProof, verify_substate_value_proof};
+use tari_validator_node_rpc::client::{
+    SubstateProofData,
+    SubstateResult,
+    ValidatorNodeClientFactory,
+    ValidatorNodeRpcClient,
+};
 
 use crate::{
     error::IndexerError,
@@ -55,6 +62,10 @@ pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
     cache_ttl: Duration,
+    /// When set, substates fetched from a validator must come with a proof that verifies against the
+    /// shard group committee, or they are rejected (fail-closed). The negative `DoesNotExist` case
+    /// is not provable and is left to the existing f+1 agreement.
+    verify_substate_proofs: bool,
     #[cfg(feature = "metrics")]
     metrics: Option<crate::metrics::Metrics>,
 }
@@ -76,6 +87,7 @@ where
             validator_node_client_factory,
             substate_cache,
             cache_ttl: DEFAULT_CACHE_TTL,
+            verify_substate_proofs: false,
             #[cfg(feature = "metrics")]
             metrics: None,
         }
@@ -84,6 +96,16 @@ where
     pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
         self.cache_ttl = ttl;
         self
+    }
+
+    pub fn with_substate_proof_verification(mut self, enabled: bool) -> Self {
+        self.verify_substate_proofs = enabled;
+        self
+    }
+
+    /// Whether substates served by this manager are verified against the shard group committee.
+    pub fn verifies_substates(&self) -> bool {
+        self.verify_substate_proofs
     }
 
     #[cfg(feature = "metrics")]
@@ -297,10 +319,79 @@ where
     ) -> Result<SubstateResult, IndexerError> {
         // build a client with the VN
         let mut client = self.validator_node_client_factory.create_client(vn_addr);
-        let result = client
-            .get_substate(substate_requirement)
+
+        if !self.verify_substate_proofs {
+            return client
+                .get_substate(substate_requirement)
+                .await
+                .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()));
+        }
+
+        let (result, proof) = client
+            .get_substate_with_proof(substate_requirement)
             .await
             .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()))?;
+
+        // Verify up/down results against the committee. A missing or invalid proof disqualifies this
+        // validator's response (fail-closed) so the caller tries another member. `DoesNotExist` is
+        // not provable and is left to the existing f+1 agreement.
+        match &result {
+            SubstateResult::Up { substate } => {
+                self.verify_substate_proof(
+                    substate_requirement.substate_id(),
+                    substate.version(),
+                    Some(substate.substate_value()),
+                    proof,
+                )
+                .await?;
+            },
+            SubstateResult::Down { version } => {
+                self.verify_substate_proof(substate_requirement.substate_id(), *version, None, proof)
+                    .await?;
+            },
+            SubstateResult::DoesNotExist => {},
+        }
+
         Ok(result)
+    }
+
+    async fn verify_substate_proof(
+        &self,
+        substate_id: &SubstateId,
+        version: u32,
+        value: Option<&SubstateValue>,
+        proof: Option<SubstateProofData>,
+    ) -> Result<(), IndexerError> {
+        let proof = proof.ok_or_else(|| IndexerError::SubstateProofVerificationFailed {
+            details: format!("validator did not return a proof for {substate_id}"),
+        })?;
+
+        let commit_proof = CommittedBlockProof::from_bytes(&proof.commit_proof).map_err(|e| {
+            IndexerError::SubstateProofVerificationFailed {
+                details: format!("undecodable commit proof: {e}"),
+            }
+        })?;
+        let shard_group = commit_proof
+            .shard_group()
+            .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+        // The committee for the commit proof's epoch/shard group is what is expected to have signed it.
+        let committee = self
+            .committee_provider
+            .get_committee_by_shard_group(commit_proof.epoch(), shard_group)
+            .await?;
+
+        verify_substate_value_proof(
+            &commit_proof,
+            &proof.substate_value_proof,
+            substate_id,
+            version,
+            value,
+            Epoch(proof.proof_epoch),
+            committee.quorum_threshold(),
+            |pk| Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero)),
+        )
+        .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+
+        Ok(())
     }
 }

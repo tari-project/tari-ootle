@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 tari_ootle_common_types = { workspace = true }
+tari_ootle_storage = { workspace = true }
 tari_epoch_manager = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_validator_node_rpc = { workspace = true }

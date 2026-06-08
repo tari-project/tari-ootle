@@ -131,8 +131,18 @@ pub struct IndexerConfig {
     /// Defaults to the builtin liquidity pool template.
     #[serde(default = "default_watched_templates")]
     pub watched_templates: Vec<TemplateAddress>,
+    /// When true (the default), substates fetched from validators to serve client reads must come
+    /// with a proof that verifies against the shard group committee, or the read fails. Disabling
+    /// trades verifiability for performance: values are served unverified, as fetched from a single
+    /// (possibly byzantine or out-of-sync) validator.
+    #[serde(default = "default_verify_substate_proofs")]
+    pub verify_substate_proofs: bool,
     /// Rate-limiting configuration for the REST API endpoints
     pub rate_limits: IndexerRateLimitsConfig,
+}
+
+fn default_verify_substate_proofs() -> bool {
+    true
 }
 
 fn default_watched_templates() -> Vec<TemplateAddress> {
@@ -159,6 +169,7 @@ impl Default for IndexerConfig {
             dry_run_cache_ttl: Duration::from_secs(10),
             event_filters: vec![],
             watched_templates: default_watched_templates(),
+            verify_substate_proofs: default_verify_substate_proofs(),
             rate_limits: IndexerRateLimitsConfig::default(),
         }
     }

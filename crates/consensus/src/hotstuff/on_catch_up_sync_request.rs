@@ -162,7 +162,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     if let Err(err) = outbound_messaging
                         .send(
                             from.clone(),
-                            HotstuffMessage::new_proposal(ProposalMessage {
+                            HotstuffMessage::new_catch_up_sync_response(ProposalMessage {
                                 block,
                                 foreign_proposals: foreign_proposals.into_iter().map(|p| p.into_proposal()).collect(),
                             }),

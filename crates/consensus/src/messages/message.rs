@@ -38,11 +38,19 @@ pub enum HotstuffMessage {
     MissingTransactionsResponse(MissingTransactionsResponse),
     /// Request to send blocks from a given height
     CatchUpSyncRequest(CatchUpRequestMessage),
+    /// A block delivered in response to a catch-up sync request. Unlike a [`HotstuffMessage::Proposal`],
+    /// this is an ordered block import: it is not subject to the live-consensus view filter and is
+    /// processed regardless of the current view.
+    CatchUpSyncResponse(Box<ProposalMessage>),
 }
 
 impl HotstuffMessage {
     pub fn new_proposal(message: ProposalMessage) -> Self {
         Self::Proposal(Box::new(message))
+    }
+
+    pub fn new_catch_up_sync_response(message: ProposalMessage) -> Self {
+        Self::CatchUpSyncResponse(Box::new(message))
     }
 
     pub fn new_newview(message: NewViewMessage) -> Self {
@@ -60,6 +68,7 @@ impl HotstuffMessage {
             Self::MissingTransactionsRequest(_) => "MissingTransactionsRequest",
             Self::MissingTransactionsResponse(_) => "MissingTransactionsResponse",
             Self::CatchUpSyncRequest(_) => "CatchUpSyncRequest",
+            Self::CatchUpSyncResponse(_) => "CatchUpSyncResponse",
         }
     }
 
@@ -74,6 +83,7 @@ impl HotstuffMessage {
             Self::MissingTransactionsRequest(msg) => msg.epoch,
             Self::MissingTransactionsResponse(msg) => msg.epoch,
             Self::CatchUpSyncRequest(msg) => msg.epoch,
+            Self::CatchUpSyncResponse(msg) => msg.block.epoch(),
         }
     }
 
@@ -143,6 +153,17 @@ impl Display for HotstuffMessage {
                 msg.epoch
             ),
             Self::CatchUpSyncRequest(msg) => write!(f, "SyncRequest({}/{})", msg.epoch, msg.block_height),
+            Self::CatchUpSyncResponse(msg) => {
+                write!(
+                    f,
+                    "CatchUpSyncResponse(Epoch={},Height={},QC={},TC={},#foreign={})",
+                    msg.block.epoch(),
+                    msg.block.height(),
+                    msg.block.justify().height(),
+                    msg.block.timeout_certificate().display(),
+                    msg.foreign_proposals.len()
+                )
+            },
         }
     }
 }

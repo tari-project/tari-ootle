@@ -1226,6 +1226,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.on_sync_request.handle(from, epoch_state.epoch(), msg);
                 Ok(())
             },
+            // Catch-up blocks reach here already past the view filter (see `msg_relative_view`) and
+            // are processed by the same block-import path as live proposals; `on_proposal_message`
+            // also drives the catch-up re-request loop.
+            HotstuffMessage::CatchUpSyncResponse(msg) => log_err(
+                "on_receive_catch_up_sync_response",
+                self.on_proposal_message(epoch_state, current_height, *msg).await,
+            ),
         }
     }
 

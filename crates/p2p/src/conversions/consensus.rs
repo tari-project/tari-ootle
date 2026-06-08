@@ -112,6 +112,9 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
             HotstuffMessage::CatchUpSyncRequest(msg) => {
                 proto::consensus::hot_stuff_message::Message::SyncRequest(msg.into())
             },
+            HotstuffMessage::CatchUpSyncResponse(msg) => {
+                proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse((&**msg).into())
+            },
         };
         Self { message: Some(message) }
     }
@@ -145,6 +148,9 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
             },
             proto::consensus::hot_stuff_message::Message::SyncRequest(msg) => {
                 HotstuffMessage::CatchUpSyncRequest(msg.try_into()?)
+            },
+            proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse(msg) => {
+                HotstuffMessage::new_catch_up_sync_response(msg.try_into()?)
             },
         })
     }

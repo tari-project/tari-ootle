@@ -27,7 +27,7 @@ use std::{
 
 use log::*;
 use tari_bor::encode;
-use tari_consensus::hotstuff::ConsensusCurrentState;
+use tari_consensus::hotstuff::{ConsensusCurrentState, commit_proofs::generate_block_commit_proof};
 use tari_consensus_types::{BlockId, HighPc, ProposalCertificate};
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
@@ -47,6 +47,8 @@ use tari_ootle_p2p::{
         ConsensusState as ProtoConsensusState,
         GetCheckpointsRequest,
         GetCheckpointsResponse,
+        GetCommittedBlockProofRequest,
+        GetCommittedBlockProofResponse,
         GetConsensusStateRequest,
         GetConsensusStateResponse,
         GetHighQcRequest,
@@ -71,6 +73,7 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BookkeepingEpochAgnosticRead,
+        CommittedBlockProof,
         EpochCheckpoint,
         SubstateRecord,
         SubstateValueFilterFlags,
@@ -512,6 +515,42 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         Ok(Response::new(GetHighQcResponse {
             high_qc: Some((&qc).into()),
+        }))
+    }
+
+    async fn get_committed_block_proof(
+        &self,
+        _req: Request<GetCommittedBlockProofRequest>,
+    ) -> Result<Response<GetCommittedBlockProofResponse>, RpcStatus> {
+        let epoch = self.consensus.current_epoch();
+        let store = self.state_store.clone();
+
+        let maybe_proof = task::spawn_blocking(move || {
+            store
+                .with_read_tx(|tx| {
+                    let last_executed = tx.last_executed_get(epoch)?;
+                    // Nothing has been committed beyond the epoch genesis yet - there is no proof to give.
+                    if last_executed.height.is_zero() {
+                        return Ok(None);
+                    }
+                    let block = Block::get(tx, &last_executed.block_id)?;
+                    let commit_qc = block.get_commit_qc(tx)?;
+                    let proof = generate_block_commit_proof(tx, &commit_qc, &block).map_err(|e| {
+                        tari_ootle_storage::StorageError::QueryError {
+                            reason: format!("generate_block_commit_proof: {e}"),
+                        }
+                    })?;
+                    Ok::<_, tari_ootle_storage::StorageError>(Some(CommittedBlockProof::new(proof)))
+                })
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        let proof = maybe_proof.ok_or_else(|| RpcStatus::not_found("No committed block beyond genesis yet"))?;
+
+        Ok(Response::new(GetCommittedBlockProofResponse {
+            commit_proof: proof.to_bytes(),
         }))
     }
 

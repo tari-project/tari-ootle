@@ -195,7 +195,7 @@ pub async fn spawn_services(
 
     let event_notifier = Notify::new(1000);
     let transaction_event_notifier = Notify::new(1024);
-    let validator_status = ValidatorStatusMonitor::new();
+    let validator_status = ValidatorStatusMonitor::new(epoch_manager.clone());
 
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),

@@ -313,3 +313,13 @@ message GetHighQcResponse {
   // The signed ProposalCertificate the responder considers its current high QC.
   tari.ootle.consensus.QuorumCertificate high_qc = 1;
 }
+
+message GetCommittedBlockProofRequest {}
+
+message GetCommittedBlockProofResponse {
+  // CBOR-encoded SidechainBlockCommitProof for the responder's latest committed block.
+  // The proof authenticates the block header (and thus its state_merkle_root, height and
+  // epoch) against the shard group committee via the committed QC chain. Allows a caller
+  // to verify how far the responder has committed without trusting its self-reported state.
+  bytes commit_proof = 1;
+}

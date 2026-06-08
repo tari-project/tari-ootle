@@ -659,23 +659,14 @@ pub struct ValidatorStatus {
     pub epoch: Epoch,
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub height: u64,
-    pub state: ValidatorConsensusState,
+    /// State Merkle root of the validator's latest committed block, as verified by the
+    /// indexer against the shard group committee. Empty if no verified tip has been observed.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub state_merkle_root: Hash32,
     /// Unix timestamp (seconds) at which this snapshot was captured. Clients
     /// can derive the freshness of the snapshot by comparing this to the
     /// current wall-clock time.
     pub observed_at_unix_s: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub enum ValidatorConsensusState {
-    Idle,
-    CheckSync,
-    Syncing,
-    Running,
-    Sleeping,
-    Shutdown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

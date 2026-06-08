@@ -56,6 +56,19 @@ impl CommittedBlockProof {
         self.proof.header.state_merkle_root
     }
 
+    /// The block id (header hash) of the committed block this proof attests to. Not part of the
+    /// trust decision - used for diagnostics/audit.
+    pub fn block_id(&self) -> FixedHash {
+        self.proof.header.calculate_block_id()
+    }
+
+    /// The epoch hash the committee committed in this block's (quorum-signed) header. A verifier can
+    /// cross-check it against the epoch hash it independently derives from the base layer
+    /// (`EpochManagerReader::get_epoch_hash`) to detect epoch-boundary divergence.
+    pub fn epoch_hash(&self) -> FixedHash {
+        self.proof.header.epoch_hash
+    }
+
     pub fn shard_group(&self) -> Result<ShardGroup, CommittedBlockProofError> {
         let sg = self.proof.header.shard_group;
         ShardGroup::new_checked(sg.start, sg.end_inclusive).ok_or(CommittedBlockProofError::InvalidShardGroup {
@@ -89,6 +102,8 @@ impl CommittedBlockProof {
             epoch: self.epoch(),
             shard_group: self.shard_group()?,
             height: self.height(),
+            block_id: self.block_id(),
+            epoch_hash: self.epoch_hash(),
             state_merkle_root: self.state_merkle_root(),
         })
     }
@@ -101,6 +116,11 @@ pub struct VerifiedBlockTip {
     pub epoch: Epoch,
     pub shard_group: ShardGroup,
     pub height: NodeHeight,
+    /// The committed block's id (header hash). Diagnostics/audit only - not part of the trust key.
+    pub block_id: FixedHash,
+    /// The committee's quorum-signed epoch hash, for cross-checking against the verifier's own
+    /// base-layer-derived epoch hash (epoch-boundary continuity).
+    pub epoch_hash: FixedHash,
     pub state_merkle_root: FixedHash,
 }
 

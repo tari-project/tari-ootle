@@ -1,6 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue, hash_substate};
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, VersionedSubstateId, VotePower, shard::Shard};
 use tari_sidechain::SidechainProofValidationError;
@@ -95,7 +96,37 @@ pub fn verify_substate_value_proof(
 ) -> Result<VerifiedBlockTip, SubstateProofVerifyError> {
     // Anchor: a quorum-signed shard-group state merkle root.
     let verified_tip = commit_proof.validate(quorum_threshold, check_vn)?;
-    let group_root = TreeHash::new(verified_tip.state_merkle_root.into_array());
+    verify_substate_value_proof_against_root(
+        value_proof_bytes,
+        substate_id,
+        version,
+        value,
+        proof_epoch,
+        verified_tip.state_merkle_root,
+    )?;
+    Ok(verified_tip)
+}
+
+/// Verifies a substate value proof against an *already-trusted* shard-group state merkle root,
+/// skipping commit-proof (QC chain) validation.
+///
+/// This is the inner half of [`verify_substate_value_proof`] for callers that have independently
+/// established `trusted_root` - e.g. from a commit proof that was committee-validated in an earlier
+/// round and recorded in a trusted-root store. Soundness is identical to the full path: the
+/// validator pins the substate value proof to the same committed block whose `state_merkle_root` we
+/// trust (proof and commit proof are generated in one read transaction against the same committed
+/// block), so verifying the proof against that root is exactly what [`verify_substate_value_proof`]
+/// does after `validate()`. The trust decision must therefore be keyed on `trusted_root` itself: a
+/// node cannot forge a substate proof that verifies against a root a quorum already signed.
+pub fn verify_substate_value_proof_against_root(
+    value_proof_bytes: &[u8],
+    substate_id: &SubstateId,
+    version: u32,
+    value: Option<&SubstateValue>,
+    proof_epoch: Epoch,
+    trusted_root: FixedHash,
+) -> Result<(), SubstateProofVerifyError> {
+    let group_root = TreeHash::new(trusted_root.into_array());
 
     let value_proof: SubstateValueProof = tari_bor::serde_codec::from_slice(value_proof_bytes)
         .map_err(|e| SubstateProofVerifyError::Decode(e.to_string()))?;
@@ -113,7 +144,7 @@ pub fn verify_substate_value_proof(
         },
     }
 
-    Ok(verified_tip)
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]

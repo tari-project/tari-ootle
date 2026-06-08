@@ -153,19 +153,6 @@ impl PaceMakerHandle {
             .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })
     }
 
-    /// Reset the leader timeout and set the view. In general, should not be used. This is used to reverse the view when
-    /// catching up (TODO: confirm is this is correct or if there is another way).
-    pub async fn reset_view(
-        &self,
-        epoch: Epoch,
-        last_seen_height: NodeHeight,
-        high_pc_height: NodeHeight,
-    ) -> Result<(), HotStuffError> {
-        // Update current height here to prevent possibility of race conditions
-        self.current_view.reset(epoch, last_seen_height);
-        self.reset(high_pc_height).await
-    }
-
     /// Reset the leader timeout. This should be called when an end of epoch proposal has been committed.
     pub async fn set_epoch(&self, epoch: Epoch) -> Result<(), HotStuffError> {
         self.current_view.reset(epoch, NodeHeight::zero());

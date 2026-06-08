@@ -19,6 +19,7 @@ message HotStuffMessage {
     MissingTransactionsRequest request_missing_transactions = 7;
     MissingTransactionsResponse requested_transaction = 8;
     SyncRequest sync_request = 9;
+    ProposalMessage catch_up_sync_response = 10;
   }
 }
 

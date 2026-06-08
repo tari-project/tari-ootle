@@ -12,6 +12,9 @@ pub mod memory_store;
 mod staged_store;
 pub use staged_store::*;
 
+mod substate_proof;
+pub use substate_proof::*;
+
 mod traits;
 pub use traits::*;
 

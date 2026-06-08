@@ -162,12 +162,37 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             foreign_proposals,
         } = msg;
 
-        let maybe_valid_block = self.store.with_read_tx(|tx| {
+        // Idempotent view advancement for already-processed blocks.
+        //
+        // Normally a block we have already stored is a no-op: the validate/process path below is
+        // skipped, and so is the `enter_view` it would have performed. That is correct in steady
+        // state, but it is unsafe after a non-monotonic catch-up view reset
+        // (`request_catch_up_sync`), which can move the pacemaker view *below* a block we have
+        // already stored. In that state every re-delivery of the bridging block (via catch-up or
+        // gossip) is deduplicated here without advancing the view, so the view can never climb back
+        // to the stored tip: the node buffers all higher proposals as "future" and re-requests
+        // catch-up forever. Making the re-entry idempotent — advancing to the view the stored block
+        // justifies — lets the node recover. `enter_view` is monotonic, so this never rewinds.
+        let already_processed = self.store.with_read_tx(|tx| {
             if Block::record_exists(tx, block.id())? {
-                info!(target: LOG_TARGET, "🧊 Block {} has already been processed", block);
-                return Ok(None);
+                Ok::<_, HotStuffError>(Some(Block::get(tx, block.id())?))
+            } else {
+                Ok(None)
             }
+        })?;
+        if let Some(existing) = already_processed {
+            info!(target: LOG_TARGET, "🧊 Block {} has already been processed", existing);
+            let justify_height = existing.justify().height();
+            let view_height = existing
+                .timeout_certificate()
+                .map_or(justify_height, |tc| tc.height().max(justify_height));
+            self.pacemaker
+                .enter_view(existing.epoch(), view_height, justify_height)
+                .await?;
+            return Ok(None);
+        }
 
+        let maybe_valid_block = self.store.with_read_tx(|tx| {
             self.validate_block(
                 tx,
                 epoch_state.epoch(),

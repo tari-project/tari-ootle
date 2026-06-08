@@ -34,4 +34,6 @@ pub enum IndexerError {
     SubstateProofVerificationFailed { details: String },
     #[error("System time error: {0}")]
     SystemTimeError(#[from] time::SystemTimeError),
+    #[error("Trusted root store error: {0}")]
+    TrustedRootStoreError(String),
 }

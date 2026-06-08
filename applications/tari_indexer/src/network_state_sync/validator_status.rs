@@ -8,7 +8,7 @@ use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VotePower};
 use tari_ootle_p2p::{PeerAddress, proto::rpc};
-use tari_ootle_storage::consensus_models::CommittedBlockProof;
+use tari_ootle_storage::consensus_models::{CommittedBlockProof, VerifiedBlockTip};
 use tokio::sync::RwLock;
 
 use crate::network_state_sync::committee_client::ValidatorRpcSession;
@@ -60,17 +60,26 @@ impl ValidatorStatusMonitor {
     ///
     /// As a side effect, the peer's self-reported consensus state is recorded for the diagnostic
     /// Validators page. That status is deliberately *not* trusted for sync-source selection.
-    pub async fn probe(&self, session: &mut ValidatorRpcSession, shard_group: ShardGroup) -> Result<(), ProbeError> {
+    pub async fn probe(
+        &self,
+        session: &mut ValidatorRpcSession,
+        shard_group: ShardGroup,
+    ) -> Result<Option<VerifiedBlockTip>, ProbeError> {
         let peer = *session.peer_address();
 
         // The trust decision: verify how far the peer has actually committed. A forged proof gates
-        // the peer out; other failures are tolerated.
-        if let Err(e) = self.verify_committed_tip(session).await {
-            if e.is_invalid_proof() {
-                return Err(e);
-            }
-            debug!(target: LOG_TARGET, "Could not verify committed tip for validator {peer}: {e}");
-        }
+        // the peer out; other failures are tolerated. On success the verified tip is returned so the
+        // caller can record the quorum-signed state root.
+        let verified_tip = match self.verify_committed_tip(session).await {
+            Ok(tip) => Some(tip),
+            Err(e) => {
+                if e.is_invalid_proof() {
+                    return Err(e);
+                }
+                debug!(target: LOG_TARGET, "Could not verify committed tip for validator {peer}: {e}");
+                None
+            },
+        };
 
         // Unverified consensus status for diagnostics. A failure here does not disqualify the peer;
         // it just means we have no fresh diagnostic snapshot to show.
@@ -78,13 +87,13 @@ impl ValidatorStatusMonitor {
             Ok(r) => r,
             Err(e) => {
                 debug!(target: LOG_TARGET, "Consensus state probe failed for validator {peer}: {e}");
-                return Ok(());
+                return Ok(verified_tip);
             },
         };
 
         let Some(epoch) = resp.epoch.map(Epoch::from) else {
             warn!(target: LOG_TARGET, "Consensus state response from validator {peer} is missing epoch");
-            return Ok(());
+            return Ok(verified_tip);
         };
 
         let state = match rpc::ConsensusState::try_from(resp.state) {
@@ -95,7 +104,7 @@ impl ValidatorStatusMonitor {
                     "Consensus state response from validator {peer} has invalid state discriminant ({}): {e}",
                     resp.state
                 );
-                return Ok(());
+                return Ok(verified_tip);
             },
         };
 
@@ -114,12 +123,12 @@ impl ValidatorStatusMonitor {
         );
 
         self.inner.write().await.insert(peer, snapshot);
-        Ok(())
+        Ok(verified_tip)
     }
 
     /// Fetch and verify the validator's latest committed block proof against its shard group
     /// committee. Verification is the basis for deciding whether to trust the peer as a sync source.
-    async fn verify_committed_tip(&self, session: &mut ValidatorRpcSession) -> Result<(), ProbeError> {
+    async fn verify_committed_tip(&self, session: &mut ValidatorRpcSession) -> Result<VerifiedBlockTip, ProbeError> {
         let resp = session
             .get_committed_block_proof(rpc::GetCommittedBlockProofRequest {})
             .await
@@ -145,7 +154,6 @@ impl ValidatorStatusMonitor {
             .validate(committee.quorum_threshold(), |pk| {
                 Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero))
             })
-            .map(|_verified_tip| ())
             .map_err(|e| ProbeError::InvalidProof(e.to_string()))
     }
 }

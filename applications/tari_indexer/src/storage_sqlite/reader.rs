@@ -17,6 +17,7 @@ use diesel::{
 };
 use log::info;
 use serde::de::DeserializeOwned;
+use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     Utxo,
     events::Event,
@@ -26,6 +27,7 @@ use tari_engine_types::{
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry, UtxoStateUpdateSet};
 use tari_ootle_common_types::{
     Epoch,
+    NodeHeight,
     ShardGroup,
     StateVersion,
     displayable::Displayable,
@@ -54,6 +56,8 @@ use crate::{
             SubstateRecord,
             TemplateCatalogueEntry,
             TemplateCatalogueRow,
+            VerifiedStateRoot,
+            VerifiedStateRootRow,
             WatchedSubstateEntry,
             WatchedSubstateRow,
         },
@@ -935,5 +939,54 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 })
             })
             .collect()
+    }
+
+    fn is_state_root_trusted(
+        &mut self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        root: &FixedHash,
+    ) -> Result<bool, StorageError> {
+        const OPERATION: &str = "is_state_root_trusted";
+        use crate::storage_sqlite::schema::verified_state_roots;
+        let count: i64 = verified_state_roots::table
+            .filter(verified_state_roots::epoch.eq(epoch.as_u64() as i64))
+            .filter(verified_state_roots::shard_group.eq(shard_group.to_parsable_string()))
+            .filter(verified_state_roots::state_merkle_root.eq(serialize_hex(root)))
+            .limit(1)
+            .count()
+            .get_result(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+        Ok(count > 0)
+    }
+
+    fn get_latest_verified_state_root(
+        &mut self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<Option<VerifiedStateRoot>, StorageError> {
+        const OPERATION: &str = "get_latest_verified_state_root";
+        use crate::storage_sqlite::schema::verified_state_roots;
+        let row: Option<VerifiedStateRootRow> = verified_state_roots::table
+            .filter(verified_state_roots::epoch.eq(epoch.as_u64() as i64))
+            .filter(verified_state_roots::shard_group.eq(shard_group.to_parsable_string()))
+            .order_by(verified_state_roots::block_height.desc())
+            .first(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {e}"),
+            })?;
+        row.map(|row| {
+            Ok(VerifiedStateRoot {
+                epoch,
+                shard_group,
+                height: NodeHeight(row.block_height as u64),
+                block_hash: deserialize_hex_try_from(&row.block_hash)?,
+                state_merkle_root: deserialize_hex_try_from(&row.state_merkle_root)?,
+            })
+        })
+        .transpose()
     }
 }

@@ -31,11 +31,13 @@ use crate::{
             NewEvent,
             NewSubstate,
             NewTemplateCatalogueRow,
+            NewVerifiedStateRoot,
             NewWatchedSubstate,
             SubstateRecord,
             UtxoRecordInsert,
             UtxoRecordUpdate,
             UtxoUpdateRecord,
+            VerifiedStateRoot,
         },
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_bincode, serialize_hex, serialize_json},
@@ -398,6 +400,58 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         )
         .execute(self.connection())
         .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn upsert_verified_state_root(&mut self, root: &VerifiedStateRoot) -> Result<(), StorageError> {
+        const OPERATION: &str = "upsert_verified_state_root";
+        // Bounded ring of recent roots retained per (epoch, shard_group): enough to absorb a read
+        // landing on a validator a few blocks behind the indexer's last probe, cheap to prune.
+        const RING_SIZE: i64 = 16;
+        use crate::storage_sqlite::schema::verified_state_roots;
+
+        let epoch = root.epoch.as_u64() as i64;
+        let shard_group = root.shard_group.to_parsable_string();
+
+        diesel::insert_into(verified_state_roots::table)
+            .values(NewVerifiedStateRoot {
+                epoch,
+                shard_group: shard_group.clone(),
+                block_height: root.height.as_u64() as i64,
+                block_hash: serialize_hex(root.block_hash),
+                state_merkle_root: serialize_hex(root.state_merkle_root),
+            })
+            .on_conflict((
+                verified_state_roots::epoch,
+                verified_state_roots::shard_group,
+                verified_state_roots::state_merkle_root,
+            ))
+            .do_nothing()
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        // Prune everything below the RING_SIZE-th most recent committed height for this key. Committed
+        // heights are unique per (epoch, shard_group), so this retains exactly the newest RING_SIZE.
+        let kept_heights = verified_state_roots::table
+            .select(verified_state_roots::block_height)
+            .filter(verified_state_roots::epoch.eq(epoch))
+            .filter(verified_state_roots::shard_group.eq(&shard_group))
+            .order_by(verified_state_roots::block_height.desc())
+            .limit(RING_SIZE)
+            .load::<i64>(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        if let Some(min_kept_height) = kept_heights.last().copied() {
+            diesel::delete(
+                verified_state_roots::table
+                    .filter(verified_state_roots::epoch.eq(epoch))
+                    .filter(verified_state_roots::shard_group.eq(&shard_group))
+                    .filter(verified_state_roots::block_height.lt(min_kept_height)),
+            )
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        }
 
         Ok(())
     }

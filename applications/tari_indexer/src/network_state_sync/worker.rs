@@ -28,7 +28,13 @@ use tari_ootle_common_types::{
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, proto::rpc};
 use tari_ootle_storage::{
     StorageError,
-    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof, SubstateValueFilterFlags},
+    consensus_models::{
+        EpochCheckpoint,
+        SubstateData,
+        SubstateUpdateProof,
+        SubstateValueFilterFlags,
+        VerifiedBlockTip,
+    },
 };
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::__macro_reexports::future::Either;
@@ -50,7 +56,7 @@ use crate::{
     storage_sqlite::{
         SqliteIndexerStore,
         SqliteStoreWriteTransaction,
-        models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
+        models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord, VerifiedStateRoot},
     },
     store::{
         IndexerStore,
@@ -366,7 +372,14 @@ impl NetworkWideStateSync {
                 },
             };
             match self.validator_status.probe(&mut session, shard_group).await {
-                Ok(_) => {},
+                Ok(Some(verified_tip)) => {
+                    // Record the quorum-signed state root so the read path can skip re-validating
+                    // commit proofs for this tip. A failure here must not abort the state sync.
+                    if let Err(e) = self.persist_verified_tip(verified_tip).await {
+                        warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {}: {}", shard_group, e);
+                    }
+                },
+                Ok(None) => {},
                 Err(e) if e.is_invalid_proof() => {
                     warn!(target: LOG_TARGET, "⚠️ Validator {} for shard group {} served an INVALID commit proof: {}. Skipping this round.", session.peer_address(), shard_group, e);
                     continue;
@@ -407,6 +420,34 @@ impl NetworkWideStateSync {
             }
         }
 
+        Ok(())
+    }
+
+    /// Records a committee-validated tip into the verified-root store, after a fail-open epoch
+    /// continuity check: the committee's quorum-signed `epoch_hash` must match the epoch hash the
+    /// indexer independently derives from the base layer. A mismatch is logged loudly but does not
+    /// stop the tip being recorded - the read path is sound regardless, so this is anomaly detection
+    /// (forged checkpoint / L1 reorg), not a gate.
+    async fn persist_verified_tip(&self, tip: VerifiedBlockTip) -> Result<(), NetworkStateSyncError> {
+        match self.epoch_manager.get_epoch_hash(tip.epoch).await {
+            Ok(expected) if expected != tip.epoch_hash => {
+                error!(
+                    target: LOG_TARGET,
+                    "⚠️ Epoch continuity mismatch for {} epoch {}: committee epoch_hash {} != base-layer-derived {}. Recording tip anyway.",
+                    tip.shard_group, tip.epoch, tip.epoch_hash, expected
+                );
+            },
+            Ok(_) => {},
+            Err(e) => {
+                // Not yet resolvable (e.g. the epoch just changed); skip the check and retry next round.
+                debug!(target: LOG_TARGET, "Epoch hash for epoch {} unavailable for continuity check: {e}", tip.epoch);
+            },
+        }
+
+        let root = VerifiedStateRoot::from_verified_tip(&tip);
+        self.store
+            .with_write_tx(move |tx| tx.upsert_verified_state_root(&root))
+            .await?;
         Ok(())
     }
 

@@ -22,19 +22,26 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    sync::Arc,
     time::Duration,
 };
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     Utxo,
     substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, UtxoStateUpdateSet};
-use tari_indexer_lib::{cached_substate_manager::CachedSubstateManager, error::IndexerError};
+use tari_indexer_lib::{
+    cached_substate_manager::{CachedSubstateManager, TrustedRootStore},
+    error::IndexerError,
+};
 use tari_ootle_common_types::{
     Epoch,
+    ShardGroup,
     StateVersion,
     SubstateRequirementRef,
     optional::IsNotFoundError,
@@ -42,7 +49,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_p2p::PeerAddress;
-use tari_ootle_storage::StorageError;
+use tari_ootle_storage::{StorageError, consensus_models::VerifiedBlockTip};
 use tari_template_lib_types::{
     ResourceAddress,
     TemplateAddress,
@@ -52,8 +59,8 @@ use tari_template_lib_types::{
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::{
-    storage_sqlite::SqliteIndexerStore,
-    store::{IndexerStoreReadTransaction, IndexerStoreReader},
+    storage_sqlite::{SqliteIndexerStore, models::VerifiedStateRoot},
+    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
     substate_file_cache::SubstateFileCache,
 };
 
@@ -62,6 +69,37 @@ pub struct SubstateResponse {
     pub id: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
+}
+
+/// Adapts the indexer's sqlite store to [`TrustedRootStore`], which the read path consults to skip
+/// commit-proof re-validation on a trusted-root hit and warms with newly-validated roots.
+#[derive(Clone)]
+struct SqliteTrustedRootStore {
+    store: SqliteIndexerStore,
+}
+
+impl std::fmt::Debug for SqliteTrustedRootStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SqliteTrustedRootStore").finish_non_exhaustive()
+    }
+}
+
+#[async_trait]
+impl TrustedRootStore for SqliteTrustedRootStore {
+    async fn is_trusted(&self, epoch: Epoch, shard_group: ShardGroup, root: FixedHash) -> Result<bool, IndexerError> {
+        self.store
+            .with_read_tx(move |tx| tx.is_state_root_trusted(epoch, shard_group, &root))
+            .await
+            .map_err(|e: StorageError| IndexerError::TrustedRootStoreError(e.to_string()))
+    }
+
+    async fn record(&self, tip: VerifiedBlockTip) -> Result<(), IndexerError> {
+        let root = VerifiedStateRoot::from_verified_tip(&tip);
+        self.store
+            .with_write_tx(move |tx| tx.upsert_verified_state_root(&root))
+            .await
+            .map_err(|e: StorageError| IndexerError::TrustedRootStoreError(e.to_string()))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -78,11 +116,18 @@ impl SubstateManager {
         validator_node_client_factory: TariValidatorNodeRpcClientFactory,
         substate_cache: SubstateFileCache,
     ) -> Self {
+        // Consulted only when proof verification is enabled (the dry-run manager has it off, so its
+        // copy is inert). Lets a read skip re-validating a served commit proof when its root is
+        // already trusted, and is warmed with newly-validated roots.
+        let trusted_root_store = Arc::new(SqliteTrustedRootStore {
+            store: substate_store.clone(),
+        });
         let cached_substates = CachedSubstateManager::new(
             epoch_manager.clone(),
             validator_node_client_factory.clone(),
             substate_cache,
-        );
+        )
+        .with_trusted_root_store(trusted_root_store);
 
         Self {
             cache_manager: cached_substates,

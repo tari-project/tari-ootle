@@ -4,6 +4,7 @@
 use std::{ops::Deref, time::UNIX_EPOCH};
 
 use axum::{Extension, Json, response::Response};
+use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_indexer_client::{
     types,
     types::{
@@ -13,6 +14,7 @@ use tari_indexer_client::{
         GetNetworkSyncStateResponse,
         NetworkDescription,
         SyncProgress,
+        ValidatorConsensusState,
         ValidatorStatus,
     },
 };
@@ -70,7 +72,7 @@ pub async fn get_network_sync_stats(
                 shard_group: snapshot.shard_group,
                 epoch: snapshot.epoch,
                 height: snapshot.height.as_u64(),
-                state_merkle_root: snapshot.state_merkle_root,
+                state: to_client_consensus_state(snapshot.state),
                 observed_at_unix_s,
             }
         })
@@ -94,6 +96,17 @@ pub async fn get_network_sync_stats(
         validators,
     };
     Ok(Json(response))
+}
+
+fn to_client_consensus_state(state: ConsensusCurrentState) -> ValidatorConsensusState {
+    match state {
+        ConsensusCurrentState::Idle => ValidatorConsensusState::Idle,
+        ConsensusCurrentState::CheckSync => ValidatorConsensusState::CheckSync,
+        ConsensusCurrentState::Syncing => ValidatorConsensusState::Syncing,
+        ConsensusCurrentState::Running => ValidatorConsensusState::Running,
+        ConsensusCurrentState::Sleeping => ValidatorConsensusState::Sleeping,
+        ConsensusCurrentState::Shutdown => ValidatorConsensusState::Shutdown,
+    }
 }
 
 #[utoipa::path(get, path = "/network/connections", description = "Get active peer connections",

@@ -4,34 +4,34 @@
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use log::*;
+use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VotePower};
 use tari_ootle_p2p::{PeerAddress, proto::rpc};
 use tari_ootle_storage::consensus_models::CommittedBlockProof;
-use tari_template_lib_types::Hash32;
 use tokio::sync::RwLock;
 
 use crate::network_state_sync::committee_client::ValidatorRpcSession;
 
 const LOG_TARGET: &str = "tari::indexer::network_state_sync::validator_status";
 
-/// A *verified* snapshot of how far a validator has committed, as proven to the indexer during a
-/// recent sync round. Unlike a self-reported consensus state, every field here is authenticated by
-/// the shard group committee's quorum signatures, so a byzantine or lagging validator cannot
-/// inflate its apparent progress.
+/// A snapshot of one validator's self-reported consensus pacemaker state, observed by the indexer
+/// during a recent sync round.
+///
+/// This is diagnostic only and intentionally *unverified* - it backs the Validators page and is not
+/// trusted for sync-source selection. The trust decision is made separately by verifying the peer's
+/// committed block proof (see [`ValidatorStatusMonitor::probe`]).
 #[derive(Debug, Clone)]
 pub struct ValidatorStatusSnapshot {
     pub shard_group: ShardGroup,
     pub epoch: Epoch,
     pub height: NodeHeight,
-    /// State merkle root of the validator's latest committed block (verified).
-    pub state_merkle_root: Hash32,
+    pub state: ConsensusCurrentState,
     pub observed_at: SystemTime,
 }
 
-/// In-memory, lazily-populated map of the last *verified* committed tip of each validator the
-/// indexer has contacted. Entries are timestamped so callers can decide whether the data is fresh
-/// enough to be trustworthy.
+/// In-memory, lazily-populated map of the last observed consensus state of each validator the
+/// indexer has contacted. Entries are timestamped so callers can decide whether the data is fresh.
 #[derive(Clone)]
 pub struct ValidatorStatusMonitor {
     epoch_manager: EpochManagerHandle<PeerAddress>,
@@ -51,23 +51,75 @@ impl ValidatorStatusMonitor {
         guard.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
-    /// Fetch and verify the validator's latest committed block proof, recording the verified tip.
+    /// Probe a validator before trusting it as a sync source.
     ///
-    /// Unlike the previous unauthenticated consensus-state probe, this proves how far the peer has
-    /// committed: the returned proof is validated against the shard group committee, so the peer
-    /// cannot lie about its height or state root.
+    /// The meaningful check is the verification of the peer's latest committed block proof against
+    /// the shard group committee: a forged or malformed proof yields [`ProbeError::InvalidProof`] so
+    /// callers can refuse to sync from that peer. Other verification failures are non-fatal (e.g.
+    /// the peer has nothing committed yet).
     ///
-    /// Returns the verified snapshot on success. A [`ProbeError::InvalidProof`] is a strong
-    /// negative signal — the peer served a forged or malformed proof — and callers should avoid
-    /// syncing from it. Other errors are non-fatal (e.g. the peer simply has nothing committed yet,
-    /// or the indexer lacks the committee for the proof's epoch).
-    pub async fn probe(
-        &self,
-        session: &mut ValidatorRpcSession,
-        shard_group: ShardGroup,
-    ) -> Result<ValidatorStatusSnapshot, ProbeError> {
+    /// As a side effect, the peer's self-reported consensus state is recorded for the diagnostic
+    /// Validators page. That status is deliberately *not* trusted for sync-source selection.
+    pub async fn probe(&self, session: &mut ValidatorRpcSession, shard_group: ShardGroup) -> Result<(), ProbeError> {
         let peer = *session.peer_address();
 
+        // The trust decision: verify how far the peer has actually committed. A forged proof gates
+        // the peer out; other failures are tolerated.
+        if let Err(e) = self.verify_committed_tip(session).await {
+            if e.is_invalid_proof() {
+                return Err(e);
+            }
+            debug!(target: LOG_TARGET, "Could not verify committed tip for validator {peer}: {e}");
+        }
+
+        // Unverified consensus status for diagnostics. A failure here does not disqualify the peer;
+        // it just means we have no fresh diagnostic snapshot to show.
+        let resp = match session.get_consensus_state(rpc::GetConsensusStateRequest {}).await {
+            Ok(r) => r,
+            Err(e) => {
+                debug!(target: LOG_TARGET, "Consensus state probe failed for validator {peer}: {e}");
+                return Ok(());
+            },
+        };
+
+        let Some(epoch) = resp.epoch.map(Epoch::from) else {
+            warn!(target: LOG_TARGET, "Consensus state response from validator {peer} is missing epoch");
+            return Ok(());
+        };
+
+        let state = match rpc::ConsensusState::try_from(resp.state) {
+            Ok(s) => ConsensusCurrentState::from(s),
+            Err(e) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "Consensus state response from validator {peer} has invalid state discriminant ({}): {e}",
+                    resp.state
+                );
+                return Ok(());
+            },
+        };
+
+        let snapshot = ValidatorStatusSnapshot {
+            shard_group,
+            epoch,
+            height: NodeHeight::from(resp.height),
+            state,
+            observed_at: SystemTime::now(),
+        };
+
+        debug!(
+            target: LOG_TARGET,
+            "Observed validator {peer} in {shard_group}: epoch={}, height={}, state={}",
+            snapshot.epoch, snapshot.height, snapshot.state
+        );
+
+        self.inner.write().await.insert(peer, snapshot);
+        Ok(())
+    }
+
+    /// Fetch and verify the validator's latest committed block proof against its shard group
+    /// committee. Verification is the basis for deciding whether to trust the peer as a sync source.
+    async fn verify_committed_tip(&self, session: &mut ValidatorRpcSession) -> Result<(), ProbeError> {
         let resp = session
             .get_committed_block_proof(rpc::GetCommittedBlockProofRequest {})
             .await
@@ -89,28 +141,12 @@ impl ValidatorStatusMonitor {
             .await
             .map_err(|e| ProbeError::CommitteeUnavailable(e.to_string()))?;
 
-        let verified = proof
+        proof
             .validate(committee.quorum_threshold(), |pk| {
                 Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero))
             })
-            .map_err(|e| ProbeError::InvalidProof(e.to_string()))?;
-
-        let snapshot = ValidatorStatusSnapshot {
-            shard_group,
-            epoch: verified.epoch,
-            height: verified.height,
-            state_merkle_root: verified.state_merkle_root.into_array().into(),
-            observed_at: SystemTime::now(),
-        };
-
-        debug!(
-            target: LOG_TARGET,
-            "✅ Verified validator {peer} tip in {shard_group}: epoch={}, height={}, state_root={}",
-            snapshot.epoch, snapshot.height, snapshot.state_merkle_root
-        );
-
-        self.inner.write().await.insert(peer, snapshot.clone());
-        Ok(snapshot)
+            .map(|_verified_tip| ())
+            .map_err(|e| ProbeError::InvalidProof(e.to_string()))
     }
 }
 

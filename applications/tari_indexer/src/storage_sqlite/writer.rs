@@ -414,7 +414,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         let epoch = root.epoch.as_u64() as i64;
         let shard_group = root.shard_group.to_parsable_string();
 
-        diesel::insert_into(verified_state_roots::table)
+        let inserted = diesel::insert_into(verified_state_roots::table)
             .values(NewVerifiedStateRoot {
                 epoch,
                 shard_group: shard_group.clone(),
@@ -430,6 +430,11 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .do_nothing()
             .execute(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        // The root was already recorded: the ring is unchanged, so skip the prune queries.
+        if inserted == 0 {
+            return Ok(());
+        }
 
         // Prune everything below the RING_SIZE-th most recent committed height for this key. Committed
         // heights are unique per (epoch, shard_group), so this retains exactly the newest RING_SIZE.

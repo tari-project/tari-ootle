@@ -228,16 +228,14 @@ impl NetworkWideStateSync {
                 .try_with_random_members(|mut session| {
                     let validator_status = validator_status.clone();
                     async move {
-                        // Verify how far this peer has committed before trusting it as a sync
-                        // source. A forged/malformed proof disqualifies the peer so another member
-                        // is tried; other probe failures are non-fatal.
+                        // Verify how far this peer has committed before trusting it as a sync source.
+                        // `probe` only returns Err for a forged/malformed proof (other failures are
+                        // logged internally and return Ok(None)), which disqualifies the peer so
+                        // another committee member is tried.
                         if let Err(e) = validator_status.probe(&mut session, shard_group).await {
-                            if e.is_invalid_proof() {
-                                return Err(NetworkStateSyncError::InvalidCommitProof {
-                                    details: format!("shard group {shard_group}: {e}"),
-                                });
-                            }
-                            debug!(target: LOG_TARGET, "Could not verify tip for validator {} in shard group {}: {}", session.peer_address(), shard_group, e);
+                            return Err(NetworkStateSyncError::InvalidCommitProof {
+                                details: format!("shard group {shard_group}: {e}"),
+                            });
                         }
                         let resp = session
                             .get_checkpoints(rpc::GetCheckpointsRequest {
@@ -380,12 +378,10 @@ impl NetworkWideStateSync {
                     }
                 },
                 Ok(None) => {},
-                Err(e) if e.is_invalid_proof() => {
+                // probe only returns Err for an invalid (forged) commit proof.
+                Err(e) => {
                     warn!(target: LOG_TARGET, "⚠️ Validator {} for shard group {} served an INVALID commit proof: {}. Skipping this round.", session.peer_address(), shard_group, e);
                     continue;
-                },
-                Err(e) => {
-                    debug!(target: LOG_TARGET, "Could not verify tip for validator {} in shard group {}: {}", session.peer_address(), shard_group, e);
                 },
             }
             if !has_synced_global_shard {

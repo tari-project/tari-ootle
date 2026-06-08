@@ -35,6 +35,7 @@ use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
     NumPreshards,
+    ShardGroup,
     SubstateRequirement,
     displayable::Displayable,
     optional::Optional,
@@ -126,6 +127,43 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
         } else {
             Err(RpcStatus::general("Consensus is not running on this node"))
         }
+    }
+
+    /// Attaches a commit proof and a substate value proof for `substate` to `resp`, anchored to the
+    /// latest committed block. Generated within the caller's read tx (the same one used for the
+    /// substate lookup) so the value proof's group root matches the commit proof's block header. If
+    /// nothing is committed beyond the epoch genesis yet, no proof is attached and the caller treats
+    /// the result as unverified.
+    fn attach_substate_proof<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        shard_group: ShardGroup,
+        num_preshards: NumPreshards,
+        substate: &SubstateRecord,
+        resp: &mut GetSubstateResponse,
+    ) -> Result<(), RpcStatus> {
+        let epoch = self.consensus.current_epoch();
+        let last_executed = tx
+            .last_executed_get(epoch)
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        if last_executed.height.is_zero() {
+            return Ok(());
+        }
+
+        let block = Block::get(tx, &last_executed.block_id).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let commit_qc = block
+            .get_commit_qc(tx)
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let commit_proof =
+            generate_block_commit_proof(tx, &commit_qc, &block).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let value_proof = generate_substate_proof(tx, shard_group, &substate.to_versioned_substate_id(), num_preshards)
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
+        resp.commit_proof = CommittedBlockProof::new(commit_proof).to_bytes();
+        resp.substate_value_proof =
+            tari_bor::serde_codec::to_vec(&value_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        resp.proof_epoch = substate.created().at_epoch.as_u64();
+        Ok(())
     }
 }
 
@@ -248,35 +286,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             let info = local_committee_info
                 .as_ref()
                 .expect("committee info is fetched whenever include_proof is set");
-            // Anchor the proof to the latest committed block. Generated within the same read tx as
-            // the substate lookup so the substate proof's group root matches the commit proof's
-            // block header. If nothing is committed beyond the epoch genesis yet, no proof is
-            // attached (the caller treats this as "unverified").
-            let epoch = self.consensus.current_epoch();
-            let last_executed = tx
-                .last_executed_get(epoch)
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-            if !last_executed.height.is_zero() {
-                let block =
-                    Block::get(&tx, &last_executed.block_id).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-                let commit_qc = block
-                    .get_commit_qc(&tx)
-                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-                let commit_proof = generate_block_commit_proof(&tx, &commit_qc, &block)
-                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-                let value_proof = generate_substate_proof(
-                    &tx,
-                    info.shard_group(),
-                    &substate.to_versioned_substate_id(),
-                    info.num_preshards(),
-                )
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-                resp.commit_proof = CommittedBlockProof::new(commit_proof).to_bytes();
-                resp.substate_value_proof =
-                    tari_bor::serde_codec::to_vec(&value_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-                resp.proof_epoch = substate.created().at_epoch.as_u64();
-            }
+            self.attach_substate_proof(&tx, info.shard_group(), info.num_preshards(), &substate, &mut resp)?;
         }
 
         Ok(Response::new(resp))

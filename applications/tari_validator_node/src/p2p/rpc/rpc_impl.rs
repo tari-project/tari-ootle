@@ -79,6 +79,7 @@ use tari_ootle_storage::{
         SubstateValueFilterFlags,
         TransactionRecord,
     },
+    generate_substate_proof,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
@@ -168,25 +169,32 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .map_err(|e| RpcStatus::bad_request(format!("Invalid substate requirement: {e}")))?
             .ok_or_else(|| RpcStatus::bad_request("Missing substate requirement"))?;
 
-        if !substate_requirement.substate_id().is_global() {
+        // We need our local committee info to (a) confirm we store a non-global substate and (b) know
+        // our shard group + preshard count when generating a proof.
+        let local_committee_info = if !substate_requirement.substate_id().is_global() || req.include_proof {
             let current_epoch = self
                 .epoch_manager
                 .current_epoch()
                 .await
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-            let local_committee_info = self
+            let info = self
                 .epoch_manager
                 .get_local_committee_info(current_epoch)
                 .await
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-            if !local_committee_info.includes_substate_id(substate_requirement.substate_id()) {
+            if !substate_requirement.substate_id().is_global() &&
+                !info.includes_substate_id(substate_requirement.substate_id())
+            {
                 return Err(RpcStatus::bad_request(format!(
                     "This node in {} does not store {}",
-                    local_committee_info.shard_group(),
+                    info.shard_group(),
                     substate_requirement
                 )));
             }
-        }
+            Some(info)
+        } else {
+            None
+        };
 
         debug!(
             target: LOG_TARGET,
@@ -212,7 +220,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             }));
         };
 
-        let resp = if let Some(destroyed) = substate.destroyed() {
+        let mut resp = if let Some(destroyed) = substate.destroyed() {
             GetSubstateResponse {
                 status: SubstateStatus::Down as i32,
                 address: substate.substate_id().to_bytes(),
@@ -220,6 +228,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 version: substate.version(),
                 created_at_state_version: substate.created().at_state_version,
                 destroyed_at_state_version: destroyed.at_state_version,
+                ..Default::default()
             }
         } else {
             GetSubstateResponse {
@@ -231,9 +240,44 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                     .map(|v| v.to_bytes())
                     .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
                 created_at_state_version: substate.created().at_state_version,
-                destroyed_at_state_version: Default::default(),
+                ..Default::default()
             }
         };
+
+        if req.include_proof {
+            let info = local_committee_info
+                .as_ref()
+                .expect("committee info is fetched whenever include_proof is set");
+            // Anchor the proof to the latest committed block. Generated within the same read tx as
+            // the substate lookup so the substate proof's group root matches the commit proof's
+            // block header. If nothing is committed beyond the epoch genesis yet, no proof is
+            // attached (the caller treats this as "unverified").
+            let epoch = self.consensus.current_epoch();
+            let last_executed = tx
+                .last_executed_get(epoch)
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            if !last_executed.height.is_zero() {
+                let block =
+                    Block::get(&tx, &last_executed.block_id).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+                let commit_qc = block
+                    .get_commit_qc(&tx)
+                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+                let commit_proof = generate_block_commit_proof(&tx, &commit_qc, &block)
+                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+                let value_proof = generate_substate_proof(
+                    &tx,
+                    info.shard_group(),
+                    &substate.to_versioned_substate_id(),
+                    info.num_preshards(),
+                )
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
+                resp.commit_proof = CommittedBlockProof::new(commit_proof).to_bytes();
+                resp.substate_value_proof =
+                    tari_bor::serde_codec::to_vec(&value_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+                resp.proof_epoch = substate.created().at_epoch.as_u64();
+            }
+        }
 
         Ok(Response::new(resp))
     }

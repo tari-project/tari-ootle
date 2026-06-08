@@ -212,6 +212,8 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
 
         let request = proto::rpc::GetSubstateRequest {
             substate_requirement: Some(substate_req.into()),
+            // Proof verification is wired in a follow-up; request the unverified value for now.
+            include_proof: false,
         };
 
         let resp = client.get_substate(request).await?;

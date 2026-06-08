@@ -91,6 +91,9 @@ message GetPeersResponse {
 
 message GetSubstateRequest {
   tari.ootle.common.SubstateRequirement substate_requirement = 1;
+  // If true, the responder includes a verifiable proof of the substate's committed value (or
+  // absence) against the latest committed shard-group state merkle root.
+  bool include_proof = 2;
 }
 
 message GetSubstateResponse {
@@ -102,6 +105,17 @@ message GetSubstateResponse {
   uint64 created_at_state_version = 5;
   // Optional (i.e. 0 if not destroyed)
   uint64 destroyed_at_state_version = 6;
+  // Proof fields below are only populated when the request set `include_proof` and the responder
+  // had a committed block to anchor against. They are empty otherwise.
+  // CBOR-encoded SubstateValueProof: the substate leaf is included (status Up) in / excluded
+  // (status Down) from its shard, which is in turn committed in the shard-group state merkle root.
+  bytes substate_value_proof = 7;
+  // CBOR-encoded CommittedBlockProof: anchors the trusted shard-group state merkle root by proving
+  // the committing block header against the shard group committee.
+  bytes commit_proof = 8;
+  // The epoch the substate value hash was computed at, needed by the verifier to re-derive the leaf
+  // value hash and bind it to the returned substate value. Only meaningful for status Up.
+  uint64 proof_epoch = 9;
 }
 
 enum SubstateStatus {

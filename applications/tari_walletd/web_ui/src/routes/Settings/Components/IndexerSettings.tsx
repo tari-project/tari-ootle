@@ -29,7 +29,7 @@ import Typography from "@mui/material/Typography";
 import { GetNetworkInfoResponse } from "@tari-project/ootle-ts-bindings";
 import { indexerGetNetworkInfo, settingsSet } from "@utils/json_rpc";
 import React, { useEffect, useState } from "react";
-import { Form } from "react-router";
+import { Form } from "react-router-dom";
 
 function validateUrl(value: string): string | null {
   try {

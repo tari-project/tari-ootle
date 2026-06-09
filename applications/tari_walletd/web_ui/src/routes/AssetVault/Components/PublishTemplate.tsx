@@ -47,7 +47,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { base64FromArrayBuffer } from "@utils/helpers";
 import { DragEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Form } from "react-router";
+import { Form } from "react-router-dom";
 
 const MAX_WASM_SIZE = 3 * 1024 * 1024; // 3 MiB
 

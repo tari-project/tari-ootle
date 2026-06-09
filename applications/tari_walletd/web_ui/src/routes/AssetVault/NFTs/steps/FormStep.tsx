@@ -38,7 +38,7 @@ import {
 import { validateOotleAddress } from "@tari-project/ootle-ts-bindings/dist/helpers/ootleAddress";
 import { displayNftId, substateIdToString } from "@utils/helpers";
 import { FormEvent, useMemo, useState } from "react";
-import { Form } from "react-router";
+import { Form } from "react-router-dom";
 
 interface FormStepProps {
   account: Account;

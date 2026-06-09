@@ -41,7 +41,7 @@ import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage, shortenString } from "@utils/helpers";
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link } from "react-router-dom";
 import TimeChip from "./TimeChip";
 
 interface TransactionsProps {

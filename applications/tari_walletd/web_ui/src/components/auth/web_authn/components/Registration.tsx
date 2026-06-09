@@ -12,7 +12,7 @@ import Typography from "@mui/material/Typography";
 import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistration } from "@utils/json_rpc";
 import { Buffer } from "buffer";
 import { FormEvent, useState } from "react";
-import { Form } from "react-router";
+import { Form } from "react-router-dom";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 

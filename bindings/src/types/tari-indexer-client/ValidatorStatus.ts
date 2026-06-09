@@ -15,6 +15,10 @@ export type ValidatorStatus = {
   shard_group: ShardGroup;
   epoch: Epoch;
   height: bigint;
+  /**
+   * The validator's self-reported consensus pacemaker state. Diagnostic only - this is not
+   * verified, so it should not be relied upon for anything but display.
+   */
   state: ValidatorConsensusState;
   /**
    * Unix timestamp (seconds) at which this snapshot was captured. Clients

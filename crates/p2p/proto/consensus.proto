@@ -19,6 +19,7 @@ message HotStuffMessage {
     MissingTransactionsRequest request_missing_transactions = 7;
     MissingTransactionsResponse requested_transaction = 8;
     SyncRequest sync_request = 9;
+    ProposalMessage catch_up_sync_response = 10;
   }
 }
 
@@ -46,6 +47,7 @@ message ForeignProposalMessage {
 message ForeignProposalNotification {
   bytes block_id = 1;
   uint64 epoch = 2;
+  repeated uint32 shard_groups = 3;
 }
 
 message ForeignProposalRequest {

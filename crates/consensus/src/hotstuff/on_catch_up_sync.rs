@@ -42,10 +42,6 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
             NodeHeight(1)
         };
 
-        // Reset leader timeout to previous height since we're behind and need to process catch up blocks. This is the
-        // only case where the view is non-monotonic.
-        self.pacemaker.reset_view(epoch, block_height, block_height).await?;
-
         info!(
             target: LOG_TARGET,
             "⏰ Catch up required from block {}/{} from {} (current view: {})",

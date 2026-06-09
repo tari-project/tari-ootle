@@ -122,6 +122,18 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    verified_state_roots (id) {
+        id -> Integer,
+        epoch -> BigInt,
+        shard_group -> Text,
+        block_height -> BigInt,
+        block_hash -> Text,
+        state_merkle_root -> Text,
+        validated_at -> Timestamp,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(
     epoch_checkpoints,
     events,
@@ -132,5 +144,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction_receipts,
     transactions,
     utxos,
+    verified_state_roots,
     watched_substates,
 );

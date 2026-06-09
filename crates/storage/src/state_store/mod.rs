@@ -2,11 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod shard_scoped_state_tree;
+mod substate_value_proof;
 use std::{collections::HashMap, ops::Deref};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 pub use shard_scoped_state_tree::*;
+pub use substate_value_proof::*;
 use tari_consensus_types::{
     BlockId,
     Decision,

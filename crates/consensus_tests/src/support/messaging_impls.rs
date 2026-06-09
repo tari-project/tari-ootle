@@ -5,8 +5,6 @@ use tari_consensus::{
     messages::HotstuffMessage,
     traits::{InboundMessaging, InboundMessagingError, OutboundMessaging, OutboundMessagingError},
 };
-use tari_epoch_manager::EpochManagerReader;
-use tari_ootle_common_types::ShardGroup;
 use tokio::sync::mpsc;
 
 use super::epoch_manager::TestEpochManager;
@@ -78,20 +76,16 @@ impl OutboundMessaging for TestOutboundMessaging {
         })
     }
 
-    async fn broadcast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    async fn broadcast<T>(&mut self, message: T) -> Result<(), OutboundMessagingError>
     where T: Into<HotstuffMessage> + Send {
-        // TODO: technically we should use the consensus epoch here, but current tests will not trigger this bug
-        let epoch = self
+        // A broadcast is gossiped on a single network-wide topic, so it reaches every validator. Messages relevant
+        // only to a subset of shard groups carry that audience in their payload and are filtered by the receiver.
+        let peers = self
             .epoch_manager
-            .current_epoch()
+            .all_validators()
             .await
-            .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?;
-        let committee = self
-            .epoch_manager
-            .get_committee_by_shard_group(epoch, shard_group)
-            .await
-            .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?;
-        let peers = committee.address_iter().cloned();
+            .into_iter()
+            .map(|(vn, _)| vn.address);
         self.multicast(peers, message).await
     }
 }

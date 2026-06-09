@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 #[cfg(test)]
+mod catch_up_rewind;
+#[cfg(test)]
 mod consensus;
 #[cfg(test)]
 mod dummy_blocks;

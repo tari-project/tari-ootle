@@ -7,7 +7,7 @@ repository.workspace = true
 license.workspace = true
 
 [features]
-metrics = ["libp2p/metrics", "libp2p-substream/metrics", "libp2p-messaging/metrics"]
+metrics = ["libp2p/metrics", "libp2p-substream/metrics", "libp2p-messaging/metrics", "prometheus-client"]
 
 [dependencies]
 libp2p = { workspace = true, features = [
@@ -19,4 +19,5 @@ libp2p-messaging = { workspace = true, features = ["prost"] }
 libp2p-substream = { workspace = true }
 libp2p-peer-store = { workspace = true }
 
+prometheus-client = { workspace = true, optional = true }
 thiserror = { workspace = true }

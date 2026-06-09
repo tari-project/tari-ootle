@@ -162,12 +162,37 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             foreign_proposals,
         } = msg;
 
-        let maybe_valid_block = self.store.with_read_tx(|tx| {
+        // Idempotent view advancement for already-processed blocks.
+        //
+        // Normally a block we have already stored is a no-op: the validate/process path below is
+        // skipped, and so is the `enter_view` it would have performed. That is correct in steady
+        // state, but it is unsafe after a non-monotonic catch-up view reset
+        // (`request_catch_up_sync`), which can move the pacemaker view *below* a block we have
+        // already stored. In that state every re-delivery of the bridging block (via catch-up or
+        // gossip) is deduplicated here without advancing the view, so the view can never climb back
+        // to the stored tip: the node buffers all higher proposals as "future" and re-requests
+        // catch-up forever. Making the re-entry idempotent — advancing to the view the stored block
+        // justifies — lets the node recover. `enter_view` is monotonic, so this never rewinds.
+        let already_processed = self.store.with_read_tx(|tx| {
             if Block::record_exists(tx, block.id())? {
-                info!(target: LOG_TARGET, "🧊 Block {} has already been processed", block);
-                return Ok(None);
+                Ok::<_, HotStuffError>(Some(Block::get(tx, block.id())?))
+            } else {
+                Ok(None)
             }
+        })?;
+        if let Some(existing) = already_processed {
+            info!(target: LOG_TARGET, "🧊 Block {} has already been processed", existing);
+            let justify_height = existing.justify().height();
+            let view_height = existing
+                .timeout_certificate()
+                .map_or(justify_height, |tc| tc.height().max(justify_height));
+            self.pacemaker
+                .enter_view(existing.epoch(), view_height, justify_height)
+                .await?;
+            return Ok(None);
+        }
 
+        let maybe_valid_block = self.store.with_read_tx(|tx| {
             self.validate_block(
                 tx,
                 epoch_state.epoch(),
@@ -1099,37 +1124,34 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     }
     info!(
         target: LOG_TARGET,
-        "🌐 FOREIGN PROPOSE: new commit block to {} foreign shard group(s). {}",
-        non_local_shard_groups.len(),
+        "🌐 FOREIGN PROPOSE: Broadcasting new commit block {} notification to {} foreign shard group(s).",
         block,
+        non_local_shard_groups.len(),
     );
 
-    for shard_group in non_local_shard_groups {
-        info!(
+    // The notification is gossiped on a single network-wide topic, so it only needs to be published once. The target
+    // shard groups are carried in the message and receivers that are not in the audience ignore it.
+    // TODO: all local VNs will broadcast this. Perhaps we can reduce this to $f+1$.
+    // The shard groups are sorted so that the encoded payload is deterministic: every local VN produces identical
+    // bytes for the same block, allowing gossipsub's content-addressed message id to deduplicate the broadcasts.
+    let mut shard_groups = non_local_shard_groups.into_iter().collect::<Vec<_>>();
+    shard_groups.sort_by_key(|sg| sg.encode_as_u32());
+    if let Err(err) = outbound_messaging
+        .broadcast(HotstuffMessage::ForeignProposalNotification(
+            ForeignProposalNotificationMessage {
+                block_id: *block.id(),
+                epoch: block.epoch(),
+                shard_groups,
+            },
+        ))
+        .await
+    {
+        error!(
             target: LOG_TARGET,
-            "🌐 FOREIGN PROPOSE: Broadcasting commit block {} notification to shard group {}.",
-            &block,
-            shard_group,
+            "❌ Error broadcasting foreign proposal notification for block {}: {}",
+            block,
+            err
         );
-        // TODO: all local VNs will broadcast this. This message only needs to be published once. Perhaps we can reduce
-        // this to $f+1$.
-        if let Err(err) = outbound_messaging
-            .broadcast(
-                shard_group,
-                HotstuffMessage::ForeignProposalNotification(ForeignProposalNotificationMessage {
-                    block_id: *block.id(),
-                    epoch: block.epoch(),
-                }),
-            )
-            .await
-        {
-            error!(
-                target: LOG_TARGET,
-                "❌ Error broadcasting foreign proposal notification to shard group {}: {}",
-                shard_group,
-                err
-            );
-        }
     }
 
     Ok(())

@@ -88,6 +88,8 @@ impl ConfigOverrideProvider for Cli {
         let mut overrides = self.common.get_config_property_overrides(network);
         overrides.push(("network".to_string(), network.to_string()));
         overrides.push(("validator_node.override_from".to_string(), network.to_string()));
+        overrides.push(("epoch_oracle.override_from".to_string(), network.to_string()));
+        overrides.push(("p2p.override_from".to_string(), network.to_string()));
         overrides.push(("p2p.seeds.override_from".to_string(), network.to_string()));
 
         if let Some(ref json_rpc_address) = self.json_rpc_listener_address {
@@ -142,15 +144,8 @@ impl ConfigOverrideProvider for Cli {
                 url.to_string(),
             ));
         }
-        if let Some(ref config_path) = self.epoch_oracle_config {
-            overrides.push((
-                "epoch_oracle.configured.config_file".to_string(),
-                config_path
-                    .to_str()
-                    .expect("epoch_oracle_config must be a UTF-8 string")
-                    .to_string(),
-            ));
-        }
+        // `epoch_oracle_config` is applied after the config is loaded (see main) so it can override an inline
+        // `config_json` shipped in a network preset without tripping the "both set" error.
         overrides
     }
 }

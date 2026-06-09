@@ -96,6 +96,17 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 }
                 self.process_local_proposal(current_height, from, epoch_state, *msg)
             },
+            HotstuffMessage::CatchUpSyncResponse(msg) => {
+                if !epoch_state.local_committee().contains(&from) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❌ Received catch-up response from non-committee member {}. Discarding message.",
+                        from
+                    );
+                    return Ok(MessageValidationResult::Discard);
+                }
+                self.process_catch_up_response(from, epoch_state, *msg)
+            },
             HotstuffMessage::ForeignProposal(proposal) => {
                 self.process_foreign_proposal(epoch_state, from, proposal).await
             },
@@ -185,6 +196,55 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         }
 
         self.handle_missing_transactions_local_block(from, epoch_state.local_committee_info(), proposal)
+    }
+
+    /// Validate a block delivered via catch-up sync. This is an ordered block import, so — unlike
+    /// [`Self::process_local_proposal`] — it is intentionally NOT gated on the current view height:
+    /// a node whose view has advanced beyond its stored blocks must still ingest the gap. Stateless
+    /// validation and missing-transaction parking are identical to the live-proposal path.
+    fn process_catch_up_response(
+        &mut self,
+        from: TConsensusSpec::Addr,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        proposal: ProposalMessage,
+    ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
+        info!(
+            target: LOG_TARGET,
+            "🌐 new unvalidated CATCH-UP block {} from {}",
+            proposal.block,
+            from,
+        );
+
+        if let Err(err) = self.check_local_proposal(&proposal.block, epoch_state) {
+            return Ok(MessageValidationResult::Invalid {
+                from,
+                message: HotstuffMessage::new_catch_up_sync_response(proposal),
+                err,
+            });
+        }
+
+        let missing_tx_ids = self.store.with_write_tx(|tx| {
+            self.check_for_missing_transactions(tx, epoch_state.local_committee_info(), &proposal)
+        })?;
+
+        if missing_tx_ids.is_empty() {
+            return Ok(MessageValidationResult::Ready {
+                from,
+                message: HotstuffMessage::new_catch_up_sync_response(proposal),
+            });
+        }
+
+        self.publish_event(HotstuffEvent::ProposedBlockParked {
+            block: proposal.block.as_leaf(),
+            num_missing_txs: missing_tx_ids.len(),
+            num_awaiting_txs: 0,
+        });
+
+        Ok(MessageValidationResult::ParkedProposal {
+            block_id: *proposal.block.id(),
+            epoch: proposal.block.epoch(),
+            missing_txs: missing_tx_ids,
+        })
     }
 
     pub fn update_parked_blocks<'a, I: IntoIterator<Item = &'a TransactionId> + ExactSizeIterator>(

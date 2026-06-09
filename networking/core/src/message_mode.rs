@@ -56,11 +56,14 @@ impl<TMsg: MessageSpec> MessagingMode<TMsg> {
             ..
         } = self
         {
-            let (prefix, _) = msg
+            // Topics may be a bare prefix (single global topic, e.g. "consensus") or a prefixed topic
+            // (e.g. "transactions-0-15"). Route on the prefix before the first delimiter, falling back to the
+            // whole topic when there is no delimiter.
+            let prefix = msg
                 .topic
                 .as_str()
                 .split_once(TOPIC_DELIMITER)
-                .ok_or_else(|| GossipSendError::InvalidToken(msg.topic.clone().into_string()))?;
+                .map_or_else(|| msg.topic.as_str(), |(prefix, _)| prefix);
             let tx_gossip_messages = tx_gossip_messages_by_topic
                 .get(prefix)
                 .ok_or_else(|| GossipSendError::InvalidToken(msg.topic.clone().into_string()))?;

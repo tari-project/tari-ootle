@@ -23,7 +23,6 @@
 use log::*;
 use tari_consensus::messages::HotstuffMessage;
 use tari_networking::{NetworkingHandle, NetworkingService};
-use tari_ootle_common_types::ShardGroup;
 use tari_ootle_p2p::{TariMessagingSpec, proto};
 use tari_swarm::messaging::{
     Codec,
@@ -31,7 +30,7 @@ use tari_swarm::messaging::{
 };
 
 use super::ConsensusGossipError;
-use crate::p2p::services::consensus_gossip::service::shard_group_to_topic;
+use crate::p2p::services::consensus_gossip::service::topic;
 
 const LOG_TARGET: &str = "tari::validator_node::consensus_gossip";
 
@@ -49,12 +48,8 @@ impl ConsensusGossipHandle {
         }
     }
 
-    pub async fn publish(
-        &mut self,
-        shard_group: ShardGroup,
-        message: HotstuffMessage,
-    ) -> Result<(), ConsensusGossipError> {
-        let topic = shard_group_to_topic(shard_group);
+    pub async fn publish(&mut self, message: HotstuffMessage) -> Result<(), ConsensusGossipError> {
+        let topic = topic();
 
         let message = proto::consensus::HotStuffMessage::from(&message);
         let encoded_len = message.encoded_len();

@@ -69,6 +69,9 @@ pub struct GetSubstateResponse {
     pub version: u32,
     #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
     pub substate: SubstateValue,
+    /// True when the indexer verified this substate's value against the shard group committee (via a
+    /// merkle proof). False when proofs are disabled and the value was served unverified.
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -659,6 +662,8 @@ pub struct ValidatorStatus {
     pub epoch: Epoch,
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub height: u64,
+    /// The validator's self-reported consensus pacemaker state. Diagnostic only - this is not
+    /// verified, so it should not be relied upon for anything but display.
     pub state: ValidatorConsensusState,
     /// Unix timestamp (seconds) at which this snapshot was captured. Clients
     /// can derive the freshness of the snapshot by comparing this to the

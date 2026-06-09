@@ -357,3 +357,126 @@ fn proposer_accumulated_data_must_come_from_justify_on_timeout_recovery() {
         "regression: initialising candidate from highest_seen would not match validators"
     );
 }
+
+/// Regression test for the proposer-side of the leader-failure recovery fork (defect B).
+///
+/// After a timeout, the next leader's proposal must extend a block the whole committee
+/// deterministically agrees on: the HighQC's justified block, or a dummy chain extending it.
+/// Validators reconstruct exactly that chain from the HighQC carried in the candidate
+/// (`calculate_dummy_blocks_from_justify`) and require the candidate's parent to equal the last
+/// dummy. When the leader's `HighestSeenBlock` is an *uncertified* real block sitting above the
+/// HighQC (`leaf > HighPC` — accepted locally but never QC'd, e.g. a re-proposed
+/// already-committed transaction whose votes the rest of the committee withholds), the proposer
+/// must NOT extend that real block. Its id differs from the dummy every validator recomputes, so
+/// the proposal is rejected as `CandidateBlockDoesNotExtendJustify` and the committee forks on
+/// every timeout round. The fix anchors the proposer on the HighQC (via `justify_block.height()`),
+/// so its parent matches the validators' reconstruction.
+#[test]
+fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
+    let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+    let epoch = Epoch(8516);
+    let committee: Committee<PeerAddress> = (0u8..4)
+        .map(create_key_pair_from_seed)
+        .map(|(_, pk)| CommitteeMember {
+            address: PeerAddress::derive_from_public_key(&pk),
+            public_key: pk.to_byte_type(),
+            vote_power: VotePower::of(1),
+        })
+        .collect();
+
+    let genesis = Block::genesis(
+        Network::LocalNet,
+        epoch,
+        FixedHash::zero(),
+        shard_group,
+        FixedHash::zero(),
+        None,
+    );
+
+    let make_block = |parent, height, timestamp| {
+        let header = BlockHeader::create_unsigned(
+            Network::LocalNet,
+            parent,
+            genesis.justify().calculate_id(),
+            height,
+            epoch,
+            shard_group,
+            committee.shuffled().next().unwrap().public_key,
+            FixedHash::zero(),
+            &BTreeSet::new(),
+            0,
+            timestamp,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+        Block::new(header, genesis.justify().clone(), BTreeSet::new(), None)
+    };
+
+    // The HighQC's justified block (HighPC), at height H.
+    let high_qc_height = NodeHeight(162);
+    let justify_block = make_block(*genesis.id(), high_qc_height, 0);
+    let gap_height = high_qc_height + NodeHeight(1);
+    // After a timeout at H+1, the leader proposes the recovery block at H+2 (one dummy to fill).
+    let candidate_height = high_qc_height + NodeHeight(2);
+
+    // The dummy chain every validator reconstructs from the HighQC. The last dummy (at H+1) is the
+    // parent the candidate must extend.
+    let validator_dummies = calculate_dummy_blocks(
+        justify_block.height(),
+        candidate_height,
+        Network::LocalNet,
+        epoch,
+        shard_group,
+        *justify_block.id(),
+        justify_block.justify(),
+        &BlockId::zero(), // no early short-circuit; we want the full chain
+        *justify_block.state_merkle_root(),
+        &RoundRobinLeaderStrategy,
+        &committee,
+        justify_block.timestamp(),
+        *justify_block.header().accumulated_data(),
+        *justify_block.epoch_hash(),
+    );
+    let expected_parent = validator_dummies.last().expect("a dummy block fills the H+1 gap");
+    assert_eq!(expected_parent.height(), gap_height);
+    assert!(expected_parent.is_dummy());
+
+    // The fix: the proposer anchors on the HighQC, producing the same last dummy as the validator.
+    let fixed_parent = calculate_last_dummy_block(
+        justify_block.height(),
+        candidate_height,
+        Network::LocalNet,
+        epoch,
+        shard_group,
+        *justify_block.id(),
+        justify_block.justify(),
+        *justify_block.state_merkle_root(),
+        &RoundRobinLeaderStrategy,
+        &committee,
+        justify_block.timestamp(),
+        *justify_block.header().accumulated_data(),
+        *justify_block.epoch_hash(),
+    )
+    .expect("a dummy block fills the H+1 gap");
+    assert_eq!(
+        fixed_parent.block_id(),
+        expected_parent.id(),
+        "fixed proposer (HighQC-anchored) parent must match the validator reconstruction"
+    );
+
+    // The buggy proposer extended its HighestSeenBlock instead: a block stored at the gap height that
+    // was accepted locally but never gathered a QC (in production, the signed re-proposal of an
+    // already-committed transaction). It is a distinct block from the reconstructed dummy.
+    let uncertified_leaf = make_block(*justify_block.id(), gap_height, 1);
+    assert_eq!(uncertified_leaf.height(), expected_parent.height());
+
+    // Defect B: that real leaf is NOT the dummy validators expect at the gap height, so extending it
+    // is rejected as `CandidateBlockDoesNotExtendJustify`, forking the committee on every timeout.
+    assert_ne!(
+        uncertified_leaf.id(),
+        expected_parent.id(),
+        "uncertified leaf diverges from the validators' reconstructed dummy — extending it forks the committee"
+    );
+}

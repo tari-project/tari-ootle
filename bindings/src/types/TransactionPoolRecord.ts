@@ -30,4 +30,10 @@ export type TransactionPoolRecord = {
   locked_epoch: LockedEpoch | null;
   last_updated: string;
   last_updated_in_block: BlockId | null;
+  /**
+   * Static transaction weight (`Transaction::calculate_transaction_weight`), cached here so block
+   * proposal can budget by weight without loading the full transaction body. Computed once when the
+   * record is created.
+   */
+  transaction_weight: bigint;
 };

@@ -55,7 +55,11 @@ async fn main_inner() -> anyhow::Result<()> {
     let cli = Cli::init();
     let config_path = cli.common.config_path();
     let cfg = load_configuration(config_path, true, &cli, Some(cli.network()))?;
-    let config = ApplicationConfig::load_from(&cfg)?;
+    let mut config = ApplicationConfig::load_from(&cfg)?;
+    // An explicit oracle config file given on the CLI takes precedence over both `config_file` and `config_json`.
+    if let Some(path) = cli.epoch_oracle_config.clone() {
+        config.epoch_oracle.configured.set_config_file_override(path);
+    }
     // Remove the file if it was left behind by a previous run
     let _file = fs::remove_file(config.common.base_path.join("pid"));
     let mut shutdown = Shutdown::new();

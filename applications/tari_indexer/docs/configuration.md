@@ -120,9 +120,6 @@ Configuration for discovering and connecting to network peers.
 
 # Require DNSSEC validation for DNS seeds (default: false)
 #dns_seeds_use_dnssec = false
-
-# Rendezvous server for peer discovery (optional)
-#rendezvous_server = "public_key::/ip4/1.2.3.4/tcp/18189"
 ```
 
 ### Network-Specific Peer Seeds

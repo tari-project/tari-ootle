@@ -60,4 +60,10 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
         &self,
         req: Request<proto::GetHighQcRequest>,
     ) -> Result<Response<proto::GetHighQcResponse>, RpcStatus>;
+
+    #[rpc(method = 10)]
+    async fn get_committed_block_proof(
+        &self,
+        req: Request<proto::GetCommittedBlockProofRequest>,
+    ) -> Result<Response<proto::GetCommittedBlockProofResponse>, RpcStatus>;
 }

@@ -4,5 +4,9 @@ import type { TransactionStatus } from "../TransactionStatus";
 
 export type TransactionGetAllRequest = {
   status: TransactionStatus | null;
+  /**
+   * Filter to transactions involving this account. Transactions are linked to the account(s) they
+   * involve at submission time, so this works even for stealth transactions.
+   */
   account: ComponentAddress | null;
 };

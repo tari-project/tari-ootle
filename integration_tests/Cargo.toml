@@ -46,12 +46,12 @@ tari_ootle_wallet_sdk = { workspace = true }
 ootle_byte_type = { workspace = true }
 
 # Minotari
-minotari_console_wallet = { workspace = true }
-minotari_node = { workspace = true }
-minotari_wallet = { workspace = true }
-tari_comms = { workspace = true }
-tari_comms_dht = { workspace = true }
-tari_p2p = { workspace = true }
+minotari_console_wallet = "5.4.0-pre.3"
+minotari_node = "5.4.0-pre.3"
+minotari_wallet = "5.4.0-pre.3"
+tari_comms = "5.4.0-pre.3"
+tari_comms_dht = "5.4.0-pre.3"
+tari_p2p = "5.4.0-pre.3"
 
 anyhow = { workspace = true }
 config = { workspace = true }

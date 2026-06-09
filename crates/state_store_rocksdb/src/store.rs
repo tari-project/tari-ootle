@@ -16,10 +16,9 @@ use rocksdb::{
     IteratorMode,
     SingleThreaded,
     SliceTransform,
+    SnapshotWithThreadMode,
     TransactionDB,
     TransactionDBOptions,
-    TransactionOptions,
-    WriteOptions,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tari_ootle_common_types::NodeAddressable;
@@ -31,10 +30,8 @@ use crate::{
     error::RocksDbStorageError,
     info::ColumnFamilyInfo,
     options::DatabaseOptions,
-    read_only::ReadOnly,
     read_only_ctx::ReadOnlyContext,
     reader::RocksDbStateStoreReadTransaction,
-    snapshot::SnapshotContext,
     traits::{RocksDatabase, RocksReader},
     writer::RocksDbStateStoreWriteTransaction,
 };
@@ -93,6 +90,10 @@ pub struct RocksDbStateStore<TAddr, DB = TransactionDB> {
     _addr: PhantomData<TAddr>,
 }
 
+/// A standalone, consistent point-in-time read view over the state store (a RocksDB snapshot) — what
+/// `StateStore::create_read_tx` returns. See CONTEXT.md (read view).
+pub type ReadView<'a, TAddr> = RocksDbStateStoreReadTransaction<'a, TAddr, SnapshotWithThreadMode<'a, TransactionDB>>;
+
 impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
     pub fn open<P: AsRef<Path>>(path: P, options: DatabaseOptions) -> Result<Self, StorageError> {
         let rocks_opts = build_default_store_opts();
@@ -129,9 +130,12 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
         Ok(())
     }
 
-    pub fn snapshot(&self) -> SnapshotContext<'_, TransactionDB> {
+    /// Open a consistent point-in-time read view (a RocksDB snapshot) over the database. This is the
+    /// bound-free inherent form of [`tari_ootle_storage::StateStore::create_read_tx`]; see CONTEXT.md
+    /// (read view).
+    pub fn read_view(&self) -> ReadView<'_, TAddr> {
         let snapshot = self.db.snapshot();
-        SnapshotContext::new(&self.db, snapshot)
+        RocksDbStateStoreReadTransaction::new(&self.db, snapshot)
     }
 }
 
@@ -205,30 +209,18 @@ impl<TAddr, DB> fmt::Debug for RocksDbStateStore<TAddr, DB> {
 impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> StateStore for RocksDbStateStore<TAddr, TransactionDB> {
     type Addr = TAddr;
     type ReadTransaction<'a>
-        = RocksDbStateStoreReadTransaction<'a, Self::Addr>
-    where TAddr: 'a;
-    type Snapshot<'a>
-        = SnapshotContext<'a, TransactionDB>
+        = ReadView<'a, Self::Addr>
     where TAddr: 'a;
     type WriteTransaction<'a>
         = RocksDbStateStoreWriteTransaction<'a, Self::Addr>
     where TAddr: 'a;
 
-    fn snapshot(&self) -> Self::Snapshot<'_> {
-        let snapshot = self.db.snapshot();
-        SnapshotContext::new(&self.db, snapshot)
-    }
-
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
-        let mut opts = TransactionOptions::default();
-        let mut write_opts = WriteOptions::new();
-        // NOTE: these options are provided because I assume that they have a smaller footprint and
-        // (almost) prevent writes. If there are any issues these options, or if the assumptions
-        // are incorrect, they can be simply be defaulted.
-        opts.set_max_write_batch_size(1);
-        write_opts.disable_wal(true);
-        let tx = ReadOnly::new(self.db.transaction_opt(&write_opts, &opts));
-        Ok(RocksDbStateStoreReadTransaction::new(&self.db, tx))
+        // A standalone read view is a consistent point-in-time snapshot: it observes one committed
+        // state for its whole lifetime and is safe to use concurrently with the single writer and
+        // other readers. Reads within a write transaction stay transaction-backed for read-your-writes.
+        // See CONTEXT.md (read view).
+        Ok(self.read_view())
     }
 
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {

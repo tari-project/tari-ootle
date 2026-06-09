@@ -11,7 +11,7 @@ use crate::{
     cf_api::CfContext,
     column_families::{state_tree, substate},
     error::RocksDbStorageError,
-    reader::ReadOnlyTransaction,
+    traits::RocksReader,
 };
 
 const LOG_TARGET: &str = "tari::ootle::state_store_rocksdb::state_tree_iterator";
@@ -19,10 +19,10 @@ const LOG_TARGET: &str = "tari::ootle::state_store_rocksdb::state_tree_iterator"
 type BoxedIter<'a> =
     Box<dyn Iterator<Item = Result<((Shard, NodeKey), Node<StateTreePayload>), RocksDbStorageError>> + 'a>;
 
-pub struct LatestSubstateStateTreeIterator<'a> {
+pub struct LatestSubstateStateTreeIterator<'a, R> {
     state: IterState,
-    tree_query: CfContext<'a, ReadOnlyTransaction<'a>, state_tree::ByShardStateVersionQuery>,
-    substate_cf: CfContext<'a, ReadOnlyTransaction<'a>, substate::SubstateCf>,
+    tree_query: CfContext<'a, R, state_tree::ByShardStateVersionQuery>,
+    substate_cf: CfContext<'a, R, substate::SubstateCf>,
     shard: Shard,
     state_version: Version,
     iter: Option<BoxedIter<'a>>,
@@ -50,10 +50,10 @@ impl IterState {
     }
 }
 
-impl<'a> LatestSubstateStateTreeIterator<'a> {
+impl<'a, R: RocksReader> LatestSubstateStateTreeIterator<'a, R> {
     pub fn new(
-        tree_query: CfContext<'a, ReadOnlyTransaction<'a>, state_tree::ByShardStateVersionQuery>,
-        substate_cf: CfContext<'a, ReadOnlyTransaction<'a>, substate::SubstateCf>,
+        tree_query: CfContext<'a, R, state_tree::ByShardStateVersionQuery>,
+        substate_cf: CfContext<'a, R, substate::SubstateCf>,
         shard: Shard,
         state_version: Version,
         value_filters: SubstateValueFilterFlags,
@@ -70,7 +70,7 @@ impl<'a> LatestSubstateStateTreeIterator<'a> {
     }
 }
 
-impl Iterator for LatestSubstateStateTreeIterator<'_> {
+impl<R: RocksReader> Iterator for LatestSubstateStateTreeIterator<'_, R> {
     type Item = Result<(Version, SubstateId, Substate), StorageError>;
 
     fn next(&mut self) -> Option<Self::Item> {

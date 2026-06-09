@@ -18,6 +18,7 @@ use tari_ootle_app_utilities::transaction_executor::TransactionExecutor;
 use tari_ootle_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     consensus_models::{LockedEpoch, TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::Transaction;
@@ -63,9 +64,9 @@ where
     TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>,
     for<'a> TValidator: Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError>,
 {
-    fn validate(
+    fn validate<TTx: StateStoreReadTransaction>(
         &self,
-        _tx: &TStateStore::ReadTransaction<'_>,
+        _tx: &TTx,
         current_epoch: Epoch,
         transaction: &Transaction,
     ) -> Result<(), BlockTransactionExecutorError> {

@@ -14,8 +14,8 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
 
     fn get_template(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
         const OPERATION: &str = "RocksDbReadOnlyStateStore::get_template";
-        let cx = self.snapshot();
-        let cf = cx.cf(SubstateCf)?;
+        let tx = self.read_view();
+        let cf = tx.db().cf(SubstateCf)?;
         let address = template_address_to_substate_address(*id);
         let substate = cf.get(&address, OPERATION)?;
         let value = substate.into_substate_value().ok_or_else(|| StorageError::NotFound {
@@ -32,8 +32,8 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
 
     fn has_template(&self, id: &TemplateAddress) -> Result<bool, Self::Error> {
         const OPERATION: &str = "RocksDbReadOnlyStateStore::has_template";
-        let cx = self.snapshot();
-        let cf = cx.cf(SubstateCf)?;
+        let tx = self.read_view();
+        let cf = tx.db().cf(SubstateCf)?;
         let address = template_address_to_substate_address(*id);
         let exists = cf.exists(&address, OPERATION)?;
         Ok(exists)

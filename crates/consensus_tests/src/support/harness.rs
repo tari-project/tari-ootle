@@ -443,8 +443,8 @@ impl Test {
             "No submitted transactions to check"
         );
         self.validators.values().all(|v| {
-            let cx = v.state_store.snapshot();
-            let link_cf = cx.cf(FinalizedTransactionLinkCf).unwrap();
+            let tx = v.state_store.create_read_tx().unwrap();
+            let link_cf = tx.db().cf(FinalizedTransactionLinkCf).unwrap();
             for id in &self.submitted_transactions {
                 if !link_cf.exists(id, "test").unwrap() {
                     return false;
@@ -463,18 +463,18 @@ impl Test {
             .values()
             .filter(|vn| destination.is_for_vn(vn))
             .all(|vn| {
-                let cx = vn.state_store.snapshot();
-                let link_cf = cx.cf(FinalizedTransactionLinkCf).unwrap();
+                let tx = vn.state_store.create_read_tx().unwrap();
+                let link_cf = tx.db().cf(FinalizedTransactionLinkCf).unwrap();
                 link_cf.exists(transaction_id, "test").unwrap()
             })
     }
 
     pub async fn wait_for_n_to_be_finalized(&self, n: usize) {
         self.wait_all_for_predicate(format!("waiting for {n} to be finalized"), |vn| {
-            let cx = vn.state_store.snapshot();
-            let cf = cx.cf(TransactionCf).unwrap();
+            let tx = vn.state_store.create_read_tx().unwrap();
+            let cf = tx.db().cf(TransactionCf).unwrap();
             let transactions = cf.key_iterator(Ordering::Ascending, "test");
-            let link_cf = cx.cf(FinalizedTransactionLinkCf).unwrap();
+            let link_cf = tx.db().cf(FinalizedTransactionLinkCf).unwrap();
             let mut finalized = 0;
             let mut count = 0;
             for transaction in transactions {

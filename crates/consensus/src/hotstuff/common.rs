@@ -22,7 +22,6 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     ShardScopedTreeStoreReader,
-    StateStore,
     StateStoreReadTransaction,
     consensus_models::{
         Block,
@@ -384,8 +383,8 @@ pub(crate) fn get_leader_for_view<
     })
 }
 
-pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
-    store: &mut PendingSubstateStore<TStore>,
+pub fn apply_leader_fee_to_substate_store<TTx: StateStoreReadTransaction>(
+    store: &mut PendingSubstateStore<TTx>,
     claim_public_key_bytes: &RistrettoPublicKeyBytes,
     num_preshards: NumPreshards,
     shard: Shard,
@@ -439,16 +438,16 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn process_newly_justified_block<TStore: StateStore>(
-    tx: &<TStore as StateStore>::ReadTransaction<'_>,
+pub fn process_newly_justified_block<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
     new_leaf_block: &Block,
     justify_id: PcId,
     local_committee_info: &CommitteeInfo,
     change_set: &mut ProposedBlockChangeSet,
 ) -> Result<Vec<Block>, HotStuffError> {
     let timer = TraceTimer::info(LOG_TARGET, "Process newly justified chain");
-    fn process_newly_justified_block_inner<TStore: StateStore>(
-        tx: &<TStore as StateStore>::ReadTransaction<'_>,
+    fn process_newly_justified_block_inner<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
         block: &Block,
         new_leaf_block: &LeafBlock,
         justify_id: PcId,
@@ -567,7 +566,7 @@ pub fn process_newly_justified_block<TStore: StateStore>(
 
     let leaf = new_leaf_block.as_leaf();
     for block in blocks_to_process.iter().rev().chain(iter::once(new_leaf_block)) {
-        process_newly_justified_block_inner::<TStore>(tx, block, &leaf, justify_id, local_committee_info, change_set)?;
+        process_newly_justified_block_inner::<TTx>(tx, block, &leaf, justify_id, local_committee_info, change_set)?;
     }
 
     Ok(blocks_to_process)

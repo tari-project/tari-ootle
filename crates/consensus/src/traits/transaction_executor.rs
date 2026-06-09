@@ -7,6 +7,7 @@ use tari_engine_types::substate::Substate;
 use tari_ootle_common_types::{Epoch, SubstateRequirement, optional::IsNotFoundError};
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     StorageError,
     consensus_models::{LockedEpoch, TransactionExecution, TransactionPoolError},
 };
@@ -54,9 +55,9 @@ impl IsNotFoundError for BlockTransactionExecutorError {
 }
 
 pub trait BlockTransactionExecutor<TStateStore: StateStore> {
-    fn validate(
+    fn validate<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &TStateStore::ReadTransaction<'_>,
+        tx: &TTx,
         current_epoch: Epoch,
         transaction: &Transaction,
     ) -> Result<(), BlockTransactionExecutorError>;

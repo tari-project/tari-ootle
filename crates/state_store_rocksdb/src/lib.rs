@@ -35,7 +35,6 @@ pub use store::*;
 mod dbs;
 mod info;
 pub mod read_only_ctx;
-pub mod snapshot;
 
 mod options;
 pub use options::*;

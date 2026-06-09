@@ -83,13 +83,9 @@ pub trait StateStore {
     type Addr: NodeAddressable;
     type ReadTransaction<'a>: StateStoreReadTransaction<Addr = Self::Addr>
     where Self: 'a;
-    type WriteTransaction<'a>: StateStoreWriteTransaction<Addr = Self::Addr> + Deref<Target = Self::ReadTransaction<'a>>
+    type WriteTransaction<'a>: StateStoreWriteTransaction<Addr = Self::Addr>
+        + Deref<Target: StateStoreReadTransaction<Addr = Self::Addr>>
     where Self: 'a;
-
-    type Snapshot<'a>
-    where Self: 'a;
-
-    fn snapshot(&self) -> Self::Snapshot<'_>;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError>;
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError>;
@@ -115,13 +111,6 @@ pub trait StateStore {
     where E: From<StorageError> {
         let tx = self.create_read_tx()?;
         let ret = f(&tx)?;
-        Ok(ret)
-    }
-
-    fn with_snapshot<F: FnOnce(&Self::Snapshot<'_>) -> Result<R, E>, R, E>(&self, f: F) -> Result<R, E>
-    where E: From<StorageError> {
-        let snapshot = self.snapshot();
-        let ret = f(&snapshot)?;
         Ok(ret)
     }
 }

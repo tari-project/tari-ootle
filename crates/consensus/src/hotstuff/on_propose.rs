@@ -25,6 +25,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     consensus_models::{
         Block,
         BlockHeader,
@@ -167,7 +168,7 @@ where TConsensusSpec: ConsensusSpec
                 let high_qc = HighPc::get(&**tx, epoch)?;
                 let high_qc_cert = ProposalCertificate::get(&**tx, epoch, high_qc.id())?;
                 let next_block = on_propose.build_next_block(
-                    tx,
+                    &**tx,
                     epoch,
                     next_height,
                     highest_seen_block,
@@ -277,14 +278,14 @@ where TConsensusSpec: ConsensusSpec
     }
 
     /// Returns Ok(None) if the command cannot be sequenced yet due to lock conflicts.
-    fn transaction_pool_record_to_command(
+    fn transaction_pool_record_to_command<TTx: StateStoreReadTransaction>(
         &self,
         start_of_chain_id: &LeafBlock,
         locked_epoch: &LockedEpoch,
         pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
         lock_conflicts: &mut TransactionLockConflicts,
     ) -> Result<Option<Command>, HotStuffError> {
@@ -330,9 +331,9 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn build_next_block(
+    fn build_next_block<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         epoch: Epoch,
         next_height: NodeHeight,
         highest_seen_block: HighestSeenBlock,
@@ -443,13 +444,7 @@ where TConsensusSpec: ConsensusSpec
 
             if !justify_block.has_justify_qc() {
                 // TODO: we dont need to process transactions here that are not in the batch
-                process_newly_justified_block::<TConsensusSpec::StateStore>(
-                    tx,
-                    &justify_block,
-                    high_qc_id,
-                    local_committee_info,
-                    &mut change_set,
-                )?;
+                process_newly_justified_block(tx, &justify_block, high_qc_id, local_committee_info, &mut change_set)?;
             }
         }
 
@@ -616,9 +611,9 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn fetch_next_proposal_batch(
+    fn fetch_next_proposal_batch<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<<TConsensusSpec as ConsensusSpec>::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         local_committee_info: &CommitteeInfo,
         start_of_chain_block: HighestSeenBlock,
     ) -> Result<ProposalBatch, HotStuffError> {
@@ -711,14 +706,14 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn prepare_transaction(
+    fn prepare_transaction<TTx: StateStoreReadTransaction>(
         &self,
         parent_block: &LeafBlock,
         locked_epoch: &LockedEpoch,
         mut pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
         lock_conflicts: &mut TransactionLockConflicts,
     ) -> Result<Option<Command>, HotStuffError> {
@@ -906,13 +901,13 @@ where TConsensusSpec: ConsensusSpec
         }
     }
 
-    fn local_accept_transaction(
+    fn local_accept_transaction<TTx: StateStoreReadTransaction>(
         &self,
         parent_block: &LeafBlock,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
         mut tx_rec: TransactionPoolRecord,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
     ) -> Result<Option<Command>, HotStuffError> {
         // Only set to abort if either the local or one or more foreign shards decided to ABORT
@@ -969,12 +964,12 @@ where TConsensusSpec: ConsensusSpec
         Ok(Some(Command::LocalAccept(atom)))
     }
 
-    fn accept_transaction(
+    fn accept_transaction<TTx: StateStoreReadTransaction>(
         &self,
         parent_block: &LeafBlock,
         tx_rec: &TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
     ) -> Result<Option<Command>, HotStuffError> {
         if tx_rec.current_decision().is_abort() {
             return Ok(Some(Command::SomeAccept(tx_rec.get_current_transaction_atom())));
@@ -1032,9 +1027,9 @@ where TConsensusSpec: ConsensusSpec
         Ok(atom)
     }
 
-    fn execute_transaction(
+    fn execute_transaction<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         parent_block: &LeafBlock,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,

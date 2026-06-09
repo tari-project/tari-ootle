@@ -253,7 +253,7 @@ fn create_store() -> (TestStore, TempDir) {
 
 fn create_pending_store<'a, 'tx, TStore: StateStore>(
     tx: &'a TStore::ReadTransaction<'tx>,
-) -> PendingSubstateStore<'a, 'tx, TStore> {
+) -> PendingSubstateStore<'a, TStore::ReadTransaction<'tx>> {
     PendingSubstateStore::new(
         tx,
         LeafBlock {

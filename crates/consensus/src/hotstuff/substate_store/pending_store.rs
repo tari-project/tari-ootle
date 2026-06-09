@@ -21,7 +21,6 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_storage::{
-    StateStore,
     StateStoreReadTransaction,
     consensus_models::{BlockDiff, LockConflict, SubstateChange, SubstateLock, SubstateRecord},
 };
@@ -35,8 +34,8 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::hotstuff::substate_store::pending_store";
 
-pub struct PendingSubstateStore<'store, 'tx, TStore: StateStore + 'store + 'tx> {
-    store: &'store TStore::ReadTransaction<'tx>,
+pub struct PendingSubstateStore<'store, TTx: StateStoreReadTransaction> {
+    store: &'store TTx,
     /// Map from substate address to the index in the diff list of the corresponding change
     pending: HashMap<SubstateAddress, usize>,
     /// Map from substate id to the index in the diff list of the latest change
@@ -48,8 +47,8 @@ pub struct PendingSubstateStore<'store, 'tx, TStore: StateStore + 'store + 'tx> 
     num_preshards: NumPreshards,
 }
 
-impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
-    pub fn new(store: &'a TStore::ReadTransaction<'tx>, parent_block: LeafBlock, num_preshards: NumPreshards) -> Self {
+impl<'a, TTx: StateStoreReadTransaction> PendingSubstateStore<'a, TTx> {
+    pub fn new(store: &'a TTx, parent_block: LeafBlock, num_preshards: NumPreshards) -> Self {
         Self {
             store,
             pending: HashMap::new(),
@@ -61,7 +60,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
         }
     }
 
-    pub fn read_transaction(&self) -> &'a TStore::ReadTransaction<'tx> {
+    pub fn read_transaction(&self) -> &'a TTx {
         self.store
     }
 
@@ -182,9 +181,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
     }
 }
 
-impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
-    for PendingSubstateStore<'store, 'tx, TStore>
-{
+impl<'store, TTx: StateStoreReadTransaction> ReadableSubstateStore for PendingSubstateStore<'store, TTx> {
     type Error = SubstateStoreError;
 
     fn get(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, Self::Error> {
@@ -219,7 +216,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
     }
 }
 
-impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingSubstateStore<'a, 'tx, TStore> {
+impl<'a, TTx: StateStoreReadTransaction> WriteableSubstateStore for PendingSubstateStore<'a, TTx> {
     fn put(&mut self, change: SubstateChange) -> Result<(), Self::Error> {
         match &change {
             SubstateChange::Up { id, substate, .. } => {
@@ -304,7 +301,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
     }
 }
 
-impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store, 'tx, TStore> {
+impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
     pub fn get_latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
         if let Some(ch) = self
             .head

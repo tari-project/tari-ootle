@@ -67,6 +67,45 @@ jobs:
         run: |
           prettier --check "./applications/{tari_validator_node/web_ui,tari_indexer/web_ui,tari_ootle_walletd/web_ui}/src/*.{ts,tsx,json}"
 
+  web_ui_build:
+    name: web ui build
+    runs-on: [ ubuntu-latest ]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: install pnpm
+        uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
+        with:
+          version: 10.28.0
+
+      - name: setup node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: 'pnpm'
+
+      # Builds every workspace web UI (walletd, indexer, validator node, db_inspector)
+      # together with the bindings/clients they depend on, in topological order.
+      # --no-frozen-lockfile: this is a build check, not a lockfile-integrity gate,
+      #   and the committed lockfile's pnpm "overrides" representation otherwise
+      #   trips pnpm's frozen check under CI.
+      # --ignore-scripts: dependency build scripts (esbuild/@swc/core/@parcel/watcher)
+      #   ship prebuilt binaries and are not needed to compile the UIs; without this,
+      #   pnpm 10 fails CI installs with ERR_PNPM_IGNORED_BUILDS.
+      - name: build workspace web UIs
+        run: |
+          pnpm install --no-frozen-lockfile --ignore-scripts
+          pnpm --recursive run build
+
+      # The swarm daemon web UI is a standalone npm project, not part of the pnpm workspace.
+      - name: build swarm daemon web UI
+        working-directory: applications/tari_swarm_daemon/webui
+        run: |
+          npm ci
+          npm run build
+
   clippy:
     name: clippy
     runs-on: [ ubuntu-latest ]

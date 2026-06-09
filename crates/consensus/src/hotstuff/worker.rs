@@ -1042,13 +1042,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     //       all — that would remove this whole class of pool-vs-state-store divergence.
     pub fn clear_transaction_pool(&self) -> Result<usize, HotStuffError> {
         self.state_store.with_write_tx(|tx| {
-            let ids = self
-                .transaction_pool
-                .get_all(&**tx, usize::MAX)?
-                .iter()
-                .map(|rec| *rec.id())
-                .collect::<Vec<_>>();
-            let removed = self.transaction_pool.remove_all(tx, &ids)?;
+            let recs = self.transaction_pool.get_all(&**tx, usize::MAX)?;
+            let ids = recs.iter().map(|rec| rec.id());
+            let removed = self.transaction_pool.remove_all(tx, ids)?;
             Ok::<_, HotStuffError>(removed.len())
         })
     }

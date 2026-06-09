@@ -26,7 +26,7 @@ import {
   substateIdToString,
 } from "@utils/helpers";
 import { useState } from "react";
-import { useParams } from "react-router";
+import { useParams } from "react-router-dom";
 import PlaceHolder from "./components/PlaceHolder";
 import { SenderAddress } from "./components/SenderAddress";
 import SortableHeader from "./components/SortableHeader";

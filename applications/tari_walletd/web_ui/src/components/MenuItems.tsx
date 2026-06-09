@@ -40,7 +40,7 @@ import {
   IoTerminalOutline,
 } from "react-icons/io5";
 import { LuBookOpen, LuKeyRound, LuLayoutTemplate } from "react-icons/lu";
-import { NavLink } from "react-router";
+import { NavLink } from "react-router-dom";
 
 function MainListItems() {
   const theme = useTheme();

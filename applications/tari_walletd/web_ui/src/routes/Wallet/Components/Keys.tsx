@@ -34,7 +34,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import { KeyId } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
-import { Form } from "react-router";
+import { Form } from "react-router-dom";
 
 function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
   const rowKey =

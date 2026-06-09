@@ -34,6 +34,7 @@ import {
   InputAdornment,
   Stack,
   TextField,
+  Tooltip,
   Typography,
   Table,
   TableBody,
@@ -49,6 +50,8 @@ import { useGetSubstate } from "../../api/hooks/useSubstates";
 import { convertCborValue, type Component, type SubstateValue } from "@tari-project/ootle-ts-bindings";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
+import VerifiedIcon from "@mui/icons-material/Verified";
+import GppMaybeIcon from "@mui/icons-material/GppMaybe";
 
 const SUBSTATE_PREFIXES = ["component", "resource", "vault", "nft", "tombstone", "txreceipt", "template", "vnfp", "utxo"];
 
@@ -73,7 +76,32 @@ function getSubstateData(substate: SubstateValue): unknown {
   return Object.values(substate)[0];
 }
 
-function SubstateDetails({ substate, version }: { substate: SubstateValue; version: number }) {
+function VerifiedChip({ verified }: { verified: boolean }) {
+  const title = verified
+    ? "This substate's value was verified by the indexer against the shard group committee via a Merkle proof."
+    : "Served without a proof — the value is trusted from a single validator and was not cryptographically verified.";
+  return (
+    <Tooltip title={title}>
+      <Chip
+        icon={verified ? <VerifiedIcon /> : <GppMaybeIcon />}
+        label={verified ? "Verified" : "Unverified"}
+        color={verified ? "success" : "warning"}
+        variant={verified ? "filled" : "outlined"}
+        size="small"
+      />
+    </Tooltip>
+  );
+}
+
+function SubstateDetails({
+  substate,
+  version,
+  verified,
+}: {
+  substate: SubstateValue;
+  version: number;
+  verified: boolean;
+}) {
   const type = getSubstateType(substate);
   const data = getSubstateData(substate);
 
@@ -84,6 +112,8 @@ function SubstateDetails({ substate, version }: { substate: SubstateValue; versi
         <Typography variant="body2" color="text.secondary">
           Version {version}
         </Typography>
+        <Box sx={{ flexGrow: 1 }} />
+        <VerifiedChip verified={verified} />
       </Box>
       <Divider />
       {renderSubstateByType(type, data)}
@@ -382,7 +412,7 @@ function SubstatesLayout() {
             {data && (
               <>
                 <Divider />
-                <SubstateDetails substate={data.substate} version={data.version} />
+                <SubstateDetails substate={data.substate} version={data.version} verified={data.verified} />
               </>
             )}
           </Stack>

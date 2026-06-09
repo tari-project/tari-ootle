@@ -22,11 +22,14 @@
 
 use std::{
     collections::HashMap,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
+use async_trait::async_trait;
 use log::*;
-use tari_engine_types::substate::{Substate, SubstateId};
+use tari_common_types::types::FixedHash;
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -36,9 +39,20 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateRequirementRef,
     ToSubstateAddress,
+    VotePower,
     displayable::Displayable,
 };
-use tari_validator_node_rpc::client::{SubstateResult, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
+use tari_ootle_storage::{
+    consensus_models::{CommittedBlockProof, VerifiedBlockTip},
+    verify_substate_value_proof,
+    verify_substate_value_proof_against_root,
+};
+use tari_validator_node_rpc::client::{
+    SubstateProofData,
+    SubstateResult,
+    ValidatorNodeClientFactory,
+    ValidatorNodeRpcClient,
+};
 
 use crate::{
     error::IndexerError,
@@ -49,12 +63,34 @@ const LOG_TARGET: &str = "tari::indexer::scanner";
 
 const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(300);
 
+/// A store of committee-validated shard-group state merkle roots that the read path consults to
+/// avoid re-validating a served commit proof's QC chain when its root is already trusted.
+///
+/// The trust decision is keyed on the 32-byte `state_merkle_root` scoped by `(epoch, shard_group)`:
+/// a node cannot produce a substate value proof that verifies against a root a quorum already
+/// signed, so reusing such a root is exactly as sound as re-validating the commit proof.
+#[async_trait]
+pub trait TrustedRootStore: std::fmt::Debug + Send + Sync + 'static {
+    /// True if `root` is a recorded, committee-validated state merkle root for `(epoch, shard_group)`.
+    async fn is_trusted(&self, epoch: Epoch, shard_group: ShardGroup, root: FixedHash) -> Result<bool, IndexerError>;
+
+    /// Records a newly committee-validated tip so subsequent reads at this root hit the fast path.
+    async fn record(&self, tip: VerifiedBlockTip) -> Result<(), IndexerError>;
+}
+
 #[derive(Debug, Clone)]
 pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     committee_provider: TEpochManager,
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
     cache_ttl: Duration,
+    /// When set, substates fetched from a validator must come with a proof that verifies against the
+    /// shard group committee, or they are rejected (fail-closed). The negative `DoesNotExist` case
+    /// is not provable and is left to the existing f+1 agreement.
+    verify_substate_proofs: bool,
+    /// When set, lets a read skip re-validating a served commit proof whose root is already trusted,
+    /// and is warmed with newly-validated roots. See [`TrustedRootStore`].
+    trusted_root_store: Option<Arc<dyn TrustedRootStore>>,
     #[cfg(feature = "metrics")]
     metrics: Option<crate::metrics::Metrics>,
 }
@@ -76,6 +112,8 @@ where
             validator_node_client_factory,
             substate_cache,
             cache_ttl: DEFAULT_CACHE_TTL,
+            verify_substate_proofs: false,
+            trusted_root_store: None,
             #[cfg(feature = "metrics")]
             metrics: None,
         }
@@ -84,6 +122,23 @@ where
     pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
         self.cache_ttl = ttl;
         self
+    }
+
+    pub fn with_substate_proof_verification(mut self, enabled: bool) -> Self {
+        self.verify_substate_proofs = enabled;
+        self
+    }
+
+    /// Sets the trusted-root store used to skip commit-proof re-validation on a store hit (and warmed
+    /// on a miss). Only meaningful together with [`Self::with_substate_proof_verification`].
+    pub fn with_trusted_root_store(mut self, store: Arc<dyn TrustedRootStore>) -> Self {
+        self.trusted_root_store = Some(store);
+        self
+    }
+
+    /// Whether substates served by this manager are verified against the shard group committee.
+    pub fn verifies_substates(&self) -> bool {
+        self.verify_substate_proofs
     }
 
     #[cfg(feature = "metrics")]
@@ -297,10 +352,119 @@ where
     ) -> Result<SubstateResult, IndexerError> {
         // build a client with the VN
         let mut client = self.validator_node_client_factory.create_client(vn_addr);
-        let result = client
-            .get_substate(substate_requirement)
+
+        if !self.verify_substate_proofs {
+            return client
+                .get_substate(substate_requirement)
+                .await
+                .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()));
+        }
+
+        let (result, proof) = client
+            .get_substate_with_proof(substate_requirement)
             .await
             .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()))?;
+
+        // Verify up/down results against the committee. A missing or invalid proof disqualifies this
+        // validator's response (fail-closed) so the caller tries another member. `DoesNotExist` is
+        // not provable and is left to the existing f+1 agreement.
+        match &result {
+            SubstateResult::Up { substate } => {
+                self.verify_substate_proof(
+                    substate_requirement.substate_id(),
+                    substate.version(),
+                    Some(substate.substate_value()),
+                    proof,
+                )
+                .await?;
+            },
+            SubstateResult::Down { version } => {
+                self.verify_substate_proof(substate_requirement.substate_id(), *version, None, proof)
+                    .await?;
+            },
+            SubstateResult::DoesNotExist => {},
+        }
+
         Ok(result)
+    }
+
+    async fn verify_substate_proof(
+        &self,
+        substate_id: &SubstateId,
+        version: u32,
+        value: Option<&SubstateValue>,
+        proof: Option<SubstateProofData>,
+    ) -> Result<(), IndexerError> {
+        let proof = proof.ok_or_else(|| IndexerError::SubstateProofVerificationFailed {
+            details: format!("validator did not return a proof for {substate_id}"),
+        })?;
+
+        let commit_proof = CommittedBlockProof::from_bytes(&proof.commit_proof).map_err(|e| {
+            IndexerError::SubstateProofVerificationFailed {
+                details: format!("undecodable commit proof: {e}"),
+            }
+        })?;
+        let epoch = commit_proof.epoch();
+        let shard_group = commit_proof
+            .shard_group()
+            .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+        let root = commit_proof.state_merkle_root();
+
+        // Fast path: if this exact (epoch, shard_group, root) was already committee-validated and
+        // recorded in the trusted-root store, verify the value proof directly against the trusted
+        // root and skip re-validating the commit proof's QC chain (and the committee lookup). A node
+        // cannot forge a value proof that verifies against a root a quorum already signed, so this is
+        // as sound as the full path.
+        if let Some(store) = &self.trusted_root_store &&
+            store.is_trusted(epoch, shard_group, root).await?
+        {
+            verify_substate_value_proof_against_root(
+                &proof.substate_value_proof,
+                substate_id,
+                version,
+                value,
+                Epoch(proof.proof_epoch),
+                root,
+            )
+            .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+            debug!(
+                target: LOG_TARGET,
+                "trusted-root HIT for {substate_id} at epoch {epoch} {shard_group}: skipped commit-proof validation"
+            );
+            return Ok(());
+        }
+
+        // Slow path: validate the commit proof against the shard group committee, yielding a trusted
+        // root, then verify the value proof against it.
+        let committee = self
+            .committee_provider
+            .get_committee_by_shard_group(epoch, shard_group)
+            .await?;
+
+        let verified_tip = verify_substate_value_proof(
+            &commit_proof,
+            &proof.substate_value_proof,
+            substate_id,
+            version,
+            value,
+            Epoch(proof.proof_epoch),
+            committee.quorum_threshold(),
+            |pk| Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero)),
+        )
+        .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+        debug!(
+            target: LOG_TARGET,
+            "trusted-root MISS for {substate_id} at epoch {epoch} {shard_group}: validated commit proof"
+        );
+
+        // Warm the store so subsequent reads at this tip hit the fast path. A write failure must not
+        // fail an otherwise-verified read.
+        if let Some(store) = &self.trusted_root_store &&
+            let Err(e) = store.record(verified_tip).await
+        {
+            warn!(target: LOG_TARGET, "Failed to record verified root for {substate_id}: {e}");
+        }
+
+        Ok(())
     }
 }

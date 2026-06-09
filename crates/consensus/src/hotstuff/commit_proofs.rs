@@ -108,7 +108,7 @@ pub fn generate_end_of_epoch_commit_proof<TTx: StateStoreReadTransaction>(
     Ok(command_commit_proof)
 }
 
-pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
+pub fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     // The QC that caused the block to commit
     commit_qc: &ProposalCertificate,

@@ -490,5 +490,11 @@ fn msg_relative_view(
             }
             MessageRelativeView::Current
         },
+        // Catch-up responses are an ordered block import, not live consensus. They are deliberately
+        // exempt from the view filter: a node behind on blocks must ingest them regardless of where
+        // its current view sits (above OR below the imported heights). Ordering is preserved by the
+        // sender (FIFO, height order) and the request/response loop, and each imported block advances
+        // the view monotonically, so they are never buffered or dropped here.
+        HotstuffMessage::CatchUpSyncResponse(_) => MessageRelativeView::Current,
     }
 }

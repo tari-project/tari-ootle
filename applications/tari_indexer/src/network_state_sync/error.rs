@@ -17,6 +17,8 @@ pub enum NetworkStateSyncError {
     ValidatorCommitteeClientError(#[from] ValidatorCommitteeClientError),
     #[error("Invalid checkpoint: {details}")]
     InvalidCheckpoint { details: String },
+    #[error("Validator served an invalid committed block proof: {details}")]
+    InvalidCommitProof { details: String },
     #[error("Invalid state update: {details}")]
     InvalidStateUpdate { details: String },
     #[error("Request failed: {0}")]

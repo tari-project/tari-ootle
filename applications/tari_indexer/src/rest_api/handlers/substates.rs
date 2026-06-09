@@ -69,6 +69,9 @@ pub async fn get_substate(
         Some((_, substate)) => Ok(Json(GetSubstateResponse {
             version: substate.version(),
             substate: substate.into_substate_value(),
+            // When verification is enabled, a returned (non-cached) value was checked against the
+            // committee before being accepted; otherwise it was served unverified.
+            verified: manager.verifies_substates() && !req.local_search_only,
         })),
         None => Err(ErrorResponse::not_found(format!("Substate {} not found", substate_id))),
     }

@@ -145,6 +145,74 @@ mod confirm_all_transitions {
 
         tx.rollback().unwrap();
     }
+
+    #[test]
+    fn transaction_pool_get_all_overlays_pending_update_rocksdb() {
+        let (db, _tmp) = create_rocksdb();
+        transaction_pool_get_all_overlays_pending_update(db);
+    }
+
+    // Regression: get_all must return each record's effective state, i.e. with the pending update from the
+    // chain at the leaf block overlaid, not the bare committed record.
+    fn transaction_pool_get_all_overlays_pending_update(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+
+        let atom1 = create_tx_atom();
+
+        let network = Network::LocalNet;
+        let zero_block = Block::zero_block(network, num_preshards());
+        zero_block.insert(&mut tx).unwrap();
+        tx.proposal_certificates_save(zero_block.justify()).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
+            .unwrap();
+
+        let shard_group = zero_block.shard_group();
+
+        let block1 = Block::create(
+            network,
+            *zero_block.id(),
+            zero_block.justify().clone(),
+            None,
+            NodeHeight(1),
+            Epoch(0),
+            shard_group,
+            Default::default(),
+            [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            SchnorrSignatureBytes::zero(),
+            EpochTime::now().as_u64(),
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::default(),
+        )
+        .unwrap();
+        block1.insert(&mut tx).unwrap();
+        block1.as_locked().set(&mut tx).unwrap();
+        block1.as_leaf().set(&mut tx).unwrap();
+
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, None, 0)
+            .unwrap();
+
+        // Base record has no pending update yet.
+        let base = tx.transaction_pool_get_all(1000).unwrap();
+        let base_rec = base.iter().find(|r| *r.id() == atom1.id).unwrap().clone();
+        assert!(base_rec.pending_stage().is_none());
+
+        // Record a pending transition for the transaction in block1, which is on the chain at the leaf.
+        let mut updated = base_rec;
+        updated
+            .set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, shard_group)
+            .unwrap();
+        tx.transaction_pool_add_pending_update(&block1.as_leaf(), &TransactionPoolStatusUpdate::new(updated, true))
+            .unwrap();
+
+        let overlaid = tx.transaction_pool_get_all(1000).unwrap();
+        let rec = overlaid.iter().find(|r| *r.id() == atom1.id).unwrap();
+        assert_eq!(rec.pending_stage(), Some(TransactionPoolStage::LocalPrepared));
+
+        tx.rollback().unwrap();
+    }
 }
 
 mod transaction_operations {

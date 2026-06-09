@@ -1208,13 +1208,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "transaction_pool_get_all";
         let cf = self.db().cf(TransactionPoolCf)?;
 
-        // A freshly state-synced node that has not yet entered consensus will not have a commit block (or pending
-        // chain) yet. Therefore, there are then no block-scoped pool updates to overlay — return the base
-        // records as-is rather than failing with NotFound.
+        // Overlay each record's latest pending update by walking the pending chain back from the leaf block, so
+        // callers see its effective state at the tip. With no leaf block yet (e.g. freshly state-synced, before
+        // joining consensus) there is no pending chain and nothing to overlay.
         let mut updates = HashMap::new();
-        if let Some(commit_block) = self.get_commit_block().optional()? {
-            let pending_chain = self.get_pending_chain_ordered(&commit_block.block_id)?;
+        if let Some(leaf_block) = self.leaf_block_get_any().optional()? {
+            let pending_chain = self.get_pending_chain_ordered(leaf_block.block_id())?;
             let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+            // Oldest first so the tip's update wins per transaction.
             for block_id in pending_chain.into_iter().rev() {
                 let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
                 for result in iter {

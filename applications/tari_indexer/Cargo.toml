@@ -19,6 +19,7 @@ path = "src/bin/indexer_gen_openapi.rs"
 tari_base_node_client = { workspace = true }
 tari_bor = { workspace = true, features = ["serde"] }
 tari_common = { workspace = true }
+tari_common_types = { workspace = true }
 tari_consensus = { workspace = true }
 tari_template_builtin = { workspace = true, features = ["templates"] }
 tari_crypto = { workspace = true }
@@ -98,6 +99,9 @@ tracing-appender = "0.2.4"
 logroller = "0.1"
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = [

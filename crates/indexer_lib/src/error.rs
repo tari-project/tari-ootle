@@ -30,6 +30,10 @@ pub enum IndexerError {
     SubstateCacheError(#[from] SubstateCacheError),
     #[error("No committee members available: {details}")]
     NoCommitteeMembers { details: String },
+    #[error("Substate proof verification failed: {details}")]
+    SubstateProofVerificationFailed { details: String },
     #[error("System time error: {0}")]
     SystemTimeError(#[from] time::SystemTimeError),
+    #[error("Trusted root store error: {0}")]
+    TrustedRootStoreError(String),
 }

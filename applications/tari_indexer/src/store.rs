@@ -9,6 +9,7 @@ use std::{
 
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
+use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     Utxo,
     events::Event,
@@ -48,6 +49,7 @@ use crate::{
         SubstateRecord,
         TemplateCatalogueEntry,
         UtxoUpdateRecord,
+        VerifiedStateRoot,
         WatchedSubstateEntry,
     },
 };
@@ -210,6 +212,25 @@ pub trait IndexerStoreReadTransaction {
         limit: u64,
         offset: u64,
     ) -> Result<Vec<WatchedSubstateEntry>, StorageError>;
+
+    // -------------------------------- Verified State Roots -------------------------------- //
+
+    /// True if `root` is a committee-validated state merkle root recorded for `(epoch, shard_group)`.
+    /// This is the read-path trust decision: a hit lets a substate value proof be verified against
+    /// `root` without re-validating the serving validator's commit proof.
+    fn is_state_root_trusted(
+        &mut self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        root: &FixedHash,
+    ) -> Result<bool, StorageError>;
+
+    /// The most recently committed verified state root recorded for `(epoch, shard_group)`, if any.
+    fn get_latest_verified_state_root(
+        &mut self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<Option<VerifiedStateRoot>, StorageError>;
 }
 
 pub trait IndexerStoreWriteTransaction {
@@ -248,6 +269,11 @@ pub trait IndexerStoreWriteTransaction {
     ) -> Result<(), StorageError>;
 
     fn delete_watched_substate(&mut self, component_address: &SubstateId) -> Result<(), StorageError>;
+
+    /// Records a committee-validated state root, retaining only the most recent roots per
+    /// `(epoch, shard_group)` (a bounded ring) so reads landing on a validator slightly behind the
+    /// indexer's last probe still hit a trusted root. Idempotent on `(epoch, shard_group, root)`.
+    fn upsert_verified_state_root(&mut self, root: &VerifiedStateRoot) -> Result<(), StorageError>;
 }
 
 /// An event that was inserted into the database, with its assigned auto-increment ID.

@@ -26,6 +26,7 @@ mod substate;
 mod template_catalogue;
 mod utxo;
 mod utxo_update;
+mod verified_state_root;
 mod watched_substate;
 
 pub use events::*;
@@ -35,5 +36,7 @@ pub use template_catalogue::TemplateCatalogueEntry;
 pub(crate) use template_catalogue::{NewTemplateCatalogueRow, TemplateCatalogueRow};
 pub(crate) use utxo::*;
 pub(crate) use utxo_update::*;
+pub use verified_state_root::VerifiedStateRoot;
+pub(crate) use verified_state_root::{NewVerifiedStateRoot, VerifiedStateRootRow};
 pub use watched_substate::WatchedSubstateEntry;
 pub(crate) use watched_substate::{NewWatchedSubstate, WatchedSubstateRow};

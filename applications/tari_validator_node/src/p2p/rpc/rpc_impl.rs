@@ -27,7 +27,7 @@ use std::{
 
 use log::*;
 use tari_bor::encode;
-use tari_consensus::hotstuff::ConsensusCurrentState;
+use tari_consensus::hotstuff::{ConsensusCurrentState, commit_proofs::generate_block_commit_proof};
 use tari_consensus_types::{BlockId, HighPc, ProposalCertificate};
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
@@ -35,6 +35,7 @@ use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
     NumPreshards,
+    ShardGroup,
     SubstateRequirement,
     displayable::Displayable,
     optional::Optional,
@@ -47,6 +48,8 @@ use tari_ootle_p2p::{
         ConsensusState as ProtoConsensusState,
         GetCheckpointsRequest,
         GetCheckpointsResponse,
+        GetCommittedBlockProofRequest,
+        GetCommittedBlockProofResponse,
         GetConsensusStateRequest,
         GetConsensusStateResponse,
         GetHighQcRequest,
@@ -71,11 +74,13 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BookkeepingEpochAgnosticRead,
+        CommittedBlockProof,
         EpochCheckpoint,
         SubstateRecord,
         SubstateValueFilterFlags,
         TransactionRecord,
     },
+    generate_substate_proof,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
@@ -123,6 +128,43 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             Err(RpcStatus::general("Consensus is not running on this node"))
         }
     }
+
+    /// Attaches a commit proof and a substate value proof for `substate` to `resp`, anchored to the
+    /// latest committed block. Generated within the caller's read tx (the same one used for the
+    /// substate lookup) so the value proof's group root matches the commit proof's block header. If
+    /// nothing is committed beyond the epoch genesis yet, no proof is attached and the caller treats
+    /// the result as unverified.
+    fn attach_substate_proof<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        shard_group: ShardGroup,
+        num_preshards: NumPreshards,
+        substate: &SubstateRecord,
+        resp: &mut GetSubstateResponse,
+    ) -> Result<(), RpcStatus> {
+        let epoch = self.consensus.current_epoch();
+        let last_executed = tx
+            .last_executed_get(epoch)
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        if last_executed.height.is_zero() {
+            return Ok(());
+        }
+
+        let block = Block::get(tx, &last_executed.block_id).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let commit_qc = block
+            .get_commit_qc(tx)
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let commit_proof =
+            generate_block_commit_proof(tx, &commit_qc, &block).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let value_proof = generate_substate_proof(tx, shard_group, &substate.to_versioned_substate_id(), num_preshards)
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
+        resp.commit_proof = CommittedBlockProof::new(commit_proof).to_bytes();
+        resp.substate_value_proof =
+            tari_bor::serde_codec::to_vec(&value_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        resp.proof_epoch = substate.created().at_epoch.as_u64();
+        Ok(())
+    }
 }
 
 #[tari_rpc_framework::async_trait]
@@ -165,25 +207,32 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .map_err(|e| RpcStatus::bad_request(format!("Invalid substate requirement: {e}")))?
             .ok_or_else(|| RpcStatus::bad_request("Missing substate requirement"))?;
 
-        if !substate_requirement.substate_id().is_global() {
+        // We need our local committee info to (a) confirm we store a non-global substate and (b) know
+        // our shard group + preshard count when generating a proof.
+        let local_committee_info = if !substate_requirement.substate_id().is_global() || req.include_proof {
             let current_epoch = self
                 .epoch_manager
                 .current_epoch()
                 .await
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-            let local_committee_info = self
+            let info = self
                 .epoch_manager
                 .get_local_committee_info(current_epoch)
                 .await
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-            if !local_committee_info.includes_substate_id(substate_requirement.substate_id()) {
+            if !substate_requirement.substate_id().is_global() &&
+                !info.includes_substate_id(substate_requirement.substate_id())
+            {
                 return Err(RpcStatus::bad_request(format!(
                     "This node in {} does not store {}",
-                    local_committee_info.shard_group(),
+                    info.shard_group(),
                     substate_requirement
                 )));
             }
-        }
+            Some(info)
+        } else {
+            None
+        };
 
         debug!(
             target: LOG_TARGET,
@@ -209,7 +258,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             }));
         };
 
-        let resp = if let Some(destroyed) = substate.destroyed() {
+        let mut resp = if let Some(destroyed) = substate.destroyed() {
             GetSubstateResponse {
                 status: SubstateStatus::Down as i32,
                 address: substate.substate_id().to_bytes(),
@@ -217,6 +266,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 version: substate.version(),
                 created_at_state_version: substate.created().at_state_version,
                 destroyed_at_state_version: destroyed.at_state_version,
+                ..Default::default()
             }
         } else {
             GetSubstateResponse {
@@ -228,9 +278,16 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                     .map(|v| v.to_bytes())
                     .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
                 created_at_state_version: substate.created().at_state_version,
-                destroyed_at_state_version: Default::default(),
+                ..Default::default()
             }
         };
+
+        if req.include_proof {
+            let info = local_committee_info
+                .as_ref()
+                .expect("committee info is fetched whenever include_proof is set");
+            self.attach_substate_proof(&tx, info.shard_group(), info.num_preshards(), &substate, &mut resp)?;
+        }
 
         Ok(Response::new(resp))
     }
@@ -512,6 +569,42 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         Ok(Response::new(GetHighQcResponse {
             high_qc: Some((&qc).into()),
+        }))
+    }
+
+    async fn get_committed_block_proof(
+        &self,
+        _req: Request<GetCommittedBlockProofRequest>,
+    ) -> Result<Response<GetCommittedBlockProofResponse>, RpcStatus> {
+        let epoch = self.consensus.current_epoch();
+        let store = self.state_store.clone();
+
+        let maybe_proof = task::spawn_blocking(move || {
+            store
+                .with_read_tx(|tx| {
+                    let last_executed = tx.last_executed_get(epoch)?;
+                    // Nothing has been committed beyond the epoch genesis yet - there is no proof to give.
+                    if last_executed.height.is_zero() {
+                        return Ok(None);
+                    }
+                    let block = Block::get(tx, &last_executed.block_id)?;
+                    let commit_qc = block.get_commit_qc(tx)?;
+                    let proof = generate_block_commit_proof(tx, &commit_qc, &block).map_err(|e| {
+                        tari_ootle_storage::StorageError::QueryError {
+                            reason: format!("generate_block_commit_proof: {e}"),
+                        }
+                    })?;
+                    Ok::<_, tari_ootle_storage::StorageError>(Some(CommittedBlockProof::new(proof)))
+                })
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        let proof = maybe_proof.ok_or_else(|| RpcStatus::not_found("No committed block beyond genesis yet"))?;
+
+        Ok(Response::new(GetCommittedBlockProofResponse {
+            commit_proof: proof.to_bytes(),
         }))
     }
 

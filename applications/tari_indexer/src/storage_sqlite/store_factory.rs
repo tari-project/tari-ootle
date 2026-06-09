@@ -152,3 +152,107 @@ fn apply_pragmas(conn: &mut SqliteConnection) -> Result<(), diesel::result::Erro
     sql_query(format!("PRAGMA busy_timeout = {};", busy_timeout_ms)).execute(conn)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_common_types::types::FixedHash;
+    use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
+
+    use super::*;
+    use crate::{
+        storage_sqlite::models::VerifiedStateRoot,
+        store::{IndexerStoreReadTransaction, IndexerStoreReader},
+    };
+
+    fn shard_group() -> ShardGroup {
+        ShardGroup::new_checked(1, 4).unwrap()
+    }
+
+    fn tip_at(height: u64) -> VerifiedStateRoot {
+        // Each height gets a distinct root, as committed heights do on a real chain.
+        VerifiedStateRoot {
+            epoch: Epoch(1),
+            shard_group: shard_group(),
+            height: NodeHeight(height),
+            block_hash: FixedHash::new([height as u8; 32]),
+            state_merkle_root: FixedHash::new([height as u8; 32]),
+        }
+    }
+
+    async fn temp_store() -> (tempfile::TempDir, SqliteIndexerStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteIndexerStore::try_create(dir.path().join("indexer.db")).unwrap();
+        (dir, store)
+    }
+
+    #[tokio::test]
+    async fn verified_state_roots_ring_prunes_to_sixteen() {
+        let (_dir, store) = temp_store().await;
+
+        // Record 19 distinct committed heights for the same (epoch, shard group).
+        for h in 1..=19u64 {
+            let root = tip_at(h);
+            store
+                .with_write_tx(move |tx| tx.upsert_verified_state_root(&root))
+                .await
+                .unwrap();
+        }
+
+        // The latest reflects the most recent committed height.
+        let latest = store
+            .with_read_tx(move |tx| tx.get_latest_verified_state_root(Epoch(1), shard_group()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.height, NodeHeight(19));
+
+        // The newest 16 (heights 4..=19) remain trusted; the oldest 3 (1..=3) were pruned.
+        for h in 4..=19u64 {
+            let root = FixedHash::new([h as u8; 32]);
+            assert!(
+                store
+                    .with_read_tx(move |tx| tx.is_state_root_trusted(Epoch(1), shard_group(), &root))
+                    .await
+                    .unwrap(),
+                "height {h} should still be trusted"
+            );
+        }
+        for h in 1..=3u64 {
+            let root = FixedHash::new([h as u8; 32]);
+            assert!(
+                !store
+                    .with_read_tx(move |tx| tx.is_state_root_trusted(Epoch(1), shard_group(), &root))
+                    .await
+                    .unwrap(),
+                "height {h} should have been pruned"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn verified_state_roots_upsert_is_idempotent() {
+        let (_dir, store) = temp_store().await;
+        for _ in 0..3 {
+            let root = tip_at(5);
+            store
+                .with_write_tx(move |tx| tx.upsert_verified_state_root(&root))
+                .await
+                .unwrap();
+        }
+        let hash = FixedHash::new([5u8; 32]);
+        assert!(
+            store
+                .with_read_tx(move |tx| tx.is_state_root_trusted(Epoch(1), shard_group(), &hash))
+                .await
+                .unwrap()
+        );
+        // An unrecorded root is not trusted.
+        let other = FixedHash::new([99u8; 32]);
+        assert!(
+            !store
+                .with_read_tx(move |tx| tx.is_state_root_trusted(Epoch(1), shard_group(), &other))
+                .await
+                .unwrap()
+        );
+    }
+}

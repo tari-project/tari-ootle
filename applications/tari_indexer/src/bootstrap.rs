@@ -195,7 +195,7 @@ pub async fn spawn_services(
 
     let event_notifier = Notify::new(1000);
     let transaction_event_notifier = Notify::new(1024);
-    let validator_status = ValidatorStatusMonitor::new();
+    let validator_status = ValidatorStatusMonitor::new(epoch_manager.clone());
 
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
@@ -220,7 +220,8 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         substate_cache,
-    );
+    )
+    .with_substate_proof_verification(config.indexer.verify_substate_proofs);
     #[cfg(feature = "metrics")]
     let substate_manager = substate_manager.with_metrics(metrics_registry);
 
@@ -245,10 +246,13 @@ pub async fn spawn_services(
     .await
     .context("template manager init thread panicked")??;
 
-    // Dry run - use a shorter cache TTL for more accurate fee estimates
+    // Dry run - use a shorter cache TTL for more accurate fee estimates. Proof verification is left
+    // off here: dry run only produces a fee estimate, and gating it on proof availability would make
+    // transaction submission fragile when proofs are momentarily unavailable.
     let dry_run_substate_manager = substate_manager
         .clone()
-        .with_cache_ttl(config.indexer.dry_run_cache_ttl);
+        .with_cache_ttl(config.indexer.dry_run_cache_ttl)
+        .with_substate_proof_verification(false);
     let fee_table = get_fee_table_by_network(config.network);
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
         fee_table.clone(),

@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use tari_jellyfish::{SPARSE_MERKLE_PLACEHOLDER_HASH, StaleTreeNode, Version};
+use tari_jellyfish::{SPARSE_MERKLE_PLACEHOLDER_HASH, SparseMerkleProofExt, StaleTreeNode, TreeHash, Version};
 use tari_ootle_common_types::ToSubstateAddress;
 use tari_state_tree::memory_store::MemoryTreeStore;
 
@@ -230,4 +230,90 @@ fn proofs() {
     let (key, _, proof) = tree.get_proof(3, &make_value(4)).unwrap();
     let hash = hash_value_from_seed(50);
     proof.verify_inclusion(&root_hash, &key, &hash).unwrap_err();
+}
+
+// Builds the shard-group root tree the same way a validator does for a block header: an ephemeral
+// tree over the ordered `[global, shard_0, shard_1, ...]` roots. The first shard hosts our substates.
+fn shard_group_root_and_proof(shard_root: TreeHash) -> (TreeHash, SparseMerkleProofExt) {
+    use tari_state_tree::{compute_merkle_root_for_hashes, compute_proof_for_hashes};
+    // [global (empty), our shard, an unrelated sibling shard]
+    let ordered_roots = vec![SPARSE_MERKLE_PLACEHOLDER_HASH, shard_root, hash_value_from_seed(99)];
+    let group_root = compute_merkle_root_for_hashes(ordered_roots.clone()).unwrap();
+    let (_, shard_root_proof) = compute_proof_for_hashes(ordered_roots.into_iter(), shard_root).unwrap();
+    (group_root, shard_root_proof)
+}
+
+#[test]
+fn two_level_substate_inclusion_proof() {
+    use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};
+
+    // Build a shard JMT with the production (SpreadPrefix) key mapper, as a real validator would.
+    let mut store = MemoryTreeStore::<StateTreePayload>::new();
+    SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(None, 1, vec![change(1, Some(30))])
+        .unwrap();
+    SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(Some(1), 2, vec![change(2, Some(40))])
+        .unwrap();
+    let shard_root = SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(Some(2), 3, vec![change(3, Some(50))])
+        .unwrap();
+
+    // Level 1: leaf proof for substate make_value(2) against the shard root.
+    let (_key, proof_value, leaf_proof) = SpreadPrefixStateTree::new(&mut store)
+        .get_proof(3, &make_value(2))
+        .unwrap();
+    let value_hash = proof_value.unwrap().0;
+
+    // Level 2: shard root within the shard-group root.
+    let (group_root, shard_root_proof) = shard_group_root_and_proof(shard_root);
+
+    let proof = SubstateValueProof::new(shard_root, shard_root_proof, leaf_proof);
+
+    // Verifies against the trusted group root.
+    proof
+        .verify_inclusion(&group_root, &make_value(2), &value_hash)
+        .unwrap();
+    // A tampered value hash is rejected (binds the value to the committed leaf).
+    proof
+        .verify_inclusion(&group_root, &make_value(2), &hash_value_from_seed(200))
+        .unwrap_err();
+    // A wrong group root is rejected (level-2 failure).
+    proof
+        .verify_inclusion(&hash_value_from_seed(7), &make_value(2), &value_hash)
+        .unwrap_err();
+    // An included substate cannot be proven absent.
+    proof.verify_exclusion(&group_root, &make_value(2)).unwrap_err();
+}
+
+#[test]
+fn two_level_substate_exclusion_proof() {
+    use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};
+
+    let mut store = MemoryTreeStore::<StateTreePayload>::new();
+    SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(None, 1, vec![change(1, Some(30))])
+        .unwrap();
+    SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(Some(1), 2, vec![change(2, Some(40))])
+        .unwrap();
+    let shard_root = SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(Some(2), 3, vec![change(3, Some(50))])
+        .unwrap();
+
+    // make_value(4) was never created in this shard - the leaf proof is an exclusion proof.
+    let (_key, proof_value, leaf_proof) = SpreadPrefixStateTree::new(&mut store)
+        .get_proof(3, &make_value(4))
+        .unwrap();
+    assert!(proof_value.is_none());
+
+    let (group_root, shard_root_proof) = shard_group_root_and_proof(shard_root);
+    let proof = SubstateValueProof::new(shard_root, shard_root_proof, leaf_proof);
+
+    // The absent substate is provably absent under the trusted group root...
+    proof.verify_exclusion(&group_root, &make_value(4)).unwrap();
+    // ...but cannot be proven present.
+    proof
+        .verify_inclusion(&group_root, &make_value(4), &hash_value_from_seed(50))
+        .unwrap_err();
 }

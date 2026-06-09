@@ -49,7 +49,7 @@ import useThemeStore from "@store/themeStore";
 import { componentSettings, dark, light } from "@tari-project/ootle-web-ui-theming";
 import { settingsGet } from "@utils/json_rpc";
 import { useEffect, useState } from "react";
-import { Link, Outlet } from "react-router";
+import { Link, Outlet } from "react-router-dom";
 
 const DRAWER_WIDTH = 300;
 

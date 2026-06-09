@@ -30,7 +30,7 @@ import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { FormEvent, useEffect, useState } from "react";
-import { Form, Navigate } from "react-router";
+import { Form, Navigate } from "react-router-dom";
 
 function Onboarding() {
   const { mutate, isPending } = useAccountsCreate();

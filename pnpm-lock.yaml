@@ -140,7 +140,7 @@ importers:
         specifier: ^5.91.3
         version: 5.91.3(@tanstack/react-query@5.90.21(react@19.2.4))(react@19.2.4)
       '@tari-project/ootle-ts-bindings':
-        specifier: link:../../../bindings
+        specifier: workspace:*
         version: link:../../../bindings
       async-mutex:
         specifier: ^0.5.0
@@ -269,18 +269,15 @@ importers:
       react-qr-code:
         specifier: ^2.0.18
         version: 2.0.18(react@19.2.4)
-      react-router:
-        specifier: ^7.16.0
-        version: 7.17.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react-router-dom:
-        specifier: ^7.16.0
-        version: 7.16.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^7.17.0
+        version: 7.17.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react-simple-code-editor:
         specifier: ^0.14.1
         version: 0.14.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       use-react-router-breadcrumbs:
         specifier: ^4.0.1
-        version: 4.0.1(react-router-dom@7.16.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react@19.2.4)
+        version: 4.0.1(react-router-dom@7.17.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react@19.2.4)
       zustand:
         specifier: 'catalog:'
         version: 5.0.11(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
@@ -2524,6 +2521,13 @@ packages:
 
   react-router-dom@7.16.0:
     resolution: {integrity: sha512-kMUAbimWB5FVbF4Bce4bJsiKJWLIUHq/mEG8+CFDnCSgltptBiG5nguducmsJeGKytlCvQud9Qhzpn49iduTlA==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+
+  react-router-dom@7.17.0:
+    resolution: {integrity: sha512-fyU2yjGups/hE6Xz0I5ZYbVL8Gx29eCjgpHaRaTaVU+OOAdfRX05KsvyRm0GO8YQwOkhpU3MurW1jyMUJn+zSw==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       react: '>=18'
@@ -5315,6 +5319,12 @@ snapshots:
       react-dom: 19.2.4(react@19.2.4)
       react-router: 7.16.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
 
+  react-router-dom@7.17.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+      react-router: 7.17.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+
   react-router@7.13.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
     dependencies:
       cookie: 1.1.1
@@ -5622,10 +5632,10 @@ snapshots:
       react: 19.2.4
       react-router-dom: 7.13.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
 
-  use-react-router-breadcrumbs@4.0.1(react-router-dom@7.16.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react@19.2.4):
+  use-react-router-breadcrumbs@4.0.1(react-router-dom@7.17.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react@19.2.4):
     dependencies:
       react: 19.2.4
-      react-router-dom: 7.16.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      react-router-dom: 7.17.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
 
   use-sync-external-store@1.6.0(react@19.2.4):
     dependencies:

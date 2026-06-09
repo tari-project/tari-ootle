@@ -43,7 +43,7 @@ import {
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
 import { SyntheticEvent, useState } from "react";
-import { Form } from "react-router";
+import { Form } from "react-router-dom";
 
 export interface SendMoneyFormState {
   address: string;

@@ -52,7 +52,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { validatorsClaimFees, validatorsGetFees } from "@utils/json_rpc";
 import React, { useEffect, useState } from "react";
-import { Form } from "react-router";
+import { Form } from "react-router-dom";
 
 interface FormState {
   account: string | null;

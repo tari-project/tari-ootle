@@ -33,7 +33,7 @@ import Transactions from "@routes/Transactions/Transactions";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useEffect } from "react";
-import { Navigate } from "react-router";
+import { Navigate } from "react-router-dom";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";

@@ -23,7 +23,7 @@
 import { StyledPaper } from "@components/StyledComponents";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
-import { isRouteErrorResponse, useRouteError } from "react-router";
+import { isRouteErrorResponse, useRouteError } from "react-router-dom";
 
 export default function ErrorPage() {
   let error: any = useRouteError();

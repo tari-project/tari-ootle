@@ -261,7 +261,10 @@ pub async fn spawn_services(
         dry_run_substate_manager,
         // We do not verify the kernel merkle proof, since that requires syncing L1 headers
         // TODO: maybe at least validate the well-formedness of the proof
-        KnowledgeProofVerifier::new(config.network),
+        KnowledgeProofVerifier::new(
+            config.network,
+            config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
+        ),
     );
 
     let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());

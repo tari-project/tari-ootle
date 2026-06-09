@@ -35,6 +35,12 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";
 
+/// The Ootle base chain has no L1 deployment key, so its burn-claim sidechain binding is `None`.
+/// The wallet only ever claims to Ootle (it is not sidechain-aware), so this is a constant rather
+/// than a threaded parameter. The validator node, which *can* run a keyed sidechain, sources its
+/// own id from config instead. See tari-ootle#445.
+pub const OOTLE_SIDECHAIN_ID: Option<RistrettoPublicKeyBytes> = None;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StealthCryptoApi;
 
@@ -169,11 +175,17 @@ impl StealthCryptoApi {
         value: u64,
         claimant_pk: &RistrettoPublicKeyBytes,
     ) -> bool {
+        // The wallet only ever claims to the Ootle base chain (`OOTLE_SIDECHAIN_ID` = None), so the
+        // sidechain binding is constant here. The `Option<&[u8]>` encoding mirrors the L1 signer's
+        // `Option<CompressedPublicKey>` borsh, and the authoritative binding check is on the VN
+        // (tari-ootle#445).
         // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
         // length bytes of size 32
+        let sidechain_id = OOTLE_SIDECHAIN_ID.as_ref().map(|id| id.as_bytes());
         let message = ownership_proof_hasher64(network)
             .chain(&commitment.as_bytes())
             .chain(&claimant_pk.as_bytes())
+            .chain(&sidechain_id)
             .finalize();
 
         let Ok(commitment) = PedersenCommitment::convert_from_byte_type(commitment) else {

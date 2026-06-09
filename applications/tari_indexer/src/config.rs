@@ -114,12 +114,8 @@ pub struct IndexerConfig {
     pub block_scanning_interval: Duration,
     #[serde(with = "serializers::seconds")]
     pub state_scanning_interval: Duration,
-    /// The sidechain to listen on.
+    /// The sidechain to listen on. Also identifies this chain for L1 burn-claim binding.
     pub sidechain_id: Option<RistrettoPublicKey>,
-    /// The templates sidechain id
-    pub templates_sidechain_id: Option<RistrettoPublicKey>,
-    /// The burnt utxos sidechain id
-    pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// Cache TTL for substates fetched during dry run transaction processing.
     /// A shorter TTL reduces the chance of stale fee estimates.
     #[serde(with = "serializers::seconds")]
@@ -164,8 +160,6 @@ impl Default for IndexerConfig {
             block_scanning_interval: Duration::from_secs(10),
             state_scanning_interval: Duration::from_secs(60),
             sidechain_id: None,
-            templates_sidechain_id: None,
-            burnt_utxo_sidechain_id: None,
             dry_run_cache_ttl: Duration::from_secs(10),
             event_filters: vec![],
             watched_templates: default_watched_templates(),

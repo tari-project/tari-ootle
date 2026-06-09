@@ -99,12 +99,9 @@ pub struct ValidatorNodeConfig {
     pub fee_claim_public_key: RistrettoPublicKey,
     /// Create identity file if not exists
     pub dont_create_id: bool,
-    /// The (optional) sidechain to run this on
-    pub validator_node_sidechain_id: Option<RistrettoPublicKey>,
-    /// The templates sidechain id
-    pub template_sidechain_id: Option<RistrettoPublicKey>,
-    /// The burnt utxo sidechain id
-    pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
+    /// The (optional) sidechain to run this on. Identifies this chain for validator-node and
+    /// template registration filtering, block-header validation, and L1 burn-claim binding.
+    pub sidechain_id: Option<RistrettoPublicKey>,
     /// The path to store layer-one transactions.
     pub layer_one_transaction_path: PathBuf,
     /// Consensus configuration
@@ -162,9 +159,7 @@ impl Default for ValidatorNodeConfig {
             // Burn your fees
             fee_claim_public_key: RistrettoPublicKey::default(),
             dont_create_id: false,
-            validator_node_sidechain_id: None,
-            template_sidechain_id: None,
-            burnt_utxo_sidechain_id: None,
+            sidechain_id: None,
             layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
             consensus: ConsensusConfig::default(),
         }

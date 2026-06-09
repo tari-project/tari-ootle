@@ -1205,19 +1205,22 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError> {
-        // TODO: Only used in tests
         const OPERATION: &str = "transaction_pool_get_all";
         let cf = self.db().cf(TransactionPoolCf)?;
 
-        let commit_block = self.get_commit_block()?;
-        let pending_chain = self.get_pending_chain_ordered(&commit_block.block_id)?;
-        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+        // A freshly state-synced node that has not yet entered consensus will not have a commit block (or pending
+        // chain) yet. Therefore, there are then no block-scoped pool updates to overlay — return the base
+        // records as-is rather than failing with NotFound.
         let mut updates = HashMap::new();
-        for block_id in pending_chain.into_iter().rev() {
-            let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
-            for result in iter {
-                let ((_, tx_id), update) = result?;
-                updates.insert(tx_id, update);
+        if let Some(commit_block) = self.get_commit_block().optional()? {
+            let pending_chain = self.get_pending_chain_ordered(&commit_block.block_id)?;
+            let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+            for block_id in pending_chain.into_iter().rev() {
+                let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
+                for result in iter {
+                    let ((_, tx_id), update) = result?;
+                    updates.insert(tx_id, update);
+                }
             }
         }
 

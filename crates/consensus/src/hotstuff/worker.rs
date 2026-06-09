@@ -1049,6 +1049,37 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         })
     }
 
+    /// Drop any pooled transaction that has already been finalised in the state store, returning the
+    /// number removed.
+    ///
+    /// Unlike [`Self::clear_transaction_pool`] (which is the correct, wholesale response after a state
+    /// sync rewrites the state store), this only removes records the local node itself has
+    /// already finalised — so it is safe to run on the up-to-date re-entry path, where the pool still
+    /// holds genuinely-pending transactions we must keep.
+    ///
+    /// The persisted transaction pool is keyed by [`TransactionId`] only and is not epoch-scoped, so a
+    /// transaction finalised in a previous epoch can survive in the pool across a restart that re-enters
+    /// consensus already up-to-date (i.e. without going through `Syncing`). Re-proposing such a
+    /// transaction in the new epoch breaks liveness: the rest of the committee finalised and removed it,
+    /// so the block carrying it can never gather a QC (`TransactionNotInPool`) and the pacemaker loops on
+    /// `NEWVIEW` forever. Reconciling the pool against committed state on re-entry removes those stale
+    /// records before they can be proposed.
+    // TODO: the transaction pool only holds pending (derived) state and should not be persisted at
+    //       all — that would remove this whole class of pool-vs-state-store divergence.
+    pub fn reconcile_transaction_pool(&self) -> Result<usize, HotStuffError> {
+        self.state_store.with_write_tx(|tx| {
+            let recs = self.transaction_pool.get_all(&**tx, usize::MAX)?;
+            let mut finalized_ids = Vec::new();
+            for rec in &recs {
+                if TransactionRecord::is_record_finalized(&**tx, rec.id())? {
+                    finalized_ids.push(*rec.id());
+                }
+            }
+            let removed = self.transaction_pool.remove_all(tx, &finalized_ids)?;
+            Ok::<_, HotStuffError>(removed.len())
+        })
+    }
+
     async fn propose_now(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,

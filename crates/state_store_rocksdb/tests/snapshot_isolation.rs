@@ -13,6 +13,11 @@ use tari_consensus_types::{BlockId, LeafBlock};
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 
+// Compile-time guard: a read view is `Sync` so `&view` can be shared across threads for parallel
+// reads on one consistent snapshot. (It stays `!Send` by construction; see `reader.rs`.)
+fn _read_view_is_sync<T: Sync>() {}
+const _: fn() = || _read_view_is_sync::<tari_state_store_rocksdb::ReadView<'static, String>>();
+
 fn leaf_block_at(epoch: Epoch, height: u64) -> LeafBlock {
     LeafBlock {
         block_id: BlockId::zero(),

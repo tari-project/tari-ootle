@@ -7598,6 +7598,7 @@ dependencies = [
  "futures 0.3.31",
  "indexmap 2.13.0",
  "ootle_byte_type",
+ "ootle_ledger_client",
  "ootle_ledger_common",
  "rand 0.10.1",
  "serde",
@@ -7606,7 +7607,6 @@ dependencies = [
  "tari_bor",
  "tari_crypto",
  "tari_indexer_client",
- "tari_ledger_client",
  "tari_ootle_address",
  "tari_ootle_common_types",
  "tari_ootle_template_metadata",
@@ -7657,6 +7657,30 @@ version = "0.8.0"
 dependencies = [
  "tari_crypto",
  "tari_template_lib_types",
+]
+
+[[package]]
+name = "ootle_ledger_client"
+version = "0.1.1"
+dependencies = [
+ "blake2 0.10.6",
+ "borsh",
+ "curve25519-dalek 4.1.3",
+ "hex",
+ "indexmap 2.13.0",
+ "ledger-transport",
+ "ledger-transport-hid",
+ "ootle-network",
+ "ootle_ledger_common",
+ "rand 0.10.1",
+ "reqwest 0.13.2",
+ "serde",
+ "tari_crypto",
+ "tari_ootle_transaction",
+ "tari_ootle_wallet_crypto",
+ "tari_template_lib_types",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -11508,30 +11532,6 @@ dependencies = [
  "tari_crypto",
  "tari_hashing",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "tari_ledger_client"
-version = "0.1.1"
-dependencies = [
- "blake2 0.10.6",
- "borsh",
- "curve25519-dalek 4.1.3",
- "hex",
- "indexmap 2.13.0",
- "ledger-transport",
- "ledger-transport-hid",
- "ootle-network",
- "ootle_ledger_common",
- "rand 0.10.1",
- "reqwest 0.13.2",
- "serde",
- "tari_crypto",
- "tari_ootle_transaction",
- "tari_ootle_wallet_crypto",
- "tari_template_lib_types",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]

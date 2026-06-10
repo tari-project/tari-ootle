@@ -21,6 +21,7 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{decode::DecodeAnswer, error::LedgerClientError};
 
+/// Result of a [`LedgerClient`] operation; `E` is the transport's error type.
 pub type LedgerClientResult<T, E> = Result<T, LedgerClientError<E>>;
 
 const CLA: u8 = 0x80;
@@ -31,15 +32,19 @@ const MAX_CHUNK: usize = 250;
 /// One field of the canonical signing preimage to stream: its wire tag and borsh bytes.
 pub type SegmentRef<'a> = (SigningField, &'a [u8]);
 
+/// Client for the Ootle Ledger app, generic over the APDU transport `T`.
 pub struct LedgerClient<T> {
     inner: T,
 }
 
 impl<T: Exchange> LedgerClient<T> {
+    /// Wrap an APDU transport. The transport is assumed to be connected to a device (or emulator)
+    /// with the Ootle app open.
     pub fn new(inner: T) -> Self {
         Self { inner }
     }
 
+    /// Return the running app's version string, e.g. `"0.1.0"`.
     pub async fn get_app_version(&self) -> LedgerClientResult<String, T::Error> {
         let command = APDUCommand {
             cla: CLA,
@@ -53,6 +58,7 @@ impl<T: Exchange> LedgerClient<T> {
         answer.decode()
     }
 
+    /// Return the running app's name, e.g. `"Tari Ootle"`.
     pub async fn get_app_name(&self) -> LedgerClientResult<String, T::Error> {
         let command = APDUCommand {
             cla: CLA,
@@ -66,6 +72,8 @@ impl<T: Exchange> LedgerClient<T> {
         answer.decode()
     }
 
+    /// Derive a key on-device from the `(account, index, key_type)` BIP-32 path parameters and
+    /// return its public key. The secret never leaves the device.
     pub async fn get_public_key(
         &self,
         account: u64,

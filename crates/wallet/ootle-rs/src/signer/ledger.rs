@@ -17,9 +17,9 @@
 //! identical to the public path.
 
 use async_trait::async_trait;
+use ootle_ledger_client::{Exchange, LedgerClient, LedgerClientError};
 use ootle_ledger_common::arg_types::{KeyType, SignMode, SigningField};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_ledger_client::{Exchange, LedgerClient, LedgerClientError};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_transaction::{
     IntoSigned,

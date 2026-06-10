@@ -21,7 +21,7 @@ tari_ootle_address = { workspace = true }
 tari_template_builtin = { workspace = true }
 
 # Ledger hardware-wallet signer (feature-gated).
-tari_ledger_client = { path = "../ledger/client", version = "0.1.1", optional = true }
+ootle_ledger_client = { path = "../ledger/client", version = "0.1.1", optional = true }
 ootle_ledger_common = { workspace = true, optional = true }
 
 async-trait = { workspace = true }
@@ -44,4 +44,4 @@ tracing = { workspace = true, features = ["log-always"] }
 [features]
 default = []
 mmap-value-lookup = ["tari_ootle_wallet_crypto/mmap-value-lookup"]
-ledger = ["dep:tari_ledger_client", "dep:ootle_ledger_common"]
+ledger = ["dep:ootle_ledger_client", "dep:ootle_ledger_common"]

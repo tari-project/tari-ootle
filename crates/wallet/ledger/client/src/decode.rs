@@ -8,6 +8,7 @@ use ledger_transport::APDUAnswer;
 
 use crate::LedgerClientError;
 
+/// Decode an APDU answer's data field as a borsh-encoded value.
 pub trait DecodeAnswer<Out> {
     fn decode<E>(&self) -> Result<Out, LedgerClientError<E>>
     where Self: Sized;

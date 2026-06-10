@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') || github.ref != 'refs/heads/development' }}
 
 env:
-  nightly_toolchain: nightly-2025-06-25
+  nightly_toolchain: nightly-2025-12-05
   stable_toolchain: stable
   CARGO_HTTP_MULTIPLEXING: false
   CARGO_TERM_COLOR: always

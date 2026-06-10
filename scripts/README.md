@@ -173,7 +173,7 @@ When asked to bump a crate / cut a release:
      `Cargo.toml` `version` (patch or minor as advised) and any pin(s) on the bumped deps.
 4. **Format:**
    ```sh
-   cargo +nightly-2025-06-25 fmt --all
+   cargo +nightly-2025-12-05 fmt --all
    ```
 5. **Dry-run the publish:**
    ```sh

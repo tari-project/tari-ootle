@@ -38,6 +38,16 @@ pub struct WriteArgs {
     pub manifest: Option<PathBuf>,
     #[clap(long, short = 'a', alias = "arg")]
     pub manifest_args: Vec<String>,
+    /// Template alias to address mappings used to resolve `use <alias>;` imports in the manifest,
+    /// e.g. `--template MaxCompute=template_<hex>`. May be repeated.
+    #[clap(long = "template", alias = "templates")]
+    pub templates: Vec<String>,
+    /// Extra substate inputs to declare on each generated transaction that aren't passed as `--arg`
+    /// (e.g. a fee vault the manifest debits but never names). May be repeated. Accepts an
+    /// unversioned id like `vault_<hex>` or a versioned `vault_<hex>:<version>`. Substate-typed
+    /// `--arg`s are declared as inputs automatically and don't need repeating here.
+    #[clap(long = "input", alias = "inputs")]
+    pub inputs: Vec<String>,
     #[clap(long, alias = "args-file")]
     pub manifest_args_file: Option<PathBuf>,
     #[clap(long, short = 'k', alias = "signer")]

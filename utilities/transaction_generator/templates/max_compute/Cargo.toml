@@ -1,0 +1,28 @@
+[workspace]
+[package]
+name = "max_compute"
+version = "0.1.0"
+edition = "2024"
+description = "A template that burns close to the maximum metered compute per call, used for stress testing"
+
+[package.metadata.tari-template]
+tags = ["stress", "benchmark"]
+category = "stress-test"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tari_template_lib = { path = "../../../../crates/template_lib" }
+
+[profile.release]
+opt-level = 's'     # Optimize for size.
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic.
+strip = "debuginfo" # Strip debug info.
+
+[lib]
+crate-type = ["cdylib"]
+
+[build-dependencies]
+tari_ootle_template_build = "0.7"

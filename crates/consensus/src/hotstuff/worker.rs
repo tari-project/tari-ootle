@@ -26,6 +26,7 @@ use tari_ootle_common_types::{
     NodeHeight,
     ProtocolVersion,
     ShardGroup,
+    VersionedSubstateId,
     displayable::Displayable,
     optional::Optional,
 };
@@ -37,6 +38,7 @@ use tari_ootle_storage::{
         EpochCheckpoint,
         ForeignProposalRecord,
         NoVoteReason,
+        SubstateRecord,
         TransactionPool,
         TransactionRecord,
     },
@@ -1045,6 +1047,59 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             let recs = self.transaction_pool.get_all(&**tx, usize::MAX)?;
             let ids = recs.iter().map(|rec| rec.id());
             let removed = self.transaction_pool.remove_all(tx, ids)?;
+            Ok::<_, HotStuffError>(removed.len())
+        })
+    }
+
+    /// Drop any pooled transaction that is already committed in the substate store, returning the
+    /// number removed.
+    ///
+    /// Unlike [`Self::clear_transaction_pool`] (the correct, wholesale response after a state sync
+    /// rewrites the state store), this reconciles the pool against committed state and only removes
+    /// records that are demonstrably stale — so it is safe to run on the up-to-date re-entry path,
+    /// where the pool still holds genuinely-pending transactions we must keep.
+    ///
+    /// The persisted transaction pool is keyed by [`TransactionId`] only and is not epoch-scoped. In
+    /// steady state a transaction's outputs go `UP`, its pool record is removed and it is marked
+    /// finalised atomically in the same commit; but committed state applied *outside* local block-commit
+    /// (e.g. a state sync, the `#2195` case) can leave the persisted pool holding already-committed
+    /// transactions. Such a record can survive across a restart that re-enters consensus already
+    /// up-to-date (i.e. without going through `Syncing`, which clears the pool). Re-proposing it in the
+    /// new epoch breaks liveness: the leader's prepare aborts with `LockInputsFailed` because the
+    /// output substates are already `UP`, replicas that removed it no-vote with `TransactionNotInPool`,
+    /// no QC forms and the pacemaker loops on `NEWVIEW` forever.
+    ///
+    /// Every committed transaction creates a `TransactionReceipt` output substate (version 0) whose
+    /// address is derived from the transaction ID, so the receipt existing in the store is a precise
+    /// per-transaction commitment marker: no other transaction can create it (checking other outputs
+    /// would false-positive on address collisions with a *different* committed transaction and drop a
+    /// genuinely-pending record from only our pool). Note this detects commits whose receipt shard
+    /// belongs to the local shard group, and aborted transactions write no receipt — neither of which
+    /// produces the local output conflict that wedges the leader.
+    // TODO: the transaction pool only holds pending (derived) state and should not be persisted at
+    //       all — that would remove this whole class of pool-vs-state-store divergence.
+    pub fn reconcile_transaction_pool(&self) -> Result<usize, HotStuffError> {
+        // Scan under a read tx so we don't hold the exclusive write lock for the per-record receipt
+        // lookups. `remove_all` skips missing keys, so opening a separate write tx for the removal is
+        // safe even if the pool changes in between.
+        let stale_ids = self.state_store.with_read_tx(|tx| {
+            let recs = self.transaction_pool.get_all(tx, usize::MAX)?;
+            let mut stale_ids = Vec::new();
+            for rec in &recs {
+                let receipt = VersionedSubstateId::for_tx_receipt(rec.to_receipt_id());
+                if SubstateRecord::exists(tx, receipt.as_versioned_ref())? {
+                    stale_ids.push(*rec.id());
+                }
+            }
+            Ok::<_, HotStuffError>(stale_ids)
+        })?;
+
+        if stale_ids.is_empty() {
+            return Ok(0);
+        }
+
+        self.state_store.with_write_tx(|tx| {
+            let removed = self.transaction_pool.remove_all(tx, &stale_ids)?;
             Ok::<_, HotStuffError>(removed.len())
         })
     }

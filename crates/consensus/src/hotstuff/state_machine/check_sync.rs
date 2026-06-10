@@ -41,15 +41,16 @@ where
                 SyncStatus::UpToDate => {
                     // We're re-entering consensus already up-to-date, bypassing `Syncing` (and its
                     // wholesale pool clear). The persisted transaction pool is not epoch-scoped, so a
-                    // transaction finalised in a previous epoch can survive here across a restart and get
-                    // re-proposed in the next epoch — which can never gather a QC and wedges consensus.
-                    // Drop any already-finalised records (keeping genuinely-pending ones) before running.
+                    // transaction whose outputs are already committed can survive here across a restart
+                    // and get re-proposed in the next epoch — which can never gather a QC and wedges
+                    // consensus. Reconcile the pool against committed state (dropping records whose
+                    // outputs are already UP, keeping genuinely-pending ones) before running.
                     let reconciled = context.hotstuff.reconcile_transaction_pool()?;
                     if reconciled > 0 {
                         warn!(
                             target: LOG_TARGET,
                             "🧹 Reconciled transaction pool on up-to-date re-entry: removed {reconciled} \
-                             already-finalised transaction(s)",
+                             already-committed transaction(s)",
                         );
                     }
                     return Ok(ConsensusStateEvent::Ready);

@@ -26,11 +26,13 @@ use tari_ootle_common_types::{
     NodeHeight,
     ProtocolVersion,
     ShardGroup,
+    VersionedSubstateIdRef,
     displayable::Displayable,
     optional::Optional,
 };
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     consensus_models::{
         Block,
         BookkeepingModel,
@@ -1049,44 +1051,57 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         })
     }
 
-    /// Drop any pooled transaction that has already been finalised in the state store, returning the
-    /// number removed.
+    /// Drop any pooled transaction whose outputs are already committed in the substate store,
+    /// returning the number removed.
     ///
-    /// Unlike [`Self::clear_transaction_pool`] (which is the correct, wholesale response after a state
-    /// sync rewrites the state store), this only removes records the local node itself has
-    /// already finalised — so it is safe to run on the up-to-date re-entry path, where the pool still
-    /// holds genuinely-pending transactions we must keep.
+    /// Unlike [`Self::clear_transaction_pool`] (the correct, wholesale response after a state sync
+    /// rewrites the state store), this reconciles the pool against committed state and only removes
+    /// records that are demonstrably stale — so it is safe to run on the up-to-date re-entry path,
+    /// where the pool still holds genuinely-pending transactions we must keep.
     ///
-    /// The persisted transaction pool is keyed by [`TransactionId`] only and is not epoch-scoped, so a
-    /// transaction finalised in a previous epoch can survive in the pool across a restart that re-enters
-    /// consensus already up-to-date (i.e. without going through `Syncing`). Re-proposing such a
-    /// transaction in the new epoch breaks liveness: the rest of the committee finalised and removed it,
-    /// so the block carrying it can never gather a QC (`TransactionNotInPool`) and the pacemaker loops on
-    /// `NEWVIEW` forever. Reconciling the pool against committed state on re-entry removes those stale
-    /// records before they can be proposed.
+    /// The persisted transaction pool is keyed by [`TransactionId`] only and is not epoch-scoped. In
+    /// steady state a transaction's outputs go `UP`, its pool record is removed and it is marked
+    /// finalised atomically in the same commit; but committed state applied *outside* local block-commit
+    /// (e.g. a state sync, the `#2195` case) leaves the persisted pool holding transactions whose
+    /// outputs are already `UP`. Such a record can survive across a restart that re-enters consensus
+    /// already up-to-date (i.e. without going through `Syncing`, which clears the pool). Re-proposing it
+    /// in the new epoch breaks liveness: the leader's prepare aborts with `LockInputsFailed` because the
+    /// output substate is already `UP`, replicas that removed it no-vote with `TransactionNotInPool`, no
+    /// QC forms and the pacemaker loops on `NEWVIEW` forever.
+    ///
+    /// We detect this with exactly the condition that wedges the leader: a pooled transaction whose
+    /// output versioned substates already exist (the [`SubstateIsUp`] lock failure). Genuinely-pending
+    /// transactions have not created their outputs yet, so they are retained.
+    ///
+    /// [`SubstateIsUp`]: crate::hotstuff::substate_store::LockFailedError::SubstateIsUp
     // TODO: the transaction pool only holds pending (derived) state and should not be persisted at
     //       all — that would remove this whole class of pool-vs-state-store divergence.
     pub fn reconcile_transaction_pool(&self) -> Result<usize, HotStuffError> {
-        // Scan the pool under a read tx so we don't hold the exclusive write lock for the
-        // per-record finalized lookups. `remove_all` skips missing keys, so opening a separate
-        // write tx for the removal is safe even if the pool changes in between.
-        let finalized_ids = self.state_store.with_read_tx(|tx| {
+        // Scan under a read tx so we don't hold the exclusive write lock for the per-record output
+        // lookups. `remove_all` skips missing keys, so opening a separate write tx for the removal is
+        // safe even if the pool changes in between.
+        let stale_ids = self.state_store.with_read_tx(|tx| {
             let recs = self.transaction_pool.get_all(tx, usize::MAX)?;
-            let mut finalized_ids = Vec::new();
+            let mut stale_ids = Vec::new();
             for rec in &recs {
-                if TransactionRecord::is_record_finalized(tx, rec.id())? {
-                    finalized_ids.push(*rec.id());
+                let outputs = rec
+                    .evidence()
+                    .iter()
+                    .flat_map(|(_, shard_evidence)| shard_evidence.outputs().iter())
+                    .map(|(substate_id, version)| VersionedSubstateIdRef::new(substate_id, *version));
+                if tx.substates_any_exist(outputs)? {
+                    stale_ids.push(*rec.id());
                 }
             }
-            Ok::<_, HotStuffError>(finalized_ids)
+            Ok::<_, HotStuffError>(stale_ids)
         })?;
 
-        if finalized_ids.is_empty() {
+        if stale_ids.is_empty() {
             return Ok(0);
         }
 
         self.state_store.with_write_tx(|tx| {
-            let removed = self.transaction_pool.remove_all(tx, &finalized_ids)?;
+            let removed = self.transaction_pool.remove_all(tx, &stale_ids)?;
             Ok::<_, HotStuffError>(removed.len())
         })
     }

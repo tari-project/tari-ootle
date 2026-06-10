@@ -4,14 +4,15 @@
 //! Read-only rollback queries that walk the rocksdb state store directly.
 //!
 //! These were previously methods on `StateStoreReadTransaction`. Consensus never calls
-//! them, so they now live with the rollback tool and operate against the concrete
-//! `RocksDbStateStoreReadTransaction` type.
+//! them, so they now live with the rollback tool and operate against a `ReadView` (a
+//! standalone, consistent point-in-time read view of the state store).
 
 use serde::{Serialize, de::DeserializeOwned};
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, shard::Shard};
 use tari_ootle_storage::{Ordering, StorageError, consensus_models::RollbackHistoryEntry};
 use tari_state_store_rocksdb::{
+    ReadView,
     column_families::{
         block,
         block::BlockCf,
@@ -19,7 +20,6 @@ use tari_state_store_rocksdb::{
         state_transition::{ByShardAndStateVersionQuery, StateTransitionCf, StateTransitionType},
         substate::SubstateCf,
     },
-    reader::RocksDbStateStoreReadTransaction,
 };
 use tari_state_tree::Version;
 
@@ -27,9 +27,7 @@ use super::types::{BlocksAfterEpochRow, RewindTransitionKind, SubstateRewindPlan
 
 /// List all rollback-history breadcrumbs in chronological order (oldest first).
 /// Returns an empty vec if no rollback has ever been applied.
-pub fn rollback_history_list<TAddr>(
-    tx: &RocksDbStateStoreReadTransaction<'_, TAddr>,
-) -> Result<Vec<RollbackHistoryEntry>, StorageError>
+pub fn rollback_history_list<TAddr>(tx: &ReadView<'_, TAddr>) -> Result<Vec<RollbackHistoryEntry>, StorageError>
 where TAddr: NodeAddressable + Serialize + DeserializeOwned {
     const OPERATION: &str = "rollback_history_list";
     let cf = tx.db().cf(RollbackHistoryCf)?;
@@ -44,7 +42,7 @@ where TAddr: NodeAddressable + Serialize + DeserializeOwned {
 /// yield one row per transition in *reverse index order* so the dry-run produces the
 /// same reverse-application sequence the mutating rewind applies.
 pub fn rollback_plan_collect_substates<'a, TAddr>(
-    tx: &RocksDbStateStoreReadTransaction<'a, TAddr>,
+    tx: &ReadView<'a, TAddr>,
     shard: Shard,
     target_version: Version,
 ) -> Result<Vec<SubstateRewindPlanRow>, StorageError>
@@ -94,7 +92,7 @@ where
 /// block with `epoch > target`, load each to extract the ids of transactions whose
 /// finalising commit would be undone.
 pub fn rollback_plan_collect_blocks<'a, TAddr>(
-    tx: &RocksDbStateStoreReadTransaction<'a, TAddr>,
+    tx: &ReadView<'a, TAddr>,
     target_epoch: Epoch,
 ) -> Result<Vec<BlocksAfterEpochRow>, StorageError>
 where

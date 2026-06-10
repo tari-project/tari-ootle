@@ -19,6 +19,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     consensus_models::{
         BlockTransactionExecution,
         Evidence,
@@ -59,9 +60,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
     }
 
-    pub fn prepare(
+    pub fn prepare<TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         local_committee_info: &CommitteeInfo,
         pool_tx: &TransactionPoolRecord,
         block: LeafBlock,
@@ -157,9 +158,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
     }
 
-    fn resolve_local_versions<'a>(
+    fn resolve_local_versions<'a, TTx: StateStoreReadTransaction>(
         &self,
-        store: &PendingSubstateStore<TStateStore>,
+        store: &PendingSubstateStore<TTx>,
         local_committee_info: &CommitteeInfo,
         transaction: &'a Transaction,
     ) -> Result<ResolvedInputs<'a>, BlockTransactionExecutorError> {
@@ -260,9 +261,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         )
     }
 
-    pub fn execute_or_fetch(
+    pub fn execute_or_fetch<TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         transaction: &TransactionRecord,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
         block: &LeafBlock,
@@ -304,9 +305,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             .execute(transaction.transaction(), execution_locked_epoch, resolved_inputs)
     }
 
-    pub fn fetch_execution(
+    pub fn fetch_execution<TTx: StateStoreReadTransaction>(
         &self,
-        store: &PendingSubstateStore<TStateStore>,
+        store: &PendingSubstateStore<TTx>,
         transaction_id: &TransactionId,
         block: &LeafBlock,
     ) -> Result<Option<TransactionExecution>, BlockTransactionExecutorError> {
@@ -319,9 +320,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         Ok(None)
     }
 
-    fn resolve_inputs<'a>(
+    fn resolve_inputs<'a, TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         transaction: &'a TransactionRecord,
         local_committee_info: &CommitteeInfo,
     ) -> Result<ResolvedTransactionInputs<'a>, BlockTransactionExecutorError> {
@@ -375,9 +376,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
     }
 
-    fn prepare_local_input_transaction(
+    fn prepare_local_input_transaction<TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         local_committee_info: &CommitteeInfo,
         transaction: &TransactionRecord,
         local_versions: IndexMap<SubstateRequirementRef<'_>, u32>,
@@ -453,9 +454,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
     }
 
-    fn prepare_multishard_involved_transaction(
+    fn prepare_multishard_involved_transaction<TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         local_committee_info: &CommitteeInfo,
         transaction: &TransactionRecord,
         local_versions: IndexMap<SubstateRequirementRef<'_>, u32>,
@@ -484,9 +485,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
     }
 
-    fn prepare_multishard_from_execution(
+    fn prepare_multishard_from_execution<TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         local_committee_info: &CommitteeInfo,
         transaction_id: TransactionId,
         execution: TransactionExecution,
@@ -519,9 +520,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
     }
 
-    fn prepare_multishard_no_execution(
+    fn prepare_multishard_no_execution<TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         local_committee_info: &CommitteeInfo,
         transaction_id: TransactionId,
         local_versions: IndexMap<SubstateRequirementRef<'_>, u32>,
@@ -563,9 +564,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         Ok(PreparedTransaction::new_multishard_evidence(evidence, lock_status))
     }
 
-    fn prepare_multishard_output_only_transaction(
+    fn prepare_multishard_output_only_transaction<TTx: StateStoreReadTransaction>(
         &self,
-        store: &mut PendingSubstateStore<TStateStore>,
+        store: &mut PendingSubstateStore<TTx>,
         local_committee_info: &CommitteeInfo,
         transaction: &TransactionRecord,
         non_local_inputs: IndexSet<SubstateRequirementRef<'_>>,

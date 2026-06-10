@@ -58,7 +58,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 
     pub fn exists(
         &self,
-        tx: &TStateStore::ReadTransaction<'_>,
+        tx: &impl StateStoreReadTransaction,
         id: &TransactionId,
     ) -> Result<bool, TransactionPoolError> {
         let exists = tx.transaction_pool_exists(id)?;
@@ -111,7 +111,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 
     pub fn get_all(
         &self,
-        tx: &TStateStore::ReadTransaction<'_>,
+        tx: &impl StateStoreReadTransaction,
         limit: usize,
     ) -> Result<Vec<TransactionPoolRecord>, TransactionPoolError> {
         let recs = tx.transaction_pool_get_all(limit)?;
@@ -125,7 +125,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
     /// single transaction heavier than the whole budget still makes progress.
     pub fn get_batch_for_next_block(
         &self,
-        tx: &TStateStore::ReadTransaction<'_>,
+        tx: &impl StateStoreReadTransaction,
         weight_budget: u64,
         max_count: usize,
         block_id: &BlockId,
@@ -139,7 +139,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 
     pub fn has_ready_or_pending_transaction_updates(
         &self,
-        tx: &TStateStore::ReadTransaction<'_>,
+        tx: &impl StateStoreReadTransaction,
         block_id: &BlockId,
     ) -> Result<bool, TransactionPoolError> {
         // Check if any pending transactions have state updates that need to be applied
@@ -217,7 +217,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         Ok(false)
     }
 
-    pub fn count(&self, tx: &TStateStore::ReadTransaction<'_>) -> Result<usize, TransactionPoolError> {
+    pub fn count(&self, tx: &impl StateStoreReadTransaction) -> Result<usize, TransactionPoolError> {
         let count = tx.transaction_pool_count(None, None, false)?;
         Ok(count)
     }

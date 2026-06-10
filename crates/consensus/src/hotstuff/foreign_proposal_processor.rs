@@ -14,7 +14,6 @@ use tari_ootle_common_types::{
     optional::Optional,
 };
 use tari_ootle_storage::{
-    StateStore,
     StateStoreReadTransaction,
     consensus_models::{
         BlockPledge,
@@ -45,12 +44,12 @@ use crate::{
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::foreign_proposal_processor";
 
 #[allow(clippy::too_many_lines)]
-pub fn process_foreign_block<TStore: StateStore>(
-    tx: &TStore::ReadTransaction<'_>,
+pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
     local_leaf: &LeafBlock,
     proposal: &ForeignProposal,
     local_committee_info: &CommitteeInfo,
-    substate_store: &mut PendingSubstateStore<TStore>,
+    substate_store: &mut PendingSubstateStore<TTx>,
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");

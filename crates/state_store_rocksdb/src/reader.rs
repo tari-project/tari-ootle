@@ -153,32 +153,52 @@ use crate::{
     error::RocksDbStorageError,
     read_only::ReadOnly,
     state_tree_iterator::LatestSubstateStateTreeIterator,
-    traits::Cf,
+    traits::{Cf, RocksReader},
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::state_store_rocksdb::reader";
 
 pub(crate) type ReadOnlyTransaction<'a> = ReadOnly<Transaction<'a, TransactionDB>>;
 
-pub struct RocksDbStateStoreReadTransaction<'a, TAddr> {
-    tx: ReadOnlyTransaction<'a>,
+pub struct RocksDbStateStoreReadTransaction<'a, TAddr, R = ReadOnlyTransaction<'a>> {
+    tx: R,
     db: &'a TransactionDB,
     _addr: PhantomData<TAddr>,
+    // A read view must not be held open across an `.await` or *moved* to another thread: a live
+    // snapshot pins SST files (space amplification), and reads are meant to be short and scoped.
+    // This marker makes the type `!Send`, turning "held across an await in a Send future" into a
+    // compile error rather than a documented discipline. It also drops the auto `Sync` impl, which is
+    // restored below so `&ReadView` can still be shared for parallel reads on one snapshot.
+    // See CONTEXT.md (read view).
+    _not_send: PhantomData<*const ()>,
 }
 
-impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
-    pub(crate) fn new(db: &'a TransactionDB, tx: ReadOnlyTransaction<'a>) -> Self {
+// SAFETY: a read view exposes only `&self` read operations. When the backing reader `R` is `Sync`,
+// the snapshot and `&TransactionDB` it holds are thread-safe to share, so `&ReadView` may be shared
+// across threads (e.g. `std::thread::scope`/rayon) for parallel reads on one consistent snapshot. The
+// type stays `!Send` (the `_not_send` marker), so a view still cannot be moved across a thread
+// boundary or held across an `.await` in a `Send` future. `PhantomData<TAddr>` holds no value, so
+// `TAddr: Sync` is not required.
+unsafe impl<TAddr, R: Sync> Sync for RocksDbStateStoreReadTransaction<'_, TAddr, R> {}
+
+impl<'a, TAddr, R> RocksDbStateStoreReadTransaction<'a, TAddr, R> {
+    pub(crate) fn new(db: &'a TransactionDB, tx: R) -> Self {
         Self {
             tx,
             db,
             _addr: PhantomData,
+            _not_send: PhantomData,
         }
     }
 
-    pub fn db(&self) -> DbContext<'_, ReadOnlyTransaction<'_>> {
+    pub fn db(&self) -> DbContext<'_, R> {
         DbContext::new(self.db, &self.tx)
     }
+}
 
+// `rocksdb_transaction`/`into_rocksdb_transaction` only exist on the transaction-backed instantiation
+// (the writer uses them for commit/rollback/drop). A snapshot-backed read view has no transaction.
+impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr, ReadOnlyTransaction<'a>> {
     pub(crate) fn rocksdb_transaction(&self) -> &Transaction<'a, TransactionDB> {
         &self.tx.inner
     }
@@ -188,7 +208,9 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
     }
 }
 
-impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStateStoreReadTransaction<'a, TAddr> {
+impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksReader>
+    RocksDbStateStoreReadTransaction<'a, TAddr, R>
+{
     /// Returns the blocks until the end_block (inclusive). NOTE: there is no specific order in the returned blocks
     /// (HashSet) so this should only be used to determine ex/inclusion in the set. The end_block should be a block
     /// in the pending chain if not an empty list is returned.
@@ -334,8 +356,8 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 }
 
-impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStoreReadTransaction
-    for RocksDbStateStoreReadTransaction<'tx, TAddr>
+impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksReader> StateStoreReadTransaction
+    for RocksDbStateStoreReadTransaction<'tx, TAddr, R>
 {
     type Addr = TAddr;
 

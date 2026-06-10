@@ -20,6 +20,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     consensus_models::{LockedEpoch, TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
@@ -66,9 +67,9 @@ impl TestBlockTransactionProcessor {
 }
 
 impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBlockTransactionProcessor {
-    fn validate(
+    fn validate<TTx: StateStoreReadTransaction>(
         &self,
-        _tx: &TStateStore::ReadTransaction<'_>,
+        _tx: &TTx,
         _current_epoch: Epoch,
         _transaction: &Transaction,
     ) -> Result<(), BlockTransactionExecutorError> {

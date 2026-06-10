@@ -11,6 +11,7 @@ use tari_engine_types::commit_result::{AbortReason, RejectReason};
 use tari_ootle_common_types::{ShardGroup, committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     StateStoreWriteTransaction,
     consensus_models::{
         Block,
@@ -155,13 +156,8 @@ where TConsensusSpec: ConsensusSpec
         // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
         if !justified_block.has_justify_qc() {
             // We need to process this before to ensure that we have the latest state when checking the new block
-            let processed_blocks = process_newly_justified_block::<TConsensusSpec::StateStore>(
-                tx,
-                &justified_block,
-                block_qc_id,
-                local_committee_info,
-                change_set,
-            )?;
+            let processed_blocks =
+                process_newly_justified_block(&**tx, &justified_block, block_qc_id, local_committee_info, change_set)?;
             for mut block in processed_blocks {
                 block.add_justify_qc(tx, &block_qc_id)?;
             }
@@ -171,11 +167,11 @@ where TConsensusSpec: ConsensusSpec
             can_propose_epoch_end |= justified_block.is_epoch_end();
         }
 
-        if self.should_vote(tx, valid_block.block())? {
+        if self.should_vote(&**tx, valid_block.block())? {
             let parent = valid_block.block().get_parent(&**tx)?;
 
             self.decide_what_to_vote(
-                tx,
+                &**tx,
                 &parent,
                 valid_block.block(),
                 local_committee_info,
@@ -218,9 +214,9 @@ where TConsensusSpec: ConsensusSpec
     /// if b_new .height > vheight && (b_new extends b_lock || b_new .justify.node.height > b_lock .height)
     ///
     /// If we have not previously voted on this block and the node extends the current locked node, then we vote
-    fn should_vote(
+    fn should_vote<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         block: &Block,
     ) -> Result<bool, ProposalValidationError> {
         let Some(last_voted) = LastVoted::get(tx, block.epoch()).optional()? else {
@@ -243,9 +239,9 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn decide_what_to_vote(
+    fn decide_what_to_vote<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         parent: &Block,
         block: &Block,
         local_committee_info: &CommitteeInfo,
@@ -555,13 +551,13 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn evaluate_local_only_command(
+    fn evaluate_local_only_command<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         block: &Block,
         atom: &TransactionAtom,
         local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
         total_leader_fee: &mut u64,
         total_exhaust_burn: &mut u128,
@@ -743,13 +739,13 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn initial_prepare_multishard(
+    fn initial_prepare_multishard<TTx: StateStoreReadTransaction>(
         &self,
         tx_rec: &mut TransactionPoolRecord,
         block: &Block,
         atom: &TransactionAtom,
         local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate Prepare command");
@@ -891,13 +887,13 @@ where TConsensusSpec: ConsensusSpec
         Ok(None)
     }
 
-    fn evaluate_local_prepare_command(
+    fn evaluate_local_prepare_command<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         block: &Block,
         atom: &TransactionAtom,
         local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let Some(mut tx_rec) = proposed_block_change_set
@@ -974,13 +970,13 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn evaluate_local_accept_command(
+    fn evaluate_local_accept_command<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         block: &Block,
         atom: &TransactionAtom,
         local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let Some(mut tx_rec) = proposed_block_change_set
@@ -1221,13 +1217,13 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn evaluate_all_accept_command(
+    fn evaluate_all_accept_command<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         block: &Block,
         atom: &TransactionAtom,
         local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
         total_leader_fee: &mut u64,
         total_exhaust_burn: &mut u128,
@@ -1399,9 +1395,9 @@ where TConsensusSpec: ConsensusSpec
         Ok(None)
     }
 
-    fn evaluate_some_accept_command(
+    fn evaluate_some_accept_command<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         block: &Block,
         atom: &TransactionAtom,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
@@ -1479,14 +1475,14 @@ where TConsensusSpec: ConsensusSpec
         Ok(None)
     }
 
-    fn evaluate_foreign_proposal_command(
+    fn evaluate_foreign_proposal_command<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         local_block: &Block,
         fp_atom: &ForeignProposalAtom,
         local_committee_info: &CommitteeInfo,
         foreign_shard_group: ShardGroup,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+        substate_store: &mut PendingSubstateStore<TTx>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         if proposed_block_change_set
@@ -1548,9 +1544,9 @@ where TConsensusSpec: ConsensusSpec
         Ok(None)
     }
 
-    fn execute_transaction(
+    fn execute_transaction<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         block: LeafBlock,
         locked_epoch: LockedEpoch,
         transaction: TransactionRecord,

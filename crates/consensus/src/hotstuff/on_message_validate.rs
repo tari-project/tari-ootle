@@ -13,6 +13,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     StateStoreWriteTransaction,
     consensus_models::{
         Block,
@@ -361,7 +362,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         // Also park block if it has missing transactions from foreign proposals
         for proposal in &proposal.foreign_proposals {
             let foreign_missing =
-                self.get_missing_transactions_for_foreign_proposal(tx, local_committee_info, proposal)?;
+                self.get_missing_transactions_for_foreign_proposal(&**tx, local_committee_info, proposal)?;
             missing_tx_ids.extend(foreign_missing);
         }
 
@@ -482,9 +483,9 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         })
     }
 
-    fn get_missing_transactions_for_foreign_proposal(
+    fn get_missing_transactions_for_foreign_proposal<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx: &TTx,
         local_committee_info: &CommitteeInfo,
         proposal: &ForeignProposal,
     ) -> Result<HashSet<TransactionId>, HotStuffError> {

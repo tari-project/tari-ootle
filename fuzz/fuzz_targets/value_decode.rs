@@ -34,7 +34,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = tari_engine_types::substate::SubstateValue::from_bytes(&data);
         })
         .expect("spawn bounded-stack fuzz thread");
-    // A stack overflow aborts the whole process (caught by libFuzzer); a clean
-    // run returns here normally.
-    let _ = handle.join();
+    // A stack overflow aborts the whole process (caught by libFuzzer). Otherwise
+    // propagate any worker panic so libFuzzer records it as a crash too.
+    handle.join().expect("decode worker panicked");
 });

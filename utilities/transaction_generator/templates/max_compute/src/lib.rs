@@ -25,10 +25,10 @@ const DIVISIONS_PER_ROUND: u32 = 8;
 const MIX: u64 = 0x9E37_79B9_7F4A_7C17;
 
 /// Number of outer rounds that lands just under the 100M metering budget. Calibrated empirically
-/// (see `tests/max_compute.rs` in the `transaction_generator` crate): the measured cost is ~110
-/// points per round, so this targets ~88M points and leaves ~12% head-room under the 100M cap for
-/// compiler/metering drift.
-const MAX_ROUNDS: u64 = 800_000;
+/// (see `tests/max_compute.rs` in the `transaction_generator` crate): with division re-costed to 30
+/// points (see `wasm/metering.rs`) the measured cost is ~358 points per round, so this targets ~88M
+/// points and leaves ~12% head-room under the 100M cap for compiler/metering drift.
+const MAX_ROUNDS: u64 = 245_000;
 
 #[template]
 mod max_compute {

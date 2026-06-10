@@ -104,15 +104,21 @@ fn cost_function(op: &Operator) -> u64 {
         Operator::F64Gt |
         Operator::F64Le |
         Operator::F64Ge => 4,
+        // Integer multiply and divide are far more expensive to execute than an add, but were
+        // historically metered identically (1 point). Re-costed from measured per-op latency (see
+        // the `metering_recost` engine example) — division dominates a CPU-bound transaction's
+        // wall-clock time, so under-pricing it let a transaction buy far more execution time than
+        // its metered cost implied. Values target the slow path on a typical x86 validator (64-bit
+        // divide ~30-90 cycles, 32-bit ~20-30, multiply ~3); re-measure on the slowest supported
+        // hardware and raise if needed.
+        Operator::I64DivU | Operator::I64DivS | Operator::I64RemU | Operator::I64RemS => 30,
+        Operator::I32DivU | Operator::I32DivS | Operator::I32RemU | Operator::I32RemS => 20,
+        Operator::I64Mul => 3,
+        Operator::I32Mul => 2,
         Operator::I32Clz |
         Operator::I32Ctz |
         Operator::I32Popcnt |
         Operator::I32Sub |
-        Operator::I32Mul |
-        Operator::I32DivS |
-        Operator::I32DivU |
-        Operator::I32RemS |
-        Operator::I32RemU |
         Operator::I32And |
         Operator::I32Or |
         Operator::I32Xor |
@@ -126,11 +132,6 @@ fn cost_function(op: &Operator) -> u64 {
         Operator::I64Popcnt |
         Operator::I64Add |
         Operator::I64Sub |
-        Operator::I64Mul |
-        Operator::I64DivS |
-        Operator::I64DivU |
-        Operator::I64RemS |
-        Operator::I64RemU |
         Operator::I64And |
         Operator::I64Or |
         Operator::I64Xor |
@@ -145,11 +146,11 @@ fn cost_function(op: &Operator) -> u64 {
         Operator::F32Floor |
         Operator::F32Trunc |
         Operator::F32Nearest => 4,
-        Operator::F32Sqrt => 10,
+        Operator::F32Sqrt => 20,
+        Operator::F32Div => 12,
         Operator::F32Add |
         Operator::F32Sub |
         Operator::F32Mul |
-        Operator::F32Div |
         Operator::F32Min |
         Operator::F32Max |
         Operator::F32Copysign |
@@ -159,11 +160,11 @@ fn cost_function(op: &Operator) -> u64 {
         Operator::F64Floor |
         Operator::F64Trunc |
         Operator::F64Nearest => 4,
-        Operator::F64Sqrt => 10,
+        Operator::F64Sqrt => 20,
+        Operator::F64Div => 15,
         Operator::F64Add |
         Operator::F64Sub |
         Operator::F64Mul |
-        Operator::F64Div |
         Operator::F64Min |
         Operator::F64Max |
         Operator::F64Copysign => 4,

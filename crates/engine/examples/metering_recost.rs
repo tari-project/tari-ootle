@@ -12,9 +12,10 @@
 //! Methodology: each `bench_*` function in the `metering_bench` template runs a serial dependent
 //! chain with identical per-step glue, varying only one measured op. For each op we time the call at
 //! two round counts and take the slope, which cancels fixed per-call overhead, giving time per step.
-//! `bench_and` (a 1-cycle op) and `bench_noop` (glue only) calibrate the cost of a single cheap op,
-//! and every op is priced as round(its latency / one cheap-op's latency). Latency (dependent chain),
-//! not throughput, is what a busy-loop attacker realises, so it's the conservative number to price.
+//! `bench_cheap8` (8 cheap ops) and `bench_noop` (glue only) calibrate the cost of a single cheap op
+//! (a single one is below the noise floor), and every op is priced as round(its latency / one
+//! cheap-op's latency). Latency (dependent chain), not throughput, is what a busy-loop attacker
+//! realises, so it's the conservative number to price.
 
 use std::time::Instant;
 
@@ -40,7 +41,12 @@ struct Bench {
 }
 
 const fn b(label: &'static str, func: &'static str, current: u64, float: bool) -> Bench {
-    Bench { label, func, current, float }
+    Bench {
+        label,
+        func,
+        current,
+        float,
+    }
 }
 
 fn main() {
@@ -91,7 +97,10 @@ fn main() {
     println!();
     println!("Per-op cost (lower bound; dependent-chain latency). 1 cheap op ≈ {cheap_op_ns:.3} ns");
     println!();
-    println!("{:<14} {:>10} {:>10} {:>9} {:>10}", "op", "ns/op", "x cheap", "current", "suggested");
+    println!(
+        "{:<14} {:>10} {:>10} {:>9} {:>10}",
+        "op", "ns/op", "x cheap", "current", "suggested"
+    );
     println!("{}", "-".repeat(57));
 
     for bench in &benches {

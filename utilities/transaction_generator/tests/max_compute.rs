@@ -56,8 +56,8 @@ fn busy_max_stays_under_the_metering_budget() {
 }
 
 /// The cost is linear in `rounds`, which is what lets `MAX_ROUNDS` be calibrated. This pins the
-/// slope (~110 points/round); a change here means the template was retuned and `MAX_ROUNDS` should
-/// be rechecked.
+/// slope (~358 points/round with division re-costed to 30 points); a change here means the template
+/// or the metering table was retuned and `MAX_ROUNDS` should be rechecked.
 #[test]
 fn busy_cost_is_linear_in_rounds() {
     let mut test = TemplateTest::new(CRATE_PATH, [MAX_COMPUTE]);
@@ -86,8 +86,8 @@ fn busy_cost_is_linear_in_rounds() {
 
     let per_round = (p2 - p1) / 20_000;
     assert!(
-        (95..=125).contains(&per_round),
-        "expected ~110 metering points per round, measured {per_round}",
+        (330..=390).contains(&per_round),
+        "expected ~358 metering points per round, measured {per_round}",
     );
 }
 

@@ -3096,10 +3096,18 @@ where
     }
 
     fn record_wasm_execution(&mut self, points_consumed: u64) -> Result<(), RuntimeError> {
+        // Accumulate into the transaction-wide total unconditionally (not via a module) so the
+        // per-transaction budget is enforced even when fee charging is disabled. The fee module
+        // reads this total in `on_before_finalize` to compute the WASM execution charge.
+        self.tracker.accumulate_wasm_points(points_consumed);
         for module in self.modules.iter() {
             module.on_wasm_execution(&mut self.tracker, points_consumed)?;
         }
         Ok(())
+    }
+
+    fn wasm_points_consumed(&self) -> u64 {
+        self.tracker.accumulated_wasm_points()
     }
 
     fn resolve_args(

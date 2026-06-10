@@ -137,15 +137,4 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
 
         Ok(())
     }
-
-    fn on_wasm_execution(
-        &self,
-        track: &mut StateTracker<TStore>,
-        points_consumed: u64,
-    ) -> Result<(), RuntimeModuleError> {
-        // Accumulate raw points; the divisor is applied once in `on_before_finalize` so
-        // sub-divisor calls cannot round to zero individually.
-        track.accumulate_wasm_points(points_consumed);
-        Ok(())
-    }
 }

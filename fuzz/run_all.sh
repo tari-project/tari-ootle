@@ -31,14 +31,18 @@ FUZZ_TARGET="${FUZZ_TARGET:-$(rustc "+${FUZZ_TOOLCHAIN}" -vV | sed -n 's/^host: 
 
 # Per-target libFuzzer flags. Recursion targets bound their own stack internally;
 # the alloc/compile targets need resource limits so the failure surfaces as a
-# crash artifact rather than killing the runner.
-declare -A TARGET_FLAGS=(
-  [value_decode]="-rss_limit_mb=2048"
-  [transaction_decode]="-rss_limit_mb=512 -malloc_limit_mb=64"
-  [substate_id_from_str]="-rss_limit_mb=2048"
-  [parse_manifest]="-rss_limit_mb=2048 -timeout=25"
-  [wasm_validate_code]="-rss_limit_mb=2048 -timeout=25"
-)
+# crash artifact rather than killing the runner. Kept as a case (not an
+# associative array) so the script runs under macOS's stock bash 3.2.
+flags_for() {
+  case "$1" in
+    value_decode) echo "-rss_limit_mb=2048" ;;
+    transaction_decode) echo "-rss_limit_mb=512 -malloc_limit_mb=64" ;;
+    substate_id_from_str) echo "-rss_limit_mb=2048" ;;
+    parse_manifest) echo "-rss_limit_mb=2048 -timeout=25" ;;
+    wasm_validate_code) echo "-rss_limit_mb=2048 -timeout=25" ;;
+    *) return 1 ;;
+  esac
+}
 
 # Default target order (kept explicit so output is deterministic).
 ALL_TARGETS=(value_decode transaction_decode substate_id_from_str parse_manifest wasm_validate_code)
@@ -57,8 +61,7 @@ fi
 
 status=0
 for target in "${TARGETS[@]}"; do
-  flags="${TARGET_FLAGS[$target]:-}"
-  if [[ -z "${TARGET_FLAGS[$target]+set}" ]]; then
+  if ! flags="$(flags_for "${target}")"; then
     echo "error: unknown fuzz target '${target}'. Known targets: ${ALL_TARGETS[*]}" >&2
     exit 2
   fi

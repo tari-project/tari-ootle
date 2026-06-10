@@ -6,7 +6,6 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 
 use minicbor::{
     CborLen,
-    Decode,
     Decoder,
     Encoder,
     data::{Tag, Type},
@@ -244,61 +243,81 @@ impl<C> minicbor::Encode<C> for Value {
     }
 }
 
+/// Maximum container-nesting depth accepted when decoding a dynamic [`Value`] tree.
+///
+/// The decode is recursive (one stack frame per nested array/map/tag), and the input is untrusted
+/// — roughly one byte of input buys one level of nesting, so without a bound a tiny payload can
+/// drive the decoder into a stack overflow (a process abort, not a catchable error). This caps the
+/// recursion so over-nested input fails as a clean `Err` instead.
+///
+/// Set just above the semantic `MAX_VISITOR_DEPTH` (50) enforced on the materialised tree in
+/// `engine_types::indexed_value`: high enough that this never rejects input downstream validation
+/// would accept, low enough that the worst-case recursion stays a small fraction of the stack on
+/// the threads that run untrusted decode (e.g. tokio's 2 MiB workers).
+pub const MAX_DECODE_DEPTH: usize = 64;
+
 impl<'b, C> minicbor::Decode<'b, C> for Value {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
-        match d.datatype()? {
-            Type::Null => {
-                d.null()?;
-                Ok(Value::Null)
-            },
-            Type::Undefined => {
-                d.undefined()?;
-                Ok(Value::Null)
-            },
-            Type::Bool => Ok(Value::Bool(d.bool()?)),
-            Type::U8 | Type::U16 | Type::U32 | Type::U64 => Ok(Value::Integer(i128::from(d.u64()?))),
-            Type::I8 | Type::I16 | Type::I32 | Type::I64 => Ok(Value::Integer(i128::from(d.i64()?))),
-            Type::Int => Ok(Value::Integer(i128::from(d.int()?))),
-            Type::F16 | Type::F32 | Type::F64 => Ok(Value::Float(d.f64()?)),
-            Type::Bytes => Ok(Value::Bytes(d.bytes()?.to_vec())),
-            Type::BytesIndef => {
-                let mut out = Vec::new();
-                for chunk in d.bytes_iter()? {
-                    out.extend_from_slice(chunk?);
-                }
-                Ok(Value::Bytes(out))
-            },
-            Type::String => Ok(Value::Text(d.str()?.to_string())),
-            Type::StringIndef => {
-                let mut out = String::new();
-                for chunk in d.str_iter()? {
-                    out.push_str(chunk?);
-                }
-                Ok(Value::Text(out))
-            },
-            Type::Array => {
-                let len = d.array()?;
-                Ok(Value::Array(decode_array(d, len, ctx)?))
-            },
-            Type::ArrayIndef => {
-                let _ = d.array()?;
-                Ok(Value::Array(decode_array(d, None, ctx)?))
-            },
-            Type::Map => {
-                let len = d.map()?;
-                Ok(Value::Map(decode_map(d, len, ctx)?))
-            },
-            Type::MapIndef => {
-                let _ = d.map()?;
-                Ok(Value::Map(decode_map(d, None, ctx)?))
-            },
-            Type::Tag => {
-                let tag: u64 = d.tag()?.into();
-                let inner: Value = Value::decode(d, ctx)?;
-                Ok(Value::Tag(tag, Box::new(inner)))
-            },
-            other => Err(decode::Error::message("unsupported CBOR datatype").with_message(other)),
-        }
+        decode_value(d, ctx, 0)
+    }
+}
+
+fn decode_value<'b, C>(d: &mut Decoder<'b>, ctx: &mut C, depth: usize) -> Result<Value, decode::Error> {
+    if depth >= MAX_DECODE_DEPTH {
+        return Err(decode::Error::message("maximum CBOR nesting depth exceeded"));
+    }
+    match d.datatype()? {
+        Type::Null => {
+            d.null()?;
+            Ok(Value::Null)
+        },
+        Type::Undefined => {
+            d.undefined()?;
+            Ok(Value::Null)
+        },
+        Type::Bool => Ok(Value::Bool(d.bool()?)),
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 => Ok(Value::Integer(i128::from(d.u64()?))),
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 => Ok(Value::Integer(i128::from(d.i64()?))),
+        Type::Int => Ok(Value::Integer(i128::from(d.int()?))),
+        Type::F16 | Type::F32 | Type::F64 => Ok(Value::Float(d.f64()?)),
+        Type::Bytes => Ok(Value::Bytes(d.bytes()?.to_vec())),
+        Type::BytesIndef => {
+            let mut out = Vec::new();
+            for chunk in d.bytes_iter()? {
+                out.extend_from_slice(chunk?);
+            }
+            Ok(Value::Bytes(out))
+        },
+        Type::String => Ok(Value::Text(d.str()?.to_string())),
+        Type::StringIndef => {
+            let mut out = String::new();
+            for chunk in d.str_iter()? {
+                out.push_str(chunk?);
+            }
+            Ok(Value::Text(out))
+        },
+        Type::Array => {
+            let len = d.array()?;
+            Ok(Value::Array(decode_array(d, len, ctx, depth)?))
+        },
+        Type::ArrayIndef => {
+            let _ = d.array()?;
+            Ok(Value::Array(decode_array(d, None, ctx, depth)?))
+        },
+        Type::Map => {
+            let len = d.map()?;
+            Ok(Value::Map(decode_map(d, len, ctx, depth)?))
+        },
+        Type::MapIndef => {
+            let _ = d.map()?;
+            Ok(Value::Map(decode_map(d, None, ctx, depth)?))
+        },
+        Type::Tag => {
+            let tag: u64 = d.tag()?.into();
+            let inner = decode_value(d, ctx, depth + 1)?;
+            Ok(Value::Tag(tag, Box::new(inner)))
+        },
+        other => Err(decode::Error::message("unsupported CBOR datatype").with_message(other)),
     }
 }
 
@@ -342,7 +361,12 @@ impl<C> CborLen<C> for Value {
 #[cfg(not(feature = "std"))]
 use alloc::string::ToString;
 
-fn decode_array<'b, C>(d: &mut Decoder<'b>, len: Option<u64>, ctx: &mut C) -> Result<Vec<Value>, decode::Error> {
+fn decode_array<'b, C>(
+    d: &mut Decoder<'b>,
+    len: Option<u64>,
+    ctx: &mut C,
+    depth: usize,
+) -> Result<Vec<Value>, decode::Error> {
     let mut out = match len {
         Some(n) => Vec::with_capacity(n.min(64) as usize),
         None => Vec::new(),
@@ -350,7 +374,7 @@ fn decode_array<'b, C>(d: &mut Decoder<'b>, len: Option<u64>, ctx: &mut C) -> Re
     match len {
         Some(n) => {
             for _ in 0..n {
-                out.push(Value::decode(d, ctx)?);
+                out.push(decode_value(d, ctx, depth + 1)?);
             }
         },
         None => loop {
@@ -358,13 +382,18 @@ fn decode_array<'b, C>(d: &mut Decoder<'b>, len: Option<u64>, ctx: &mut C) -> Re
                 d.skip()?;
                 break;
             }
-            out.push(Value::decode(d, ctx)?);
+            out.push(decode_value(d, ctx, depth + 1)?);
         },
     }
     Ok(out)
 }
 
-fn decode_map<'b, C>(d: &mut Decoder<'b>, len: Option<u64>, ctx: &mut C) -> Result<Vec<(Value, Value)>, decode::Error> {
+fn decode_map<'b, C>(
+    d: &mut Decoder<'b>,
+    len: Option<u64>,
+    ctx: &mut C,
+    depth: usize,
+) -> Result<Vec<(Value, Value)>, decode::Error> {
     let mut out = match len {
         Some(n) => Vec::with_capacity(n.min(64) as usize),
         None => Vec::new(),
@@ -372,8 +401,8 @@ fn decode_map<'b, C>(d: &mut Decoder<'b>, len: Option<u64>, ctx: &mut C) -> Resu
     match len {
         Some(n) => {
             for _ in 0..n {
-                let k = Value::decode(d, ctx)?;
-                let v = Value::decode(d, ctx)?;
+                let k = decode_value(d, ctx, depth + 1)?;
+                let v = decode_value(d, ctx, depth + 1)?;
                 out.push((k, v));
             }
         },
@@ -382,8 +411,8 @@ fn decode_map<'b, C>(d: &mut Decoder<'b>, len: Option<u64>, ctx: &mut C) -> Resu
                 d.skip()?;
                 break;
             }
-            let k = Value::decode(d, ctx)?;
-            let v = Value::decode(d, ctx)?;
+            let k = decode_value(d, ctx, depth + 1)?;
+            let v = decode_value(d, ctx, depth + 1)?;
             out.push((k, v));
         },
     }
@@ -492,5 +521,45 @@ mod tests {
             )])),
         );
         assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn deeply_nested_within_limit_roundtrips() {
+        // Comfortably below MAX_DECODE_DEPTH: legitimately nested input must still decode.
+        let depth = MAX_DECODE_DEPTH / 2;
+        let mut v = Value::Integer(1);
+        for _ in 0..depth {
+            v = Value::Array(vec![v]);
+        }
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    // The decode is recursive, so without a depth bound a tiny untrusted payload (≈1 byte per
+    // nesting level) overflows the stack and aborts the process. These assert that over-nested
+    // input of each container kind fails as a clean `Err` instead. Each chain is far longer than
+    // any real stack could survive unbounded, so a regression would abort the test binary.
+
+    #[test]
+    fn deeply_nested_array_errors_instead_of_overflow() {
+        let bytes = vec![0x81u8; 100_000]; // chain of CBOR "array of 1"
+        assert!(minicbor::decode::<Value>(&bytes).is_err());
+    }
+
+    #[test]
+    fn deeply_nested_indefinite_array_errors_instead_of_overflow() {
+        let bytes = vec![0x9fu8; 100_000]; // chain of CBOR "indefinite-length array"
+        assert!(minicbor::decode::<Value>(&bytes).is_err());
+    }
+
+    #[test]
+    fn deeply_nested_map_errors_instead_of_overflow() {
+        let bytes = vec![0xa1u8; 100_000]; // chain of CBOR "map of 1" (recurses on each key)
+        assert!(minicbor::decode::<Value>(&bytes).is_err());
+    }
+
+    #[test]
+    fn deeply_nested_tag_errors_instead_of_overflow() {
+        let bytes = vec![0xc0u8; 100_000]; // chain of CBOR "tag"
+        assert!(minicbor::decode::<Value>(&bytes).is_err());
     }
 }

@@ -1067,14 +1067,25 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     // TODO: the transaction pool only holds pending (derived) state and should not be persisted at
     //       all — that would remove this whole class of pool-vs-state-store divergence.
     pub fn reconcile_transaction_pool(&self) -> Result<usize, HotStuffError> {
-        self.state_store.with_write_tx(|tx| {
-            let recs = self.transaction_pool.get_all(&**tx, usize::MAX)?;
+        // Scan the pool under a read tx so we don't hold the exclusive write lock for the
+        // per-record finalized lookups. `remove_all` skips missing keys, so opening a separate
+        // write tx for the removal is safe even if the pool changes in between.
+        let finalized_ids = self.state_store.with_read_tx(|tx| {
+            let recs = self.transaction_pool.get_all(tx, usize::MAX)?;
             let mut finalized_ids = Vec::new();
             for rec in &recs {
-                if TransactionRecord::is_record_finalized(&**tx, rec.id())? {
+                if TransactionRecord::is_record_finalized(tx, rec.id())? {
                     finalized_ids.push(*rec.id());
                 }
             }
+            Ok::<_, HotStuffError>(finalized_ids)
+        })?;
+
+        if finalized_ids.is_empty() {
+            return Ok(0);
+        }
+
+        self.state_store.with_write_tx(|tx| {
             let removed = self.transaction_pool.remove_all(tx, &finalized_ids)?;
             Ok::<_, HotStuffError>(removed.len())
         })

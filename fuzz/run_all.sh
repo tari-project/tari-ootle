@@ -22,6 +22,13 @@ FUZZ_TOOLCHAIN="${FUZZ_TOOLCHAIN:-nightly}"
 # Run from the repo root regardless of where the script is invoked from.
 cd "$(dirname "$0")/.."
 
+# Build for the real host triple. cargo-fuzz otherwise defaults to the triple it
+# was *itself* compiled for — and prebuilt (e.g. binstall'd) binaries are often
+# x86_64-unknown-linux-musl, whose std isn't installed and whose static libc is
+# incompatible with the sanitizer. Pinning to the host avoids both. Override with
+# FUZZ_TARGET if you really want to cross-fuzz.
+FUZZ_TARGET="${FUZZ_TARGET:-$(rustc "+${FUZZ_TOOLCHAIN}" -vV | sed -n 's/^host: //p')}"
+
 # Per-target libFuzzer flags. Recursion targets bound their own stack internally;
 # the alloc/compile targets need resource limits so the failure surfaces as a
 # crash artifact rather than killing the runner.
@@ -64,9 +71,9 @@ for target in "${TARGETS[@]}"; do
     corpus_args+=("fuzz/seeds/${target}")
   fi
 
-  echo "==> fuzzing '${target}' for ${MAX_TOTAL_TIME}s (flags: ${flags:-none})"
+  echo "==> fuzzing '${target}' for ${MAX_TOTAL_TIME}s on ${FUZZ_TARGET} (flags: ${flags:-none})"
   # shellcheck disable=SC2086 # word-splitting of $flags is intentional
-  if ! cargo "+${FUZZ_TOOLCHAIN}" fuzz run "${target}" "${corpus_args[@]}" -- -max_total_time="${MAX_TOTAL_TIME}" ${flags}; then
+  if ! cargo "+${FUZZ_TOOLCHAIN}" fuzz run --target "${FUZZ_TARGET}" "${target}" "${corpus_args[@]}" -- -max_total_time="${MAX_TOTAL_TIME}" ${flags}; then
     echo "!! target '${target}' produced a finding (see fuzz/artifacts/${target}/)" >&2
     status=1
   fi

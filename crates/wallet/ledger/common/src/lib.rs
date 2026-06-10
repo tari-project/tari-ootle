@@ -1,6 +1,20 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+//! Shared definitions of the APDU protocol spoken between the Tari Ootle Ledger device app and a
+//! host client (`ootle_ledger_client`).
+//!
+//! Both sides depend on this crate so the wire format is defined exactly once:
+//!
+//! - [`Instruction`] — the APDU instruction set (sent under class byte `0x80`).
+//! - [`OotleStatusWord`] — app-specific error status words returned by the device.
+//! - [`arg_types`] — borsh-encoded request/response bodies and the framing of the streamed `SignTransaction` exchange.
+//! - [`signing`] — domain-separation constants the device uses to recompute the transaction signing message and Schnorr
+//!   challenge.
+//!
+//! The crate is `no_std` by default so it can build inside the Ledger embedded app; the host
+//! enables the `std` feature.
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod arg_types;
@@ -37,13 +51,19 @@ pub mod signing {
 }
 
 /// APDU instruction set for the Ootle Ledger app.
-/// Byte values must match what `tari-ledger-client` sends (CLA = 0x80).
+/// Byte values must match what `ootle_ledger_client` sends (CLA = 0x80).
 #[repr(u8)]
 #[derive(Debug)]
 pub enum Instruction {
+    /// Return the app version (`CARGO_PKG_VERSION`) as UTF-8 bytes.
     GetVersion = 0x01,
+    /// Return the app name as UTF-8 bytes.
     GetAppName = 0x02,
+    /// Derive and return a public key. Body: [`arg_types::GetPublicKeyRequest`], response:
+    /// [`arg_types::GetPublicKeyResponse`].
     GetPublicKey = 0x03,
+    /// Sign a transaction, streamed as a sequence of frames (see [`arg_types::FrameKind`]).
+    /// Concludes with the user review on-device and an [`arg_types::SignTransactionResponse`].
     SignTransaction = 0x04,
 }
 
@@ -62,12 +82,19 @@ impl TryFrom<u8> for Instruction {
     }
 }
 
-/// Ledger application status words.
+/// App-specific error status words returned in the APDU status bytes (`SW1SW2`).
+///
+/// On the wire these are offset by [`OOTLE_STATUS_BASE`] (see [`Self::to_status`]) to keep them
+/// out of the ISO 7816 / Ledger SDK status ranges. A successful exchange returns the standard
+/// `0x9000` instead.
 #[repr(u16)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum OotleStatusWord {
+    /// The request body could not be decoded, or the APDU parameters were invalid.
     BadRequest = 0x01,
+    /// The device failed to encode the response body.
     EncodeResponseFail = 0x02,
+    /// Deriving the requested key on-device failed.
     KeyDeriveFail = 0x03,
     /// A streamed `SignTransaction` chunk arrived out of order or in an unexpected state.
     SignStreamError = 0x04,
@@ -77,9 +104,12 @@ pub enum OotleStatusWord {
     UserRejected = 0x06,
 }
 
+/// Base offset for [`OotleStatusWord`] values on the wire, keeping app-specific errors clear of
+/// the ISO 7816 and Ledger SDK status word ranges.
 pub const OOTLE_STATUS_BASE: u16 = 0xB000;
 
 impl OotleStatusWord {
+    /// The 16-bit status word as sent on the wire: [`OOTLE_STATUS_BASE`] plus the error code.
     pub fn to_status(self) -> u16 {
         OOTLE_STATUS_BASE | self as u16
     }

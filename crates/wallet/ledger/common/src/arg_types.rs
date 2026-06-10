@@ -1,8 +1,15 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+//! Borsh-encoded APDU request/response bodies and the framing of the streamed `SignTransaction`
+//! exchange.
+
 use borsh::{BorshDeserialize, BorshSerialize};
 
+/// Key-derivation branch for [`GetPublicKeyRequest`] and [`SignTransactionHeader`].
+///
+/// Mirrors `tari_ootle_wallet_sdk::models::KeyBranch` variant-for-variant so host and device
+/// derive the same keys.
 #[repr(u64)]
 #[derive(Clone, Copy, BorshSerialize, BorshDeserialize)]
 #[borsh(use_discriminant = true)]
@@ -26,11 +33,13 @@ pub enum KeyType {
 }
 
 impl KeyType {
+    /// The branch's borsh discriminant, used as the derivation-path component.
     pub fn as_u64(&self) -> u64 {
         *self as u64
     }
 }
 
+/// Body of a `GetPublicKey` request: the derivation path of the key to return.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct GetPublicKeyRequest {
     pub account: u64,
@@ -38,6 +47,7 @@ pub struct GetPublicKeyRequest {
     pub key_type: KeyType,
 }
 
+/// Response to `GetPublicKey`: the compressed Ristretto public key for the requested path.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct GetPublicKeyResponse {
     pub public_key: [u8; 32],
@@ -110,6 +120,7 @@ pub enum SigningField {
 }
 
 impl SigningField {
+    /// The field tag carried in the low 7 bits of `P1` on `Segment` frames.
     pub fn as_tag(self) -> u8 {
         self as u8
     }

@@ -1,7 +1,7 @@
 [package]
-name = "tari_ledger_client"
+name = "ootle_ledger_client"
 version = "0.1.1"
-description = "A client for interacting with Ootle Ledger wallet app."
+description = "Host client for the Tari Ootle Ledger app: on-device key derivation and transaction signing over any APDU transport"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -17,7 +17,7 @@ thiserror = { workspace = true }
 
 # Speculos transport
 reqwest = { workspace = true, features = ["json"], optional = true }
-serde = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
 hex = { workspace = true, optional = true }
 borsh = { workspace = true, default-features = false }
 
@@ -36,3 +36,6 @@ indexmap = { workspace = true }
 [features]
 speculos-transport = ["serde", "reqwest", "hex"]
 hid-transport = ["dep:ledger-transport-hid"]
+
+[package.metadata.docs.rs]
+all-features = true

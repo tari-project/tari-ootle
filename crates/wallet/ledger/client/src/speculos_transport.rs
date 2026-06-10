@@ -1,11 +1,15 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+//! APDU transport for the [Speculos](https://github.com/LedgerHQ/speculos) Ledger emulator.
+
 use std::ops::Deref;
 
 use ledger_transport::{APDUAnswer, APDUCommand, Exchange, async_trait};
 use serde::{Deserialize, Serialize};
 
+/// [`Exchange`] implementation that sends APDUs to a running Speculos emulator over its REST API,
+/// so the full client/app exchange can be exercised without a physical device.
 #[derive(Debug, Default)]
 pub struct SpeculosTransport {
     inner: reqwest::Client,

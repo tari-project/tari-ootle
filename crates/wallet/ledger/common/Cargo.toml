@@ -1,8 +1,10 @@
 [package]
 name = "ootle_ledger_common"
 version = "0.1.0"
+description = "Shared APDU protocol types for the Tari Ootle Ledger app and its host client"
 edition = "2024"
 authors = ["Tari Development Community"]
+repository = "https://github.com/tari-project/tari-ootle"
 license = "BSD-3-Clause"
 
 [dependencies]

@@ -56,6 +56,8 @@ CRATES = [
     ("ootle-wasm-core", "crates/ootle_wasm/core", 3),
     ("ootle-wasm", "crates/ootle_wasm/wasm", 3),
     ("tari_template_test_tooling", "crates/template_test_tooling", 3),
+    ("ootle_ledger_common", "crates/wallet/ledger/common", 4),
+    ("ootle_ledger_client", "crates/wallet/ledger/client", 4),
     ("ootle-rs", "crates/wallet/ootle-rs", 4),
     ("tari_ootle_wallet_sdk", "crates/wallet/sdk", 4),
     ("tari_ootle_wallet_storage_sqlite", "crates/wallet/storage_sqlite", 4),

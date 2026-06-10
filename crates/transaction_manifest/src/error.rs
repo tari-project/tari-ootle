@@ -24,6 +24,8 @@
 pub enum ManifestError {
     #[error("Lex error: {0}")]
     LexError(String),
+    #[error("Manifest source is {size} bytes, exceeding the maximum of {max}")]
+    ManifestTooLarge { size: usize, max: usize },
     #[error("Syntax error: {0}")]
     SyntaxError(#[from] syn::Error),
     #[error("Missing expression")]

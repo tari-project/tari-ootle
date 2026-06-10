@@ -115,7 +115,8 @@ fn parse_inputs(items: &[String]) -> anyhow::Result<Vec<SubstateRequirement>> {
     items
         .iter()
         .map(|s| {
-            s.parse::<SubstateRequirement>()
+            s.trim()
+                .parse::<SubstateRequirement>()
                 .map_err(|e| anyhow!("Invalid --input '{}': {}", s, e))
         })
         .collect()
@@ -128,9 +129,10 @@ fn parse_templates(items: &[String]) -> anyhow::Result<HashMap<String, TemplateA
             let (alias, address) = s
                 .split_once('=')
                 .ok_or_else(|| anyhow!("Invalid template mapping '{}' (expected <alias>=template_<hex>)", s))?;
-            let hex = address.trim().strip_prefix("template_").unwrap_or(address.trim());
+            let trimmed = address.trim();
+            let hex = trimmed.strip_prefix("template_").unwrap_or(trimmed).trim();
             let address = TemplateAddress::from_hex(hex)
-                .map_err(|_| anyhow!("Invalid template address for '{}': {}", alias, address))?;
+                .map_err(|_| anyhow!("Invalid template address for '{}': {}", alias, trimmed))?;
             Ok((alias.trim().to_string(), address))
         })
         .collect()

@@ -74,6 +74,11 @@ members = [
     "utilities/traffic-sim",
     "utilities/validator_rollback",
 ]
+# The cargo-fuzz crate is nightly-only (needs libFuzzer sanitizer instrumentation) and must stay out
+# of the default workspace build/test sweep. See fuzz/README.md.
+exclude = [
+    "fuzz",
+]
 resolver = "2"
 
 [workspace.dependencies]

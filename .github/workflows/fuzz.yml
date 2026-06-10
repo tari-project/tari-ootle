@@ -1,0 +1,89 @@
+---
+name: Fuzz
+
+'on':
+  workflow_dispatch:
+    inputs:
+      max_total_time:
+        description: 'Seconds to run each fuzz target'
+        default: '60'
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+    # Only the crates reachable from the fuzz targets (plus the harnesses/CI themselves).
+    paths:
+      - 'crates/tari_bor/**'
+      - 'crates/engine/**'
+      - 'crates/engine_types/**'
+      - 'crates/transaction/**'
+      - 'crates/transaction_manifest/**'
+      - 'crates/template_lib_types/**'
+      - 'fuzz/**'
+      - '.github/workflows/fuzz.yml'
+  push:
+    branches:
+      - development
+      - main
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+env:
+  nightly_toolchain: nightly-2025-06-25
+  CARGO_HTTP_MULTIPLEXING: false
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  PROTOC: protoc
+  # Per-target seconds. Overridable via the workflow_dispatch input.
+  MAX_TOTAL_TIME: ${{ github.event.inputs.max_total_time || '60' }}
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: [ ubuntu-latest ]
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - value_decode
+          - transaction_decode
+          - substate_id_from_str
+          - parse_manifest
+          - wasm_validate_code
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: ${{ env.nightly_toolchain }}
+
+      - uses: ./.github/actions/rust-cache
+
+      - name: ubuntu dependencies
+        run: |
+          sudo apt-get update
+          sudo bash scripts/install_ubuntu_dependencies.sh
+
+      - uses: rui314/setup-mold@v1
+
+      - name: install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      - name: run fuzz target
+        run: FUZZ_TOOLCHAIN=${{ env.nightly_toolchain }} ./fuzz/run_all.sh ${{ matrix.target }}
+
+      - name: upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

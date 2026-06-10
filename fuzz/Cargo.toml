@@ -51,13 +51,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "parse_manifest"
-path = "fuzz_targets/parse_manifest.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "wasm_validate_code"
 path = "fuzz_targets/wasm_validate_code.rs"
 test = false

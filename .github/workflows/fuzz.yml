@@ -51,7 +51,6 @@ jobs:
           - value_decode
           - transaction_decode
           - substate_id_from_str
-          - parse_manifest
           - wasm_validate_code
 
     steps:

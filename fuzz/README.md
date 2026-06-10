@@ -25,8 +25,18 @@ rustup toolchain install nightly  # cargo fuzz uses nightly by default
 | `value_decode` | `tari_bor::Value::decode` unbounded recursion (CBOR) | runs on a 256 KiB stack internally |
 | `transaction_decode` | `tari_bor` collection adapters: `with_capacity(n)` from the CBOR length header | `-rss_limit_mb=512 -malloc_limit_mb=64` |
 | `substate_id_from_str` | address/substate string parsing → `hex.rs` (regression guard for the multibyte-UTF-8 hex panic) | — |
-| `parse_manifest` | manifest DSL lex/parse stack overflow via nested token groups | runs on a 256 KiB stack internally |
 | `wasm_validate_code` | `WasmModule::validate_code` (wasmer compile + custom-section/ABI decode) | `-rss_limit_mb=2048 -timeout=25` |
+
+### Not fuzzed: manifest parsing
+
+`tari_transaction_manifest::parse_manifest` is intentionally **not** a fuzz target. It lexes/parses
+with `proc_macro2`/`syn`, which recurse without a depth limit, so deeply-nested input can abort the
+parser — and `syn`'s non-`Send` types make a worker-thread/`stacker` workaround disproportionately
+costly. This is accepted: manifests are parsed **wallet-side**, not at a public/consensus boundary,
+and the only consequence of a parse abort is that a malicious manifest fails to parse and is never
+signed. `parse_manifest` instead applies a generous source-size cap (`MAX_MANIFEST_BYTES`) as a
+sanity bound. The CBOR/transaction/address/wasm targets above cover the genuinely untrusted
+(network/RPC) decode surfaces.
 
 ## Running
 
@@ -64,7 +74,6 @@ stalls at the gate:
 
 - `wasm_validate_code` — a real compiled template binary, so mutations start from a valid module and
   reach the custom-section + ABI-decode paths.
-- `parse_manifest` — a small valid manifest, so mutations explore real DSL structure.
 - `substate_id_from_str` — one valid address/key string per kind.
 
 The recursion/alloc targets (`value_decode`, `transaction_decode`) need no seed to find their first

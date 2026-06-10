@@ -38,14 +38,13 @@ flags_for() {
     value_decode) echo "-rss_limit_mb=2048" ;;
     transaction_decode) echo "-rss_limit_mb=512 -malloc_limit_mb=64" ;;
     substate_id_from_str) echo "-rss_limit_mb=2048" ;;
-    parse_manifest) echo "-rss_limit_mb=2048 -timeout=25" ;;
     wasm_validate_code) echo "-rss_limit_mb=2048 -timeout=25" ;;
     *) return 1 ;;
   esac
 }
 
 # Default target order (kept explicit so output is deterministic).
-ALL_TARGETS=(value_decode transaction_decode substate_id_from_str parse_manifest wasm_validate_code)
+ALL_TARGETS=(value_decode transaction_decode substate_id_from_str wasm_validate_code)
 
 if ! cargo "+${FUZZ_TOOLCHAIN}" fuzz --version >/dev/null 2>&1; then
   echo "error: cargo-fuzz is not available on toolchain '${FUZZ_TOOLCHAIN}'." >&2

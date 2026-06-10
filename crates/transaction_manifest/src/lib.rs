@@ -50,11 +50,25 @@ pub fn parse_manifest(
     templates: HashMap<String, TemplateAddress>,
     blob_inputs: HashMap<String, Blob>,
 ) -> Result<ManifestInstructions, ManifestError> {
+    // Manifests are authored/parsed wallet-side, not at a public consensus boundary, so this is a
+    // sanity bound rather than a hardened defence: it keeps `proc_macro2`/`syn` from doing unbounded
+    // work on absurd input. Pathologically deep nesting within the cap can still abort the parser
+    // (`syn` recurses without a depth limit) — acceptable here, since the only consequence is that a
+    // malicious manifest fails to parse and is never signed.
+    if input.len() > MAX_MANIFEST_BYTES {
+        return Err(ManifestError::ManifestTooLarge {
+            size: input.len(),
+            max: MAX_MANIFEST_BYTES,
+        });
+    }
+
     let tokens = TokenStream::from_str(input).map_err(|e| ManifestError::LexError(e.to_string()))?;
     let ast = parse2::<ManifestAst>(tokens)?;
-
     ManifestInstructionGenerator::new(globals, templates, blob_inputs).generate_instructions(ast)
 }
+
+/// Sanity bound on manifest source size. Generous — real manifests are a few KiB at most.
+const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 
 pub struct ManifestInstructions {
     pub instructions: Vec<Instruction>,
@@ -62,4 +76,26 @@ pub struct ManifestInstructions {
     /// Blobs referenced by `blob!(name)` in the manifest, in the order they were first
     /// encountered. Indices in `InstructionArg::Blob(idx)` map directly into this list.
     pub blobs: Blobs,
+}
+
+#[cfg(test)]
+mod size_cap_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_oversized_source() {
+        let src = "a".repeat(MAX_MANIFEST_BYTES + 1);
+        let res = parse_manifest(&src, HashMap::new(), Default::default(), Default::default());
+        assert!(matches!(res, Err(ManifestError::ManifestTooLarge { size, max })
+            if size == MAX_MANIFEST_BYTES + 1 && max == MAX_MANIFEST_BYTES));
+    }
+
+    #[test]
+    fn accepts_normal_manifest() {
+        // A normal manifest parses past the size cap and lex/parse (it fails later only because
+        // `foo` is undefined, not at the cap).
+        let src = "fn main() { let a = foo(bar([1, 2, 3])); }";
+        let res = parse_manifest(src, HashMap::new(), Default::default(), Default::default());
+        assert!(!matches!(res, Err(ManifestError::ManifestTooLarge { .. })));
+    }
 }

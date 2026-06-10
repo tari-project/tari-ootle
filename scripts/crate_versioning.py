@@ -279,7 +279,7 @@ def cmd_impact(args):
         print(f"  {step}. For each independent dependent above, "
               f"update pin(s) and choose patch-vs-minor based on API surface.")
         step += 1
-    print(f"  {step}. cargo +nightly-2025-06-25 fmt --all, then "
+    print(f"  {step}. cargo +nightly-2025-12-05 fmt --all, then "
           f"./scripts/publish_crates.py --dry-run, then --execute.")
 
 

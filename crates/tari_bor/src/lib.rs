@@ -29,7 +29,7 @@ pub use minicbor::{self, CborLen, Decode, Encode};
 #[cfg(feature = "serde")]
 pub use serde::{self, Deserialize, Serialize, de::DeserializeOwned};
 pub use tag::*;
-pub use value::Value;
+pub use value::{MAX_DECODE_DEPTH, Value};
 pub use walker::*;
 
 /// Encode a value into a freshly allocated `Vec<u8>` using the unit context.

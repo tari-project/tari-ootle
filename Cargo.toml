@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.33.4"
+version = "0.33.5"
 edition = "2024"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -73,6 +73,11 @@ members = [
     "utilities/db_inspector",
     "utilities/traffic-sim",
     "utilities/validator_rollback",
+]
+# The cargo-fuzz crate is nightly-only (needs libFuzzer sanitizer instrumentation) and must stay out
+# of the default workspace build/test sweep. See fuzz/README.md.
+exclude = [
+    "fuzz",
 ]
 resolver = "2"
 

@@ -1,0 +1,7 @@
+# Build artifacts and runtime fuzzing state. Curated seeds live under seeds/ and
+# ARE committed; the evolving corpus and crash artifacts are generated locally.
+target/
+corpus/
+artifacts/
+coverage/
+Cargo.lock

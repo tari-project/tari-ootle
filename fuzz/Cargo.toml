@@ -1,0 +1,58 @@
+[package]
+name = "tari-ootle-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "BSD-3-Clause"
+
+# This crate is intentionally excluded from the root workspace (see `exclude` in
+# the top-level Cargo.toml). It is nightly-only (libFuzzer needs the sanitizer
+# instrumentation that `cargo fuzz` passes through) and must not be part of the
+# default `cargo build`/`cargo test` sweep.
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+# Path deps into the workspace crates under test. No version pins: this crate is
+# never published, and pinning would fight the workspace version rollups.
+tari_bor = { path = "../crates/tari_bor", default-features = true }
+tari_engine = { path = "../crates/engine" }
+tari_engine_types = { path = "../crates/engine_types" }
+tari_ootle_transaction = { path = "../crates/transaction" }
+tari_template_lib_types = { path = "../crates/template_lib_types" }
+tari_transaction_manifest = { path = "../crates/transaction_manifest" }
+
+# Each target panics/aborts only on a real finding (overflow/OOM/hang); any
+# `Err` is an acceptable outcome. Keep `test`/`doc`/`bench` off — these are
+# libFuzzer entry points, not normal binaries.
+
+[[bin]]
+name = "value_decode"
+path = "fuzz_targets/value_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "transaction_decode"
+path = "fuzz_targets/transaction_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "substate_id_from_str"
+path = "fuzz_targets/substate_id_from_str.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_validate_code"
+path = "fuzz_targets/wasm_validate_code.rs"
+test = false
+doc = false
+bench = false

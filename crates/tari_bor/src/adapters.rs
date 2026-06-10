@@ -3,6 +3,15 @@
 //! Shared minicbor `#[cbor(with = ...)]` adapters for container types that don't
 //! ship with a derive-friendly codec.
 
+/// Upper bound on how many elements we pre-allocate from an untrusted CBOR length header.
+///
+/// The length prefix is attacker-controlled, so `with_capacity(n)` lets a tiny payload
+/// request a multi-GB allocation (OOM/abort). We reserve at most this many slots up front
+/// and let the collection grow as elements are actually decoded — decoding runs out of input
+/// long before a dishonest length can allocate unbounded memory. Mirrors the cap the dynamic
+/// `Value` decoder already applies in `value.rs`.
+const MAX_PREALLOC: u64 = 64;
+
 /// Adapter that lets `Box<[T]>` participate in minicbor derives via `#[cbor(with = "boxed_slice")]`.
 /// On the wire this matches the canonical encoding of `Vec<T>` — a length-prefixed array.
 pub mod boxed_slice {
@@ -28,7 +37,7 @@ pub mod boxed_slice {
         let len = d.array()?;
         match len {
             Some(n) => {
-                let mut out = Vec::with_capacity(n as usize);
+                let mut out = Vec::with_capacity(n.min(super::MAX_PREALLOC) as usize);
                 for _ in 0..n {
                     out.push(T::decode(d, ctx)?);
                 }
@@ -95,7 +104,7 @@ pub mod indexset_codec {
         let len = d.array()?;
         match len {
             Some(n) => {
-                let mut out = IndexSet::with_capacity_and_hasher(n as usize, S::default());
+                let mut out = IndexSet::with_capacity_and_hasher(n.min(super::MAX_PREALLOC) as usize, S::default());
                 for _ in 0..n {
                     let v = T::decode(d, ctx)?;
                     out.insert(v);
@@ -171,7 +180,7 @@ pub mod indexmap_codec {
         let len = d.map()?;
         match len {
             Some(n) => {
-                let mut out = IndexMap::with_capacity_and_hasher(n as usize, S::default());
+                let mut out = IndexMap::with_capacity_and_hasher(n.min(super::MAX_PREALLOC) as usize, S::default());
                 for _ in 0..n {
                     let k = K::decode(d, ctx)?;
                     let v = V::decode(d, ctx)?;
@@ -346,5 +355,39 @@ pub mod serde_bridge {
         v.serialize(&mut ser)
             .expect("serde_bridge cbor_len: foreign-type serialize failed");
         counter.get()
+    }
+}
+
+#[cfg(test)]
+mod alloc_cap_tests {
+    use minicbor::Decoder;
+
+    // CBOR array/map headers claiming u64::MAX elements with no element bytes following. With the
+    // pre-allocation capped, decode fails cleanly on the missing input; an unbounded
+    // `with_capacity(n)` would instead reserve a multi-GB buffer from this ~9-byte payload and abort.
+    const HUGE_ARRAY_HEADER: [u8; 9] = [0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    #[cfg(feature = "indexmap")]
+    const HUGE_MAP_HEADER: [u8; 9] = [0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+
+    #[test]
+    fn boxed_slice_rejects_dishonest_length_without_oom() {
+        let mut d = Decoder::new(&HUGE_ARRAY_HEADER);
+        assert!(super::boxed_slice::decode::<(), u8>(&mut d, &mut ()).is_err());
+    }
+
+    #[cfg(feature = "indexmap")]
+    #[test]
+    fn indexset_rejects_dishonest_length_without_oom() {
+        use std::collections::hash_map::RandomState;
+        let mut d = Decoder::new(&HUGE_ARRAY_HEADER);
+        assert!(super::indexset_codec::decode::<(), u8, RandomState>(&mut d, &mut ()).is_err());
+    }
+
+    #[cfg(feature = "indexmap")]
+    #[test]
+    fn indexmap_rejects_dishonest_length_without_oom() {
+        use std::collections::hash_map::RandomState;
+        let mut d = Decoder::new(&HUGE_MAP_HEADER);
+        assert!(super::indexmap_codec::decode::<(), u8, u8, RandomState>(&mut d, &mut ()).is_err());
     }
 }

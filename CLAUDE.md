@@ -48,7 +48,7 @@
 
 ### Formatting
 
-Use `cargo  +nightly-2025-06-25 fmt --all` to format all code with the specified nightly version before pushing commits
+Use `cargo  +nightly-2025-12-05 fmt --all` to format all code with the specified nightly version before pushing commits
 involving rust code.
 
 ### Publishing & Crate Versioning

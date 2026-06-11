@@ -11,7 +11,6 @@ use log::*;
 use tari_indexer_client::types::{
     GetTransactionResponse,
     GetTransactionResultResponse,
-    IndexerTransactionFinalizedResult,
     ListRecentTransactionsRequest,
     ListRecentTransactionsResponse,
     QueryTransactionEventsRequest,
@@ -23,7 +22,6 @@ use tari_indexer_client::types::{
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::RpcStatusCode;
-use tari_validator_node_rpc::client::TransactionResultStatus;
 
 use crate::{
     network_client::NetworkClientError,
@@ -225,22 +223,7 @@ pub async fn get_transaction_result(
         .map_err(ErrorResponse::anyhow)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Transaction {transaction_id} not found")))?;
 
-    let resp = match result {
-        TransactionResultStatus::Pending => GetTransactionResultResponse {
-            result: IndexerTransactionFinalizedResult::Pending,
-        },
-        TransactionResultStatus::Finalized(finalized) => GetTransactionResultResponse {
-            result: IndexerTransactionFinalizedResult::Finalized {
-                final_decision: finalized.final_decision,
-                execution_result: finalized.execute_result.map(Box::new),
-                execution_time: finalized.execution_time,
-                finalized_time: finalized.finalized_time,
-                abort_details: finalized.abort_details,
-            },
-        },
-    };
-
-    Ok(Json(GetTransactionResultResponse { result: resp.result }))
+    Ok(Json(GetTransactionResultResponse { result }))
 }
 
 #[utoipa::path(

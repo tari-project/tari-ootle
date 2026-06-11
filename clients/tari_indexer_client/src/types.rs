@@ -370,6 +370,9 @@ pub struct TransactionEntry {
     /// Result summary from the locally indexed transaction receipt. None when no receipt has been
     /// indexed yet (pending or aborted).
     pub summary: Option<TransactionResultSummary>,
+    /// Reason the transaction was rejected by mempool validation when it was submitted through
+    /// this indexer. None if the transaction was not rejected at submission.
+    pub rejected_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -398,6 +401,13 @@ pub enum IndexerTransactionFinalizedResult {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         finalized_time: PrimitiveDateTime,
         abort_details: Option<String>,
+    },
+    /// The transaction was rejected by mempool validation when it was submitted through this
+    /// indexer and was never sequenced by the network.
+    Rejected {
+        details: String,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        rejected_time: PrimitiveDateTime,
     },
 }
 

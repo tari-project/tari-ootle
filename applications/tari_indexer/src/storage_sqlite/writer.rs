@@ -18,6 +18,7 @@ use tari_ootle_common_types::{Epoch, StateVersion, shard::Shard, substate_type::
 use tari_ootle_storage::{
     StorageError,
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    time::PrimitiveDateTime,
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
@@ -321,6 +322,41 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .execute(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("insert_transaction: {e}"),
+            })?;
+
+        Ok(())
+    }
+
+    fn set_transaction_rejected(&mut self, transaction_id: TransactionId, reason: &str) -> Result<(), StorageError> {
+        use crate::storage_sqlite::schema::transactions;
+
+        diesel::update(transactions::table)
+            .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
+            .set((
+                transactions::rejected_reason.eq(reason),
+                transactions::rejected_at.eq(diesel::dsl::now),
+            ))
+            .execute(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("set_transaction_rejected: {e}"),
+            })?;
+
+        Ok(())
+    }
+
+    fn clear_transaction_rejection(&mut self, transaction_id: TransactionId) -> Result<(), StorageError> {
+        use crate::storage_sqlite::schema::transactions;
+
+        diesel::update(transactions::table)
+            .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
+            .filter(transactions::rejected_reason.is_not_null())
+            .set((
+                transactions::rejected_reason.eq(None::<String>),
+                transactions::rejected_at.eq(None::<PrimitiveDateTime>),
+            ))
+            .execute(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("clear_transaction_rejection: {e}"),
             })?;
 
         Ok(())

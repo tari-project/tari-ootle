@@ -463,6 +463,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .select((
                 transactions::body,
                 transactions::created_at,
+                transactions::rejected_reason,
                 (
                     transaction_receipts::outcome,
                     transaction_receipts::total_fees_paid,
@@ -483,7 +484,12 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 reason: format!("list_recent_transactions: {}", e),
             })
             .and_then(
-                |(body, created_at, receipt): (String, PrimitiveDateTime, ReceiptSummaryRow)| {
+                |(body, created_at, rejected_reason, receipt): (
+                    String,
+                    PrimitiveDateTime,
+                    Option<String>,
+                    ReceiptSummaryRow,
+                )| {
                     let full: Transaction = deserialize_json(&body)?;
                     let transaction_id = full.calculate_id();
                     Ok(TransactionEntry {
@@ -491,6 +497,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                         created_at,
                         transaction: full.into(),
                         summary: receipt.map(map_receipt_summary).transpose()?,
+                        rejected_reason,
                     })
                 },
             )
@@ -506,6 +513,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .select((
                 transactions::body,
                 transactions::created_at,
+                transactions::rejected_reason,
                 (
                     transaction_receipts::outcome,
                     transaction_receipts::total_fees_paid,
@@ -514,13 +522,13 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     .nullable(),
             ))
             .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
-            .first::<(String, PrimitiveDateTime, ReceiptSummaryRow)>(self.connection())
+            .first::<(String, PrimitiveDateTime, Option<String>, ReceiptSummaryRow)>(self.connection())
             .optional()
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_transaction: {e}"),
             })?;
 
-        row.map(|(body, created_at, receipt)| {
+        row.map(|(body, created_at, rejected_reason, receipt)| {
             let full: Transaction = deserialize_json(&body)?;
             Ok(TransactionEntry {
                 // The row was looked up by this id, so it matches full.calculate_id() without recomputing it.
@@ -528,9 +536,28 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 created_at,
                 transaction: full.into(),
                 summary: receipt.map(map_receipt_summary).transpose()?,
+                rejected_reason,
             })
         })
         .transpose()
+    }
+
+    fn get_transaction_rejection(
+        &mut self,
+        transaction_id: TransactionId,
+    ) -> Result<Option<(String, PrimitiveDateTime)>, StorageError> {
+        use crate::storage_sqlite::schema::transactions;
+
+        let row = transactions::table
+            .select((transactions::rejected_reason, transactions::rejected_at))
+            .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
+            .first::<(Option<String>, Option<PrimitiveDateTime>)>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("get_transaction_rejection: {e}"),
+            })?;
+
+        Ok(row.and_then(|(reason, rejected_at)| reason.zip(rejected_at)))
     }
 
     fn list_transaction_receipts(

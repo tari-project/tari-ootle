@@ -144,6 +144,18 @@ where
                         details: "Pending execution result returned from dry run".to_string(),
                     });
                 },
+                TransactionFinalizedResult::Rejected { details, .. } => {
+                    self.store.with_write_tx(|tx| {
+                        tx.transactions_update(
+                            WalletTransactionUpdate::new(tx_id)
+                                .with_new_status(TransactionStatus::DryRunFailed)
+                                .with_invalid_reason(details),
+                        )
+                    })?;
+                    return Err(TransactionApiError::InvalidTransactionQueryResponse {
+                        details: format!("Transaction rejected by dry run: {details}"),
+                    });
+                },
                 TransactionFinalizedResult::Finalized {
                     execution_result,
                     finalized_time,
@@ -222,6 +234,21 @@ where
 
         match resp.result {
             TransactionFinalizedResult::Pending => Ok(None),
+            TransactionFinalizedResult::Rejected { details, rejected_time } => {
+                let transaction = self.store.with_write_tx(|tx| {
+                    tx.transactions_update(
+                        WalletTransactionUpdate::new(transaction_id)
+                            .with_new_status(TransactionStatus::InvalidTransaction)
+                            .with_invalid_reason(&details)
+                            .with_finalized_time(rejected_time),
+                    )?;
+                    self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
+                    let transaction = tx.transactions_get(transaction_id)?;
+                    Ok::<_, TransactionApiError>(transaction)
+                })?;
+
+                Ok(Some(transaction))
+            },
             TransactionFinalizedResult::Finalized {
                 final_decision,
                 execution_result,

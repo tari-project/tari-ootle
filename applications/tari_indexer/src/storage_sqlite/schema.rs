@@ -93,6 +93,8 @@ diesel::table! {
         transaction_id -> Text,
         body -> Text,
         created_at -> Timestamp,
+        rejected_reason -> Nullable<Text>,
+        rejected_at -> Nullable<Timestamp>,
     }
 }
 

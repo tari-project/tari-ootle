@@ -98,16 +98,6 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating substate create cost".to_string()))?;
         track.add_fee_charge(FeeSource::SubstateCreate, create_cost);
 
-        let log_cost = (track.num_logs() as u64)
-            .checked_mul(self.fee_table.per_log_cost())
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating log cost".to_string()))?;
-        track.add_fee_charge(FeeSource::Logs, log_cost);
-
-        let event_cost = (track.num_events() as u64)
-            .checked_mul(self.fee_table.per_event_cost())
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating event cost".to_string()))?;
-        track.add_fee_charge(FeeSource::Events, event_cost);
-
         // WASM execution: charge once against the transaction's accumulated points so the divisor
         // rounds against the total. Per-call rounding would let a transaction split work into
         // sub-divisor chunks and pay zero for any single one (each `points/divisor` is `0`), even

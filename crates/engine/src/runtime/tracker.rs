@@ -133,14 +133,6 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| state.take_events())
     }
 
-    pub fn num_events(&self) -> usize {
-        self.read_with(|state| state.events().len())
-    }
-
-    pub fn num_logs(&self) -> usize {
-        self.read_with(|state| state.logs().len())
-    }
-
     pub fn get_template_address(&self) -> Result<TemplateAddress, RuntimeError> {
         self.read_with(|state| state.current_template().map(|(a, _)| *a))
     }

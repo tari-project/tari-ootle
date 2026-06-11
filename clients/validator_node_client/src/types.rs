@@ -34,24 +34,24 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
-    shard::Shard,
     Epoch,
     NodeHeight,
     StateVersion,
     SubstateAddress,
+    committee::{Committee, CommitteeInfo},
+    shard::Shard,
 };
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
+    Ordering,
     consensus_models::{Block, TransactionExecution, TransactionPoolRecord},
     global::models,
     time::PrimitiveDateTime,
-    Ordering,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::QuorumDecision;
-use tari_template_abi::{version::WasmAbiVersion, ArgDef};
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_abi::{ArgDef, version::WasmAbiVersion};
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(

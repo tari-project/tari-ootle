@@ -25,7 +25,7 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
-    component::{derive_component_address_from_public_key, Component},
+    component::{Component, derive_component_address_from_public_key},
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
@@ -37,14 +37,14 @@ use tari_engine_types::{
 use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
 use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
-    call_arg,
-    call_args,
     AllocatableAddressType,
     ComponentReference,
     Instruction,
     MigrateFunction,
     ResourceAddressRef,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    call_arg,
+    call_args,
 };
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -53,22 +53,21 @@ use tari_template_lib::{
     invoke_args,
     models::{Bucket, BucketId},
     types::{
-        access_rules::ComponentAccessRules,
-        constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        crypto::RistrettoPublicKeyBytes,
-        stealth::StealthTransferStatement,
         Amount,
         ComponentAddress,
         NonFungibleAddress,
         OwnerRule,
         TemplateAddress,
+        access_rules::ComponentAccessRules,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::RistrettoPublicKeyBytes,
+        stealth::StealthTransferStatement,
     },
 };
 
 use crate::{
     executables::{Executable, WeightedExecutable},
     runtime::{
-        scope::{CallScope, PushCallFrame},
         AuthParams,
         AuthorizationScope,
         NativeAction,
@@ -79,11 +78,12 @@ use crate::{
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
+        scope::{CallScope, PushCallFrame},
     },
     state_store::StateReader,
     template::LoadedTemplate,
     traits::{ClaimProofVerifier, Invokable},
-    transaction::{error::TransactionErrorKind, TransactionError},
+    transaction::{TransactionError, error::TransactionErrorKind},
     wasm::{WasmModule, WasmProcess},
 };
 

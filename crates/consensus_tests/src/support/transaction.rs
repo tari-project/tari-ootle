@@ -6,22 +6,22 @@ use std::{iter, time::Duration};
 use tari_common_types::types::PrivateKey;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
+    Epoch,
+    ValidatorFeePool,
+    ValidatorFeeWithdrawal,
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::{Component, ComponentBody, ComponentHeader},
     fees::{FeeBreakdown, FeeReceiptBuilder},
     published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
     transaction_receipt::{FinalizeOutcome, TransactionReceipt},
-    Epoch,
-    ValidatorFeePool,
-    ValidatorFeeWithdrawal,
 };
 use tari_ootle_common_types::{LockIntent, SubstateRequirement};
 use tari_ootle_storage::consensus_models::{TransactionRecord, VersionedSubstateIdLockIntent};
-use tari_ootle_transaction::{args, Transaction};
+use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib_types::{SubstateOwnerRule, TransactionReceiptAddress};
 
-use crate::support::{committee_number_to_shard_group, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
+use crate::support::{TEST_NUM_PRESHARDS, committee_number_to_shard_group, helpers::random_substate_in_shard_group};
 
 pub fn build_transaction_from(tx: Transaction) -> TransactionRecord {
     TransactionRecord::new(tx)

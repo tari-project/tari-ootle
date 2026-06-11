@@ -78,6 +78,15 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
                 let v = d.i64()?;
                 Ok(PrecisionAmount::from(v))
             },
+            Type::String | Type::StringIndef => {
+                let mut s = String::new();
+                for chunk in d.str_iter()? {
+                    s.push_str(chunk?);
+                }
+                s.parse::<PrecisionAmount>().map_err(|e| {
+                    minicbor::decode::Error::message(format!("PrecisionAmount: invalid string '{}': {}", s, e))
+                })
+            },
             other => Err(minicbor::decode::Error::message(format!(
                 "PrecisionAmount: unexpected CBOR datatype {:?}",
                 other
@@ -643,6 +652,16 @@ mod tests {
     use serde_json::json;
 
     use super::{PrecisionAmount as Amount, *};
+
+    #[test]
+    fn can_decode_cbor_string() {
+        let encoded = tari_bor::encode(&"-100000000000000000000000000").unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(decoded, "-100000000000000000000000000".parse::<Amount>().unwrap());
+
+        let encoded = tari_bor::encode(&"not a number").unwrap();
+        tari_bor::decode::<Amount>(&encoded).unwrap_err();
+    }
 
     #[test]
     fn basic_arithmetic() {

@@ -60,6 +60,14 @@ impl<'b, C> minicbor::Decode<'b, C> for Amount {
                 let v = d.i64()?;
                 Amount::try_from(v).map_err(|e| minicbor::decode::Error::message(format!("Amount: {}", e)))
             },
+            Type::String | Type::StringIndef => {
+                let mut s = String::new();
+                for chunk in d.str_iter()? {
+                    s.push_str(chunk?);
+                }
+                s.parse::<Amount>()
+                    .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
+            },
             other => Err(minicbor::decode::Error::message(format!(
                 "Amount: unexpected CBOR datatype {:?}",
                 other
@@ -673,6 +681,16 @@ mod tests {
         let encoded = tari_bor::encode(&a).unwrap();
         let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
         assert_eq!(a, decoded);
+    }
+
+    #[test]
+    fn can_decode_cbor_string() {
+        let encoded = tari_bor::encode(&"100000000000000000000000000").unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(decoded, Amount::new(100000000000000000000000000));
+
+        let encoded = tari_bor::encode(&"not a number").unwrap();
+        tari_bor::decode::<Amount>(&encoded).unwrap_err();
     }
 
     #[test]

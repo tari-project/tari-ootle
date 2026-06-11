@@ -522,10 +522,14 @@ where TConsensusSpec: ConsensusSpec
                 &mut executed_transactions,
                 &mut lock_conflicts,
             )?;
-            if !had_execution && let Some(execution) = executed_transactions.get(&tx_id) {
-                wasm_points_total = wasm_points_total.saturating_add(execution.result().wasm_execution_points);
-            }
             if let Some(command) = maybe_command {
+                // Count points only for transactions actually proposed in this block: the budget bounds
+                // replica re-execution per block, mirroring the validation-side sum over block commands. A
+                // skipped transaction (e.g. lock conflict) is counted in the later block that proposes it;
+                // its propose-time execution cost here is bounded by the soft deadline above.
+                if !had_execution && let Some(execution) = executed_transactions.get(&tx_id) {
+                    wasm_points_total = wasm_points_total.saturating_add(execution.result().wasm_execution_points);
+                }
                 total_leader_fee = total_leader_fee
                     .checked_add(
                         command

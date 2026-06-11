@@ -75,9 +75,6 @@ const isAcceptResult = (result: any): result is { Accept: any } =>
 const isFeeOnlyResult = (result: any): result is { AcceptFeeRejectRest: [any, any] } =>
   result && typeof result === "object" && "AcceptFeeRejectRest" in result;
 
-const isRejectResult = (result: any): result is { Reject: any } =>
-  result && typeof result === "object" && "Reject" in result;
-
 function formatRejectReason(reason: any): string {
   if (reason == null) return "";
   if (typeof reason === "string") return reason;
@@ -125,11 +122,6 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
     data?.result && isFinalized(data.result)
       ? data.result.Finalized.execution_result?.finalize?.result
       : undefined;
-  const execRejectReason = isFeeOnlyResult(execResult)
-    ? execResult.AcceptFeeRejectRest[1]
-    : isRejectResult(execResult)
-      ? execResult.Reject
-      : null;
 
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedPanels((prev) =>
@@ -163,35 +155,17 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                     <TableRow>
                       <TableCell>Decision</TableCell>
                       <DataTableCell>
-                        <StatusChip status={data.result.Finalized.final_decision} showTitle={true} />
+                        <StatusChip
+                          status={data.result.Finalized.final_decision}
+                          showTitle={true}
+                          feeOnly={isFeeOnlyResult(execResult)}
+                        />
                       </DataTableCell>
                     </TableRow>
-                    {execResult && (
+                    {isFeeOnlyResult(execResult) && (
                       <TableRow>
-                        <TableCell>Execution Result</TableCell>
-                        <DataTableCell>
-                          {isAcceptResult(execResult) ? (
-                            <Chip label="Accept" variant="outlined" sx={{ color: "#5F9C91", borderColor: "#5F9C91" }} />
-                          ) : isFeeOnlyResult(execResult) ? (
-                            <Chip
-                              label="Fee only — execution rejected"
-                              variant="outlined"
-                              sx={{ color: "#FFA500", borderColor: "#FFA500" }}
-                            />
-                          ) : (
-                            <Chip
-                              label="Reject"
-                              variant="outlined"
-                              sx={{ color: "#DB7E7E", borderColor: "#DB7E7E" }}
-                            />
-                          )}
-                        </DataTableCell>
-                      </TableRow>
-                    )}
-                    {execRejectReason && (
-                      <TableRow>
-                        <TableCell>{isFeeOnlyResult(execResult) ? "Rejection Reason" : "Reject Reason"}</TableCell>
-                        <DataTableCell>{formatRejectReason(execRejectReason)}</DataTableCell>
+                        <TableCell>Rejection Reason</TableCell>
+                        <DataTableCell>{formatRejectReason(execResult.AcceptFeeRejectRest[1])}</DataTableCell>
                       </TableRow>
                     )}
                     <TableRow>

@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Chip, Avatar } from "@mui/material";
-import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
+import { IoCheckmarkOutline, IoCloseOutline, IoWarningOutline } from "react-icons/io5";
 import { useTheme } from "@mui/material/styles";
 import type { Decision } from "@tari-project/ootle-ts-bindings";
 import {ReactNode} from "react";
@@ -29,31 +29,40 @@ import {ReactNode} from "react";
 interface StatusChipProps {
   status: Decision;
   showTitle?: boolean;
+  // The consensus decision is Commit, but the execution result was AcceptFeeRejectRest: the fee was
+  // charged while the main body was rejected (e.g. out of the per-transaction metering budget).
+  feeOnly?: boolean;
 }
 
 const colorList: Record<string, string> = {
   Commit: "#5F9C91",
+  PartialCommit: "#FFA500",
   Abort: "#DB7E7E",
-  // Pending: '#ECA86A',
-  // DryRun: '#318EFA',
-  // New: '#9D5CF9',
-  // InvalidTransaction: '#DB7E7E',
-  // OnlyFeeAccepted: '#FFA500',
 };
 
 export default function StatusChip({
   status,
   showTitle = true,
+  feeOnly = false,
 }: StatusChipProps) {
   const theme = useTheme();
 
-  const statusKey = typeof status === "string" ? status : "Abort";
-  const statusLabel =
-    typeof status === "string" ? status : `Abort: ${status.Abort}`;
+  const statusKey = feeOnly ? "PartialCommit" : typeof status === "string" ? status : "Abort";
+  const statusLabel = feeOnly
+    ? "Partial Commit"
+    : typeof status === "string"
+      ? status
+      : `Abort: ${status.Abort}`;
 
   const iconList: Record<string, ReactNode> = {
     Commit: (
       <IoCheckmarkOutline
+        style={{ height: 14, width: 14 }}
+        color={theme.palette.background.paper}
+      />
+    ),
+    PartialCommit: (
+      <IoWarningOutline
         style={{ height: 14, width: 14 }}
         color={theme.palette.background.paper}
       />

@@ -361,7 +361,7 @@ pub async fn spawn_services(
     );
     handles.push(join_handle);
 
-    spawn_p2p_rpc(
+    let join_handle = spawn_p2p_rpc(
         &config,
         &mut networking,
         epoch_manager.clone(),
@@ -370,6 +370,7 @@ pub async fn spawn_services(
         consensus_handle.clone(),
     )
     .await?;
+    handles.push(join_handle);
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
     save_identities(&config, &keypair)?;
@@ -444,7 +445,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<JoinHandle<Result<(), anyhow::Error>>> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
         .with_maximum_sessions_per_client(config.validator_node.rpc.max_sessions_per_client)
@@ -460,8 +461,12 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     networking
         .add_protocol_notifier(rpc_server.all_protocols().iter().cloned(), notify_tx)
         .await?;
-    tokio::spawn(rpc_server.serve(notify_rx));
-    Ok(())
+    // The RPC service owns a state store clone, so this handle must be tracked in `Services::handles`:
+    // `join_all` awaiting it is what guarantees the store is dropped (and RocksDB's LOCK released) before
+    // `run_validator_node` returns. The task ends at shutdown when the networking worker exits and drops
+    // the protocol notifier sender, closing `notify_rx`.
+    let handle = tokio::spawn(async move { rpc_server.serve(notify_rx).await.map_err(anyhow::Error::from) });
+    Ok(handle)
 }
 
 pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(

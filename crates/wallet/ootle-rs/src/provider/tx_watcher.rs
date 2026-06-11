@@ -21,7 +21,7 @@ use tari_indexer_client::{
 };
 use tari_ootle_common_types::{
     engine_types::{
-        commit_result::TransactionResult,
+        commit_result::{ExecuteResult, TransactionResult},
         transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
     },
     optional::Optional,
@@ -295,24 +295,7 @@ impl PendingTransaction {
                         execution_result,
                         abort_details,
                         ..
-                    })) => {
-                        if let Some(result) = execution_result {
-                            return match result.finalize.result {
-                                TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
-                                TransactionResult::AcceptFeeRejectRest(_, reason) => {
-                                    Ok(TransactionOutcome::OnlyFeeCommit(reason))
-                                },
-                                TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
-                            };
-                        }
-
-                        // Any commit case would have been handled above, so this is a rejection
-                        let reason = abort_details.unwrap_or_else(|| "Unknown".to_string());
-                        Err(PendingTransactionError::TransactionRejected {
-                            tx_id: self.tx_id,
-                            reason,
-                        })
-                    },
+                    })) => self.outcome_from_finalized(execution_result, abort_details),
                     Ok(Some(IndexerTransactionFinalizedResult::Rejected { details, .. })) => {
                         Err(PendingTransactionError::TransactionRejected {
                             tx_id: self.tx_id,
@@ -340,24 +323,7 @@ impl PendingTransaction {
                         execution_result,
                         abort_details,
                         ..
-                    })) => {
-                        if let Some(result) = execution_result {
-                            return match result.finalize.result {
-                                TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
-                                TransactionResult::AcceptFeeRejectRest(_, reason) => {
-                                    Ok(TransactionOutcome::OnlyFeeCommit(reason))
-                                },
-                                TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
-                            };
-                        }
-
-                        // Any commit case would have been handled above, so this is a rejection
-                        let reason = abort_details.unwrap_or_else(|| "Unknown".to_string());
-                        Err(PendingTransactionError::TransactionRejected {
-                            tx_id: self.tx_id,
-                            reason,
-                        })
-                    },
+                    })) => self.outcome_from_finalized(execution_result, abort_details),
                     Ok(Some(IndexerTransactionFinalizedResult::Rejected { details, .. })) => {
                         Err(PendingTransactionError::TransactionRejected {
                             tx_id: self.tx_id,
@@ -376,6 +342,27 @@ impl PendingTransaction {
             },
             Err(e) => Err(e),
         }
+    }
+
+    fn outcome_from_finalized(
+        &self,
+        execution_result: Option<Box<ExecuteResult>>,
+        abort_details: Option<String>,
+    ) -> Result<TransactionOutcome, PendingTransactionError> {
+        if let Some(result) = execution_result {
+            return match result.finalize.result {
+                TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
+                TransactionResult::AcceptFeeRejectRest(_, reason) => Ok(TransactionOutcome::OnlyFeeCommit(reason)),
+                TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
+            };
+        }
+
+        // Any commit case would have been handled above, so this is a rejection
+        let reason = abort_details.unwrap_or_else(|| "Unknown".to_string());
+        Err(PendingTransactionError::TransactionRejected {
+            tx_id: self.tx_id,
+            reason,
+        })
     }
 
     async fn try_get_transaction_result(

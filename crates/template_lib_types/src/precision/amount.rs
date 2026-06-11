@@ -78,7 +78,13 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
                 let v = d.i64()?;
                 Ok(PrecisionAmount::from(v))
             },
-            Type::String | Type::StringIndef => {
+            Type::String => {
+                let s = d.str()?;
+                s.parse::<PrecisionAmount>().map_err(|e| {
+                    minicbor::decode::Error::message(format!("PrecisionAmount: invalid string '{}': {}", s, e))
+                })
+            },
+            Type::StringIndef => {
                 let mut s = String::new();
                 for chunk in d.str_iter()? {
                     s.push_str(chunk?);

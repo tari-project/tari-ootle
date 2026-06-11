@@ -60,7 +60,12 @@ impl<'b, C> minicbor::Decode<'b, C> for Amount {
                 let v = d.i64()?;
                 Amount::try_from(v).map_err(|e| minicbor::decode::Error::message(format!("Amount: {}", e)))
             },
-            Type::String | Type::StringIndef => {
+            Type::String => {
+                let s = d.str()?;
+                s.parse::<Amount>()
+                    .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
+            },
+            Type::StringIndef => {
                 let mut s = String::new();
                 for chunk in d.str_iter()? {
                     s.push_str(chunk?);

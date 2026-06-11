@@ -82,6 +82,8 @@ diesel::table! {
         address -> Text,
         data -> Text,
         created_at -> Timestamp,
+        outcome -> Text,
+        total_fees_paid -> BigInt,
     }
 }
 

@@ -36,7 +36,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { TransactionEntry } from "@tari-project/ootle-ts-bindings";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useGetTransactionResult, useListRecentTransactions } from "../../../api/hooks/useTransactions";
+import { useListRecentTransactions } from "../../../api/hooks/useTransactions";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import StatusChip from "../../../Components/StatusChip";
 import { DataTableCell } from "../../../Components/StyledComponents";
@@ -49,17 +49,10 @@ import TimeChip from "./TimeChip";
 type ExtendedTransactionEntry = TransactionEntry & { id: string; show?: boolean };
 
 function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
-  const { transaction_id, created_at } = entry;
-  const { data: resultData, isLoading: resultLoading } = useGetTransactionResult(transaction_id);
+  const { transaction_id, created_at, summary } = entry;
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
   const shortLen = isSm ? 4 : 8;
-
-  const finalized =
-    resultData?.result && typeof resultData.result === "object" && "Finalized" in resultData.result
-      ? resultData.result.Finalized
-      : null;
-  const fees = finalized?.execution_result?.finalize?.fee_receipt?.total_fees_paid;
 
   return (
     <TableRow>
@@ -79,16 +72,14 @@ function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
         </Stack>
       </DataTableCell>
       <DataTableCell>
-        {resultLoading ? (
-          "--"
-        ) : finalized ? (
-          <StatusChip status={finalized.final_decision} showTitle={true} />
+        {summary ? (
+          <StatusChip status="Commit" feeOnly={summary.outcome === "FeeIntentCommit"} showTitle={true} />
         ) : (
           <Chip label="Pending" color="warning" size="small" variant="outlined" />
         )}
       </DataTableCell>
       <DataTableCell>
-        {resultLoading ? "--" : fees ? formatCurrency(fees, CURRENCY.DECIMALS, CURRENCY.SYMBOL) : "--"}
+        {summary ? formatCurrency(summary.total_fees_paid, CURRENCY.DECIMALS, CURRENCY.SYMBOL) : "--"}
       </DataTableCell>
       <DataTableCell>
         <IconButton

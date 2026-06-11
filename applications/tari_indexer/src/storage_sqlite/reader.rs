@@ -6,6 +6,7 @@ use std::{collections::HashMap, fmt::Write, str::FromStr};
 use diesel::{
     EscapeExpressionMethods,
     ExpressionMethods,
+    JoinOnDsl,
     NullableExpressionMethods,
     OptionalExtension,
     QueryDsl,
@@ -24,7 +25,13 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
 };
-use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry, UtxoStateUpdateSet};
+use tari_indexer_client::types::{
+    ListSubstateItem,
+    NonFungibleSubstate,
+    TransactionEntry,
+    TransactionResultSummary,
+    UtxoStateUpdateSet,
+};
 use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
@@ -68,6 +75,21 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::reader";
+
+/// Denormalized (outcome, total_fees_paid, created_at) columns left-joined from transaction_receipts.
+type ReceiptSummaryRow = Option<(String, i64, PrimitiveDateTime)>;
+
+fn map_receipt_summary(
+    (outcome, total_fees_paid, finalized_at): (String, i64, PrimitiveDateTime),
+) -> Result<TransactionResultSummary, StorageError> {
+    Ok(TransactionResultSummary {
+        outcome: outcome.parse().map_err(|_| StorageError::DataInconsistency {
+            details: format!("Invalid finalize outcome '{outcome}' in transaction_receipts"),
+        })?,
+        total_fees_paid: total_fees_paid as u64,
+        finalized_at,
+    })
+}
 
 pub struct SqliteStoreReadTransaction<'a> {
     pub(super) transaction: SqliteTransaction<&'a mut SqliteConnection>,
@@ -422,7 +444,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         last_transaction_id: Option<TransactionId>,
         limit: usize,
     ) -> Result<Vec<TransactionEntry>, StorageError> {
-        use crate::storage_sqlite::schema::transactions;
+        use crate::storage_sqlite::schema::{transaction_receipts, transactions};
 
         let start_id = if let Some(last_id) = last_transaction_id {
             transactions::table
@@ -437,51 +459,75 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         };
 
         let rows = transactions::table
-            .select((transactions::body, transactions::created_at))
+            .left_join(transaction_receipts::table.on(transaction_receipts::address.eq(transactions::transaction_id)))
+            .select((
+                transactions::body,
+                transactions::created_at,
+                (
+                    transaction_receipts::outcome,
+                    transaction_receipts::total_fees_paid,
+                    transaction_receipts::created_at,
+                )
+                    .nullable(),
+            ))
             .filter(transactions::id.lt(start_id))
             .order_by(transactions::id.desc())
             .limit(limit as i64)
             .load_iter(self.connection())
             .map_err(|e| StorageError::QueryError {
-                reason: format!("get_last_scanned_block_id: {}", e),
+                reason: format!("list_recent_transactions: {}", e),
             })?;
 
         rows.map(|r| {
             r.map_err(|e| StorageError::QueryError {
-                reason: format!("get_last_scanned_block_id: {}", e),
+                reason: format!("list_recent_transactions: {}", e),
             })
-            .and_then(|(body, created_at): (String, PrimitiveDateTime)| {
-                let full: Transaction = deserialize_json(&body)?;
-                let transaction_id = full.calculate_id();
-                Ok(TransactionEntry {
-                    transaction_id,
-                    created_at,
-                    transaction: full.into(),
-                })
-            })
+            .and_then(
+                |(body, created_at, receipt): (String, PrimitiveDateTime, ReceiptSummaryRow)| {
+                    let full: Transaction = deserialize_json(&body)?;
+                    let transaction_id = full.calculate_id();
+                    Ok(TransactionEntry {
+                        transaction_id,
+                        created_at,
+                        transaction: full.into(),
+                        summary: receipt.map(map_receipt_summary).transpose()?,
+                    })
+                },
+            )
         })
         .collect()
     }
 
     fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<Option<TransactionEntry>, StorageError> {
-        use crate::storage_sqlite::schema::transactions;
+        use crate::storage_sqlite::schema::{transaction_receipts, transactions};
 
         let row = transactions::table
-            .select((transactions::body, transactions::created_at))
+            .left_join(transaction_receipts::table.on(transaction_receipts::address.eq(transactions::transaction_id)))
+            .select((
+                transactions::body,
+                transactions::created_at,
+                (
+                    transaction_receipts::outcome,
+                    transaction_receipts::total_fees_paid,
+                    transaction_receipts::created_at,
+                )
+                    .nullable(),
+            ))
             .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
-            .first::<(String, PrimitiveDateTime)>(self.connection())
+            .first::<(String, PrimitiveDateTime, ReceiptSummaryRow)>(self.connection())
             .optional()
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_transaction: {e}"),
             })?;
 
-        row.map(|(body, created_at)| {
+        row.map(|(body, created_at, receipt)| {
             let full: Transaction = deserialize_json(&body)?;
             Ok(TransactionEntry {
                 // The row was looked up by this id, so it matches full.calculate_id() without recomputing it.
                 transaction_id,
                 created_at,
                 transaction: full.into(),
+                summary: receipt.map(map_receipt_summary).transpose()?,
             })
         })
         .transpose()

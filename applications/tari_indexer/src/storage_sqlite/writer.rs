@@ -266,6 +266,8 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .values((
                     transaction_receipts::address.eq(&receipt_addr_hex),
                     transaction_receipts::data.eq(serialize_json(&receipt)?),
+                    transaction_receipts::outcome.eq(receipt.outcome.to_string()),
+                    transaction_receipts::total_fees_paid.eq(receipt.fee_receipt.total_fees_paid() as i64),
                 ))
                 .execute(self.connection())
                 .map_err(|e| StorageError::general(OPERATION, e))?;

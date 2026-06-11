@@ -12,7 +12,7 @@ use tari_engine_types::{
     events::Event,
     resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
-    transaction_receipt::TransactionReceipt,
+    transaction_receipt::{FinalizeOutcome, TransactionReceipt},
 };
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, StateVersion, shard::Shard};
 use tari_ootle_template_metadata::MetadataHash;
@@ -367,6 +367,20 @@ pub struct TransactionEntry {
     pub transaction: PrunedTransaction,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_at: PrimitiveDateTime,
+    /// Result summary from the locally indexed transaction receipt. None when no receipt has been
+    /// indexed yet (pending or aborted).
+    pub summary: Option<TransactionResultSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct TransactionResultSummary {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub outcome: FinalizeOutcome,
+    pub total_fees_paid: u64,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub finalized_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

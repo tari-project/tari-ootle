@@ -1,6 +1,8 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use std::{fmt, fmt::Display, str::FromStr};
+
 use serde::{Deserialize, Serialize};
 use tari_template_lib::types::Hash32;
 
@@ -95,6 +97,31 @@ impl FinalizeOutcome {
         matches!(self, FinalizeOutcome::FeeIntentCommit)
     }
 }
+
+impl Display for FinalizeOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Commit => write!(f, "Commit"),
+            Self::FeeIntentCommit => write!(f, "FeeIntentCommit"),
+        }
+    }
+}
+
+impl FromStr for FinalizeOutcome {
+    type Err = FinalizeOutcomeParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Commit" => Ok(Self::Commit),
+            "FeeIntentCommit" => Ok(Self::FeeIntentCommit),
+            _ => Err(FinalizeOutcomeParseError),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid FinalizeOutcome string")]
+pub struct FinalizeOutcomeParseError;
 
 #[derive(
     Debug,

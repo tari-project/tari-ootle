@@ -255,4 +255,65 @@ mod tests {
                 .unwrap()
         );
     }
+
+    #[tokio::test]
+    async fn recent_transactions_include_receipt_summary() {
+        use tari_common_types::types::PrivateKey;
+        use tari_engine_types::{
+            fees::FeeReceiptBuilder,
+            transaction_receipt::{FinalizeOutcome, TransactionReceipt},
+        };
+        use tari_ootle_transaction::Transaction;
+
+        use crate::store::IndexerStoreWriteTransaction;
+
+        let (_dir, store) = temp_store().await;
+
+        let transaction = Transaction::builder_localnet().build_and_seal(&PrivateKey::from(123u64));
+        let tx_id = transaction.calculate_id();
+        store
+            .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction))
+            .await
+            .unwrap();
+
+        // No receipt indexed yet — the transaction lists without a summary.
+        let entries = store
+            .with_read_tx(move |tx| tx.list_recent_transactions(None, 10))
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].transaction_id, tx_id);
+        assert!(entries[0].summary.is_none());
+
+        let receipt = TransactionReceipt {
+            outcome: FinalizeOutcome::FeeIntentCommit,
+            diff_summary: Default::default(),
+            fee_withdrawals: [].into(),
+            events: [].into(),
+            logs: [].into(),
+            fee_receipt: FeeReceiptBuilder::default().with_total_fees_paid(123).build(),
+            epoch: Epoch(1),
+        };
+        store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_transaction_receipts([(tx_id.into_receipt_address(), receipt)], &[])
+            })
+            .await
+            .unwrap();
+
+        let entries = store
+            .with_read_tx(move |tx| tx.list_recent_transactions(None, 10))
+            .await
+            .unwrap();
+        let summary = entries[0].summary.as_ref().unwrap();
+        assert!(summary.outcome.is_fee_intent_commit());
+        assert_eq!(summary.total_fees_paid, 123);
+
+        let entry = store
+            .with_read_tx(move |tx| tx.get_transaction(tx_id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.summary.as_ref().unwrap().total_fees_paid, 123);
+    }
 }

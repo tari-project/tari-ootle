@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.33.2"
+    "version": "0.33.5"
   },
   "paths": {
     "/epoch-checkpoints": {
@@ -1450,11 +1450,16 @@
         "type": "object",
         "required": [
           "version",
-          "substate"
+          "substate",
+          "verified"
         ],
         "properties": {
           "substate": {
             "type": "object"
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "True when the indexer verified this substate's value against the shard group committee (via a\nmerkle proof). False when proofs are disabled and the value was served unverified."
           },
           "version": {
             "type": "integer",
@@ -1966,12 +1971,45 @@
             "type": "string",
             "format": "date-time"
           },
+          "summary": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TransactionResultSummary",
+                "description": "Result summary from the locally indexed transaction receipt. None when no receipt has been\nindexed yet (pending or aborted)."
+              }
+            ]
+          },
           "transaction": {
             "type": "object",
             "description": "Pruned transaction — blob commitments retained, raw blob bytes omitted to keep the\nresponse size bounded. The transaction id and signatures remain verifiable."
           },
           "transaction_id": {
             "type": "string"
+          }
+        }
+      },
+      "TransactionResultSummary": {
+        "type": "object",
+        "required": [
+          "outcome",
+          "total_fees_paid",
+          "finalized_at"
+        ],
+        "properties": {
+          "finalized_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "total_fees_paid": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -2022,7 +2060,8 @@
             "type": "object"
           },
           "state": {
-            "$ref": "#/components/schemas/ValidatorConsensusState"
+            "$ref": "#/components/schemas/ValidatorConsensusState",
+            "description": "The validator's self-reported consensus pacemaker state. Diagnostic only - this is not\nverified, so it should not be relied upon for anything but display."
           }
         }
       }

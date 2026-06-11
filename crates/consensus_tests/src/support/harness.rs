@@ -50,6 +50,7 @@ use tokio::{sync::broadcast, task, time::sleep};
 use super::{
     MessageFilter,
     TEST_NUM_PRESHARDS,
+    TEST_WASM_EXECUTION_POINTS,
     build_substate_id_for_committee,
     build_transaction,
     helpers,
@@ -640,6 +641,7 @@ pub struct TestBuilder {
     failure_nodes: Vec<TestAddress>,
     config: HotstuffConfig,
     claim_keys: Option<(TestVnDestination, RistrettoPublicKey)>,
+    allow_wasm_budget_deferrals: bool,
 }
 
 impl TestBuilder {
@@ -653,6 +655,7 @@ impl TestBuilder {
             message_filter: None,
             failure_nodes: Vec::new(),
             claim_keys: None,
+            allow_wasm_budget_deferrals: false,
             config: HotstuffConfig {
                 network: Network::LocalNet,
                 sidechain_id: None,
@@ -671,10 +674,12 @@ impl TestBuilder {
                     // Effectively disable the validation-time weight cap by default; tests that exercise
                     // it set a low value explicitly.
                     max_block_validation_weight: u64::MAX,
-                    // Fabricated test executions consume no wasm points; effectively disable the budgets
-                    // unless a test sets low values explicitly.
-                    max_block_wasm_points: u64::MAX,
-                    max_block_validation_wasm_points: u64::MAX,
+                    // Network-default wasm budgets. Fabricated executions consume
+                    // TEST_WASM_EXECUTION_POINTS each, sized so normal test transactions can never
+                    // hit the budget (asserted in `start`). Tests exercising excessive computation
+                    // lower these explicitly and opt out via `allow_wasm_budget_deferrals`.
+                    max_block_wasm_points: 4_500_000_000,
+                    max_block_validation_wasm_points: 5_000_000_000,
                     fee_exhaust_divisor: 20,
                     epoch_end_spread_blocks: 0,
                 },
@@ -744,6 +749,14 @@ impl TestBuilder {
         self
     }
 
+    /// Opt out of the wasm budget invariant check in `start` for tests that deliberately exercise
+    /// excessive computation (i.e. expect transactions to be deferred by the wasm points budget).
+    #[allow(dead_code)]
+    pub fn allow_wasm_budget_deferrals(mut self) -> Self {
+        self.allow_wasm_budget_deferrals = true;
+        self
+    }
+
     async fn build_validators(
         leader_strategy: &RoundRobinLeaderStrategy,
         epoch_manager: &TestEpochManager,
@@ -796,6 +809,24 @@ impl TestBuilder {
     }
 
     pub async fn start(self) -> Test {
+        // Normal test transactions must never hit the wasm points budget: even a block filled to
+        // max_commands_in_block must fit within the proposer budget. A config that violates this
+        // would silently defer transactions and change scheduling; fail loudly here instead.
+        if !self.allow_wasm_budget_deferrals {
+            let constants = &self.config.consensus_constants;
+            let max_points_per_block = constants.max_commands_in_block as u64 * TEST_WASM_EXECUTION_POINTS;
+            assert!(
+                max_points_per_block <= constants.max_block_wasm_points,
+                "Test config allows normal transactions to hit the wasm points budget: {} commands × {} points/tx = \
+                 {} > max_block_wasm_points {}. If this test deliberately exercises excessive computation, opt out \
+                 with allow_wasm_budget_deferrals().",
+                constants.max_commands_in_block,
+                TEST_WASM_EXECUTION_POINTS,
+                max_points_per_block,
+                constants.max_block_wasm_points,
+            );
+        }
+
         let committees = build_committees(self.committees);
         let num_committees = u32::try_from(committees.len()).expect("WAAAY too many committees");
 

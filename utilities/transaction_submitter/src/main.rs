@@ -163,16 +163,21 @@ async fn fetch_result_summary(
             match timeout(Duration::from_secs(10), results_rx.recv()).await {
                 Ok(Some(tx)) => {
                     result.num_transactions += 1;
-                    if tx.is_committed {
-                        result.num_committed += 1;
-                        result.num_up_substates += tx.num_up_substates;
-                        result.num_down_substates += tx.num_down_substates;
-                        result.slowest_execution_time = cmp::max(result.slowest_execution_time, tx.execution_time);
-                        result.fastest_execution_time = cmp::min(result.fastest_execution_time, tx.execution_time);
-                        result.total_execution_time += tx.execution_time;
-                    }
-                    if tx.is_error {
-                        result.num_errors += 1;
+                    match tx.outcome {
+                        Outcome::Committed => {
+                            result.num_committed += 1;
+                            result.num_up_substates += tx.num_up_substates;
+                            result.num_down_substates += tx.num_down_substates;
+                            result.record_execution_time(tx.execution_time);
+                        },
+                        // Still executed (and consumed validator time), so it counts toward the
+                        // execution-time stats — just not as a committed success.
+                        Outcome::FeeAcceptedExecutionRejected => {
+                            result.num_execution_rejected += 1;
+                            result.record_execution_time(tx.execution_time);
+                        },
+                        Outcome::Rejected => result.num_rejected += 1,
+                        Outcome::Error => result.num_errors += 1,
                     }
                 },
                 Ok(None) => break,
@@ -215,28 +220,28 @@ async fn fetch_result_summary(
                                 },
                         })) => {
                             let result = match execution_result {
-                                Some(exec_result) => {
-                                    if let Some(diff) = exec_result.finalize.result.any_accept() {
-                                        TxFinalized {
-                                            is_committed: true,
-                                            is_error: false,
-                                            num_up_substates: diff.up_len(),
-                                            num_down_substates: diff.down_len(),
-                                            execution_time,
-                                        }
-                                    } else {
-                                        TxFinalized {
-                                            is_committed: false,
-                                            is_error: false,
-                                            num_up_substates: 0,
-                                            num_down_substates: 0,
-                                            execution_time,
-                                        }
+                                // Full accept: fee and main intents both committed.
+                                Some(exec_result) if exec_result.finalize.is_full_accept() => {
+                                    let diff = exec_result.finalize.accept().expect("is_full_accept");
+                                    TxFinalized {
+                                        outcome: Outcome::Committed,
+                                        num_up_substates: diff.up_len(),
+                                        num_down_substates: diff.down_len(),
+                                        execution_time,
                                     }
                                 },
-                                None => TxFinalized {
-                                    is_committed: false,
-                                    is_error: false,
+                                // Fee charged but the main body was rejected — e.g. it ran out of the
+                                // per-transaction metering budget. The transaction executed but did not
+                                // do its intended work, so it is neither a full success nor an error.
+                                Some(exec_result) if exec_result.finalize.is_fee_only() => TxFinalized {
+                                    outcome: Outcome::FeeAcceptedExecutionRejected,
+                                    num_up_substates: 0,
+                                    num_down_substates: 0,
+                                    execution_time,
+                                },
+                                // Rejected outright (or finalized with no execution result).
+                                _ => TxFinalized {
+                                    outcome: Outcome::Rejected,
                                     num_up_substates: 0,
                                     num_down_substates: 0,
                                     execution_time,
@@ -263,8 +268,7 @@ async fn fetch_result_summary(
                             println!("Failed to get transaction result: {}", e);
                             results_tx
                                 .send(TxFinalized {
-                                    is_committed: false,
-                                    is_error: true,
+                                    outcome: Outcome::Error,
                                     num_up_substates: 0,
                                     num_down_substates: 0,
                                     execution_time: Duration::from_secs(0),
@@ -302,18 +306,34 @@ fn normalize_endpoint(input: &str) -> String {
     url
 }
 
+/// How a submitted transaction was finalized.
+enum Outcome {
+    /// Full accept — fee and main intents both committed.
+    Committed,
+    /// Fee was charged but the main body was rejected (e.g. it ran out of the per-transaction
+    /// metering budget). The transaction executed but did not do its intended work.
+    FeeAcceptedExecutionRejected,
+    /// Rejected outright (no accepted diff), or finalized with no execution result.
+    Rejected,
+    /// Could not be retrieved / errored while fetching the result.
+    Error,
+}
+
 struct TxFinalized {
-    pub is_committed: bool,
-    pub is_error: bool,
-    pub num_up_substates: usize,
-    pub num_down_substates: usize,
-    pub execution_time: Duration,
+    outcome: Outcome,
+    num_up_substates: usize,
+    num_down_substates: usize,
+    execution_time: Duration,
 }
 
 #[derive(Debug, Clone)]
 pub struct StressTestResultSummary {
     pub num_transactions: usize,
     pub num_committed: usize,
+    /// Fee charged but the main body rejected .
+    pub num_execution_rejected: usize,
+    /// Rejected outright (no accepted diff).
+    pub num_rejected: usize,
     pub num_errors: usize,
     pub num_up_substates: usize,
     pub num_down_substates: usize,
@@ -322,11 +342,26 @@ pub struct StressTestResultSummary {
     pub total_execution_time: Duration,
 }
 
+impl StressTestResultSummary {
+    fn record_execution_time(&mut self, execution_time: Duration) {
+        self.slowest_execution_time = cmp::max(self.slowest_execution_time, execution_time);
+        self.fastest_execution_time = cmp::min(self.fastest_execution_time, execution_time);
+        self.total_execution_time += execution_time;
+    }
+
+    /// Transactions that actually executed (committed or fee-charged-then-rejected).
+    fn num_executed(&self) -> usize {
+        self.num_committed + self.num_execution_rejected
+    }
+}
+
 impl Default for StressTestResultSummary {
     fn default() -> Self {
         Self {
             num_transactions: 0,
             num_committed: 0,
+            num_execution_rejected: 0,
+            num_rejected: 0,
             num_errors: 0,
             num_up_substates: 0,
             num_down_substates: 0,
@@ -340,25 +375,30 @@ impl Default for StressTestResultSummary {
 fn print_summary(summary: &StressTestResultSummary) {
     println!("Summary:");
     println!(
-        "  Success rate: {:.2}%",
+        "  Success rate (fully committed): {:.2}%",
         summary.num_committed as f64 / summary.num_transactions as f64 * 100.0
     );
     println!("  Transactions submitted: {}", summary.num_transactions);
-    println!("  Transactions committed: {}", summary.num_committed);
-    println!("  Transactions errored: {}", summary.num_errors);
+    println!("  Fully committed: {}", summary.num_committed);
+    println!("  Fee charged, execution rejected: {}", summary.num_execution_rejected);
+    println!("  Rejected: {}", summary.num_rejected);
+    println!("  Errored: {}", summary.num_errors);
     println!("  Up substates: {}", summary.num_up_substates);
     println!("  Down substates: {}", summary.num_down_substates);
 
     let avg = summary
         .total_execution_time
         .as_nanos()
-        .checked_div(summary.num_committed as u128)
+        .checked_div(summary.num_executed() as u128)
         .map(|n| Duration::from_nanos(n.try_into().unwrap_or(u64::MAX)))
         .map(|n| format!("{:.2?}", n))
         .unwrap_or_else(|| "--".to_string());
 
     println!(
-        "  Total execution time: {:.2?} (slowest: {:.2?}, fastest: {:.2?}, Avg: {avg})",
-        summary.total_execution_time, summary.slowest_execution_time, summary.fastest_execution_time
+        "  Execution time over {} executed: total {:.2?} (slowest: {:.2?}, fastest: {:.2?}, Avg: {avg})",
+        summary.num_executed(),
+        summary.total_execution_time,
+        summary.slowest_execution_time,
+        summary.fastest_execution_time
     );
 }

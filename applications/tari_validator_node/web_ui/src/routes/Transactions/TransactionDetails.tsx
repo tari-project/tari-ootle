@@ -125,6 +125,17 @@ export default function TransactionDetails() {
       if ("Accept" in result.finalize.result) {
         return <span>Accepted</span>;
       }
+      // Fee was charged but the main body was rejected (e.g. out of the per-transaction metering
+      // budget). The consensus decision is still "Commit", so label this distinctly from a full
+      // reject.
+      if ("AcceptFeeRejectRest" in result.finalize.result) {
+        return (
+          <span>
+            Fee only — execution rejected:{" "}
+            {rejectReasonToString(getRejectReasonFromTransactionResult(result.finalize.result))}
+          </span>
+        );
+      }
       return <span>{rejectReasonToString(getRejectReasonFromTransactionResult(result.finalize.result))}</span>;
     } else {
       return <span>In progress</span>;

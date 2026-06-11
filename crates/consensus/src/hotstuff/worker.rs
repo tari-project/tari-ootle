@@ -291,31 +291,36 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// Broadcast events are not replayed, so without re-deriving `next_epoch` from the oracle here, no validator
     /// resuming a stalled epoch would propose `EndEpoch` until the next base-layer epoch boundary publishes a fresh
     /// event, leaving the committee stuck one epoch behind for an entire base-layer epoch.
+    ///
+    /// Seeds the epoch immediately following `starting_epoch` and lets consensus progress naturally from there. If
+    /// the oracle is more than one epoch ahead, the committee transitions one epoch and the next `EpochChanged` event
+    /// (or peer QCs at a higher epoch) drives the rest.
     async fn seed_next_epoch_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
         let oracle_epoch = self.epoch_manager.current_epoch().await?;
         if oracle_epoch <= starting_epoch {
             return Ok(());
         }
 
-        let required_schema = ProtocolVersion::at(oracle_epoch);
+        let next_epoch = starting_epoch + Epoch(1);
+        let required_schema = ProtocolVersion::at(next_epoch);
         if required_schema > ProtocolVersion::MAX_SUPPORTED {
             error!(
                 target: LOG_TARGET,
                 "🛑 Binary does not support schema {} required at epoch {}. Upgrade required.",
                 required_schema,
-                oracle_epoch,
+                next_epoch,
             );
-            return Err(HotStuffError::UnsupportedProtocolVersion { epoch: oracle_epoch });
+            return Err(HotStuffError::UnsupportedProtocolVersion { epoch: next_epoch });
         }
 
         if !self
             .epoch_manager
-            .is_this_validator_registered_for_epoch(oracle_epoch)
+            .is_this_validator_registered_for_epoch(next_epoch)
             .await?
         {
             info!(
                 target: LOG_TARGET,
-                "💤 This validator is not registered for next epoch {oracle_epoch}. Will stop consensus once the \
+                "💤 This validator is not registered for next epoch {next_epoch}. Will stop consensus once the \
                  current epoch {starting_epoch} has transitioned."
             );
             return Ok(());
@@ -324,9 +329,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         info!(
             target: LOG_TARGET,
             "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding next epoch \
-             so that EndEpoch can be proposed.",
+             {next_epoch} so that EndEpoch can be proposed.",
         );
-        self.next_epoch = Some((oracle_epoch, Instant::now()));
+        self.next_epoch = Some((next_epoch, Instant::now()));
         Ok(())
     }
 

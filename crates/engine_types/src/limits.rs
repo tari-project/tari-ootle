@@ -19,6 +19,20 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_memory_pages: 32, // ~2MiB = 32 * 64KiB
 };
 
+/// Maximum Wasmer metering points a single template invocation may consume. Enforced by the
+/// metering middleware compiled into the engine (see `tari_engine::wasm::module::create_engine`):
+/// exceeding it traps the call with an out-of-gas error.
+pub const MAX_WASM_POINTS_PER_CALL: u64 = 100_000_000;
+
+/// Maximum Wasmer metering points a whole transaction may consume, summed across every template
+/// invocation it makes (top-level instructions and nested cross-template calls). Each invocation
+/// otherwise gets a fresh per-call budget, so without this a transaction could multiply its
+/// execution time by stacking instructions or recursing to `ENGINE_LIMITS.max_call_depth`. Enforced
+/// in `WasmProcess::invoke` by capping each call's allowance to the budget remaining for the
+/// transaction. Kept equal to the per-call cap: a transaction gets one compute budget, shared across
+/// all its calls. The aggregate across a *block* still needs a separate per-block budget.
+pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
+
 pub struct EngineLimits {
     pub max_substate_outputs: usize,
     pub max_substate_size: usize,

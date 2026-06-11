@@ -1,0 +1,21 @@
+[workspace]
+[package]
+name = "metering_bench"
+version = "0.1.0"
+edition = "2024"
+
+# Microbenchmark template for re-costing the Wasmer metering table. Each `bench_*` function runs a
+# serial dependent chain of one WASM op so the engine example `metering_recost` can measure its real
+# per-op latency. See crates/engine/examples/metering_recost.rs.
+
+[dependencies]
+tari_template_lib = { path = "../../../../template_lib" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = 'abort'
+
+[lib]
+crate-type = ["cdylib"]

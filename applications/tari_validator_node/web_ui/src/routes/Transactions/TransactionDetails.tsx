@@ -125,6 +125,17 @@ export default function TransactionDetails() {
       if ("Accept" in result.finalize.result) {
         return <span>Accepted</span>;
       }
+      // Fee was charged but the main body was rejected (e.g. out of the per-transaction metering
+      // budget). The consensus decision is still "Commit", so label this distinctly from a full
+      // reject.
+      if ("AcceptFeeRejectRest" in result.finalize.result) {
+        return (
+          <span>
+            Fee only — execution rejected:{" "}
+            {rejectReasonToString(getRejectReasonFromTransactionResult(result.finalize.result))}
+          </span>
+        );
+      }
       return <span>{rejectReasonToString(getRejectReasonFromTransactionResult(result.finalize.result))}</span>;
     } else {
       return <span>In progress</span>;
@@ -145,6 +156,9 @@ export default function TransactionDetails() {
   const transaction = container?.V1.body.transaction;
   const decision = typeof final_decision === "object" ? "Abort" : final_decision;
   const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
+  // Decision is Commit, but the body was rejected after the fee was charged (e.g. out of the
+  // per-transaction metering budget) — render the status as a partial commit.
+  const feeOnly = !!(result && "AcceptFeeRejectRest" in result.finalize.result);
   return (
     <>
       <Grid size={12}>
@@ -180,7 +194,7 @@ export default function TransactionDetails() {
                             <TableRow>
                               <TableCell>Status</TableCell>
                               <DataTableCell>
-                                <StatusChip status={decision} />
+                                <StatusChip status={decision} feeOnly={feeOnly} />
                               </DataTableCell>
                             </TableRow>
                           )}

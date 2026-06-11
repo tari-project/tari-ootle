@@ -229,8 +229,6 @@ impl TemplateTest {
                 per_transaction_weight_cost: 1,
                 per_module_call_cost: 1,
                 per_byte_storage_cost: 1,
-                per_event_cost: 1,
-                per_log_cost: 1,
                 per_signature_verification_cost: 1,
                 per_template_load_cost_unit: 1,
                 per_substate_create_cost: 1,

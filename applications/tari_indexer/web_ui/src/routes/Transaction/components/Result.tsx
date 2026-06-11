@@ -69,6 +69,23 @@ const isFinalized = (result: any): result is { Finalized: any } =>
 const isAcceptResult = (result: any): result is { Accept: any } =>
   result && typeof result === "object" && "Accept" in result;
 
+// Fee was charged but the main body was rejected (e.g. it ran out of the per-transaction metering
+// budget). The consensus decision is still "Commit", so the execution result is the only place this
+// shows up.
+const isFeeOnlyResult = (result: any): result is { AcceptFeeRejectRest: [any, any] } =>
+  result && typeof result === "object" && "AcceptFeeRejectRest" in result;
+
+function formatRejectReason(reason: any): string {
+  if (reason == null) return "";
+  if (typeof reason === "string") return reason;
+  if (typeof reason === "object") {
+    const [key, value] = Object.entries(reason)[0] ?? [];
+    if (key === undefined) return "";
+    return value == null ? String(key) : `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`;
+  }
+  return String(reason);
+}
+
 const Empty = ({ message }: { message: string }) => (
   <Stack alignItems="center" sx={{ p: 3 }}>
     <Typography variant="body2" color="text.secondary">
@@ -100,6 +117,11 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
   if (!isValidHash) {
     return <Alert severity="error">Invalid Hash</Alert>;
   }
+
+  const execResult: any =
+    data?.result && isFinalized(data.result)
+      ? data.result.Finalized.execution_result?.finalize?.result
+      : undefined;
 
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedPanels((prev) =>
@@ -133,9 +155,19 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                     <TableRow>
                       <TableCell>Decision</TableCell>
                       <DataTableCell>
-                        <StatusChip status={data.result.Finalized.final_decision} showTitle={true} />
+                        <StatusChip
+                          status={data.result.Finalized.final_decision}
+                          showTitle={true}
+                          feeOnly={isFeeOnlyResult(execResult)}
+                        />
                       </DataTableCell>
                     </TableRow>
+                    {isFeeOnlyResult(execResult) && (
+                      <TableRow>
+                        <TableCell>Rejection Reason</TableCell>
+                        <DataTableCell>{formatRejectReason(execResult.AcceptFeeRejectRest[1])}</DataTableCell>
+                      </TableRow>
+                    )}
                     <TableRow>
                       <TableCell>Finalized Time</TableCell>
                       <DataTableCell>{data.result.Finalized.finalized_time || "N/A"}</DataTableCell>

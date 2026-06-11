@@ -14,7 +14,9 @@ use std::{
 use anyhow::anyhow;
 use cli::Cli;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
+use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::Network;
+use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::{
     BoxedTransactionBuilder,
@@ -101,10 +103,39 @@ fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionB
                     manifest_args.extend(parse_arg(line));
                 }
             }
-            manifest::builder(signer_key, network, manifest, manifest_args, HashMap::new())
+            let templates = parse_templates(&args.templates)?;
+            let inputs = parse_inputs(&args.inputs)?;
+            manifest::builder(signer_key, network, manifest, manifest_args, templates, inputs)
         },
         None => Ok(Box::new(free_coins::builder(network))),
     }
+}
+
+fn parse_inputs(items: &[String]) -> anyhow::Result<Vec<SubstateRequirement>> {
+    items
+        .iter()
+        .map(|s| {
+            s.trim()
+                .parse::<SubstateRequirement>()
+                .map_err(|e| anyhow!("Invalid --input '{}': {}", s, e))
+        })
+        .collect()
+}
+
+fn parse_templates(items: &[String]) -> anyhow::Result<HashMap<String, TemplateAddress>> {
+    items
+        .iter()
+        .map(|s| {
+            let (alias, address) = s
+                .split_once('=')
+                .ok_or_else(|| anyhow!("Invalid template mapping '{}' (expected <alias>=template_<hex>)", s))?;
+            let trimmed = address.trim();
+            let hex = trimmed.strip_prefix("template_").unwrap_or(trimmed).trim();
+            let address = TemplateAddress::from_hex(hex)
+                .map_err(|_| anyhow!("Invalid template address for '{}': {}", alias, trimmed))?;
+            Ok((alias.trim().to_string(), address))
+        })
+        .collect()
 }
 
 fn parse_args(globals: &[String]) -> Result<HashMap<String, ManifestValue>, anyhow::Error> {

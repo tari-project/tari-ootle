@@ -44,7 +44,7 @@ use tari_template_lib::{
     types::{LogLevel, engine_args::SignatureInvokeArg},
 };
 use wasmer::{AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr, imports};
-use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points};
+use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points, set_remaining_points};
 
 use crate::{
     runtime::Runtime,
@@ -337,14 +337,21 @@ impl Invokable<Store> for WasmProcess {
             Ok(())
         })?;
 
-        // Snapshot the metering counter so we can charge for the points this invocation consumes.
-        // The limit is set when the engine compiles the module (see `wasm::module::create_engine`);
-        // for any well-formed module this is `Remaining(limit)` here on the first call. We treat
-        // anything else as "already exhausted" → no points to charge.
-        let points_before = match get_remaining_points(store, &self.instance) {
+        // Cap this invocation's metering allowance to whatever remains of the transaction-wide
+        // budget. A fresh store starts at the per-call ceiling (set when the engine compiles the
+        // module, see `wasm::module::create_engine`); lowering it to `budget - already_consumed`
+        // stops a transaction from exceeding `MAX_WASM_POINTS_PER_TRANSACTION` by spreading work
+        // across many instructions or nested cross-template calls, each of which would otherwise get
+        // a fresh per-call budget. When the budget is already spent the allowance is zero and the
+        // call traps out-of-gas on its first metered op.
+        let per_call_cap = match get_remaining_points(store, &self.instance) {
             MeteringPoints::Remaining(n) => n,
             MeteringPoints::Exhausted => 0,
         };
+        let consumed = self.env.state().interface().wasm_points_consumed();
+        let budget_remaining = limits::MAX_WASM_POINTS_PER_TRANSACTION.saturating_sub(consumed);
+        let points_before = per_call_cap.min(budget_remaining);
+        set_remaining_points(store, &self.instance, points_before);
 
         // Call the contract entrypoint
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());

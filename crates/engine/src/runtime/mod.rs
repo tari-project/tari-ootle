@@ -244,9 +244,14 @@ pub trait RuntimeInterface {
     ) -> Result<(), RuntimeError>;
 
     /// Records the number of Wasmer metering points consumed by a single WASM template invocation
-    /// so that runtime modules (notably the fee module) can convert them into a fee charge. Called
-    /// once per `WasmProcess::invoke`, including across nested cross-template calls.
+    /// so that runtime modules (notably the fee module) can convert them into a fee charge, and adds
+    /// them to the transaction-wide total. Called once per `WasmProcess::invoke`, including across
+    /// nested cross-template calls.
     fn record_wasm_execution(&mut self, points_consumed: u64) -> Result<(), RuntimeError>;
+
+    /// Total Wasmer metering points consumed by the transaction so far, across every template
+    /// invocation. Used by `WasmProcess::invoke` to enforce `MAX_WASM_POINTS_PER_TRANSACTION`.
+    fn wasm_points_consumed(&self) -> u64;
 
     fn resolve_args(
         &self,

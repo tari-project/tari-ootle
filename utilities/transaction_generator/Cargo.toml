@@ -23,6 +23,11 @@ rayon = { workspace = true }
 rand = { workspace = true }
 once_cell = { workspace = true, features = ["critical-section"] }
 
+[dev-dependencies]
+# Used by tests/max_compute.rs to measure the max_compute template's metered cost via the engine.
+tari_template_test_tooling = { workspace = true }
+tari_engine_types = { workspace = true }
+
 [package.metadata.cargo-machete]
 ignored = [
     # Need to force critical_section feature

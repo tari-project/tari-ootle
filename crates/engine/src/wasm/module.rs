@@ -167,8 +167,9 @@ impl WasmModule {
         compiler
             .opt_level(CraneliftOptLevel::SpeedAndSize)
             .canonicalize_nans(true);
-        // TODO: Configure metering limit
-        compiler.push_middleware(Arc::new(metering::middleware(100_000_000)));
+        // Per-call metering ceiling. `WasmProcess::invoke` lowers each call's allowance further to
+        // whatever remains of the per-transaction budget (`MAX_WASM_POINTS_PER_TRANSACTION`).
+        compiler.push_middleware(Arc::new(metering::middleware(limits::MAX_WASM_POINTS_PER_CALL)));
 
         let mut features = wasmer::sys::Features::default();
         features

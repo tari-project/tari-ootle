@@ -37,14 +37,6 @@
 //! - **`per_byte_storage_cost`**: Cost per byte of data written to persistent storage (substates). Note: The actual
 //!   cost is reduced by a factor of 4 (cost × 0.25) to make storage more affordable.
 //!
-//! ## Event and Logging Fees
-//!
-//! - **`per_event_cost`**: Cost for each event emitted during transaction execution. Events are used to notify external
-//!   systems of state changes.
-//!
-//! - **`per_log_cost`**: Cost for each log entry produced during transaction execution. Logs are primarily used for
-//!   debugging and monitoring.
-//!
 //! ## Cryptographic Operation Fees
 //!
 //! - **`per_signature_verification_cost`**: Cost for each cryptographic signature verification performed during
@@ -56,7 +48,7 @@
 //! Fees are assessed at different points during transaction execution:
 //! 1. **On Initialize**: Transaction weight costs
 //! 2. **During Execution**: Module calls, template loads, signature verifications
-//! 3. **Before Finalize**: Storage costs, event costs, log costs
+//! 3. **Before Finalize**: Storage costs, WASM execution costs
 
 use tari_engine::fees::FeeTable;
 use tari_ootle_transaction::Network;
@@ -70,8 +62,6 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     per_transaction_weight_cost: 1,
     per_module_call_cost: 1,
     per_byte_storage_cost: 1,
-    per_event_cost: 1,
-    per_log_cost: 1,
     per_signature_verification_cost: 10,
     // Bumped from 1 to better reflect worst-case cold wasmer instantiation: a 2 MiB template (the
     // current cap) costs ~7000 µT to load vs ~700 µT previously.
@@ -110,8 +100,6 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     per_transaction_weight_cost: 1,
     per_module_call_cost: 1,
     per_byte_storage_cost: 1,
-    per_event_cost: 1,
-    per_log_cost: 1,
     per_signature_verification_cost: 10,
     per_template_load_cost_unit: 10,
     per_substate_create_cost: 25,

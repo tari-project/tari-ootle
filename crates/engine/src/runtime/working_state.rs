@@ -1467,14 +1467,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
         mem::take(&mut self.events)
     }
 
-    pub fn events(&self) -> &[Event] {
-        &self.events
-    }
-
-    pub fn logs(&self) -> &[LogEntry] {
-        &self.logs
-    }
-
     pub fn finalize_fees_and_refunds(
         &mut self,
         substates_to_persist: &mut IndexMap<SubstateId, SubstateValue>,

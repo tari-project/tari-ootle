@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap},
     fmt::{Display, Formatter},
     ops::Deref,
 };
@@ -11,11 +11,8 @@ use indexmap::IndexMap;
 use log::*;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{NodeHeight, ShardGroup, displayable::Displayable, optional::Optional, shard::Shard};
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional, shard::Shard, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
     consensus_models::{
         Block,
         BlockDiff,
@@ -36,10 +33,13 @@ use tari_ootle_storage::{
         TransactionPoolStatusUpdate,
         ValidatorConsensusStats,
     },
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::QuorumDecision;
-use tari_template_lib_types::{ClaimedOutputTombstoneAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, ClaimedOutputTombstoneAddress};
 
 use crate::{hotstuff::transaction_manager::TransactionLockConflicts, tracing::TraceTimer};
 
@@ -305,6 +305,12 @@ impl ProposedBlockChangeSet {
 
     pub fn quorum_decision(&self) -> Option<QuorumDecision> {
         self.quorum_decision
+    }
+
+    pub fn transaction_execution(&self, transaction_id: &TransactionId) -> Option<&BlockTransactionExecution> {
+        self.transaction_changes
+            .get(transaction_id)
+            .and_then(|change| change.execution.as_ref())
     }
 
     pub fn take_transaction_execution(&mut self, transaction_id: &TransactionId) -> Option<BlockTransactionExecution> {

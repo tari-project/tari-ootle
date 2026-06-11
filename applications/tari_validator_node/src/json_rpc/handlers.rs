@@ -21,10 +21,10 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use axum_jrpc::{
+    error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
     JsonRpcExtractor,
     JsonRpcResponse,
-    error::{JsonRpcError, JsonRpcErrorReason},
 };
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::*;
@@ -35,13 +35,11 @@ use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle, traits::LayerOneTransactionSubmitter};
+use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
 use tari_epoch_oracles::store::StoreKey;
-use tari_networking::{NetworkingHandle, NetworkingService, is_supported_multiaddr};
+use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 use tari_ootle_common_types::{
-    Epoch,
-    SubstateAddress,
     layer_one_transaction::{
         LayerOnePayloadType,
         LayerOneTransactionDef,
@@ -50,14 +48,16 @@ use tari_ootle_common_types::{
     },
     optional::Optional,
     services::template_provider::TemplateProvider,
+    Epoch,
+    SubstateAddress,
 };
-use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, public_key_to_peer_id};
+use tari_ootle_p2p::{public_key_to_peer_id, PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{
+    consensus_models::{Block, BookkeepingModel, SubstateRecord, TransactionExecution, TransactionRecord},
+    global::GlobalDb,
     StateStore,
     StateStoreReadTransaction,
     StorageError,
-    consensus_models::{Block, BookkeepingModel, SubstateRecord, TransactionExecution, TransactionRecord},
-    global::GlobalDb,
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
@@ -107,15 +107,15 @@ use tari_validator_node_client::types::{
 };
 
 use crate::{
-    ApplicationConfig,
     bootstrap::Services,
     consensus::{
-        ConsensusHandle,
         spec::{ValidatorNodeStateStore, ValidatorTemplateProvider},
+        ConsensusHandle,
     },
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
+    ApplicationConfig,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
@@ -391,13 +391,27 @@ impl JsonRpcHandlers {
     pub async fn get_block(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let data: GetBlockRequest = value.parse_params()?;
-        let block = self
+        let (block, executions) = self
             .state_store
-            .with_read_tx(|tx| Block::get(tx, &data.block_id).optional())
+            .with_read_tx(|tx| {
+                let Some(block) = Block::get(tx, &data.block_id).optional()? else {
+                    return Ok(None);
+                };
+                let executions = tx.block_transaction_executions_get_all_for_block(&data.block_id)?;
+                Ok::<_, StorageError>(Some((block, executions)))
+            })
             .map_err(internal_error(answer_id.clone()))?
             .ok_or_else(|| not_found(answer_id.clone(), format!("Block {} not found", data.block_id)))?;
 
-        let res = GetBlockResponse { block };
+        let total_wasm_execution_points = executions
+            .iter()
+            .map(|e| e.result().wasm_execution_points)
+            .fold(0u64, u64::saturating_add);
+
+        let res = GetBlockResponse {
+            block,
+            total_wasm_execution_points,
+        };
         Ok(JsonRpcResponse::success(answer_id, res))
     }
 

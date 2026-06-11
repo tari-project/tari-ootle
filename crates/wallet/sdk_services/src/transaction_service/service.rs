@@ -8,8 +8,6 @@ use tari_engine_types::commit_result::ExecuteResult;
 use tari_ootle_common_types::{optional::IsNotFoundError, response_status::TransactionStatusResponseError};
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
-    WalletSdk,
-    WalletSdkSpec,
     models::{
         TransactionContext,
         TransactionContextKind,
@@ -21,10 +19,12 @@ use tari_ootle_wallet_sdk::{
         WalletLockId,
     },
     network::WalletNetworkInterface,
+    WalletSdk,
+    WalletSdkSpec,
 };
 use tari_shutdown::ShutdownSignal;
 use tokio::{
-    sync::{Semaphore, mpsc, watch},
+    sync::{mpsc, watch, Semaphore},
     time,
     time::MissedTickBehavior,
 };
@@ -144,6 +144,7 @@ where
                                 finalize,
                                 execution_time: finalized_transaction.execution_time.unwrap_or_default(),
                                 execute_epoch: None,
+                                wasm_execution_points: 0,
                             }))
                             .map_err(|_| TransactionServiceError::ServiceShutdown)?;
                     },

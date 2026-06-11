@@ -713,6 +713,25 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         })
     }
 
+    fn block_transaction_executions_get_all_for_block(
+        &self,
+        block_id: &BlockId,
+    ) -> Result<Vec<BlockTransactionExecution>, StorageError> {
+        const OPERATION: &str = "block_transaction_executions_get_all_for_block";
+
+        let query = self.db().cf(block_transaction_execution::ByBlockQuery)?;
+        let cf = self.db().cf(BlockTransactionExecutionCf)?;
+
+        let mut executions = Vec::new();
+        for result in query.query_prefix_range_key_iterator(Ordering::default(), block_id) {
+            let (block_id, tx_id, height) = result?;
+            let execution = cf.get(&(tx_id, block_id, height), OPERATION)?;
+            executions.push(execution);
+        }
+
+        Ok(executions)
+    }
+
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError> {
         const OPERATION: &str = "blocks_get";
 

@@ -288,6 +288,8 @@ where TConsensusSpec: ConsensusSpec
             PendingSubstateStore::new(tx, block.as_leaf(), self.config.consensus_constants.num_preshards);
         let mut total_leader_fee = 0;
         let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
+        let max_validation_wasm_points = self.config.consensus_constants.max_block_validation_wasm_points;
+        let mut block_wasm_points = 0u64;
 
         for cmd in block.commands() {
             match cmd {
@@ -471,6 +473,27 @@ where TConsensusSpec: ConsensusSpec
 
                     continue;
                 },
+            }
+
+            // CONSENSUS RULE: a block may not execute more than `max_block_validation_wasm_points` of WASM
+            // metering points. The total is accumulated as commands execute and the first command that pushes
+            // it over the limit stops block execution (no-vote), bounding the compute a misbehaving leader can
+            // extract from replicas. Metering is deterministic, so every replica computes identical totals and
+            // stops at the same command. Commands executed for this block have an execution in the change set;
+            // finalization commands (AllAccept/SomeAccept) reuse a prior block's execution and add nothing.
+            if let Some(atom) = cmd.transaction() &&
+                let Some(execution) = proposed_block_change_set.transaction_execution(atom.id())
+            {
+                block_wasm_points = block_wasm_points.saturating_add(execution.result().wasm_execution_points);
+                if block_wasm_points > max_validation_wasm_points {
+                    let reason = NoVoteReason::BlockWasmPointsExceeded {
+                        total_points: block_wasm_points,
+                        max_points: max_validation_wasm_points,
+                    };
+                    warn!(target: LOG_TARGET, "❌ NO VOTE: {reason}");
+                    proposed_block_change_set.set_no_vote(reason);
+                    return Ok(());
+                }
             }
         }
 

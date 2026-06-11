@@ -25,7 +25,7 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
-    component::{Component, derive_component_address_from_public_key},
+    component::{derive_component_address_from_public_key, Component},
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
@@ -37,14 +37,14 @@ use tari_engine_types::{
 use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
 use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    call_arg,
+    call_args,
     AllocatableAddressType,
     ComponentReference,
     Instruction,
     MigrateFunction,
     ResourceAddressRef,
-    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
-    call_arg,
-    call_args,
 };
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -53,21 +53,22 @@ use tari_template_lib::{
     invoke_args,
     models::{Bucket, BucketId},
     types::{
+        access_rules::ComponentAccessRules,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::RistrettoPublicKeyBytes,
+        stealth::StealthTransferStatement,
         Amount,
         ComponentAddress,
         NonFungibleAddress,
         OwnerRule,
         TemplateAddress,
-        access_rules::ComponentAccessRules,
-        constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        crypto::RistrettoPublicKeyBytes,
-        stealth::StealthTransferStatement,
     },
 };
 
 use crate::{
     executables::{Executable, WeightedExecutable},
     runtime::{
+        scope::{CallScope, PushCallFrame},
         AuthParams,
         AuthorizationScope,
         NativeAction,
@@ -78,12 +79,11 @@ use crate::{
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
-        scope::{CallScope, PushCallFrame},
     },
     state_store::StateReader,
     template::LoadedTemplate,
     traits::{ClaimProofVerifier, Invokable},
-    transaction::{TransactionError, error::TransactionErrorKind},
+    transaction::{error::TransactionErrorKind, TransactionError},
     wasm::{WasmModule, WasmProcess},
 };
 
@@ -204,6 +204,7 @@ where
                         finalize,
                         execution_time: timer.elapsed(),
                         execute_epoch: execute_epoch.map(Into::into),
+                        wasm_execution_points: runtime.interface().wasm_points_consumed(),
                     });
                 }
                 execution_results
@@ -219,6 +220,7 @@ where
                     finalize: FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason()),
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
+                    wasm_execution_points: runtime.interface().wasm_points_consumed(),
                 });
             },
         };
@@ -231,6 +233,9 @@ where
         let (mut runtime, instruction_result) =
             Self::process_instructions(&template_provider, runtime, instructions.main, &blobs);
 
+        // Must be captured before finalize consumes the working state.
+        let wasm_execution_points = runtime.interface().wasm_points_consumed();
+
         match instruction_result {
             Ok(execution_results) => {
                 let mut finalize = runtime.interface_mut().finalize()?;
@@ -239,6 +244,7 @@ where
                     finalize,
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
+                    wasm_execution_points,
                 })
             },
             // This can happen e.g if you have dangling buckets after running the instructions
@@ -252,6 +258,7 @@ where
                     finalize,
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
+                    wasm_execution_points,
                 })
             },
         }

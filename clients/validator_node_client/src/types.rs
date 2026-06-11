@@ -34,24 +34,24 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
+    committee::{Committee, CommitteeInfo},
+    shard::Shard,
     Epoch,
     NodeHeight,
     StateVersion,
     SubstateAddress,
-    committee::{Committee, CommitteeInfo},
-    shard::Shard,
 };
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
-    Ordering,
     consensus_models::{Block, TransactionExecution, TransactionPoolRecord},
     global::models,
     time::PrimitiveDateTime,
+    Ordering,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::QuorumDecision;
-use tari_template_abi::{ArgDef, version::WasmAbiVersion};
-use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_abi::{version::WasmAbiVersion, ArgDef};
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -274,6 +274,9 @@ pub struct GetTxPoolResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetBlockResponse {
     pub block: Block,
+    /// Total WASM metering points consumed by transactions executed for this block (the per-block budget is
+    /// enforced against this sum).
+    pub total_wasm_execution_points: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

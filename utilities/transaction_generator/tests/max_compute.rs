@@ -6,7 +6,7 @@
 //! these tests prove it succeeds, pin how close to the limit it runs, and let `MAX_ROUNDS` be
 //! retuned if the cost drifts.
 
-use tari_engine_types::fees::FeeSource;
+use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_test_tooling::TemplateTest;
 
@@ -98,4 +98,28 @@ fn wasm_points(finalize: &tari_engine_types::commit_result::FinalizeResult) -> u
         .iter()
         .find_map(|(s, a)| (*s == FeeSource::WasmExecution).then_some(*a))
         .expect("WasmExecution charge present")
+}
+
+/// Two stacked `busy_max()` calls in one transaction must exceed the per-transaction metering
+/// budget and be rejected, even though each call would succeed on its own fresh per-call budget.
+/// This is what the `max_compute_stacked.rs` manifest exercises on a live network; if `MAX_ROUNDS`
+/// ever drops low enough that two calls fit under the budget, this catches it.
+#[test]
+fn stacked_busy_max_is_rejected_by_per_transaction_budget() {
+    let mut test = TemplateTest::new(CRATE_PATH, [MAX_COMPUTE]);
+    let addr = test.get_template_address("MaxCompute");
+
+    // Fees are disabled here on purpose: the per-transaction budget is enforced independently of fee
+    // charging, so the rejection must be the out-of-gas execution failure, not insufficient fees.
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_function(addr, "busy_max", args![])
+            .call_function(addr, "busy_max", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert!(
+        matches!(reason, RejectReason::ExecutionFailure(_)),
+        "expected an out-of-gas execution failure from exceeding the per-transaction budget, got {reason:?}",
+    );
 }

@@ -16,4 +16,9 @@ export type TransactionEntry = {
    * indexed yet (pending or aborted).
    */
   summary: TransactionResultSummary | null;
+  /**
+   * Reason the transaction was rejected by mempool validation when it was submitted through
+   * this indexer. None if the transaction was not rejected at submission.
+   */
+  rejected_reason: string | null;
 };

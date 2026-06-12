@@ -120,6 +120,11 @@ pub enum TransactionFinalizedResult {
         finalized_time: PrimitiveDateTime,
         abort_details: Option<String>,
     },
+    /// The transaction was rejected by mempool validation at submission and was never sequenced.
+    Rejected {
+        details: String,
+        rejected_time: PrimitiveDateTime,
+    },
 }
 
 impl TransactionFinalizedResult {
@@ -127,6 +132,7 @@ impl TransactionFinalizedResult {
         match self {
             TransactionFinalizedResult::Pending => None,
             TransactionFinalizedResult::Finalized { execution_result, .. } => execution_result.map(|r| *r),
+            TransactionFinalizedResult::Rejected { .. } => None,
         }
     }
 }

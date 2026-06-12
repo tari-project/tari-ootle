@@ -1,12 +1,13 @@
 ---
-# Publishing all NPM packages to the npm registry when the version number changes
+# Publishing all NPM packages to the npm registry when a version tag is pushed.
+# Packages whose local version already matches the registry are skipped.
 # See https://github.com/marketplace/actions/npm-publish for more information
 name: Publish Packages to npmjs
 
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]*"
   # Allows you to run this workflow manually from the Actions tab on GitHub.
   workflow_dispatch:
 

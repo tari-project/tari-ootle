@@ -256,6 +256,24 @@ async fn fetch_result_summary(
                         })) => {
                             sleep(Duration::from_secs(1)).await;
                         },
+                        Ok(Some(GetTransactionResultResponse {
+                            result: IndexerTransactionFinalizedResult::Rejected { details, .. },
+                        })) => {
+                            println!(
+                                "Transaction {} rejected by mempool validation: {}",
+                                transaction_id, details
+                            );
+                            results_tx
+                                .send(TxFinalized {
+                                    outcome: Outcome::Rejected,
+                                    num_up_substates: 0,
+                                    num_down_substates: 0,
+                                    execution_time: Duration::from_secs(0),
+                                })
+                                .await
+                                .unwrap();
+                            break;
+                        },
                         Ok(None) => {
                             println!(
                                 "[{}] Result not found for transaction {}. The indexer may not have seen it yet. \

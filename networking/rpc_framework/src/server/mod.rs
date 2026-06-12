@@ -288,8 +288,29 @@ where
 
         debug!(
             target: LOG_TARGET,
-            "Peer RPC server is shut down because the protocol notification stream ended"
+            "Peer RPC server is shutting down because the protocol notification stream ended. Waiting for {} active \
+             session(s) to complete",
+            self.tasks.len()
         );
+
+        // Drain in-flight sessions so that returning from serve means every per-session service instance
+        // (and anything it owns, e.g. a state store handle) has been dropped. This is bounded: the
+        // notification stream only ends once networking has shut down, so each session errors out at its
+        // next substream read/write — which also closes any in-progress response stream — and handler
+        // futures are bounded by the client deadline.
+        while let Some(result) = self.tasks.next().await {
+            match result {
+                Ok(peer_id) => self.on_session_complete(&peer_id),
+                Err(err) => {
+                    error!(
+                        target: LOG_TARGET,
+                        "Session task panicked while shutting down: {}", err
+                    );
+                },
+            }
+        }
+
+        debug!(target: LOG_TARGET, "Peer RPC server is shut down");
 
         Ok(())
     }
@@ -819,5 +840,35 @@ fn err_to_log_level(err: &io::Error) -> log::Level {
         ErrorKind::WriteZero |
         ErrorKind::UnexpectedEof => log::Level::Debug,
         _ => log::Level::Error,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn serve_drains_in_flight_sessions_before_returning() {
+        let (notify_tx, notify_rx) = mpsc::unbounded_channel();
+        let (_request_tx, request_rx) = mpsc::channel(1);
+        let mut server = PeerRpcServer::new(RpcServerBuilder::new(), ProtocolServiceNotFound, notify_rx, request_rx);
+
+        // Each real session task owns a per-session service instance (and anything it captured, e.g. a state
+        // store handle). Returning from serve must guarantee those are dropped.
+        let session_resource = Arc::new(());
+        for _ in 0..3 {
+            let resource = session_resource.clone();
+            server.tasks.push(tokio::spawn(async move {
+                time::sleep(Duration::from_millis(50)).await;
+                drop(resource);
+                PeerId::random()
+            }));
+        }
+
+        // Closing the notification channel signals serve to shut down.
+        drop(notify_tx);
+        server.serve().await.unwrap();
+
+        assert_eq!(Arc::strong_count(&session_resource), 1);
     }
 }

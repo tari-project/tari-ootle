@@ -379,6 +379,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::GetEpochHash { epoch, reply } => {
                 handle(reply, self.inner.get_epoch_hash(epoch), context)
             },
+            EpochManagerRequest::GetCurrentEpochHash { reply } => {
+                handle(reply, Ok(self.inner.current_epoch_hash()), context)
+            },
             EpochManagerRequest::GetValidatorNodeByPublicKey {
                 epoch,
                 public_key,

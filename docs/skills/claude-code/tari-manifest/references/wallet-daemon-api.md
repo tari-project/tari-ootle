@@ -8,8 +8,8 @@ The wallet daemon exposes a JSON-RPC 2.0 API. All requests are POST to the endpo
 
 The daemon supports two authentication modes configured via `WalletDaemonAuth`:
 
-- **`none`** (default) - Anonymous authentication. Any client can obtain a JWT by sending `"credentials": "None"`.
-- **`webauthn`** - WebAuthn/passkey-based authentication. Requires a registered passkey to authenticate.
+- **`none`** - Anonymous authentication. Any client can obtain a JWT by sending `"credentials": "None"`.
+- **`webauthn`** (default) - WebAuthn/passkey-based authentication. Requires a registered passkey to authenticate.
 
 ### Authentication Flow (auth.method = "none")
 

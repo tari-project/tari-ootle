@@ -27,8 +27,6 @@ import ListItemText from "@mui/material/ListItemText";
 import {
   IoHomeOutline,
   IoHome,
-  IoPeopleOutline,
-  IoPeople,
   IoBarChart,
   IoGitNetworkOutline,
   IoGitNetwork,
@@ -69,12 +67,6 @@ const mainItems = [
     icon: <IoBarChartSharp style={iconStyle} />,
     activeIcon: <IoBarChart style={activeIconStyle} />,
     link: "blocks",
-  },
-  {
-    title: "Committees",
-    icon: <IoPeopleOutline style={iconStyle} />,
-    activeIcon: <IoPeople style={activeIconStyle} />,
-    link: "committees",
   },
   {
     title: "Connections",

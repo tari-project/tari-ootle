@@ -22,7 +22,6 @@
 
 import { Routes, Route } from "react-router-dom";
 import Mempool from "./routes/Mempool/Mempool";
-import Committees from "./routes/Committees/CommitteesLayout";
 import ValidatorNode from "./routes/VN/ValidatorNode";
 import Connections from "./routes/Connections/Connections";
 import Fees from "./routes/Fees/Fees";
@@ -56,11 +55,6 @@ export const breadcrumbRoutes = [
   {
     label: "Home",
     path: "/",
-    dynamic: false,
-  },
-  {
-    label: "Committees",
-    path: "/committees",
     dynamic: false,
   },
   {
@@ -172,7 +166,6 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Layout />} errorElement={<ErrorPage />}>
             <Route index element={<ValidatorNode />} />
-            <Route path="committees" element={<Committees />} />
             <Route path="connections" element={<Connections />} />
             <Route path="fees" element={<Fees />} />
             <Route path="blocks" element={<Blocks />} />

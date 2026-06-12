@@ -36,7 +36,6 @@ import type {
   GetEpochManagerStatsResponse,
   VNGetIdentityResponse,
   GetMempoolStatsResponse,
-  GetNetworkCommitteeResponse,
   GetShardKeyRequest,
   GetShardKeyResponse,
   GetStateRequest,
@@ -131,7 +130,6 @@ export const getShardKey = (request: GetShardKeyRequest): Promise<GetShardKeyRes
 export const getCommittee = (request: GetCommitteeRequest): Promise<GetCommitteeResponse> =>
   jsonRpc("get_committee", request);
 export const getAllVns = (request: VNGetAllVnsRequest): Promise<VNGetAllVnsResponse> => jsonRpc("get_all_vns", request);
-export const getNetworkCommittees = (): Promise<GetNetworkCommitteeResponse> => jsonRpc("get_network_committees", {});
 // export const getFees = (request: VNGetValidatorFeesRequest): Promise<VNGetValidatorFeesResponse> =>
 //   jsonRpc("get_fees", request);
 

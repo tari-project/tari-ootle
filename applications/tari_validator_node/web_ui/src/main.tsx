@@ -25,7 +25,6 @@ import ReactDOM from "react-dom/client";
 import "./theme/theme.css";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
-import Committees from "./routes/Committees/CommitteesLayout";
 import Connections from "./routes/Connections/Connections";
 import Fees from "./routes/Fees/Fees";
 import Mempool from "./routes/Mempool/Mempool";
@@ -70,10 +69,6 @@ const router = createBrowserRouter([
       {
         path: "mempool",
         element: <Mempool />,
-      },
-      {
-        path: "committees",
-        element: <Committees />,
       },
       {
         path: "transactions/:transactionHash",

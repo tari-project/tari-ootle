@@ -33,7 +33,7 @@ time = { workspace = true, features = ["serde", "serde-human-readable"] }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 webauthn-rs = { workspace = true }
-keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+keyring-core = { workspace = true }
 rand = { workspace = true }
 passwords = "3.1.16"
 zeroize = { workspace = true, features = ["serde", "simd"] }

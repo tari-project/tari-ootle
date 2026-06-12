@@ -33,6 +33,7 @@ use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, models::KeyBranch};
 use tari_ootle_walletd::{
     cli::{Cli, Subcommand},
     config::ApplicationConfig,
+    init_os_keyring_store,
     init_wallet_store,
     initialize_wallet_sdk,
     run_tari_ootle_walletd,
@@ -60,6 +61,10 @@ async fn main() -> Result<(), anyhow::Error> {
     config.ootle_wallet_daemon.network = cli.network();
     if let Some(password) = cli.override_keyring_password.take() {
         config.ootle_wallet_daemon.override_keyring_password = Some(password);
+    }
+
+    if config.ootle_wallet_daemon.override_keyring_password.is_none() {
+        init_os_keyring_store()?;
     }
 
     match &cli.command {

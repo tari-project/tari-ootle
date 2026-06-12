@@ -201,6 +201,19 @@ pub async fn run_tari_ootle_walletd(
     Ok(())
 }
 
+/// Installs the OS-native credential store that the wallet SDK uses to hold the cipher seed password.
+/// Must be called before the SDK touches the keyring. Not needed when `override_keyring_password` is set.
+/// On platforms without a supported store, keyring access fails with a clear error advising `--password`.
+pub fn init_os_keyring_store() -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    keyring_core::set_default_store(apple_native_keyring_store::keychain::Store::new()?);
+    #[cfg(target_os = "linux")]
+    keyring_core::set_default_store(dbus_secret_service_keyring_store::Store::new()?);
+    #[cfg(target_os = "windows")]
+    keyring_core::set_default_store(windows_native_keyring_store::Store::new()?);
+    Ok(())
+}
+
 pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWalletStore> {
     let store = SqliteWalletStore::try_open(config.to_data_dir().join("wallet.sqlite"))?;
     store.run_migrations()?;

@@ -78,16 +78,19 @@ impl<'a, TStore: WalletStore> PasswordManagerApi<'a, TStore> {
         Ok(SafePassword::from(str_password))
     }
 
-    fn get_cipher_seed_password_keyring_entry(&self, key: &str) -> Result<keyring::Entry, PasswordManagerApiError> {
-        let result = keyring::Entry::new(KEYRING_ENTRIES_SERVICE, key);
+    fn get_cipher_seed_password_keyring_entry(
+        &self,
+        key: &str,
+    ) -> Result<keyring_core::Entry, PasswordManagerApiError> {
+        let result = keyring_core::Entry::new(KEYRING_ENTRIES_SERVICE, key);
 
         match result {
             Ok(entry) => Ok(entry),
-            Err(keyring::Error::NoEntry) => {
-                // NoEntry maps to various errors in the keyring codebase, including AccessDenied, keyExpired etc.
-                // Entry::new says that it will only return an error if the service/user are invalid but there may be
-                // more errors possible e.g. AccessDenied. In any case we provide a better error than NoEntry for this
-                // case. We dont want IsNotFoundError to be true for this case.
+            // NoDefaultStore means the binary did not install a credential store before using the SDK
+            // (see e.g. tari_ootle_walletd::init_os_keyring_store). NoEntry from Entry::new can mask other
+            // access errors. Both mean "the keyring is unusable", not "the password is not set", so we must
+            // not let IsNotFoundError be true for them.
+            Err(keyring_core::Error::NoEntry | keyring_core::Error::NoDefaultStore) => {
                 Err(PasswordManagerApiError::FailedToAccessKeyRing)
             },
             Err(err) => Err(err.into()),
@@ -123,7 +126,7 @@ pub enum PasswordManagerApiError {
     #[error("Config API error: {0}")]
     ConfigApiError(#[from] ConfigApiError),
     #[error("OS Keyring error: {0}")]
-    KeyRing(#[from] keyring::Error),
+    KeyRing(#[from] keyring_core::Error),
     #[error("Failed to generate password for cipher seed: {0}")]
     PasswordGeneration(String),
     #[error(
@@ -137,6 +140,6 @@ pub enum PasswordManagerApiError {
 
 impl IsNotFoundError for PasswordManagerApiError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::KeyRing(e) if matches!(e, keyring::Error::NoEntry))
+        matches!(self, Self::KeyRing(e) if matches!(e, keyring_core::Error::NoEntry))
     }
 }

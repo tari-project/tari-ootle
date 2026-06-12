@@ -221,6 +221,11 @@ humantime-serde = "1.1.1"
 include_dir = "0.7.2"
 indexmap = "2.11.4"
 indoc = "1.0.6"
+# OS keyring: the wallet SDK talks to keyring-core; binaries install a platform store at startup
+keyring-core = "1.0"
+apple-native-keyring-store = "1.0"
+dbus-secret-service-keyring-store = "1.0"
+windows-native-keyring-store = "1.1"
 lazy_static = "1.4.0"
 # Use Tari's libp2p fork that adds support for Schnorr-Ristretto
 libp2p-identity = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "e31882612c2e9c843a789117e460022ab7cda06b" }

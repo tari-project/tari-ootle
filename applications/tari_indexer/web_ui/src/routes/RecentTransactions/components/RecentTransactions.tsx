@@ -74,7 +74,7 @@ function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
       <DataTableCell>
         {summary ? (
           <StatusChip status="Commit" feeOnly={summary.outcome === "FeeIntentCommit"} showTitle={true} />
-        ) : rejected_reason ? (
+        ) : rejected_reason != null ? (
           <Chip label="Rejected" color="error" size="small" variant="outlined" title={rejected_reason} />
         ) : (
           <Chip label="Pending" color="warning" size="small" variant="outlined" />

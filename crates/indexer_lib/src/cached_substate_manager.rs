@@ -332,8 +332,9 @@ where
         let f = (committee.len() - 1) / 3;
         let mut num_nexist_substate_results = 0;
         let mut last_error = None;
-        // First Up/Down response that came back without a proof. Only served if no member can prove.
-        let mut unproven_result = None;
+        // Highest-version Up/Down response that came back without a proof. Only served if no member
+        // can prove.
+        let mut unproven_result: Option<SubstateResult> = None;
         for member in committee.shuffled() {
             let vn_addr = &member.address;
             debug!(target: LOG_TARGET, "Getting substate {} from vn {}", substate_req, vn_addr);
@@ -350,9 +351,13 @@ where
                                 });
                             }
                             // The member could not prove its response (e.g. nothing committed since
-                            // the epoch started). Keep it as a fallback and try the rest of the
-                            // committee for a proven copy.
-                            if unproven_result.is_none() {
+                            // the epoch started). Keep the highest version as a fallback (a member
+                            // that is still syncing may respond with a stale copy) and try the rest
+                            // of the committee for a proven copy.
+                            if unproven_result
+                                .as_ref()
+                                .is_none_or(|r| r.version() < substate_result.version())
+                            {
                                 unproven_result = Some(substate_result);
                             }
                         },

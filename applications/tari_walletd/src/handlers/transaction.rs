@@ -12,7 +12,7 @@ use tari_ootle_common_types::{Epoch, optional::Optional, response_status::Respon
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::{
     apis::transaction::TransactionApiError,
-    models::{TransactionContext, WalletEvent},
+    models::{KeyId, TransactionContext, WalletEvent},
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_ootle_walletd_client::{
@@ -38,11 +38,12 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib_types::ComponentAddress;
-use tari_transaction_manifest::parse_manifest;
+use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 use tokio::time;
 
 use super::context::HandlerContext;
 use crate::{
+    WalletSdk,
     handlers::{
         HandlerError,
         helpers::{
@@ -106,21 +107,10 @@ pub async fn handle_submit(
     // hold a narrower capability (transfer family, publish_template) call
     // `submit_inner` directly with their own scoped check upstream.
     context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
-    let sdk = context.wallet_sdk();
     // Best-effort: tag the transaction with the account that seals (pays for) it, so it can be filtered
     // per account. The seal signer may not map to a known account (e.g. an imported key) — that is fine.
-    let linked_accounts = sdk
-        .key_manager_api()
-        .get_public_key(req.seal_signer)
-        .ok()
-        .and_then(|pk| {
-            sdk.accounts_api()
-                .get_account_by_public_key(&pk.public_key.to_byte_type())
-                .optional()
-                .ok()
-                .flatten()
-        })
-        .map(|acc| vec![acc.account.component_address])
+    let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
+        .map(|address| vec![address])
         .unwrap_or_default();
     submit_inner(context, req, linked_accounts).await
 }
@@ -212,6 +202,59 @@ async fn submit_inner(
         .map_err(map_transaction_submission_error)?;
 
     Ok(TransactionSubmitResponse { transaction_id })
+}
+
+/// Parses the request's variables, blobs and manifest source into instructions, mapping parse
+/// failures to invalid-params errors.
+fn parse_manifest_request(req: &TransactionSubmitManifestRequest) -> Result<ManifestInstructions, anyhow::Error> {
+    let variables = req
+        .variables
+        .iter()
+        .map(|(name, value)| {
+            value.parse().map(|value| (name.to_string(), value)).map_err(|err| {
+                invalid_params(
+                    "variables",
+                    Some(format!("Failed to parse variable '{}': {}", name, err)),
+                )
+            })
+        })
+        .collect::<Result<_, _>>()?;
+
+    let blob_inputs = req
+        .blobs
+        .iter()
+        .map(|(name, blob)| (name.clone(), blob.clone()))
+        .collect();
+    parse_manifest(&req.manifest, variables, Default::default(), blob_inputs)
+        .map_err(|e| invalid_params("manifest", Some(format!("Failed to parse manifest: {}", e))))
+}
+
+/// Best-effort: resolves the wallet account whose owner public key is `key_id`. Returns `None` if the
+/// key or a matching account is unknown (e.g. an imported key).
+fn get_account_for_key(sdk: &WalletSdk, key_id: KeyId) -> Option<ComponentAddress> {
+    let pk = sdk.key_manager_api().get_public_key(key_id).ok()?;
+    sdk.accounts_api()
+        .get_account_by_public_key(&pk.public_key.to_byte_type())
+        .optional()
+        .ok()
+        .flatten()
+        .map(|account| account.account.component_address)
+}
+
+/// Builds a [`TransactionContext`] linking the fee payer account (if any) and the seal signer's
+/// account (if it maps to one of the wallet's accounts). Returns `None` if neither is known.
+fn build_transaction_context(
+    sdk: &WalletSdk,
+    fee_payer: Option<ComponentAddress>,
+    seal_signer_key_id: KeyId,
+) -> Option<TransactionContext> {
+    let mut linked_accounts = Vec::from_iter(fee_payer);
+    if let Some(address) =
+        get_account_for_key(sdk, seal_signer_key_id).filter(|address| !linked_accounts.contains(address))
+    {
+        linked_accounts.push(address);
+    }
+    (!linked_accounts.is_empty()).then(|| TransactionContext::with_accounts(linked_accounts))
 }
 
 fn map_transaction_submission_error(e: TransactionServiceError) -> anyhow::Error {
@@ -323,26 +366,7 @@ pub async fn handle_submit_manifest(
         .optional()?
         .ok_or_else(|| invalid_request("No default account found".to_string()))?;
 
-    let variables = req
-        .variables
-        .iter()
-        .map(|(name, value)| {
-            value.parse().map(|value| (name.to_string(), value)).map_err(|err| {
-                invalid_params(
-                    "variables",
-                    Some(format!("Failed to parse variable '{}': {}", name, err)),
-                )
-            })
-        })
-        .collect::<Result<_, _>>()?;
-
-    let blob_inputs = req
-        .blobs
-        .iter()
-        .map(|(name, blob)| (name.clone(), blob.clone()))
-        .collect();
-    let instructions = parse_manifest(&req.manifest, variables, Default::default(), blob_inputs)
-        .map_err(|e| invalid_params("manifest", Some(format!("Failed to parse manifest: {}", e))))?;
+    let instructions = parse_manifest_request(&req)?;
 
     let default_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
         invalid_params(
@@ -356,7 +380,11 @@ pub async fn handle_submit_manifest(
     // Fee of zero is never valid
     let fee_amount = req.max_fee.max(1);
 
-    let default_account_pays_fee = instructions.fee_instructions.is_empty();
+    // The default account is the implicit fee payer when the manifest has no fee instructions.
+    let fee_payer = instructions
+        .fee_instructions
+        .is_empty()
+        .then(|| *default_account.component_address());
 
     let mut transaction = context
         .transaction_builder()
@@ -424,30 +452,9 @@ pub async fn handle_submit_manifest(
         });
     }
 
-    // Link the involved account(s): the default account when it pays the fee, plus the seal signer's
-    // account when it maps to one of the wallet's accounts. Manifest instructions can touch any
-    // account, so this is best-effort.
-    let mut linked_accounts = Vec::new();
-    if default_account_pays_fee {
-        linked_accounts.push(*default_account.component_address());
-    }
-    if let Some(address) = sdk
-        .key_manager_api()
-        .get_public_key(seal_signer_key_id)
-        .ok()
-        .and_then(|pk| {
-            sdk.accounts_api()
-                .get_account_by_public_key(&pk.public_key.to_byte_type())
-                .optional()
-                .ok()
-                .flatten()
-        })
-        .map(|account| account.account.component_address)
-        .filter(|address| !linked_accounts.contains(address))
-    {
-        linked_accounts.push(address);
-    }
-    let tx_context = (!linked_accounts.is_empty()).then(|| TransactionContext::with_accounts(linked_accounts));
+    // Link the fee payer and the seal signer's account (when it maps to one of the wallet's
+    // accounts). Manifest instructions can touch any account, so this is best-effort.
+    let tx_context = build_transaction_context(sdk, fee_payer, seal_signer_key_id);
     let transaction_id = context
         .transaction_service()
         .submit_transaction_with_opts(transaction, tx_context, None)

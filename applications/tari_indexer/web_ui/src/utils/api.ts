@@ -35,6 +35,8 @@ import type {
   ListRecentTransactionsResponse,
   ListTransactionReceiptsRequest,
   ListTransactionReceiptsResponse,
+  ListValidatorsRequest,
+  ListValidatorsResponse,
   ListWatchedSubstatesRequest,
   ListWatchedSubstatesResponse,
   ListWatchedTemplatesResponse,
@@ -90,6 +92,9 @@ export const getIdentity = (): Promise<IndexerGetIdentityResponse> => client().t
 export const getConnections = (): Promise<IndexerGetConnectionsResponse> => client().then((c) => c.getConnections());
 
 export const getNetworkStats = (): Promise<GetNetworkSyncStateResponse> => client().then((c) => c.networkStats());
+
+export const listValidators = (params: Partial<ListValidatorsRequest> = {}): Promise<ListValidatorsResponse> =>
+  client().then((c) => c.listValidators(params));
 
 export const getSubstate = (
   id: SubstateId,

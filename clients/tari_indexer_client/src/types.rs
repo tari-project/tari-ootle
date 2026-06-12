@@ -711,6 +711,54 @@ pub enum ValidatorConsensusState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListValidatorsRequest {
+    /// The epoch to fetch the roster for. Defaults to the current epoch.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
+    pub epoch: Option<Epoch>,
+}
+
+/// The validator roster for an epoch, as registered on the base layer and tracked by the epoch
+/// manager. Unlike the lazily-observed snapshots in `GetNetworkSyncStateResponse`, this is the
+/// complete consensus-derived validator set for the epoch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListValidatorsResponse {
+    /// The epoch the roster applies to.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    pub validators: Vec<ValidatorInfo>,
+}
+
+/// A single validator's registration entry for an epoch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ValidatorInfo {
+    /// The validator's consensus public key.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub public_key: RistrettoPublicKeyBytes,
+    /// libp2p PeerId derived from the public key. Can be used to join against the liveness
+    /// snapshots in `GetNetworkSyncStateResponse.validators`.
+    pub peer_id: String,
+    /// The committee (shard group) the validator belongs to in this epoch.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub shard_group: ShardGroup,
+    /// The first epoch the validator's registration is active.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub start_epoch: Epoch,
+    /// The epoch the validator was deactivated, if any.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
+    pub end_epoch: Option<Epoch>,
+    /// The public key that may claim fees earned by this validator.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub fee_claim_public_key: RistrettoPublicKeyBytes,
+    pub vote_power: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct NetworkDescription {
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub epoch: Epoch,

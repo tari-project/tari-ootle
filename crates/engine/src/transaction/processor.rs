@@ -204,6 +204,7 @@ where
                         finalize,
                         execution_time: timer.elapsed(),
                         execute_epoch: execute_epoch.map(Into::into),
+                        wasm_execution_points: runtime.interface().wasm_points_consumed(),
                     });
                 }
                 execution_results
@@ -219,6 +220,7 @@ where
                     finalize: FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason()),
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
+                    wasm_execution_points: runtime.interface().wasm_points_consumed(),
                 });
             },
         };
@@ -231,6 +233,9 @@ where
         let (mut runtime, instruction_result) =
             Self::process_instructions(&template_provider, runtime, instructions.main, &blobs);
 
+        // Must be captured before finalize consumes the working state.
+        let wasm_execution_points = runtime.interface().wasm_points_consumed();
+
         match instruction_result {
             Ok(execution_results) => {
                 let mut finalize = runtime.interface_mut().finalize()?;
@@ -239,6 +244,7 @@ where
                     finalize,
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
+                    wasm_execution_points,
                 })
             },
             // This can happen e.g if you have dangling buckets after running the instructions
@@ -252,6 +258,7 @@ where
                     finalize,
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
+                    wasm_execution_points,
                 })
             },
         }

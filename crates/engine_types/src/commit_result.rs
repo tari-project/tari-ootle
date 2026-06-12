@@ -54,6 +54,14 @@ pub struct ExecuteResult {
     /// lock to an epoch.
     #[n(2)]
     pub execute_epoch: Option<Epoch>,
+    /// Total WASM metering points consumed by the transaction across all calls, including failed/aborted execution.
+    /// Metering is deterministic, so every validator computes the identical value for the same transaction and
+    /// pledged state. Used to enforce the per-block WASM points budget. Defaults to 0 when decoding executions
+    /// persisted before this field existed.
+    #[n(3)]
+    #[cbor(default)]
+    #[serde(default)]
+    pub wasm_execution_points: u64,
 }
 
 impl ExecuteResult {
@@ -62,6 +70,7 @@ impl ExecuteResult {
             finalize: FinalizeResult::new_rejected(transaction_hash, reason),
             execution_time: Duration::default(),
             execute_epoch,
+            wasm_execution_points: 0,
         }
     }
 

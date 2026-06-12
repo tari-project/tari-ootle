@@ -165,6 +165,10 @@ pub trait StateStoreReadTransaction: Sized {
         tx_id: &TransactionId,
         from_block: &LeafBlock,
     ) -> Result<BlockTransactionExecution, StorageError>;
+    fn block_transaction_executions_get_all_for_block(
+        &self,
+        block_id: &BlockId,
+    ) -> Result<Vec<BlockTransactionExecution>, StorageError>;
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError>;
     fn blocks_get_all_ids_by_height(&self, epoch: Epoch, height: NodeHeight) -> Result<Vec<BlockId>, StorageError>;
     fn blocks_get_genesis_for_epoch(&self, epoch: Epoch) -> Result<Block, StorageError>;

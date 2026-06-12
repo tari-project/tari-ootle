@@ -64,6 +64,22 @@ pub struct ConsensusConstants {
     /// Set above `max_block_weight` so honest proposals are never rejected. CONSENSUS RULE: must be
     /// uniform network-wide, otherwise nodes diverge on block validity.
     pub max_block_validation_weight: u64,
+    /// The maximum total WASM metering points a leader will pack into a single block, summed from each
+    /// transaction's actual metered execution (`ExecuteResult::wasm_execution_points`). Transaction weight is
+    /// size/IO-based and blind to execution cost, so a low-weight compute-heavy transaction evades the weight
+    /// budget — this bounds the pure WASM compute a block adds on top of the weight-bounded work. Like
+    /// `max_block_weight`, this is a local proposing heuristic only and carries no fork risk. A transaction's
+    /// points are only known after it executes, so a block may overshoot this budget by up to
+    /// `MAX_WASM_POINTS_PER_TRANSACTION`; `max_block_validation_wasm_points` must allow for this.
+    pub max_block_wasm_points: u64,
+    /// The maximum total WASM metering points a block may contain to be considered valid. Like
+    /// `max_block_validation_weight` this IS enforced when receiving/voting on a block: a replica keeps a
+    /// running points total while executing the block's commands and stops at the first command that pushes the
+    /// total over this limit (no-vote), bounding the CPU a misbehaving leader can extract from replicas.
+    /// Metering is deterministic, so every replica stops at the same command and votes identically. Must be at
+    /// least `max_block_wasm_points + MAX_WASM_POINTS_PER_TRANSACTION` so honest proposals are never rejected.
+    /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on block validity.
+    pub max_block_validation_wasm_points: u64,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
     /// Number of base-layer blocks of leeway a voter is allowed when accepting `EndEpoch` proposals.
@@ -98,6 +114,13 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
+            // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
+            // of the metering costs on x86-class hardware.
+            max_block_wasm_points: 4_500_000_000,
+            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
+            // honest proposals are never rejected.
+            max_block_validation_wasm_points: 5_000_000_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 10,
         }
@@ -126,6 +149,13 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
+            // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
+            // of the metering costs on x86-class hardware.
+            max_block_wasm_points: 4_500_000_000,
+            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
+            // honest proposals are never rejected.
+            max_block_validation_wasm_points: 5_000_000_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 1,
         }
@@ -154,6 +184,13 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
+            // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
+            // of the metering costs on x86-class hardware.
+            max_block_wasm_points: 4_500_000_000,
+            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
+            // honest proposals are never rejected.
+            max_block_validation_wasm_points: 5_000_000_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }
@@ -182,6 +219,13 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
+            // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
+            // of the metering costs on x86-class hardware.
+            max_block_wasm_points: 4_500_000_000,
+            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
+            // honest proposals are never rejected.
+            max_block_validation_wasm_points: 5_000_000_000,
             fee_exhaust_divisor: 20, // 1/20 = 5%
             epoch_end_spread_blocks: 5,
         }
@@ -201,6 +245,31 @@ impl From<Network> for ConsensusConstants {
             ),
             Network::Esmeralda => Self::esmeralda(),
             Network::StageNet | Network::NextNet | Network::Igor => Self::testnet(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::limits::MAX_WASM_POINTS_PER_TRANSACTION;
+
+    use super::*;
+
+    #[test]
+    fn validation_budgets_always_admit_honest_proposals() {
+        for constants in [
+            ConsensusConstants::mainnet(),
+            ConsensusConstants::devnet(7),
+            ConsensusConstants::esmeralda(),
+            ConsensusConstants::testnet(),
+        ] {
+            assert!(constants.max_block_validation_weight >= constants.max_block_weight);
+            // A leader only learns a transaction's points after executing it, so an honest block may
+            // exceed the propose budget by up to one transaction's full points budget.
+            assert!(
+                constants.max_block_validation_wasm_points >=
+                    constants.max_block_wasm_points + MAX_WASM_POINTS_PER_TRANSACTION
+            );
         }
     }
 }

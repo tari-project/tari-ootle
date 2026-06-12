@@ -274,6 +274,9 @@ pub struct GetTxPoolResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetBlockResponse {
     pub block: Block,
+    /// Total WASM metering points consumed by transactions executed for this block (the per-block budget is
+    /// enforced against this sum).
+    pub total_wasm_execution_points: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

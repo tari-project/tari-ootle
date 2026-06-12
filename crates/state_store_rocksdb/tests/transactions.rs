@@ -302,6 +302,7 @@ mod transaction_execution_operations {
         transaction_execution_operations(db);
     }
 
+    #[expect(clippy::too_many_lines)]
     fn transaction_execution_operations(db: impl StateStore) {
         let mut tx = db.create_write_tx().unwrap();
 
@@ -346,6 +347,7 @@ mod transaction_execution_operations {
                 ),
                 execution_time: Duration::from_secs(1),
                 execute_epoch: None,
+                wasm_execution_points: 0,
             },
             vec![],
             vec![],
@@ -374,6 +376,7 @@ mod transaction_execution_operations {
                 ),
                 execution_time: Duration::from_secs(1),
                 execute_epoch: None,
+                wasm_execution_points: 0,
             },
             vec![],
             vec![],
@@ -385,6 +388,22 @@ mod transaction_execution_operations {
             .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf())
             .unwrap();
         assert_eq_debug(&res, &exec1);
+
+        // block_transaction_executions_get_all_for_block
+        let all = tx
+            .block_transaction_executions_get_all_for_block(not_committed_block.id())
+            .unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq_debug(&all[0], &exec1);
+        let all = tx
+            .block_transaction_executions_get_all_for_block(committed_block.id())
+            .unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq_debug(&all[0], &exec2);
+        let all = tx
+            .block_transaction_executions_get_all_for_block(chain[3].id())
+            .unwrap();
+        assert!(all.is_empty());
 
         // transactions_finalize_all
         tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
@@ -460,6 +479,7 @@ mod transaction_execution_operations {
                 ),
                 execution_time: Duration::from_secs(1),
                 execute_epoch: None,
+                wasm_execution_points: 0,
             },
             vec![],
             vec![],

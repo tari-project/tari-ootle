@@ -67,6 +67,7 @@ export default function BlockDetails() {
   const [epochEvents, setEpochEvents] = useState<string[]>([]);
   const [identity, setIdentity] = useState<VNGetIdentityResponse>();
   const [blockTime, setBlockTime] = useState<number>(0);
+  const [wasmPoints, setWasmPoints] = useState<bigint>(0n);
   const [foreignProposals, setForeignProposals] = useState<ForeignProposalAtom[]>([]);
 
   useEffect(() => {
@@ -75,6 +76,7 @@ export default function BlockDetails() {
         .then(([resp, identity]) => {
           setIdentity(identity);
           setBlock(resp.block);
+          setWasmPoints(resp.total_wasm_execution_points);
           getBlock({ block_id: resp.block.header.parent }).then((justify_block) => {
             if (resp.block.stored_at && justify_block.block.stored_at) {
               let blockTime = resp.block.block_time || 0;
@@ -204,6 +206,11 @@ export default function BlockDetails() {
                             <DataTableCell>
                               {block!.header.accumulated_data.total_exhaust_burn.toString()}
                             </DataTableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell title="Total WASM metering points consumed by transactions executed for this block">WASM
+                              Points</TableCell>
+                            <DataTableCell>{wasmPoints.toString()}</DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Status</TableCell>

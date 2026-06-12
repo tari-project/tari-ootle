@@ -391,13 +391,27 @@ impl JsonRpcHandlers {
     pub async fn get_block(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let data: GetBlockRequest = value.parse_params()?;
-        let block = self
+        let (block, executions) = self
             .state_store
-            .with_read_tx(|tx| Block::get(tx, &data.block_id).optional())
+            .with_read_tx(|tx| {
+                let Some(block) = Block::get(tx, &data.block_id).optional()? else {
+                    return Ok(None);
+                };
+                let executions = tx.block_transaction_executions_get_all_for_block(&data.block_id)?;
+                Ok::<_, StorageError>(Some((block, executions)))
+            })
             .map_err(internal_error(answer_id.clone()))?
             .ok_or_else(|| not_found(answer_id.clone(), format!("Block {} not found", data.block_id)))?;
 
-        let res = GetBlockResponse { block };
+        let total_wasm_execution_points = executions
+            .iter()
+            .map(|e| e.result().wasm_execution_points)
+            .fold(0u64, u64::saturating_add);
+
+        let res = GetBlockResponse {
+            block,
+            total_wasm_execution_points,
+        };
         Ok(JsonRpcResponse::success(answer_id, res))
     }
 

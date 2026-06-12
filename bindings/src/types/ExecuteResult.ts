@@ -16,4 +16,10 @@ export type ExecuteResult = {
    * lock to an epoch.
    */
   execute_epoch: Epoch | null;
+  /**
+   * Total WASM metering points consumed by the transaction across all calls, including failed/aborted execution.
+   * Metering is deterministic, so every validator computes the identical value for the same transaction and
+   * pledged state. Used to enforce the per-block WASM points budget.
+   */
+  wasm_execution_points: bigint;
 };

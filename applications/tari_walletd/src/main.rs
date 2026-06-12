@@ -64,7 +64,7 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     if config.ootle_wallet_daemon.override_keyring_password.is_none() {
-        init_os_keyring_store()?;
+        init_os_keyring_store();
     }
 
     match &cli.command {

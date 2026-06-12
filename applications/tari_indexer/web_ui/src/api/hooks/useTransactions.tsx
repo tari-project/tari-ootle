@@ -28,9 +28,12 @@ import {
   getTransactionResult,
 } from "../../utils/api";
 
-// A finalized result is `{ Finalized: {...} }`; a pending one is the string "Pending".
-const isFinalizedResult = (data: IndexerGetTransactionResultResponse | undefined): boolean =>
-  data?.result != null && typeof data.result === "object" && "Finalized" in data.result;
+// A settled result is `{ Finalized: {...} }` or `{ Rejected: {...} }`; a pending one is the
+// string "Pending". Both settled states are terminal.
+const isSettledResult = (data: IndexerGetTransactionResultResponse | undefined): boolean =>
+  data?.result != null &&
+  typeof data.result === "object" &&
+  ("Finalized" in data.result || "Rejected" in data.result);
 
 interface UseListRecentTransactionsProps {
   last_id: string | null;
@@ -55,10 +58,10 @@ export const useGetTransactionResult = (transaction_id: string) => {
     queryKey: ["transaction_result", transaction_id],
     queryFn: () => getTransactionResult({ transaction_id }),
     enabled: !!transaction_id,
-    // Once a transaction is finalized (Accept/Abort) its result is immutable, so treat it as
-    // permanently fresh — React Query then never auto-refetches it (no polling, window-focus or
-    // remount refresh). Pending results keep the default so they still update.
-    staleTime: (query) => (isFinalizedResult(query.state.data) ? Infinity : 0),
+    // Once a transaction is finalized (Accept/Abort) or rejected its result is immutable, so treat
+    // it as permanently fresh — React Query then never auto-refetches it (no polling, window-focus
+    // or remount refresh). Pending results keep the default so they still update.
+    staleTime: (query) => (isSettledResult(query.state.data) ? Infinity : 0),
   });
 };
 

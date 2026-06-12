@@ -49,7 +49,7 @@ import TimeChip from "./TimeChip";
 type ExtendedTransactionEntry = TransactionEntry & { id: string; show?: boolean };
 
 function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
-  const { transaction_id, created_at, summary } = entry;
+  const { transaction_id, created_at, summary, rejected_reason } = entry;
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
   const shortLen = isSm ? 4 : 8;
@@ -74,6 +74,8 @@ function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
       <DataTableCell>
         {summary ? (
           <StatusChip status="Commit" feeOnly={summary.outcome === "FeeIntentCommit"} showTitle={true} />
+        ) : rejected_reason != null ? (
+          <Chip label="Rejected" color="error" size="small" variant="outlined" title={rejected_reason} />
         ) : (
           <Chip label="Pending" color="warning" size="small" variant="outlined" />
         )}

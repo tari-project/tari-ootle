@@ -201,6 +201,42 @@ pub async fn run_tari_ootle_walletd(
     Ok(())
 }
 
+/// Installs the OS-native credential store that the wallet SDK uses to hold the cipher seed password.
+/// Must be called before the SDK touches the keyring. Not needed when `override_keyring_password` is set.
+/// If no store can be installed (e.g. no DBus Secret Service on a headless host), a warning is logged and
+/// any later keyring access fails with a clear error advising `--password`.
+pub fn init_os_keyring_store() {
+    let result: keyring_core::Result<std::sync::Arc<keyring_core::CredentialStore>> = {
+        #[cfg(target_os = "macos")]
+        {
+            apple_native_keyring_store::keychain::Store::new().map(|s| s as _)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            dbus_secret_service_keyring_store::Store::new().map(|s| s as _)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            windows_native_keyring_store::Store::new().map(|s| s as _)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        {
+            Err(keyring_core::Error::NotSupportedByStore(
+                "no OS keyring store is available on this platform".to_string(),
+            ))
+        }
+    };
+
+    match result {
+        Ok(store) => keyring_core::set_default_store(store),
+        Err(err) => warn!(
+            target: LOG_TARGET,
+            "⚠️ OS keyring store is unavailable: {err}. The wallet cannot store or retrieve the cipher seed \
+             password; use the `--password` option to provide one.",
+        ),
+    }
+}
+
 pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWalletStore> {
     let store = SqliteWalletStore::try_open(config.to_data_dir().join("wallet.sqlite"))?;
     store.run_migrations()?;

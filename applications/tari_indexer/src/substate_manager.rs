@@ -71,6 +71,15 @@ pub struct SubstateResponse {
     pub substate: SubstateValue,
 }
 
+/// A substate returned by a lookup together with whether it was committee-verified. `verified` is
+/// false when proof verification is disabled, or when no committee member could supply a proof yet
+/// (e.g. nothing has been committed since an epoch change).
+#[derive(Debug, Clone)]
+pub struct FetchedSubstate {
+    pub substate: Substate,
+    pub verified: bool,
+}
+
 /// Adapts the indexer's sqlite store to [`TrustedRootStore`], which the read path consults to skip
 /// commit-proof re-validation on a trusted-root hit and warms with newly-validated roots.
 #[derive(Clone)]
@@ -246,11 +255,11 @@ impl SubstateManager {
     }
 
     pub async fn get_substate(&self, req: SubstateRequirementRef<'_>) -> Result<Substate, SubstateManagerError> {
-        let substate_result = self
+        let lookup_result = self
             .cache_manager
             .get_substate(req.substate_id(), req.version())
             .await?;
-        match substate_result {
+        match lookup_result.result {
             SubstateResult::Up { substate } => Ok(*substate),
             SubstateResult::Down { version } => Err(SubstateManagerError::InputSubstateIsDown {
                 substate_id: req.substate_id().clone(),
@@ -265,7 +274,7 @@ impl SubstateManager {
     pub async fn get_substates<'a, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
         &self,
         substate_req: I,
-    ) -> Result<HashMap<SubstateId, Substate>, SubstateManagerError> {
+    ) -> Result<HashMap<SubstateId, FetchedSubstate>, SubstateManagerError> {
         let substate_req = substate_req.into_iter().collect::<HashSet<_>>();
         let mut results = HashMap::with_capacity(substate_req.len());
 
@@ -276,10 +285,11 @@ impl SubstateManager {
                 let Some(substate) = self.get_substate_from_db(req.substate_id(), Some(version)).await?
             {
                 found_in_cache.insert(*req);
-                results.insert(
-                    req.substate_id().clone(),
-                    Substate::new(substate.version, substate.substate),
-                );
+                results.insert(req.substate_id().clone(), FetchedSubstate {
+                    substate: Substate::new(substate.version, substate.substate),
+                    // Locally-stored substates were verified when ingested iff verification is on.
+                    verified: self.cache_manager.verifies_substates(),
+                });
             }
         }
 
@@ -288,19 +298,19 @@ impl SubstateManager {
             if found_in_cache.contains(&req) {
                 continue;
             }
-            let substate_result = self
+            let lookup_result = self
                 .cache_manager
                 .get_substate(req.substate_id(), req.version())
                 .await?;
-            match substate_result {
+            match lookup_result.result {
                 SubstateResult::DoesNotExist => {
                     // Skip, does not exist
                 },
                 SubstateResult::Up { substate } => {
-                    results.insert(
-                        req.substate_id().clone(),
-                        Substate::new(substate.version(), substate.into_substate_value()),
-                    );
+                    results.insert(req.substate_id().clone(), FetchedSubstate {
+                        substate: Substate::new(substate.version(), substate.into_substate_value()),
+                        verified: lookup_result.verified,
+                    });
                 },
                 SubstateResult::Down { version } => {
                     return Err(SubstateManagerError::InputSubstateIsDown {

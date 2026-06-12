@@ -12,7 +12,10 @@ use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::{GetSubstateRequest, GetSubstateResponse, GetSubstatesRequest, GetSubstatesResponse};
 use tari_ootle_common_types::SubstateRequirementRef;
 
-use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
+use crate::{
+    rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult},
+    substate_manager::FetchedSubstate,
+};
 
 #[utoipa::path(
     get,
@@ -55,23 +58,28 @@ pub async fn get_substate(
             .map(|a| {
                 a.into_iter()
                     .find(|(_, substate)| req.version.is_none_or(|v| substate.version() == v))
+                    .map(|(_, substate)| FetchedSubstate {
+                        substate,
+                        verified: false,
+                    })
             })
             .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?
     } else {
         manager
             .get_substates(iter::once(requirement))
             .await
-            .map(|a| a.into_iter().next())
+            .map(|a| a.into_iter().next().map(|(_, fetched)| fetched))
             .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?
     };
 
     match maybe_substate {
-        Some((_, substate)) => Ok(Json(GetSubstateResponse {
-            version: substate.version(),
-            substate: substate.into_substate_value(),
-            // When verification is enabled, a returned (non-cached) value was checked against the
-            // committee before being accepted; otherwise it was served unverified.
-            verified: manager.verifies_substates() && !req.local_search_only,
+        Some(fetched) => Ok(Json(GetSubstateResponse {
+            version: fetched.substate.version(),
+            substate: fetched.substate.into_substate_value(),
+            // True when this value was checked against the committee before being accepted. False
+            // for local-only lookups, when verification is disabled, or when no committee member
+            // could supply a proof yet (e.g. nothing committed since an epoch change).
+            verified: fetched.verified,
         })),
         None => Err(ErrorResponse::not_found(format!("Substate {} not found", substate_id))),
     }

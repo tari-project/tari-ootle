@@ -149,11 +149,14 @@ impl DryRunTransactionProcessor {
         &self,
         transaction: &Transaction,
     ) -> Result<HashMap<SubstateId, Substate>, DryRunTransactionProcessorError> {
-        let susbtates = self
+        let substates = self
             .substate_manager
             .get_substates(transaction.inputs().iter().map(|req| req.as_ref()))
             .await?;
-        Ok(susbtates)
+        Ok(substates
+            .into_iter()
+            .map(|(id, fetched)| (id, fetched.substate))
+            .collect())
     }
 
     async fn get_virtual_substates(&self) -> Result<VirtualSubstates, DryRunTransactionProcessorError> {

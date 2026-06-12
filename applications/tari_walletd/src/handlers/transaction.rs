@@ -356,6 +356,8 @@ pub async fn handle_submit_manifest(
     // Fee of zero is never valid
     let fee_amount = req.max_fee.max(1);
 
+    let default_account_pays_fee = instructions.fee_instructions.is_empty();
+
     let mut transaction = context
         .transaction_builder()
         .with_dry_run(req.dry_run)
@@ -422,7 +424,34 @@ pub async fn handle_submit_manifest(
         });
     }
 
-    let transaction_id = context.transaction_service().submit_transaction(transaction).await?;
+    // Link the involved account(s): the default account when it pays the fee, plus the seal signer's
+    // account when it maps to one of the wallet's accounts. Manifest instructions can touch any
+    // account, so this is best-effort.
+    let mut linked_accounts = Vec::new();
+    if default_account_pays_fee {
+        linked_accounts.push(*default_account.component_address());
+    }
+    if let Some(address) = sdk
+        .key_manager_api()
+        .get_public_key(seal_signer_key_id)
+        .ok()
+        .and_then(|pk| {
+            sdk.accounts_api()
+                .get_account_by_public_key(&pk.public_key.to_byte_type())
+                .optional()
+                .ok()
+                .flatten()
+        })
+        .map(|account| account.account.component_address)
+        .filter(|address| !linked_accounts.contains(address))
+    {
+        linked_accounts.push(address);
+    }
+    let tx_context = (!linked_accounts.is_empty()).then(|| TransactionContext::with_accounts(linked_accounts));
+    let transaction_id = context
+        .transaction_service()
+        .submit_transaction_with_opts(transaction, tx_context, None)
+        .await?;
 
     Ok(TransactionSubmitManifestResponse {
         transaction_id,

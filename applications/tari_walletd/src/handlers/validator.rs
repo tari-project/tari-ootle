@@ -13,7 +13,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{SubstateAddress, SubstateRequirement, derive_fee_pool_address};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
-use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
+use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, TransactionContext};
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
@@ -234,7 +234,16 @@ pub async fn handle_claim_validator_fees(
     }
 
     let mut events = context.notifier().subscribe();
-    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
+    // Link the transaction to the account the fees are claimed into so it appears in the
+    // account-filtered transaction list.
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction_with_opts(
+            transaction,
+            Some(TransactionContext::with_accounts([account_component_address])),
+            None,
+        )
+        .await?;
 
     let finalized = wait_for_result(&mut events, tx_id).await?;
 

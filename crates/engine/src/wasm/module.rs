@@ -171,9 +171,12 @@ impl WasmModule {
         // whatever remains of the per-transaction budget (`MAX_WASM_POINTS_PER_TRANSACTION`).
         compiler.push_middleware(Arc::new(metering::middleware(limits::MAX_WASM_POINTS_PER_CALL)));
 
+        // Every feature is set explicitly rather than relying on `Features::default()`: the
+        // accepted-module set is consensus-critical, and wasmer flips defaults between releases
+        // (e.g. `extended_const` became default-on in 7.1.0). When bumping wasmer, add any newly
+        // introduced feature flag here explicitly.
         let mut features = wasmer::sys::Features::default();
         features
-            // Explicitly disable threads and multi value, the remaining defaults are repeated here for clarity
             .threads(false)
             .bulk_memory(true)
             .multi_value(false)
@@ -184,7 +187,9 @@ impl WasmModule {
             .memory64(false)
             .multi_memory(false)
             .exceptions(false)
-            .module_linking(false);
+            .module_linking(false)
+            .extended_const(false)
+            .wide_arithmetic(false);
 
         let mut engine = EngineBuilder::new(compiler).set_features(Some(features)).engine();
         engine.set_tunables(tunables);

@@ -66,6 +66,9 @@ import SubstatesContent from "./SubstatesContent";
 const isFinalized = (result: any): result is { Finalized: any } =>
   typeof result === "object" && result !== null && "Finalized" in result;
 
+const isRejected = (result: any): result is { Rejected: { details: string; rejected_time: string } } =>
+  typeof result === "object" && result !== null && "Rejected" in result;
+
 const isAcceptResult = (result: any): result is { Accept: any } =>
   result && typeof result === "object" && "Accept" in result;
 
@@ -122,6 +125,8 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
     data?.result && isFinalized(data.result)
       ? data.result.Finalized.execution_result?.finalize?.result
       : undefined;
+
+  const rejected = data?.result && isRejected(data.result) ? data.result.Rejected : undefined;
 
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedPanels((prev) =>
@@ -381,9 +386,25 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                   <TableRow>
                     <TableCell>Status</TableCell>
                     <DataTableCell>
-                      <Chip label="Pending" color="warning" variant="filled" />
+                      {rejected ? (
+                        <Chip label="Rejected" color="error" variant="filled" />
+                      ) : (
+                        <Chip label="Pending" color="warning" variant="filled" />
+                      )}
                     </DataTableCell>
                   </TableRow>
+                  {rejected && (
+                    <>
+                      <TableRow>
+                        <TableCell>Rejection Reason</TableCell>
+                        <DataTableCell>{rejected.details}</DataTableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Rejected Time</TableCell>
+                        <DataTableCell>{rejected.rejected_time}</DataTableCell>
+                      </TableRow>
+                    </>
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>

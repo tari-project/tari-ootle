@@ -1228,6 +1228,60 @@
         }
       }
     },
+    "/validators": {
+      "get": {
+        "tags": [
+          "handlers::validators"
+        ],
+        "description": "Get the validator roster for an epoch as tracked by the epoch manager",
+        "operationId": "list_validators",
+        "parameters": [
+          {
+            "name": "epoch",
+            "in": "query",
+            "description": "Epoch to fetch the roster for. Defaults to the current epoch",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The validator roster for the epoch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListValidatorsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The requested epoch has not occurred yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/wait-until-ready": {
       "get": {
         "tags": [
@@ -1459,7 +1513,7 @@
           },
           "verified": {
             "type": "boolean",
-            "description": "True when the indexer verified this substate's value against the shard group committee (via a\nmerkle proof). False when proofs are disabled and the value was served unverified."
+            "description": "True when the indexer verified this substate's value against the shard group committee (via a\nmerkle proof). False when proofs are disabled, or when no committee member could supply a\nproof yet (e.g. nothing committed since an epoch change) and the value was served unverified."
           },
           "version": {
             "type": "integer",
@@ -1736,6 +1790,28 @@
           }
         }
       },
+      "ListValidatorsResponse": {
+        "type": "object",
+        "description": "The validator roster for an epoch, as registered on the base layer and tracked by the epoch\nmanager. Unlike the lazily-observed snapshots in `GetNetworkSyncStateResponse`, this is the\ncomplete consensus-derived validator set for the epoch.",
+        "required": [
+          "epoch",
+          "validators"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The epoch the roster applies to.",
+            "minimum": 0
+          },
+          "validators": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidatorInfo"
+            }
+          }
+        }
+      },
       "NetworkDescription": {
         "type": "object",
         "required": [
@@ -1971,6 +2047,13 @@
             "type": "string",
             "format": "date-time"
           },
+          "rejected_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reason the transaction was rejected by mempool validation when it was submitted through\nthis indexer. None if the transaction was not rejected at submission."
+          },
           "summary": {
             "oneOf": [
               {
@@ -2023,6 +2106,56 @@
           "Sleeping",
           "Shutdown"
         ]
+      },
+      "ValidatorInfo": {
+        "type": "object",
+        "description": "A single validator's registration entry for an epoch.",
+        "required": [
+          "public_key",
+          "peer_id",
+          "shard_group",
+          "start_epoch",
+          "fee_claim_public_key",
+          "vote_power"
+        ],
+        "properties": {
+          "end_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The epoch the validator was deactivated, if any.",
+            "minimum": 0
+          },
+          "fee_claim_public_key": {
+            "type": "string",
+            "description": "The public key that may claim fees earned by this validator."
+          },
+          "peer_id": {
+            "type": "string",
+            "description": "libp2p PeerId derived from the public key. Can be used to join against the liveness\nsnapshots in `GetNetworkSyncStateResponse.validators`."
+          },
+          "public_key": {
+            "type": "string",
+            "description": "The validator's consensus public key."
+          },
+          "shard_group": {
+            "type": "object",
+            "description": "The committee (shard group) the validator belongs to in this epoch."
+          },
+          "start_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The first epoch the validator's registration is active.",
+            "minimum": 0
+          },
+          "vote_power": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "ValidatorStatus": {
         "type": "object",

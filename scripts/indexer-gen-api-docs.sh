@@ -11,4 +11,4 @@ mkdir -p "$(dirname $OPENAPI_PATH)"
 # Generate API docs for the indexer
 cargo run --bin indexer-gen-openapi --release --no-default-features -- $OPENAPI_PATH
 
-npx @redocly/cli@2.20.0 build-docs $OPENAPI_PATH -o $OUT_PATH
+npx @redocly/cli@2.32.2 build-docs $OPENAPI_PATH -o $OUT_PATH

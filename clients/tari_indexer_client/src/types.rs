@@ -70,7 +70,8 @@ pub struct GetSubstateResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
     pub substate: SubstateValue,
     /// True when the indexer verified this substate's value against the shard group committee (via a
-    /// merkle proof). False when proofs are disabled and the value was served unverified.
+    /// merkle proof). False when proofs are disabled, or when no committee member could supply a
+    /// proof yet (e.g. nothing committed since an epoch change) and the value was served unverified.
     pub verified: bool,
 }
 

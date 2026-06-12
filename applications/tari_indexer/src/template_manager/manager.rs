@@ -288,14 +288,12 @@ impl TemplateManager {
             });
         }
 
-        for (substate_id, substate) in fetched_templates {
-            let template =
-                substate
-                    .into_substate_value()
-                    .into_template()
-                    .ok_or(TemplateManagerError::InvariantViolation {
-                        details: format!("Expected template substate at address {}", substate_id),
-                    })?;
+        for (substate_id, fetched) in fetched_templates {
+            let template = fetched.substate.into_substate_value().into_template().ok_or(
+                TemplateManagerError::InvariantViolation {
+                    details: format!("Expected template substate at address {}", substate_id),
+                },
+            )?;
             let template_addr = substate_id
                 .as_template()
                 .expect("fetched_templates are all templates")

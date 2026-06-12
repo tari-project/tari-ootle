@@ -38,6 +38,12 @@ pub struct SubstateCacheEntry {
     pub substate_result: SubstateResult,
     #[n(2)]
     pub cached_at: u64,
+    /// True if the value was committee-verified when it was fetched. Entries written before this
+    /// field existed decode as unverified.
+    #[n(3)]
+    #[serde(default)]
+    #[cbor(default)]
+    pub verified: bool,
 }
 
 #[derive(Debug, Serialize, Clone, Copy, minicbor::Encode, minicbor::CborLen)]
@@ -48,6 +54,8 @@ pub struct SubstateCacheEntryRef<'a> {
     pub substate_result: &'a SubstateResult,
     #[n(2)]
     pub cached_at: u64,
+    #[n(3)]
+    pub verified: bool,
 }
 
 pub trait SubstateCache: Send + Sync {

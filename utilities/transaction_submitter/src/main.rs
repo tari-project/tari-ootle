@@ -393,7 +393,7 @@ impl Default for StressTestResultSummary {
 fn print_summary(summary: &StressTestResultSummary) {
     println!("Summary:");
     println!(
-        "  Success rate (fully committed): {:.2}%",
+        "  Success rate: {:.2}%",
         summary.num_committed as f64 / summary.num_transactions as f64 * 100.0
     );
     println!("  Transactions submitted: {}", summary.num_transactions);

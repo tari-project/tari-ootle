@@ -40,7 +40,7 @@ pub async fn get_resource(
     let is_xtr = resource_address == TARI_TOKEN;
     let resource_address = SubstateId::Resource(resource_address);
 
-    let (_, substate) = context
+    let (_, fetched) = context
         .substate_manager()
         .get_substates(iter::once(SubstateRequirementRef::new(&resource_address, None)))
         .await
@@ -49,6 +49,7 @@ pub async fn get_resource(
         .next()
         .ok_or_else(|| ErrorResponse::not_found(format!("Resource {} not found", resource_address)))?;
 
+    let substate = fetched.substate;
     let version = substate.version();
     let resource = substate.into_substate_value().into_resource().ok_or_else(|| {
         ErrorResponse::general_error(format!(

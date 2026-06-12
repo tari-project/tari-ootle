@@ -27,7 +27,6 @@
   ],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.28.0",
   "dependencies": {
     "@tari-project/ootle-ts-bindings": "workspace:^"
   },

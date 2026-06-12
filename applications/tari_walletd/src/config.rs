@@ -174,8 +174,8 @@ pub struct WebAuthnConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WalletDaemonAuth {
-    #[default]
     None,
+    #[default]
     WebAuthn,
 }
 

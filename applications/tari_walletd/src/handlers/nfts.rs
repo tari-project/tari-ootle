@@ -14,7 +14,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
-use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
+use tari_ootle_wallet_sdk::{apis::substate::ValidatorScanResult, models::TransactionContext};
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
@@ -134,7 +134,16 @@ pub async fn handle_mint_faucet(
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     let mut events = context.notifier().subscribe();
-    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
+    // Link the transaction to the account receiving the minted NFTs so it appears in the
+    // account-filtered transaction list.
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction_with_opts(
+            transaction,
+            Some(TransactionContext::with_accounts([account.component_address])),
+            None,
+        )
+        .await?;
 
     // Wait for the account monitor to observe the newly deposited NFT before returning.
     let (finalize_event, _) = wait_for_result_and_account(&mut events, &tx_id, &account.component_address).await?;
@@ -361,8 +370,29 @@ pub async fn handle_transfer(
     }
 
     // execute transaction
+    // Link the source and fee payer accounts, and the target too if it is one of the wallet's own
+    // accounts (so a self-transfer shows under both).
+    let mut linked_accounts = vec![source_account_address];
+    if !linked_accounts.contains(&fee_payer_account_address) {
+        linked_accounts.push(fee_payer_account_address);
+    }
+    if !linked_accounts.contains(&target_account_address) &&
+        sdk.accounts_api()
+            .get_account_by_address(&target_account_address)
+            .optional()?
+            .is_some()
+    {
+        linked_accounts.push(target_account_address);
+    }
     let mut events = context.notifier().subscribe();
-    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction_with_opts(
+            transaction,
+            Some(TransactionContext::with_accounts(linked_accounts)),
+            None,
+        )
+        .await?;
 
     let finalized = crate::handlers::helpers::wait_for_result(&mut events, tx_id).await?;
 

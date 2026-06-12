@@ -279,10 +279,13 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     }
 
     async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {
-        let epoch = self.get_current_epoch();
+        // Resolve the current epoch inside the service rather than reading the shared atomic here.
+        // Reading the epoch and then requesting its hash is racy: the service may advance the
+        // epoch in between, and the previously-current epoch may have no persisted row (epoch 0 on
+        // a fresh chain never does), turning a "current hash" read into a spurious NoEpochFound.
         let (tx, rx) = oneshot::channel();
         self.tx_request
-            .send(EpochManagerRequest::GetEpochHash { epoch, reply: tx })
+            .send(EpochManagerRequest::GetCurrentEpochHash { reply: tx })
             .await
             .map_err(|_| EpochManagerError::SendError)?;
 

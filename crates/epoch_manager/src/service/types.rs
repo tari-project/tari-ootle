@@ -32,6 +32,9 @@ pub enum EpochManagerRequest<TAddr> {
         epoch: Epoch,
         reply: Reply<FixedHash>,
     },
+    GetCurrentEpochHash {
+        reply: Reply<FixedHash>,
+    },
     GetValidatorNodeByPublicKey {
         epoch: Epoch,
         public_key: RistrettoPublicKeyBytes,

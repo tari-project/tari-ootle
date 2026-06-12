@@ -20,9 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useContext, useEffect, useState } from "react";
+import { useContext } from "react";
 import AllVNs from "./Components/AllVNs";
-import Committees from "../Committees/Committees";
 import Connections from "./Components/Connections";
 import Fees from "./Components/Fees";
 import Info from "./Components/Info";
@@ -33,17 +32,9 @@ import { StyledPaper } from "../../Components/StyledComponents";
 import Grid from "@mui/material/Grid";
 import SecondaryHeading from "../../Components/SecondaryHeading";
 import { VNContext } from "../../App";
-import { getNetworkCommittees } from "../../utils/json_rpc";
-import type { GetNetworkCommitteeResponse } from "@tari-project/ootle-ts-bindings";
 
 function ValidatorNode() {
-  const [committees, setCommittees] = useState<GetNetworkCommitteeResponse | null>(null);
-
   const { epoch, identity, shardKey, error } = useContext(VNContext);
-
-  useEffect(() => {
-    getNetworkCommittees().then(setCommittees);
-  }, []);
 
   if (error !== "") {
     return <div className="error">{error}</div>;
@@ -58,18 +49,6 @@ function ValidatorNode() {
       <Grid size={12}>
         <StyledPaper>
           <Info epoch={epoch} identity={identity} shardKey={shardKey} />
-        </StyledPaper>
-      </Grid>
-      <Grid size={12}>
-        <SecondaryHeading>Committees</SecondaryHeading>
-      </Grid>
-      <Grid size={12}>
-        <StyledPaper>
-          {committees ? (
-            <>
-              <Committees peerId={identity.peer_id} committees={committees.committees} />
-            </>
-          ) : null}
         </StyledPaper>
       </Grid>
       <Grid size={12}>

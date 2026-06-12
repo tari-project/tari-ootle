@@ -23,7 +23,7 @@
 pub(crate) mod error;
 
 use tari_epoch_manager::EpochManagerReader;
-use tari_indexer_client::types::TransactionEntry;
+use tari_indexer_client::types::{IndexerTransactionFinalizedResult, TransactionEntry};
 use tari_ootle_common_types::{NodeAddressable, ToSubstateAddress, optional::Optional};
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
@@ -52,11 +52,12 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
+        let transaction_id = transaction.calculate_id();
         if !transaction.verify_all_signatures() {
             // DEV note: If signatures are invalid here, this is probably an issue
             // with the JSON decoding (crates/engine_types/src/argument_parser.rs)
             return Err(TransactionManagerError::InvalidTransaction {
-                transaction_id: transaction.calculate_id(),
+                transaction_id,
                 details: "Transaction has one or more invalid signature(s)".to_string(),
             });
         }
@@ -64,16 +65,47 @@ where
         self.store
             .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction_for_db))
             .await?;
-        let id = self.network_client.submit_transaction(transaction).await?;
-        Ok(id)
+        match self.network_client.submit_transaction(transaction).await {
+            Ok(id) => {
+                // A previously rejected transaction may be accepted on resubmission (e.g. after a
+                // missing template is published), so a stale rejection must not shadow it.
+                self.store
+                    .with_write_tx(move |tx| tx.clear_transaction_rejection(id))
+                    .await?;
+                Ok(id)
+            },
+            Err(err) => {
+                if let Some(details) = err.validation_rejection_details() {
+                    let details = details.to_string();
+                    self.store
+                        .with_write_tx(move |tx| tx.set_transaction_rejected(transaction_id, &details))
+                        .await?;
+                }
+                Err(err.into())
+            },
+        }
     }
 
     pub async fn get_transaction_result(
         &self,
         transaction_id: TransactionId,
-    ) -> Result<TransactionResultStatus, TransactionManagerError> {
+    ) -> Result<IndexerTransactionFinalizedResult, TransactionManagerError> {
+        // A transaction rejected by mempool validation is never sequenced, so the network would
+        // report it as pending forever. Report the locally recorded rejection instead.
+        let rejection = self
+            .store
+            .with_read_tx(move |tx| tx.get_transaction_rejection(transaction_id))
+            .await?;
+        if let Some((details, rejected_at)) = rejection {
+            return Ok(IndexerTransactionFinalizedResult::Rejected {
+                details,
+                rejected_time: rejected_at,
+            });
+        }
+
         let transaction_substate_address = transaction_id.to_substate_address();
-        self.network_client
+        let result = self
+            .network_client
             .try_single_with_committee(transaction_substate_address, |mut client| async move {
                 client.get_finalized_transaction_result(transaction_id).await.optional()
             })
@@ -81,7 +113,18 @@ where
             .ok_or_else(|| TransactionManagerError::NotFound {
                 entity: "Transaction result",
                 key: transaction_id.to_string(),
-            })
+            })?;
+
+        Ok(match result {
+            TransactionResultStatus::Pending => IndexerTransactionFinalizedResult::Pending,
+            TransactionResultStatus::Finalized(finalized) => IndexerTransactionFinalizedResult::Finalized {
+                final_decision: finalized.final_decision,
+                execution_result: finalized.execute_result.map(Box::new),
+                execution_time: finalized.execution_time,
+                finalized_time: finalized.finalized_time,
+                abort_details: finalized.abort_details,
+            },
+        })
     }
 
     pub async fn list_recent_transactions(

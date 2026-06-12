@@ -419,6 +419,9 @@ fn convert_indexer_result_to_wallet_result(result: IndexerTransactionFinalizedRe
             finalized_time,
             abort_details,
         },
+        IndexerTransactionFinalizedResult::Rejected { details, rejected_time } => {
+            TransactionFinalizedResult::Rejected { details, rejected_time }
+        },
     }
 }
 

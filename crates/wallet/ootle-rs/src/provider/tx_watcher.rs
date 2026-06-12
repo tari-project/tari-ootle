@@ -21,7 +21,7 @@ use tari_indexer_client::{
 };
 use tari_ootle_common_types::{
     engine_types::{
-        commit_result::TransactionResult,
+        commit_result::{ExecuteResult, TransactionResult},
         transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
     },
     optional::Optional,
@@ -295,22 +295,11 @@ impl PendingTransaction {
                         execution_result,
                         abort_details,
                         ..
-                    })) => {
-                        if let Some(result) = execution_result {
-                            return match result.finalize.result {
-                                TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
-                                TransactionResult::AcceptFeeRejectRest(_, reason) => {
-                                    Ok(TransactionOutcome::OnlyFeeCommit(reason))
-                                },
-                                TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
-                            };
-                        }
-
-                        // Any commit case would have been handled above, so this is a rejection
-                        let reason = abort_details.unwrap_or_else(|| "Unknown".to_string());
+                    })) => self.outcome_from_finalized(execution_result, abort_details),
+                    Ok(Some(IndexerTransactionFinalizedResult::Rejected { details, .. })) => {
                         Err(PendingTransactionError::TransactionRejected {
                             tx_id: self.tx_id,
-                            reason,
+                            reason: details,
                         })
                     },
                     Ok(None) => {
@@ -334,22 +323,11 @@ impl PendingTransaction {
                         execution_result,
                         abort_details,
                         ..
-                    })) => {
-                        if let Some(result) = execution_result {
-                            return match result.finalize.result {
-                                TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
-                                TransactionResult::AcceptFeeRejectRest(_, reason) => {
-                                    Ok(TransactionOutcome::OnlyFeeCommit(reason))
-                                },
-                                TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
-                            };
-                        }
-
-                        // Any commit case would have been handled above, so this is a rejection
-                        let reason = abort_details.unwrap_or_else(|| "Unknown".to_string());
+                    })) => self.outcome_from_finalized(execution_result, abort_details),
+                    Ok(Some(IndexerTransactionFinalizedResult::Rejected { details, .. })) => {
                         Err(PendingTransactionError::TransactionRejected {
                             tx_id: self.tx_id,
-                            reason,
+                            reason: details,
                         })
                     },
                     Ok(None) => {
@@ -364,6 +342,27 @@ impl PendingTransaction {
             },
             Err(e) => Err(e),
         }
+    }
+
+    fn outcome_from_finalized(
+        &self,
+        execution_result: Option<Box<ExecuteResult>>,
+        abort_details: Option<String>,
+    ) -> Result<TransactionOutcome, PendingTransactionError> {
+        if let Some(result) = execution_result {
+            return match result.finalize.result {
+                TransactionResult::Accept(_) => Ok(TransactionOutcome::Commit),
+                TransactionResult::AcceptFeeRejectRest(_, reason) => Ok(TransactionOutcome::OnlyFeeCommit(reason)),
+                TransactionResult::Reject(reason) => Ok(TransactionOutcome::Reject(reason)),
+            };
+        }
+
+        // Any commit case would have been handled above, so this is a rejection
+        let reason = abort_details.unwrap_or_else(|| "Unknown".to_string());
+        Err(PendingTransactionError::TransactionRejected {
+            tx_id: self.tx_id,
+            reason,
+        })
     }
 
     async fn try_get_transaction_result(
@@ -400,64 +399,72 @@ impl PendingTransaction {
         if let Some(receipt) = self.try_get_transaction_receipt().await? {
             return Ok(receipt);
         }
-        if let Some(IndexerTransactionFinalizedResult::Finalized {
-            final_decision,
-            abort_details,
-            execution_result,
-            ..
-        }) = self.try_get_transaction_result().await?
-        {
-            if final_decision.is_abort() {
-                let reason = execution_result
-                    .as_ref()
-                    .and_then(|res| res.finalize.result.any_reject())
-                    .map(|reject| reject.to_string())
-                    .or(abort_details)
-                    .unwrap_or_else(|| "Unknown".to_string());
+        match self.try_get_transaction_result().await? {
+            Some(IndexerTransactionFinalizedResult::Rejected { details, .. }) => {
                 return Err(PendingTransactionError::TransactionRejected {
                     tx_id: self.tx_id,
-                    reason,
+                    reason: details,
                 });
-            }
-            if final_decision.is_commit() {
-                // Transaction committed but receipt not found. This is a due to a race condition where the indexer may
-                // not have indexed the receipt yet.
-                //
-                // TODO: improvements to the indexer may be needed to fully resolve this.
-                tracing::warn!("Transaction committed but receipt not found for tx_id: {}", self.tx_id);
-                let execute_epoch = execution_result
-                    .as_ref()
-                    .and_then(|res| res.execute_epoch)
-                    .unwrap_or_default();
-                return Ok(TransactionReceipt {
-                    outcome: FinalizeOutcome::Commit,
-                    diff_summary: execution_result
+            },
+            Some(IndexerTransactionFinalizedResult::Pending) | None => {},
+            Some(IndexerTransactionFinalizedResult::Finalized {
+                final_decision,
+                abort_details,
+                execution_result,
+                ..
+            }) => {
+                if final_decision.is_abort() {
+                    let reason = execution_result
                         .as_ref()
-                        .and_then(|res| res.finalize.any_accept())
-                        .map(|diff| DiffSummary::from_diff(diff, execute_epoch))
-                        .unwrap_or_default(),
-                    fee_withdrawals: execution_result
+                        .and_then(|res| res.finalize.result.any_reject())
+                        .map(|reject| reject.to_string())
+                        .or(abort_details)
+                        .unwrap_or_else(|| "Unknown".to_string());
+                    return Err(PendingTransactionError::TransactionRejected {
+                        tx_id: self.tx_id,
+                        reason,
+                    });
+                }
+                if final_decision.is_commit() {
+                    // Transaction committed but receipt not found. This is a due to a race condition where the indexer
+                    // may not have indexed the receipt yet.
+                    //
+                    // TODO: improvements to the indexer may be needed to fully resolve this.
+                    tracing::warn!("Transaction committed but receipt not found for tx_id: {}", self.tx_id);
+                    let execute_epoch = execution_result
                         .as_ref()
-                        .and_then(|res| res.finalize.any_accept())
-                        .map(|diff| diff.validator_fee_withdrawals().to_vec().into_boxed_slice())
-                        .unwrap_or_default(),
-                    events: execution_result
-                        .as_ref()
-                        .map(|res| res.finalize.events.clone().into_boxed_slice())
-                        .unwrap_or_default(),
-                    logs: execution_result
-                        .as_ref()
-                        .map(|res| res.finalize.logs.clone().into_boxed_slice())
-                        .unwrap_or_default(),
-                    fee_receipt: execution_result
-                        .as_ref()
-                        .map(|res| res.finalize.fee_receipt.clone())
-                        .unwrap_or_default(),
-                    epoch: execute_epoch,
-                });
+                        .and_then(|res| res.execute_epoch)
+                        .unwrap_or_default();
+                    return Ok(TransactionReceipt {
+                        outcome: FinalizeOutcome::Commit,
+                        diff_summary: execution_result
+                            .as_ref()
+                            .and_then(|res| res.finalize.any_accept())
+                            .map(|diff| DiffSummary::from_diff(diff, execute_epoch))
+                            .unwrap_or_default(),
+                        fee_withdrawals: execution_result
+                            .as_ref()
+                            .and_then(|res| res.finalize.any_accept())
+                            .map(|diff| diff.validator_fee_withdrawals().to_vec().into_boxed_slice())
+                            .unwrap_or_default(),
+                        events: execution_result
+                            .as_ref()
+                            .map(|res| res.finalize.events.clone().into_boxed_slice())
+                            .unwrap_or_default(),
+                        logs: execution_result
+                            .as_ref()
+                            .map(|res| res.finalize.logs.clone().into_boxed_slice())
+                            .unwrap_or_default(),
+                        fee_receipt: execution_result
+                            .as_ref()
+                            .map(|res| res.finalize.fee_receipt.clone())
+                            .unwrap_or_default(),
+                        epoch: execute_epoch,
+                    });
 
-                // return Err(PendingTransactionError::ReceiptNotFound { tx_id: self.tx_id });
-            }
+                    // return Err(PendingTransactionError::ReceiptNotFound { tx_id: self.tx_id });
+                }
+            },
         }
 
         let _outcome = self.watch().await?;

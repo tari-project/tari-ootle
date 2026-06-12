@@ -30,6 +30,7 @@ use tari_ootle_storage::{
     Ordering,
     StorageError,
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    time::PrimitiveDateTime,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::{
@@ -134,6 +135,13 @@ pub trait IndexerStoreReadTransaction {
     /// Fetch a single transaction (with its instructions) by ID. Returns `None` if the transaction
     /// was not submitted through this indexer.
     fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<Option<TransactionEntry>, StorageError>;
+
+    /// Fetch the mempool rejection reason and time for a transaction submitted through this indexer.
+    /// Returns `None` if the transaction is unknown or was not rejected.
+    fn get_transaction_rejection(
+        &mut self,
+        transaction_id: TransactionId,
+    ) -> Result<Option<(String, PrimitiveDateTime)>, StorageError>;
 
     // -------------------------------- Transaction Receipts -------------------------------- //
     fn list_transaction_receipts(
@@ -255,6 +263,10 @@ pub trait IndexerStoreWriteTransaction {
         event_filters: &[EventFilter],
     ) -> Result<Vec<InsertedEvent>, StorageError>;
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
+    /// Mark a stored transaction as rejected by mempool validation, recording the reason.
+    fn set_transaction_rejected(&mut self, transaction_id: TransactionId, reason: &str) -> Result<(), StorageError>;
+    /// Clear a previous rejection, e.g. when the same transaction is later resubmitted successfully.
+    fn clear_transaction_rejection(&mut self, transaction_id: TransactionId) -> Result<(), StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
     fn upsert_template_catalogue(
         &mut self,

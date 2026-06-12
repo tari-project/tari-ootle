@@ -11,6 +11,7 @@ use log::{info, warn};
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_ootle_common_types::{NodeAddressable, NumPreshards, ShardGroup, SubstateAddress, displayable::Displayable};
 use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_rpc_framework::RpcStatusCode;
 use tari_validator_node_rpc::{
     ValidatorNodeRpcClientError,
     client::{ValidatorNodeClientFactory, ValidatorNodeRpcClient},
@@ -215,4 +216,25 @@ pub enum NetworkClientError {
     },
     #[error("No committee at present. Try again later")]
     NoCommitteeMembers,
+}
+
+impl NetworkClientError {
+    /// Returns the rejection details when every involved validator failed and the last failure was a
+    /// BAD_REQUEST, i.e. the transaction was explicitly rejected as invalid (e.g. by mempool
+    /// validation) rather than failing for transient reasons.
+    pub fn validation_rejection_details(&self) -> Option<&str> {
+        let NetworkClientError::AllValidatorsFailed {
+            last_error: Some(rpc_err),
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let status = rpc_err.status()?;
+        if status.as_status_code() == RpcStatusCode::BadRequest {
+            Some(status.details())
+        } else {
+            None
+        }
+    }
 }

@@ -45,6 +45,8 @@ import type {
   ListWatchedSubstatesRequest,
   ListWatchedSubstatesResponse,
   ListWatchedTemplatesResponse,
+  ListValidatorsRequest,
+  ListValidatorsResponse,
 } from "@tari-project/ootle-ts-bindings";
 import { FetchTransport, HttpTransport } from "./transports";
 import type { SseStream } from "./sse";
@@ -115,6 +117,10 @@ export class IndexerClient {
 
   public getConnections(): Promise<IndexerGetConnectionsResponse> {
     return this.transport.sendGet(`network/connections`, {});
+  }
+
+  public listValidators(params: Partial<ListValidatorsRequest> = {}): Promise<ListValidatorsResponse> {
+    return this.transport.sendGet(`validators`, params);
   }
 
   public getNonFungibles(params: GetNonFungiblesRequest): Promise<GetNonFungiblesResponse> {

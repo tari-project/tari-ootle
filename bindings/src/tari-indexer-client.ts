@@ -62,3 +62,6 @@ export * from "./types/tari-indexer-client/ListSubstateItem";
 export * from "./types/tari-indexer-client/StreamTransactionEventsRequest";
 export * from "./types/tari-indexer-client/ListWatchedSubstatesRequest";
 export * from "./types/tari-indexer-client/ListEpochCheckpointsRequest";
+export * from "./types/tari-indexer-client/ListValidatorsRequest";
+export * from "./types/tari-indexer-client/ListValidatorsResponse";
+export * from "./types/tari-indexer-client/ValidatorInfo";

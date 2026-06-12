@@ -70,7 +70,8 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::transaction_receipts::get_transaction_receipt,
     handlers::transaction_events::sse_transaction_events,
     handlers::epoch_checkpoints::list_epoch_checkpoints,
-    handlers::epoch_checkpoints::get_latest_epoch_checkpoint
+    handlers::epoch_checkpoints::get_latest_epoch_checkpoint,
+    handlers::validators::list_validators
 ))]
 pub struct ApiDoc;
 
@@ -151,6 +152,7 @@ impl Server {
             .route("/network", get(handlers::network::get))
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
             .route("/network/connections", get(handlers::network::get_connections))
+            .route("/validators", get(handlers::validators::list_validators))
             // ----------------------------------------------------------------
             // /substates/* – per-IP rate limit (rate_limits.substates_rate)
             // ----------------------------------------------------------------

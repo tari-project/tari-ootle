@@ -11584,7 +11584,6 @@ dependencies = [
  "tari_epoch_manager",
  "tari_ootle_common_types",
  "tari_ootle_storage",
- "tari_template_lib_types",
  "tari_validator_node_rpc",
  "thiserror 2.0.18",
 ]

@@ -86,12 +86,12 @@ jobs:
 
       # Builds every workspace web UI (walletd, indexer, validator node, db_inspector)
       # together with the bindings/clients they depend on, in topological order.
-      # --ignore-scripts: dependency build scripts (esbuild/@swc/core/@parcel/watcher)
-      #   ship prebuilt binaries and are not needed to compile the UIs; without this,
-      #   pnpm fails CI installs with ERR_PNPM_IGNORED_BUILDS.
+      # Ignored dependency build scripts (esbuild/@swc/core/@parcel/watcher) ship
+      # prebuilt binaries and aren't needed to compile the UIs; strictDepBuilds: false
+      # in pnpm-workspace.yaml keeps this frozen install green.
       - name: build workspace web UIs
         run: |
-          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm install --frozen-lockfile
           pnpm --recursive run build
 
       # The swarm daemon web UI is a standalone npm project, not part of the pnpm workspace.

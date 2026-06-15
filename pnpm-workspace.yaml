@@ -25,4 +25,11 @@ ignoredBuiltDependencies:
   - esbuild
   - msw
 
+# These dependencies ship prebuilt binaries, so their build scripts are intentionally
+# ignored (above) and not needed to compile the bindings, clients or web UIs. pnpm 11
+# otherwise hard-fails any install that leaves build scripts unrun with
+# ERR_PNPM_IGNORED_BUILDS; disabling the strict gate keeps `pnpm install --frozen-lockfile`
+# green across CI and publish jobs without per-command --ignore-scripts workarounds.
+strictDepBuilds: false
+
 publishBranch: development

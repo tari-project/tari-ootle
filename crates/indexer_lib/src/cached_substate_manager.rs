@@ -47,6 +47,7 @@ use tari_ootle_storage::{
     verify_substate_value_proof,
     verify_substate_value_proof_against_root,
 };
+use tari_template_lib_types::constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS};
 use tari_validator_node_rpc::client::{
     SubstateProofData,
     SubstateResult,
@@ -426,14 +427,22 @@ where
                 .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()));
         }
 
-        // Read-only substates (the TARI resource, the public identity resource) are protocol
-        // constants bootstrapped directly into the substate store at genesis. They are never
-        // written to the shard state tree, so no inclusion proof can be produced for them and
-        // verification would always fail with a leaf-key mismatch. Their value is fixed by the
-        // protocol, so they are verified by definition: fetch without a proof and treat as verified.
+        // The TARI resource and the public identity resource are immutable protocol constants
+        // bootstrapped directly into the substate store at genesis. They are never written to the
+        // shard state tree, so no inclusion proof can be produced for them and verification would
+        // always fail with a leaf-key mismatch. Their value is fixed by the protocol, so they are
+        // verified by definition: fetch without a proof and treat as verified.
+        //
+        // This is deliberately restricted to these two genesis addresses. Other read-only substates
+        // (templates, transaction receipts, claimed output tombstones) are created during
+        // transaction execution and *are* committed to the state tree, so they must still be proven.
+        //
         // TODO: commit genesis substates to the state tree so they can be cryptographically verified
         //       like any other substate (changes the genesis state root, so deferred).
-        if substate_requirement.substate_id().is_read_only() {
+        let resource_address = substate_requirement.substate_id().as_resource_address();
+        if resource_address == Some(STEALTH_TARI_RESOURCE_ADDRESS) ||
+            resource_address == Some(PUBLIC_IDENTITY_RESOURCE_ADDRESS)
+        {
             return client
                 .get_substate(substate_requirement)
                 .await

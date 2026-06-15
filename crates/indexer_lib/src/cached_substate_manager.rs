@@ -426,6 +426,21 @@ where
                 .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()));
         }
 
+        // Read-only substates (the TARI resource, the public identity resource) are protocol
+        // constants bootstrapped directly into the substate store at genesis. They are never
+        // written to the shard state tree, so no inclusion proof can be produced for them and
+        // verification would always fail with a leaf-key mismatch. Their value is fixed by the
+        // protocol, so they are verified by definition: fetch without a proof and treat as verified.
+        // TODO: commit genesis substates to the state tree so they can be cryptographically verified
+        //       like any other substate (changes the genesis state root, so deferred).
+        if substate_requirement.substate_id().is_read_only() {
+            return client
+                .get_substate(substate_requirement)
+                .await
+                .map(|result| (result, true))
+                .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()));
+        }
+
         let (result, proof) = client
             .get_substate_with_proof(substate_requirement)
             .await

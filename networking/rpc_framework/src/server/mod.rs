@@ -851,7 +851,7 @@ mod tests {
     async fn serve_drains_in_flight_sessions_before_returning() {
         let (notify_tx, notify_rx) = mpsc::unbounded_channel();
         let (_request_tx, request_rx) = mpsc::channel(1);
-        let mut server = PeerRpcServer::new(RpcServerBuilder::new(), ProtocolServiceNotFound, notify_rx, request_rx);
+        let server = PeerRpcServer::new(RpcServerBuilder::new(), ProtocolServiceNotFound, notify_rx, request_rx);
 
         // Each real session task owns a per-session service instance (and anything it captured, e.g. a state
         // store handle). Returning from serve must guarantee those are dropped.

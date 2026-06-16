@@ -44,8 +44,10 @@ fn initial_contribution_and_redeem() {
                 Workspace("xtr_coins"),
                 Workspace("faucet_coins")
             ])
-            .put_last_instruction_output_on_workspace("pool_units")
-            .call_method(user1, "deposit", args![Workspace("pool_units")])
+            .put_last_instruction_output_on_workspace("contribution")
+            .call_method(user1, "deposit", args![Workspace("contribution.0")])
+            .call_method(user1, "deposit", args![Workspace("contribution.1")])
+            .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
             .add_signer(&test.to_public_key_bytes(), &user1_secret)
             .seal(test.secret_key()),
@@ -104,6 +106,129 @@ fn initial_contribution_and_redeem() {
 }
 
 #[test]
+fn second_contribution_and_partial_redeem() {
+    // Regression test for the `(true, true, true)` contribute branch and partial redemption, neither of which were
+    // previously covered. A non-proportional second contribution exercises (a) the ratio math that must not truncate
+    // to zero and (b) the change bucket returned for the over-supplied resource. The partial redeem exercises the
+    // proportional-payout math that must not truncate to zero either.
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_address = test.get_template_address(TEMPLATE_NAME);
+
+    let (faucet_component, faucet_resource) = create_test_faucet_component(&mut test, 1_000_000_000_000u64);
+    let (user1, _user1_proof, user1_secret) = test.create_funded_account();
+
+    // ACT 1: create the pool with an initial 1000 TARI : 4000 stablecoin contribution (ratio 1:4, LP minted = 2000).
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .allocate_component_address("pool")
+            .call_function(template_address, "create", args![
+                OwnerRule::OwnedBySigner,
+                AccessRule::AllowAll,
+                TARI_TOKEN,
+                faucet_resource,
+                metadata!["name" => "TARI-Stablecoin Liquidity Pool"],
+                Workspace("pool"),
+            ])
+            .call_method(faucet_component, "take_free_coins_custom", args![4000])
+            .put_last_instruction_output_on_workspace("faucet_coins")
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 1000])
+            .put_last_instruction_output_on_workspace("xtr_coins")
+            .call_method("pool", "contribute", args![
+                Workspace("xtr_coins"),
+                Workspace("faucet_coins")
+            ])
+            .put_last_instruction_output_on_workspace("contribution")
+            .call_method(user1, "deposit", args![Workspace("contribution.0")])
+            .call_method(user1, "deposit", args![Workspace("contribution.1")])
+            .call_method(user1, "deposit", args![Workspace("contribution.2")])
+            .finish()
+            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let store = test.read_only_state_store();
+    let (pool_addr, pool_body) = store
+        .get_components_by_template_address(template_address)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let indexed = pool_body.body.to_indexed_well_known_types().unwrap();
+    let lp_resx = indexed.resource_addresses().first().copied().unwrap();
+
+    // ACT 2: a deliberately non-proportional second contribution: 500 TARI but 4000 stablecoin. At the 1:4 reserve
+    // ratio only 2000 stablecoin is needed to match the 500 TARI, so 2000 stablecoin must be returned as change.
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet_component, "take_free_coins_custom", args![4000])
+            .put_last_instruction_output_on_workspace("faucet_coins")
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 500])
+            .put_last_instruction_output_on_workspace("xtr_coins")
+            .call_method(pool_addr, "contribute", args![
+                Workspace("xtr_coins"),
+                Workspace("faucet_coins")
+            ])
+            .put_last_instruction_output_on_workspace("contribution")
+            // change_a (TARI) is empty, change_b (stablecoin) must hold the unused 2000.
+            .assert_bucket_contains_at_least("contribution.2", faucet_resource, 2000u64)
+            .call_method(user1, "deposit", args![Workspace("contribution.0")])
+            .call_method(user1, "deposit", args![Workspace("contribution.1")])
+            .call_method(user1, "deposit", args![Workspace("contribution.2")])
+            .finish()
+            .seal(&user1_secret),
+        vec![],
+    );
+
+    // Reserves must keep the 1:4 ratio: a = 1000 + 500 = 1500, b = 4000 + 2000 = 6000.
+    let store = test.read_only_state_store();
+    let pool_body = store.get_component(pool_addr).unwrap();
+    let indexed = pool_body.body.to_indexed_well_known_types().unwrap();
+    let vaults = indexed
+        .vault_ids()
+        .iter()
+        .map(|id| store.get_vault(id).unwrap())
+        .map(|v| (*v.resource_address(), v))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(vaults.get(&TARI_TOKEN).unwrap().balance(), 1500);
+    assert_eq!(vaults.get(&faucet_resource).unwrap().balance(), 6000);
+
+    // The user should now hold LP = 2000 (initial) + 1000 (second) = 3000.
+    let user_account = store.get_account(user1).unwrap();
+    let lp_vault = user_account.get_vault_by_resource(&lp_resx).unwrap();
+    let lp_balance = store.get_vault(&lp_vault.vault_id()).unwrap().balance();
+    assert_eq!(lp_balance, 3000);
+
+    // ACT 3: redeem HALF the LP (1500 of 3000). Proportional payout = 750 TARI and 3000 stablecoin.
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(user1, "withdraw", args![lp_resx, 1500])
+            .put_last_instruction_output_on_workspace("redeem_lp")
+            .call_method(pool_addr, "redeem", args![Workspace("redeem_lp")])
+            .put_last_instruction_output_on_workspace("redeemed")
+            .assert_bucket_contains_at_least("redeemed.0", TARI_TOKEN, 750u64)
+            .assert_bucket_contains_at_least("redeemed.1", faucet_resource, 3000u64)
+            .call_method(user1, "deposit", args![Workspace("redeemed.0")])
+            .call_method(user1, "deposit", args![Workspace("redeemed.1")])
+            .finish()
+            .seal(&user1_secret),
+        vec![],
+    );
+
+    // Half the reserves should remain in the pool: a = 750, b = 3000.
+    let store = test.read_only_state_store();
+    let pool_body = store.get_component(pool_addr).unwrap();
+    let indexed = pool_body.body.to_indexed_well_known_types().unwrap();
+    let vaults = indexed
+        .vault_ids()
+        .iter()
+        .map(|id| store.get_vault(id).unwrap())
+        .map(|v| (*v.resource_address(), v))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(vaults.get(&TARI_TOKEN).unwrap().balance(), 750);
+    assert_eq!(vaults.get(&faucet_resource).unwrap().balance(), 3000);
+}
+
+#[test]
 fn basic_constant_product_swap() {
     // Setup
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
@@ -139,8 +264,10 @@ fn basic_constant_product_swap() {
                 Workspace("xtr_coins"),
                 Workspace("faucet_coins")
             ])
-            .put_last_instruction_output_on_workspace("pool_units")
-            .call_method(user1, "deposit", args![Workspace("pool_units")])
+            .put_last_instruction_output_on_workspace("contribution")
+            .call_method(user1, "deposit", args![Workspace("contribution.0")])
+            .call_method(user1, "deposit", args![Workspace("contribution.1")])
+            .call_method(user1, "deposit", args![Workspace("contribution.2")])
             // Give user some stablecoin for later
             .call_method(faucet_component, "take_free_coins_custom", args![
                 1_000_000

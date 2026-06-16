@@ -3,7 +3,6 @@
 
 use std::error::Error;
 
-use serde::Serialize;
 use tari_bor::encode;
 
 pub type BuilderWorkspaceKey = String;
@@ -34,7 +33,7 @@ impl NamedArg {
         Ok(Self::Literal(encode(&value)?))
     }
 
-    pub fn from_type<T: Serialize + tari_bor::Encode<()>>(val: &T) -> Result<Self, tari_bor::BorError> {
+    pub fn from_type<T: tari_bor::Encode<()>>(val: &T) -> Result<Self, tari_bor::BorError> {
         Ok(Self::Literal(encode(val)?))
     }
 
@@ -57,7 +56,7 @@ impl NamedArg {
 /// Trait for converting a value into a [`NamedArg`] for use in template method calls.
 ///
 /// This enables macro-generated template methods to accept either:
-/// - Concrete values (any `T: Serialize`, CBOR-encoded into `NamedArg::Literal`)
+/// - Concrete values (any `T: tari_bor::Encode`, CBOR-encoded into `NamedArg::Literal`)
 /// - Workspace references (`NamedArg::Workspace`, created via `workspace!("key")`)
 pub trait IntoArg {
     fn into_arg(self) -> NamedArg;
@@ -69,7 +68,7 @@ impl IntoArg for NamedArg {
     }
 }
 
-impl<T: Serialize + tari_bor::Encode<()>> IntoArg for T {
+impl<T: tari_bor::Encode<()>> IntoArg for T {
     /// Converts a serializable type to a `NamedArg::Literal` by CBOR-encoding it.
     ///
     /// ## Panics
@@ -169,7 +168,7 @@ macro_rules! __args_inner {
 /// // Workspace arguments are resolved at runtime.
 /// let args = args![Workspace("foo"), 42, "bar"];
 ///
-/// // Any data type that implements `serde::Serialize` can be used as a literal argument.
+/// // Any data type that implements `tari_bor::Encode` can be used as a literal argument.
 /// let args = args![MyStruct { field1: 42, field2: "hello".to_string() }];
 /// ```
 ///

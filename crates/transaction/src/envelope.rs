@@ -3,23 +3,13 @@
 
 use crate::Transaction;
 
-#[derive(
-    Debug,
-    Clone,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-    serde::Serialize,
-    serde::Deserialize,
-    PartialEq,
-    Eq,
-)]
+#[derive(Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
-#[serde(transparent)]
 pub struct TransactionEnvelope(
     #[n(0)]
     #[cbor(with = "minicbor::bytes")]
-    #[serde(with = "ootle_serde::base64")]
+    #[cfg_attr(feature = "serde", serde(with = "ootle_serde::base64"))]
     pub Box<[u8]>,
 );
 

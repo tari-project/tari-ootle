@@ -5,7 +5,6 @@ use std::{collections::HashSet, fmt::Display, iter};
 
 use indexmap::IndexSet;
 use log::*;
-use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     hashing::{EngineHashDomainLabel, hash_template_code, hasher32},
     indexed_value::IndexedValueError,
@@ -30,9 +29,8 @@ const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
 static XTR_REQUIREMENT: SubstateRequirement = SubstateRequirement::new(SubstateId::Resource(TARI_TOKEN), None);
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionV1 {
     #[n(0)]

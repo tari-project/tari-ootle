@@ -12,19 +12,19 @@ tari_engine_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_template_metadata = { workspace = true, features = ["borsh"] }
 tari_crypto = { workspace = true, features = ["borsh"] }
-tari_template_lib_types = { workspace = true, features = ["std", "serde"] }
+tari_template_lib_types = { workspace = true, features = ["std"] }
 tari_bor = { workspace = true, features = ["std", "indexmap"] }
 minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 tari_hashing = { workspace = true }
-ootle_serde = { workspace = true, features = ["base64"] }
+ootle_serde = { workspace = true, features = ["base64"], optional = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 ootle-network = { workspace = true }
 
 borsh = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
-indexmap = { workspace = true, features = ["serde"] }
-serde = { workspace = true, default-features = true }
+indexmap = { workspace = true }
+serde = { workspace = true, default-features = true, features = ["derive"], optional = true }
 ts-rs = { workspace = true, optional = true }
 hex = { workspace = true }
 thiserror = { workspace = true }
@@ -33,4 +33,5 @@ thiserror = { workspace = true }
 serde_json = { workspace = true }
 
 [features]
+serde = ["dep:serde", "dep:ootle_serde", "tari_bor/serde", "tari_template_lib_types/serde", "indexmap/serde"]
 ts = ["ts-rs", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib_types/ts", "tari_bor/ts"]

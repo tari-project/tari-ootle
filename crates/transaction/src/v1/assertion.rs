@@ -3,27 +3,17 @@
 
 use std::fmt::Display;
 
-use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib_types::{Amount, MaxVec, NonFungibleId, ResourceAddress};
 
 pub type NftAssertVec = MaxVec<32, NonFungibleId>;
 
-#[derive(
-    Debug,
-    Clone,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
+#[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Assertion {
     #[n(0)]
-    #[serde(rename = "BktAmt")]
+    #[cfg_attr(feature = "serde", serde(rename = "BktAmt"))]
     BucketAmount {
         #[n(0)]
         resource_address: ResourceAddress,
@@ -33,10 +23,10 @@ pub enum Assertion {
         amount: Amount,
     },
     #[n(1)]
-    #[serde(rename = "NtNil")]
+    #[cfg_attr(feature = "serde", serde(rename = "NtNil"))]
     IsNotNull,
     #[n(2)]
-    #[serde(rename = "BktCtnNft")]
+    #[cfg_attr(feature = "serde", serde(rename = "BktCtnNft"))]
     BucketContainsNonFungibles {
         #[n(0)]
         resource_address: ResourceAddress,
@@ -76,17 +66,8 @@ impl Display for Assertion {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
+#[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum CheckOrd {
     #[n(0)]
@@ -126,17 +107,8 @@ impl Display for CheckOrd {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
+#[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum NftCheck {
     #[n(0)]

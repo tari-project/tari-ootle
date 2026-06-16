@@ -3,7 +3,6 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
 use tari_bor::encode;
 use tari_template_lib_types::bytes::Bytes;
 
@@ -18,13 +17,12 @@ pub type WorkspaceId = u16;
     PartialEq,
     Eq,
     Hash,
-    Serialize,
-    Deserialize,
     borsh::BorshSerialize,
     minicbor::Encode,
     minicbor::Decode,
     minicbor::CborLen,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct WorkspaceOffsetId {
     #[n(0)]
@@ -82,17 +80,8 @@ impl fmt::Display for WorkspaceOffsetId {
 
 /// Represents an argument that can be passed to a transaction instruction. Either a literal value or a reference to a
 /// item on the runtime's workspace, or a reference to a transaction blob by index.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
+#[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum InstructionArg {
     /// The argument is in the transaction execution's workspace, which means it is the result of a previous
@@ -103,9 +92,12 @@ pub enum InstructionArg {
     #[n(1)]
     Literal(
         #[n(0)]
-        #[serde(
-            serialize_with = "ootle_serde::hex::serialize",
-            deserialize_with = "ootle_serde::hex::deserialize_from_vec"
+        #[cfg_attr(
+            feature = "serde",
+            serde(
+                serialize_with = "ootle_serde::hex::serialize",
+                deserialize_with = "ootle_serde::hex::deserialize_from_vec"
+            )
         )]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         Bytes,
@@ -128,7 +120,7 @@ impl InstructionArg {
         Self::Literal(bytes.into())
     }
 
-    pub fn from_type<T: Serialize + tari_bor::Encode<()>>(val: &T) -> Result<Self, tari_bor::BorError> {
+    pub fn from_type<T: tari_bor::Encode<()>>(val: &T) -> Result<Self, tari_bor::BorError> {
         Ok(Self::raw_literal_bytes(encode(val)?))
     }
 
@@ -326,6 +318,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn decode_encode_json() {
         let arg = InstructionArg::workspace(1, Some(2));

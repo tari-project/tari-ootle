@@ -3,7 +3,6 @@
 
 use std::ops::Deref;
 
-use serde::{Deserialize, Serialize};
 use tari_engine_types::hashing::{EngineHashDomainLabel, hasher32};
 use tari_template_lib_types::{Hash32, MaxBytes, bytes::Bytes};
 
@@ -34,20 +33,21 @@ pub struct BlobIndexOverflow {
     PartialEq,
     Eq,
     Hash,
-    Serialize,
-    Deserialize,
     borsh::BorshSerialize,
     minicbor::Encode,
     minicbor::Decode,
     minicbor::CborLen,
 )]
-#[serde(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
 pub struct Blob(
     #[n(0)]
-    #[serde(
-        serialize_with = "ootle_serde::base64::serialize",
-        deserialize_with = "ootle_serde::base64::deserialize"
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            serialize_with = "ootle_serde::base64::serialize",
+            deserialize_with = "ootle_serde::base64::deserialize"
+        )
     )]
     Bytes,
 );
@@ -120,18 +120,9 @@ pub fn hash_blob(blob: &Blob) -> Hash32 {
 /// Ordered collection of `Blob`s carried by a transaction. Index 0 corresponds to the first
 /// blob, etc. Instructions and arguments reference blobs by `BlobIndex` into this list.
 #[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
+    Debug, Clone, Default, PartialEq, Eq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Blobs(#[n(0)] Vec<Blob>);
 
@@ -192,19 +183,9 @@ impl Blobs {
 /// hashing real blobs or arrived via deserialization of bytes previously written by this
 /// crate's storage layer (and is bound by a signature, so tampering is detectable).
 #[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
+    Debug, Clone, Default, PartialEq, Eq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
 )]
-#[serde(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BlobHashes(#[n(0)] Vec<Hash32>);
 
@@ -305,6 +286,7 @@ mod tests {
         assert_eq!(buf.len(), 4 + 32);
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn blob_serde_json_roundtrip() {
         let blob = Blob::from(vec![1, 2, 3, 4]);
@@ -313,6 +295,7 @@ mod tests {
         assert_eq!(blob, decoded);
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn blobs_serde_json_roundtrip() {
         let blobs = Blobs::from_vec(vec![Blob::from(vec![1]), Blob::from(vec![2, 3])]);

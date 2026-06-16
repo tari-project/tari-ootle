@@ -54,7 +54,7 @@ impl Bucket {
     /// `Err(duration)` with the time until the next token is available.
     fn try_consume(&mut self, capacity: f64, refill_rate: f64) -> Result<(), Duration> {
         let now = Instant::now();
-        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        let elapsed = now.saturating_duration_since(self.last_refill).as_secs_f64();
         self.last_refill = now;
         self.last_accessed = now;
 
@@ -145,7 +145,7 @@ impl IpRateLimiter {
             return;
         }
         let now = Instant::now();
-        let now_secs = now.duration_since(self.start).as_secs();
+        let now_secs = now.saturating_duration_since(self.start).as_secs();
         let last = self.last_eviction_secs.load(Ordering::Relaxed);
         if now_secs.saturating_sub(last) < EVICTION_INTERVAL.as_secs() {
             return;
@@ -158,7 +158,7 @@ impl IpRateLimiter {
             return;
         }
         self.buckets
-            .retain(|_ip, bucket| now.duration_since(bucket.last_accessed) < self.stale_ttl);
+            .retain(|_ip, bucket| now.saturating_duration_since(bucket.last_accessed) < self.stale_ttl);
     }
 }
 

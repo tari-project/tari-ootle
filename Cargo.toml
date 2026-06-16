@@ -144,30 +144,27 @@ ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.8" }
 ootle_serde = { path = "crates/ootle_serde", version = "0.3" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = "5.4.0-pre.3"
-minotari_app_utilities = "5.4.0-pre.3"
-minotari_node_grpc_client = "5.4.0-pre.3"
-minotari_wallet_grpc_client = "5.4.0-pre.3"
-tari_common = "5.4.0-pre.3"
-tari_common_sqlite = "5.4.0-pre.3"
-tari_common_types = "5.4.0-pre.3"
-tari_jellyfish = "5.4.0-pre.3"
-tari_metrics = "5.4.0-pre.3"
-tari_mmr = "5.4.0-pre.3"
-tari_node_components = "5.4.0-pre.3"
-tari_shutdown = "5.4.0-pre.3"
-tari_sidechain = "5.4.0-pre.3"
-tari_transaction_components = "5.4.0-pre.3"
-tari_comms = "5.4.0-pre.3"
-tari_comms_dht = "5.4.0-pre.3"
-tari_p2p = "5.4.0-pre.3"
+minotari_app_grpc = "5.4.0-pre.5"
+minotari_app_utilities = "5.4.0-pre.5"
+minotari_node_grpc_client = "5.4.0-pre.5"
+minotari_wallet_grpc_client = "5.4.0-pre.5"
+tari_common = "5.4.0-pre.5"
+tari_common_sqlite = "5.4.0-pre.5"
+tari_common_types = "5.4.0-pre.5"
+tari_jellyfish = "5.4.0-pre.5"
+tari_metrics = "5.4.0-pre.5"
+tari_mmr = "5.4.0-pre.5"
+tari_node_components = "5.4.0-pre.5"
+tari_shutdown = "5.4.0-pre.5"
+tari_sidechain = "5.4.0-pre.5"
+tari_transaction_components = "5.4.0-pre.5"
 
 tari_crypto = "0.23"
 tari_utilities = "0.10"
-tari_hashing = "5.4.0-pre.3"
+tari_hashing = "5.4.0-pre.5"
 
 ## Ledger
-minotari_ledger_wallet_common = "5.4.0-pre.3"
+minotari_ledger_wallet_common = "5.4.0-pre.5"
 ootle_ledger_common = { path = "crates/wallet/ledger/common", version = "0.1.0" }
 
 # networking crates

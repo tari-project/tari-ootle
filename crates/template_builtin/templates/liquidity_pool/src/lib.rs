@@ -138,31 +138,22 @@ mod template {
                 reserve_a.is_positive(),
                 reserve_b.is_positive(),
             ) {
-                // Reserve pools are empty, mint initial lp tokens
-                (false, false, false) => {
-                    // initial liquidity provision, mint lp tokens equal to the geometric mean  `sqrt(c_1 * c_2)` of the
-                    // contributions
-
-                    (
-                        // TODO: possible lost of precision even with 192 bit integer
-                        a_amount
-                            .checked_mul(b_amount)
-                            .and_then(|c1_c2| c1_c2.checked_sqrt())
-                            .expect(OVERFLOW_MSG),
-                        a_amount,
-                        b_amount,
-                    )
-                },
+                // No LP tokens exist yet: this is the initial liquidity provision. Reserves may already be non-zero
+                // if the owner pre-seeded a vault via `protected_add_liquidity` (e.g. to bootstrap a pool in stages),
+                // in which case we mint on top of them. With no LP outstanding there is no existing price to
+                // preserve, so the first provider sets it: take the full contribution and mint LP equal to the
+                // geometric mean of the resulting total reserves, `sqrt((reserve_a + a) * (reserve_b + b))`. This
+                // reduces to `sqrt(a * b)` for a fresh, empty pool.
                 (false, _, _) => {
-                    // No LP tokens exist but reserves are non-zero. The only way to reach this is the owner seeding a
-                    // vault via `protected_add_liquidity` without minting LP; the normal flow keeps reserves and LP
-                    // supply in lockstep. Minting here would credit the contributor for reserves they did not provide,
-                    // so reject it. The owner can drain the orphaned reserves via `protected_remove_liquidity` to
-                    // return the pool to an empty state, after which contributions can bootstrap it normally.
-                    panic!(
-                        "Pool has reserves but no LP supply; owner must drain via protected_remove_liquidity before \
-                         contributions can resume"
-                    );
+                    let total_a = reserve_a.checked_add(a_amount).expect(OVERFLOW_MSG);
+                    let total_b = reserve_b.checked_add(b_amount).expect(OVERFLOW_MSG);
+                    // TODO: possible loss of precision even with 192 bit integer
+                    let mint = total_a
+                        .checked_mul(total_b)
+                        .and_then(|product| product.checked_sqrt())
+                        .expect(OVERFLOW_MSG);
+
+                    (mint, a_amount, b_amount)
                 },
                 (true, true, true) => {
                     // Normal case: existing LP supply and non-zero reserves

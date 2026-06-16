@@ -229,6 +229,90 @@ fn second_contribution_and_partial_redeem() {
 }
 
 #[test]
+fn bootstrap_contribution_after_seeding_reserve() {
+    // Regression test for the `(false, _, _)` branch: the owner seeds one reserve via the owner-only
+    // `protected_add_liquidity` (which mints no LP), then bootstraps the pool with a full `contribute`. With no LP
+    // outstanding the first contribution must succeed and set the price over the combined reserves, not be rejected.
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_address = test.get_template_address(TEMPLATE_NAME);
+
+    let (faucet_component, faucet_resource) = create_test_faucet_component(&mut test, 1_000_000_000_000u64);
+    let (user1, user1_proof, user1_secret) = test.create_funded_account();
+
+    // ACT 1: create the pool owned by user1 (so user1 can call the owner-gated protected_* methods). With
+    // `OwnerRule::OwnedBySigner` the owner is the seal signer, i.e. user1.
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .allocate_component_address("pool")
+            .call_function(template_address, "create", args![
+                OwnerRule::OwnedBySigner,
+                AccessRule::AllowAll,
+                TARI_TOKEN,
+                faucet_resource,
+                metadata!["name" => "TARI-Stablecoin Liquidity Pool"],
+                Workspace("pool"),
+            ])
+            .build_and_seal(&user1_secret),
+        vec![user1_proof.clone()],
+    );
+
+    let store = test.read_only_state_store();
+    let (pool_addr, _) = store
+        .get_components_by_template_address(template_address)
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    // ACT 2: owner seeds 1000 TARI into reserve A via protected_add_liquidity (no LP minted).
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 1000])
+            .put_last_instruction_output_on_workspace("seed_a")
+            .call_method(pool_addr, "protected_add_liquidity", args![Workspace("seed_a")])
+            .build_and_seal(&user1_secret),
+        vec![user1_proof.clone()],
+    );
+
+    // ACT 3: bootstrap with a full contribution of 500 TARI + 2000 stablecoin. Total reserves become
+    // (1000 + 500, 0 + 2000) = (1500, 2000) and LP minted = floor(sqrt(1500 * 2000)) = 1732.
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet_component, "take_free_coins_custom", args![2000])
+            .put_last_instruction_output_on_workspace("faucet_coins")
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 500])
+            .put_last_instruction_output_on_workspace("xtr_coins")
+            .call_method(pool_addr, "contribute", args![
+                Workspace("xtr_coins"),
+                Workspace("faucet_coins")
+            ])
+            .put_last_instruction_output_on_workspace("contribution")
+            .call_method(user1, "deposit", args![Workspace("contribution.0")])
+            .call_method(user1, "deposit", args![Workspace("contribution.1")])
+            .call_method(user1, "deposit", args![Workspace("contribution.2")])
+            .build_and_seal(&user1_secret),
+        vec![user1_proof.clone()],
+    );
+
+    let store = test.read_only_state_store();
+    let pool_body = store.get_component(pool_addr).unwrap();
+    let indexed = pool_body.body.to_indexed_well_known_types().unwrap();
+    let vaults = indexed
+        .vault_ids()
+        .iter()
+        .map(|id| store.get_vault(id).unwrap())
+        .map(|v| (*v.resource_address(), v))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(vaults.get(&TARI_TOKEN).unwrap().balance(), 1500);
+    assert_eq!(vaults.get(&faucet_resource).unwrap().balance(), 2000);
+
+    let lp_resx = indexed.resource_addresses().first().copied().unwrap();
+    let user_account = store.get_account(user1).unwrap();
+    let lp_vault = user_account.get_vault_by_resource(&lp_resx).unwrap();
+    let lp_balance = store.get_vault(&lp_vault.vault_id()).unwrap().balance();
+    assert_eq!(lp_balance, 1732);
+}
+
+#[test]
 fn basic_constant_product_swap() {
     // Setup
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);

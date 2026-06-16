@@ -4,7 +4,6 @@
 use std::collections::HashSet;
 
 use indexmap::IndexSet;
-use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedValueError},
     substate::SubstateId,
@@ -14,9 +13,8 @@ use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPu
 
 use crate::{Blobs, ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsignedTransactionV1 {
     #[n(0)]
@@ -44,7 +42,7 @@ pub struct UnsignedTransactionV1 {
     /// raw blob bytes are excluded so that storage layers can drop them without affecting
     /// signature verifiability or transaction id.
     #[n(8)]
-    #[serde(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
     #[cbor(default)]
     pub blobs: Blobs,
 }

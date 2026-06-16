@@ -12,7 +12,6 @@
 
 use indexmap::IndexSet;
 use log::*;
-use serde::{Deserialize, Serialize};
 use tari_engine_types::hashing::{EngineHashDomainLabel, hasher32};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -36,9 +35,8 @@ const LOG_TARGET: &str = "tari::ootle::transaction::pruned";
 ///
 /// All non-blob fields are preserved verbatim so the field projection used in the signing /
 /// id digest is byte-identical to the full form.
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrunedUnsignedTransactionV1 {
     #[n(0)]
@@ -66,7 +64,7 @@ pub struct PrunedUnsignedTransactionV1 {
     /// blob sizes without downloading payloads. May be empty when deserialised from older
     /// archives that didn't record sizes.
     #[n(9)]
-    #[serde(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
     #[cbor(default)]
     #[borsh(skip)]
     pub blob_sizes: Vec<u32>,
@@ -114,9 +112,8 @@ impl From<UnsignedTransactionV1> for PrunedUnsignedTransactionV1 {
 }
 
 /// Mirror of `UnsealedTransactionV1` for the pruned form.
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrunedUnsealedTransactionV1 {
     #[n(0)]
@@ -186,9 +183,8 @@ impl From<UnsealedTransactionV1> for PrunedUnsealedTransactionV1 {
 /// Constructed only via `From<TransactionV1>` (which derives blob commitments from the full
 /// blobs and drops the payloads) or via deserialization of bytes previously written by the
 /// storage layer.
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrunedTransactionV1 {
     #[n(0)]

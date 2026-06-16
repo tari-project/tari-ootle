@@ -3,7 +3,6 @@
 
 use std::fmt::{Display, Formatter};
 
-use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     limits,
@@ -32,17 +31,8 @@ use crate::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
 
-#[derive(
-    Debug,
-    Clone,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
+#[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Instruction {
     #[n(0)]
@@ -127,7 +117,7 @@ pub enum Instruction {
         binary: BlobIndex,
         /// Optional multihash of off-chain CBOR metadata
         #[n(1)]
-        #[serde(default)]
+        #[cfg_attr(feature = "serde", serde(default))]
         #[cbor(default)]
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
         metadata_hash: Option<MetadataHash>,
@@ -507,17 +497,8 @@ fn collect_arg_blob_ids(args: &[InstructionArg], out: &mut Vec<BlobIndex>) {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
+#[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct MigrateFunction {
     #[n(0)]
@@ -548,6 +529,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn decode_encode_json() {
         let instruction = make_sample();

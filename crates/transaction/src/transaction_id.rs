@@ -7,7 +7,6 @@ use std::{
 };
 
 use borsh::BorshSerialize;
-use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{SubstateAddress, ToSubstateAddress};
 use tari_template_lib_types::{
     Hash32,
@@ -25,20 +24,18 @@ use tari_template_lib_types::{
     PartialOrd,
     Ord,
     Hash,
-    Deserialize,
-    Serialize,
     Default,
     BorshSerialize,
     minicbor::Encode,
     minicbor::Decode,
     minicbor::CborLen,
 )]
-#[serde(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionId(
     #[n(0)]
     #[cbor(with = "minicbor::bytes")]
-    #[serde(with = "ootle_serde::hex")]
+    #[cfg_attr(feature = "serde", serde(with = "ootle_serde::hex"))]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     [u8; 32],
 );

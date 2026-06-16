@@ -4,7 +4,6 @@
 use std::collections::HashSet;
 
 use indexmap::IndexSet;
-use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
@@ -22,9 +21,8 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsealedTransactionV1 {
     #[n(0)]

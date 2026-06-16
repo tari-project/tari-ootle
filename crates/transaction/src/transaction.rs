@@ -5,7 +5,6 @@ use std::{collections::HashSet, fmt::Display};
 
 use indexmap::IndexSet;
 use ootle_network::Network;
-use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::MinotariBurnClaimProof,
     indexed_value::IndexedValueError,
@@ -36,9 +35,8 @@ use crate::{
     weight::TransactionWeight,
 };
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Transaction {
     #[n(0)]
@@ -334,9 +332,8 @@ impl Display for Transaction {
 ///
 /// Constructed only via `From<Transaction>` (which derives commitments from the full blobs and
 /// drops the payloads) or via deserialization of bytes previously written by the storage layer.
-#[derive(
-    Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
-)]
+#[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum PrunedTransaction {
     #[n(0)]

@@ -3,22 +3,12 @@
 
 use std::fmt::{Display, Formatter};
 
-use tari_bor::{Deserialize, Serialize};
 use tari_template_lib_types::ResourceAddress;
 
 use crate::args::{WorkspaceId, WorkspaceOffsetId};
 
-#[derive(
-    Debug,
-    Clone,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
+#[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceAddressRef {
     #[n(0)]

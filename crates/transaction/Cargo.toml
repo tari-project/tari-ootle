@@ -34,4 +34,4 @@ serde_json = { workspace = true }
 
 [features]
 serde = ["dep:serde", "dep:ootle_serde", "tari_bor/serde", "tari_template_lib_types/serde", "indexmap/serde"]
-ts = ["ts-rs", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib_types/ts", "tari_bor/ts"]
+ts = ["ts-rs", "serde", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib_types/ts", "tari_bor/ts"]

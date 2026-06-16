@@ -12464,7 +12464,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_builtin"
-version = "0.32.0"
+version = "0.32.1"
 dependencies = [
  "anyhow",
  "minicbor",

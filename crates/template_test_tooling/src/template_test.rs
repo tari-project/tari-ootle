@@ -22,7 +22,7 @@ use tari_crypto::{
 use tari_engine::{
     executables::Executable,
     fees::{FeeModule, FeeTable},
-    runtime::{AuthParams, RuntimeModule},
+    runtime::{AuthParams, RuntimeModule, SpendScriptGuardModule},
     state_store::{
         StateWriter,
         memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
@@ -681,9 +681,10 @@ impl TemplateTest {
         transaction: Transaction,
         mut proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
-        let mut modules: Vec<Box<dyn RuntimeModule<ReadOnlyMemoryStateStore>>> = Vec::with_capacity(2);
+        let mut modules: Vec<Box<dyn RuntimeModule<ReadOnlyMemoryStateStore>>> = Vec::with_capacity(3);
 
         modules.push(Box::new(self.track_calls.clone()));
+        modules.push(Box::new(SpendScriptGuardModule));
 
         if self.enable_fees {
             modules.push(Box::new(FeeModule::new(0, self.fee_table.clone(), false)));

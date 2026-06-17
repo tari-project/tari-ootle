@@ -180,6 +180,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
         address: K,
         value: V,
     ) -> Result<(), RuntimeError> {
+        if self.is_read_only_context() {
+            return Err(RuntimeError::WriteInReadOnlyContext);
+        }
         let address = address.into();
         let value = value.into();
         self.enforce_substate_size_limit(&value)?;
@@ -198,6 +201,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn write_lock_substate(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
+        if self.is_read_only_context() {
+            return Err(RuntimeError::WriteInReadOnlyContext);
+        }
         self.lock_substate(addr, LockFlag::Write)
     }
 
@@ -345,7 +351,45 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
                 Ok(())
             },
+            SpendCondition::Script(_) => {
+                // Spend scripts cannot be evaluated here: a WASM predicate must run via the
+                // `RuntimeInterfaceImpl` layer which holds the template provider and the re-entrant runtime
+                // pointer. They are therefore evaluated in `RuntimeInterfaceImpl::evaluate_input_spend_scripts`
+                // BEFORE the spend is executed, so by the time we reach this point the predicate has already
+                // authorised (or rejected, aborting the transfer) the spend.
+                Ok(())
+            },
         }
+    }
+
+    /// Reads the spend condition of an unspent stealth UTXO without spending it, taking and releasing a read lock.
+    /// Used to drive spend-script evaluation at the `RuntimeInterfaceImpl` layer before the spend is executed.
+    pub fn get_stealth_utxo_spend_condition(
+        &mut self,
+        resource_address: ResourceAddress,
+        input: &StealthInput,
+    ) -> Result<SpendCondition, RuntimeError> {
+        let address = UtxoAddress::new(resource_address, input.commitment.into());
+        let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Read)?;
+        let result = (|| {
+            let (_, value) = self.store.get_locked_substate(lock_id)?;
+            let utxo = value.as_utxo().ok_or_else(|| RuntimeError::InvariantError {
+                function: "get_stealth_utxo_spend_condition",
+                details: format!("Substate at {} is not a UTXO", address),
+            })?;
+            if utxo.is_frozen() {
+                return Err(ResourceError::InvalidSpend {
+                    details: format!("Utxo {} is frozen", address),
+                }
+                .into());
+            }
+            let output = utxo.output().ok_or_else(|| ResourceError::InvalidSpend {
+                details: format!("Utxo {} is burnt", address),
+            })?;
+            Ok(output.spend_condition.clone())
+        })();
+        self.store.try_unlock(lock_id)?;
+        result
     }
 
     pub fn get_non_fungible(&self, locked: &LockedSubstate) -> Result<&NonFungibleContainer, RuntimeError> {
@@ -1085,6 +1129,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn current_call_frame(&self) -> Result<&CallFrame, RuntimeError> {
         self.call_frames.last().ok_or(RuntimeError::NoActiveCallFrame)
+    }
+
+    /// Whether the current call frame is a read-only sandbox (a spend-script predicate frame). When
+    /// true, `write_lock_substate` and `new_substate` reject with `RuntimeError::WriteInReadOnlyContext`.
+    pub fn is_read_only_context(&self) -> bool {
+        self.call_frames.last().map(|f| f.is_read_only()).unwrap_or(false)
+    }
+
+    /// Marks the current (most recently pushed) call frame as a read-only spend-script sandbox. Must be
+    /// called immediately after the predicate frame is pushed and before the predicate executes.
+    pub fn make_current_frame_read_only(&mut self) -> Result<(), RuntimeError> {
+        self.call_frames
+            .last_mut()
+            .ok_or(RuntimeError::NoActiveCallFrame)?
+            .restrict_to_read_only();
+        Ok(())
     }
 
     pub fn current_call_scope(&self) -> Result<&CallScope, RuntimeError> {

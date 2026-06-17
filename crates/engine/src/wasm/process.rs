@@ -39,6 +39,7 @@ use tari_template_lib::{
         NonFungibleInvokeArg,
         ProofInvokeArg,
         ResourceInvokeArg,
+        SpendContextInvokeArg,
         VaultInvokeArg,
     },
     types::{LogLevel, engine_args::SignatureInvokeArg},
@@ -237,6 +238,11 @@ impl WasmProcess {
             EngineOp::SignatureInvoke => {
                 Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: SignatureInvokeArg| {
                     state.interface_mut().signature_invoke(arg.action, arg.args.into())
+                })
+            },
+            EngineOp::SpendContextInvoke => {
+                Self::handle(store, env_mut, arg_ptr, arg_len, |state, arg: SpendContextInvokeArg| {
+                    state.interface_mut().spend_context_invoke(arg.action)
                 })
             },
         };

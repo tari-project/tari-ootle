@@ -2,11 +2,15 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use minicbor::{CborLen, Decode, Encode};
+use tari_template_abi::rust::prelude::*;
 
 use super::ViewableBalanceProof;
 use crate::{
     EncryptedData,
+    FunctionName,
+    TemplateAddress,
     access_rules::AccessRule,
+    bytes::Bytes,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
 };
 
@@ -69,6 +73,10 @@ pub enum SpendCondition {
     Signed(#[n(0)] RistrettoPublicKeyBytes),
     #[n(1)]
     AccessRule(#[n(0)] AccessRule),
+    /// Spend is gated on a stateless WASM predicate over the spending transfer. The referenced template function
+    /// introspects the spending `StealthTransferStatement` and rejects the spend by panicking.
+    #[n(2)]
+    Script(#[n(0)] SpendScript),
 }
 
 impl SpendCondition {
@@ -79,10 +87,50 @@ impl SpendCondition {
         }
     }
 
+    pub const fn as_script(&self) -> Option<&SpendScript> {
+        match self {
+            Self::Script(script) => Some(script),
+            _ => None,
+        }
+    }
+
     pub const fn as_type_str(&self) -> &'static str {
         match self {
             Self::Signed(_) => "SignedBy",
             Self::AccessRule(_) => "AccessRule",
+            Self::Script(_) => "Script",
+        }
+    }
+}
+
+/// A stateless WASM predicate that gates the spend of a stealth UTXO.
+///
+/// The condition fully commits to `{template, function, args}`, so a spender cannot substitute a different predicate.
+/// Templates are immutable substates, so the referenced code cannot change once the output is committed.
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+pub struct SpendScript {
+    /// The template providing the predicate.
+    #[n(0)]
+    pub template: TemplateAddress,
+    /// The stateless (`is_mut == false`) predicate function on that template.
+    #[n(1)]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub function: FunctionName,
+    /// Bound parameters, positional — one CBOR-encoded value per leading (non-`SpendContext`) parameter, matching the
+    /// engine's `Vec<Bytes>` call ABI. Baked into the output at creation; the spender cannot alter them.
+    #[n(2)]
+    pub args: Vec<Bytes>,
+}
+
+impl SpendScript {
+    pub fn new(template: TemplateAddress, function: FunctionName, args: Vec<Bytes>) -> Self {
+        Self {
+            template,
+            function,
+            args,
         }
     }
 }

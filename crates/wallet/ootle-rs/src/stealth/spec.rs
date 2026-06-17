@@ -6,7 +6,7 @@ use std::{num::NonZeroU64, ops::Not};
 use indexmap::IndexSet;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
-use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag};
+use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag, stealth::SpendScript};
 
 use crate::Address;
 
@@ -150,6 +150,12 @@ impl Output {
     pub fn with_pay_to(mut self, pay_to: PayTo) -> Self {
         self.pay_to = pay_to;
         self
+    }
+
+    /// Gate this output's spend on a stateless WASM predicate (a `SpendCondition::Script`). The value is still
+    /// encrypted to `destination` so the recipient can discover and decrypt it; spending requires satisfying `script`.
+    pub fn with_spend_script(self, script: SpendScript) -> Self {
+        self.with_pay_to(PayTo::Script(script))
     }
 
     pub fn with_utxo_tag(mut self, utxo_tag: UtxoTag) -> Self {

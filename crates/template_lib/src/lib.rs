@@ -171,6 +171,9 @@ pub mod component;
 mod consensus;
 pub use consensus::Consensus;
 
+mod spend_context;
+pub use spend_context::SpendContext;
+
 pub mod caller_context;
 
 pub mod rand;

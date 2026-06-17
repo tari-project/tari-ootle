@@ -42,6 +42,7 @@ pub enum EngineOp {
     BuiltinTemplateInvoke = 0x0E,
     AddressAllocationInvoke = 0x0F,
     SignatureInvoke = 0x10,
+    SpendContextInvoke = 0x11,
 }
 
 impl EngineOp {
@@ -64,6 +65,7 @@ impl EngineOp {
             0x0E => Some(EngineOp::BuiltinTemplateInvoke),
             0x0F => Some(EngineOp::AddressAllocationInvoke),
             0x10 => Some(EngineOp::SignatureInvoke),
+            0x11 => Some(EngineOp::SpendContextInvoke),
             _ => None,
         }
     }

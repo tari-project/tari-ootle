@@ -70,7 +70,16 @@ pub use tari_template_lib_types::{
     custom_signature_domain,
     metadata,
     rule,
-    stealth::{StealthInputsStatement, StealthOutputsStatement, StealthTransferStatement},
+    stealth::{
+        CurrentInputView,
+        SpendCondition,
+        SpendScript,
+        StealthInputView,
+        StealthInputsStatement,
+        StealthOutputView,
+        StealthOutputsStatement,
+        StealthTransferStatement,
+    },
 };
 #[cfg(all(feature = "macro", target_arch = "wasm32"))]
 pub use tari_template_macros::template;
@@ -103,6 +112,7 @@ pub use crate::{
     },
     rand,
     resource::{ResourceBuilder, ResourceManager},
+    spend_context::SpendContext,
     template::{BuiltinTemplate, TemplateManager},
     types,
     types::{Amount, amount, crypto},

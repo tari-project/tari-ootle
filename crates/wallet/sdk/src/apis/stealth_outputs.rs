@@ -258,6 +258,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         match spend_condition {
             SpendCondition::Signed(_) => true,
             SpendCondition::AccessRule(rule) => self.is_spendable_access_rule(rule),
+            // Script-conditioned UTXOs cannot be auto-selected as inputs: satisfying an arbitrary spend predicate
+            // requires script-specific bound arguments and witnesses the wallet cannot infer generically. Spending
+            // them must be driven explicitly by the caller.
+            SpendCondition::Script(_) => false,
         }
     }
 
@@ -686,6 +690,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 SpendCondition::Signed(output_owner_public_key.to_byte_type())
             },
             PayTo::AccessRule(access_rule) => SpendCondition::AccessRule(access_rule),
+            PayTo::Script(script) => SpendCondition::Script(script),
         };
 
         let witness = OutputWitness {

@@ -148,6 +148,7 @@ pub fn create_stealth_output_witness(params: CreateStealthOutputWitnessParams<'_
             SpendCondition::Signed(owner_public_key.to_byte_type())
         },
         PayTo::AccessRule(access_rule) => SpendCondition::AccessRule(access_rule),
+        PayTo::Script(script) => SpendCondition::Script(script),
     };
 
     let tag = crypto.derive_stealth_output_tag(network, &nonce_secret, &view_key, &resource_address);

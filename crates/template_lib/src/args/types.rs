@@ -936,3 +936,39 @@ pub struct BurnStealthUtxoArg {
     #[n(1)]
     pub value_proof: Option<StealthValueProof>,
 }
+
+// -------------------------------- SpendContext -------------------------------- //
+
+/// The read-only introspection actions a spend script may perform over the spending transfer. The scope is the current
+/// `StealthTransferStatement` only. Confidential values are never exposed — only commitments and
+/// `minimum_value_promise`.
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum SpendContextAction {
+    /// The stealth inputs being spent (commitments).
+    #[n(0)]
+    Inputs,
+    /// The stealth outputs being created (commitment, minimum value promise, spend condition, tag).
+    #[n(1)]
+    Outputs,
+    /// The index + commitment of the input whose condition is executing.
+    #[n(2)]
+    CurrentInput,
+    /// The `SpendCondition::Script(..)` that invoked this predicate (enables recursive covenants).
+    #[n(3)]
+    InvokingCondition,
+    /// The total revealed amount being spent by the transfer.
+    #[n(4)]
+    RevealedInputAmount,
+    /// The total revealed amount being output by the transfer.
+    #[n(5)]
+    RevealedOutputAmount,
+}
+
+/// A spend-context introspection operation argument.
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SpendContextInvokeArg {
+    #[n(0)]
+    pub action: SpendContextAction,
+}

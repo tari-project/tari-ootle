@@ -38,6 +38,9 @@ pub use actions::*;
 mod module;
 pub use module::{RuntimeEvent, RuntimeModule, RuntimeModuleError};
 
+mod spend_script_guard;
+pub use spend_script_guard::SpendScriptGuardModule;
+
 mod fee_state;
 mod tracker;
 
@@ -90,6 +93,7 @@ use tari_template_lib::{
         ProofRef,
         ResourceAction,
         ResourceRef,
+        SpendContextAction,
         VaultAction,
         WorkspaceAction,
     },
@@ -220,6 +224,10 @@ pub trait RuntimeInterface {
     fn put_on_workspace(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
 
     fn signature_invoke(&mut self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
+
+    /// Read-only introspection over the spending `StealthTransferStatement`, available only while a spend-script
+    /// predicate is executing. Backs the `SpendContext` template-lib API.
+    fn spend_context_invoke(&mut self, action: SpendContextAction) -> Result<InvokeResult, RuntimeError>;
 
     fn allocate_address(
         &mut self,

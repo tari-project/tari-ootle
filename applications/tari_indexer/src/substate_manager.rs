@@ -400,7 +400,7 @@ pub enum SubstateManagerError {
     IndexerError(#[from] IndexerError),
     #[error("Storage error: {0}")]
     StorageError(#[from] StorageError),
-    #[error("Input substate {substate_id}v{version} is down")]
+    #[error("Input substate {substate_id} (v{version}) is down")]
     InputSubstateIsDown { substate_id: SubstateId, version: u32 },
     #[error("Input substate {substate_id} does not exist")]
     InputSubstateDoesNotExist { substate_id: SubstateId },

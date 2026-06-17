@@ -102,7 +102,12 @@ mod template {
             .create()
         }
 
-        pub fn contribute(&mut self, mut bucket_a: Bucket, mut bucket_b: Bucket) -> Bucket {
+        /// Contributes liquidity to the pool, minting LP tokens in return.
+        ///
+        /// To preserve the reserve ratio the pool only takes the matching portion of one of the input buckets, so the
+        /// remainder of the other is returned to the caller as change. Returns `(lp_tokens, change_a, change_b)` where
+        /// `change_a`/`change_b` correspond to `bucket_a`/`bucket_b` and may be empty.
+        pub fn contribute(&mut self, mut bucket_a: Bucket, mut bucket_b: Bucket) -> (Bucket, Bucket, Bucket) {
             // Potentially saves binary space
             const OVERFLOW_MSG: &str = "Overflow when calculating LP token mint amount";
 
@@ -133,36 +138,19 @@ mod template {
                 reserve_a.is_positive(),
                 reserve_b.is_positive(),
             ) {
-                // Reserve pools are empty, mint initial lp tokens
-                (false, false, false) => {
-                    // initial liquidity provision, mint lp tokens equal to the geometric mean  `sqrt(c_1 * c_2)` of the
-                    // contributions
-
-                    (
-                        // TODO: possible lost of precision even with 192 bit integer
-                        a_amount
-                            .checked_mul(b_amount)
-                            .and_then(|c1_c2| c1_c2.checked_sqrt())
-                            .expect(OVERFLOW_MSG),
-                        a_amount,
-                        b_amount,
-                    )
-                },
+                // No LP tokens exist yet: this is the initial liquidity provision. Reserves may already be non-zero
+                // if the owner pre-seeded a vault via `protected_add_liquidity` (e.g. to bootstrap a pool in stages),
+                // in which case we mint on top of them. With no LP outstanding there is no existing price to
+                // preserve, so the first provider sets it: take the full contribution and mint LP equal to the
+                // geometric mean of the resulting total reserves, `sqrt((reserve_a + a) * (reserve_b + b))`. This
+                // reduces to `sqrt(a * b)` for a fresh, empty pool.
                 (false, _, _) => {
-                    // No LP tokens currently exist but reserves are non-zero
-                    // Calculate the geometric mean of the ratios of the contributions to the reserves
-                    // i.e. sqrt(c_1 + r_1) * sqrt(c_2 + r_2)
-
-                    // TODO: lost of precision
-                    let mint = a_amount
-                        .checked_add(reserve_a)
-                        .and_then(|c1_r1| c1_r1.checked_sqrt())
-                        .and_then(|sqrt_c1_r1| {
-                            b_amount
-                                .checked_add(reserve_b)
-                                .and_then(|c2_r2| c2_r2.checked_sqrt())
-                                .and_then(|sqrt_c2_r2| sqrt_c1_r1.checked_mul(sqrt_c2_r2))
-                        })
+                    let total_a = reserve_a.checked_add(a_amount).expect(OVERFLOW_MSG);
+                    let total_b = reserve_b.checked_add(b_amount).expect(OVERFLOW_MSG);
+                    // TODO: possible loss of precision even with 192 bit integer
+                    let mint = total_a
+                        .checked_mul(total_b)
+                        .and_then(|product| product.checked_sqrt())
                         .expect(OVERFLOW_MSG);
 
                     (mint, a_amount, b_amount)
@@ -172,15 +160,18 @@ mod template {
                     // calculate the amount each contribution can be contributed to keep the ratio of the reserves the
                     // same
 
+                    // Multiply before dividing: `PrecisionAmount` is a 192-bit *integer*, so dividing first
+                    // truncates the ratio to zero whenever a contribution is smaller than its reserve. The wide
+                    // intermediate holds the product without overflow.
                     let required_contribution_a = a_amount
-                        .checked_div(reserve_a)
-                        .and_then(|r| r.checked_mul(reserve_b))
+                        .checked_mul(reserve_b)
+                        .and_then(|num| num.checked_div(reserve_a))
                         .map(|b_required| (a_amount, b_required))
                         .expect(OVERFLOW_MSG);
 
                     let required_contribution_b = b_amount
-                        .checked_div(reserve_b)
-                        .and_then(|r| r.checked_mul(reserve_a))
+                        .checked_mul(reserve_a)
+                        .and_then(|num| num.checked_div(reserve_b))
                         .map(|a_required| (a_required, b_amount))
                         .expect(OVERFLOW_MSG);
 
@@ -190,8 +181,8 @@ mod template {
                         .filter(|(c_a, c_b)| *c_a <= a_amount && *c_b <= b_amount)
                         .map(|(c_a, c_b)| {
                             let mint = c_a
-                                .checked_div(reserve_a)
-                                .and_then(|r| r.checked_mul(lp_supply))
+                                .checked_mul(lp_supply)
+                                .and_then(|num| num.checked_div(reserve_a))
                                 .expect(OVERFLOW_MSG);
                             (mint, c_a, c_b)
                         })
@@ -209,6 +200,13 @@ mod template {
             let lp_mint_amount = Amount::try_from(lp_mint_amount).expect("LP mint amount conversion failed");
             let a_contribution = Amount::try_from(a_contribution).expect("A contribution conversion failed");
             let b_contribution = Amount::try_from(b_contribution).expect("B contribution conversion failed");
+
+            // Reject dust contributions that round down to a zero contribution or zero mint, rather than failing
+            // later with an opaque `Bucket::take` assertion.
+            assert!(
+                a_contribution.is_positive() && b_contribution.is_positive() && lp_mint_amount.is_positive(),
+                "Contribution too small relative to pool reserves to mint any LP tokens"
+            );
 
             // mint and return the new lp tokens
             let mint_lp_tokens = self.lp_resource.mint_fungible(lp_mint_amount);
@@ -228,7 +226,9 @@ mod template {
                 "contributed_b" => b_contribution.to_string(),
             ]);
 
-            mint_lp_tokens
+            // Return the LP tokens plus the unused remainder of each input bucket as change. `bucket_a`/`bucket_b`
+            // now hold only what was not contributed; one is usually empty, which is harmless to return.
+            (mint_lp_tokens, bucket_a, bucket_b)
         }
 
         pub fn redeem(&mut self, lp_bucket: Bucket) -> (Bucket, Bucket) {
@@ -246,6 +246,13 @@ mod template {
             let lp_total_supply = self.lp_total_supply();
 
             let (a_amount, b_amount) = self.calculate_redemption_amounts(lp_total_supply, redeem_amount);
+
+            // A redemption so small it rounds down to zero of either reserve would otherwise abort with an opaque
+            // withdraw error (or, worse, return nothing). Reject it up front before burning the LP tokens.
+            assert!(
+                a_amount.is_positive() && b_amount.is_positive(),
+                "Redemption amount too small to withdraw any tokens from the pool"
+            );
 
             // withdraw the redeemed amounts from the pool
             let a_bucket = self.vault_a.withdraw(a_amount);
@@ -314,12 +321,22 @@ mod template {
 
             // Simple constant product formula without fees
             // Δy = y.Δx / (X + Δx)
-            let output_amount = input_amount
-                .checked_mul(output_reserve)
+            // Computed in 192-bit precision to avoid overflow in the `y·Δx` product for large reserves.
+            let dx = input_amount.into_precision_amount();
+            let output_amount = dx
+                .checked_mul(output_reserve.into_precision_amount())
                 .and_then(|num| {
-                    num.checked_div(input_reserve.checked_add(input_amount).expect("Overflow in swap calc"))
+                    input_reserve
+                        .into_precision_amount()
+                        .checked_add(dx)
+                        .and_then(|denom| num.checked_div(denom))
                 })
                 .expect("Overflow in swap calculation");
+            let output_amount = Amount::try_from(output_amount).expect("swap output conversion failed");
+
+            // A swap input too small to move any of the output reserve would otherwise abort with an opaque
+            // withdraw error. Reject it with a clear message.
+            assert!(output_amount.is_positive(), "Swap input too small to yield any output");
 
             // Perform the swap
             self.get_pool_vault(input_pool).deposit(input_bucket);
@@ -349,21 +366,34 @@ mod template {
         }
 
         fn calculate_redemption_amounts(&self, lp_total_supply: Amount, lp_redeem_amount: Amount) -> (Amount, Amount) {
-            // get the pool reserve
-            let a_reserve = self.vault_a.balance();
-            let b_reserve = self.vault_b.balance();
+            assert!(
+                lp_total_supply.is_positive(),
+                "Cannot redeem from a pool with no LP supply"
+            );
 
-            // calculate the amounts owed to the user based on provided LP tokens
-            let lp_ratio = lp_redeem_amount.checked_div(lp_total_supply).expect("Div zero");
-            let a_amount_owed = lp_ratio
+            // get the pool reserve. Compute in 192-bit precision and multiply before dividing: dividing the LP ratio
+            // first truncates it to zero for any partial redemption (since these are integers), and the wide
+            // intermediate avoids overflow in `lp_redeem_amount * reserve`.
+            let a_reserve = self.vault_a.balance().into_precision_amount();
+            let b_reserve = self.vault_b.balance().into_precision_amount();
+            let lp_total_supply = lp_total_supply.into_precision_amount();
+            let lp_redeem_amount = lp_redeem_amount.into_precision_amount();
+
+            // amount_owed = lp_redeem_amount * reserve / lp_total_supply (rounded down in favour of the pool)
+            let a_amount_owed = lp_redeem_amount
                 .checked_mul(a_reserve)
+                .and_then(|num| num.checked_div(lp_total_supply))
                 .expect("Amount overflow when calculating redemption value for resource A");
 
-            let b_amount_owed = lp_ratio
+            let b_amount_owed = lp_redeem_amount
                 .checked_mul(b_reserve)
+                .and_then(|num| num.checked_div(lp_total_supply))
                 .expect("Amount overflow when calculating redemption value for resource B");
 
-            (a_amount_owed, b_amount_owed)
+            (
+                Amount::try_from(a_amount_owed).expect("redemption amount A conversion failed"),
+                Amount::try_from(b_amount_owed).expect("redemption amount B conversion failed"),
+            )
         }
 
         pub fn get_pool_balances(&self) -> (Amount, Amount) {

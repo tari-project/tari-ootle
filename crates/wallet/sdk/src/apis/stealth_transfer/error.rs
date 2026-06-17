@@ -13,6 +13,7 @@ use crate::{
         locks::LocksApiError,
         stealth_outputs::StealthOutputsApiError,
         substate::SubstateApiError,
+        swap_pool::SwapPoolApiError,
     },
     storage::WalletStorageError,
 };
@@ -53,6 +54,8 @@ pub enum StealthTransferApiError {
     InvariantViolation { details: String },
     #[error("Locks API error: {0}")]
     LocksApiError(#[from] LocksApiError),
+    #[error("Swap pool error: {0}")]
+    SwapPoolApi(#[from] SwapPoolApiError),
 }
 
 impl IsNotFoundError for StealthTransferApiError {

@@ -186,8 +186,19 @@ where
                     }
                 } else {
                     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
-                    if now.saturating_sub(entry.cached_at) > self.cache_ttl.as_secs() {
+                    let is_stale = now.saturating_sub(entry.cached_at) > self.cache_ttl.as_secs();
+                    // A cached `Down` result means the substate has advanced past `entry.version`. An
+                    // unversioned lookup asks for the *latest* version, so a `Down` entry can never
+                    // satisfy it: refetch from the committee (which always returns the latest Up for an
+                    // unversioned request) to discover the new version. Serving the stale `Down`
+                    // surfaces as a spurious "input substate is down" error — e.g. dry-running a
+                    // transaction whose unversioned inputs include a frequently-updated substate such as
+                    // a swap pool reserve.
+                    let is_down = matches!(entry.substate_result, SubstateResult::Down { .. });
+                    if is_stale {
                         debug!(target: LOG_TARGET, "Cached substate {} is stale. Fetching fresh copy.", substate_id);
+                    } else if is_down {
+                        debug!(target: LOG_TARGET, "Cached substate {} is down at v{}. Fetching latest version.", substate_id, entry.version);
                     } else {
                         debug!(target: LOG_TARGET, "Substate cache hit for {} with version {}", substate_id, entry.version);
                         #[cfg(feature = "metrics")]

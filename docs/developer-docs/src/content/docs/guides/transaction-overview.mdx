@@ -140,7 +140,7 @@ let transaction = Transaction::builder(network)
     .build_and_seal(&secret_key);
 ```
 
-Any type that implements `serde::Serialize` can be passed as an argument, including addresses, amounts, strings, structs, and more.
+Any CBOR-encodable type (one that implements `minicbor::Encode`) can be passed as an argument, including addresses, amounts, strings, structs, and more.
 
 ---
 

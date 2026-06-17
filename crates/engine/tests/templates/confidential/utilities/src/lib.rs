@@ -22,21 +22,19 @@
 
 use tari_template_lib::prelude::*;
 
-#[template]
-mod faucet_template {
+// A stateless utility template: it exposes only pure free functions over confidential buckets and
+// holds no component state, so invoking these functions never creates a component.
+#[template(stateless)]
+mod ConfidentialUtilities {
     use super::*;
 
-    pub struct ConfidentialUtilities;
+    /// Withdraws from a bucket and returns a new bucket containing the withdrawn funds.
+    pub fn take_from_bucket(mut bucket: Bucket, proof: ConfidentialWithdrawProof) -> Bucket {
+        bucket.take_confidential(proof)
+    }
 
-    impl ConfidentialUtilities {
-        /// Withdraws from a bucket and returns a new bucket containing the withdrawn funds.
-        pub fn take_from_bucket(mut bucket: Bucket, proof: ConfidentialWithdrawProof) -> Bucket {
-            bucket.take_confidential(proof)
-        }
-
-        /// Joins two buckets into one, returning a new bucket containing the combined value of the same resource..
-        pub fn join_buckets(mut bucket1: Bucket, bucket2: Bucket) -> Bucket {
-            bucket1.join(bucket2)
-        }
+    /// Joins two buckets into one, returning a new bucket containing the combined value of the same resource.
+    pub fn join_buckets(bucket1: Bucket, bucket2: Bucket) -> Bucket {
+        bucket1.join(bucket2)
     }
 }

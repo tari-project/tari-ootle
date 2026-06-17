@@ -113,6 +113,7 @@ use crate::{
         TransactionNetworkValidator,
         TransactionSignatureValidator,
         TransactionValidationError,
+        TransactionWeightValidator,
         WithContext,
     },
     validator::Validator,
@@ -473,9 +474,12 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
     network: Network,
     template_manager: TProvider,
 ) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
+    let max_transaction_weight = ConsensusConstants::from(network).max_transaction_weight;
     TransactionNetworkValidator::new(network)
         .and_then(TransactionDryRunValidator)
         .and_then(BasicValidations::new())
+        // Cheap structural check — reject over-weight transactions before verifying signatures.
+        .and_then(TransactionWeightValidator::new(max_transaction_weight))
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
 }

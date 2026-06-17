@@ -6,6 +6,7 @@ mod epoch_range;
 mod network;
 mod signature;
 mod template_exists;
+mod weight;
 
 mod dry_run;
 
@@ -15,6 +16,7 @@ pub use epoch_range::*;
 pub use network::*;
 pub use signature::*;
 pub use template_exists::*;
+pub use weight::*;
 
 mod error;
 mod with_context;

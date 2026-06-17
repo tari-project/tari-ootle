@@ -287,13 +287,18 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {
-    const NON_LITERAL_WEIGHT: u64 = 1; // Default weight for workspace and blob refs (cheap, just an index)
-    // Blob payloads are charged at the transaction level by `calc_blobs_weight`, so we don't
-    // double-count them here.
+    // Workspace and blob refs are cheap — just an index. Blob payloads are charged at the
+    // transaction level by `calc_blobs_weight`, so we don't double-count them here.
+    const NON_LITERAL_WEIGHT: u64 = 1;
+    // Inline literal args carry their bytes directly in the instruction, so price them by size
+    // (consistent with blob/log byte costing) with a floor so any non-empty arg costs at least as
+    // much as a cheap ref.
+    const LITERAL_BYTE_DIVISOR: u64 = 3;
     args.iter()
         .map(|a| {
-            a.as_literal_bytes()
-                .map_or(NON_LITERAL_WEIGHT, |b| b.len().min(1) as u64)
+            a.as_literal_bytes().map_or(NON_LITERAL_WEIGHT, |b| {
+                (b.len() as u64 / LITERAL_BYTE_DIVISOR).max(NON_LITERAL_WEIGHT)
+            })
         })
         .sum()
 }
@@ -423,6 +428,23 @@ mod blob_validation_tests {
         assert!(
             large.calculate_transaction_weight() > small.calculate_transaction_weight(),
             "larger blob payload must produce larger transaction weight",
+        );
+    }
+
+    #[test]
+    fn literal_arg_size_contributes_to_transaction_weight() {
+        // Same instruction shape, differing only in the byte size of an inline literal argument →
+        // the larger argument must produce a larger weight. Guards against under-pricing inline
+        // args, which would otherwise let multi-KiB payloads ride along at near-zero weight/fee.
+        let small = build_with_blobs(vec![], vec![call_function(vec![InstructionArg::raw_literal_bytes(
+            vec![0u8; 30],
+        )])]);
+        let large = build_with_blobs(vec![], vec![call_function(vec![InstructionArg::raw_literal_bytes(
+            vec![0u8; 3000],
+        )])]);
+        assert!(
+            large.calculate_transaction_weight() > small.calculate_transaction_weight(),
+            "larger literal argument payload must produce larger transaction weight",
         );
     }
 

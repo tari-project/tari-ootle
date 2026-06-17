@@ -674,6 +674,8 @@ impl TestBuilder {
                     // Effectively disable the validation-time weight cap by default; tests that exercise
                     // it set a low value explicitly.
                     max_block_validation_weight: u64::MAX,
+                    // Per-transaction mempool weight cap; effectively unbounded in tests.
+                    max_transaction_weight: u64::MAX,
                     // Network-default wasm budgets. Fabricated executions consume
                     // TEST_WASM_EXECUTION_POINTS each, sized so normal test transactions can never
                     // hit the budget (asserted in `start`). Tests exercising excessive computation

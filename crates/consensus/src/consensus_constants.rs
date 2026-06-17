@@ -64,6 +64,14 @@ pub struct ConsensusConstants {
     /// Set above `max_block_weight` so honest proposals are never rejected. CONSENSUS RULE: must be
     /// uniform network-wide, otherwise nodes diverge on block validity.
     pub max_block_validation_weight: u64,
+    /// The maximum weight (see `Transaction::calculate_transaction_weight`) a single transaction may
+    /// have to be admitted. Unlike the block-level budgets this bounds an *individual* transaction,
+    /// stopping one transaction from carrying a disproportionate amount of size/IO/execution work
+    /// (e.g. multi-MiB inline arguments or a flood of cheap instructions) into the network before it
+    /// is gossiped, stored and executed. Must sit above the heaviest legitimate transaction — a
+    /// max-size template publish (`limits::ENGINE_LIMITS.max_template_binary_size_bytes`) — so honest
+    /// transactions are never rejected. Enforced at RPC submit / mempool admission, not in consensus.
+    pub max_transaction_weight: u64,
     /// The maximum total WASM metering points a leader will pack into a single block, summed from each
     /// transaction's actual metered execution (`ExecuteResult::wasm_execution_points`). Transaction weight is
     /// size/IO-based and blind to execution cost, so a low-weight compute-heavy transaction evades the weight
@@ -114,6 +122,10 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // Admits the heaviest legitimate transaction — a 1.5 MiB template publish is ~524k weight
+            // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
+            // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
+            max_transaction_weight: 1_000_000,
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
@@ -149,6 +161,10 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // Admits the heaviest legitimate transaction — a 1.5 MiB template publish is ~524k weight
+            // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
+            // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
+            max_transaction_weight: 1_000_000,
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
@@ -184,6 +200,10 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // Admits the heaviest legitimate transaction — a 1.5 MiB template publish is ~524k weight
+            // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
+            // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
+            max_transaction_weight: 1_000_000,
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
@@ -219,6 +239,10 @@ impl ConsensusConstants {
             // full validation-weight block projects to ~5.5s of execution on 2-core hardware — well
             // within the 10s block time. Rejects the ~31k-weight/500-command overload that broke things.
             max_block_validation_weight: 15_000,
+            // Admits the heaviest legitimate transaction — a 1.5 MiB template publish is ~524k weight
+            // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
+            // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
+            max_transaction_weight: 1_000_000,
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
@@ -251,7 +275,7 @@ impl From<Network> for ConsensusConstants {
 
 #[cfg(test)]
 mod tests {
-    use tari_engine_types::limits::MAX_WASM_POINTS_PER_TRANSACTION;
+    use tari_engine_types::limits::{ENGINE_LIMITS, MAX_WASM_POINTS_PER_TRANSACTION};
 
     use super::*;
 
@@ -269,6 +293,27 @@ mod tests {
             assert!(
                 constants.max_block_validation_wasm_points >=
                     constants.max_block_wasm_points + MAX_WASM_POINTS_PER_TRANSACTION
+            );
+        }
+    }
+
+    #[test]
+    fn max_transaction_weight_admits_max_template_publish() {
+        // A max-size template publish carries the binary as a blob, weighing roughly
+        // (binary bytes / 3) (see `calc_blobs_weight`). The per-transaction cap must stay above this
+        // so honest template publishes are never rejected at ingress.
+        let max_template_publish_weight = ENGINE_LIMITS.max_template_binary_size_bytes as u64 / 3;
+        for constants in [
+            ConsensusConstants::mainnet(),
+            ConsensusConstants::devnet(7),
+            ConsensusConstants::esmeralda(),
+            ConsensusConstants::testnet(),
+        ] {
+            assert!(
+                constants.max_transaction_weight > max_template_publish_weight,
+                "max_transaction_weight ({}) must exceed a max-size template publish (~{})",
+                constants.max_transaction_weight,
+                max_template_publish_weight,
             );
         }
     }

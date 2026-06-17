@@ -48,4 +48,10 @@ pub enum TransactionValidationError {
     ContainsPayFeeInstruction { transaction_id: TransactionId },
     #[error("Dry run transactions are not allowed")]
     DryRunNotAllowed,
+    #[error("Transaction {transaction_id} weight {weight} exceeds the maximum allowed weight {max_weight}")]
+    TransactionExceedsMaxWeight {
+        transaction_id: TransactionId,
+        weight: u64,
+        max_weight: u64,
+    },
 }

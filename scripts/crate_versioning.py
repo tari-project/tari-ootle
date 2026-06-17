@@ -23,7 +23,14 @@ cohort; every other tier is independently versioned:
 SemVer rules for 0.y.z crates:
   patch (0.y.z -> 0.y.(z+1)) — non-breaking. Dependents auto-pick-up via ^0.y.
   minor (0.y.z -> 0.(y+1).0) — breaking. Every direct dependent must update
-                                its pin and republish at least a patch.
+                                its pin and republish.
+
+A breaking bump cascades through *public* dependents: if a crate re-exposes a
+minor-bumped dep in its public API, that dep's break is also a break of this
+crate, so it must bump minor too (and that, in turn, can promote its own public
+dependents). Deps are treated as public by default — the safe, never-under-bump
+assumption. IMPL_DETAIL_DEPS records audited exceptions that are
+implementation-detail only and so need just a patch + pin update.
 """
 
 import argparse
@@ -46,6 +53,39 @@ YELLOW = "\033[1;33m"
 CYAN = "\033[0;36m"
 BOLD = "\033[1m"
 NC = "\033[0m"
+
+# Public-dependency model.
+#
+# When a dependency makes a breaking (0.x minor) change, a crate must also bump
+# minor IF that dependency is *public* — i.e. its types appear in the crate's own
+# public API (re-exported, in a public fn signature, a public field, …). Then the
+# dep's break is a break of this crate too, and it cascades to the crate's own
+# public dependents.
+#
+# Every publish-set dependency is treated as PUBLIC by default. That is the safe
+# default: it can only ever over-bump (a needless minor), never under-bump. The
+# under-bump is the real hazard — it ships a breaking change as a patch and
+# silently breaks consumers pinning "^0.y" (exactly how tari_indexer_client 0.32.2
+# shipped a tari_engine_types 0.33->0.34 break as a patch).
+#
+# IMPL_DETAIL_DEPS is the deny-list of edges we have AUDITED and confirmed are
+# implementation-detail only (the dep's types never reach the crate's public API).
+# Such an edge needs only a patch + pin update when the dep bumps, not a minor.
+#
+#   Add an edge here ONLY after verifying the dep does not appear in the crate's
+#   public API. Omitting an edge is safe (conservative minor); wrongly adding one
+#   re-introduces the under-bump bug.
+#
+#   Example — a crate that uses tari_bor purely for internal encode/decode:
+#     IMPL_DETAIL_DEPS = {"tari_ootle_wallet_storage_sqlite": {"tari_bor"}}
+#
+# {crate_name: {dep_name, ...}}
+IMPL_DETAIL_DEPS = {}
+
+
+def is_public_dep(crate, dep):
+    """True unless the (crate -> dep) edge is an audited implementation-detail."""
+    return dep not in IMPL_DETAIL_DEPS.get(crate, set())
 
 
 def cargo_metadata():
@@ -175,13 +215,15 @@ def cmd_impact(args):
 
     tier3_crates = {n for n, t in TIER_OF.items() if t == 3}
 
-    # Fixed-point: what must republish at a new (minor) version, vs what must
-    # update pins + republish (patch min, possibly minor).
+    # Fixed-point: which crates must republish at a new (minor) version, vs which
+    # only need a pin update + patch.
     #   - target is "minor" (the breaking change).
-    #   - Anything in tier 3 that ends up bumping at all forces the entire
-    #     tier 3 cohort to bump minor (workspace.package.version moves).
-    #   - Anything with a normal dep on a "minor" crate must update its pin
-    #     and republish — at minimum patch, "minor?" if it re-exposes types.
+    #   - Any tier-3 crate that bumps at all forces the entire tier-3 cohort to
+    #     bump minor (workspace.package.version moves them together).
+    #   - Any crate with a PUBLIC dep on a minor-bumped crate is itself a breaking
+    #     change (the changed types reach its public API) and joins the set. This
+    #     cascades: a crate promoted to minor can in turn promote its own public
+    #     dependents.
     minor_set = {target}
     while True:
         changed = False
@@ -189,23 +231,21 @@ def cmd_impact(args):
         if minor_set & tier3_crates and not tier3_crates.issubset(minor_set):
             minor_set |= tier3_crates
             changed = True
-        # 2. propagate pin-updates: any tier-3 crate that depends on a
-        #    minor-bumped crate becomes minor too (workspace will move it anyway).
+        # 2. public-dependency cascade
         for c, ds in deps.items():
             if c in minor_set:
                 continue
-            if ds & minor_set and TIER_OF[c] == 3:
+            if any(is_public_dep(c, d) for d in ds & minor_set):
                 minor_set.add(c)
                 changed = True
         if not changed:
             break
 
-    # Pin-update set: non-tier-3 crates with a normal dep on anything that
-    # is being minor-bumped. They must update the pin and republish at least
-    # a patch (or minor if their own API re-exposes the changed types).
-    # We do NOT cascade further: patch bumps are absorbed by ^0.y pins, so
-    # they don't force more downstream changes. If a user picks minor for one
-    # of these, they should re-run impact on that crate.
+    # Pin-update set: non-tier-3 crates left with a normal dep into the minor set
+    # *only* through impl-detail edges (any public edge would have promoted them
+    # into minor_set above). They recompile and republish a PATCH — the changed
+    # types don't reach their public API — and patch bumps are absorbed by ^0.y
+    # pins, so they don't cascade further.
     pin_update_set = {
         c for c, ds in deps.items()
         if c not in minor_set and TIER_OF[c] != 3 and ds & minor_set
@@ -231,14 +271,19 @@ def cmd_impact(args):
         print(f"{BOLD}Independent (non-core) — minor (breaking) bump required:{NC}")
         for c in non_t3_minor:
             marker = "*" if c == target else " "
-            print(f"  {marker} {c} {versions[c]} -> {bump(versions[c], 'minor')}")
+            line = f"  {marker} {c} {versions[c]} -> {bump(versions[c], 'minor')}"
+            if c == target:
+                print(f"{line}  (the changed crate)")
+            else:
+                causes = sorted(d for d in deps[c] & minor_set if is_public_dep(c, d))
+                print(f"{line}  (re-exposes {', '.join(causes)} in public API)")
         print()
 
     # Render pin-update set (independent crates that must republish).
     pin_independent = sorted(c for c in pin_update_set if TIER_OF[c] != 3)
     if pin_independent:
-        print(f"{BOLD}Independent (non-core) — must update pin(s) and republish "
-              f"(patch min, minor if API re-exposes changed types):{NC}")
+        print(f"{BOLD}Independent (non-core) — recompile & republish a PATCH "
+              f"(deps are impl-detail, not re-exposed):{NC}")
         for c in pin_independent:
             cur = versions[c]
             # Which deps of c are bumping?
@@ -247,9 +292,7 @@ def cmd_impact(args):
                                   for d in bumping_deps[:4])
             if len(bumping_deps) > 4:
                 pin_hint += f", … (+{len(bumping_deps) - 4} more)"
-            print(f"  {c} {cur} [{TIER_LABELS[TIER_OF[c]]}]")
-            print(f"    bump:  {cur} -> {bump(cur, 'patch')} (patch) "
-                  f"or {bump(cur, 'minor')} (minor) if API re-exposes")
+            print(f"  {c} {cur} -> {bump(cur, 'patch')} [{TIER_LABELS[TIER_OF[c]]}]")
             print(f"    pins:  {pin_hint}")
         print()
 
@@ -271,13 +314,14 @@ def cmd_impact(args):
         print(f"  {step}. Update tier-3 pins in [workspace.dependencies].")
         step += 1
     if non_t3_minor:
-        print(f"  {step}. Bump these independent crates in their own Cargo.toml:")
+        print(f"  {step}. Minor-bump these independent crates in their own Cargo.toml:")
         for c in non_t3_minor:
             print(f"       {c} -> {bump(versions[c], 'minor')}")
         step += 1
     if pin_independent:
-        print(f"  {step}. For each independent dependent above, "
-              f"update pin(s) and choose patch-vs-minor based on API surface.")
+        print(f"  {step}. Patch-bump these and update their pins:")
+        for c in pin_independent:
+            print(f"       {c} -> {bump(versions[c], 'patch')}")
         step += 1
     print(f"  {step}. cargo +nightly-2025-12-05 fmt --all, then "
           f"./scripts/publish_crates.py --dry-run, then --execute.")

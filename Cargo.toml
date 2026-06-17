@@ -99,7 +99,7 @@ tari_engine = { path = "crates/engine", version = "0.34" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
-tari_ootle_wallet_crypto = { path = "crates/wallet/crypto", version = "0.33" }
+tari_ootle_wallet_crypto = { path = "crates/wallet/crypto", version = "0.34" }
 tari_ootle_wallet_sdk = { path = "crates/wallet/sdk", version = "0.33" }
 tari_ootle_wallet_sdk_services = { path = "crates/wallet/sdk_services" }
 tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite", version = "0.33" }
@@ -114,7 +114,7 @@ tari_transaction_manifest = { path = "crates/transaction_manifest", version = "0
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
-tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false, version = "0.32" }
+tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false, version = "0.33" }
 tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }

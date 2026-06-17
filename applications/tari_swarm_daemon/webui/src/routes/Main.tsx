@@ -466,12 +466,12 @@ export default function Main() {
         Object.keys(resp.nodes).map((index) => {
           jsonRpc("get_logs", { instance_type: "TariWalletDaemon", index: Number(index) })
             .then((resp) => {
-              setLogs((state: any) => ({ ...state, [`dan ${index}`]: resp }));
+              setLogs((state: any) => ({ ...state, [`wallet ${index}`]: resp }));
             })
             .catch((error) => console.log(error));
           jsonRpc("get_stdout", { instance_type: "TariWalletDaemon", index: Number(index) })
             .then((resp) => {
-              setStdoutLogs((state: any) => ({ ...state, [`dan ${index}`]: resp }));
+              setStdoutLogs((state: any) => ({ ...state, [`wallet ${index}`]: resp }));
             })
             .catch((error) => console.log(error));
         });

@@ -450,7 +450,7 @@ export default function Main() {
               setLogs((state: any) => ({ ...state, [`vn ${index}`]: resp }));
             })
             .catch((error) => console.log(error));
-          jsonRpc("get_stdout", `vn ${index}`)
+          jsonRpc("get_stdout", { instance_type: "TariValidatorNode", index: Number(index) })
             .then((resp) => {
               setStdoutLogs((state: any) => ({ ...state, [`vn ${index}`]: resp }));
             })
@@ -469,7 +469,7 @@ export default function Main() {
               setLogs((state: any) => ({ ...state, [`dan ${index}`]: resp }));
             })
             .catch((error) => console.log(error));
-          jsonRpc("get_stdout", `dan ${index}`)
+          jsonRpc("get_stdout", { instance_type: "TariWalletDaemon", index: Number(index) })
             .then((resp) => {
               setStdoutLogs((state: any) => ({ ...state, [`dan ${index}`]: resp }));
             })
@@ -488,7 +488,7 @@ export default function Main() {
               setLogs((state: any) => ({ ...state, [`indexer ${index}`]: resp }));
             })
             .catch((error) => console.log(error));
-          jsonRpc("get_stdout", `indexer ${index}`)
+          jsonRpc("get_stdout", { instance_type: "TariIndexer", index: Number(index) })
             .then((resp) => {
               setStdoutLogs((state: any) => ({ ...state, [`indexer ${index}`]: resp }));
             })

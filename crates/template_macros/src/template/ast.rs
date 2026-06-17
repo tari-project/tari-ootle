@@ -22,6 +22,7 @@
 
 use std::fmt::{Debug, Formatter};
 
+use proc_macro2::Span;
 use quote::ToTokens;
 use syn::{
     Error,
@@ -32,6 +33,7 @@ use syn::{
     ImplItem,
     ImplItemFn,
     Item,
+    ItemFn,
     ItemMod,
     ItemUse,
     Result,
@@ -49,20 +51,45 @@ use syn::{
     token::Comma,
 };
 
+use crate::template::options::TemplateOptions;
+
 #[allow(dead_code)]
 pub struct TemplateAst {
     pub template_name: Ident,
     pub module_content: Vec<Item>,
     pub functions: Vec<FunctionAst>,
     pub uses: Vec<ItemUse>,
+    /// Set when the template was declared with `#[template(stateless)]`. The functions live as
+    /// free `pub fn` items in the module rather than as associated functions on a component
+    /// struct, which changes the call path the dispatcher generates.
+    pub stateless: bool,
 }
 
 impl Parse for TemplateAst {
-    #[allow(clippy::too_many_lines)]
     fn parse(input: ParseStream) -> Result<Self> {
-        // parse the "mod" block
-        let mut module: ItemMod = input.parse()?;
+        // parse the "mod" block. The `Parse` impl always uses the default (stateful) options;
+        // option-dependent parsing goes through `from_item_mod`.
+        let module: ItemMod = input.parse()?;
+        Self::from_item_mod(module, TemplateOptions::default())
+    }
+}
 
+impl TemplateAst {
+    /// Build a [`TemplateAst`] from an already-parsed module, taking the macro `options` into
+    /// account. This is the entry point used by `generate_template`, since parsing itself depends
+    /// on the `stateless` flag (which the `syn::Parse` impl has no access to).
+    pub fn from_item_mod(module: ItemMod, options: TemplateOptions) -> Result<Self> {
+        if options.stateless {
+            Self::parse_stateless(module)
+        } else {
+            Self::parse_stateful(module)
+        }
+    }
+
+    /// Parse a conventional, component-based template: the first `pub struct`/`pub enum` names the
+    /// component (and template), and its `impl` block provides the functions and methods.
+    #[allow(clippy::too_many_lines)]
+    fn parse_stateful(mut module: ItemMod) -> Result<Self> {
         // get the contents of the "mod" block
         let items = match module.content {
             Some((_, ref mut items)) => items,
@@ -186,7 +213,123 @@ impl Parse for TemplateAst {
                 .map(|(_, c)| c)
                 .ok_or_else(|| Error::new(module.ident.span(), "Template module must contain content"))?,
             uses,
+            stateless: false,
         })
+    }
+
+    /// Parse a component-less, stateless template (`#[template(stateless)]`). The template name is
+    /// the module identifier and the public API is the set of free `pub fn` items in the module —
+    /// no struct is interpreted as a component. Any struct/enum present is treated purely as a
+    /// data type (and still receives the usual CBOR derives unless `skip_cbor_derives` is set).
+    fn parse_stateless(mut module: ItemMod) -> Result<Self> {
+        let template_name = module.ident.clone();
+
+        // get the contents of the "mod" block
+        let items = match module.content {
+            Some((_, ref mut items)) => items,
+            None => return Err(Error::new(template_name.span(), "empty module")),
+        };
+
+        let mut functions = Vec::with_capacity(5);
+        let mut uses = Vec::new();
+
+        for item in items {
+            match item {
+                Item::Fn(fn_item) => {
+                    // Only public free functions form the template's public API. Anything else
+                    // (private helpers, data-type `impl` blocks, etc.) is left untouched in the
+                    // module for the author to use internally.
+                    if !matches!(fn_item.vis, Visibility::Public(_)) {
+                        continue;
+                    }
+
+                    if fn_item.attrs.iter().any(|attr| attr.path().is_ident("migration")) {
+                        return Err(Error::new(
+                            fn_item.sig.ident.span(),
+                            "stateless templates cannot have #[migration] functions",
+                        ));
+                    }
+
+                    if let Some(receiver) = fn_item.sig.receiver() {
+                        return Err(Error::new(
+                            receiver.span(),
+                            "stateless templates cannot have methods (functions with a `self` receiver)",
+                        ));
+                    }
+
+                    if let Some(span) = self_return_span(&fn_item.sig.output) {
+                        return Err(Error::new(
+                            span,
+                            "stateless templates cannot have a constructor (a function returning `Self`)",
+                        ));
+                    }
+
+                    functions.push(Self::get_function_from_fn(fn_item));
+                },
+                Item::Use(item) => {
+                    // Exclude super imports
+                    if let UseTree::Path(path) = &item.tree &&
+                        path.ident == "super"
+                    {
+                        continue;
+                    }
+                    uses.push(item.clone());
+                },
+                _ => {},
+            }
+        }
+
+        if functions.is_empty() {
+            return Err(Error::new(
+                template_name.span(),
+                "a stateless template must define at least one public function",
+            ));
+        }
+
+        Ok(Self {
+            template_name,
+            functions,
+            module_content: module
+                .content
+                .map(|(_, c)| c)
+                .ok_or_else(|| Error::new(module.ident.span(), "Template module must contain content"))?,
+            uses,
+            stateless: true,
+        })
+    }
+}
+
+/// Returns the span of a `Self` mention anywhere in a function's return type, if any. Used to
+/// reject "constructors" in stateless templates. Recurses so that wrapped forms such as
+/// `-> Self`, `-> (Self, ..)`, `-> Option<Self>`, `-> Result<Self, E>` and `-> &Self` are all
+/// caught with a clear macro error rather than a raw compiler error.
+fn self_return_span(output: &ReturnType) -> Option<Span> {
+    match output {
+        ReturnType::Default => None,
+        ReturnType::Type(_, ty) => type_self_span(ty),
+    }
+}
+
+fn type_self_span(ty: &Type) -> Option<Span> {
+    match ty {
+        Type::Path(path) => path.path.segments.iter().find_map(|segment| {
+            if segment.ident == "Self" {
+                return Some(segment.ident.span());
+            }
+            // Recurse into generic arguments (e.g. `Option<Self>`, `Result<Self, E>`).
+            match &segment.arguments {
+                syn::PathArguments::AngleBracketed(args) => args.args.iter().find_map(|arg| match arg {
+                    syn::GenericArgument::Type(inner) => type_self_span(inner),
+                    _ => None,
+                }),
+                _ => None,
+            }
+        }),
+        Type::Tuple(tuple) => tuple.elems.iter().find_map(type_self_span),
+        Type::Reference(reference) => type_self_span(&reference.elem),
+        Type::Group(group) => type_self_span(&group.elem),
+        Type::Paren(paren) => type_self_span(&paren.elem),
+        _ => None,
     }
 }
 
@@ -306,6 +449,17 @@ impl TemplateAst {
         }
     }
 
+    /// Build a [`FunctionAst`] from a free `pub fn` item (used by stateless templates). Callers
+    /// must have already rejected `self` receivers, `-> Self` returns and `#[migration]`.
+    fn get_function_from_fn(item: &ItemFn) -> FunctionAst {
+        FunctionAst {
+            name: item.sig.ident.to_string(),
+            input_types: Self::get_input_types(&item.sig.inputs),
+            output_type: Self::get_output_type_token(&item.sig.output),
+            is_migration: false,
+        }
+    }
+
     fn get_input_types(inputs: &Punctuated<FnArg, Comma>) -> Vec<TypeAst> {
         inputs
             .iter()
@@ -408,5 +562,133 @@ impl Debug for TypeAst {
                 write!(f, "Tuple {{ name: {:?}, type_tuple: {:?} }}", name, type_tuple)
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod stateless_tests {
+    use std::str::FromStr;
+
+    use indoc::indoc;
+    use proc_macro2::TokenStream;
+    use syn::parse2;
+
+    use super::TemplateAst;
+    use crate::template::options::TemplateOptions;
+
+    fn parse(src: &str) -> super::Result<TemplateAst> {
+        let module = parse2::<syn::ItemMod>(TokenStream::from_str(src).unwrap()).unwrap();
+        let options = TemplateOptions {
+            stateless: true,
+            ..Default::default()
+        };
+        TemplateAst::from_item_mod(module, options)
+    }
+
+    #[test]
+    fn collects_free_functions_and_names_from_module() {
+        let ast = parse(indoc! {"
+            mod math {
+                pub fn add(a: u32, b: u32) -> u32 { a + b }
+                pub fn mul(a: u32, b: u32) -> u32 { a * b }
+            }
+        "})
+        .unwrap();
+
+        assert!(ast.stateless);
+        // The template name comes from the module identifier, not a struct.
+        assert_eq!(ast.template_name.to_string(), "math");
+        assert_eq!(ast.functions.len(), 2);
+        assert_eq!(ast.functions[0].name, "add");
+        assert_eq!(ast.functions[1].name, "mul");
+        // No function touches `self`, so none is mutable.
+        assert!(ast.functions.iter().all(|f| !f.is_mut()));
+    }
+
+    #[test]
+    fn ignores_private_helpers() {
+        let ast = parse(indoc! {"
+            mod math {
+                pub fn add(a: u32, b: u32) -> u32 { helper(a) + b }
+                fn helper(a: u32) -> u32 { a }
+            }
+        "})
+        .unwrap();
+
+        assert_eq!(ast.functions.len(), 1);
+        assert_eq!(ast.functions[0].name, "add");
+    }
+
+    #[test]
+    fn rejects_self_method() {
+        let err = parse(indoc! {"
+            mod math {
+                pub fn add(a: u32) -> u32 { a }
+                pub fn get(&self) -> u32 { 0 }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("cannot have methods"), "{err}");
+    }
+
+    #[test]
+    fn rejects_mut_self_method() {
+        let err = parse(indoc! {"
+            mod math {
+                pub fn set(&mut self, value: u32) { }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("cannot have methods"), "{err}");
+    }
+
+    #[test]
+    fn rejects_constructor_returning_self() {
+        let err = parse(indoc! {"
+            mod math {
+                pub fn new() -> Self { }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("constructor"), "{err}");
+    }
+
+    #[test]
+    fn rejects_constructor_returning_wrapped_self() {
+        // `Self` wrapped in generics, references or tuples is still a constructor and must be
+        // rejected with the macro error rather than a raw compiler error.
+        for ret in ["Result<Self, String>", "Option<Self>", "&Self", "(Self, u32)"] {
+            let src = format!("mod math {{ pub fn new() -> {ret} {{ }} }}");
+            let err = parse(&src).err().unwrap();
+            assert!(err.to_string().contains("constructor"), "{ret}: {err}");
+        }
+    }
+
+    #[test]
+    fn rejects_migration_function() {
+        let err = parse(indoc! {"
+            mod math {
+                #[migration]
+                pub fn migrate(a: u32) -> u32 { a }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("migration"), "{err}");
+    }
+
+    #[test]
+    fn requires_at_least_one_public_function() {
+        let err = parse(indoc! {"
+            mod math {
+                pub struct NotAComponent { x: u32 }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("at least one public function"), "{err}");
     }
 }

@@ -131,11 +131,11 @@ pub struct Guess {
 ```
 
 <Aside type="tip">
-  Putting the struct inside the `template` module (annotated with the `#[template]` attribute) automatically implements
-  the required `serde` traits. You can also put it outside the module, and add `#[derive(serde::Serialize,
-  serde::Deserialize)]`
-  to it to achieve the same effect. You would need to add the `serde` crate as a dependency in your `Cargo.toml` to do
-  that.
+  Putting the struct inside the `template` module (annotated with the `#[template]` attribute) automatically derives
+  the required CBOR encoding (`minicbor::Encode`, `minicbor::Decode` and `minicbor::CborLen`) and tags each field for
+  you. You can also put it outside the module and add `#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]`
+  — tagging each field with `#[n(N)]` — to achieve the same effect. You would need to add the `minicbor` crate as a
+  dependency in your `Cargo.toml` to do that.
 </Aside>
 
 ## Implement a constructor

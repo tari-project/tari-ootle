@@ -11956,7 +11956,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_crypto"
-version = "0.33.2"
+version = "0.34.0"
 dependencies = [
  "argon2 0.5.3",
  "blake2 0.10.6",

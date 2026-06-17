@@ -5,7 +5,7 @@ use log::warn;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::Transaction;
 
-use crate::{transaction_validators::TransactionValidationError, validator::Validator};
+use crate::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::epoch_range";
 

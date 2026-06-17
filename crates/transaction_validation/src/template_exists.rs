@@ -5,7 +5,7 @@ use log::warn;
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_ootle_transaction::Transaction;
 
-use crate::{transaction_validators::TransactionValidationError, validator::Validator};
+use crate::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::template_exists";
 
@@ -15,7 +15,7 @@ pub struct TemplateExistsValidator<TProvider> {
 }
 
 impl<TProvider> TemplateExistsValidator<TProvider> {
-    pub(crate) fn new(provider: TProvider) -> Self {
+    pub fn new(provider: TProvider) -> Self {
         Self { provider }
     }
 }

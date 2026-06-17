@@ -3,7 +3,7 @@
 
 use std::marker::PhantomData;
 
-use crate::validator::Validator;
+use crate::Validator;
 
 #[derive(Debug, Default)]
 pub struct WithContext<C, T, E>(PhantomData<(C, T, E)>);

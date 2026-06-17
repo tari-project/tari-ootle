@@ -10,6 +10,7 @@ use tari_consensus::{
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_storage::consensus_models::TransactionPool;
 use tari_ootle_transaction::{Network, Transaction};
+use tari_ootle_transaction_validation::{BoxedValidator, TransactionValidationError};
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -22,8 +23,6 @@ use crate::{
     consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec},
     event_subscription::EventSubscription,
     p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
-    transaction_validators::TransactionValidationError,
-    validator::BoxedValidator,
 };
 
 mod block_transaction_executor;

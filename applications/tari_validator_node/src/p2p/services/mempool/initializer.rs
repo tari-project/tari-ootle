@@ -27,6 +27,7 @@ use tari_networking::NetworkingHandle;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::StateStore;
 use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction_validation::{TransactionValidationError, Validator};
 use tokio::{sync::mpsc, task, task::JoinHandle};
 
 #[cfg(feature = "metrics")]
@@ -34,8 +35,6 @@ use super::metrics::PrometheusMempoolMetrics;
 use crate::{
     consensus::ConsensusHandle,
     p2p::services::mempool::{handle::MempoolHandle, service::MempoolService},
-    transaction_validators::TransactionValidationError,
-    validator::Validator,
 };
 
 const LOG_TARGET: &str = "tari::ootle::validator_node::mempool";

@@ -44,6 +44,7 @@ members = [
     "crates/template_test_tooling",
     "crates/transaction_manifest",
     "crates/transaction",
+    "crates/transaction_validation",
     "crates/validator_node_rpc",
     "crates/wallet/ootle-rs",
     "crates/wallet/crypto",
@@ -130,6 +131,7 @@ tari_ootle_common_types = { path = "crates/common_types", version = "0.34" }
 tari_engine_types = { path = "crates/engine_types", version = "0.34" }
 tari_template_builtin = { path = "crates/template_builtin", version = "0.32" }
 tari_ootle_transaction = { path = "crates/transaction", version = "0.34" }
+tari_ootle_transaction_validation = { path = "crates/transaction_validation" }
 
 # Template lib
 tari_ootle_template_build = { path = "crates/template_build", version = "0.7" }

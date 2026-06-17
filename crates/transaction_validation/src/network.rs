@@ -4,7 +4,7 @@
 use log::warn;
 use tari_ootle_transaction::{Network, Transaction};
 
-use crate::{transaction_validators::TransactionValidationError, validator::Validator};
+use crate::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::network";
 
@@ -55,10 +55,7 @@ mod tests {
     };
     use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-    use crate::{
-        transaction_validators::{TransactionNetworkValidator, TransactionValidationError},
-        validator::Validator,
-    };
+    use crate::{TransactionNetworkValidator, TransactionValidationError, Validator};
 
     fn tx(network_byte: u8) -> Transaction {
         Transaction::new(

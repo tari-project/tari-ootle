@@ -31,6 +31,7 @@ use tari_ootle_common_types::optional::Optional;
 use tari_ootle_p2p::{NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::TransactionRecord};
 use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction_validation::{TransactionValidationError, Validator};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::MempoolError;
@@ -42,8 +43,6 @@ use crate::{
         gossip::{IncomingMessage, MempoolGossip},
         handle::MempoolRequest,
     },
-    transaction_validators::TransactionValidationError,
-    validator::Validator,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::mempool::service";

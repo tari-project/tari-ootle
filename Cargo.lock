@@ -11522,6 +11522,7 @@ dependencies = [
  "tari_ootle_storage_sqlite",
  "tari_ootle_template_metadata",
  "tari_ootle_transaction",
+ "tari_ootle_transaction_validation",
  "tari_rpc_framework",
  "tari_shutdown",
  "tari_template_builtin",
@@ -11922,6 +11923,21 @@ dependencies = [
  "tari_template_lib_types",
  "thiserror 2.0.18",
  "ts-rs",
+]
+
+[[package]]
+name = "tari_ootle_transaction_validation"
+version = "0.34.2"
+dependencies = [
+ "anyhow",
+ "indexmap 2.13.0",
+ "log",
+ "tari_networking",
+ "tari_ootle_common_types",
+ "tari_ootle_storage",
+ "tari_ootle_transaction",
+ "tari_template_lib",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -12717,6 +12733,7 @@ dependencies = [
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
  "tari_ootle_transaction",
+ "tari_ootle_transaction_validation",
  "tari_rpc_framework",
  "tari_rpc_state_sync",
  "tari_shutdown",

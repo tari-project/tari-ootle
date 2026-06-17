@@ -25,7 +25,8 @@ pub(crate) mod error;
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_client::types::{IndexerTransactionFinalizedResult, TransactionEntry};
 use tari_ootle_common_types::{NodeAddressable, ToSubstateAddress, optional::Optional};
-use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Network, Transaction, TransactionId};
+use tari_ootle_transaction_validation::{Validator, create_structural_transaction_validator};
 use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
 use crate::{
@@ -38,6 +39,8 @@ use crate::{
 pub struct TransactionManager<TEpochManager, TClientFactory, TStore> {
     network_client: TariNetworkClient<TEpochManager, TClientFactory>,
     store: TStore,
+    network: Network,
+    max_transaction_weight: u64,
 }
 
 impl<TEpochManager, TClientFactory, TAddr, TStore> TransactionManager<TEpochManager, TClientFactory, TStore>
@@ -47,18 +50,33 @@ where
     TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
     TStore: IndexerStore,
 {
-    pub fn new(network_client: TariNetworkClient<TEpochManager, TClientFactory>, store: TStore) -> Self {
-        Self { network_client, store }
+    pub fn new(
+        network_client: TariNetworkClient<TEpochManager, TClientFactory>,
+        store: TStore,
+        network: Network,
+        max_transaction_weight: u64,
+    ) -> Self {
+        Self {
+            network_client,
+            store,
+            network,
+            max_transaction_weight,
+        }
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
         let transaction_id = transaction.calculate_id();
-        if !transaction.verify_all_signatures() {
-            // DEV note: If signatures are invalid here, this is probably an issue
-            // with the JSON decoding (crates/engine_types/src/argument_parser.rs)
+        // Run the structural mempool validations (network, basic, weight, signature) before
+        // forwarding to validator committees, so malformed or over-weight transactions are rejected
+        // here instead of being fanned out across the network. Context-dependent checks (epoch range,
+        // template existence) are left to the validators, whose epoch/template view is authoritative.
+        // DEV note: an invalid signature here is probably a JSON decoding issue
+        // (crates/engine_types/src/argument_parser.rs).
+        let validator = create_structural_transaction_validator(self.network, self.max_transaction_weight);
+        if let Err(err) = validator.validate(&(), &transaction) {
             return Err(TransactionManagerError::InvalidTransaction {
                 transaction_id,
-                details: "Transaction has one or more invalid signature(s)".to_string(),
+                details: err.to_string(),
             });
         }
         let transaction_for_db = transaction.clone();

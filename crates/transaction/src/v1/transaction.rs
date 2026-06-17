@@ -290,17 +290,29 @@ fn calc_args_weight(args: &[InstructionArg]) -> u64 {
     // Workspace and blob refs are cheap — just an index. Blob payloads are charged at the
     // transaction level by `calc_blobs_weight`, so we don't double-count them here.
     const NON_LITERAL_WEIGHT: u64 = 1;
-    // Inline literal args carry their bytes directly in the instruction, so price them by size
-    // (consistent with blob/log byte costing) with a floor so any non-empty arg costs at least as
-    // much as a cheap ref.
+    // Inline literal args carry their bytes directly in the instruction, so price them by size,
+    // consistent with blob/log byte costing.
     const LITERAL_BYTE_DIVISOR: u64 = 3;
-    args.iter()
-        .map(|a| {
-            a.as_literal_bytes().map_or(NON_LITERAL_WEIGHT, |b| {
-                (b.len() as u64 / LITERAL_BYTE_DIVISOR).max(NON_LITERAL_WEIGHT)
-            })
-        })
-        .sum()
+
+    // Accumulate the raw literal bytes and apply the divisor once across the whole instruction.
+    // Dividing per-argument would let a large literal be split into many small ones so each share
+    // rounds down, evading the weight (and hence the fee). Each literal still costs at least
+    // `NON_LITERAL_WEIGHT`, so a flood of tiny args can never be cheaper than the same bytes in one.
+    let mut total_literal_bytes = 0u64;
+    let mut num_literals = 0u64;
+    let mut num_non_literals = 0u64;
+    for arg in args {
+        match arg.as_literal_bytes() {
+            Some(bytes) => {
+                total_literal_bytes += bytes.len() as u64;
+                num_literals += 1;
+            },
+            None => num_non_literals += 1,
+        }
+    }
+
+    let literal_weight = (total_literal_bytes / LITERAL_BYTE_DIVISOR).max(num_literals * NON_LITERAL_WEIGHT);
+    literal_weight + num_non_literals * NON_LITERAL_WEIGHT
 }
 
 /// Per-blob byte weight. Each blob's payload contributes its bytes (divided by the binary
@@ -445,6 +457,26 @@ mod blob_validation_tests {
         assert!(
             large.calculate_transaction_weight() > small.calculate_transaction_weight(),
             "larger literal argument payload must produce larger transaction weight",
+        );
+    }
+
+    #[test]
+    fn splitting_literal_args_does_not_reduce_weight() {
+        // A payload split across many small literal args must not weigh less than the same bytes in
+        // a single arg — otherwise an attacker could chunk a literal to round each share down and
+        // evade weight/fee pricing.
+        const TOTAL: usize = 3000;
+        const CHUNK: usize = 5;
+        let single = build_with_blobs(vec![], vec![call_function(vec![InstructionArg::raw_literal_bytes(
+            vec![0u8; TOTAL],
+        )])]);
+        let split_args = (0..TOTAL / CHUNK)
+            .map(|_| InstructionArg::raw_literal_bytes(vec![0u8; CHUNK]))
+            .collect();
+        let split = build_with_blobs(vec![], vec![call_function(split_args)]);
+        assert!(
+            split.calculate_transaction_weight() >= single.calculate_transaction_weight(),
+            "splitting a literal arg into smaller chunks must not reduce transaction weight",
         );
     }
 

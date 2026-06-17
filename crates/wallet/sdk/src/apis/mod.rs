@@ -17,6 +17,7 @@ pub mod signer;
 pub mod stealth_outputs;
 pub mod stealth_transfer;
 pub mod substate;
+pub mod swap_pool;
 pub mod template;
 pub mod transaction;
 pub mod viewable_balance;

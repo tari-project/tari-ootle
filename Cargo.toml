@@ -114,7 +114,7 @@ tari_transaction_manifest = { path = "crates/transaction_manifest", version = "0
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
-tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false, version = "0.32" }
+tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false, version = "0.33" }
 tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }

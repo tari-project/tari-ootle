@@ -7659,7 +7659,7 @@ dependencies = [
 
 [[package]]
 name = "ootle-rs"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -11543,7 +11543,7 @@ dependencies = [
 
 [[package]]
 name = "tari_indexer_client"
-version = "0.32.2"
+version = "0.33.0"
 dependencies = [
  "anyhow",
  "bounded-vec",

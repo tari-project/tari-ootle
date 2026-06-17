@@ -32,4 +32,14 @@ ignoredBuiltDependencies:
 # green across CI and publish jobs without per-command --ignore-scripts workarounds.
 strictDepBuilds: false
 
+# Record an explicit allow/deny for every build-script dependency. Without this,
+# pnpm 11 treats them as "undecided" and appends an `allowBuilds:` scaffold to this
+# file on every `pnpm install` (even with --frozen-lockfile), which dirties the
+# working tree and made `pnpm publish` abort with ERR_PNPM_GIT_UNCLEAN. false = do
+# not run their build scripts (they ship prebuilt binaries).
+allowBuilds:
+  '@parcel/watcher': false
+  '@swc/core': false
+  esbuild: false
+
 publishBranch: development

@@ -215,6 +215,19 @@ where
             }
         }
 
+        // `get_dependent_substates` and the parent fetches above carry the version from the wallet's
+        // local store / network scan, ignoring the `unversioned` request. When the caller asked for
+        // unversioned dependencies, normalise the whole set: a locally-cached version can be stale
+        // (e.g. a swap pool reserve advances on every swap), and pinning it makes the indexer reject the
+        // input as "down" once the chain moves past it. `SubstateRequirement` hashes by id only, so
+        // collapsing to unversioned cannot introduce duplicates.
+        if unversioned {
+            return Ok(substate_ids
+                .into_iter()
+                .map(SubstateRequirement::into_unversioned)
+                .collect());
+        }
+
         Ok(substate_ids)
     }
 

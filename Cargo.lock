@@ -12699,7 +12699,6 @@ dependencies = [
  "dashmap 5.5.3",
  "futures 0.3.31",
  "include_dir",
- "indexmap 2.13.0",
  "lazy_static",
  "libp2p",
  "libsqlite3-sys",

@@ -41,6 +41,7 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChangeSource,
         ConfidentialOutputModel,
         ImportedKeyId,
         KeyId,
@@ -783,6 +784,91 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 key: vault_id.to_string(),
             });
         }
+
+        Ok(())
+    }
+
+    fn balance_changes_insert(
+        &mut self,
+        vault_address: &VaultId,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        before_revealed_balance: &Amount,
+        after_revealed_balance: &Amount,
+        before_confidential_balance: &Amount,
+        after_confidential_balance: &Amount,
+        source: &BalanceChangeSource,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "balance_changes_insert";
+        use crate::schema::{account_balance_changes, accounts, vaults};
+
+        let account_id = accounts::table
+            .select(accounts::id)
+            .filter(accounts::address.eq(account_address.to_string()))
+            .first::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let vault_db_id = vaults::table
+            .select(vaults::id)
+            .filter(vaults::address.eq(vault_address.to_string()))
+            .first::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let source_str = models::balance_change_source_to_string(source);
+        let (transaction_id, is_transaction) = match source {
+            BalanceChangeSource::Transaction { transaction_id } => {
+                (Some(transaction_id.to_string()), true)
+            },
+            _ => (None, false),
+        };
+
+        // Idempotency: for Transaction sources, skip if an entry already exists for this (vault, transaction_id)
+        if is_transaction {
+            if let Some(ref tx_id) = transaction_id {
+                let existing = account_balance_changes::table
+                    .select(account_balance_changes::id)
+                    .filter(account_balance_changes::vault_id.eq(vault_db_id))
+                    .filter(account_balance_changes::transaction_id.eq(tx_id))
+                    .first::<i32>(self.connection())
+                    .optional()
+                    .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+                if existing.is_some() {
+                    return Ok(());
+                }
+            }
+        }
+
+        let compute_delta = |before: &Amount, after: &Amount| -> String {
+            let b = before.to_u128();
+            let a = after.to_u128();
+            if a >= b {
+                (a - b).to_string()
+            } else {
+                format!("-{}", b - a)
+            }
+        };
+
+        let values = (
+            account_balance_changes::vault_id.eq(vault_db_id),
+            account_balance_changes::account_id.eq(account_id),
+            account_balance_changes::resource_address.eq(resource_address.to_string()),
+            account_balance_changes::before_revealed_balance.eq(before_revealed_balance.to_string()),
+            account_balance_changes::after_revealed_balance.eq(after_revealed_balance.to_string()),
+            account_balance_changes::before_confidential_balance.eq(before_confidential_balance.to_string()),
+            account_balance_changes::after_confidential_balance.eq(after_confidential_balance.to_string()),
+            account_balance_changes::revealed_delta.eq(compute_delta(before_revealed_balance, after_revealed_balance)),
+            account_balance_changes::confidential_delta.eq(compute_delta(
+                before_confidential_balance,
+                after_confidential_balance,
+            )),
+            account_balance_changes::source.eq(source_str),
+            account_balance_changes::transaction_id.eq(transaction_id),
+        );
+
+        diesel::insert_into(account_balance_changes::table)
+            .values(values)
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         Ok(())
     }

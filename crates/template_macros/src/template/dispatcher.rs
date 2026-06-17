@@ -99,11 +99,11 @@ fn get_function_idents(ast: &TemplateAst) -> Result<impl Iterator<Item = Functio
 
 fn get_function_blocks(ast: &TemplateAst) -> impl Iterator<Item = Expr> + '_ {
     ast.get_functions()
-        .map(|function| get_function_block(&ast.template_name, function))
+        .map(|function| get_function_block(&ast.template_name, function, ast.stateless))
 }
 
 #[allow(clippy::too_many_lines)]
-fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
+fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool) -> Expr {
     let template_mod_name = format_ident!("{}_template", template_ident);
     let mut args: Vec<Expr> = vec![];
     let mut stmts = vec![];
@@ -198,8 +198,16 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
 
     // call the user defined function in the template
     let function_ident = Ident::new(&ast.name, Span::call_site());
-    stmts.push(parse_quote! {
-        let rtn = #template_mod_name::#template_ident::#function_ident(#(#args),*);
+    stmts.push(if stateless {
+        // Stateless templates expose free functions directly in the generated module, so there is
+        // no component struct to qualify the call with.
+        parse_quote! {
+            let rtn = #template_mod_name::#function_ident(#(#args),*);
+        }
+    } else {
+        parse_quote! {
+            let rtn = #template_mod_name::#template_ident::#function_ident(#(#args),*);
+        }
     });
 
     if ast.is_migration {

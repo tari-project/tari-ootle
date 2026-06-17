@@ -272,12 +272,26 @@ mod tests {
     use tari_template_abi::{TemplateDef, Type as ArgType};
 
     use super::generate_template_def;
-    use crate::template::ast::TemplateAst;
+    use crate::template::{ast::TemplateAst, options::TemplateOptions};
 
     fn parse_template_def(input: &str) -> TemplateDef {
         let tokens = TokenStream::from_str(input).unwrap();
         let ast = parse2::<TemplateAst>(tokens).unwrap();
-        let output = generate_template_def(&ast).unwrap();
+        decode_template_def(&ast)
+    }
+
+    fn parse_stateless_template_def(input: &str) -> TemplateDef {
+        let module = parse2::<syn::ItemMod>(TokenStream::from_str(input).unwrap()).unwrap();
+        let options = TemplateOptions {
+            stateless: true,
+            ..Default::default()
+        };
+        let ast = TemplateAst::from_item_mod(module, options).unwrap();
+        decode_template_def(&ast)
+    }
+
+    fn decode_template_def(ast: &TemplateAst) -> TemplateDef {
+        let output = generate_template_def(ast).unwrap();
 
         // The generated code is: pub static TEMPLATE_DEF: [u8; N] = [b0, b1, ...] ;
         // Extract the byte array after "= ["
@@ -518,5 +532,35 @@ mod tests {
 
         let funcs = get_functions(&def);
         assert_eq!(funcs[0].output, ArgType::Unit);
+    }
+
+    #[test]
+    fn test_stateless_template_def() {
+        let def = parse_stateless_template_def(indoc! {"
+            mod math {
+                pub fn add(a: u32, b: u32) -> u32 { a + b }
+                pub fn mul(a: u32, b: u32) -> u32 { a * b }
+            }
+        "});
+
+        // Template name is taken from the module identifier, not a struct.
+        let TemplateDef::V1(v1) = &def;
+        assert_eq!(v1.template_name, "math");
+
+        let funcs = get_functions(&def);
+        assert_eq!(funcs.len(), 2);
+
+        assert_eq!(funcs[0].name, "add");
+        assert_eq!(funcs[0].arguments.len(), 2);
+        assert_eq!(funcs[0].arguments[0].name, "a");
+        assert_eq!(funcs[0].arguments[0].arg_type, ArgType::U32);
+        assert_eq!(funcs[0].arguments[1].name, "b");
+        assert_eq!(funcs[0].arguments[1].arg_type, ArgType::U32);
+        assert_eq!(funcs[0].output, ArgType::U32);
+        // No component, so nothing is mutable.
+        assert!(!funcs[0].is_mut);
+
+        assert_eq!(funcs[1].name, "mul");
+        assert!(!funcs[1].is_mut);
     }
 }

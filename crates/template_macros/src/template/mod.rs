@@ -28,7 +28,7 @@ mod template_def;
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Result, parse2};
+use syn::{ItemMod, Result, parse2};
 
 use self::{
     ast::TemplateAst,
@@ -45,9 +45,14 @@ use self::{
 /// (no flags) is to inject `#[derive(minicbor::Encode, Decode, CborLen)]` and positional
 /// `#[n(N)]` tags onto every template struct/enum. Setting
 /// [`TemplateOptions::skip_cbor_derives`] suppresses both, leaving the author to write the
-/// derives and indices by hand.
+/// derives and indices by hand. Setting [`TemplateOptions::stateless`] declares a
+/// component-less template whose public API is a set of free `pub fn` items.
 pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result<TokenStream> {
-    let mut ast = parse2::<TemplateAst>(input)?;
+    // Parse to a module first so that AST construction can take `options` into account: the
+    // `stateless` flag changes how the module body is interpreted (free functions vs. a component
+    // struct/impl), which the `syn::Parse for TemplateAst` impl has no access to on its own.
+    let module = parse2::<ItemMod>(input)?;
+    let mut ast = TemplateAst::from_item_mod(module, options)?;
 
     if !options.skip_cbor_derives {
         ast::inject_cbor_derives(&mut ast.module_content)?;
@@ -68,4 +73,55 @@ pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result
     // eprintln!("output = {}", output);
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use proc_macro2::TokenStream;
+
+    use super::{generate_template, options::TemplateOptions};
+
+    fn expand(src: &str, options: TemplateOptions) -> String {
+        generate_template(options, TokenStream::from_str(src).unwrap())
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn stateless_dispatches_to_free_functions() {
+        let out = expand(
+            "mod math { pub fn add(a: u32, b: u32) -> u32 { a + b } }",
+            TemplateOptions {
+                stateless: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(out.contains("pub mod math_template"), "{out}");
+        assert!(out.contains("math_main"), "{out}");
+        // Free-function call path (`math_template :: add`), with no component struct qualifier.
+        assert!(out.contains("math_template :: add"), "{out}");
+        assert!(!out.contains("math_template :: math :: add"), "{out}");
+    }
+
+    #[test]
+    fn stateless_composes_with_skip_cbor_derives() {
+        let src = "mod math { pub struct Point { x: u32, y: u32 } pub fn sum(p: Point) -> u32 { p.x + p.y } }";
+
+        // With derives injected (default): the data struct gets the minicbor derives.
+        let with_derives = expand(src, TemplateOptions {
+            stateless: true,
+            ..Default::default()
+        });
+        assert!(with_derives.contains("minicbor :: Encode"), "{with_derives}");
+
+        // skip_cbor_derives suppresses the injection even in stateless mode.
+        let skipped = expand(src, TemplateOptions {
+            stateless: true,
+            skip_cbor_derives: true,
+        });
+        assert!(!skipped.contains("minicbor :: Encode"), "{skipped}");
+    }
 }

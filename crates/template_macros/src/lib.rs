@@ -35,6 +35,10 @@
 //! - `skip_cbor_derives` — suppress the default `#[derive(minicbor::Encode, minicbor::Decode, minicbor::CborLen)]`
 //!   injection on template structs/enums *and* the per-field/variant `#[n(N)]` index assignment. The author is then
 //!   responsible for providing their own derives and indices.
+//! - `stateless` — declare a component-less template. The module exposes only stateless free `pub fn` items (no
+//!   component, no state, no `&self` methods); the template name is taken from the module identifier. Methods, `->
+//!   Self` constructors and `#[migration]` functions are rejected. Useful for pure-function templates such as
+//!   spend-time scripts, resource auth-hook libraries and validation/math helpers. Composes with `skip_cbor_derives`.
 //!
 //! Field-level overrides are always honoured, regardless of the flag: if a field already
 //! carries `#[n(N)]`, `#[b(N)]`, or `#[cbor(n(N))]`, the macro will not overwrite it.
@@ -69,6 +73,14 @@
 //!         #[n(1)] beta: u32,
 //!     }
 //!     impl HandRolled { pub fn new() -> Self { Self { alpha: 0, beta: 0 } } }
+//! }
+//!
+//! // A component-less, stateless template — only free functions, no struct/state.
+//! // The template name is the module identifier (`math`).
+//! #[template(stateless)]
+//! mod math {
+//!     pub fn add(a: u32, b: u32) -> u32 { a + b }
+//!     pub fn mul(a: u32, b: u32) -> u32 { a * b }
 //! }
 //! ```
 

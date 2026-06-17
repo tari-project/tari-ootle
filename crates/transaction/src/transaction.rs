@@ -20,7 +20,12 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     committee::CommitteeInfo,
 };
-use tari_template_lib_types::{ClaimedOutputTombstoneAddress, ComponentAddress, TemplateAddress};
+use tari_template_lib_types::{
+    ClaimedOutputTombstoneAddress,
+    ComponentAddress,
+    TemplateAddress,
+    crypto::RistrettoPublicKeyBytes,
+};
 
 use crate::{
     Blobs,
@@ -131,6 +136,16 @@ impl Transaction {
         match self {
             Self::V1(tx) => tx.verify_all_signatures(),
         }
+    }
+
+    /// Returns the public key of the main signer: the authorized seal signer if present, otherwise
+    /// the first transaction signer. `None` if the transaction has no signers and the seal signer is
+    /// not authorized.
+    pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
+        if self.is_seal_signer_authorized() {
+            return Some(*self.seal_signature().public_key());
+        }
+        self.signatures().first().map(|sig| *sig.public_key())
     }
 
     pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {

@@ -68,6 +68,18 @@ use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_ootle_transaction::{Network, Transaction};
+use tari_ootle_transaction_validation::{
+    BasicValidations,
+    EpochRangeValidator,
+    TemplateExistsValidator,
+    TransactionDryRunValidator,
+    TransactionNetworkValidator,
+    TransactionSignatureValidator,
+    TransactionValidationError,
+    TransactionWeightValidator,
+    Validator,
+    WithContext,
+};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
@@ -105,18 +117,6 @@ use crate::{
             messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         },
     },
-    transaction_validators::{
-        BasicValidations,
-        EpochRangeValidator,
-        TemplateExistsValidator,
-        TransactionDryRunValidator,
-        TransactionNetworkValidator,
-        TransactionSignatureValidator,
-        TransactionValidationError,
-        TransactionWeightValidator,
-        WithContext,
-    },
-    validator::Validator,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::bootstrap";

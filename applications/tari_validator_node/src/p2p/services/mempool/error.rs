@@ -4,9 +4,10 @@
 use tari_epoch_manager::EpochManagerError;
 use tari_networking::NetworkingError;
 use tari_ootle_storage::StorageError;
+use tari_ootle_transaction_validation::TransactionValidationError;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{p2p::services::mempool::MempoolRequest, transaction_validators::TransactionValidationError};
+use crate::p2p::services::mempool::MempoolRequest;
 
 #[derive(thiserror::Error, Debug)]
 pub enum MempoolError {

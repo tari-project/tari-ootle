@@ -2,10 +2,9 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use log::warn;
-use tari_engine::executables::Executable;
 use tari_ootle_transaction::Transaction;
 
-use crate::{transaction_validators::TransactionValidationError, validator::Validator};
+use crate::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::signature";
 
@@ -20,7 +19,7 @@ impl Validator<Transaction> for TransactionSignatureValidator {
         if transaction.main_signer().is_none() {
             warn!(target: LOG_TARGET, "TransactionSignatureValidator - FAIL: No main signer");
             return Err(TransactionValidationError::NoMainSigner {
-                transaction_id: transaction.to_id(),
+                transaction_id: transaction.calculate_id(),
             });
         }
 

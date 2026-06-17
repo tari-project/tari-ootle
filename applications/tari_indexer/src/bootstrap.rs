@@ -267,7 +267,12 @@ pub async fn spawn_services(
         ),
     );
 
-    let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
+    let transaction_manager = TransactionManager::new(
+        network_client.clone(),
+        store.clone(),
+        config.network,
+        consensus_constants.max_transaction_weight,
+    );
 
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.

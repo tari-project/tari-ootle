@@ -39,8 +39,6 @@ mod metrics;
 mod migrations;
 pub mod node;
 mod p2p;
-pub mod transaction_validators;
-mod validator;
 
 use std::{fs, io, iter, process, time::Instant};
 

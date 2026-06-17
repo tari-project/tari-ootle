@@ -32,6 +32,7 @@ tari_engine_types = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }
+tari_ootle_transaction_validation = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["service"] }
@@ -59,7 +60,6 @@ time = { workspace = true, features = ["formatting"] }
 lazy_static = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true }
-indexmap = { workspace = true }
 serde_json5 = { workspace = true }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true, features = ["std"] }

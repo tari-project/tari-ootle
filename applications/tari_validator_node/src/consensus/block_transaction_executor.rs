@@ -22,8 +22,7 @@ use tari_ootle_storage::{
     consensus_models::{LockedEpoch, TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::Transaction;
-
-use crate::{transaction_validators::TransactionValidationError, validator::Validator};
+use tari_ootle_transaction_validation::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_executor";
 

@@ -122,12 +122,19 @@ fn generate_covenant_claims(
         }
         seen.push(condition);
 
+        let value_overflow = || WalletCryptoError::InvalidArgument {
+            name: "covenant",
+            details: "Covenant partition value sum overflowed".to_string(),
+        };
+
         let mut agg_input_mask = RistrettoSecretKey::default();
         let mut input_value = Amount::zero();
         let mut input_commitments = Vec::new();
         for input in inputs.iter().filter(|i| i.spend_condition.as_ref() == Some(condition)) {
             agg_input_mask = agg_input_mask + &input.mask_and_value.mask;
-            input_value = input_value.saturating_add(Amount::from_u64(input.mask_and_value.value));
+            input_value = input_value
+                .checked_add(Amount::from_u64(input.mask_and_value.value))
+                .ok_or_else(value_overflow)?;
             input_commitments.push(input.mask_and_value.to_commitment().to_byte_type());
         }
 
@@ -136,7 +143,9 @@ fn generate_covenant_claims(
         let mut output_commitments = Vec::new();
         for output in outputs.iter().filter(|o| &o.spend_condition == condition) {
             agg_output_mask = agg_output_mask + &output.witness.mask;
-            output_value = output_value.saturating_add(Amount::from_u64(output.witness.amount));
+            output_value = output_value
+                .checked_add(Amount::from_u64(output.witness.amount))
+                .ok_or_else(value_overflow)?;
             output_commitments.push(output.witness.to_commitment().to_byte_type());
         }
 

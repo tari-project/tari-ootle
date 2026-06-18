@@ -22,8 +22,8 @@ const LOG_TARGET: &str = "tari::engine::crypto::covenant";
 /// declared `revealed_amount`. Confidential values are never exposed. Soundness against forged output values relies on
 /// the per-output range proofs verified elsewhere in the transfer pipeline.
 ///
-/// `revealed_amount` is the exact net cleartext outflow of the partition and must be non-negative; the caller bounds it
-/// against the script's permitted allowance.
+/// `revealed_amount` is the exact net cleartext outflow of the partition; the caller bounds it against the script's
+/// permitted allowance. Amounts above `u64::MAX` are rejected by `commit_amount` below (the range-proof domain).
 pub fn validate_covenant_balance_proof(
     condition: &SpendCondition,
     revealed_amount: Amount,
@@ -31,10 +31,6 @@ pub fn validate_covenant_balance_proof(
     output_commitments: &[PedersenCommitmentBytes],
     signature: &BalanceProofSignature,
 ) -> bool {
-    if revealed_amount.is_negative() {
-        return false;
-    }
-
     let Some(sig) = try_decode_to_signature(signature) else {
         warn!(target: LOG_TARGET, "Malformed covenant balance proof signature");
         return false;

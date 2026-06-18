@@ -74,6 +74,9 @@ pub fn generate_covenant_balance_proof_signature(
     input_commitments: &[PedersenCommitmentBytes],
     output_commitments: &[PedersenCommitmentBytes],
 ) -> BalanceProofSignature {
+    // Unlike the global balance proofs, there is no zero-excess sentinel: a covenant partition's aggregate mask
+    // difference is non-trivial for distinct output masks, and a degenerate zero excess would yield the identity
+    // point, which the verifier rejects — the correct fail-closed outcome.
     let secret_excess = agg_input_mask - agg_output_mask;
     let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
     let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());

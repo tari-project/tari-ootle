@@ -99,6 +99,11 @@ impl SpendContext {
     // ------------------------------ Covenant helpers ------------------------------ //
     // These are thin assertions over `outputs()` / `invoking_condition()`. Authors compose them; the engine treats
     // them as ordinary predicate logic.
+    //
+    // A "partition" is every input and output of the transfer that shares the invoking spend condition. Partitions are
+    // keyed by condition equality, so distinct UTXOs gated by an identical `Script(template, fn, args)` form one
+    // partition — there is no hidden per-UTXO identity. Use distinct bound args (e.g. a vault nonce) when separate
+    // UTXOs must be separate covenants.
 
     /// Recursive "stay in the vault" covenant: asserts that the transfer has at least one stealth output and that every
     /// stealth output carries the same spend condition that invoked this predicate.
@@ -144,6 +149,9 @@ impl SpendContext {
 
     /// Capped-withdrawal covenant (TIP-0006 Option C): asserts at most `max_revealed` cleartext leaves the invoking
     /// partition this spend. The withdrawn amount is public; the remaining confidential balance is not revealed.
+    ///
+    /// The allowance is per-partition, not per-UTXO: if several spent UTXOs share this exact condition they form one
+    /// partition with one shared `max_revealed`. Bind a per-UTXO identity into the condition's args for per-UTXO caps.
     pub fn require_balance_preserved_with_allowance(&self, max_revealed: u64) {
         assert!(
             self.covenant_balanced(max_revealed),

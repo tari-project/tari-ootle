@@ -3327,6 +3327,11 @@ where
 
         // (T2) Spend time: evaluate the predicate for every input carrying a `Script` condition BEFORE the spend
         // executes, so a rejection leaves the inputs unspent. This is the authoritative, mandatory security gate.
+        //
+        // Covenant soundness invariant: a covenant balance proof binds the partition's output commitments but trusts
+        // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
+        // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
+        // wraparound forgery in the covenant check.
         self.evaluate_input_spend_scripts(resource_address.clone(), &statement)?;
 
         self.tracker.write_with(|state_mut| {

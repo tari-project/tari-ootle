@@ -147,9 +147,7 @@ impl TryFrom<StealthInputWitnessJson> for StealthInputWitness {
     fn try_from(value: StealthInputWitnessJson) -> Result<Self, Self::Error> {
         let inner = value.into_inner();
         let mask = decode_secret_key(&inner.mask, "mask")?;
-        Ok(StealthInputWitness {
-            mask_and_value: MaskAndValue::new(inner.value, mask),
-        })
+        Ok(StealthInputWitness::new(MaskAndValue::new(inner.value, mask)))
     }
 }
 

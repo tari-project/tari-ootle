@@ -115,9 +115,7 @@ mod stealth_tests {
             .iter()
             .map(|&(seed, amount)| {
                 let (mask, _) = create_key_pair_from_seed(seed);
-                StealthInputWitness {
-                    mask_and_value: MaskAndValue::new(amount, mask.clone()),
-                }
+                StealthInputWitness::new(MaskAndValue::new(amount, mask.clone()))
             })
             .collect()
     }

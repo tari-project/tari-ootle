@@ -963,6 +963,13 @@ pub enum SpendContextAction {
     /// The total revealed amount being output by the transfer.
     #[n(5)]
     RevealedOutputAmount,
+    /// Verifies the covenant sub-balance proof for the invoking partition, permitting at most `max_revealed` cleartext
+    /// to leave it. Returns whether the partition's value is conserved within that allowance.
+    #[n(6)]
+    AssertCovenantBalanced {
+        #[n(0)]
+        max_revealed: u64,
+    },
 }
 
 /// A spend-context introspection operation argument.

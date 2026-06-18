@@ -15,6 +15,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{
+    Amount,
     FunctionName,
     ResourceAddress,
     TemplateAddress,
@@ -69,6 +70,23 @@ fn faucet_new_tx(test: &mut TemplateTest, mint: &StealthSecretTransferData) -> T
 /// (the output mask is needed to spend the UTXO).
 fn mint_utxo(test: &mut TemplateTest, condition: SpendCondition) -> (ResourceAddress, StealthSecretTransferData) {
     let mint = stealth::generate_mint_statement(vec![(100u64, condition)], 0u64, None);
+    let tx = faucet_new_tx(test, &mint);
+    test.execute_expect_success(tx, vec![]);
+    let resx = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+    (resx, mint)
+}
+
+/// Mints one 100-unit stealth UTXO per `condition` (all in a single resource) and returns the resource address plus
+/// the mint secrets (`output_masks[i]` spends the UTXO gated by `conditions[i]`).
+fn mint_utxos(
+    test: &mut TemplateTest,
+    conditions: Vec<SpendCondition>,
+) -> (ResourceAddress, StealthSecretTransferData) {
+    let outputs = conditions.into_iter().map(|c| (100u64, c)).collect::<Vec<_>>();
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let tx = faucet_new_tx(test, &mint);
     test.execute_expect_success(tx, vec![]);
     let resx = test
@@ -191,6 +209,191 @@ fn covenant_rejects_spend_with_no_stealth_outputs() {
         std::iter::empty::<(u64, SpendCondition)>(),
         100u64,
     );
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+}
+
+// -------------------------------- Covenant value conservation -------------------------------- //
+
+/// Spends the single minted UTXO (gated by `covenant`) into the given stealth `outputs`. The input carries `covenant`
+/// so the transfer builder emits the covenant balance claim; value assigned to an output with a different condition has
+/// left the covenant partition.
+fn spend_with_covenant(
+    mint: &StealthSecretTransferData,
+    covenant: &SpendCondition,
+    outputs: Vec<(u64, SpendCondition)>,
+) -> StealthSecretTransferData {
+    stealth::generate_transfer_data(
+        [(
+            MaskAndValue {
+                mask: mint.output_masks[0].clone(),
+                value: 100,
+            },
+            covenant.clone(),
+        )],
+        0u64,
+        outputs,
+        0u64,
+    )
+}
+
+#[test]
+fn covenant_balance_allows_full_conservation() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant = script_condition(script_template, "preserve_balance", vec![]);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+
+    // The full 100 units stay in the covenant -> conserved.
+    let transfer = spend_with_covenant(&mint, &covenant, vec![(100, covenant.clone())]);
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+}
+
+#[test]
+fn covenant_balance_rejects_value_leaving_partition() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant = script_condition(script_template, "preserve_balance", vec![]);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+
+    // All 100 units go to a Signed output, leaving the covenant entirely -> rejected (allowance is zero).
+    let transfer = spend_with_covenant(&mint, &covenant, vec![(
+        100,
+        SpendCondition::Signed(test.to_public_key_bytes()),
+    )]);
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+}
+
+#[test]
+fn covenant_balance_allows_withdrawal_within_allowance() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant = script_condition(script_template, "preserve_balance_with_allowance", vec![encode_arg(
+        &30u64,
+    )]);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+
+    // Withdraw 30 to a Signed output, keep 70 in the covenant -> within the 30 allowance.
+    let transfer = spend_with_covenant(&mint, &covenant, vec![
+        (70, covenant.clone()),
+        (30, SpendCondition::Signed(test.to_public_key_bytes())),
+    ]);
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+}
+
+#[test]
+fn covenant_balance_rejects_withdrawal_over_allowance() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant = script_condition(script_template, "preserve_balance_with_allowance", vec![encode_arg(
+        &30u64,
+    )]);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+
+    // Withdraw 40 to a Signed output, exceeding the 30 allowance -> rejected.
+    let transfer = spend_with_covenant(&mint, &covenant, vec![
+        (60, covenant.clone()),
+        (40, SpendCondition::Signed(test.to_public_key_bytes())),
+    ]);
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+}
+
+#[test]
+fn covenant_balance_verifies_each_partition_independently() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant_a = script_condition(script_template, "preserve_balance", vec![]);
+    let covenant_b = script_condition(script_template, "preserve_balance_with_allowance", vec![encode_arg(
+        &50u64,
+    )]);
+    let (resx, mint) = mint_utxos(&mut test, vec![covenant_a.clone(), covenant_b.clone()]);
+
+    // Two covenant partitions in one transfer. A (input 0) is fully conserved; B (input 1) withdraws 50 within its
+    // allowance. Each predicate must match its own claim by partition index, not the other's.
+    let transfer = stealth::generate_transfer_data(
+        [
+            (
+                MaskAndValue {
+                    mask: mint.output_masks[0].clone(),
+                    value: 100,
+                },
+                covenant_a.clone(),
+            ),
+            (
+                MaskAndValue {
+                    mask: mint.output_masks[1].clone(),
+                    value: 100,
+                },
+                covenant_b.clone(),
+            ),
+        ],
+        0u64,
+        vec![
+            (100u64, covenant_a),
+            (50u64, covenant_b),
+            (50u64, SpendCondition::Signed(test.to_public_key_bytes())),
+        ],
+        0u64,
+    );
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+}
+
+#[test]
+fn covenant_balance_rejects_understated_withdrawal() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant = script_condition(script_template, "preserve_balance_with_allowance", vec![encode_arg(
+        &30u64,
+    )]);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+
+    // Truly move 40 out of the covenant, but tamper the claim to understate the outflow as 30 to feign compliance with
+    // the allowance. The proof is bound to the true outflow, so verification fails and the spend is rejected.
+    let mut transfer = spend_with_covenant(&mint, &covenant, vec![
+        (60, covenant.clone()),
+        (40, SpendCondition::Signed(test.to_public_key_bytes())),
+    ]);
+    assert_eq!(transfer.statement.covenant_claims.len(), 1);
+    transfer.statement.covenant_claims[0].revealed_amount = Amount::from_u64(30);
+
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
             .stealth_transfer(resx, transfer.statement)

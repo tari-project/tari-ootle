@@ -50,6 +50,16 @@ mod spend_scripts {
             ctx.require_output_preserves_condition();
         }
 
+        /// Full-conservation covenant: no value may leave this UTXO's covenant partition.
+        pub fn preserve_balance(ctx: SpendContext) {
+            ctx.require_balance_preserved();
+        }
+
+        /// Capped-withdrawal covenant: at most `max_revealed` cleartext may leave the covenant per spend.
+        pub fn preserve_balance_with_allowance(max_revealed: u64, ctx: SpendContext) {
+            ctx.require_balance_preserved_with_allowance(max_revealed);
+        }
+
         /// Signature lock: authorises only if the bound `signature` is valid for `public_key` over a fixed message.
         /// Exercises `signature_invoke` from inside a spend script.
         pub fn require_signature(public_key: PublicKey, signature: Signature<SpendSigDomain>, _ctx: SpendContext) {

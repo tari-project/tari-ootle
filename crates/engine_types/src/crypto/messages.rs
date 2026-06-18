@@ -5,7 +5,7 @@ use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_template_lib::types::{
     Amount,
     crypto::PedersenCommitmentBytes,
-    stealth::{StealthInputsStatement, StealthOutputsStatement, ViewableBalanceProofMessageFields},
+    stealth::{SpendCondition, StealthInputsStatement, StealthOutputsStatement, ViewableBalanceProofMessageFields},
 };
 
 use crate::{
@@ -52,6 +52,28 @@ pub fn stealth_balance_proof64(
         .chain(public_nonce)
         .chain(stealth_inputs_statement)
         .chain(stealth_outputs_statement)
+        .result()
+        .into()
+}
+
+/// Challenge for a covenant sub-balance proof (TIP-0006 `AssertCovenantBalanced`). Bound to a distinct domain from
+/// [`stealth_balance_proof64`] so a partition proof can never be replayed as, or mistaken for, the whole-transfer
+/// balance proof. The `condition`, `revealed_amount` and the ordered commitment lists pin the proof to one partition.
+pub fn covenant_balance_proof64(
+    public_excess: &RistrettoPublicKey,
+    public_nonce: &RistrettoPublicKey,
+    condition: &SpendCondition,
+    revealed_amount: &Amount,
+    input_commitments: &[PedersenCommitmentBytes],
+    output_commitments: &[PedersenCommitmentBytes],
+) -> Hash64 {
+    engine_hasher64(EngineHashDomainLabel::CovenantBalanceProof)
+        .chain(public_excess)
+        .chain(public_nonce)
+        .chain(condition)
+        .chain(revealed_amount)
+        .chain(input_commitments)
+        .chain(output_commitments)
         .result()
         .into()
 }

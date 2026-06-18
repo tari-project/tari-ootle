@@ -48,20 +48,41 @@ pub enum SpendConditionSpec {
 
 pub struct InputSpec {
     mask_and_value: MaskAndValue,
+    spend_condition: Option<SpendCondition>,
 }
 
 impl InputSpec {
     pub fn new(mask_and_value: MaskAndValue) -> Self {
-        Self { mask_and_value }
+        Self {
+            mask_and_value,
+            spend_condition: None,
+        }
+    }
+
+    pub fn with_spend_condition(mask_and_value: MaskAndValue, spend_condition: SpendCondition) -> Self {
+        Self {
+            mask_and_value,
+            spend_condition: Some(spend_condition),
+        }
     }
 
     pub fn mask_and_value(&self) -> &MaskAndValue {
         &self.mask_and_value
+    }
+
+    pub fn spend_condition(&self) -> Option<&SpendCondition> {
+        self.spend_condition.as_ref()
     }
 }
 
 impl From<MaskAndValue> for InputSpec {
     fn from(mask_and_value: MaskAndValue) -> Self {
         Self::new(mask_and_value)
+    }
+}
+
+impl From<(MaskAndValue, SpendCondition)> for InputSpec {
+    fn from((mask_and_value, spend_condition): (MaskAndValue, SpendCondition)) -> Self {
+        Self::with_spend_condition(mask_and_value, spend_condition)
     }
 }

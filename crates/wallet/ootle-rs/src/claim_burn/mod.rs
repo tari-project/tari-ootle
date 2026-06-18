@@ -218,6 +218,7 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
             inputs_statement,
             outputs_statement,
             balance_proof: Some(balance_proof),
+            covenant_claims: Vec::new(),
         };
 
         // Sanity check the constructed transfer balances before paying any fees.

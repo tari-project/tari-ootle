@@ -108,6 +108,30 @@ impl StealthInputsStatement {
     }
 }
 
+/// A covenant sub-balance proof (TIP-0006 `AssertCovenantBalanced`) covering one partition of the transfer: the inputs
+/// and outputs that share a `SpendCondition::Script`. It proves the partition's committed value is conserved into
+/// outputs carrying that condition save for an exact cleartext `revealed_amount`, without exposing confidential values.
+///
+/// A claim is keyed by `partition_input_index` rather than by restating its (potentially large) spend condition; the
+/// engine matches it to its partition by that index. The condition is bound into `signature`, so a claim cannot be
+/// validated against the wrong partition.
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+pub struct CovenantBalanceClaim {
+    /// The index, within the transfer's spent inputs, of the first input belonging to this partition. Identifies the
+    /// partition without restating its spend condition.
+    #[n(0)]
+    pub partition_input_index: u32,
+    /// The exact net cleartext amount leaving the partition (zero for full conservation). Must be non-negative.
+    #[n(1)]
+    pub revealed_amount: Amount,
+    /// Schnorr proof of knowledge of the partition's aggregate mask difference.
+    #[n(2)]
+    pub signature: BalanceProofSignature,
+}
+
 #[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -121,6 +145,12 @@ pub struct StealthTransferStatement {
     /// is valid). This may be None, if and only if, the transfer is revealed-only (i.e. no stealth inputs or outputs).
     #[n(2)]
     pub balance_proof: Option<BalanceProofSignature>,
+    /// Covenant sub-balance proofs (TIP-0006), one per input partition whose `SpendCondition::Script` predicate
+    /// requires value conservation. Empty when no spent input gates on a covenant.
+    #[n(3)]
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[cbor(default)]
+    pub covenant_claims: Vec<CovenantBalanceClaim>,
 }
 
 impl StealthTransferStatement {
@@ -129,6 +159,7 @@ impl StealthTransferStatement {
             inputs_statement: StealthInputsStatement::new_revealed_only(input_amount),
             outputs_statement: StealthOutputsStatement::new_revealed_only(output_amount),
             balance_proof: None,
+            covenant_claims: vec![],
         }
     }
 

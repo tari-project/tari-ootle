@@ -12,6 +12,18 @@
   `crates/template_lib_types/`)
 - CBOR serialization: `tari_bor` (in `crates/tari_bor/`) - wraps ciborium, re-exports serde
 
+## Code Comments
+
+IMPORTANT: Comments must help a future reader understand code that isn't self-explanatory — non-obvious
+invariants, the reason for a non-obvious approach, tricky edge cases. They must NOT narrate changes.
+
+- When fixing a bug, lint, or doing a refactor, do not add a comment explaining what was wrong or why you
+  changed it. The corrected code no longer has the issue, so such a comment describes a problem that isn't
+  in the code — it serves no future reader.
+- Rationale for a fix belongs in the commit message and PR description, not in the source.
+- Write present-tense statements of intent/invariant ("X must be Y because Z"), never history ("changed
+  this from A to B", "without this guard X would happen", "previously this did A").
+
 ## Key Facts
 
 ### Token Amounts

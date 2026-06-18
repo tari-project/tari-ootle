@@ -77,6 +77,18 @@ mod spend_scripts {
             emit_event("spend_script_test", Metadata::new());
         }
 
+        /// Attempts a cross-template call. `call_invoke` is on the read-only deny-list (and cross-template calls are
+        /// disabled at the frame level), so this always aborts the spend before the target runs.
+        pub fn try_cross_template_call(template: TemplateAddress, _ctx: SpendContext) {
+            let _: () = TemplateManager::get(template).call("always_ok", args![]);
+        }
+
+        /// Runs an unbounded computation. The WASM metering budget aborts it, which the engine turns into a rejected
+        /// spend — a script cannot stall consensus by spending unbounded compute.
+        pub fn exhaust_budget(_ctx: SpendContext) {
+            loop {}
+        }
+
         // --------------- Deliberately ill-shaped functions for creation-time (T1) tests --------------- //
 
         /// Mutable predicate — rejected at creation time (`is_mut == true`).

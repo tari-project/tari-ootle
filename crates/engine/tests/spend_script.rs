@@ -404,6 +404,75 @@ fn covenant_balance_rejects_understated_withdrawal() {
     assert_reject_reason(&reason, "Spend script rejected the spend");
 }
 
+/// A confidential "allowance vault": a real-world covenant where each spend may withdraw at most a fixed cap and the
+/// remainder is forced (by the balance covenant) back into a UTXO under the same condition, so the cap keeps applying
+/// over the vault's lifetime across successive spends.
+#[test]
+fn covenant_balance_allowance_vault_persists_across_spends() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let vault = script_condition(script_template, "preserve_balance_with_allowance", vec![encode_arg(
+        &30u64,
+    )]);
+    let recipient = SpendCondition::Signed(test.to_public_key_bytes());
+    let (resx, mint) = mint_utxo(&mut test, vault.clone());
+
+    // Spend 1: withdraw 30 to the recipient; the remaining 70 rolls back into the vault.
+    let spend1 = spend_with_covenant(&mint, &vault, vec![(70, vault.clone()), (30, recipient.clone())]);
+    let vault_70 = spend1.output_masks[0].clone();
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, spend1.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    // Spend 2: spend the persisted 70-unit vault output; withdraw another 30, leaving 40 in the vault.
+    let spend2 = stealth::generate_transfer_data(
+        [(
+            MaskAndValue {
+                mask: vault_70,
+                value: 70,
+            },
+            vault.clone(),
+        )],
+        0u64,
+        vec![(40u64, vault.clone()), (30u64, recipient.clone())],
+        0u64,
+    );
+    let vault_40 = spend2.output_masks[0].clone();
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, spend2.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    // The cap re-applies to the persisted vault: withdrawing 35 of the remaining 40 exceeds the 30 allowance.
+    let over = stealth::generate_transfer_data(
+        [(
+            MaskAndValue {
+                mask: vault_40,
+                value: 40,
+            },
+            vault.clone(),
+        )],
+        0u64,
+        vec![(5u64, vault.clone()), (35u64, recipient)],
+        0u64,
+    );
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, over.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+}
+
 // -------------------------------- Unconditional reject -------------------------------- //
 
 #[test]
@@ -459,6 +528,51 @@ fn sandbox_denies_emit_event() {
     );
     assert_reject_reason(&reason, "Spend script rejected the spend");
     assert_reject_reason(&reason, "forbidden inside a read-only");
+}
+
+#[test]
+fn sandbox_denies_cross_template_call() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    // The bound arg is a template address for the predicate to call into.
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "try_cross_template_call", vec![encode_arg(
+            &script_template,
+        )]),
+    );
+
+    let transfer = spend_into(&mint, SpendCondition::Signed(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+    assert_reject_reason(&reason, "call_invoke");
+}
+
+// -------------------------------- Compute budget -------------------------------- //
+
+#[test]
+fn spend_script_exceeding_compute_budget_aborts() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let (resx, mint) = mint_utxo(&mut test, script_condition(script_template, "exhaust_budget", vec![]));
+
+    // The predicate spins forever; the WASM metering budget aborts it and the engine rejects the spend rather than
+    // letting an expensive script stall execution.
+    let transfer = spend_into(&mint, SpendCondition::Signed(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
 }
 
 // -------------------------------- Creation-time (T1) validation -------------------------------- //

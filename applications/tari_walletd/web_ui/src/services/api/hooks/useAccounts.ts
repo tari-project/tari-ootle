@@ -44,6 +44,7 @@ import {
   accountsCreate,
   accountsCreateFreeTestCoins,
   accountsGet,
+  accountsGetBalanceChanges,
   accountsGetBalances,
   accountsGetDefault,
   accountsList,
@@ -303,6 +304,27 @@ export const useAccountsGetBalances = (account?: ComponentAddress, refresh: bool
       }
       return newData;
     },
+  });
+};
+
+export const useAccountsGetBalanceChanges = (
+  account: ComponentAddress | undefined,
+  offset: number,
+  limit: number,
+  resourceAddress?: ResourceAddress,
+) => {
+  return useQuery({
+    enabled: !!account,
+    queryKey: ["account_balance_changes", account, resourceAddress, offset, limit],
+    queryFn: () =>
+      accountsGetBalanceChanges({
+        account: { ComponentAddress: account! },
+        offset,
+        limit,
+        resource_address: resourceAddress ?? null,
+        transaction_id: null,
+      }),
+    refetchInterval: 5000,
   });
 };
 

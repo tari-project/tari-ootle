@@ -37,7 +37,12 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import NftList from "@routes/AssetVault/NFTs/NFTList";
-import { BalanceEntry, decodeOotleAddressOrNull, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import {
+  BalanceEntry,
+  ComponentAddress,
+  decodeOotleAddressOrNull,
+  substateIdToString,
+} from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
 import { formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { accountsAssociateStealthResource } from "@utils/json_rpc";
@@ -45,27 +50,48 @@ import { useState } from "react";
 import { IoAdd } from "react-icons/io5";
 import { Form, useParams } from "react-router-dom";
 import { useAccountsGet, useAccountsGetBalances } from "../../services/api/hooks/useAccounts";
+import { BalanceChangeHistory, BalanceChangeHistoryDialog } from "./BalanceChangeHistory";
 
-function BalanceRow(props: BalanceEntry) {
+function BalanceRow({ balance, accountAddress }: { balance: BalanceEntry; accountAddress: ComponentAddress }) {
+  const [showChanges, setShowChanges] = useState(false);
   const currency = {
-    symbol: props.token_symbol || "",
-    decimals: props.divisibility,
+    symbol: balance.token_symbol || "",
+    decimals: balance.divisibility,
   } as Currency;
 
   return (
-    <TableRow key={props.resource_address}>
-      <DataTableCell>
-        <CopyAddress address={props.resource_address} display={props.token_symbol || props.resource_address} />
-      </DataTableCell>
-      <DataTableCell>{props.resource_type}</DataTableCell>
-      <DataTableCell>{formatCurrency(props.balance, currency)}</DataTableCell>
-      <DataTableCell>{formatCurrency(props.confidential_balance, currency)}</DataTableCell>
-    </TableRow>
+    <>
+      <TableRow key={balance.resource_address}>
+        <DataTableCell>
+          <CopyAddress address={balance.resource_address} display={balance.token_symbol || balance.resource_address} />
+        </DataTableCell>
+        <DataTableCell>{balance.resource_type}</DataTableCell>
+        <DataTableCell>{formatCurrency(balance.balance, currency)}</DataTableCell>
+        <DataTableCell>{formatCurrency(balance.confidential_balance, currency)}</DataTableCell>
+        <DataTableCell>
+          {balance.vault_address && (
+            <Button size="small" variant="text" onClick={() => setShowChanges(true)}>
+              View changes
+            </Button>
+          )}
+        </DataTableCell>
+      </TableRow>
+      {balance.vault_address && (
+        <BalanceChangeHistoryDialog
+          open={showChanges}
+          onClose={() => setShowChanges(false)}
+          accountAddress={accountAddress}
+          resourceAddress={balance.resource_address}
+          resourceLabel={balance.token_symbol}
+        />
+      )}
+    </>
   );
 }
 
 function AccountDetailsLayout() {
   const { id: accountAddr } = useParams();
+  const accountAddress = substateIdToString(accountAddr!) as ComponentAddress;
   const [showAddStealth, setShowAddStealth] = useState(false);
   const [stealthResource, setStealthResource] = useState({ newResourceAddress: "" });
   const [nftPage, setNftPage] = useState(0);
@@ -212,12 +238,23 @@ function AccountDetailsLayout() {
                     <TableCell>Resource Type</TableCell>
                     <TableCell>Revealed Balance</TableCell>
                     <TableCell>Confidential Balance</TableCell>
+                    <TableCell>History</TableCell>
                   </TableRow>
                 </TableHead>
-                <TableBody>{balancesData?.balances.map((balance: BalanceEntry) => BalanceRow(balance))}</TableBody>
+                <TableBody>
+                  {balancesData?.balances.map((balance: BalanceEntry) => (
+                    <BalanceRow key={balance.resource_address} balance={balance} accountAddress={accountAddress} />
+                  ))}
+                </TableBody>
               </Table>
             </TableContainer>
           </FetchStatusCheck>
+        </StyledPaper>
+      </Grid>
+      <Grid size={12}>
+        <StyledPaper>
+          <InnerHeading>Balance Change History</InnerHeading>
+          <BalanceChangeHistory accountAddress={accountAddress} />
         </StyledPaper>
       </Grid>
       <Grid size={12}>

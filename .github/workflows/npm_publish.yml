@@ -62,7 +62,12 @@ jobs:
           fi
 
           echo "== Publishing =="
-          pnpm publish --provenance
+          # --no-git-checks: this workflow runs on a release tag push, so the
+          # checkout lands on a detached HEAD that is not the configured
+          # publish-branch (development). pnpm's git checks (clean tree, on
+          # publish-branch, remote up to date) guard interactive publishes from
+          # a workstation, not an automated tag release, so disable them here.
+          pnpm publish --provenance --no-git-checks
 
   # Publish the Tari Wallet Daemon client to the NPM registry
   publish-wallet-daemon-client:
@@ -116,7 +121,12 @@ jobs:
           fi
 
           echo "== Publishing =="
-          pnpm publish --provenance
+          # --no-git-checks: this workflow runs on a release tag push, so the
+          # checkout lands on a detached HEAD that is not the configured
+          # publish-branch (development). pnpm's git checks (clean tree, on
+          # publish-branch, remote up to date) guard interactive publishes from
+          # a workstation, not an automated tag release, so disable them here.
+          pnpm publish --provenance --no-git-checks
 
   # Publish the Tari Indexer client to the NPM registry
   publish-indexer-client:
@@ -170,4 +180,9 @@ jobs:
           fi
 
           echo "== Publishing =="
-          pnpm publish --provenance
+          # --no-git-checks: this workflow runs on a release tag push, so the
+          # checkout lands on a detached HEAD that is not the configured
+          # publish-branch (development). pnpm's git checks (clean tree, on
+          # publish-branch, remote up to date) guard interactive publishes from
+          # a workstation, not an automated tag release, so disable them here.
+          pnpm publish --provenance --no-git-checks

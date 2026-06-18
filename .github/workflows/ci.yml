@@ -84,15 +84,28 @@ jobs:
           node-version-file: .nvmrc
           cache: 'pnpm'
 
+      - name: install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Guard: a frozen install must not mutate tracked files. pnpm 11 appends an
+      # `allowBuilds:` scaffold to pnpm-workspace.yaml for any build-script dependency
+      # that lacks an explicit allow/deny, which silently dirties the working tree and
+      # made `pnpm publish` abort on release with ERR_PNPM_GIT_UNCLEAN. The release
+      # workflow only runs on a tag push, so this fails loudly in PR CI instead. To fix
+      # a failure here, declare the new dependency in pnpm-workspace.yaml (allowBuilds).
+      - name: assert frozen install left the tree clean
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::pnpm install modified tracked files (diff above) — declare new build-script deps in pnpm-workspace.yaml (allowBuilds)."
+            exit 1
+          fi
+
       # Builds every workspace web UI (walletd, indexer, validator node, db_inspector)
       # together with the bindings/clients they depend on, in topological order.
       # Ignored dependency build scripts (esbuild/@swc/core/@parcel/watcher) ship
-      # prebuilt binaries and aren't needed to compile the UIs; strictDepBuilds: false
-      # in pnpm-workspace.yaml keeps this frozen install green.
+      # prebuilt binaries and aren't needed to compile the UIs.
       - name: build workspace web UIs
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --recursive run build
+        run: pnpm --recursive run build
 
       # The swarm daemon web UI is a standalone npm project, not part of the pnpm workspace.
       - name: build swarm daemon web UI

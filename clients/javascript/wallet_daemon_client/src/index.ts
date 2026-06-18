@@ -20,6 +20,8 @@ import type {
   AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
+  GetBalanceChangesRequest,
+  GetBalanceChangesResponse,
   AccountsRenameRequest,
   AccountsRenameResponse,
   AccountsTransferRequest,
@@ -310,6 +312,10 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public accountsSetDefault(params: AccountSetDefaultRequest): Promise<AccountSetDefaultResponse> {
     return this.sendRequest("accounts.set_default", params);
+  }
+
+  public getBalanceChanges(params: GetBalanceChangesRequest): Promise<GetBalanceChangesResponse> {
+    return this.sendRequest("accounts.get_balance_changes", params);
   }
 
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {

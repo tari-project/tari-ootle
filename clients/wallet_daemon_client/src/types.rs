@@ -1637,3 +1637,41 @@ pub struct AddressBookDeleteRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AddressBookDeleteResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct GetBalanceChangesRequest {
+    #[serde(deserialize_with = "opt_string_or_struct")]
+    pub account: Option<ComponentAddressOrName>,
+    #[serde(default)]
+    pub offset: Option<u64>,
+    #[serde(default)]
+    pub limit: Option<u64>,
+    #[serde(default)]
+    pub resource_address: Option<ResourceAddress>,
+    #[serde(default)]
+    pub transaction_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct BalanceChangeEntry {
+    pub vault_address: String,
+    pub resource_address: String,
+    pub before_revealed_balance: String,
+    pub after_revealed_balance: String,
+    pub before_confidential_balance: String,
+    pub after_confidential_balance: String,
+    pub revealed_delta: String,
+    pub confidential_delta: String,
+    pub source: String,
+    pub transaction_id: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct GetBalanceChangesResponse {
+    pub changes: Vec<BalanceChangeEntry>,
+    pub total: u64,
+}

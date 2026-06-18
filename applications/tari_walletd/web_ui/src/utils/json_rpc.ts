@@ -35,6 +35,8 @@ import type {
   AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
+  GetBalanceChangesRequest,
+  GetBalanceChangesResponse,
   AccountsListRequest,
   AccountsListResponse,
   AccountsRenameRequest,
@@ -285,6 +287,9 @@ export const mintFaucetNfts = (request: MintFaucetNftRequest): Promise<MintFauce
   client().then((c) => c.mintFaucetNfts(request));
 export const accountsGetDefault = (request: AccountGetDefaultRequest): Promise<AccountGetResponse> =>
   client().then((c) => c.accountsGetDefault(request));
+
+export const getBalanceChanges = (request: GetBalanceChangesRequest): Promise<GetBalanceChangesResponse> =>
+  client().then((c) => c.getBalanceChanges(request));
 
 // confidential
 export const confidentialViewVaultBalance = (

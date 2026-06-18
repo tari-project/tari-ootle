@@ -17,7 +17,15 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
     apis::substate::ValidatorScanResult,
-    models::{AccountChangedEvent, AccountCreatedEvent, AccountUpdate, NewAccountData, NonFungibleToken, WalletEvent},
+    models::{
+        AccountChangedEvent,
+        AccountCreatedEvent,
+        AccountUpdate,
+        BalanceChangeSource,
+        NewAccountData,
+        NonFungibleToken,
+        WalletEvent,
+    },
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
@@ -140,7 +148,7 @@ where TSpec: WalletSdkSpec
             if let Some(account_addr) = account_substate_id.substate_id().as_component_address() {
                 self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
                     .await?;
-                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default())
+                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), BalanceChangeSource::Scan)
                     .await?;
             }
 
@@ -160,6 +168,7 @@ where TSpec: WalletSdkSpec
         vault_id: VaultId,
         latest_vault: &Vault,
         updated_nft_data: HashMap<NonFungibleId, NonFungibleContainer>,
+        source: BalanceChangeSource,
     ) -> Result<bool, AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
 
@@ -261,6 +270,26 @@ where TSpec: WalletSdkSpec
                 new_confidential_balance
             );
             accounts_api.update_vault_balance(vault_id, new_balance, new_confidential_balance)?;
+
+            let before_revealed = maybe_current_vault
+                .as_ref()
+                .map(|v| v.revealed_balance)
+                .unwrap_or(Amount::zero());
+            let before_confidential = maybe_current_vault
+                .as_ref()
+                .map(|v| v.confidential_balance)
+                .unwrap_or(Amount::zero());
+
+            accounts_api.balance_changes_insert(
+                &vault_id,
+                &account_address,
+                latest_vault.resource_address(),
+                &before_revealed,
+                &new_balance,
+                &before_confidential,
+                &new_confidential_balance,
+                &source,
+            )?;
             has_changed = true;
         }
 
@@ -513,7 +542,13 @@ where TSpec: WalletSdkSpec
                         .collect();
 
                     has_changed |= self
-                        .refresh_vault(account_address, *vault_id, vault, updated_nfts)
+                        .refresh_vault(
+                            account_address,
+                            *vault_id,
+                            vault,
+                            updated_nfts,
+                            BalanceChangeSource::Transaction { transaction_id: tx_id },
+                        )
                         .await?;
                 }
             }
@@ -587,7 +622,14 @@ where TSpec: WalletSdkSpec
                 .collect();
 
             // Update the vault balance / confidential outputs
-            self.refresh_vault(account_addr, vault_id, vault, updated_nfts).await?;
+            self.refresh_vault(
+                account_addr,
+                vault_id,
+                vault,
+                updated_nfts,
+                BalanceChangeSource::Transaction { transaction_id: tx_id },
+            )
+            .await?;
             updated_accounts.insert((account_addr, account_version));
         }
 

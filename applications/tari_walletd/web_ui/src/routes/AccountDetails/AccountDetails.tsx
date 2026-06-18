@@ -37,6 +37,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import NftList from "@routes/AssetVault/NFTs/NFTList";
+import BalanceChangesLog from "@routes/AccountDetails/BalanceChangesLog";
 import { BalanceEntry, decodeOotleAddressOrNull, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
 import { formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
@@ -235,6 +236,9 @@ function AccountDetailsLayout() {
             onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setNftRowsPerPage, setNftPage)}
           />
         </StyledPaper>
+      </Grid>
+      <Grid size={12}>
+        <BalanceChangesLog account={substateIdToString(accountAddr!)} />
       </Grid>
     </>
   );

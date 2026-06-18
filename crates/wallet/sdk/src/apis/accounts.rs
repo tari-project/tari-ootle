@@ -11,6 +11,7 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
     Amount,
@@ -32,6 +33,8 @@ use crate::{
         Account,
         AccountUpdate,
         AccountWithAddress,
+        BalanceChange,
+        BalanceChangeSource,
         EpochBirthday,
         KeyId,
         KeyIdOrPublicKey,
@@ -213,6 +216,56 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         self.store
             .with_write_tx(|tx| tx.vaults_update(vault_address, revealed_balance, confidential_balance))?;
         Ok(())
+    }
+
+    pub fn balance_changes_insert(
+        &self,
+        vault_address: &VaultId,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        before_revealed_balance: &Amount,
+        after_revealed_balance: &Amount,
+        before_confidential_balance: &Amount,
+        after_confidential_balance: &Amount,
+        source: &BalanceChangeSource,
+    ) -> Result<(), AccountsApiError> {
+        self.store.with_write_tx(|tx| {
+            tx.balance_changes_insert(
+                vault_address,
+                account_address,
+                resource_address,
+                before_revealed_balance,
+                after_revealed_balance,
+                before_confidential_balance,
+                after_confidential_balance,
+                source,
+            )
+        })?;
+        Ok(())
+    }
+
+    pub fn balance_changes_get_by_account(
+        &self,
+        account: &ComponentAddress,
+        offset: u64,
+        limit: u64,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+    ) -> Result<Vec<BalanceChange>, AccountsApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let changes = tx.balance_changes_get_by_account(account, offset, limit, resource_address, transaction_id)?;
+        Ok(changes)
+    }
+
+    pub fn balance_changes_count_by_account(
+        &self,
+        account: &ComponentAddress,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+    ) -> Result<u64, AccountsApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let count = tx.balance_changes_count_by_account(account, resource_address, transaction_id)?;
+        Ok(count)
     }
 
     pub fn get_vault_balance(&self, vault_address: &VaultId) -> Result<VaultBalance, AccountsApiError> {

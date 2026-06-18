@@ -27,6 +27,8 @@ use tari_ootle_wallet_sdk::{
     },
     models::{
         AccountWithAddress,
+        BalanceChange,
+        BalanceChangeSource,
         KeyBranch,
         NewAccountData,
         StealthUtxoSpendKeyId,
@@ -65,6 +67,7 @@ use tari_ootle_walletd_client::{
         AccountsRenameResponse,
         AccountsTransferRequest,
         AccountsTransferResponse,
+        BalanceChangeEntry,
         BalanceEntry,
         ClaimBurnProof,
         ClaimBurnProofContents,
@@ -72,6 +75,8 @@ use tari_ootle_walletd_client::{
         ClaimBurnResponse,
         ConfidentialTransferRequest,
         ConfidentialTransferResponse,
+        GetBalanceChangesRequest,
+        GetBalanceChangesResponse,
         StealthTransferRequest,
         StealthTransferResponse,
     },
@@ -1467,4 +1472,70 @@ pub async fn handle_associate_stealth_resource(
         .await?;
 
     Ok(AccountsAssociateStealthResourceResponse {})
+}
+
+fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
+    let source = match &change.source {
+        BalanceChangeSource::Transaction { transaction_id } => format!("Transaction:{}", transaction_id),
+        BalanceChangeSource::Scan => "Scan".to_string(),
+        BalanceChangeSource::Recovery => "Recovery".to_string(),
+    };
+    BalanceChangeEntry {
+        vault_address: change.vault_address.to_string(),
+        resource_address: change.resource_address,
+        before_revealed_balance: change.before_revealed_balance,
+        after_revealed_balance: change.after_revealed_balance,
+        before_confidential_balance: change.before_confidential_balance,
+        after_confidential_balance: change.after_confidential_balance,
+        revealed_delta: change.revealed_delta,
+        confidential_delta: change.confidential_delta,
+        source,
+        transaction_id: change.transaction_id,
+        created_at: change.created_at.to_string(),
+    }
+}
+
+pub async fn handle_get_balance_changes(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: GetBalanceChangesRequest,
+) -> Result<GetBalanceChangesResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
+    let sdk = context.wallet_sdk();
+    let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
+    enforce_scopes(&granted, &[Permission::Accounts(
+        Crud::Read,
+        Some(*account.component_address()),
+    )])?;
+
+    let tx_id = req
+        .transaction_id
+        .as_ref()
+        .map(|s| {
+            s.parse::<tari_ootle_transaction::TransactionId>()
+                .map_err(|e| invalid_params("transaction_id", Some(&e.to_string())))
+        })
+        .transpose()?;
+
+    let changes = sdk
+        .accounts_api()
+        .balance_changes_get_by_account(
+            account.component_address(),
+            req.offset.unwrap_or(0),
+            req.limit.unwrap_or(100),
+            req.resource_address.as_ref(),
+            tx_id,
+        )?;
+
+    let total = sdk
+        .accounts_api()
+        .balance_changes_count_by_account(
+            account.component_address(),
+            req.resource_address.as_ref(),
+            tx_id,
+        )?;
+
+    let changes = changes.into_iter().map(balance_change_to_entry).collect();
+
+    Ok(GetBalanceChangesResponse { changes, total })
 }

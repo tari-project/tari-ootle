@@ -753,7 +753,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 account_balance_changes::all_columns,
                 vaults::address,
             ))
-            .order(account_balance_changes::created_at.desc())
+            .order((account_balance_changes::created_at.desc(), account_balance_changes::id.desc()))
             .into_boxed();
 
         let rows = if let Some(resource_addr) = resource_address {

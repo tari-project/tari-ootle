@@ -801,24 +801,13 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         source: &BalanceChangeSource,
     ) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "balance_changes_insert";
-        use crate::schema::{account_balance_changes, accounts, vaults};
+        use crate::schema::{account_balance_changes, vaults};
 
-        let account_id = accounts::table
-            .select(accounts::id)
-            .filter(accounts::address.eq(account_address.to_string()))
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "account".to_string(),
-                key: account_address.to_string(),
-            })?;
 
-        let vault_db_id = vaults::table
-            .select(vaults::id)
+        let (vault_db_id, account_id) = vaults::table
+            .select((vaults::id, vaults::account_id))
             .filter(vaults::address.eq(vault_address.to_string()))
-            .first::<i32>(self.connection())
+            .first::<(i32, i32)>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {

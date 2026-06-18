@@ -14,6 +14,6 @@ CREATE TABLE account_balance_changes (
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX account_balance_changes_account_idx ON account_balance_changes (account_id);
+CREATE INDEX account_balance_changes_account_created_at_idx ON account_balance_changes (account_id, created_at DESC);
 CREATE INDEX account_balance_changes_vault_idx ON account_balance_changes (vault_id);
 CREATE INDEX account_balance_changes_tx_idx ON account_balance_changes (transaction_id);

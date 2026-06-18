@@ -100,12 +100,16 @@ impl SpendContext {
     // These are thin assertions over `outputs()` / `invoking_condition()`. Authors compose them; the engine treats
     // them as ordinary predicate logic.
 
-    /// Recursive "stay in the vault" covenant: asserts that every stealth output carries the same spend condition that
-    /// invoked this predicate.
+    /// Recursive "stay in the vault" covenant: asserts that the transfer has at least one stealth output and that every
+    /// stealth output carries the same spend condition that invoked this predicate.
+    ///
+    /// This bounds only the spend condition of surviving stealth outputs, not the revealed amount — compose it with a
+    /// revealed-output check if value must not leave the covenant as cleartext.
     pub fn require_output_preserves_condition(&self) {
         let me = self.invoking_condition();
+        let outputs = self.outputs();
         assert!(
-            self.outputs().iter().all(|o| o.spend_condition == me),
+            !outputs.is_empty() && outputs.iter().all(|o| o.spend_condition == me),
             "spend script covenant: every output must preserve the invoking spend condition",
         );
     }

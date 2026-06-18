@@ -173,6 +173,34 @@ fn covenant_rejects_output_that_changes_condition() {
     assert_reject_reason(&reason, "Spend script rejected the spend");
 }
 
+#[test]
+fn covenant_rejects_spend_with_no_stealth_outputs() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant = script_condition(script_template, "preserve_covenant", vec![]);
+    let (resx, mint) = mint_utxo(&mut test, covenant);
+
+    // Reveal the whole 100 units, producing zero stealth outputs. The covenant requires at least one output that
+    // preserves the condition, so the spend is rejected.
+    let transfer = stealth::generate_transfer_data(
+        [MaskAndValue {
+            mask: mint.output_masks[0].clone(),
+            value: 100,
+        }],
+        0u64,
+        std::iter::empty::<(u64, SpendCondition)>(),
+        100u64,
+    );
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+}
+
 // -------------------------------- Unconditional reject -------------------------------- //
 
 #[test]

@@ -255,7 +255,7 @@ fn sandbox_denies_emit_event() {
         vec![],
     );
     assert_reject_reason(&reason, "Spend script rejected the spend");
-    assert_reject_reason(&reason, "not permitted inside a spend script");
+    assert_reject_reason(&reason, "forbidden inside a read-only");
 }
 
 // -------------------------------- Creation-time (T1) validation -------------------------------- //

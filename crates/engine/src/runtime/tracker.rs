@@ -398,9 +398,8 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| state.fee_state().is_dry_run())
     }
 
-    /// Whether the current call frame is a read-only spend-script sandbox. Used by
-    /// [`SpendScriptGuardModule`](crate::runtime::SpendScriptGuardModule) to deny the few effectful host
-    /// ops that bypass the lock layer.
+    /// Whether the current call frame is a read-only spend-script sandbox. Used by the engine's core read-only
+    /// enforcement to deny the few effectful host ops that bypass the lock layer.
     pub fn is_in_read_only_context(&self) -> bool {
         self.working_state
             .as_ref()

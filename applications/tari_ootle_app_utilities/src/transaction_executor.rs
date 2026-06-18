@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tari_engine::{
     executables::Executable,
     fees::{FeeModule, FeeTable},
-    runtime::{AuthParams, RuntimeModule, SpendScriptGuardModule},
+    runtime::{AuthParams, RuntimeModule},
     state_store::{StateReader, StateStoreError},
     template::LoadedTemplate,
     traits::ClaimProofVerifier,
@@ -96,10 +96,7 @@ impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<
         dry_run: bool,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
-        let modules = vec![
-            Box::new(SpendScriptGuardModule) as Box<dyn RuntimeModule<TStore>>,
-            Box::new(FeeModule::new(0, fee_table, dry_run)) as Box<dyn RuntimeModule<TStore>>,
-        ];
+        let modules = vec![Box::new(FeeModule::new(0, fee_table, dry_run)) as Box<dyn RuntimeModule<TStore>>];
         Self {
             template_provider: Arc::new(template_provider),
             modules: Arc::from(modules),

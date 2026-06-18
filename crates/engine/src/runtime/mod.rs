@@ -38,9 +38,6 @@ pub use actions::*;
 mod module;
 pub use module::{RuntimeEvent, RuntimeModule, RuntimeModuleError};
 
-mod spend_script_guard;
-pub use spend_script_guard::SpendScriptGuardModule;
-
 mod fee_state;
 mod tracker;
 

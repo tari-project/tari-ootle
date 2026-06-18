@@ -183,6 +183,8 @@ pub enum RuntimeError {
     AccessDeniedOwnerRequired { action: ActionIdent },
     #[error("Write attempted in a read-only execution context")]
     WriteInReadOnlyContext,
+    #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
+    ForbiddenInReadOnlyContext { operation: &'static str },
     #[error("Spend script rejected the spend: {details}")]
     SpendScriptRejected { details: String },
     #[error("Spend context is only available during spend-script execution")]

@@ -231,8 +231,38 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     fn invoke_modules_on_runtime_call(&mut self, function: &'static str) -> Result<(), RuntimeError> {
+        // Core read-only sandbox enforcement runs first and unconditionally. It deliberately does NOT live in a
+        // RuntimeModule: modules are optional, observer-style functionality (fees, call tracking), so making a
+        // security invariant depend on one would mean dropping that module silently re-opens the sandbox. This is the
+        // single per-host-op entry point, so enforcing here covers every op that routes through it regardless of
+        // which modules are registered.
+        self.enforce_read_only_restrictions(function)?;
         for module in self.modules.iter() {
             module.on_runtime_call(&mut self.tracker, function)?;
+        }
+        Ok(())
+    }
+
+    /// Layer (b) of the spend-script sandbox: deny the effectful or non-deterministic host ops that are NOT mediated by
+    /// the write-lock chokepoint (layer (a) in `WorkingState::write_lock_substate` / `new_substate`, which neutralises
+    /// every state write). Together they make a spend-script predicate provably side-effect-free and deterministic.
+    ///
+    /// The list contains only WASM host ops (each backed by an `EngineOp`), because a read-only frame only exists while
+    /// a predicate's WASM is executing — instruction-level operations such as `pay_fee` and `publish_template` have no
+    /// `EngineOp`, run only at the top level, and so can never execute in a read-only context. `call_invoke` is also
+    /// blocked at the frame level (`allow_cross_template_calls == false`) and listed here for defence in depth.
+    fn enforce_read_only_restrictions(&self, function: &'static str) -> Result<(), RuntimeError> {
+        const FORBIDDEN_IN_READ_ONLY: &[&str] = &[
+            "call_invoke",
+            "generate_random_invoke",
+            "generate_uuid",
+            "emit_event",
+            "proof_invoke",
+            "bucket_invoke",
+        ];
+
+        if self.tracker.is_in_read_only_context() && FORBIDDEN_IN_READ_ONLY.contains(&function) {
+            return Err(RuntimeError::ForbiddenInReadOnlyContext { operation: function });
         }
         Ok(())
     }

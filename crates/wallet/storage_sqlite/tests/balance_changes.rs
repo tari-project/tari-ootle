@@ -314,7 +314,7 @@ fn pagination() {
 }
 
 #[test]
-fn zero_balance_change_not_logged() {
+fn zero_balance_change_is_logged_by_storage() {
     let db = SqliteWalletStore::try_open(":memory:").unwrap();
     db.run_migrations().unwrap();
     let (account_address, vault_id, resource_address) = setup_account_and_vault(&db);

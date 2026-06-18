@@ -29,6 +29,16 @@ pub enum BalanceChangeSource {
 }
 
 impl BalanceChange {
+    pub fn compute_delta(before: Amount, after: Amount) -> String {
+        let before_u128 = before.to_u128();
+        let after_u128 = after.to_u128();
+        if after_u128 >= before_u128 {
+            (after_u128 - before_u128).to_string()
+        } else {
+            format!("-{}", before_u128 - after_u128)
+        }
+    }
+
     pub fn new(
         vault_address: VaultId,
         resource_address: ResourceAddress,
@@ -38,8 +48,8 @@ impl BalanceChange {
         after_confidential_balance: Amount,
         source: BalanceChangeSource,
     ) -> Self {
-        let revealed_delta = compute_delta(before_revealed_balance, after_revealed_balance);
-        let confidential_delta = compute_delta(before_confidential_balance, after_confidential_balance);
+        let revealed_delta = Self::compute_delta(before_revealed_balance, after_revealed_balance);
+        let confidential_delta = Self::compute_delta(before_confidential_balance, after_confidential_balance);
         let transaction_id = match &source {
             BalanceChangeSource::Transaction { transaction_id } => Some(transaction_id.to_string()),
             BalanceChangeSource::Scan | BalanceChangeSource::Recovery => None,
@@ -60,12 +70,4 @@ impl BalanceChange {
     }
 }
 
-fn compute_delta(before: Amount, after: Amount) -> String {
-    let before_u128 = before.to_u128();
-    let after_u128 = after.to_u128();
-    if after_u128 >= before_u128 {
-        (after_u128 - before_u128).to_string()
-    } else {
-        format!("-{}", before_u128 - after_u128)
-    }
-}
+

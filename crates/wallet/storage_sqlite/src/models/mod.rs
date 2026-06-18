@@ -4,6 +4,7 @@
 mod account;
 mod address_book_entry;
 mod api_key;
+mod balance_change;
 
 mod config;
 
@@ -26,6 +27,7 @@ pub use account::*;
 pub use address_book_entry::*;
 pub use api_key::*;
 pub use authored_template::*;
+pub use balance_change::*;
 pub use confidential_output::*;
 pub use config::*;
 pub use non_fungible_tokens::*;

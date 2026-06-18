@@ -41,6 +41,8 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChange,
+        BalanceChangeSource,
         ConfidentialOutputModel,
         ImportedKeyId,
         KeyId,
@@ -785,6 +787,63 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         }
 
         Ok(())
+    }
+
+    fn balance_changes_insert(
+        &mut self,
+        current_vault: &VaultModel,
+        revealed_after: Amount,
+        confidential_after: Amount,
+        source: BalanceChangeSource,
+    ) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_insert";
+        use crate::schema::{account_balance_changes, vaults};
+
+        if current_vault.revealed_balance == revealed_after && current_vault.confidential_balance == confidential_after
+        {
+            return Err(WalletStorageError::bad_query(
+                OPERATION,
+                "balance change cannot be zero",
+            ));
+        }
+
+        let (vault_id, account_id, resource_address) = vaults::table
+            .select((vaults::id, vaults::account_id, vaults::resource_address))
+            .filter(vaults::address.eq(current_vault.id.to_string()))
+            .first::<(i32, i32, String)>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "vault".to_string(),
+                key: current_vault.id.to_string(),
+            })?;
+        let transaction_id = source.transaction_id().map(|id| id.to_string());
+        let values = (
+            account_balance_changes::account_id.eq(account_id),
+            account_balance_changes::vault_id.eq(vault_id),
+            account_balance_changes::resource_address.eq(resource_address),
+            account_balance_changes::source_type.eq(source.as_key_str()),
+            account_balance_changes::transaction_id.eq(transaction_id),
+            account_balance_changes::revealed_before.eq(current_vault.revealed_balance.to_string()),
+            account_balance_changes::revealed_after.eq(revealed_after.to_string()),
+            account_balance_changes::confidential_before.eq(current_vault.confidential_balance.to_string()),
+            account_balance_changes::confidential_after.eq(confidential_after.to_string()),
+            account_balance_changes::revealed_delta.eq(BalanceChange::signed_delta(
+                current_vault.revealed_balance,
+                revealed_after,
+            )),
+            account_balance_changes::confidential_delta.eq(BalanceChange::signed_delta(
+                current_vault.confidential_balance,
+                confidential_after,
+            )),
+        );
+        let inserted = diesel::insert_into(account_balance_changes::table)
+            .values(values)
+            .on_conflict_do_nothing()
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(inserted == 1)
     }
 
     fn vaults_lock_revealed_funds(

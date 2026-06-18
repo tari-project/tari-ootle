@@ -23,6 +23,7 @@ use crate::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChange,
         ConfidentialOutputModel,
         Config,
         KeyType,
@@ -101,6 +102,22 @@ pub trait WalletStoreReader {
         &mut self,
         account_addr: &ComponentAddress,
     ) -> Result<Vec<VaultId>, WalletStorageError>;
+
+    // Balance changes
+    fn balance_changes_get_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+        offset: usize,
+        limit: usize,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<&TransactionId>,
+    ) -> Result<Vec<BalanceChange>, WalletStorageError>;
+    fn balance_changes_count_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<&TransactionId>,
+    ) -> Result<u64, WalletStorageError>;
 
     // Resources
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;

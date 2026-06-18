@@ -18,6 +18,24 @@ diesel::table! {
 }
 
 diesel::table! {
+    account_balance_changes (id) {
+        id -> Integer,
+        account_id -> Integer,
+        vault_id -> Integer,
+        resource_address -> Text,
+        source_type -> Text,
+        transaction_id -> Nullable<Text>,
+        revealed_before -> Text,
+        revealed_after -> Text,
+        confidential_before -> Text,
+        confidential_after -> Text,
+        revealed_delta -> Text,
+        confidential_delta -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     authored_templates (id) {
         id -> Integer,
         author_public_key -> Text,
@@ -296,6 +314,8 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(account_balance_changes -> accounts (account_id));
+diesel::joinable!(account_balance_changes -> vaults (vault_id));
 diesel::joinable!(confidential_outputs -> accounts (account_id));
 diesel::joinable!(confidential_outputs -> vaults (vault_id));
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
@@ -311,6 +331,7 @@ diesel::joinable!(wallet_events -> accounts (account_id));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    account_balance_changes,
     accounts,
     address_book,
     api_keys,

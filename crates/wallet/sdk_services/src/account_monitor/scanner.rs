@@ -17,7 +17,15 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
     apis::substate::ValidatorScanResult,
-    models::{AccountChangedEvent, AccountCreatedEvent, AccountUpdate, NewAccountData, NonFungibleToken, WalletEvent},
+    models::{
+        AccountChangedEvent,
+        AccountCreatedEvent,
+        AccountUpdate,
+        BalanceChangeSource,
+        NewAccountData,
+        NonFungibleToken,
+        WalletEvent,
+    },
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
@@ -47,6 +55,15 @@ where TSpec: WalletSdkSpec
     }
 
     pub async fn refresh_account(&self, account_address: ComponentAddress) -> Result<bool, AccountMonitorError> {
+        self.refresh_account_with_source(account_address, BalanceChangeSource::Scan)
+            .await
+    }
+
+    pub(crate) async fn refresh_account_with_source(
+        &self,
+        account_address: ComponentAddress,
+        source: BalanceChangeSource,
+    ) -> Result<bool, AccountMonitorError> {
         info!(
             target: LOG_TARGET,
             "🏦 Refreshing account {}", account_address
@@ -140,7 +157,7 @@ where TSpec: WalletSdkSpec
             if let Some(account_addr) = account_substate_id.substate_id().as_component_address() {
                 self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
                     .await?;
-                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default())
+                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), source)
                     .await?;
             }
 
@@ -160,6 +177,7 @@ where TSpec: WalletSdkSpec
         vault_id: VaultId,
         latest_vault: &Vault,
         updated_nft_data: HashMap<NonFungibleId, NonFungibleContainer>,
+        source: BalanceChangeSource,
     ) -> Result<bool, AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
 
@@ -249,9 +267,12 @@ where TSpec: WalletSdkSpec
         let outputs_api = self.wallet_sdk.confidential_outputs_api();
         let new_confidential_balance = outputs_api.get_unspent_balance(&vault_id)?;
 
-        if maybe_current_vault
-            .is_none_or(|v| v.confidential_balance != new_confidential_balance || v.revealed_balance != new_balance)
-        {
+        if accounts_api.update_vault_balance_and_record_change(
+            vault_id,
+            new_balance,
+            new_confidential_balance,
+            source,
+        )? {
             info!(
                 target: LOG_TARGET,
                 "🔒️ balance updated in vault {} in account {}. Balance is {} and confidential balance is {}",
@@ -260,7 +281,6 @@ where TSpec: WalletSdkSpec
                 new_balance,
                 new_confidential_balance
             );
-            accounts_api.update_vault_balance(vault_id, new_balance, new_confidential_balance)?;
             has_changed = true;
         }
 
@@ -513,7 +533,13 @@ where TSpec: WalletSdkSpec
                         .collect();
 
                     has_changed |= self
-                        .refresh_vault(account_address, *vault_id, vault, updated_nfts)
+                        .refresh_vault(
+                            account_address,
+                            *vault_id,
+                            vault,
+                            updated_nfts,
+                            BalanceChangeSource::Transaction { transaction_id: tx_id },
+                        )
                         .await?;
                 }
             }
@@ -587,7 +613,14 @@ where TSpec: WalletSdkSpec
                 .collect();
 
             // Update the vault balance / confidential outputs
-            self.refresh_vault(account_addr, vault_id, vault, updated_nfts).await?;
+            self.refresh_vault(
+                account_addr,
+                vault_id,
+                vault,
+                updated_nfts,
+                BalanceChangeSource::Transaction { transaction_id: tx_id },
+            )
+            .await?;
             updated_accounts.insert((account_addr, account_version));
         }
 

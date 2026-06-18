@@ -28,6 +28,7 @@ use crate::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChangeSource,
         ConfidentialOutputModel,
         ImportedKeyId,
         KeyId,
@@ -127,6 +128,13 @@ pub trait WalletStoreWriter: CommittableStore {
         revealed_balance: Amount,
         confidential_balance: Amount,
     ) -> Result<(), WalletStorageError>;
+    fn balance_changes_insert(
+        &mut self,
+        current_vault: &VaultModel,
+        revealed_after: Amount,
+        confidential_after: Amount,
+        source: BalanceChangeSource,
+    ) -> Result<bool, WalletStorageError>;
     fn vaults_lock_revealed_funds(
         &mut self,
         lock_id: WalletLockId,

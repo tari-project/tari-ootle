@@ -186,7 +186,7 @@ pub enum RuntimeError {
     #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
     ForbiddenInReadOnlyContext { operation: &'static str },
     #[error("Spend script rejected the spend: {details}")]
-    SpendScriptRejected { details: String },
+    SpendScriptRejected { details: Box<RuntimeError> },
     #[error("Spend context is only available during spend-script execution")]
     SpendContextUnavailable,
     #[error("Invalid method address rule for {template_name}: {details}")]

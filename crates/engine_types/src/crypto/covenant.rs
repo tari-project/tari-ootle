@@ -70,9 +70,13 @@ pub fn validate_covenant_balance_proof(
     sig.verify_raw_uniform(&public_excess, &message)
 }
 
-fn aggregate_commitments(commitments: &[PedersenCommitmentBytes]) -> Option<RistrettoPublicKey> {
-    commitments.iter().try_fold(RistrettoPublicKey::default(), |acc, c| {
-        let commitment = PedersenCommitment::convert_from_byte_type(c).ok()?;
-        Some(acc + commitment.as_public_key())
-    })
+fn aggregate_commitments<'a, I: IntoIterator<Item = &'a PedersenCommitmentBytes>>(
+    commitments: I,
+) -> Option<RistrettoPublicKey> {
+    commitments
+        .into_iter()
+        .try_fold(RistrettoPublicKey::default(), |acc, c| {
+            let commitment = PedersenCommitment::convert_from_byte_type(c).ok()?;
+            Some(acc + commitment.as_public_key())
+        })
 }

@@ -656,7 +656,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         result
             .map(|_| ())
-            .map_err(|e| RuntimeError::SpendScriptRejected { details: e.to_string() })
+            .map_err(|e| RuntimeError::SpendScriptRejected { details: Box::new(e) })
     }
 }
 
@@ -3232,15 +3232,21 @@ where
                 // A claim is keyed by the index of its partition's first input. Locate that index for this partition
                 // and match the claim by it — no condition is compared across the claim boundary; the proof signature
                 // binds the partition.
-                let claim = ctx
-                    .input_conditions
+                let Some(first_input_index) = ctx.input_conditions.iter().position(|condition| condition == me) else {
+                    return Ok(InvokeResult::encode(&false)?);
+                };
+
+                let maybe_claim = ctx
+                    .covenant_claims
                     .iter()
-                    .position(|condition| condition == me)
-                    .and_then(|first_input_index| {
-                        ctx.covenant_claims
-                            .iter()
-                            .find(|claim| claim.partition_input_index as usize == first_input_index)
-                    });
+                    .find(|claim| claim.partition_input_index as usize == first_input_index);
+
+                let Some(claim) = maybe_claim else {
+                    return Ok(InvokeResult::encode(&false)?);
+                };
+                if claim.revealed_amount > Amount::from_u64(max_revealed) {
+                    return Ok(InvokeResult::encode(&false)?);
+                }
 
                 let input_commitments = ctx
                     .inputs
@@ -3252,23 +3258,20 @@ where
                 let output_commitments = ctx
                     .outputs
                     .iter()
-                    .filter(|output| &output.spend_condition == me)
+                    .filter(|output| output.spend_condition == *me)
                     .map(|output| output.commitment)
                     .collect::<Vec<_>>();
 
                 // The covenant is satisfied only if a claim exists at this partition's position, its declared outflow
                 // is within the allowance, and the sub-balance proof verifies. A missing or invalid claim yields
                 // `false`, which the predicate turns into a rejected spend.
-                let satisfied = claim.is_some_and(|claim| {
-                    claim.revealed_amount <= Amount::from_u64(max_revealed) &&
-                        validate_covenant_balance_proof(
-                            me,
-                            claim.revealed_amount,
-                            &input_commitments,
-                            &output_commitments,
-                            &claim.signature,
-                        )
-                });
+                let satisfied = validate_covenant_balance_proof(
+                    me,
+                    claim.revealed_amount,
+                    &input_commitments,
+                    &output_commitments,
+                    &claim.signature,
+                );
                 Ok(InvokeResult::encode(&satisfied)?)
             },
         }

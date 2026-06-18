@@ -57,6 +57,8 @@ use tari_ootle_walletd_client::{
         AccountsCreateResponse,
         AccountsCreateStealthTransferStatementRequest,
         AccountsCreateStealthTransferStatementResponse,
+        AccountsGetBalanceChangesRequest,
+        AccountsGetBalanceChangesResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
         AccountsListRequest,
@@ -372,6 +374,39 @@ pub async fn handle_get_balances(
         address: *account.component_address(),
         balances,
     })
+}
+
+pub async fn handle_get_balance_changes(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsGetBalanceChangesRequest,
+) -> Result<AccountsGetBalanceChangesResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
+    let sdk = context.wallet_sdk();
+    let account = get_account(&req.account, &sdk.accounts_api())?;
+    enforce_scopes(&granted, &[Permission::Accounts(
+        Crud::Read,
+        Some(*account.component_address()),
+    )])?;
+    let limit = usize::try_from(req.limit)
+        .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {e}"))))?;
+    let offset = usize::try_from(req.offset)
+        .map_err(|e| invalid_params("offset", Some(&format!("offset overflowed usize: {e}"))))?;
+    let accounts_api = sdk.accounts_api();
+    let changes = accounts_api.get_balance_changes(
+        account.component_address(),
+        offset,
+        limit,
+        req.resource_address.as_ref(),
+        req.transaction_id.as_ref(),
+    )?;
+    let total = accounts_api.count_balance_changes(
+        account.component_address(),
+        req.resource_address.as_ref(),
+        req.transaction_id.as_ref(),
+    )?;
+
+    Ok(AccountsGetBalanceChangesResponse { changes, total })
 }
 
 pub async fn handle_get(
@@ -1469,4 +1504,169 @@ pub async fn handle_associate_stealth_resource(
         .await?;
 
     Ok(AccountsAssociateStealthResourceResponse {})
+}
+
+#[cfg(test)]
+mod balance_change_handler_tests {
+    use std::str::FromStr;
+
+    use axum_extra::headers::{Authorization, authorization::Bearer};
+    use tari_ootle_address::Network;
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_wallet_sdk::{
+        WalletSdkConfig,
+        cipher_seed::CipherSeedRestore,
+        models::{BalanceChangeSource, EpochBirthday, KeyBranch, KeyId},
+    };
+    use tari_ootle_wallet_sdk_services::{indexer_rest_api::IndexerRestApiNetworkInterface, notify::Notify};
+    use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+    use tari_ootle_walletd_client::permissions::Permissions;
+    use tari_shutdown::Shutdown;
+    use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId};
+    use tari_utilities::SafePassword;
+
+    use super::*;
+    use crate::{
+        WalletSdk,
+        config::{WalletDaemonAuth, WalletDaemonConfig},
+        handlers::{HandlerContext, auth::create_authenticator},
+        services::spawn_services,
+    };
+
+    #[tokio::test]
+    async fn balance_changes_handler_authorizes_filters_and_paginates() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SqliteWalletStore::try_open(temp.path().join("wallet.sqlite")).unwrap();
+        store.run_migrations().unwrap();
+        let mut sdk = WalletSdk::initialize_with_local_key_store(
+            store.clone(),
+            IndexerRestApiNetworkInterface::new("http://127.0.0.1:18300"),
+            WalletSdkConfig {
+                network: Network::LocalNet,
+                override_keyring_password: Some(SafePassword::from_str("test wallet password").unwrap()),
+            },
+            EpochBirthday::far_future(),
+        )
+        .unwrap();
+        sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
+            .unwrap();
+
+        let account: ComponentAddress = "component_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
+            .parse()
+            .unwrap();
+        let first_vault: VaultId = "vault_0000000000000000000000000000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let second_vault: VaultId = "vault_0000000000000000000000000000000000000000000000000000000000000002"
+            .parse()
+            .unwrap();
+        let first_resource: ResourceAddress =
+            "resource_0000000000000000000000000000000000000000000000000000000000000001"
+                .parse()
+                .unwrap();
+        let second_resource: ResourceAddress =
+            "resource_0000000000000000000000000000000000000000000000000000000000000002"
+                .parse()
+                .unwrap();
+        let accounts = sdk.accounts_api();
+        accounts
+            .add_account(
+                Some("savings"),
+                &account,
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                KeyId::derived(KeyBranch::Account, 0),
+                Epoch::zero(),
+                true,
+                true,
+            )
+            .unwrap();
+        for (vault, resource, symbol) in [
+            (first_vault, first_resource, "ONE"),
+            (second_vault, second_resource, "TWO"),
+        ] {
+            accounts
+                .add_vault(
+                    account,
+                    vault,
+                    resource,
+                    ResourceType::Fungible,
+                    Some(symbol.to_string()),
+                    2,
+                )
+                .unwrap();
+        }
+        accounts
+            .update_vault_balance_and_record_change(
+                first_vault,
+                Amount::from(100u64),
+                Amount::zero(),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap();
+        accounts
+            .update_vault_balance_and_record_change(
+                first_vault,
+                Amount::from(150u64),
+                Amount::zero(),
+                BalanceChangeSource::Recovery,
+            )
+            .unwrap();
+        accounts
+            .update_vault_balance_and_record_change(
+                second_vault,
+                Amount::from(200u64),
+                Amount::zero(),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap();
+
+        let notify = Notify::new(10);
+        let mut shutdown = Shutdown::new();
+        let services = spawn_services(
+            shutdown.to_signal(),
+            notify.clone(),
+            sdk.clone(),
+            temp.path().to_path_buf(),
+            false,
+        );
+        let mut config = WalletDaemonConfig::default();
+        config.network = Network::LocalNet;
+        config.authentication = WalletDaemonAuth::None;
+        let context = HandlerContext::new(
+            sdk,
+            notify,
+            services.transaction_service_handle.clone(),
+            services.account_monitor_handle.clone(),
+            config.clone(),
+            create_authenticator(&config, store).unwrap(),
+            SafePassword::from_str("test jwt secret").unwrap(),
+            shutdown.to_signal(),
+        );
+        let permissions = Permissions::from_str(&format!("accounts:read:{account}")).unwrap();
+        let claims = context.jwt_api().generate_auth_claims(permissions).unwrap();
+        let token = context.jwt_api().grant(&claims).unwrap();
+        let bearer = Authorization::<Bearer>::bearer(&token).unwrap().0;
+
+        let response = handle_get_balance_changes(&context, Some(&bearer), AccountsGetBalanceChangesRequest {
+            account: "savings".into(),
+            offset: 1,
+            limit: 1,
+            resource_address: Some(first_resource),
+            transaction_id: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(response.total, 2);
+        assert_eq!(response.changes.len(), 1);
+        assert_eq!(response.changes[0].resource_address, first_resource);
+        assert_eq!(response.changes[0].revealed_delta, "100");
+        assert_eq!(response.changes[0].source, BalanceChangeSource::Scan);
+
+        shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(5), services.services_fut)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }

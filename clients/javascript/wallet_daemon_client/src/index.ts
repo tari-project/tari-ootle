@@ -14,6 +14,8 @@ import type {
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountsGetBalanceChangesRequest,
+  AccountsGetBalanceChangesResponse,
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
@@ -282,6 +284,12 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public accountsGetBalances(params: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> {
     return this.sendRequest("accounts.get_balances", params);
+  }
+
+  public accountsGetBalanceChanges(
+    params: AccountsGetBalanceChangesRequest,
+  ): Promise<AccountsGetBalanceChangesResponse> {
+    return this.sendRequest("accounts.get_balance_changes", params);
   }
 
   public accountsList(params: AccountsListRequest): Promise<AccountsListResponse> {

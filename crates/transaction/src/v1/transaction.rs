@@ -282,8 +282,25 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
 }
 
 fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
+    // Per-byte divisor for serialized spend-condition bytes committed into outputs, consistent with the other
+    // byte-weighted costs (logs, blobs, literal args).
+    const SPEND_CONDITION_BYTE_DIVISOR: u64 = 3;
+
+    // A spend condition — notably a `Script`'s `args` — is committed into the created output, so its serialized size
+    // must contribute to the creating transaction's weight. Without this, a large script/args could be broadcast for
+    // free and used to bloat outputs. The output's other bytes are charged separately (per-byte storage at substate
+    // creation); here we only price the spend-condition payload that the count-based weight below cannot see.
+    let spend_condition_bytes: u64 = statement
+        .outputs_statement
+        .outputs
+        .iter()
+        .map(|o| tari_bor::encoded_len(&o.spend_condition).unwrap_or(0) as u64)
+        .sum();
+
     // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
-    100 + statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
+    100 + statement.inputs_statement.inputs.len() as u64 +
+        (statement.outputs_statement.outputs.len() as u64 * 2) +
+        spend_condition_bytes / SPEND_CONDITION_BYTE_DIVISOR
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {

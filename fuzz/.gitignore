@@ -1,7 +1,12 @@
 # Build artifacts and runtime fuzzing state. Curated seeds live under seeds/ and
 # ARE committed; the evolving corpus and crash artifacts are generated locally.
+#
+# Cargo.lock IS committed (this is a binary crate, not a published library): the
+# fuzz crate resolves independently of the workspace, so without a lockfile CI
+# re-resolves every run and can drift onto transitive versions that don't build
+# (e.g. curve25519-dalek 5.0.0-rc.1 pulling an ff that tari_bulletproofs_plus
+# can't compile against). Committing the lock makes the fuzz build reproducible.
 target/
 corpus/
 artifacts/
 coverage/
-Cargo.lock

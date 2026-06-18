@@ -398,6 +398,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| state.fee_state().is_dry_run())
     }
 
+    /// Whether the current call frame is a read-only spend-script sandbox. Used by the engine's core read-only
+    /// enforcement to deny the few effectful host ops that bypass the lock layer.
+    pub fn is_in_read_only_context(&self) -> bool {
+        self.working_state
+            .as_ref()
+            .map(|state| state.is_read_only_context())
+            .unwrap_or(false)
+    }
+
     pub(super) fn read_with<R, F: FnOnce(&WorkingState<TStore>) -> R>(&self, f: F) -> R {
         f(self
             .working_state

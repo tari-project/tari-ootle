@@ -177,6 +177,7 @@ async fn create_output_witness<K: OutputMaskProvider>(
             SpendCondition::Signed(output_owner_public_key.to_byte_type())
         },
         PayTo::AccessRule(access_rule) => SpendCondition::AccessRule(access_rule),
+        PayTo::Script(script) => SpendCondition::Script(script),
     };
 
     let witness = OutputWitness {

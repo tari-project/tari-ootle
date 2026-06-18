@@ -57,9 +57,10 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{TemplateDef, Type};
+use tari_template_abi::{FunctionDef, TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
+    SpendContext,
     args::{
         AddressAllocationInvokeArg,
         AllocateAddressResult,
@@ -91,6 +92,7 @@ use tari_template_lib::{
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
         SetFreezeStealthUtxosArg,
+        SpendContextAction,
         StealthTransferResourceArg,
         UpdateAccessRuleArg,
         VaultAction,
@@ -123,10 +125,17 @@ use tari_template_lib::{
         access_rules::{ComponentAccessRules, ResourceAuthAction, UpdateRule},
         bytes::Bytes,
         constants::{IMAGE_URL, TARI_TOKEN, TOKEN_SYMBOL},
-        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
         engine_args::{SignatureAction, SignatureVerifyArg},
         metadata,
-        stealth::{SpendCondition, StealthTransferStatement},
+        stealth::{
+            CurrentInputView,
+            SpendCondition,
+            SpendScript,
+            StealthInputView,
+            StealthOutputView,
+            StealthTransferStatement,
+        },
     },
 };
 
@@ -163,6 +172,27 @@ pub struct RuntimeInterfaceImpl<TStore, TTemplateProvider> {
     /// A pointer to the runtime that is set after initialization to allow for cross-template calls.
     /// This is using an atomic pointer simply to make RuntimeInterfaceImpl Send + Sync to satisfy wasmer trait bounds.
     runtime_pointer: Option<AtomicPtr<Box<dyn RuntimeInterface>>>,
+    /// The introspection context made available to a spend-script predicate for the duration of its evaluation. It is
+    /// set immediately before invoking the predicate and cleared immediately after, so `spend_context_invoke` (which
+    /// re-enters this same interface through the runtime pointer) can serve the `SpendContext` accessors.
+    spend_exec_context: Option<SpendScriptExecution>,
+    /// One-shot flag: when set, the next pushed call frame is restricted to a read-only, non-cross-template sandbox
+    /// (used for the spend-script predicate frame). Consumed by `push_call_frame`.
+    restricted_frame_pending: bool,
+}
+
+/// The data a spend-script predicate can introspect, derived once from the spending `StealthTransferStatement` before
+/// the predicate runs. Only commitments, spend conditions, `minimum_value_promise` and tags are exposed — never
+/// confidential values.
+#[derive(Debug, Clone)]
+struct SpendScriptExecution {
+    inputs: Vec<StealthInputView>,
+    outputs: Vec<StealthOutputView>,
+    revealed_input_amount: Amount,
+    revealed_output_amount: Amount,
+    current_input_index: u32,
+    current_input_commitment: PedersenCommitmentBytes,
+    invoking_condition: SpendCondition,
 }
 
 impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<Template = LoadedTemplate>>
@@ -186,6 +216,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             claim_burn_proof_verifier,
             blobs,
             runtime_pointer: None,
+            spend_exec_context: None,
+            restricted_frame_pending: false,
         };
         runtime.invoke_modules_on_initialize()?;
         Ok(runtime)
@@ -199,8 +231,38 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     fn invoke_modules_on_runtime_call(&mut self, function: &'static str) -> Result<(), RuntimeError> {
+        // Core read-only sandbox enforcement runs first and unconditionally. It deliberately does NOT live in a
+        // RuntimeModule: modules are optional, observer-style functionality (fees, call tracking), so making a
+        // security invariant depend on one would mean dropping that module silently re-opens the sandbox. This is the
+        // single per-host-op entry point, so enforcing here covers every op that routes through it regardless of
+        // which modules are registered.
+        self.enforce_read_only_restrictions(function)?;
         for module in self.modules.iter() {
             module.on_runtime_call(&mut self.tracker, function)?;
+        }
+        Ok(())
+    }
+
+    /// Layer (b) of the spend-script sandbox: deny the effectful or non-deterministic host ops that are NOT mediated by
+    /// the write-lock chokepoint (layer (a) in `WorkingState::write_lock_substate` / `new_substate`, which neutralises
+    /// every state write). Together they make a spend-script predicate provably side-effect-free and deterministic.
+    ///
+    /// The list contains only WASM host ops (each backed by an `EngineOp`), because a read-only frame only exists while
+    /// a predicate's WASM is executing — instruction-level operations such as `pay_fee` and `publish_template` have no
+    /// `EngineOp`, run only at the top level, and so can never execute in a read-only context. `call_invoke` is also
+    /// blocked at the frame level (`allow_cross_template_calls == false`) and listed here for defence in depth.
+    fn enforce_read_only_restrictions(&self, function: &'static str) -> Result<(), RuntimeError> {
+        const FORBIDDEN_IN_READ_ONLY: &[&str] = &[
+            "call_invoke",
+            "generate_random_invoke",
+            "generate_uuid",
+            "emit_event",
+            "proof_invoke",
+            "bucket_invoke",
+        ];
+
+        if self.tracker.is_in_read_only_context() && FORBIDDEN_IN_READ_ONLY.contains(&function) {
+            return Err(RuntimeError::ForbiddenInReadOnlyContext { operation: function });
         }
         Ok(())
     }
@@ -458,6 +520,169 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         Ok(())
+    }
+
+    /// Validates the shape of a spend-script predicate `FunctionDef`, mirroring `check_resource_auth_hook`. A spend
+    /// script must be a non-mutable, unit-returning function whose last argument is a `SpendContext`. The mutability
+    /// rule is load-bearing: a mutable predicate could take a write lock and cause side effects, defeating the
+    /// read-only guarantee.
+    fn validate_spend_script_signature(func: &FunctionDef) -> Result<(), RuntimeError> {
+        if func.is_mut {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "SpendScript",
+                reason: format!("spend script function '{}' must not be mutable", func.name),
+            });
+        }
+        if !matches!(func.output, Type::Unit) {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "SpendScript",
+                reason: format!(
+                    "spend script function '{}' must return unit (it rejects by panicking, not by returning a value)",
+                    func.name
+                ),
+            });
+        }
+        match func.arguments.last() {
+            Some(arg) if arg.arg_type.other() == Some("SpendContext") => Ok(()),
+            _ => Err(RuntimeError::InvalidArgument {
+                argument: "SpendScript",
+                reason: format!(
+                    "spend script function '{}' must take a SpendContext as its last argument",
+                    func.name
+                ),
+            }),
+        }
+    }
+
+    /// Resolves a `SpendScript` against its template and validates it end-to-end: the referenced function exists, has
+    /// the required signature, and `args` carries exactly one well-formed-CBOR element per leading (non-`SpendContext`)
+    /// parameter. Used at both creation time (T1) and spend time (T2). Because templates are immutable substates, a
+    /// `SpendScript` referencing one requires it to already resolve — there is no "not yet published" skip case.
+    fn validate_spend_script(&self, script: &SpendScript) -> Result<FunctionDef, RuntimeError> {
+        let template_def = self.get_template_def(&script.template)?;
+        let func = template_def
+            .get_function(&script.function)
+            .ok_or_else(|| RuntimeError::InvalidArgument {
+                argument: "SpendScript",
+                reason: format!(
+                    "spend script function '{}' not found on template {}",
+                    script.function, script.template
+                ),
+            })?;
+        Self::validate_spend_script_signature(func)?;
+
+        // `SpendScript.args` is positional: one CBOR value per leading parameter. Signature validation above
+        // guarantees there is at least the trailing `SpendContext` argument, so this subtraction cannot underflow.
+        let expected_bound_args = func.arguments.len() - 1;
+        if script.args.len() != expected_bound_args {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "SpendScript",
+                reason: format!(
+                    "spend script '{}' expects {} bound argument(s) but {} were provided",
+                    script.function,
+                    expected_bound_args,
+                    script.args.len()
+                ),
+            });
+        }
+        // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
+        // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
+        for (i, arg) in script.args.iter().enumerate() {
+            let _value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
+                argument: "SpendScript",
+                reason: format!(
+                    "spend script '{}' bound argument {} is not well-formed CBOR: {}",
+                    script.function, i, e
+                ),
+            })?;
+        }
+
+        Ok(func.clone())
+    }
+
+    /// Evaluates the spend script for every input that carries a `SpendCondition::Script`. Runs before the spend is
+    /// executed so that a rejection leaves the inputs unspent. `Signed`/`AccessRule` conditions are not touched here —
+    /// they are checked inline (WASM-free) inside `execute_stealth_transfer`.
+    fn evaluate_input_spend_scripts(
+        &mut self,
+        resource_address: ResourceAddressRef,
+        statement: &StealthTransferStatement,
+    ) -> Result<(), RuntimeError> {
+        if statement.inputs_statement.inputs.is_empty() {
+            return Ok(());
+        }
+        let resolved = self
+            .tracker
+            .read_with(|state| state.resolve_resource_address_ref(resource_address))?;
+
+        for (index, input) in statement.inputs_statement.inputs.iter().enumerate() {
+            let condition = self
+                .tracker
+                .write_with(|state| state.get_stealth_utxo_spend_condition(resolved, input))?;
+            if let SpendCondition::Script(script) = condition {
+                self.evaluate_spend_script(&script, index as u32, input.commitment, statement)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Invokes a single spend-script predicate inside a read-only restricted frame. Returning normally authorises the
+    /// spend; any panic — a deliberate `assert!`, out-of-gas, or a blocked state mutation
+    /// (`WriteInReadOnlyContext`) — aborts it as `SpendScriptRejected`.
+    fn evaluate_spend_script(
+        &mut self,
+        script: &SpendScript,
+        input_index: u32,
+        input_commitment: PedersenCommitmentBytes,
+        statement: &StealthTransferStatement,
+    ) -> Result<(), RuntimeError> {
+        // (T2) Authoritative spend-time validation. A `SpendCondition` is untrusted substate data, so the function
+        // shape and bound-arg encoding are re-validated immediately before invoking, regardless of any earlier check.
+        self.validate_spend_script(script)?;
+
+        let exec = SpendScriptExecution {
+            inputs: statement
+                .inputs_statement
+                .inputs
+                .iter()
+                .map(|i| StealthInputView {
+                    commitment: i.commitment,
+                })
+                .collect(),
+            outputs: statement
+                .outputs_statement
+                .outputs
+                .iter()
+                .map(|o| StealthOutputView {
+                    commitment: o.output.commitment,
+                    minimum_value_promise: o.output.minimum_value_promise,
+                    spend_condition: o.spend_condition.clone(),
+                    tag: o.tag,
+                })
+                .collect(),
+            revealed_input_amount: statement.inputs_statement.revealed_amount,
+            revealed_output_amount: statement.outputs_statement.revealed_output_amount,
+            current_input_index: input_index,
+            current_input_commitment: input_commitment,
+            invoking_condition: SpendCondition::Script(script.clone()),
+        };
+
+        // Assemble the call args as [bound args..., injected SpendContext handle], exactly as the auth hook appends
+        // its injected `auth_caller`. The generated dispatcher decodes each slot positionally with `decode_exact::<T>`.
+        let mut args = script.args.clone();
+        args.push(Bytes::from_vec(tari_bor::encode(&SpendContext::new(input_index))?));
+
+        // Make the introspection context reachable for the duration of the call (re-entered via the runtime pointer),
+        // and restrict the predicate's frame to a read-only, non-cross-template sandbox.
+        self.spend_exec_context = Some(exec);
+        self.restricted_frame_pending = true;
+        let result = self.invoke_template_function(&script.template, &script.function, args);
+        self.spend_exec_context = None;
+        self.restricted_frame_pending = false;
+
+        result
+            .map(|_| ())
+            .map_err(|e| RuntimeError::SpendScriptRejected { details: e.to_string() })
     }
 }
 
@@ -2907,6 +3132,13 @@ where
 
     fn push_call_frame(&mut self, frame: PushCallFrame) -> Result<(), RuntimeError> {
         self.tracker.push_call_frame(frame)?;
+        // A spend-script predicate is invoked via the generic `call_function` path, so we restrict the frame it just
+        // pushed here rather than threading a flag through that path. The predicate's WASM only runs after this
+        // returns, so the read-only/no-cross-template restriction is in place before any host op can be issued.
+        if self.restricted_frame_pending {
+            self.restricted_frame_pending = false;
+            self.tracker.write_with(|state| state.make_current_frame_read_only())?;
+        }
         Ok(())
     }
 
@@ -2996,6 +3228,29 @@ where
         }
     }
 
+    fn spend_context_invoke(&mut self, action: SpendContextAction) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("spend_context_invoke")?;
+
+        // Only reachable while a spend-script predicate is executing; `spend_exec_context` is set immediately before
+        // the predicate is invoked and cleared immediately after.
+        let ctx = self
+            .spend_exec_context
+            .as_ref()
+            .ok_or(RuntimeError::SpendContextUnavailable)?;
+
+        match action {
+            SpendContextAction::Inputs => Ok(InvokeResult::encode(&ctx.inputs)?),
+            SpendContextAction::Outputs => Ok(InvokeResult::encode(&ctx.outputs)?),
+            SpendContextAction::CurrentInput => Ok(InvokeResult::encode(&CurrentInputView {
+                index: ctx.current_input_index,
+                commitment: ctx.current_input_commitment,
+            })?),
+            SpendContextAction::InvokingCondition => Ok(InvokeResult::encode(&ctx.invoking_condition)?),
+            SpendContextAction::RevealedInputAmount => Ok(InvokeResult::encode(&ctx.revealed_input_amount)?),
+            SpendContextAction::RevealedOutputAmount => Ok(InvokeResult::encode(&ctx.revealed_output_amount)?),
+        }
+    }
+
     /// Create a new address allocation for the provided substate type and entity id
     fn allocate_address(
         &mut self,
@@ -3035,6 +3290,19 @@ where
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError> {
+        // (T1) Creation time: validate any `Script` condition on a newly-created output and reject the creating
+        // transaction on failure, so a malformed condition is un-creatable rather than discovered later by the
+        // recipient as permanently locked funds.
+        for output in statement.stealth_outputs() {
+            if let SpendCondition::Script(script) = &output.spend_condition {
+                self.validate_spend_script(script)?;
+            }
+        }
+
+        // (T2) Spend time: evaluate the predicate for every input carrying a `Script` condition BEFORE the spend
+        // executes, so a rejection leaves the inputs unspent. This is the authoritative, mandatory security gate.
+        self.evaluate_input_spend_scripts(resource_address.clone(), &statement)?;
+
         self.tracker.write_with(|state_mut| {
             let Some(container) =
                 state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?

@@ -8,7 +8,7 @@ use tari_template_lib_types::UtxoAddress;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UtxoUpdateRecord {
-    Unspent(UtxoUnspent),
+    Unspent(Box<UtxoUnspent>),
     Spent(UtxoSpent),
 }
 

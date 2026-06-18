@@ -696,14 +696,14 @@ fn extend_bufs_from_substate_update(
                     if let Some(address) = create.substate.substate_id().as_utxo_address() {
                         let is_frozen = utxo.is_frozen();
                         if let Some(ref output) = utxo.output {
-                            utxos_buf.push(UtxoUpdateRecord::Unspent(UtxoUnspent {
+                            utxos_buf.push(UtxoUpdateRecord::Unspent(Box::new(UtxoUnspent {
                                 address,
                                 version: update.version(),
                                 shard,
                                 state_version,
                                 utxo_output: output.clone(),
                                 is_frozen,
-                            }));
+                            })));
                         }
                     } else {
                         warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received UTXO substate with invalid address: {}", create.substate.substate_id());

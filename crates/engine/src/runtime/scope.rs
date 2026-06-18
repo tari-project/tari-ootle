@@ -284,6 +284,10 @@ pub struct CallFrame {
     entity_id: EntityId,
     allow_cross_template_calls: bool,
     allow_migration_calls: bool,
+    /// When set, every state mutation funnelling through `WorkingState::write_lock_substate` /
+    /// `new_substate` is rejected with `RuntimeError::WriteInReadOnlyContext`. Set for spend-script
+    /// predicate frames so they are provably side-effect-free.
+    read_only: bool,
 }
 
 impl CallFrame {
@@ -295,6 +299,7 @@ impl CallFrame {
             entity_id,
             allow_cross_template_calls: true,
             allow_migration_calls: false,
+            read_only: false,
         }
     }
 
@@ -311,6 +316,7 @@ impl CallFrame {
             entity_id,
             allow_cross_template_calls: true,
             allow_migration_calls: false,
+            read_only: false,
         }
     }
 
@@ -327,6 +333,7 @@ impl CallFrame {
             entity_id,
             allow_cross_template_calls: false,
             allow_migration_calls: true,
+            read_only: false,
         }
     }
 
@@ -360,6 +367,19 @@ impl CallFrame {
 
     pub fn are_migration_calls_allowed(&self) -> bool {
         self.allow_migration_calls
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// Restricts this frame to a read-only, non-cross-template sandbox, as used for spend-script
+    /// predicate evaluation. The two restrictions are load-bearing in tandem: read-only blocks every
+    /// state write at the lock layer, while disabling cross-template calls prevents the predicate
+    /// from re-entering other templates.
+    pub fn restrict_to_read_only(&mut self) {
+        self.read_only = true;
+        self.allow_cross_template_calls = false;
     }
 }
 

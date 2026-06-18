@@ -7,6 +7,7 @@ import CopyToClipboard from "@components/CopyToClipboard";
 import { Memo } from "@components/Memo";
 import { DataTableCell } from "@components/StyledComponents";
 import {
+  IconButton,
   Stack,
   Table,
   TableBody,
@@ -15,8 +16,9 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Tooltip,
 } from "@mui/material";
-import { Account, OutputStatus, TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
+import { Account, OutputStatus, TARI_TOKEN, UtxoInfo } from "@tari-project/ootle-ts-bindings";
 import {
   bigintToDecimalString,
   emptyRows,
@@ -26,16 +28,19 @@ import {
   substateIdToString,
 } from "@utils/helpers";
 import { useState } from "react";
+import { IoExpandOutline } from "react-icons/io5";
 import { useParams } from "react-router-dom";
 import PlaceHolder from "./components/PlaceHolder";
 import { SenderAddress } from "./components/SenderAddress";
 import SortableHeader from "./components/SortableHeader";
 import StatusChip from "./components/StatusChip";
+import UtxoDetailsDialog from "./components/UtxoDetailsDialog";
 
 function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [statusFilter, setStatusFilter] = useState<OutputStatus | "all">("all");
+  const [selectedUtxo, setSelectedUtxo] = useState<UtxoInfo | null>(null);
   const { data: balancesData } = useAccountsGetBalances(substateIdToString(account.component_address));
   const params = useParams();
   const resourceAddress = params.resource_address || TARI_TOKEN;
@@ -67,9 +72,10 @@ function StealthUtxoList({ account }: { account: Account }) {
     1: "15%",
     2: "20%",
     3: "15%",
-    4: "30%",
+    4: "25%",
     5: "10%",
     6: "10%",
+    7: "5%",
   };
 
   return (
@@ -92,6 +98,9 @@ function StealthUtxoList({ account }: { account: Account }) {
                 <TableCell width={columnWidths[4]}>Encrypted Memo</TableCell>
                 <TableCell width={columnWidths[5]}>Burnt</TableCell>
                 <TableCell width={columnWidths[6]}>Frozen</TableCell>
+                <TableCell width={columnWidths[7]} align="center">
+                  Details
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -118,6 +127,13 @@ function StealthUtxoList({ account }: { account: Account }) {
                       </DataTableCell>
                       <DataTableCell>{utxo.is_burnt ? "Yes" : "No"}</DataTableCell>
                       <DataTableCell>{utxo.is_frozen ? "Yes" : "No"}</DataTableCell>
+                      <DataTableCell align="center">
+                        <Tooltip title="View details" arrow>
+                          <IconButton size="small" aria-label="view utxo details" onClick={() => setSelectedUtxo(utxo)}>
+                            <IoExpandOutline style={{ height: 16, width: 16 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </DataTableCell>
                     </TableRow>
                   ))}
                   {emptyRows(page, rowsPerPage, data.utxos) > 0 && (
@@ -126,14 +142,14 @@ function StealthUtxoList({ account }: { account: Account }) {
                         height: 57 * emptyRows(page, rowsPerPage, data.utxos),
                       }}
                     >
-                      <TableCell colSpan={6} />
+                      <TableCell colSpan={7} />
                     </TableRow>
                   )}
                 </>
               ) : (
                 !isLoading && (
                   <TableRow>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={7}>
                       <PlaceHolder status="empty" utxoStatus={statusFilter === "all" ? undefined : statusFilter} />
                     </TableCell>
                   </TableRow>
@@ -154,6 +170,7 @@ function StealthUtxoList({ account }: { account: Account }) {
           )}
         </TableContainer>
       </FetchStatusCheck>
+      <UtxoDetailsDialog utxo={selectedUtxo} open={selectedUtxo !== null} onClose={() => setSelectedUtxo(null)} />
     </Stack>
   );
 }

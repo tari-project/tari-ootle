@@ -181,6 +181,14 @@ pub enum RuntimeError {
     AccessDeniedAuthHook { action_ident: ActionIdent, details: String },
     #[error("Access Denied: You must be the owner to perform this action: {action}")]
     AccessDeniedOwnerRequired { action: ActionIdent },
+    #[error("Write attempted in a read-only execution context")]
+    WriteInReadOnlyContext,
+    #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
+    ForbiddenInReadOnlyContext { operation: &'static str },
+    #[error("Spend script rejected the spend: {details}")]
+    SpendScriptRejected { details: String },
+    #[error("Spend context is only available during spend-script execution")]
+    SpendContextUnavailable,
     #[error("Invalid method address rule for {template_name}: {details}")]
     InvalidMethodAccessRule { template_name: String, details: String },
     #[error("Runtime module error: {0}")]

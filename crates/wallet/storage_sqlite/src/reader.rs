@@ -769,8 +769,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
         };
 
         let results = rows
-            .offset(offset)
-            .limit(limit)
+            .offset(offset as i64)
+            .limit(limit as i64)
             .load::<(models::BalanceChangeRow, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 

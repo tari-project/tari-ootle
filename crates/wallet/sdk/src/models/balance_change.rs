@@ -55,7 +55,7 @@ impl BalanceChange {
             confidential_delta,
             source,
             transaction_id,
-            created_at: PrimitiveDateTime::new(time::Date::MIN, time::Time::MIN),
+            created_at: PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
         }
     }
 }

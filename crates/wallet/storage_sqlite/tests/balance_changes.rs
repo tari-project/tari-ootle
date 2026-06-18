@@ -130,20 +130,22 @@ fn multi_vault_transaction() {
     )
     .unwrap();
 
-    let mut tx = db.create_write_tx().unwrap();
-    tx.vaults_insert(VaultModel {
-        account_address,
-        id: vault_id_2,
-        resource_address: resource_address_2,
-        resource_type: ResourceType::Fungible,
-        confidential_balance: Amount::zero(),
-        revealed_balance: Amount::zero(),
-        locked_revealed_balance: Amount::zero(),
-        token_symbol: None,
-        divisibility: 0,
-    })
-    .unwrap();
-    tx.commit().unwrap();
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.vaults_insert(VaultModel {
+            account_address,
+            id: vault_id_2,
+            resource_address: resource_address_2,
+            resource_type: ResourceType::Fungible,
+            confidential_balance: Amount::zero(),
+            revealed_balance: Amount::zero(),
+            locked_revealed_balance: Amount::zero(),
+            token_symbol: None,
+            divisibility: 0,
+        })
+        .unwrap();
+        tx.commit().unwrap();
+    }
 
     let tx_id = make_tx_id(99);
     let mut tx = db.create_write_tx().unwrap();

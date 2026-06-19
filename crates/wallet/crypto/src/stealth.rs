@@ -6,6 +6,8 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_template_lib_types::{
     Amount,
     stealth::{
+        CovenantBalanceClaim,
+        SpendCondition,
         StealthInput,
         StealthInputsStatement,
         StealthOutputsStatement,
@@ -19,7 +21,7 @@ use crate::{
     StealthInputWitness,
     StealthOutputWitness,
     WalletCryptoError,
-    balance_proof::generate_stealth_balance_proof_signature,
+    balance_proof::{generate_covenant_balance_proof_signature, generate_stealth_balance_proof_signature},
     bullet_proof::generate_extended_bullet_proof,
     error::StealthProofError,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
@@ -50,29 +52,29 @@ where
         });
     }
 
-    let mut inputs = inputs.into_iter();
+    let inputs = inputs.into_iter().collect::<Vec<_>>();
     let num_inputs = inputs.len();
 
     let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output_amount)?;
-    let output_statements = output_statements.into_iter();
-    let num_outputs = output_statements.len();
+    let output_witnesses = output_statements.into_iter().collect::<Vec<_>>();
+    let num_outputs = output_witnesses.len();
 
-    let (inputs_to_spend, agg_input_mask) = inputs.try_fold(
-        (Vec::with_capacity(num_inputs), RistrettoSecretKey::default()),
-        |(mut inputs, agg_input), input| {
-            inputs.push(StealthInput {
-                commitment: input.mask_and_value.to_commitment().to_byte_type(),
-            });
-            Ok::<_, WalletCryptoError>((inputs, agg_input + &input.mask_and_value.mask))
-        },
-    )?;
+    let mut inputs_to_spend = Vec::with_capacity(num_inputs);
+    let mut agg_input_mask = RistrettoSecretKey::default();
+    for input in &inputs {
+        inputs_to_spend.push(StealthInput {
+            commitment: input.mask_and_value.to_commitment().to_byte_type(),
+        });
+        agg_input_mask = agg_input_mask + &input.mask_and_value.mask;
+    }
 
-    let agg_output_mask = output_statements
+    let agg_output_mask = output_witnesses
+        .iter()
         .map(|stmt| &stmt.witness.mask)
         .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
 
     let inputs_statement = StealthInputsStatement {
-        inputs: inputs_to_spend.clone(),
+        inputs: inputs_to_spend,
         revealed_amount: revealed_input_amount,
     };
 
@@ -86,14 +88,90 @@ where
         )
     });
 
+    let covenant_claims = generate_covenant_claims(&inputs, &output_witnesses)?;
+
     Ok(StealthTransferStatement {
-        inputs_statement: StealthInputsStatement {
-            inputs: inputs_to_spend,
-            revealed_amount: revealed_input_amount,
-        },
+        inputs_statement,
         outputs_statement,
         balance_proof,
+        covenant_claims,
     })
+}
+
+/// Generates a [`CovenantBalanceClaim`] for each distinct `SpendCondition::Script` among the spent inputs, keyed by the
+/// index of the partition's first input. Inputs and outputs are partitioned by condition (matching the engine's
+/// verification), and each partition's proof attests that its committed input value equals its committed output value
+/// plus the exact cleartext outflow `revealed_amount = Σ input values - Σ output values`.
+///
+/// A covenant partition may not receive more value than it spends in the same transaction (`revealed_amount` would be
+/// negative); deposit into a covenant separately.
+fn generate_covenant_claims(
+    inputs: &[StealthInputWitness],
+    outputs: &[&StealthOutputWitness],
+) -> Result<Vec<CovenantBalanceClaim>, WalletCryptoError> {
+    let mut claims = Vec::new();
+    let mut seen: Vec<&SpendCondition> = Vec::new();
+
+    for (partition_input_index, condition) in inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, input)| Some((index, input.spend_condition.as_ref()?)))
+    {
+        if !matches!(condition, SpendCondition::Script(_)) || seen.contains(&condition) {
+            continue;
+        }
+        seen.push(condition);
+
+        let value_overflow = || WalletCryptoError::InvalidArgument {
+            name: "covenant",
+            details: "Covenant partition value sum overflowed".to_string(),
+        };
+
+        let mut agg_input_mask = RistrettoSecretKey::default();
+        let mut input_value = Amount::zero();
+        let mut input_commitments = Vec::new();
+        for input in inputs.iter().filter(|i| i.spend_condition.as_ref() == Some(condition)) {
+            agg_input_mask = agg_input_mask + &input.mask_and_value.mask;
+            input_value = input_value
+                .checked_add(Amount::from_u64(input.mask_and_value.value))
+                .ok_or_else(value_overflow)?;
+            input_commitments.push(input.mask_and_value.to_commitment().to_byte_type());
+        }
+
+        let mut agg_output_mask = RistrettoSecretKey::default();
+        let mut output_value = Amount::zero();
+        let mut output_commitments = Vec::new();
+        for output in outputs.iter().filter(|o| &o.spend_condition == condition) {
+            agg_output_mask = agg_output_mask + &output.witness.mask;
+            output_value = output_value
+                .checked_add(Amount::from_u64(output.witness.amount))
+                .ok_or_else(value_overflow)?;
+            output_commitments.push(output.witness.to_commitment().to_byte_type());
+        }
+
+        let Some(revealed_amount) = input_value.checked_sub(output_value) else {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "covenant",
+                details: "A covenant partition may not receive more value than it spends in the same transaction"
+                    .to_string(),
+            });
+        };
+
+        claims.push(CovenantBalanceClaim {
+            partition_input_index: partition_input_index as u32,
+            revealed_amount,
+            signature: generate_covenant_balance_proof_signature(
+                condition,
+                &agg_input_mask,
+                &agg_output_mask,
+                revealed_amount,
+                &input_commitments,
+                &output_commitments,
+            ),
+        });
+    }
+
+    Ok(claims)
 }
 
 pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone>(

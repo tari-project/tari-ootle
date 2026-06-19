@@ -17,6 +17,6 @@
     "astro-skills": "^0.0.5",
     "sass": "^1.97.3",
     "sharp": "^0.34.5",
-    "wrangler": "^4.85.0"
+    "wrangler": "^4.102.0"
   }
 }

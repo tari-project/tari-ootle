@@ -38,6 +38,7 @@ export * from "./types/ComponentKey";
 export * from "./types/ComponentReference";
 export * from "./types/ConfidentialOutputStatement";
 export * from "./types/ConfidentialWithdrawProof";
+export * from "./types/CovenantBalanceClaim";
 export * from "./types/Crud";
 export * from "./types/CurrentInputView";
 export * from "./types/Decision";

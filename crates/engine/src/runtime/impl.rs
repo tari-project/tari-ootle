@@ -31,7 +31,7 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
     component::Component,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
-    crypto::OutputBody,
+    crypto::{OutputBody, validate_covenant_balance_proof},
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
@@ -128,18 +128,18 @@ use tari_template_lib::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
         engine_args::{SignatureAction, SignatureVerifyArg},
         metadata,
-        stealth::{
-            CurrentInputView,
-            SpendCondition,
-            SpendScript,
-            StealthInputView,
-            StealthOutputView,
-            StealthTransferStatement,
-        },
+        stealth::{CurrentInputView, SpendCondition, SpendScript, StealthTransferStatement},
     },
 };
 
-use super::{ActionIdent, NativeAction, Runtime, RuntimeEvent, working_state::WorkingState};
+use super::{
+    ActionIdent,
+    NativeAction,
+    Runtime,
+    RuntimeEvent,
+    spend_script_execution::SpendScriptExecution,
+    working_state::WorkingState,
+};
 use crate::{
     runtime::{
         RuntimeError,
@@ -179,20 +179,6 @@ pub struct RuntimeInterfaceImpl<TStore, TTemplateProvider> {
     /// One-shot flag: when set, the next pushed call frame is restricted to a read-only, non-cross-template sandbox
     /// (used for the spend-script predicate frame). Consumed by `push_call_frame`.
     restricted_frame_pending: bool,
-}
-
-/// The data a spend-script predicate can introspect, derived once from the spending `StealthTransferStatement` before
-/// the predicate runs. Only commitments, spend conditions, `minimum_value_promise` and tags are exposed — never
-/// confidential values.
-#[derive(Debug, Clone)]
-struct SpendScriptExecution {
-    inputs: Vec<StealthInputView>,
-    outputs: Vec<StealthOutputView>,
-    revealed_input_amount: Amount,
-    revealed_output_amount: Amount,
-    current_input_index: u32,
-    current_input_commitment: PedersenCommitmentBytes,
-    invoking_condition: SpendCondition,
 }
 
 impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<Template = LoadedTemplate>>
@@ -445,7 +431,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         &mut self,
         template_address: &TemplateAddress,
         function: &str,
-        args: Vec<Bytes>,
+        args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, RuntimeError> {
         let mut call_runtime = self.get_call_runtime();
 
@@ -454,7 +440,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             &mut call_runtime,
             template_address,
             function,
-            args.into_iter().map(InstructionArg::Literal).collect(),
+            args,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
             template_address: *template_address,
@@ -615,12 +601,21 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             .tracker
             .read_with(|state| state.resolve_resource_address_ref(resource_address))?;
 
-        for (index, input) in statement.inputs_statement.inputs.iter().enumerate() {
-            let condition = self
-                .tracker
-                .write_with(|state| state.get_stealth_utxo_spend_condition(resolved, input))?;
+        // Resolve every input's spend condition up front: a covenant predicate partitions inputs by condition, so it
+        // needs the conditions of all inputs, not just the one it gates.
+        let input_conditions = self.tracker.write_with(|state| {
+            statement
+                .inputs_statement
+                .inputs
+                .iter()
+                .map(|input| state.get_stealth_utxo_spend_condition(resolved, input))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+
+        for (index, condition) in input_conditions.iter().enumerate() {
             if let SpendCondition::Script(script) = condition {
-                self.evaluate_spend_script(&script, index as u32, input.commitment, statement)?;
+                let input = &statement.inputs_statement.inputs[index];
+                self.evaluate_spend_script(script, index as u32, input.commitment, statement, &input_conditions)?;
             }
         }
         Ok(())
@@ -635,42 +630,21 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         input_index: u32,
         input_commitment: PedersenCommitmentBytes,
         statement: &StealthTransferStatement,
+        input_conditions: &[SpendCondition],
     ) -> Result<(), RuntimeError> {
         // (T2) Authoritative spend-time validation. A `SpendCondition` is untrusted substate data, so the function
         // shape and bound-arg encoding are re-validated immediately before invoking, regardless of any earlier check.
         self.validate_spend_script(script)?;
 
-        let exec = SpendScriptExecution {
-            inputs: statement
-                .inputs_statement
-                .inputs
-                .iter()
-                .map(|i| StealthInputView {
-                    commitment: i.commitment,
-                })
-                .collect(),
-            outputs: statement
-                .outputs_statement
-                .outputs
-                .iter()
-                .map(|o| StealthOutputView {
-                    commitment: o.output.commitment,
-                    minimum_value_promise: o.output.minimum_value_promise,
-                    spend_condition: o.spend_condition.clone(),
-                    tag: o.tag,
-                })
-                .collect(),
-            revealed_input_amount: statement.inputs_statement.revealed_amount,
-            revealed_output_amount: statement.outputs_statement.revealed_output_amount,
-            current_input_index: input_index,
-            current_input_commitment: input_commitment,
-            invoking_condition: SpendCondition::Script(script.clone()),
-        };
+        let exec = SpendScriptExecution::new(statement, input_conditions, input_index, input_commitment, script);
 
         // Assemble the call args as [bound args..., injected SpendContext handle], exactly as the auth hook appends
         // its injected `auth_caller`. The generated dispatcher decodes each slot positionally with `decode_exact::<T>`.
-        let mut args = script.args.clone();
-        args.push(Bytes::from_vec(tari_bor::encode(&SpendContext::new(input_index))?));
+        let mut args = Vec::with_capacity(script.args.len() + 1);
+        args.extend(script.args.iter().cloned().map(InstructionArg::Literal));
+        args.push(InstructionArg::Literal(
+            tari_bor::encode(&SpendContext::new(input_index))?.into(),
+        ));
 
         // Make the introspection context reachable for the duration of the call (re-entered via the runtime pointer),
         // and restrict the predicate's frame to a read-only, non-cross-template sandbox.
@@ -682,7 +656,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         result
             .map(|_| ())
-            .map_err(|e| RuntimeError::SpendScriptRejected { details: e.to_string() })
+            .map_err(|e| RuntimeError::SpendScriptRejected { details: Box::new(e) })
     }
 }
 
@@ -3048,7 +3022,11 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.invoke_template_function(&template_address, &function, args)?
+                self.invoke_template_function(
+                    &template_address,
+                    &function,
+                    args.into_iter().map(InstructionArg::Literal).collect(),
+                )?
             },
             CallAction::CallMethod => {
                 let CallMethodArg {
@@ -3248,6 +3226,54 @@ where
             SpendContextAction::InvokingCondition => Ok(InvokeResult::encode(&ctx.invoking_condition)?),
             SpendContextAction::RevealedInputAmount => Ok(InvokeResult::encode(&ctx.revealed_input_amount)?),
             SpendContextAction::RevealedOutputAmount => Ok(InvokeResult::encode(&ctx.revealed_output_amount)?),
+            SpendContextAction::AssertCovenantBalanced { max_revealed } => {
+                let me = &ctx.invoking_condition;
+
+                // A claim is keyed by the index of its partition's first input. Locate that index for this partition
+                // and match the claim by it — no condition is compared across the claim boundary; the proof signature
+                // binds the partition.
+                let Some(first_input_index) = ctx.input_conditions.iter().position(|condition| condition == me) else {
+                    return Ok(InvokeResult::encode(&false)?);
+                };
+
+                let maybe_claim = ctx
+                    .covenant_claims
+                    .iter()
+                    .find(|claim| claim.partition_input_index as usize == first_input_index);
+
+                let Some(claim) = maybe_claim else {
+                    return Ok(InvokeResult::encode(&false)?);
+                };
+                if claim.revealed_amount > Amount::from_u64(max_revealed) {
+                    return Ok(InvokeResult::encode(&false)?);
+                }
+
+                let input_commitments = ctx
+                    .inputs
+                    .iter()
+                    .zip(&ctx.input_conditions)
+                    .filter(|(_, condition)| *condition == me)
+                    .map(|(input, _)| input.commitment)
+                    .collect::<Vec<_>>();
+                let output_commitments = ctx
+                    .outputs
+                    .iter()
+                    .filter(|output| output.spend_condition == *me)
+                    .map(|output| output.commitment)
+                    .collect::<Vec<_>>();
+
+                // The covenant is satisfied only if a claim exists at this partition's position, its declared outflow
+                // is within the allowance, and the sub-balance proof verifies. A missing or invalid claim yields
+                // `false`, which the predicate turns into a rejected spend.
+                let satisfied = validate_covenant_balance_proof(
+                    me,
+                    claim.revealed_amount,
+                    &input_commitments,
+                    &output_commitments,
+                    &claim.signature,
+                );
+                Ok(InvokeResult::encode(&satisfied)?)
+            },
         }
     }
 
@@ -3301,6 +3327,11 @@ where
 
         // (T2) Spend time: evaluate the predicate for every input carrying a `Script` condition BEFORE the spend
         // executes, so a rejection leaves the inputs unspent. This is the authoritative, mandatory security gate.
+        //
+        // Covenant soundness invariant: a covenant balance proof binds the partition's output commitments but trusts
+        // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
+        // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
+        // wraparound forgery in the covenant check.
         self.evaluate_input_spend_scripts(resource_address.clone(), &statement)?;
 
         self.tracker.write_with(|state_mut| {

@@ -13,8 +13,8 @@ use tari_engine_types::{
 };
 use tari_template_lib_types::{
     Amount,
-    crypto::BalanceProofSignature,
-    stealth::{StealthInputsStatement, StealthOutputsStatement},
+    crypto::{BalanceProofSignature, PedersenCommitmentBytes},
+    stealth::{SpendCondition, StealthInputsStatement, StealthOutputsStatement},
 };
 use tari_utilities::ByteArrayError;
 
@@ -57,6 +57,37 @@ pub fn generate_stealth_balance_proof_signature(
     let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
     let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let message = messages::stealth_balance_proof64(&public_excess, &public_nonce, inputs_statement, outputs_statement);
+
+    let sig = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();
+    sig.to_byte_type()
+}
+
+/// Signs a covenant sub-balance proof (TIP-0006) for one partition: the inputs and outputs sharing `condition`. The key
+/// is the partition's aggregate mask difference (`agg_input_mask - agg_output_mask`); `revealed_amount` is the exact
+/// net cleartext outflow (`Σ input values - Σ output values`) and must be non-negative. The verifier reconstructs the
+/// same excess point from the public commitments and `revealed_amount`.
+pub fn generate_covenant_balance_proof_signature(
+    condition: &SpendCondition,
+    agg_input_mask: &RistrettoSecretKey,
+    agg_output_mask: &RistrettoSecretKey,
+    revealed_amount: Amount,
+    input_commitments: &[PedersenCommitmentBytes],
+    output_commitments: &[PedersenCommitmentBytes],
+) -> BalanceProofSignature {
+    // Unlike the global balance proofs, there is no zero-excess sentinel: a covenant partition's aggregate mask
+    // difference is non-trivial for distinct output masks, and a degenerate zero excess would yield the identity
+    // point, which the verifier rejects — the correct fail-closed outcome.
+    let secret_excess = agg_input_mask - agg_output_mask;
+    let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
+    let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    let message = messages::covenant_balance_proof64(
+        &public_excess,
+        &public_nonce,
+        condition,
+        &revealed_amount,
+        input_commitments,
+        output_commitments,
+    );
 
     let sig = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();
     sig.to_byte_type()

@@ -207,10 +207,13 @@ where
         })
         .collect::<Vec<_>>();
 
-    let inputs = inputs.into_iter().map(Into::into).map(|input| {
-        let mask_and_value = input.mask_and_value().clone();
-        StealthInputWitness { mask_and_value }
-    });
+    let inputs = inputs
+        .into_iter()
+        .map(Into::into)
+        .map(|input: InputSpec| StealthInputWitness {
+            mask_and_value: input.mask_and_value().clone(),
+            spend_condition: input.spend_condition().cloned(),
+        });
 
     let transfer = stealth::create_transfer_statement(
         inputs,

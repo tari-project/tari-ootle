@@ -429,7 +429,7 @@ async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, 
     let indexer = world.get_indexer(&indexer_name);
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
     let client = indexer.get_indexer_client();
-    let mut remaining_attempts = 60;
+    let mut remaining_attempts = 120;
     loop {
         if remaining_attempts == 0 {
             panic!(

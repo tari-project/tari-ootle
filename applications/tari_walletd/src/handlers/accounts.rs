@@ -648,9 +648,7 @@ pub(crate) async fn execute_claim_burn(
     };
 
     // Package the secrets required to spend the claimed output
-    let input = StealthInputWitness {
-        mask_and_value: decrypted.into_mask_and_value(),
-    };
+    let input = StealthInputWitness::new(decrypted.into_mask_and_value());
 
     let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
         iter::once(input),

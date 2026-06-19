@@ -50,6 +50,16 @@ mod spend_scripts {
             ctx.require_output_preserves_condition();
         }
 
+        /// Full-conservation covenant: no value may leave this UTXO's covenant partition.
+        pub fn preserve_balance(ctx: SpendContext) {
+            ctx.require_balance_preserved();
+        }
+
+        /// Capped-withdrawal covenant: at most `max_revealed` cleartext may leave the covenant per spend.
+        pub fn preserve_balance_with_allowance(max_revealed: u64, ctx: SpendContext) {
+            ctx.require_balance_preserved_with_allowance(max_revealed);
+        }
+
         /// Signature lock: authorises only if the bound `signature` is valid for `public_key` over a fixed message.
         /// Exercises `signature_invoke` from inside a spend script.
         pub fn require_signature(public_key: PublicKey, signature: Signature<SpendSigDomain>, _ctx: SpendContext) {
@@ -65,6 +75,18 @@ mod spend_scripts {
         /// Attempts to emit an event, which is on the spend-script deny-list.
         pub fn try_emit_event(_ctx: SpendContext) {
             emit_event("spend_script_test", Metadata::new());
+        }
+
+        /// Attempts a cross-template call. `call_invoke` is on the read-only deny-list (and cross-template calls are
+        /// disabled at the frame level), so this always aborts the spend before the target runs.
+        pub fn try_cross_template_call(template: TemplateAddress, _ctx: SpendContext) {
+            let _: () = TemplateManager::get(template).call("always_ok", args![]);
+        }
+
+        /// Runs an unbounded computation. The WASM metering budget aborts it, which the engine turns into a rejected
+        /// spend — a script cannot stall consensus by spending unbounded compute.
+        pub fn exhaust_budget(_ctx: SpendContext) {
+            loop {}
         }
 
         // --------------- Deliberately ill-shaped functions for creation-time (T1) tests --------------- //

@@ -751,7 +751,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             })?;
 
         let mut rows = account_balance_changes::table
-            .inner_join(vaults::table.on(account_balance_changes::vault_id.eq(vaults::id)))
+            .inner_join(vaults::table)
             .filter(account_balance_changes::account_id.eq(account_id))
             .select((
                 account_balance_changes::all_columns,

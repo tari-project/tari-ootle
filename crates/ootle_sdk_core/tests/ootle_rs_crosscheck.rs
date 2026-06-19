@@ -26,9 +26,12 @@
 //! dev-tree. So this test drives the **shared `tari_ootle_transaction` builder directly**, replaying
 //! `ootle-rs`'s exact `public_transfer` recipe verbatim, and seals it through the core's
 //! **deterministic** seal seam (`ootle_sdk_core::tx::seal_public_transfer_deterministic`) with the
-//! **same pinned nonces** the vector uses. The recipe below is a line-for-line re-derivation of
-//! `account.rs`, written *here* independently of the core's `builder.rs`, so the two drivers
-//! genuinely cross-check each other rather than calling one shared helper.
+//! **same pinned nonces** the vector uses. The recipe below is a **hand-copied snapshot** of
+//! `account.rs`, kept in lockstep with it **manually** — so this driver and the core's `builder.rs`
+//! check the same recipe by two routes that must agree, rather than calling one shared helper.
+//!
+//! **Maintenance:** if `account.rs`'s `public_transfer` recipe changes, this copy must be updated by
+//! hand or the cross-check silently goes stale (it would keep matching its own frozen snapshot).
 //!
 //! ## Why pinned nonces on both sides
 //!
@@ -50,9 +53,9 @@ use ootle_sdk_core::{
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::Amount;
 
-/// `ootle-rs`'s per-transfer bucket-label convention, re-derived here verbatim from
-/// `AccountInvokeBuilder::next_bucket_name` — independently of the core's
-/// `builder.rs`, so this driver does not borrow the core's label helper.
+/// `ootle-rs`'s per-transfer bucket-label convention, hand-copied verbatim from
+/// `AccountInvokeBuilder::next_bucket_name` rather than borrowing the core's label helper, so a drift
+/// in either side's convention surfaces as a byte mismatch.
 fn ootle_rs_bucket_name(builder: &TransactionBuilder) -> String {
     format!("__AccountInvokeBuilder_{}", builder.next_workspace_id())
 }
@@ -60,10 +63,10 @@ fn ootle_rs_bucket_name(builder: &TransactionBuilder) -> String {
 /// Re-derives `ootle-rs`'s `IAccount::public_transfer` recipe (`account.rs`) directly on the
 /// shared `tari_ootle_transaction::TransactionBuilder`, building the **unsigned** transaction.
 ///
-/// This is intentionally a separate, hand-written re-implementation of the production recipe — NOT a
-/// call into the core's `build_public_transfer_unsigned` — so that the two builders genuinely
-/// cross-check each other (any drift in instruction order / fee placement / inputs / bucket label
-/// shows up as a byte mismatch).
+/// This is a hand-copied snapshot of the production recipe — NOT a call into the core's
+/// `build_public_transfer_unsigned` — kept in lockstep with `account.rs` by hand. It validates
+/// orchestration parity against that snapshot: any drift in instruction order / fee placement /
+/// inputs / bucket label shows up as a byte mismatch. If `account.rs` changes, update this copy too.
 fn build_unsigned_via_shared_builder(network: u8, intent: &PublicTransferIntent) -> UnsignedTransaction {
     let from_component = intent.from_account.to_internal().expect("valid from-account");
     let resource = intent.resource_address.to_internal().expect("valid resource");

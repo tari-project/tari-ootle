@@ -9,7 +9,7 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::{Transaction, TransactionId, args};
 use tari_ootle_wallet_sdk::{
-    models::{BalanceChangeSource, KeyBranch, KeyId},
+    models::{BalanceChangeSource, BalanceChangeSourceType, KeyBranch, KeyId},
     storage::{WalletStoreWriter, WriteableWalletStore},
 };
 use tari_template_lib::types::{Amount, ComponentAddress, ResourceType, VaultId, constants::TARI_TOKEN};
@@ -156,6 +156,59 @@ fn scan_and_recovery_are_deduplicated_and_failed_history_rolls_back_balance() {
             .count_balance_changes(&Test::test_account_address(), None, None, None)
             .unwrap(),
         2
+    );
+}
+
+#[test]
+fn transaction_source_promotes_existing_scan_for_same_balance() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let vault = Test::test_vault_address();
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    test.store()
+        .with_write_tx(|tx| tx.transactions_insert(&transaction, None, &[Test::test_account_address()], false))
+        .unwrap();
+
+    assert!(
+        accounts
+            .update_vault_balance_and_record_change(
+                vault,
+                Amount::from(10u64),
+                Amount::zero(),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap()
+    );
+    let source = BalanceChangeSource::Transaction { transaction_id };
+    assert!(
+        accounts
+            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
+            .unwrap()
+    );
+    assert!(
+        !accounts
+            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
+            .unwrap()
+    );
+
+    let changes = accounts
+        .get_balance_changes(&Test::test_account_address(), 0, 10, None, Some(&transaction_id), None)
+        .unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].source, source);
+    assert_eq!(changes[0].transaction_id, Some(transaction_id));
+    assert_eq!(changes[0].revealed_delta, "10");
+    assert_eq!(
+        accounts
+            .count_balance_changes(
+                &Test::test_account_address(),
+                None,
+                None,
+                Some(BalanceChangeSourceType::Scan),
+            )
+            .unwrap(),
+        0
     );
 }
 

@@ -208,17 +208,6 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         })
     }
 
-    pub fn update_vault_balance(
-        &self,
-        vault_address: VaultId,
-        revealed_balance: Amount,
-        confidential_balance: Amount,
-    ) -> Result<(), AccountsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.vaults_update(vault_address, revealed_balance, confidential_balance))?;
-        Ok(())
-    }
-
     pub fn update_vault_balance_and_record_change(
         &self,
         vault_address: VaultId,
@@ -226,11 +215,14 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         confidential_balance: Amount,
         source: BalanceChangeSource,
     ) -> Result<bool, AccountsApiError> {
-        self.store.with_write_tx(|tx| {
+        Ok(self.store.with_write_tx(|tx| {
             let current_vault = tx.vaults_get(&vault_address)?;
             if current_vault.revealed_balance == revealed_balance &&
                 current_vault.confidential_balance == confidential_balance
             {
+                if let Some(transaction_id) = source.transaction_id() {
+                    return tx.balance_changes_promote_scan_to_transaction(&current_vault, transaction_id);
+                }
                 return Ok(false);
             }
             if !tx.balance_changes_insert(&current_vault, revealed_balance, confidential_balance, source)? {
@@ -238,7 +230,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             }
             tx.vaults_update(vault_address, revealed_balance, confidential_balance)?;
             Ok(true)
-        })
+        })?)
     }
 
     pub fn get_balance_changes(

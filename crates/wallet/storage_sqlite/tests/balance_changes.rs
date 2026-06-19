@@ -104,12 +104,12 @@ fn record_change(
 ) {
     let mut tx = store.create_write_tx().unwrap();
     let current = tx.vaults_get(&vault_address).unwrap();
-    tx.vaults_update(vault_address, revealed_after, confidential_after)
-        .unwrap();
     assert!(
         tx.balance_changes_insert(&current, revealed_after, confidential_after, source)
             .unwrap()
     );
+    tx.vaults_update(vault_address, revealed_after, confidential_after)
+        .unwrap();
     tx.commit().unwrap();
 }
 
@@ -277,4 +277,52 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
     assert_eq!(second_page.len(), 1);
     assert!(first_page[0].id > first_page[1].id);
     assert!(first_page[1].id > second_page[0].id);
+}
+
+#[test]
+fn promotes_matching_scan_change_to_transaction_source() {
+    let (store, first_vault, _, _, _) = setup_store();
+    let transaction = build_transaction(3);
+    let transaction_id = transaction.calculate_id();
+    let mut tx = store.create_write_tx().unwrap();
+    tx.transactions_insert(&transaction, None, &[account_address()], false)
+        .unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    record_change(
+        &store,
+        first_vault,
+        Amount::from(10u64),
+        Amount::from(2u64),
+        BalanceChangeSource::Scan,
+    );
+
+    let mut tx = store.create_write_tx().unwrap();
+    let current = tx.vaults_get(&first_vault).unwrap();
+    assert!(
+        tx.balance_changes_promote_scan_to_transaction(&current, transaction_id)
+            .unwrap()
+    );
+    assert!(
+        !tx.balance_changes_promote_scan_to_transaction(&current, transaction_id)
+            .unwrap()
+    );
+    tx.commit().unwrap();
+    drop(tx);
+
+    let mut tx = store.create_read_tx().unwrap();
+    let changes = tx
+        .balance_changes_get_by_account(&account_address(), 0, 10, None, Some(&transaction_id), None)
+        .unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].source, BalanceChangeSource::Transaction { transaction_id });
+    assert_eq!(changes[0].transaction_id, Some(transaction_id));
+    assert_eq!(changes[0].revealed_delta, "10");
+    assert_eq!(changes[0].confidential_delta, "2");
+    assert_eq!(
+        tx.balance_changes_count_by_account(&account_address(), None, None, Some(BalanceChangeSourceType::Scan))
+            .unwrap(),
+        0
+    );
 }

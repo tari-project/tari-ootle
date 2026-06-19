@@ -383,7 +383,9 @@ pub async fn handle_get_balance_changes(
 ) -> Result<AccountsGetBalanceChangesResponse, anyhow::Error> {
     let granted = context.check_auth(token)?;
     let sdk = context.wallet_sdk();
-    let account = get_account(&req.account, &sdk.accounts_api())?;
+    let account = get_account(&req.account, &sdk.accounts_api())
+        .optional()?
+        .ok_or_else(|| not_found(format!("Account '{}' not found", req.account)))?;
     enforce_scopes(&granted, &[Permission::Accounts(
         Crud::Read,
         Some(*account.component_address()),
@@ -1665,6 +1667,19 @@ mod balance_change_handler_tests {
         assert_eq!(response.changes[0].resource_address, first_resource);
         assert_eq!(response.changes[0].revealed_delta, "100");
         assert_eq!(response.changes[0].source, BalanceChangeSource::Scan);
+
+        let missing_account_err =
+            handle_get_balance_changes(&context, Some(&bearer), AccountsGetBalanceChangesRequest {
+                account: "missing".into(),
+                offset: 0,
+                limit: 1,
+                resource_address: None,
+                transaction_id: None,
+                source_type: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(missing_account_err.to_string().contains("Not found"));
 
         shutdown.trigger();
         tokio::time::timeout(Duration::from_secs(5), services.services_fut)

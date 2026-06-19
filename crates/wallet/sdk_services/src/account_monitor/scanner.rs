@@ -145,21 +145,20 @@ where TSpec: WalletSdkSpec
                 continue;
             };
 
-            is_updated = true;
+            let Some(account_addr) = account_substate_id.substate_id().as_component_address() else {
+                continue;
+            };
+            self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
+                .await?;
+            self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), source)
+                .await?;
 
-            // Save the vault substate
             substate_api.save_child(
                 account_substate_id.substate_id(),
                 versioned_vault_substate_id.as_versioned_ref(),
                 [SubstateId::from(*latest_vault.resource_address())],
             )?;
-
-            if let Some(account_addr) = account_substate_id.substate_id().as_component_address() {
-                self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
-                    .await?;
-                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), source)
-                    .await?;
-            }
+            is_updated = true;
 
             self.notify.notify(AccountChangedEvent {
                 account_address,

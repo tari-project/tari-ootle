@@ -53,8 +53,7 @@ function ChangeValues({ change }: { change: BalanceChange }) {
     <Stack spacing={0.25}>
       {values.map(({ label, value }) => (
         <Typography key={label} variant="body2" color={BigInt(value) > 0n ? "success.main" : "error.main"}>
-          {values.length > 1 && `${label}: `}
-          {formatSignedDelta(value, currency)}
+          {`${label}: ${formatSignedDelta(value, currency)}`}
         </Typography>
       ))}
     </Stack>
@@ -81,7 +80,7 @@ function NewBalance({ change }: { change: BalanceChange }) {
 function Source({ change }: { change: BalanceChange }) {
   const { source } = change;
   switch (source.type) {
-    case "transaction": {
+    case "Transaction": {
       const transactionId = source.transaction_id || change.transaction_id;
       if (!transactionId || !validateHash(transactionId)) {
         return <Typography variant="body2">Transaction (unavailable)</Typography>;
@@ -98,9 +97,9 @@ function Source({ change }: { change: BalanceChange }) {
         </MuiLink>
       );
     }
-    case "scan":
+    case "Scan":
       return <Typography variant="body2">Account scan</Typography>;
-    case "recovery":
+    case "Recovery":
       return <Typography variant="body2">Account recovery</Typography>;
     default:
       return <Typography variant="body2">Unknown source</Typography>;
@@ -144,7 +143,7 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
                 <DataTableCell>
                   <CopyAddress
                     address={change.resource_address}
-                    display={change.token_symbol || change.resource_address}
+                    display={change.token_symbol || undefined}
                   />
                 </DataTableCell>
                 <DataTableCell>

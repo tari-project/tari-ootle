@@ -1674,7 +1674,7 @@ mod tests {
             "limit": 10,
             "resource_address": null,
             "transaction_id": transaction_id.to_string(),
-            "source_type": "transaction",
+            "source_type": "Transaction",
         }))
         .unwrap();
 
@@ -1692,17 +1692,17 @@ mod tests {
         assert_eq!(
             serde_json::to_value(BalanceChangeSource::Transaction { transaction_id }).unwrap(),
             serde_json::json!({
-                "type": "transaction",
+                "type": "Transaction",
                 "transaction_id": transaction_id.to_string(),
             })
         );
         assert_eq!(
             serde_json::to_value(BalanceChangeSource::Scan).unwrap(),
-            serde_json::json!({ "type": "scan" })
+            serde_json::json!({ "type": "Scan" })
         );
         assert_eq!(
             serde_json::to_value(BalanceChangeSource::Recovery).unwrap(),
-            serde_json::json!({ "type": "recovery" })
+            serde_json::json!({ "type": "Recovery" })
         );
     }
 }

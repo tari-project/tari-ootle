@@ -6,7 +6,7 @@ use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, VaultI
 use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type")]
 #[non_exhaustive]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum BalanceChangeSource {
@@ -19,7 +19,6 @@ pub enum BalanceChangeSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum BalanceChangeSourceType {
     Transaction,

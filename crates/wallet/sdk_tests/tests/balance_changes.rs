@@ -213,6 +213,58 @@ fn transaction_source_promotes_existing_scan_for_same_balance() {
 }
 
 #[test]
+fn transaction_source_does_not_promote_ambiguous_scan_for_same_balance() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let vault = Test::test_vault_address();
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    test.store()
+        .with_write_tx(|tx| tx.transactions_insert(&transaction, None, &[Test::test_account_address()], false))
+        .unwrap();
+
+    for amount in [10u64, 20, 10] {
+        assert!(
+            accounts
+                .update_vault_balance_and_record_change(
+                    vault,
+                    Amount::from(amount),
+                    Amount::zero(),
+                    BalanceChangeSource::Scan,
+                )
+                .unwrap()
+        );
+    }
+
+    assert!(
+        !accounts
+            .update_vault_balance_and_record_change(
+                vault,
+                Amount::from(10u64),
+                Amount::zero(),
+                BalanceChangeSource::Transaction { transaction_id },
+            )
+            .unwrap()
+    );
+    assert!(
+        !accounts
+            .has_balance_change_for_transaction(&vault, &transaction_id)
+            .unwrap()
+    );
+    assert_eq!(
+        accounts
+            .count_balance_changes(
+                &Test::test_account_address(),
+                None,
+                None,
+                Some(BalanceChangeSourceType::Scan),
+            )
+            .unwrap(),
+        3
+    );
+}
+
+#[test]
 fn replayed_transaction_cannot_update_a_vault_without_a_new_history_row() {
     let test = Test::new();
     let accounts = test.sdk().accounts_api();
@@ -225,8 +277,18 @@ fn replayed_transaction_cannot_update_a_vault_without_a_new_history_row() {
 
     let source = BalanceChangeSource::Transaction { transaction_id };
     assert!(
+        !accounts
+            .has_balance_change_for_transaction(&vault, &transaction_id)
+            .unwrap()
+    );
+    assert!(
         accounts
             .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
+            .unwrap()
+    );
+    assert!(
+        accounts
+            .has_balance_change_for_transaction(&vault, &transaction_id)
             .unwrap()
     );
     assert!(

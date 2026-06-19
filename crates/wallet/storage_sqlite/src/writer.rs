@@ -43,6 +43,7 @@ use tari_ootle_wallet_sdk::{
         AuthoredTemplateModel,
         BalanceChange,
         BalanceChangeSource,
+        BalanceChangeSourceType,
         ConfidentialOutputModel,
         ImportedKeyId,
         KeyId,
@@ -878,27 +879,32 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             return Ok(false);
         }
 
-        let change_id = account_balance_changes::table
-            .select(account_balance_changes::id)
+        let matching_changes = account_balance_changes::table
+            .select((
+                account_balance_changes::id,
+                account_balance_changes::source_type,
+                account_balance_changes::transaction_id,
+            ))
             .filter(account_balance_changes::vault_id.eq(vault_id))
-            .filter(account_balance_changes::source_type.eq(BalanceChangeSource::Scan.as_key_str()))
-            .filter(account_balance_changes::transaction_id.is_null())
             .filter(account_balance_changes::revealed_after.eq(current_vault.revealed_balance.to_string()))
             .filter(account_balance_changes::confidential_after.eq(current_vault.confidential_balance.to_string()))
             .order((
                 account_balance_changes::created_at.desc(),
                 account_balance_changes::id.desc(),
             ))
-            .first::<i32>(self.connection())
-            .optional()
+            .limit(2)
+            .load::<(i32, String, Option<String>)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        let Some(change_id) = change_id else {
+        let [(change_id, source_type, existing_transaction_id)] = matching_changes.as_slice() else {
             return Ok(false);
         };
+        if source_type.as_str() != BalanceChangeSource::Scan.as_key_str() || existing_transaction_id.is_some() {
+            return Ok(false);
+        }
 
-        let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(change_id)))
+        let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(*change_id)))
             .set((
-                account_balance_changes::source_type.eq("transaction"),
+                account_balance_changes::source_type.eq(BalanceChangeSourceType::Transaction.as_key_str()),
                 account_balance_changes::transaction_id.eq(Some(transaction_id)),
             ))
             .execute(self.connection())

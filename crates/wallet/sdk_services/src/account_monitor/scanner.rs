@@ -221,6 +221,18 @@ where TSpec: WalletSdkSpec
             },
         }
 
+        if let Some(transaction_id) = source.transaction_id() &&
+            accounts_api.has_balance_change_for_transaction(&vault_id, &transaction_id)?
+        {
+            info!(
+                target: LOG_TARGET,
+                "🔒️ transaction {} already recorded for vault {}; skipping replayed vault update",
+                transaction_id,
+                vault_id
+            );
+            return Ok(false);
+        }
+
         info!(
             target: LOG_TARGET,
             "🔒️ vault {} in account {} has new balance {}",

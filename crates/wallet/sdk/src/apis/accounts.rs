@@ -268,6 +268,17 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         Ok(count)
     }
 
+    pub fn has_balance_change_for_transaction(
+        &self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+    ) -> Result<bool, AccountsApiError> {
+        let exists = self
+            .store
+            .with_read_tx(|tx| tx.balance_changes_exists_for_transaction(vault_id, transaction_id))?;
+        Ok(exists)
+    }
+
     pub fn get_vault_balance(&self, vault_address: &VaultId) -> Result<VaultBalance, AccountsApiError> {
         let vault = self.store.with_read_tx(|tx| tx.vaults_get(vault_address))?;
         Ok(VaultBalance {

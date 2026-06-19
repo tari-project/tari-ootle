@@ -831,6 +831,25 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(count as u64)
     }
 
+    fn balance_changes_exists_for_transaction(
+        &mut self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+    ) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_exists_for_transaction";
+        use crate::schema::{account_balance_changes, vaults};
+
+        let count = account_balance_changes::table
+            .inner_join(vaults::table)
+            .filter(vaults::address.eq(vault_id.to_string()))
+            .filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()))
+            .count()
+            .get_result::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(count > 0)
+    }
+
     // -------------------------------- Resources -------------------------------- //
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError> {
         const OPERATION: &str = "resources_get";

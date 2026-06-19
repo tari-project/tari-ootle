@@ -121,6 +121,11 @@ pub trait WalletStoreReader {
         transaction_id: Option<&TransactionId>,
         source_type: Option<BalanceChangeSourceType>,
     ) -> Result<u64, WalletStorageError>;
+    fn balance_changes_exists_for_transaction(
+        &mut self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+    ) -> Result<bool, WalletStorageError>;
 
     // Resources
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;

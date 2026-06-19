@@ -21,6 +21,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
+import useAccountStore from "@store/accountStore";
 import type { BalanceChange, ComponentAddress, ResourceAddress } from "@tari-project/ootle-ts-bindings";
 import { shortenString } from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
@@ -42,7 +43,11 @@ function formatSignedDelta(delta: string, currency: Currency): string {
   return `${sign}${bigintToDecimalString(magnitude, currency.decimals)}${symbol}`;
 }
 
-function ChangeValues({ change }: { change: BalanceChange }) {
+function ChangeValues({ change, showBalance }: { change: BalanceChange; showBalance: boolean }) {
+  if (!showBalance) {
+    return <Typography variant="body2">********</Typography>;
+  }
+
   const currency = { symbol: change.token_symbol, decimals: change.divisibility };
   const values = [
     { label: "Revealed", value: change.revealed_delta },
@@ -60,7 +65,11 @@ function ChangeValues({ change }: { change: BalanceChange }) {
   );
 }
 
-function NewBalance({ change }: { change: BalanceChange }) {
+function NewBalance({ change, showBalance }: { change: BalanceChange; showBalance: boolean }) {
+  if (!showBalance) {
+    return <Typography variant="body2">********</Typography>;
+  }
+
   const currency = { symbol: change.token_symbol, decimals: change.divisibility };
   const showConfidential = BigInt(change.confidential_after) !== 0n || BigInt(change.confidential_delta) !== 0n;
 
@@ -109,6 +118,7 @@ function Source({ change }: { change: BalanceChange }) {
 export function BalanceChangeHistory({ accountAddress, resourceAddress }: BalanceChangeHistoryProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const showBalance = useAccountStore((state) => state.showBalance);
   const { data, isLoading, isError, error, isRefetching } = useAccountsGetBalanceChanges(
     accountAddress,
     page * rowsPerPage,
@@ -141,16 +151,13 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
               <TableRow key={change.id}>
                 <DataTableCell>{formatTimestamp(change.created_at) || "Unknown"}</DataTableCell>
                 <DataTableCell>
-                  <CopyAddress
-                    address={change.resource_address}
-                    display={change.token_symbol || undefined}
-                  />
+                  <CopyAddress address={change.resource_address} display={change.token_symbol || undefined} />
                 </DataTableCell>
                 <DataTableCell>
-                  <ChangeValues change={change} />
+                  <ChangeValues change={change} showBalance={showBalance} />
                 </DataTableCell>
                 <DataTableCell>
-                  <NewBalance change={change} />
+                  <NewBalance change={change} showBalance={showBalance} />
                 </DataTableCell>
                 <DataTableCell>
                   <Source change={change} />

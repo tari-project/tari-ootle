@@ -4,10 +4,9 @@
 use std::collections::HashMap;
 
 use tari_engine_types::substate::Substate;
-use tari_ootle_common_types::{Epoch, SubstateRequirement, optional::IsNotFoundError};
+use tari_ootle_common_types::{SubstateRequirement, optional::IsNotFoundError};
 use tari_ootle_storage::{
     StateStore,
-    StateStoreReadTransaction,
     StorageError,
     consensus_models::{LockedEpoch, TransactionExecution, TransactionPoolError},
 };
@@ -25,8 +24,6 @@ pub enum BlockTransactionExecutorError {
     StateStoreError(String),
     #[error("Substate store error: {0}")]
     SubstateStoreError(#[from] SubstateStoreError),
-    #[error("Transaction validation error: {0}")]
-    TransactionValidationError(String),
     #[error("Transaction pool error: {0}")]
     TransactionPoolError(#[from] TransactionPoolError),
     #[error("BUG: Invariant error: {0}")]
@@ -55,13 +52,6 @@ impl IsNotFoundError for BlockTransactionExecutorError {
 }
 
 pub trait BlockTransactionExecutor<TStateStore: StateStore> {
-    fn validate<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-        current_epoch: Epoch,
-        transaction: &Transaction,
-    ) -> Result<(), BlockTransactionExecutorError>;
-
     fn execute(
         &self,
         transaction: &Transaction,

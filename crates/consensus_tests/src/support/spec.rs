@@ -29,4 +29,5 @@ impl ConsensusSpec for TestConsensusSpec {
     type StateStore = TestStore;
     type SyncManager = AlwaysSyncedSyncManager;
     type TransactionExecutor = TestBlockTransactionProcessor;
+    type TransactionValidator = TestBlockTransactionProcessor;
 }

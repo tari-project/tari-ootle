@@ -41,7 +41,14 @@ elif [[ "$OOTLE_PROFILE" != "debug" ]]; then
 fi
 
 echo "==> Building ${CRATE} (${OOTLE_PROFILE}) for ${PLATFORM} [${TARGET}]"
-( cd "$REPO_DIR" && cargo build -p "$CRATE" "${CARGO_FLAGS[@]}" )
+# `cargo rustc … -- --print native-static-libs` both builds the crate's lib (all crate-types from
+# Cargo.toml) and prints the linker's real native-lib needs — a best-effort hint for consumers' link
+# flags (e.g. cgo LDFLAGS), captured here from the primary build so the crate is compiled only once.
+BUILD_STDERR="$(mktemp)"
+trap 'rm -f "$BUILD_STDERR"' EXIT
+# tee to a temp file (then drained synchronously below) and back to this process's stderr for live logs.
+( cd "$REPO_DIR" && cargo rustc -p "$CRATE" "${CARGO_FLAGS[@]}" -- --print native-static-libs ) 2>&1 1>/dev/null | tee "$BUILD_STDERR" >&2
+NATIVE_LIBS="$(sed -n 's/.*native-static-libs: //p' "$BUILD_STDERR" | head -n1)"
 
 TARGET_DIR="${REPO_DIR}/target/${TARGET}/${PROFILE_DIR}"
 HEADER_SRC="${REPO_DIR}/crates/${CRATE}/include/ootle_sdk.h"
@@ -74,12 +81,6 @@ for l in "${LIBS[@]}"; do
 done
 echo "==> Staged + stripped (${STRIP_CMD}): ${LIBS[*]}"
 
-# Linker's real native-lib needs — a hint for consumers' link flags (e.g. cgo LDFLAGS).
-NATIVE_LIBS="$(
-  cd "$REPO_DIR" &&
-  cargo rustc -p "$CRATE" "${CARGO_FLAGS[@]}" -- --print native-static-libs 2>&1 |
-  sed -n 's/.*native-static-libs: //p' | head -n1
-)" || true
 # Escape for embedding as a JSON string (mingw output can contain backslashes / quotes).
 NATIVE_LIBS="${NATIVE_LIBS//\\/\\\\}"
 NATIVE_LIBS="${NATIVE_LIBS//\"/\\\"}"

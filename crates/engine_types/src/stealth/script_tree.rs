@@ -50,21 +50,14 @@ fn branch_hash(a: Hash32, b: Hash32) -> Hash32 {
 /// Folds one level into the next: adjacent pairs become branches, a trailing unpaired node is
 /// promoted unchanged.
 fn fold_level(level: &[Hash32]) -> Vec<Hash32> {
-    let mut next = Vec::with_capacity(level.len().div_ceil(2));
-    let mut i = 0;
-    while i < level.len() {
-        match level.get(i + 1) {
-            Some(&right) => {
-                next.push(branch_hash(level[i], right));
-                i += 2;
-            },
-            None => {
-                next.push(level[i]);
-                i += 1;
-            },
-        }
-    }
-    next
+    level
+        .chunks(2)
+        .map(|pair| match pair {
+            [left, right] => branch_hash(*left, *right),
+            [unpaired] => *unpaired,
+            _ => unreachable!("chunks(2) yields slices of length 1 or 2"),
+        })
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

@@ -21,11 +21,48 @@ pub struct BalanceChange {
     pub created_at: PrimitiveDateTime,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
 pub enum BalanceChangeSource {
     Transaction { transaction_id: TransactionId },
     Scan,
     Recovery,
+}
+
+/// Lightweight source type enum for filtering — no data payload.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum BalanceChangeSourceType {
+    Transaction,
+    Scan,
+    Recovery,
+}
+
+impl BalanceChangeSource {
+    pub fn source_type(&self) -> BalanceChangeSourceType {
+        match self {
+            BalanceChangeSource::Transaction { .. } => BalanceChangeSourceType::Transaction,
+            BalanceChangeSource::Scan => BalanceChangeSourceType::Scan,
+            BalanceChangeSource::Recovery => BalanceChangeSourceType::Recovery,
+        }
+    }
+
+    pub fn as_key_str(&self) -> &'static str {
+        match self {
+            BalanceChangeSource::Transaction { .. } => "Transaction",
+            BalanceChangeSource::Scan => "Scan",
+            BalanceChangeSource::Recovery => "Recovery",
+        }
+    }
+}
+
+impl BalanceChangeSourceType {
+    pub fn as_key_str(&self) -> &'static str {
+        match self {
+            BalanceChangeSourceType::Transaction => "Transaction",
+            BalanceChangeSourceType::Scan => "Scan",
+            BalanceChangeSourceType::Recovery => "Recovery",
+        }
+    }
 }
 
 impl BalanceChange {

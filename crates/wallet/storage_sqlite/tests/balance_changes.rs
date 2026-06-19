@@ -95,7 +95,7 @@ fn tx_driven_change() {
     tx.commit().unwrap();
 
     let changes = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None)
+        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
         .unwrap();
     assert_eq!(changes.len(), 1);
 
@@ -174,19 +174,17 @@ fn multi_vault_transaction() {
     tx.commit().unwrap();
 
     let changes = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None)
+        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
         .unwrap();
     assert_eq!(changes.len(), 2);
 
-    // Filter by transaction_id
     let changes_by_tx = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, Some(tx_id))
+        .balance_changes_get_by_account(&account_address, 0, 10, None, Some(tx_id), None, None, None)
         .unwrap();
     assert_eq!(changes_by_tx.len(), 2);
 
-    // Filter by resource_address
     let changes_by_resource = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, Some(&resource_address_1), None)
+        .balance_changes_get_by_account(&account_address, 0, 10, Some(&resource_address_1), None, None, None, None)
         .unwrap();
     assert_eq!(changes_by_resource.len(), 1);
 }
@@ -212,7 +210,7 @@ fn non_transaction_recovery_change() {
     tx.commit().unwrap();
 
     let changes = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None)
+        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
         .unwrap();
     assert_eq!(changes.len(), 1);
     let change = &changes[0];
@@ -232,7 +230,6 @@ fn idempotent_rescan() {
     let tx_id = make_tx_id(7);
     let source = BalanceChangeSource::Transaction { transaction_id: tx_id };
 
-    // Insert the same change twice
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
         &vault_id,
@@ -259,7 +256,7 @@ fn idempotent_rescan() {
     tx.commit().unwrap();
 
     let changes = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None)
+        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
         .unwrap();
     assert_eq!(changes.len(), 1, "Idempotent insert should not create duplicates");
 }
@@ -288,27 +285,23 @@ fn pagination() {
     }
     tx.commit().unwrap();
 
-    // Fetch first 2 (newest first)
     let page_1 = tx
-        .balance_changes_get_by_account(&account_address, 0, 2, None, None)
+        .balance_changes_get_by_account(&account_address, 0, 2, None, None, None, None, None)
         .unwrap();
     assert_eq!(page_1.len(), 2);
 
-    // Use offset to get next page
     let page_2 = tx
-        .balance_changes_get_by_account(&account_address, 2, 2, None, None)
+        .balance_changes_get_by_account(&account_address, 2, 2, None, None, None, None, None)
         .unwrap();
     assert_eq!(page_2.len(), 2);
 
-    // Verify total count
     let total = tx
-        .balance_changes_count_by_account(&account_address, None, None)
+        .balance_changes_count_by_account(&account_address, None, None, None, None, None)
         .unwrap();
     assert_eq!(total, 5);
 
-    // Verify filtered count
     let filtered_total = tx
-        .balance_changes_count_by_account(&account_address, Some(&resource_address), None)
+        .balance_changes_count_by_account(&account_address, Some(&resource_address), None, None, None, None)
         .unwrap();
     assert_eq!(filtered_total, 5);
 }
@@ -335,12 +328,8 @@ fn zero_balance_change_not_logged() {
     tx.commit().unwrap();
 
     let changes = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None)
+        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
         .unwrap();
-    // This is logged because the storage layer doesn't filter zero deltas;
-    // the filtering happens in the scanner layer before calling record_balance_change.
-    // The test documents the current behavior: if all balances are identical, 
-    // deltas are "0" and the entry is still stored.
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].revealed_delta, "0");
     assert_eq!(changes[0].confidential_delta, "0");

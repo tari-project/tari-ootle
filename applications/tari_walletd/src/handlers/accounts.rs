@@ -29,6 +29,7 @@ use tari_ootle_wallet_sdk::{
         AccountWithAddress,
         BalanceChange,
         BalanceChangeSource,
+        BalanceChangeSourceType,
         KeyBranch,
         NewAccountData,
         StealthUtxoSpendKeyId,
@@ -1475,11 +1476,6 @@ pub async fn handle_associate_stealth_resource(
 }
 
 fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
-    let source = match &change.source {
-        BalanceChangeSource::Transaction { transaction_id } => format!("Transaction:{}", transaction_id),
-        BalanceChangeSource::Scan => "Scan".to_string(),
-        BalanceChangeSource::Recovery => "Recovery".to_string(),
-    };
     BalanceChangeEntry {
         vault_address: change.vault_address.to_string(),
         resource_address: change.resource_address,
@@ -1489,7 +1485,7 @@ fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
         after_confidential_balance: change.after_confidential_balance,
         revealed_delta: change.revealed_delta,
         confidential_delta: change.confidential_delta,
-        source,
+        source: change.source,
         transaction_id: change.transaction_id,
         created_at: change.created_at.to_string(),
     }
@@ -1525,6 +1521,9 @@ pub async fn handle_get_balance_changes(
             req.limit.unwrap_or(100),
             req.resource_address.as_ref(),
             tx_id,
+            req.source_type,
+            req.start_time.as_deref(),
+            req.end_time.as_deref(),
         )?;
 
     let total = sdk
@@ -1533,6 +1532,9 @@ pub async fn handle_get_balance_changes(
             account.component_address(),
             req.resource_address.as_ref(),
             tx_id,
+            req.source_type,
+            req.start_time.as_deref(),
+            req.end_time.as_deref(),
         )?;
 
     let changes = changes.into_iter().map(balance_change_to_entry).collect();

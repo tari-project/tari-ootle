@@ -35,6 +35,7 @@ use crate::{
         AccountWithAddress,
         BalanceChange,
         BalanceChangeSource,
+        BalanceChangeSourceType,
         EpochBirthday,
         KeyId,
         KeyIdOrPublicKey,
@@ -251,9 +252,14 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         limit: u64,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
     ) -> Result<Vec<BalanceChange>, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let changes = tx.balance_changes_get_by_account(account, offset, limit, resource_address, transaction_id)?;
+        let changes = tx.balance_changes_get_by_account(
+            account, offset, limit, resource_address, transaction_id, source_type, start_time, end_time,
+        )?;
         Ok(changes)
     }
 
@@ -262,9 +268,14 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         account: &ComponentAddress,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
     ) -> Result<u64, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let count = tx.balance_changes_count_by_account(account, resource_address, transaction_id)?;
+        let count = tx.balance_changes_count_by_account(
+            account, resource_address, transaction_id, source_type, start_time, end_time,
+        )?;
         Ok(count)
     }
 

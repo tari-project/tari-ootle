@@ -32,6 +32,7 @@ use tari_ootle_wallet_sdk::{
         ApiKey,
         AuthoredTemplateModel,
         BalanceChange,
+        BalanceChangeSourceType,
         ConfidentialOutputModel,
         Config,
         KeyType,
@@ -730,6 +731,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
         limit: u64,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
     ) -> Result<Vec<BalanceChange>, WalletStorageError> {
         const OPERATION: &str = "balance_changes_get_by_account";
         use crate::schema::{account_balance_changes, accounts, vaults};
@@ -746,7 +750,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 key: account.to_string(),
             })?;
 
-        let rows = account_balance_changes::table
+        let mut rows = account_balance_changes::table
             .inner_join(vaults::table.on(account_balance_changes::vault_id.eq(vaults::id)))
             .filter(account_balance_changes::account_id.eq(account_id))
             .select((
@@ -756,17 +760,25 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .order((account_balance_changes::created_at.desc(), account_balance_changes::id.desc()))
             .into_boxed();
 
-        let rows = if let Some(resource_addr) = resource_address {
-            rows.filter(account_balance_changes::resource_address.eq(resource_addr.to_string()))
-        } else {
-            rows
-        };
+        if let Some(resource_addr) = resource_address {
+            rows = rows.filter(account_balance_changes::resource_address.eq(resource_addr.to_string()));
+        }
 
-        let rows = if let Some(tx_id) = transaction_id {
-            rows.filter(account_balance_changes::transaction_id.eq(tx_id.to_string()))
-        } else {
-            rows
-        };
+        if let Some(tx_id) = transaction_id {
+            rows = rows.filter(account_balance_changes::transaction_id.eq(tx_id.to_string()));
+        }
+
+        if let Some(st) = source_type {
+            rows = rows.filter(account_balance_changes::source.eq(st.as_key_str()));
+        }
+
+        if let Some(start) = start_time {
+            rows = rows.filter(account_balance_changes::created_at.ge(start));
+        }
+
+        if let Some(end) = end_time {
+            rows = rows.filter(account_balance_changes::created_at.le(end));
+        }
 
         let results = rows
             .offset(offset as i64)
@@ -794,6 +806,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
         account: &ComponentAddress,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
     ) -> Result<u64, WalletStorageError> {
         const OPERATION: &str = "balance_changes_count_by_account";
         use crate::schema::{account_balance_changes, accounts};
@@ -819,6 +834,15 @@ impl WalletStoreReader for ReadTransaction<'_> {
         }
         if let Some(tx_id) = transaction_id {
             query = query.filter(account_balance_changes::transaction_id.eq(tx_id.to_string()));
+        }
+        if let Some(st) = source_type {
+            query = query.filter(account_balance_changes::source.eq(st.as_key_str()));
+        }
+        if let Some(start) = start_time {
+            query = query.filter(account_balance_changes::created_at.ge(start));
+        }
+        if let Some(end) = end_time {
+            query = query.filter(account_balance_changes::created_at.le(end));
         }
 
         let count = query

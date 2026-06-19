@@ -49,6 +49,8 @@ use tari_ootle_wallet_sdk::{
         Account,
         AddressBookEntry,
         AuthoredTemplateModel,
+        BalanceChangeSource,
+        BalanceChangeSourceType,
         DerivedKeyIndex,
         KeyBranch,
         KeyId,
@@ -1651,6 +1653,12 @@ pub struct GetBalanceChangesRequest {
     pub resource_address: Option<ResourceAddress>,
     #[serde(default)]
     pub transaction_id: Option<String>,
+    #[serde(default)]
+    pub source_type: Option<BalanceChangeSourceType>,
+    #[serde(default)]
+    pub start_time: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1664,7 +1672,7 @@ pub struct BalanceChangeEntry {
     pub after_confidential_balance: String,
     pub revealed_delta: String,
     pub confidential_delta: String,
-    pub source: String,
+    pub source: BalanceChangeSource,
     pub transaction_id: Option<String>,
     pub created_at: String,
 }

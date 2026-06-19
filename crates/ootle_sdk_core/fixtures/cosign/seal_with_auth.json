@@ -1,0 +1,171 @@
+{
+  "name": "cosign/seal_with_auth",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "cosign_seal_with_auth",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "intent": {
+      "from_account": "component_3131313131313131313131313131313131313131313131313131313131313131",
+      "recipient": {
+        "PublicKey": "a2a0c7d2940748baa58d9b65f7df99876acbabf456357973be10482b6928782a"
+      },
+      "resource_address": "resource_3232323232323232323232323232323232323232323232323232323232323232",
+      "amount": 1000000,
+      "fee": 2500,
+      "inputs": [],
+      "min_epoch": 1,
+      "max_epoch": 10,
+      "dry_run": false
+    },
+    "keys": {
+      "account_secret": "7900000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "7a00000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "7d00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "fetched": [
+      {
+        "substate_id": "component_3131313131313131313131313131313131313131313131313131313131313131",
+        "version": 0,
+        "substate_value": {
+          "Component": {
+            "body": {
+              "state": [
+                {
+                  "@cbor": "tag",
+                  "tag": 132,
+                  "value": {
+                    "@cbor": "bytes",
+                    "hex": "3333333333333333333333333333333333333333333333333333333333333333"
+                  }
+                }
+              ]
+            },
+            "header": {
+              "access_rules": {
+                "default": "DenyAll",
+                "method_access": {}
+              },
+              "entity_id": "00",
+              "owner_rule": "None",
+              "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        }
+      },
+      {
+        "substate_id": "vault_3333333333333333333333333333333333333333333333333333333333333333",
+        "version": 0,
+        "substate_value": {
+          "Vault": {
+            "freeze_flags": 0,
+            "resource_container": {
+              "Fungible": {
+                "address": "resource_3232323232323232323232323232323232323232323232323232323232323232",
+                "amount": "1000000",
+                "locked_amount": "0"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "cosign_seal_pk": "e2bf41576c1f0fcb1b7fdd5980f8f1f57f6d3f132fd44ec03c75e42360a42029",
+    "cosign_signer_secret": "7b00000000000000000000000000000000000000000000000000000000000000",
+    "cosign_signer_nonce": "7c00000000000000000000000000000000000000000000000000000000000000"
+  },
+  "expected": {
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [
+            {
+              "public_key": "fcee5a0d228484be47257110278cd3ab7146ab74e4c3aff7d4d14cd63753ed3c",
+              "signature": null
+            }
+          ],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821909c400"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_3131313131313131313131313131313131313131313131313131313131313131"
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [
+              {
+                "substate_id": "component_3131313131313131313131313131313131313131313131313131313131313131",
+                "version": null
+              },
+              {
+                "substate_id": "resource_3232323232323232323232323232323232323232323232323232323232323232",
+                "version": null
+              },
+              {
+                "substate_id": "vault_3333333333333333333333333333333333333333333333333333333333333333",
+                "version": null
+              }
+            ],
+            "instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "d88358203232323232323232323232323232323232323232323232323232323232323232"
+                    },
+                    {
+                      "Literal": "821a000f424000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_3131313131313131313131313131313131313131313131313131313131313131"
+                  },
+                  "method": "withdraw"
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 0
+                }
+              },
+              {
+                "CreateAccount": {
+                  "access_rules": null,
+                  "bucket_workspace_id": {
+                    "id": 0,
+                    "offset": null
+                  },
+                  "owner_public_key": "a2a0c7d2940748baa58d9b65f7df99876acbabf456357973be10482b6928782a",
+                  "owner_rule": null
+                }
+              }
+            ],
+            "is_seal_signer_authorized": false,
+            "max_epoch": 10,
+            "min_epoch": 1,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "e2bf41576c1f0fcb1b7fdd5980f8f1f57f6d3f132fd44ec03c75e42360a42029",
+          "signature": null
+        }
+      }
+    }
+  }
+}

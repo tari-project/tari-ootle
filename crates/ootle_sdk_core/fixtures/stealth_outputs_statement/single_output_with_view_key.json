@@ -1,0 +1,91 @@
+{
+  "name": "stealth_outputs_statement/single_output_with_view_key",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_stealth_outputs_statement",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "stealth_intent": {
+      "from_account": "component_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [],
+      "outputs": [
+        {
+          "destination_account_pk": "b820df4d8d7d59f2e4870aa19597e694109bc2eeb6a47e51bf2d0e5c897f2769",
+          "destination_view_pk": "6c5b1a8e7953516748b072c48d336d798ace16087b21fc3b63f200c8fe55e857",
+          "amount": 2500000,
+          "revealed_amount": 0,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": "a02d8c83a3f70f13144d1ee8f24814df735f324093999a366138719e59ec4606",
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 0,
+      "revealed_output_amount": 0,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_entropy": {
+      "per_output": [
+        {
+          "mask": "5000000000000000000000000000000000000000000000000000000000000000",
+          "sender_nonce": "5100000000000000000000000000000000000000000000000000000000000000",
+          "aead_nonce": "5200000000000000000000000000000000000000000000000000000000000000",
+          "elgamal_nonce": "5300000000000000000000000000000000000000000000000000000000000000",
+          "zk_nonces": [
+            "5400000000000000000000000000000000000000000000000000000000000000",
+            "5500000000000000000000000000000000000000000000000000000000000000",
+            "5600000000000000000000000000000000000000000000000000000000000000"
+          ]
+        }
+      ],
+      "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
+      "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "expected": {
+    "stealth_outputs_statement": {
+      "agg_range_proof": null,
+      "outputs": [
+        {
+          "output": {
+            "commitment": "00f0b13fdde621d64e9f9a14ac7a7dac6e7a6925b3176d76c36775ad5eda194b",
+            "encrypted_data": "5e07f92ecda6cc46326ff04036dfdd025200000000000000000000000000000000000000000000006453b420375097c1e2956f19fff4adf6da7d55b8f9f47b72c09d9e9718cc126be725629c16e20396",
+            "minimum_value_promise": 0,
+            "sender_public_nonce": "2c821028f4a86c13543739321743ae39255d5027df75326b9bc04dcc088f6a5e",
+            "viewable_balance_proof": {
+              "c_prime": "56a5159d58c7bc05d7748e165a645e0849428e77569bf9d9c54a1176450ef50c",
+              "e_prime": "00359e264e6de18489e9c362dc32725a38c93f72d61b53ff5beb64c38bb90c14",
+              "elgamal_encrypted": "fe9464bc096a1b9b5ea5cb45e6c0fa6e14093aa5a3c587de5b8b92095cc0d55b",
+              "elgamal_public_nonce": "a2c1c88b3a5a6c86b9ee4431d2bdb9d42dc145a33501f00da00f9a2eeb60d82f",
+              "r_prime": "2cef5189e3fb8c48cd2acf84b1165474beaf4a2f6bc28cdad715d6884257885d",
+              "s_m": "64cf6b0dd843261e8268c307a58eae264d81bf5cac90ce6723579b5986a16705",
+              "s_r": "206af82654312aa64c1e064fb2eb183af3e239a07f1cb3bb34f75d63fb1d3502",
+              "s_v": "d614b3298548d7c42c4564d10575f94d7fd815c9515078bdf5ff725426624304"
+            }
+          },
+          "spend_condition": {
+            "Signed": "da7a4c4fd39d253ae5d6e4dfe135c6c82e4c52a73dde164a413be867ef70cc76"
+          },
+          "tag": 770320300
+        }
+      ],
+      "revealed_output_amount": "0"
+    },
+    "aggregated_output_mask": "5000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "name": "stealth_outputs_statement/single_output_no_view_key",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_stealth_outputs_statement",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "stealth_intent": {
+      "from_account": "component_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [],
+      "outputs": [
+        {
+          "destination_account_pk": "b820df4d8d7d59f2e4870aa19597e694109bc2eeb6a47e51bf2d0e5c897f2769",
+          "destination_view_pk": "6c5b1a8e7953516748b072c48d336d798ace16087b21fc3b63f200c8fe55e857",
+          "amount": 1000000,
+          "revealed_amount": 0,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": null,
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 0,
+      "revealed_output_amount": 0,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_entropy": {
+      "per_output": [
+        {
+          "mask": "4600000000000000000000000000000000000000000000000000000000000000",
+          "sender_nonce": "4700000000000000000000000000000000000000000000000000000000000000",
+          "aead_nonce": "4800000000000000000000000000000000000000000000000000000000000000",
+          "elgamal_nonce": null,
+          "zk_nonces": null
+        }
+      ],
+      "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
+      "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "expected": {
+    "stealth_outputs_statement": {
+      "agg_range_proof": null,
+      "outputs": [
+        {
+          "output": {
+            "commitment": "a2c34c868c1c52de38ea3cca0a65f31b2ad70cefea9c29bef0d8992f65c2f452",
+            "encrypted_data": "74743fae5fe489affe31c994887b6bd048000000000000000000000000000000000000000000000038d868102c6370c8775a386d2b441ef78a76781a490ff70f991074408a74404183b2b536b60f329d",
+            "minimum_value_promise": 0,
+            "sender_public_nonce": "9423410e2456e4f8ccf3f9ad4b81d4dfe94f49300a35df2681af908e30c36a2c",
+            "viewable_balance_proof": null
+          },
+          "spend_condition": {
+            "Signed": "2e3b1da68be485373362d6ba7ff64f86d5ee9f79f24fca73a74acb7c5892b023"
+          },
+          "tag": 1050191982
+        }
+      ],
+      "revealed_output_amount": "0"
+    },
+    "aggregated_output_mask": "4600000000000000000000000000000000000000000000000000000000000000"
+  }
+}

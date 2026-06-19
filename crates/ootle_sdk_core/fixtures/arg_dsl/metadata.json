@@ -1,0 +1,21 @@
+{
+  "name": "arg_dsl/metadata",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "encode_arg",
+  "input": {
+    "arg_value": {
+      "Metadata": {
+        "provider_name": "OotleExample",
+        "website": "example.test"
+      }
+    }
+  },
+  "expected": {
+    "encoded_arg_bytes": "d881a26d70726f76696465725f6e616d656c4f6f746c654578616d706c6567776562736974656c6578616d706c652e74657374"
+  }
+}

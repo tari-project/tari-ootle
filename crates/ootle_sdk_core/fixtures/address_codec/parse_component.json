@@ -1,0 +1,19 @@
+{
+  "name": "address_codec/parse_component",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "parse_address",
+  "input": {
+    "address": "component_2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "expected": {
+    "parsed_address": {
+      "canonical": "component_2222222222222222222222222222222222222222222222222222222222222222",
+      "kind": "component"
+    }
+  }
+}

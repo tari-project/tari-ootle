@@ -1,0 +1,87 @@
+{
+  "name": "cosign/add_signature",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "cosign_add_signature",
+  "input": {
+    "network": "esmeralda",
+    "intent": {
+      "from_account": "component_3131313131313131313131313131313131313131313131313131313131313131",
+      "recipient": {
+        "PublicKey": "a2a0c7d2940748baa58d9b65f7df99876acbabf456357973be10482b6928782a"
+      },
+      "resource_address": "resource_3232323232323232323232323232323232323232323232323232323232323232",
+      "amount": 1000000,
+      "fee": 2500,
+      "inputs": [],
+      "min_epoch": 1,
+      "max_epoch": 10,
+      "dry_run": false
+    },
+    "keys": {
+      "account_secret": "7900000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "7a00000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "7d00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "fetched": [
+      {
+        "substate_id": "component_3131313131313131313131313131313131313131313131313131313131313131",
+        "version": 0,
+        "substate_value": {
+          "Component": {
+            "body": {
+              "state": [
+                {
+                  "@cbor": "tag",
+                  "tag": 132,
+                  "value": {
+                    "@cbor": "bytes",
+                    "hex": "3333333333333333333333333333333333333333333333333333333333333333"
+                  }
+                }
+              ]
+            },
+            "header": {
+              "access_rules": {
+                "default": "DenyAll",
+                "method_access": {}
+              },
+              "entity_id": "00",
+              "owner_rule": "None",
+              "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        }
+      },
+      {
+        "substate_id": "vault_3333333333333333333333333333333333333333333333333333333333333333",
+        "version": 0,
+        "substate_value": {
+          "Vault": {
+            "freeze_flags": 0,
+            "resource_container": {
+              "Fungible": {
+                "address": "resource_3232323232323232323232323232323232323232323232323232323232323232",
+                "amount": "1000000",
+                "locked_amount": "0"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "cosign_seal_pk": "e2bf41576c1f0fcb1b7fdd5980f8f1f57f6d3f132fd44ec03c75e42360a42029",
+    "cosign_signer_secret": "7b00000000000000000000000000000000000000000000000000000000000000",
+    "cosign_signer_nonce": "7c00000000000000000000000000000000000000000000000000000000000000"
+  },
+  "expected": {
+    "cosign_authorization": {
+      "public_key": "fcee5a0d228484be47257110278cd3ab7146ab74e4c3aff7d4d14cd63753ed3c",
+      "signature": "2e1c8417507d2eb6eaab1d249da08b66a6b426eb2f5b6769fb33f84886d3ef3ef96ed20f371ed88b7b31ce53c3f4b67f6519462bfdfeb7cafe062be19525d700"
+    }
+  }
+}

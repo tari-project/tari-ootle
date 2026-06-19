@@ -1,0 +1,179 @@
+{
+  "name": "stealth_transfer/revealed_output_single",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_and_encode_stealth_transfer",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "stealth_intent": {
+      "from_account": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [],
+      "outputs": [
+        {
+          "destination_account_pk": "94741f5d5d52755ece4f23f044ee27d5d1ea1e2bd196b462166b16152a9d0259",
+          "destination_view_pk": "da80862773358b466ffadfe0b3293ab3d9fd53c5ea6c955358f568322daf6a57",
+          "amount": 1000000,
+          "revealed_amount": 500000,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": null,
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 1500000,
+      "revealed_output_amount": 500000,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_entropy": {
+      "per_output": [
+        {
+          "mask": "8200000000000000000000000000000000000000000000000000000000000000",
+          "sender_nonce": "8300000000000000000000000000000000000000000000000000000000000000",
+          "aead_nonce": "8400000000000000000000000000000000000000000000000000000000000000",
+          "elgamal_nonce": null,
+          "zk_nonces": null
+        }
+      ],
+      "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
+      "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "stealth_keys": {
+      "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "1600000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "2100000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "expected": {
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [
+            {
+              "public_key": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42",
+              "signature": null
+            }
+          ],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821907d000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [],
+            "instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "d88358200101010101010101010101010101010101010101010101010101010101010101"
+                    },
+                    {
+                      "Literal": "821a0016e36000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "method": "withdraw"
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 0
+                }
+              },
+              {
+                "StealthTransfer": {
+                  "resource_address_ref": {
+                    "Address": "resource_0101010101010101010101010101010101010101010101010101010101010101"
+                  },
+                  "revealed_input_bucket": {
+                    "id": 0,
+                    "offset": null
+                  },
+                  "statement": {
+                    "balance_proof": null,
+                    "inputs_statement": {
+                      "inputs": [],
+                      "revealed_amount": "1500000"
+                    },
+                    "outputs_statement": {
+                      "agg_range_proof": null,
+                      "outputs": [
+                        {
+                          "output": {
+                            "commitment": "6c5e488d33802466f95173fb1310c28ab1f8c831a9507e9160f5042feac11113",
+                            "encrypted_data": "d247a49d078c6b0f07b765c29d35025c8400000000000000000000000000000000000000000000006039c4ce8eb625eadcc2480a4ebc7443f8ef78b1e96c6dc84da65d1e14e2bad22969d79f0c1df1bc",
+                            "minimum_value_promise": 0,
+                            "sender_public_nonce": "ba5b49a864ae343757d39cc1588e2235a183f45cb2774a50fe0993bbe7352a41",
+                            "viewable_balance_proof": null
+                          },
+                          "spend_condition": {
+                            "Signed": "720e694bab7c8f5f278403d9089a3f7b4c8eb92f0da129761a45be4656902467"
+                          },
+                          "tag": 3862804127
+                        }
+                      ],
+                      "revealed_output_amount": "500000"
+                    }
+                  }
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 1
+                }
+              },
+              {
+                "CreateAccount": {
+                  "access_rules": null,
+                  "bucket_workspace_id": {
+                    "id": 1,
+                    "offset": null
+                  },
+                  "owner_public_key": "94741f5d5d52755ece4f23f044ee27d5d1ea1e2bd196b462166b16152a9d0259",
+                  "owner_rule": null
+                }
+              }
+            ],
+            "is_seal_signer_authorized": true,
+            "max_epoch": null,
+            "min_epoch": null,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42",
+          "signature": null
+        }
+      }
+    }
+  }
+}

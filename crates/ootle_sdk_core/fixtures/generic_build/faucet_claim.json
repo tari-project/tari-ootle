@@ -1,0 +1,76 @@
+{
+  "name": "generic_build/faucet_claim",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_and_encode_faucet_claim",
+  "input": {
+    "network": "esmeralda",
+    "keys": {
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "4b00000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "4c00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "fetched": [
+      {
+        "substate_id": "component_0102030000000000000000000000000000000000000000000000000000000000",
+        "version": 0,
+        "substate_value": {
+          "Component": {
+            "body": {
+              "state": [
+                {
+                  "@cbor": "tag",
+                  "tag": 132,
+                  "value": {
+                    "@cbor": "bytes",
+                    "hex": "0102030000000000000000000000000000000000000000000000000000000001"
+                  }
+                }
+              ]
+            },
+            "header": {
+              "access_rules": {
+                "default": "DenyAll",
+                "method_access": {}
+              },
+              "entity_id": "00",
+              "owner_rule": "None",
+              "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        }
+      },
+      {
+        "substate_id": "vault_0102030000000000000000000000000000000000000000000000000000000001",
+        "version": 0,
+        "substate_value": {
+          "Vault": {
+            "freeze_flags": 0,
+            "resource_container": {
+              "Fungible": {
+                "address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+                "amount": "1000000000",
+                "locked_amount": "0"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "faucet_intent": {
+      "recipient_public_key": "fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af013",
+      "fee": 2000,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false
+    }
+  },
+  "expected": {
+    "encoded_transaction": "8200818282891826848200815820fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af01382038100820283820081d880582001020300000000000000000000000000000000000000000000000000000000006474616b6581820081810082028382018100677061795f6665658182018145821907d000808381820081d8805820010203000000000000000000000000000000000000000000000000000000000081820181d8835820010203000000000000000000000000000000000000000000000000000000000281820281d88458200102030000000000000000000000000000000000000000000000000000000001f6f6f5f4818081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203072cbc7cd9bc9ad7c1cce2b78513e2924b3e31cf75b1411caad89226b36c6595820a61d3b8f2be3699cb0d228ec547519d8ebf26f74cc8762a7f124675fca7a300b825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203e0cb31465a46309094f7895bc5799bd74e66e0b85b0f6ffd48cdd87c7ccb0035820c72676cb3940455047300b3892bacc2595ae099ba01c5291111087128584120f",
+    "transaction_id": "2bfcbc1cbf93f28e1d410fe44b40c4b6b6171fea46c353557d4b96a6014d7bab"
+  }
+}

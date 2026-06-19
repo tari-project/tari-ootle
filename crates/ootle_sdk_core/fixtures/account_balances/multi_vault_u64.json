@@ -1,0 +1,87 @@
+{
+  "name": "account_balances/multi_vault_u64",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "account_balances",
+  "input": {
+    "substate_value": {
+      "Component": {
+        "body": {
+          "state": [
+            {
+              "@cbor": "tag",
+              "tag": 132,
+              "value": {
+                "@cbor": "bytes",
+                "hex": "4141414141414141414141414141414141414141414141414141414141414141"
+              }
+            },
+            {
+              "@cbor": "tag",
+              "tag": 132,
+              "value": {
+                "@cbor": "bytes",
+                "hex": "4242424242424242424242424242424242424242424242424242424242424242"
+              }
+            }
+          ]
+        },
+        "header": {
+          "access_rules": {
+            "default": "DenyAll",
+            "method_access": {}
+          },
+          "entity_id": "00",
+          "owner_rule": "None",
+          "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "vault_substates": [
+      {
+        "substate_id": "vault_4141414141414141414141414141414141414141414141414141414141414141",
+        "version": 0,
+        "substate_value": {
+          "Vault": {
+            "freeze_flags": 0,
+            "resource_container": {
+              "Fungible": {
+                "address": "resource_3333333333333333333333333333333333333333333333333333333333333333",
+                "amount": "8589934592",
+                "locked_amount": "0"
+              }
+            }
+          }
+        }
+      },
+      {
+        "substate_id": "vault_4242424242424242424242424242424242424242424242424242424242424242",
+        "version": 0,
+        "substate_value": {
+          "Vault": {
+            "freeze_flags": 0,
+            "resource_container": {
+              "Fungible": {
+                "address": "resource_3333333333333333333333333333333333333333333333333333333333333333",
+                "amount": "123456789",
+                "locked_amount": "0"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "account_balances": [
+      {
+        "resource_address": "resource_3333333333333333333333333333333333333333333333333333333333333333",
+        "revealed_balance": 8713391381
+      }
+    ]
+  }
+}

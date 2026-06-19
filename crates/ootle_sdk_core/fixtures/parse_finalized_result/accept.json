@@ -1,0 +1,163 @@
+{
+  "name": "parse_finalized_result/accept",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "parse_finalized_result",
+  "input": {
+    "raw_result": {
+      "Finalized": {
+        "abort_details": null,
+        "execution_result": {
+          "execute_epoch": 42,
+          "execution_time": {
+            "nanos": 0,
+            "secs": 1
+          },
+          "finalize": {
+            "events": [
+              {
+                "payload": {
+                  "amount": "1000000"
+                },
+                "substate_id": "component_4141414141414141414141414141414141414141414141414141414141414141",
+                "template_address": "0000000000000000000000000000000000000000000000000000000000000000",
+                "topic": "std.deposit"
+              }
+            ],
+            "execution_results": [],
+            "fee_receipt": {
+              "cost_breakdown": {
+                "breakdown": {
+                  "Initial": 1000,
+                  "Storage": 9007199254740999
+                }
+              },
+              "total_fee_overcharge": 0,
+              "total_fee_payment": 9007199254742992,
+              "total_fees_paid": 9007199254742492
+            },
+            "logs": [
+              {
+                "level": "Info",
+                "message": "transfer executed"
+              }
+            ],
+            "result": {
+              "Accept": {
+                "down_substates": [
+                  [
+                    "vault_4242424242424242424242424242424242424242424242424242424242424242",
+                    1
+                  ]
+                ],
+                "fee_withdrawals": [],
+                "up_substates": [
+                  [
+                    "component_4141414141414141414141414141414141414141414141414141414141414141",
+                    {
+                      "substate": {
+                        "Component": {
+                          "body": {
+                            "state": [
+                              {
+                                "@cbor": "tag",
+                                "tag": 132,
+                                "value": {
+                                  "@cbor": "bytes",
+                                  "hex": "4343434343434343434343434343434343434343434343434343434343434343"
+                                }
+                              }
+                            ]
+                          },
+                          "header": {
+                            "access_rules": {
+                              "default": "DenyAll",
+                              "method_access": {}
+                            },
+                            "entity_id": "00",
+                            "owner_rule": "None",
+                            "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
+                          }
+                        }
+                      },
+                      "version": 0
+                    }
+                  ]
+                ]
+              }
+            },
+            "transaction_hash": "5151515151515151515151515151515151515151515151515151515151515151"
+          },
+          "wasm_execution_points": 0
+        },
+        "execution_time": {
+          "nanos": 0,
+          "secs": 1
+        },
+        "final_decision": "Commit",
+        "finalized_time": "2026-06-12 00:00:00.0"
+      }
+    }
+  },
+  "expected": {
+    "parsed": {
+      "diff_summary": {
+        "down": [
+          [
+            "vault_4242424242424242424242424242424242424242424242424242424242424242",
+            1
+          ]
+        ],
+        "up": [
+          {
+            "substate_id": "component_4141414141414141414141414141414141414141414141414141414141414141",
+            "version": 0
+          }
+        ]
+      },
+      "epoch": 42,
+      "events": [
+        {
+          "payload": [
+            [
+              "amount",
+              "1000000"
+            ]
+          ],
+          "substate_id": "component_4141414141414141414141414141414141414141414141414141414141414141",
+          "template_address": "0000000000000000000000000000000000000000000000000000000000000000",
+          "topic": "std.deposit"
+        }
+      ],
+      "fee_receipt": {
+        "cost_breakdown": [
+          [
+            "Initial",
+            1000
+          ],
+          [
+            "Storage",
+            9007199254740999
+          ]
+        ],
+        "total_fee_overcharge": 0,
+        "total_fee_payment": 9007199254742992,
+        "total_fees_paid": 9007199254742492
+      },
+      "logs": [
+        {
+          "level": "INFO",
+          "message": "transfer executed"
+        }
+      ],
+      "submit": {
+        "outcome": "Commit",
+        "transaction_id": "5151515151515151515151515151515151515151515151515151515151515151"
+      }
+    }
+  }
+}

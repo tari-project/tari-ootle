@@ -1,0 +1,70 @@
+{
+  "name": "generic_build/self_funding_faucet",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_and_encode_instructions",
+  "input": {
+    "network": "esmeralda",
+    "keys": {
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "4b00000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "4c00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "fetched": [],
+    "generic_intent": {
+      "fee": 2000,
+      "fee_payment": {
+        "FromWorkspaceComponent": {
+          "label": "faucet_account"
+        }
+      },
+      "fee_instructions": [
+        {
+          "CreateAccount": {
+            "owner_public_key": "fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af013",
+            "owner_rule": null,
+            "bucket_workspace_id": null
+          }
+        },
+        {
+          "PutLastInstructionOutputOnWorkspace": {
+            "key": "faucet_account"
+          }
+        },
+        {
+          "CallMethod": {
+            "call": {
+              "Address": "component_7979797979797979797979797979797979797979797979797979797979797979"
+            },
+            "method": "take",
+            "args": [
+              {
+                "Workspace": "faucet_account"
+              }
+            ]
+          }
+        }
+      ],
+      "instructions": [],
+      "blobs": [],
+      "inputs": [
+        {
+          "substate_id": "component_7171717171717171717171717171717171717171717171717171717171717171",
+          "version": 0
+        }
+      ],
+      "extra_inputs": [],
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false
+    }
+  },
+  "expected": {
+    "encoded_transaction": "8200818282891826848200815820fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af01382038100820283820081d880582079797979797979797979797979797979797979797979797979797979797979796474616b6581820081810082028382018100677061795f6665658182018145821907d000808182820081d8805820717171717171717171717171717171717171717171717171717171717171717100f6f6f5f4818081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203072cbc7cd9bc9ad7c1cce2b78513e2924b3e31cf75b1411caad89226b36c659582040731280acff527f1d3827f9f6b29f9d9e0cf3045ee7baeb76774434507deb0a825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203e0cb31465a46309094f7895bc5799bd74e66e0b85b0f6ffd48cdd87c7ccb00358201730bac72c361d49e3053762cea9be5959d13661c77ed71ddbf67c42453f5e0c",
+    "transaction_id": "d0487599b4e960c0e23db576349ab656da23fe726b0479ada8e75c650b03e375"
+  }
+}

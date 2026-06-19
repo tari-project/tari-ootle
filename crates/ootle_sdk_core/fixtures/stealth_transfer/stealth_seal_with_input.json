@@ -1,0 +1,174 @@
+{
+  "name": "stealth_transfer/stealth_seal_with_input",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_and_encode_stealth_transfer",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "fetched": [
+      {
+        "substate_id": "utxo_0101010101010101010101010101010101010101010101010101010101010101_52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
+        "version": 0,
+        "substate_value": {
+          "Utxo": {
+            "is_frozen": false,
+            "output": {
+              "output": {
+                "encrypted_data": "07a63942e8ef469a843bca2cbf6a05de101a6b077766a796d159193b273ff22e38dd1e3afb78e635ccd6a8bbf71658366e52c13b71d073f0c8104f33ca040ea1f054205cc7778a140674af390ae24371",
+                "minimum_value_promise": 0,
+                "public_nonce": "f2cce6415ff090eea8d0f041e356f28f3be3aa53ccc69867288e7432028fca23",
+                "viewable_balance": null
+              },
+              "spend_condition": {
+                "AccessRule": "AllowAll"
+              },
+              "tag": 0
+            }
+          }
+        }
+      }
+    ],
+    "stealth_intent": {
+      "from_account": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [
+        {
+          "commitment": "52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
+          "owner_account_pk": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42"
+        }
+      ],
+      "outputs": [
+        {
+          "destination_account_pk": "94741f5d5d52755ece4f23f044ee27d5d1ea1e2bd196b462166b16152a9d0259",
+          "destination_view_pk": "da80862773358b466ffadfe0b3293ab3d9fd53c5ea6c955358f568322daf6a57",
+          "amount": 1000000,
+          "revealed_amount": 0,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": null,
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 0,
+      "revealed_output_amount": 0,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_entropy": {
+      "per_output": [
+        {
+          "mask": "5a00000000000000000000000000000000000000000000000000000000000000",
+          "sender_nonce": "5b00000000000000000000000000000000000000000000000000000000000000",
+          "aead_nonce": "5c00000000000000000000000000000000000000000000000000000000000000",
+          "elgamal_nonce": null,
+          "zk_nonces": null
+        }
+      ],
+      "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
+      "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
+      "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "stealth_keys": {
+      "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "1600000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "2100000000000000000000000000000000000000000000000000000000000000"
+    },
+    "spend_secrets": [
+      "a200000000000000000000000000000000000000000000000000000000000000"
+    ]
+  },
+  "expected": {
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821907d000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [
+              {
+                "substate_id": "utxo_0101010101010101010101010101010101010101010101010101010101010101_52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
+                "version": null
+              }
+            ],
+            "instructions": [
+              {
+                "StealthTransfer": {
+                  "resource_address_ref": {
+                    "Address": "resource_0101010101010101010101010101010101010101010101010101010101010101"
+                  },
+                  "revealed_input_bucket": null,
+                  "statement": {
+                    "balance_proof": null,
+                    "inputs_statement": {
+                      "inputs": [
+                        {
+                          "commitment": "52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60"
+                        }
+                      ],
+                      "revealed_amount": "0"
+                    },
+                    "outputs_statement": {
+                      "agg_range_proof": null,
+                      "outputs": [
+                        {
+                          "output": {
+                            "commitment": "f4e61dd8a35ffeab6e00e73c187b3ef1c5d8ce92d112c0ed5dabf73fba26866d",
+                            "encrypted_data": "4a7a689cb4d62a0fe637a8cd3a6783d95c0000000000000000000000000000000000000000000000a8380809c8db5ca89b73b21a395b8de7e70d847e36a5bf63924775d1ee2c3f45710f3cfc78522cac",
+                            "minimum_value_promise": 0,
+                            "sender_public_nonce": "bc67cfdc0b57f716b6879eb4c623d6e2fd0ab4d63a8589af49ec57e1c5b7ba45",
+                            "viewable_balance_proof": null
+                          },
+                          "spend_condition": {
+                            "Signed": "3c70deea3c25923b1371dec24d2d16e6c5bc04f8c7dae6e6d0d088e79de01a32"
+                          },
+                          "tag": 1465720523
+                        }
+                      ],
+                      "revealed_output_amount": "0"
+                    }
+                  }
+                }
+              }
+            ],
+            "is_seal_signer_authorized": true,
+            "max_epoch": null,
+            "min_epoch": null,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "8e7d51d6426c66815606efad91f3bcf78efa0bf678af35bffec65b993b33280f",
+          "signature": null
+        }
+      }
+    }
+  }
+}

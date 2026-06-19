@@ -1,0 +1,22 @@
+{
+  "name": "address_codec/parse_identity_esmeralda",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "parse_address",
+  "input": {
+    "address": "otl_esm_17mufuvtwdwjlqhjj2rwaffwna5uae5pce7qje34p2jmwcz236f0sd7pjcd8eeytpr4lqk0htsk3e740g7gre3t3s4h47cwz7swvrw3sep2qlu"
+  },
+  "expected": {
+    "parsed_address": {
+      "account_key": "f6f89e316e6ba5f05e5250ddd4a5d3ed39dcd038cf812cc6a154b6ec0951d25f",
+      "bech32m": "otl_esm_17mufuvtwdwjlqhjj2rwaffwna5uae5pce7qje34p2jmwcz236f0sd7pjcd8eeytpr4lqk0htsk3e740g7gre3t3s4h47cwz7swvrw3sep2qlu",
+      "kind": "identity",
+      "network": "esmeralda",
+      "view_only_key": "06f832c34f9c91611d7e0b3eeb85a39f55e8f20798ae30adebec385e83983746"
+    }
+  }
+}

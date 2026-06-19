@@ -1,0 +1,71 @@
+{
+  "name": "generic_build/call_method_transfer",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_and_encode_instructions",
+  "input": {
+    "network": "esmeralda",
+    "keys": {
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "4b00000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "4c00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "fetched": [],
+    "generic_intent": {
+      "fee": 2500,
+      "fee_payment": {
+        "FromAccount": "component_7171717171717171717171717171717171717171717171717171717171717171"
+      },
+      "fee_instructions": [],
+      "instructions": [
+        {
+          "CallMethod": {
+            "call": {
+              "Address": "component_7171717171717171717171717171717171717171717171717171717171717171"
+            },
+            "method": "withdraw",
+            "args": [
+              {
+                "Address": "resource_7272727272727272727272727272727272727272727272727272727272727272"
+              },
+              {
+                "Amount": 1000000
+              }
+            ]
+          }
+        },
+        {
+          "PutLastInstructionOutputOnWorkspace": {
+            "key": "bucket"
+          }
+        },
+        {
+          "CreateAccount": {
+            "owner_public_key": "fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af013",
+            "owner_rule": null,
+            "bucket_workspace_id": null
+          }
+        }
+      ],
+      "blobs": [],
+      "inputs": [
+        {
+          "substate_id": "component_7171717171717171717171717171717171717171717171717171717171717171",
+          "version": 0
+        }
+      ],
+      "extra_inputs": [],
+      "min_epoch": 1,
+      "max_epoch": 10,
+      "dry_run": false
+    }
+  },
+  "expected": {
+    "encoded_transaction": "820081828289182681820283820081d88058207171717171717171717171717171717171717171717171717171717171717171677061795f6665658182018145821909c40083820283820081d88058207171717171717171717171717171717171717171717171717171717171717171687769746864726177828201815824d8835820727272727272727272727272727272727272727272727272727272727272727282018147821a000f424000820381008200815820fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af0138182820081d8805820717171717171717171717171717171717171717171717171717171717171717100010af5f4818081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203072cbc7cd9bc9ad7c1cce2b78513e2924b3e31cf75b1411caad89226b36c65958201396ce16b75d7ce484f50da03fcb0e6b1c5c40b44ca37ab6c48c603e7a222508825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203e0cb31465a46309094f7895bc5799bd74e66e0b85b0f6ffd48cdd87c7ccb00358200d786e250c2399989cfeac8bc314d84e05d5bbeee72ebe228c5cd59d47537c09",
+    "transaction_id": "443f6d45486f2bda127c11057737ea06c78817c9441990cce383c55c3baa27e8"
+  }
+}

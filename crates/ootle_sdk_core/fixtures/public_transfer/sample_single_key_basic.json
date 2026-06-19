@@ -1,0 +1,40 @@
+{
+  "name": "sample/public_transfer_single_key_basic",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_and_encode_public_transfer",
+  "input": {
+    "network": "esmeralda",
+    "intent": {
+      "from_account": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "recipient": {
+        "PublicKey": "0505050505050505050505050505050505050505050505050505050505050505"
+      },
+      "resource_address": "resource_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "amount": 9007199254753337,
+      "fee": 2000,
+      "inputs": [
+        {
+          "substate_id": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": 0
+        }
+      ],
+      "min_epoch": 5,
+      "max_epoch": 99,
+      "dry_run": false
+    },
+    "keys": {
+      "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "1600000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "2100000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "expected": {
+    "encoded_transaction": "820081828289182681820283820081d8805820aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa677061795f6665658182018145821907d00083820283820081d8805820aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa687769746864726177828201815824d8835820bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb8201814b821b0020000000003039008203810082008458200505050505050505050505050505050505050505050505050505050505050505f6f681008182820081d8805820aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa00051863f5f4818081825820bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42825820d886641e16a1165d70fa89413c4129d56b15d5f44d2dd2b09823cd723487656a5820ebaff2c54345eb906ead9fd6d30ff3af577ecd7ba525c8c44f46d204865c9e0e825820bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab428258206cb925752437368710235314963a2d23751898b536cab9b98a32bab56afeae4558209e4b08a7a43512a62457fe931ff69e59086734dcccbcc3e0b7c07cda641ddc00",
+    "transaction_id": "687ff5b810e6d49c389a49b0bb5361b75b023e752172ecde6097fbef78e95002"
+  }
+}

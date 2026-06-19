@@ -1,0 +1,50 @@
+{
+  "name": "generic_build/create_account",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "build_and_encode_instructions",
+  "input": {
+    "network": "esmeralda",
+    "keys": {
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
+      "auth_nonce": "4b00000000000000000000000000000000000000000000000000000000000000",
+      "seal_nonce": "4c00000000000000000000000000000000000000000000000000000000000000"
+    },
+    "fetched": [],
+    "generic_intent": {
+      "fee": 2000,
+      "fee_payment": {
+        "FromAccount": "component_7171717171717171717171717171717171717171717171717171717171717171"
+      },
+      "fee_instructions": [],
+      "instructions": [
+        {
+          "CreateAccount": {
+            "owner_public_key": "fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af013",
+            "owner_rule": null,
+            "bucket_workspace_id": null
+          }
+        }
+      ],
+      "blobs": [],
+      "inputs": [
+        {
+          "substate_id": "component_7171717171717171717171717171717171717171717171717171717171717171",
+          "version": 0
+        }
+      ],
+      "extra_inputs": [],
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false
+    }
+  },
+  "expected": {
+    "encoded_transaction": "820081828289182681820283820081d88058207171717171717171717171717171717171717171717171717171717171717171677061795f6665658182018145821907d000818200815820fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af0138182820081d8805820717171717171717171717171717171717171717171717171717171717171717100f6f6f5f4818081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203072cbc7cd9bc9ad7c1cce2b78513e2924b3e31cf75b1411caad89226b36c659582065b64133d57bfa6378d2c1f3d88374414cfd59605338faf3e2aa7d5f0090d50d825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf60178258203e0cb31465a46309094f7895bc5799bd74e66e0b85b0f6ffd48cdd87c7ccb0035820ca5f67d531621703cfe436b7dc3f13592e2545315ab4fe9c8596e3bf79e93f0b",
+    "transaction_id": "59e2e9be598a242763771da3178d02b0adc52a58d8fe893aa9147fe271931e3c"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "substate_decode/component",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.33.5",
+    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
+    "generated_by": "ootle-sdk-core golden-vector generator"
+  },
+  "operation": "decode_substate",
+  "input": {
+    "substate_value": {
+      "Component": {
+        "body": {
+          "state": [
+            {
+              "@cbor": "tag",
+              "tag": 132,
+              "value": {
+                "@cbor": "bytes",
+                "hex": "1111111111111111111111111111111111111111111111111111111111111111"
+              }
+            },
+            {
+              "@cbor": "tag",
+              "tag": 132,
+              "value": {
+                "@cbor": "bytes",
+                "hex": "1212121212121212121212121212121212121212121212121212121212121212"
+              }
+            }
+          ]
+        },
+        "header": {
+          "access_rules": {
+            "default": "DenyAll",
+            "method_access": {}
+          },
+          "entity_id": "00",
+          "owner_rule": "None",
+          "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  },
+  "expected": {
+    "decoded_substate": {
+      "kind": "component",
+      "value": {
+        "entity_id": "00",
+        "template_address": "0000000000000000000000000000000000000000000000000000000000000000",
+        "vault_ids": [
+          "vault_1111111111111111111111111111111111111111111111111111111111111111",
+          "vault_1212121212121212121212121212121212121212121212121212121212121212"
+        ]
+      }
+    }
+  }
+}

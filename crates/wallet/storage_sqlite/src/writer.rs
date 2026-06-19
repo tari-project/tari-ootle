@@ -792,7 +792,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn balance_changes_insert(
         &mut self,
         vault_address: &VaultId,
-        account_address: &ComponentAddress,
+        _account_address: &ComponentAddress,
         resource_address: &ResourceAddress,
         before_revealed_balance: &Amount,
         after_revealed_balance: &Amount,

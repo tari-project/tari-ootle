@@ -29,6 +29,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
+    Amount,
     ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
@@ -54,7 +55,11 @@ where TSpec: WalletSdkSpec
         Self { notify, wallet_sdk }
     }
 
-    pub async fn refresh_account(&self, account_address: ComponentAddress) -> Result<bool, AccountMonitorError> {
+    pub async fn refresh_account(
+        &self,
+        account_address: ComponentAddress,
+        source: BalanceChangeSource,
+    ) -> Result<bool, AccountMonitorError> {
         info!(
             target: LOG_TARGET,
             "🏦 Refreshing account {}", account_address
@@ -148,7 +153,7 @@ where TSpec: WalletSdkSpec
             if let Some(account_addr) = account_substate_id.substate_id().as_component_address() {
                 self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
                     .await?;
-                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), BalanceChangeSource::Scan)
+                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), source.clone())
                     .await?;
             }
 
@@ -259,6 +264,7 @@ where TSpec: WalletSdkSpec
         let new_confidential_balance = outputs_api.get_unspent_balance(&vault_id)?;
 
         if maybe_current_vault
+            .as_ref()
             .is_none_or(|v| v.confidential_balance != new_confidential_balance || v.revealed_balance != new_balance)
         {
             info!(

@@ -184,7 +184,7 @@ where
 
                 // Update UTXOs
                 self.account_monitor_handle
-                    .refresh_account_with_utxos(account_addr)
+                    .recover_account(account_addr)
                     .await?;
                 // Count this as not found for the purposes of stopping the scan after N not founds
                 Ok(false)
@@ -236,7 +236,7 @@ where
 
                 // Update vaults, UTXOs, nfts etc
                 self.account_monitor_handle
-                    .refresh_account_with_utxos(account_addr)
+                    .recover_account(account_addr)
                     .await?;
 
                 Ok(true)

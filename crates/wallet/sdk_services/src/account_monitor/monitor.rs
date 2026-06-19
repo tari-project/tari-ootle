@@ -19,7 +19,7 @@ use tari_ootle_wallet_sdk::{
         substate::SubstateApiError,
         transaction::TransactionApiError,
     },
-    models::{NewAccountData, WalletEvent},
+    models::{BalanceChangeSource, NewAccountData, WalletEvent},
 };
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::{ComponentAddress, ResourceAddress};
@@ -127,9 +127,10 @@ where
             AccountMonitorRequest::RefreshAccount {
                 account,
                 scan_for_utxos,
+                source,
                 reply,
             } => {
-                let _ignore = reply.send(self.refresh_account(account, scan_for_utxos).await);
+                let _ignore = reply.send(self.refresh_account(account, scan_for_utxos, source).await);
             },
             AccountMonitorRequest::AssociateResource {
                 account,
@@ -178,7 +179,7 @@ where
                 break;
             }
             for account in &accounts {
-                let is_updated = self.scanner.refresh_account(*account.component_address()).await?;
+                let is_updated = self.scanner.refresh_account(*account.component_address(), BalanceChangeSource::Scan).await?;
                 if self.enable_periodic_scanning_of_utxos {
                     self.refresh_stealth_utxos(*account.component_address()).await?;
                 }
@@ -208,8 +209,9 @@ where
         &self,
         account_address: ComponentAddress,
         scan_for_utxos: bool,
+        source: BalanceChangeSource,
     ) -> Result<bool, AccountMonitorError> {
-        let is_updated = self.scanner.refresh_account(account_address).await?;
+        let is_updated = self.scanner.refresh_account(account_address, source).await?;
         if scan_for_utxos {
             self.refresh_stealth_utxos(account_address).await?;
         }

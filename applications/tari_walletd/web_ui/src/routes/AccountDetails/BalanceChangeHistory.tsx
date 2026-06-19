@@ -79,7 +79,7 @@ function NewBalance({ change }: { change: BalanceChange }) {
 }
 
 function Source({ change }: { change: BalanceChange }) {
-  const source = change.source as { type?: string; transaction_id?: string };
+  const { source } = change;
   switch (source.type) {
     case "transaction": {
       const transactionId = source.transaction_id || change.transaction_id;
@@ -103,7 +103,7 @@ function Source({ change }: { change: BalanceChange }) {
     case "recovery":
       return <Typography variant="body2">Account recovery</Typography>;
     default:
-      return <Typography variant="body2">Unknown</Typography>;
+      return <Typography variant="body2">Unknown source</Typography>;
   }
 }
 

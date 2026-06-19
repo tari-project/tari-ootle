@@ -76,7 +76,7 @@ function BalanceRow({ balance, accountAddress }: { balance: BalanceEntry; accoun
           )}
         </DataTableCell>
       </TableRow>
-      {balance.vault_address && (
+      {showChanges && balance.vault_address && (
         <BalanceChangeHistoryDialog
           open={showChanges}
           onClose={() => setShowChanges(false)}

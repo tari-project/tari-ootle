@@ -42,8 +42,8 @@ import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId }
 import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoDocumentTextOutline, IoWalletOutline } from "react-icons/io5";
-import { useNavigate } from "react-router-dom";
 import ClaimCoinsButton from "./components/ClaimCoinsButton";
+import BalanceChangeDialog from "./BalanceChangeDialog";
 import { SendMoneyDialog } from "./components/SendMoney";
 
 interface BalanceRowProps {
@@ -88,9 +88,9 @@ function BalanceRow({
   onSendClicked,
 }: BalanceRowProps) {
   const theme = useTheme();
-  const navigate = useNavigate();
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
   const showBalance = useAccountStore((state) => state.showBalance);
+  const [showChanges, setShowChanges] = useState(false);
 
   const stealthUXTOs = resource_type === "Stealth" && (
     <Tooltip title="View Stealth UTXOs">
@@ -105,17 +105,28 @@ function BalanceRow({
     </Tooltip>
   );
 
-  const balanceChangesButton = accountAddress && (
-    <Tooltip title="View balance changes for this resource">
-      <Button
-        variant="outlined"
-        size="small"
-        endIcon={<IoDocumentTextOutline />}
-        onClick={() => navigate(`/accounts/${accountAddress}`)}
-      >
-        Changes
-      </Button>
-    </Tooltip>
+  const balanceChangesButton = accountAddress && vault_address && (
+    <>
+      <Tooltip title="View balance changes for this resource">
+        <Button
+          variant="outlined"
+          size="small"
+          endIcon={<IoDocumentTextOutline />}
+          onClick={() => setShowChanges(true)}
+        >
+          Changes
+        </Button>
+      </Tooltip>
+      {showChanges && (
+        <BalanceChangeDialog
+          open={showChanges}
+          onClose={() => setShowChanges(false)}
+          account={accountAddress}
+          resourceAddress={resource_address}
+          resourceLabel={token_symbol}
+        />
+      )}
+    </>
   );
 
   return (

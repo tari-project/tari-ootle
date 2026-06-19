@@ -873,20 +873,27 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 key: vault_id.to_string(),
             })?;
 
-        diesel::update(
-            account_balance_changes::table
-                .filter(account_balance_changes::vault_id.eq(vault_db_id))
-                .filter(account_balance_changes::source.eq("Scan"))
-                .filter(account_balance_changes::transaction_id.is_null())
-                .filter(account_balance_changes::after_revealed_balance.eq(after_revealed_balance.to_string()))
-                .filter(account_balance_changes::after_confidential_balance.eq(after_confidential_balance.to_string())),
-        )
-        .set((
-            account_balance_changes::source.eq("Transaction"),
-            account_balance_changes::transaction_id.eq(Some(transaction_id.to_string())),
-        ))
-        .execute(self.connection())
-        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        let scan_id = account_balance_changes::table
+            .select(account_balance_changes::id)
+            .filter(account_balance_changes::vault_id.eq(vault_db_id))
+            .filter(account_balance_changes::source.eq("Scan"))
+            .filter(account_balance_changes::transaction_id.is_null())
+            .filter(account_balance_changes::after_revealed_balance.eq(after_revealed_balance.to_string()))
+            .filter(account_balance_changes::after_confidential_balance.eq(after_confidential_balance.to_string()))
+            .order(account_balance_changes::created_at.desc())
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if let Some(id) = scan_id {
+            diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
+                .set((
+                    account_balance_changes::source.eq("Transaction"),
+                    account_balance_changes::transaction_id.eq(Some(transaction_id.to_string())),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
 
         Ok(())
     }

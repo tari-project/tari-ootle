@@ -59,9 +59,14 @@ function TimestampCell({ created_at }: { created_at: string }) {
   return <DataTableCell>{display}</DataTableCell>;
 }
 
-function BalanceChangeRow(entry: BalanceChangeEntry, index: number) {
+interface BalanceChangeRowProps {
+  entry: BalanceChangeEntry;
+  index: number;
+}
+
+function BalanceChangeRow({ entry, index }: BalanceChangeRowProps) {
   return (
-    <TableRow key={`${entry.vault_address}_${entry.created_at}_${index}`}>
+    <TableRow>
       <TimestampCell created_at={entry.created_at} />
       <DataTableCell>
         <CopyAddress address={entry.resource_address} display={entry.resource_address.substring(0, 10) + "..."} />
@@ -95,8 +100,8 @@ function BalanceChangesLog({ account }: BalanceChangesLogProps) {
   } = useGetBalanceChanges(account, undefined, undefined, page * PAGE_SIZE, PAGE_SIZE);
 
   const changes = data?.changes || [];
-  const total = data?.total || 0;
-  const hasMore = changes.length === PAGE_SIZE;
+  const total = Number(data?.total || 0);
+  const hasMore = (page + 1) * PAGE_SIZE < total;
 
   return (
     <StyledPaper>
@@ -130,7 +135,11 @@ function BalanceChangesLog({ account }: BalanceChangesLogProps) {
                     <TableCell size="small">Transaction</TableCell>
                   </TableRow>
                 </TableHead>
-                <TableBody>{changes.map((entry: BalanceChangeEntry, i: number) => BalanceChangeRow(entry, i))}</TableBody>
+                <TableBody>
+                  {changes.map((entry: BalanceChangeEntry, i: number) => (
+                    <BalanceChangeRow key={`${entry.vault_address}_${entry.created_at}_${i}`} entry={entry} index={i} />
+                  ))}
+                </TableBody>
               </Table>
             </TableContainer>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>

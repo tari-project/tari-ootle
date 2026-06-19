@@ -1487,7 +1487,7 @@ fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
         confidential_delta: change.confidential_delta,
         source: change.source,
         transaction_id: change.transaction_id,
-        created_at: change.created_at.to_string(),
+        created_at: change.created_at.to_string().replace(' ', 'T'),
     }
 }
 

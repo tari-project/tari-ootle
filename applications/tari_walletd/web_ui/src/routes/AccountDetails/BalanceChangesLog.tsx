@@ -59,9 +59,9 @@ function TimestampCell({ created_at }: { created_at: string }) {
   return <DataTableCell>{display}</DataTableCell>;
 }
 
-function BalanceChangeRow(entry: BalanceChangeEntry) {
+function BalanceChangeRow(entry: BalanceChangeEntry, index: number) {
   return (
-    <TableRow key={`${entry.vault_address}_${entry.created_at}`}>
+    <TableRow key={`${entry.vault_address}_${entry.created_at}_${index}`}>
       <TimestampCell created_at={entry.created_at} />
       <DataTableCell>
         <CopyAddress address={entry.resource_address} display={entry.resource_address.substring(0, 10) + "..."} />
@@ -130,7 +130,7 @@ function BalanceChangesLog({ account }: BalanceChangesLogProps) {
                     <TableCell size="small">Transaction</TableCell>
                   </TableRow>
                 </TableHead>
-                <TableBody>{changes.map((entry: BalanceChangeEntry) => BalanceChangeRow(entry))}</TableBody>
+                <TableBody>{changes.map((entry: BalanceChangeEntry, i: number) => BalanceChangeRow(entry, i))}</TableBody>
               </Table>
             </TableContainer>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>

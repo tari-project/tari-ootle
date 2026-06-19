@@ -803,7 +803,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         const OPERATION: &str = "balance_changes_insert";
         use crate::schema::{account_balance_changes, vaults};
 
-
         let (vault_db_id, account_id) = vaults::table
             .select((vaults::id, vaults::account_id))
             .filter(vaults::address.eq(vault_address.to_string()))
@@ -817,28 +816,10 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             })?;
 
         let source_str = models::balance_change_source_to_string(source);
-        let (transaction_id, is_transaction) = match source {
-            BalanceChangeSource::Transaction { transaction_id } => {
-                (Some(transaction_id.to_string()), true)
-            },
-            _ => (None, false),
+        let transaction_id = match source {
+            BalanceChangeSource::Transaction { transaction_id } => Some(transaction_id.to_string()),
+            _ => None,
         };
-
-        // Idempotency: for Transaction sources, skip if an entry already exists for this (vault, transaction_id)
-        if is_transaction {
-            if let Some(ref tx_id) = transaction_id {
-                let existing = account_balance_changes::table
-                    .select(account_balance_changes::id)
-                    .filter(account_balance_changes::vault_id.eq(vault_db_id))
-                    .filter(account_balance_changes::transaction_id.eq(tx_id))
-                    .first::<i32>(self.connection())
-                    .optional()
-                    .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-                if existing.is_some() {
-                    return Ok(());
-                }
-            }
-        }
 
         let values = (
             account_balance_changes::vault_id.eq(vault_db_id),
@@ -857,10 +838,15 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             account_balance_changes::transaction_id.eq(transaction_id),
         );
 
-        diesel::insert_into(account_balance_changes::table)
+        let rows_affected = diesel::insert_into(account_balance_changes::table)
             .values(values)
+            .on_conflict_do_nothing()
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if rows_affected == 0 {
+            return Ok(());
+        }
 
         Ok(())
     }

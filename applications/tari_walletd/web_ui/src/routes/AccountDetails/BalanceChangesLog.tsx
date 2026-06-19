@@ -26,7 +26,7 @@ import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from
 import Button from "@mui/material/Button";
 import { useGetBalanceChanges } from "@api/hooks/useAccounts";
 import { useTimeAgo } from "@hooks/useTimeAgo";
-import { BalanceChangeEntry, ComponentAddress } from "@tari-project/ootle-ts-bindings";
+import { BalanceChangeEntry, BalanceChangeSource, ComponentAddress } from "@tari-project/ootle-ts-bindings";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import CopyAddress from "@components/CopyAddress";
@@ -37,22 +37,21 @@ interface BalanceChangesLogProps {
 
 const PAGE_SIZE = 20;
 
-function SourceLabel({ source }: { source: string }) {
-  if (source.startsWith("Transaction:")) {
-    const txId = source.slice("Transaction:".length);
+function SourceLabel({ source }: { source: BalanceChangeSource }) {
+  if (source.type === "Transaction") {
     return (
-      <Button component={Link} to={`/transactions/${txId}`} size="small" variant="text">
+      <Button component={Link} to={`/transactions/${source.transaction_id}`} size="small" variant="text">
         Transaction
       </Button>
     );
   }
-  if (source === "Scan") {
+  if (source.type === "Scan") {
     return <span>Scan</span>;
   }
-  if (source === "Recovery") {
+  if (source.type === "Recovery") {
     return <span>Recovery</span>;
   }
-  return <span>{source}</span>;
+  return <span>{source.type}</span>;
 }
 
 function TimestampCell({ created_at }: { created_at: string }) {

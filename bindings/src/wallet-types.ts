@@ -175,5 +175,6 @@ export * from "./types/wallet-types/ComponentAddressOrName";
 export * from "./types/wallet-types/TemplatesListAuthoredResponse";
 export * from "./types/wallet-types/GetBalanceChangesRequest";
 export * from "./types/wallet-types/BalanceChangeEntry";
+export * from "./types/wallet-types/BalanceChangeSource";
 export * from "./types/wallet-types/GetBalanceChangesResponse";
 export * from "./types/wallet-types/StealthUtxosDecryptValueResponse";

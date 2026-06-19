@@ -32,6 +32,7 @@ use tari_template_test_tooling::{
     support::{
         GenerateValueLookup,
         assert_error::{assert_access_denied_for_action, assert_reject_reason},
+        spec::OutputAuthSpec,
         stealth,
         stealth::{NO_INPUTS, StealthSecretTransferData},
     },
@@ -659,15 +660,20 @@ fn transfer_restricted_by_access_rules_n_of_m() {
         public_key(pk3),
         public_key(pk4)
     ));
-    let outputs = vec![(100u64, SpendCondition::AccessRule(rule))];
+    let access_condition = SpendCondition::AccessRule(rule);
+    let outputs = vec![(100u64, access_condition.clone())];
     let mint = stealth::generate_mint_statement(outputs.clone(), 0u64, None);
     let (_, faucet_resx) = setup(&mut test, &mint, None);
 
+    // The minted UTXO is gated by a condition tree, so it is spent via the script path revealing the AccessRule leaf.
     let transfer = stealth::generate_transfer_data(
-        [MaskAndValue {
-            mask: mint.output_masks[0].clone(),
-            value: outputs[0].0,
-        }],
+        [(
+            MaskAndValue {
+                mask: mint.output_masks[0].clone(),
+                value: outputs[0].0,
+            },
+            access_condition,
+        )],
         0u64,
         [10u64, 90u64],
         0,
@@ -714,20 +720,20 @@ fn transfer_restricted_by_access_rules_n_of_m() {
 fn transfer_restricted_by_access_rules_component_scope() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
-    let outputs = vec![(100u64, SpendCondition::Signed(test.to_public_key_bytes()))];
-    let mint = stealth::generate_mint_statement(outputs.clone(), 0u64, None);
+    let outputs = vec![(100u64, OutputAuthSpec::KeyPath(test.to_public_key_bytes()))];
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (component, faucet_resx) = setup(&mut test, &mint, None);
 
     let component_scope_rule = rule!(component(component));
     let initial_transfer = stealth::generate_transfer_data(
         [MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: outputs[0].0,
+            value: 100,
         }],
         0u64,
         [
             (10u64, SpendCondition::AccessRule(component_scope_rule.clone())),
-            (90u64, SpendCondition::AccessRule(component_scope_rule)),
+            (90u64, SpendCondition::AccessRule(component_scope_rule.clone())),
         ],
         0,
     );
@@ -741,16 +747,24 @@ fn transfer_restricted_by_access_rules_component_scope() {
         vec![],
     );
 
+    // Both minted UTXOs are gated by the component-scope condition tree, so each is spent via the script path revealing
+    // its AccessRule leaf.
     let transfer = stealth::generate_transfer_data(
         [
-            MaskAndValue {
-                mask: initial_transfer.output_masks[0].clone(),
-                value: 10,
-            },
-            MaskAndValue {
-                mask: initial_transfer.output_masks[1].clone(),
-                value: 90,
-            },
+            (
+                MaskAndValue {
+                    mask: initial_transfer.output_masks[0].clone(),
+                    value: 10,
+                },
+                SpendCondition::AccessRule(component_scope_rule.clone()),
+            ),
+            (
+                MaskAndValue {
+                    mask: initial_transfer.output_masks[1].clone(),
+                    value: 90,
+                },
+                SpendCondition::AccessRule(component_scope_rule),
+            ),
         ],
         0u64,
         [

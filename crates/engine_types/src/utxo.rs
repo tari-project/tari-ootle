@@ -4,7 +4,7 @@
 use tari_bor::{Deserialize, Serialize};
 use tari_template_lib::types::{
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
-    stealth::SpendCondition,
+    stealth::SpendAuthorization,
 };
 
 use crate::crypto::OutputBody;
@@ -36,8 +36,8 @@ impl Utxo {
         self.output
     }
 
-    pub fn spender_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
-        self.output().and_then(|o| o.spend_condition.signed_by())
+    pub fn spender_public_key(&self) -> Option<RistrettoPublicKeyBytes> {
+        self.output().and_then(|o| o.auth.spend_key())
     }
 
     pub fn freeze(&mut self) {
@@ -74,7 +74,7 @@ pub struct UtxoOutput {
     #[n(0)]
     pub output: OutputBody,
     #[n(1)]
-    pub spend_condition: SpendCondition,
+    pub auth: SpendAuthorization,
     #[n(2)]
     pub tag: UtxoTag,
 }

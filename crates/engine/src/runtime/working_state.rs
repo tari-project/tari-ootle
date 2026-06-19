@@ -57,7 +57,7 @@ use tari_template_lib::{
         access_rules::ResourceAuthAction,
         constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
         metadata,
-        stealth::{SpendCondition, StealthInput, StealthTransferStatement},
+        stealth::{SpendCondition, SpendWitness, StealthInput, StealthTransferStatement},
     },
 };
 
@@ -317,64 +317,100 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 details: format!("Utxo {} is burnt", address),
             })?;
 
-            self.validate_spend_condition(output, input)?;
+            self.validate_spend_witness(output, input)?;
         }
 
         let valid_transfer = stealth::validate_transfer(stmt, view_key)?;
         Ok(valid_transfer)
     }
 
-    fn validate_spend_condition(&self, output: &UtxoOutput, input: &StealthInput) -> Result<(), RuntimeError> {
-        match &output.spend_condition {
-            SpendCondition::Signed(pk) => {
+    /// Authorises spending `input` against the committed authorisation of the UTXO it spends, dispatching on the
+    /// per-input [`SpendWitness`]:
+    /// - **key path** — the output's `spend_key` must be present and its signer badge in the auth scope;
+    /// - **script path** — the revealed leaf must be included under the output's `condition_root`, then the leaf is
+    ///   evaluated. An `AccessRule` leaf is checked here (native); a `TemplateFunction` leaf was already run as a WASM
+    ///   predicate by `RuntimeInterfaceImpl::evaluate_input_spend_scripts` BEFORE the spend executed, so it is a no-op
+    ///   here (the inclusion check above still re-binds the leaf to the committed root).
+    fn validate_spend_witness(&self, output: &UtxoOutput, input: &StealthInput) -> Result<(), RuntimeError> {
+        match &input.witness {
+            SpendWitness::KeyPath => {
+                let Some(pk) = output.auth.spend_key() else {
+                    return Err(ResourceError::InvalidSpend {
+                        details: format!(
+                            "Key-path witness provided for stealth UTXO {} which has no spend_key",
+                            input.commitment
+                        ),
+                    }
+                    .into());
+                };
                 if !self
                     .base_call_scope()
                     .auth_scope()
-                    .contains_badge(&NonFungibleAddress::from_public_key(*pk))
+                    .contains_badge(&NonFungibleAddress::from_public_key(pk))
                 {
                     return Err(RuntimeError::ResourceError(
                         ResourceError::RequiredSignatureMissingForStealthUtxo {
                             commitment: input.commitment,
-                            public_key: *pk,
+                            public_key: pk,
                         },
                     ));
                 }
 
                 Ok(())
             },
-            SpendCondition::AccessRule(access_rule) => {
-                if !self.authorization().check_access_rule(access_rule)? {
-                    return Err(RuntimeError::AccessDenied {
-                        action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
-                    });
+            SpendWitness::ScriptPath { leaf, proof } => {
+                let Some(root) = output.auth.condition_root() else {
+                    return Err(ResourceError::InvalidSpend {
+                        details: format!(
+                            "Script-path witness provided for stealth UTXO {} which has no condition_root",
+                            input.commitment
+                        ),
+                    }
+                    .into());
+                };
+                if !stealth::verify_inclusion(stealth::condition_leaf_hash(leaf), proof, root) {
+                    return Err(ResourceError::InvalidSpend {
+                        details: format!(
+                            "Revealed spend condition leaf is not committed in the condition_root of stealth UTXO {}",
+                            input.commitment
+                        ),
+                    }
+                    .into());
                 }
 
-                Ok(())
-            },
-            SpendCondition::Script(_) => {
-                // Spend scripts cannot be evaluated here: a WASM predicate must run via the
-                // `RuntimeInterfaceImpl` layer which holds the template provider and the re-entrant runtime
-                // pointer. They are therefore evaluated in `RuntimeInterfaceImpl::evaluate_input_spend_scripts`
-                // BEFORE the spend is executed, so by the time we reach this point the predicate has already
-                // authorised (or rejected, aborting the transfer) the spend.
-                Ok(())
+                match leaf {
+                    SpendCondition::AccessRule(access_rule) => {
+                        if !self.authorization().check_access_rule(access_rule)? {
+                            return Err(RuntimeError::AccessDenied {
+                                action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
+                            });
+                        }
+                        Ok(())
+                    },
+                    SpendCondition::TemplateFunction(_) => {
+                        // The WASM predicate is run by `RuntimeInterfaceImpl::evaluate_input_spend_scripts` BEFORE the
+                        // spend executes, so by the time we reach this point it has already authorised (or rejected,
+                        // aborting the transfer) the spend.
+                        Ok(())
+                    },
+                }
             },
         }
     }
 
-    /// Reads the spend condition of an unspent stealth UTXO without spending it, taking and releasing a read lock.
-    /// Used to drive spend-script evaluation at the `RuntimeInterfaceImpl` layer before the spend is executed.
-    pub fn get_stealth_utxo_spend_condition(
+    /// Reads the committed `condition_root` of an unspent stealth UTXO without spending it, taking and releasing a read
+    /// lock. Used to drive spend-script evaluation at the `RuntimeInterfaceImpl` layer before the spend is executed.
+    pub fn get_stealth_utxo_condition_root(
         &mut self,
         resource_address: ResourceAddress,
         input: &StealthInput,
-    ) -> Result<SpendCondition, RuntimeError> {
+    ) -> Result<Option<Hash32>, RuntimeError> {
         let address = UtxoAddress::new(resource_address, input.commitment.into());
         let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Read)?;
         let result = (|| {
             let (_, value) = self.store.get_locked_substate(lock_id)?;
             let utxo = value.as_utxo().ok_or_else(|| RuntimeError::InvariantError {
-                function: "get_stealth_utxo_spend_condition",
+                function: "get_stealth_utxo_condition_root",
                 details: format!("Substate at {} is not a UTXO", address),
             })?;
             if utxo.is_frozen() {
@@ -386,7 +422,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             let output = utxo.output().ok_or_else(|| ResourceError::InvalidSpend {
                 details: format!("Utxo {} is burnt", address),
             })?;
-            Ok(output.spend_condition.clone())
+            Ok(output.auth.condition_root())
         })();
         self.store.try_unlock(lock_id)?;
         result

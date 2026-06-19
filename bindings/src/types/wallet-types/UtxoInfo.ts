@@ -3,7 +3,7 @@ import type { Amount } from "../Amount";
 import type { Memo } from "../Memo";
 import type { OotleAddress } from "../OotleAddress";
 import type { OutputStatus } from "../OutputStatus";
-import type { SpendCondition } from "../SpendCondition";
+import type { SpendAuthorization } from "../SpendAuthorization";
 import type { UtxoAddress } from "../UtxoAddress";
 
 export type UtxoInfo = {
@@ -16,7 +16,7 @@ export type UtxoInfo = {
    * wallet's configured network. `None` for all other memo types.
    */
   sender_address: OotleAddress | null;
-  spend_condition: SpendCondition;
+  auth: SpendAuthorization;
   is_burnt: boolean;
   is_frozen: boolean;
   is_on_chain: boolean;

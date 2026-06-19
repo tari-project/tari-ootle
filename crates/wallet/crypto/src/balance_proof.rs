@@ -13,8 +13,9 @@ use tari_engine_types::{
 };
 use tari_template_lib_types::{
     Amount,
+    Hash32,
     crypto::{BalanceProofSignature, PedersenCommitmentBytes},
-    stealth::{SpendCondition, StealthInputsStatement, StealthOutputsStatement},
+    stealth::{StealthInputsStatement, StealthOutputsStatement},
 };
 use tari_utilities::ByteArrayError;
 
@@ -62,12 +63,12 @@ pub fn generate_stealth_balance_proof_signature(
     sig.to_byte_type()
 }
 
-/// Signs a covenant sub-balance proof (TIP-0006) for one partition: the inputs and outputs sharing `condition`. The key
-/// is the partition's aggregate mask difference (`agg_input_mask - agg_output_mask`); `revealed_amount` is the exact
-/// net cleartext outflow (`Σ input values - Σ output values`) and must be non-negative. The verifier reconstructs the
-/// same excess point from the public commitments and `revealed_amount`.
+/// Signs a covenant sub-balance proof (TIP-0006) for one partition: the inputs and outputs sharing `condition_root`.
+/// The key is the partition's aggregate mask difference (`agg_input_mask - agg_output_mask`); `revealed_amount` is the
+/// exact net cleartext outflow (`Σ input values - Σ output values`) and must be non-negative. The verifier
+/// reconstructs the same excess point from the public commitments and `revealed_amount`.
 pub fn generate_covenant_balance_proof_signature(
-    condition: &SpendCondition,
+    condition_root: &Hash32,
     agg_input_mask: &RistrettoSecretKey,
     agg_output_mask: &RistrettoSecretKey,
     revealed_amount: Amount,
@@ -83,7 +84,7 @@ pub fn generate_covenant_balance_proof_signature(
     let message = messages::covenant_balance_proof64(
         &public_excess,
         &public_nonce,
-        condition,
+        condition_root,
         &revealed_amount,
         input_commitments,
         output_commitments,

@@ -282,25 +282,25 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
 }
 
 fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
-    // Per-byte divisor for serialized spend-condition bytes committed into outputs, consistent with the other
-    // byte-weighted costs (logs, blobs, literal args).
-    const SPEND_CONDITION_BYTE_DIVISOR: u64 = 3;
+    // Per-byte divisor for serialized spend-witness bytes, consistent with the other byte-weighted costs (logs, blobs,
+    // literal args).
+    const SPEND_WITNESS_BYTE_DIVISOR: u64 = 3;
 
-    // A spend condition — notably a `Script`'s `args` — is committed into the created output, so its serialized size
-    // must contribute to the creating transaction's weight. Without this, a large script/args could be broadcast for
-    // free and used to bloat outputs. The output's other bytes are charged separately (per-byte storage at substate
-    // creation); here we only price the spend-condition payload that the count-based weight below cannot see.
-    let spend_condition_bytes: u64 = statement
-        .outputs_statement
-        .outputs
+    // A script-path spend witness reveals the spend-condition leaf — notably a `TemplateFunction`'s `args` — plus its
+    // Merkle inclusion proof, carried in the spending transaction. Its serialized size must contribute to weight,
+    // otherwise a large leaf/proof could be broadcast for free. Outputs commit only a fixed-size `condition_root`, so
+    // their condition payload is already covered by the count-based weight below.
+    let witness_bytes: u64 = statement
+        .inputs_statement
+        .inputs
         .iter()
-        .map(|o| tari_bor::encoded_len(&o.spend_condition).unwrap_or(0) as u64)
+        .map(|i| tari_bor::encoded_len(&i.witness).unwrap_or(0) as u64)
         .sum();
 
     // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
     100 + statement.inputs_statement.inputs.len() as u64 +
         (statement.outputs_statement.outputs.len() as u64 * 2) +
-        spend_condition_bytes / SPEND_CONDITION_BYTE_DIVISOR
+        witness_bytes / SPEND_WITNESS_BYTE_DIVISOR
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {

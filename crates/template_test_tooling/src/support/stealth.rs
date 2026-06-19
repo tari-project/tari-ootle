@@ -14,10 +14,20 @@ use tari_template_lib::types::{
     Amount,
     EncryptedData,
     crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
-    stealth::{SpendCondition, StealthOutputsStatement, StealthTransferStatement},
+    stealth::{SpendAuthorization, SpendCondition, StealthOutputsStatement, StealthTransferStatement},
 };
 
-use crate::support::spec::{InputSpec, OutputSpec, SpendConditionSpec};
+use crate::support::spec::{InputAuthSpec, InputSpec, OutputAuthSpec, OutputSpec};
+
+/// The resolved authorisation of a generated stealth output, recorded so a later transfer can reconstruct the spend
+/// witness for it.
+#[derive(Debug, Clone)]
+pub enum OutputAuth {
+    /// Key path with this resolved `spend_key`.
+    KeyPath(RistrettoPublicKeyBytes),
+    /// Condition tree over these committed leaves.
+    Conditions(Vec<SpendCondition>),
+}
 
 pub fn generate_stealth_output_statement<I: IntoIterator<Item = u64>, A: Into<Amount>>(
     output_amounts: I,
@@ -92,7 +102,8 @@ fn generate_stealth_statement_internal(
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 resource_view_key: view_key.clone(),
             },
-            spend_condition: SpendCondition::Signed(RistrettoPublicKey::from_secret_key(mask).to_byte_type()),
+            // Default: a key-path output owned by the mask's public key.
+            auth: SpendAuthorization::Key(RistrettoPublicKey::from_secret_key(mask).to_byte_type()),
             tag: UtxoTag::new(0),
         })
         .collect::<Vec<_>>();
@@ -103,7 +114,28 @@ fn generate_stealth_statement_internal(
 
 pub struct StealthSecretTransferData {
     pub output_masks: Vec<RistrettoSecretKey>,
+    /// The resolved authorisation of each generated output (parallel to `output_masks`), so a later transfer can build
+    /// the witness to spend it.
+    pub output_auths: Vec<OutputAuth>,
     pub statement: StealthTransferStatement,
+}
+
+impl StealthSecretTransferData {
+    /// Builds an [`InputSpec`] spending output `i` (worth `value`) of this transfer, using the recorded output auth.
+    /// Condition-tree outputs reveal their first committed leaf (single-leaf trees, the common case in tests).
+    pub fn input_spec_for(&self, i: usize, value: u64) -> InputSpec {
+        let mask_and_value = MaskAndValue {
+            mask: self.output_masks[i].clone(),
+            value,
+        };
+        match &self.output_auths[i] {
+            OutputAuth::KeyPath(_) => InputSpec::new(mask_and_value),
+            OutputAuth::Conditions(conditions) => InputSpec::with_auth(mask_and_value, InputAuthSpec::ScriptPath {
+                conditions: conditions.clone(),
+                leaf: conditions[0].clone(),
+            }),
+        }
+    }
 }
 
 pub const NO_INPUTS: iter::Empty<MaskAndValue> = iter::empty();
@@ -174,6 +206,7 @@ where
     II::IntoIter: ExactSizeIterator,
     IS: Into<InputSpec>,
 {
+    let mut output_auths = Vec::new();
     let outputs = outputs
         .into_iter()
         .map(Into::into)
@@ -190,18 +223,26 @@ where
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
             };
 
-            let spend_condition = match spec.spend_condition_spec() {
-                SpendConditionSpec::SignedBy => {
+            let (authorization, auth) = match spec.auth() {
+                OutputAuthSpec::KeyPathFromMask => {
                     // For testing purposes, we use the mask as the owner key
-                    let output_owner_public_key = RistrettoPublicKey::from_secret_key(&output_mask);
-                    SpendCondition::Signed(output_owner_public_key.to_byte_type())
+                    let pk = RistrettoPublicKey::from_secret_key(&output_mask).to_byte_type();
+                    (SpendAuthorization::Key(pk), OutputAuth::KeyPath(pk))
                 },
-                SpendConditionSpec::Specified(cond) => cond.clone(),
+                OutputAuthSpec::KeyPath(pk) => (SpendAuthorization::Key(*pk), OutputAuth::KeyPath(*pk)),
+                OutputAuthSpec::Conditions(conditions) => {
+                    let root = stealth::condition_root(conditions).unwrap();
+                    (
+                        SpendAuthorization::Script(root),
+                        OutputAuth::Conditions(conditions.clone()),
+                    )
+                },
             };
+            output_auths.push(auth);
 
             StealthOutputWitness {
                 witness: statement,
-                spend_condition,
+                auth: authorization,
                 tag: UtxoTag::new(0),
             }
         })
@@ -210,9 +251,12 @@ where
     let inputs = inputs
         .into_iter()
         .map(Into::into)
-        .map(|input: InputSpec| StealthInputWitness {
-            mask_and_value: input.mask_and_value().clone(),
-            spend_condition: input.spend_condition().cloned(),
+        .map(|input: InputSpec| match input.auth() {
+            InputAuthSpec::KeyPath => StealthInputWitness::new(input.mask_and_value().clone()),
+            InputAuthSpec::ScriptPath { conditions, leaf } => {
+                let (witness, root) = stealth::script_path_witness(conditions, leaf).unwrap();
+                StealthInputWitness::with_script_path(input.mask_and_value().clone(), witness, root)
+            },
         });
 
     let transfer = stealth::create_transfer_statement(
@@ -225,6 +269,7 @@ where
 
     StealthSecretTransferData {
         output_masks: outputs.into_iter().map(|m| m.witness.mask).collect(),
+        output_auths,
         statement: transfer,
     }
 }

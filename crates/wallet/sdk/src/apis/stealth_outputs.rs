@@ -25,6 +25,7 @@ use tari_ootle_wallet_crypto::{
     StealthOutputWitness,
     memo::Memo,
     pay_to::PayTo,
+    stealth::pay_to_output_authorization,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
@@ -35,7 +36,7 @@ use tari_template_lib::types::{
     UtxoAddress,
     access_rules::AccessRule,
     crypto::PedersenCommitmentBytes,
-    stealth::{SpendCondition, StealthTransferStatement},
+    stealth::{SpendAuthorization, StealthTransferStatement},
 };
 
 use crate::{
@@ -254,15 +255,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(())
     }
 
-    pub fn is_spendable_condition(&self, spend_condition: &SpendCondition) -> bool {
-        match spend_condition {
-            SpendCondition::Signed(_) => true,
-            SpendCondition::AccessRule(rule) => self.is_spendable_access_rule(rule),
-            // Script-conditioned UTXOs cannot be auto-selected as inputs: satisfying an arbitrary spend predicate
-            // requires script-specific bound arguments and witnesses the wallet cannot infer generically. Spending
-            // them must be driven explicitly by the caller.
-            SpendCondition::Script(_) => false,
-        }
+    /// Whether the wallet can auto-select a UTXO with this authorisation as a spend input. Only key-path UTXOs (whose
+    /// one-time `spend_key` the wallet owns) are auto-spendable. Script-path (condition-tree) UTXOs are opaque from the
+    /// committed root alone — satisfying a hidden leaf requires caller-provided conditions and witnesses — so they are
+    /// not auto-selected and must be spent explicitly by the caller.
+    pub fn is_spendable_auth(&self, auth: &SpendAuthorization) -> bool {
+        auth.spend_key().is_some()
     }
 
     pub fn is_spendable_access_rule(&self, access_rule: &AccessRule) -> bool {
@@ -583,18 +581,16 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                             &output_stealth_public_nonce,
                         );
                         let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret).to_byte_type();
-                        if output
-                            .spend_condition
-                            .signed_by()
-                            .is_none_or(|pk| *pk == stealth_address)
-                        {
+                        // A key-path output is owned only if its spend_key is our derived stealth address. A
+                        // condition-tree output (no spend_key) is recognised as viewable but not key-spendable here.
+                        if output.auth.spend_key().is_none_or(|pk| pk == stealth_address) {
                             (decrypted.value(), decrypted.memo, OutputStatus::Unspent)
                         } else {
                             warn!(
                                 target: LOG_TARGET,
                                 "⚠️ Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this wallet and will be stored as invalid.",
                                 stealth_address,
-                                output.spend_condition.signed_by().display()
+                                output.auth.spend_key().as_ref().display()
                             );
                             (decrypted.value(), decrypted.memo, OutputStatus::Invalid)
                         }
@@ -642,13 +638,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 encrypted_data: output.output.encrypted_data.clone(),
                 tag_byte: output.tag,
                 memo,
-                spend_condition: output.spend_condition.clone(),
+                auth: output.auth.clone(),
                 minimum_value_promise: output.output.minimum_value_promise,
                 status,
                 is_burnt: false,
                 is_frozen,
                 is_on_chain: true,
-                is_condition_spendable: self.is_spendable_condition(&output.spend_condition),
+                is_condition_spendable: self.is_spendable_auth(&output.auth),
                 lock_id: None,
             }));
         }
@@ -676,20 +672,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             memo,
         )?;
 
-        let spend_condition = match pay_to {
-            PayTo::StealthPublicKey => {
-                // Create stealth address that the destination can use at spend time
-                let output_owner_public_key = self.crypto_api.derive_stealth_owner_public_key(
-                    destination.network(),
-                    destination.account_key(),
-                    &nonce_secret,
-                );
-
-                SpendCondition::Signed(output_owner_public_key.to_byte_type())
-            },
-            PayTo::AccessRule(access_rule) => SpendCondition::AccessRule(access_rule),
-            PayTo::Script(script) => SpendCondition::Script(script),
-        };
+        let auth = pay_to_output_authorization(&pay_to, || {
+            // Create stealth address that the destination can use at spend time
+            self.crypto_api
+                .derive_stealth_owner_public_key(destination.network(), destination.account_key(), &nonce_secret)
+                .to_byte_type()
+        })?;
 
         let witness = OutputWitness {
             amount,
@@ -709,7 +697,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
 
         Ok(StealthOutputWitness {
             witness,
-            spend_condition,
+            auth,
             tag: derived_tag,
         })
     }
@@ -810,6 +798,8 @@ pub enum StealthOutputsApiError {
     StoreError(#[from] WalletStorageError),
     #[error("Crypto error: {0}")]
     Crypto(#[from] StealthCryptoApiError),
+    #[error("Wallet crypto error: {0}")]
+    WalletCrypto(#[from] tari_ootle_wallet_crypto::WalletCryptoError),
     #[error("Insufficient funds")]
     InsufficientFunds,
     #[error("Input selection error: {details}")]

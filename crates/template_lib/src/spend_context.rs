@@ -5,7 +5,8 @@ use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{
     Amount,
-    stealth::{CurrentInputView, SpendCondition, StealthInputView, StealthOutputView},
+    Hash32,
+    stealth::{CurrentInputView, StealthInputView, StealthOutputView},
 };
 
 use crate::{
@@ -49,15 +50,15 @@ impl SpendContext {
             .expect("SpendContext::inputs returned invalid data")
     }
 
-    /// The stealth outputs being created by this transfer, each with its commitment, `minimum_value_promise`, spend
-    /// condition and tag.
+    /// The stealth outputs being created by this transfer, each with its commitment, `minimum_value_promise`, the
+    /// output's authorisation (`spend_key`/`condition_root`) and tag.
     pub fn outputs(&self) -> Vec<StealthOutputView> {
         Self::invoke(SpendContextAction::Outputs)
             .decode()
             .expect("SpendContext::outputs returned invalid data")
     }
 
-    /// The index + commitment of the input whose spend condition is currently executing.
+    /// The index, commitment and committed `condition_root` of the input whose condition is currently executing.
     pub fn current_input(&self) -> CurrentInputView {
         Self::invoke(SpendContextAction::CurrentInput)
             .decode()
@@ -67,14 +68,6 @@ impl SpendContext {
     /// The local index of the input whose spend condition is currently executing.
     pub fn current_input_index(&self) -> u32 {
         self.current_input_index
-    }
-
-    /// The `SpendCondition::Script(..)` that invoked this predicate. Enables recursive covenants ("every output must
-    /// carry the same condition I do").
-    pub fn invoking_condition(&self) -> SpendCondition {
-        Self::invoke(SpendContextAction::InvokingCondition)
-            .decode()
-            .expect("SpendContext::invoking_condition returned invalid data")
     }
 
     /// The total revealed amount being spent by this transfer.
@@ -100,22 +93,22 @@ impl SpendContext {
     // These are thin assertions over `outputs()` / `invoking_condition()`. Authors compose them; the engine treats
     // them as ordinary predicate logic.
     //
-    // A "partition" is every input and output of the transfer that shares the invoking spend condition. Partitions are
-    // keyed by condition equality, so distinct UTXOs gated by an identical `Script(template, fn, args)` form one
-    // partition — there is no hidden per-UTXO identity. Use distinct bound args (e.g. a vault nonce) when separate
-    // UTXOs must be separate covenants.
+    // A "partition" is every input and output of the transfer that shares the invoking input's `condition_root`.
+    // Partitions are keyed by root equality, so distinct UTXOs committing the same condition tree form one partition —
+    // there is no hidden per-UTXO identity. Use distinct bound args (e.g. a vault nonce) in a leaf when separate UTXOs
+    // must be separate covenants.
 
     /// Recursive "stay in the vault" covenant: asserts that the transfer has at least one stealth output and that every
-    /// stealth output carries the same spend condition that invoked this predicate.
+    /// stealth output carries the same `condition_root` committed by the UTXO being spent.
     ///
-    /// This bounds only the spend condition of surviving stealth outputs, not the revealed amount — compose it with a
+    /// This bounds only the `condition_root` of surviving stealth outputs, not the revealed amount — compose it with a
     /// revealed-output check if value must not leave the covenant as cleartext.
     pub fn require_output_preserves_condition(&self) {
-        let me = self.invoking_condition();
+        let me = self.current_input().condition_root;
         let outputs = self.outputs();
         assert!(
-            !outputs.is_empty() && outputs.iter().all(|o| o.spend_condition == me),
-            "spend script covenant: every output must preserve the invoking spend condition",
+            !outputs.is_empty() && outputs.iter().all(|o| o.auth.condition_root() == me),
+            "spend script covenant: every output must preserve the invoking condition_root",
         );
     }
 
@@ -127,12 +120,12 @@ impl SpendContext {
         );
     }
 
-    /// Value-flow covenant: asserts at least one output carries `spend_condition` and promises at least `min_value`.
-    pub fn require_output_to(&self, spend_condition: &SpendCondition, min_value: u64) {
+    /// Value-flow covenant: asserts at least one output commits `condition_root` and promises at least `min_value`.
+    pub fn require_output_to(&self, condition_root: &Hash32, min_value: u64) {
         assert!(
             self.outputs()
                 .iter()
-                .any(|o| &o.spend_condition == spend_condition && o.minimum_value_promise >= min_value),
+                .any(|o| o.auth.condition_root() == Some(*condition_root) && o.minimum_value_promise >= min_value),
             "spend script covenant: required output not present",
         );
     }

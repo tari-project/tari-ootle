@@ -9,7 +9,9 @@ use tari_ootle_wallet_sdk::{
 use tari_template_lib_types::{
     ComponentAddress,
     EncryptedData,
+    Hash32,
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    stealth::SpendAuthorization,
 };
 use time::PrimitiveDateTime;
 
@@ -17,6 +19,44 @@ use crate::{
     schema::stealth_outputs,
     serialization::{deserialize_hex_try_from, deserialize_json},
 };
+
+/// Reconstructs a [`SpendAuthorization`] from the two persisted (nullable) columns. A row with neither column set is
+/// corrupt — the enum makes `{no key, no conditions}` unrepresentable, so it can only arise from external tampering.
+fn reconstruct_spend_authorization(
+    spend_key: Option<&str>,
+    condition_root: Option<&str>,
+) -> Result<SpendAuthorization, WalletStorageError> {
+    let spend_key = spend_key
+        .map(RistrettoPublicKeyBytes::from_hex)
+        .transpose()
+        .map_err(|_| WalletStorageError::DecodingError {
+            operation: "try_into_output",
+            item: "output spend_key",
+            details: "Corrupt db: invalid spend_key hex".to_string(),
+        })?;
+    let condition_root =
+        condition_root
+            .map(Hash32::from_hex)
+            .transpose()
+            .map_err(|_| WalletStorageError::DecodingError {
+                operation: "try_into_output",
+                item: "output condition_root",
+                details: "Corrupt db: invalid condition_root hex".to_string(),
+            })?;
+    match (spend_key, condition_root) {
+        (Some(spend_key), Some(condition_root)) => Ok(SpendAuthorization::KeyAndScript {
+            spend_key,
+            condition_root,
+        }),
+        (Some(spend_key), None) => Ok(SpendAuthorization::Key(spend_key)),
+        (None, Some(condition_root)) => Ok(SpendAuthorization::Script(condition_root)),
+        (None, None) => Err(WalletStorageError::DecodingError {
+            operation: "try_into_output",
+            item: "output spend authorization",
+            details: "Corrupt db: stealth output has neither spend_key nor condition_root".to_string(),
+        }),
+    }
+}
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = stealth_outputs)]
@@ -36,7 +76,8 @@ pub struct StealthOutput {
     pub encrypted_data: Vec<u8>,
     pub tag_byte: i32,
     pub memo_json: Option<String>,
-    pub spend_condition: String,
+    pub spend_key: Option<String>,
+    pub condition_root: Option<String>,
     pub minimum_value_promise: i64,
     pub is_burnt: bool,
     pub is_frozen: bool,
@@ -85,7 +126,7 @@ impl StealthOutput {
             })?,
             tag_byte: UtxoTag::new(self.tag_byte as u32),
             memo: self.memo_json.as_ref().map(deserialize_json).transpose()?,
-            spend_condition: deserialize_json(&self.spend_condition)?,
+            auth: reconstruct_spend_authorization(self.spend_key.as_deref(), self.condition_root.as_deref())?,
             minimum_value_promise: self.minimum_value_promise as u64,
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",

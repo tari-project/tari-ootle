@@ -8,4 +8,4 @@ import type { Hash32 } from "./Hash32";
  * The condition fully commits to `{template, function, args}`, so a spender cannot substitute a different predicate.
  * Templates are immutable substates, so the referenced code cannot change once the output is committed.
  */
-export type SpendScript = { template: Hash32; function: string; args: Array<Bytes> };
+export type TemplateFunction = { template: Hash32; function: string; args: Array<Bytes> };

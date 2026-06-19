@@ -6,8 +6,8 @@ use ootle_byte_type::{ConvertFromByteType, FromByteType};
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment};
 use tari_template_lib::types::{
     Amount,
+    Hash32,
     crypto::{BalanceProofSignature, PedersenCommitmentBytes},
-    stealth::SpendCondition,
 };
 
 use crate::crypto::{commit_amount, messages, try_decode_to_signature};
@@ -25,7 +25,7 @@ const LOG_TARGET: &str = "tari::engine::crypto::covenant";
 /// `revealed_amount` is the exact net cleartext outflow of the partition; the caller bounds it against the script's
 /// permitted allowance. Amounts above `u64::MAX` are rejected by `commit_amount` below (the range-proof domain).
 pub fn validate_covenant_balance_proof(
-    condition: &SpendCondition,
+    condition_root: &Hash32,
     revealed_amount: Amount,
     input_commitments: &[PedersenCommitmentBytes],
     output_commitments: &[PedersenCommitmentBytes],
@@ -58,7 +58,7 @@ pub fn validate_covenant_balance_proof(
     let message = messages::covenant_balance_proof64(
         &public_excess,
         &public_nonce,
-        condition,
+        condition_root,
         &revealed_amount,
         input_commitments,
         output_commitments,

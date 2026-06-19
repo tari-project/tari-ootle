@@ -20,9 +20,9 @@ use tari_ootle_wallet_crypto::{
     bullet_proof::generate_extended_bullet_proof as crypto_generate_extended_bullet_proof,
     memo::Memo,
     pay_to::PayTo,
-    stealth::create_outputs_statement,
+    stealth::{create_outputs_statement, pay_to_output_authorization},
 };
-use tari_template_lib_types::{Amount, ResourceAddress, crypto::RangeProofBytes, stealth::SpendCondition};
+use tari_template_lib_types::{Amount, ResourceAddress, crypto::RangeProofBytes};
 
 use crate::{
     error::OotleWasmError,
@@ -142,14 +142,12 @@ pub fn create_stealth_output_witness(params: CreateStealthOutputWitnessParams<'_
         .encrypt_value_and_mask(params.amount, &mask, &view_key, &nonce_secret, memo.as_ref())
         .map_err(|e| OotleWasmError::Stealth(e.to_string()))?;
 
-    let spend_condition = match pay_to {
-        PayTo::StealthPublicKey => {
-            let owner_public_key = crypto.derive_stealth_owner_public_key(network, &account_key, &nonce_secret);
-            SpendCondition::Signed(owner_public_key.to_byte_type())
-        },
-        PayTo::AccessRule(access_rule) => SpendCondition::AccessRule(access_rule),
-        PayTo::Script(script) => SpendCondition::Script(script),
-    };
+    let auth = pay_to_output_authorization(&pay_to, || {
+        crypto
+            .derive_stealth_owner_public_key(network, &account_key, &nonce_secret)
+            .to_byte_type()
+    })
+    .map_err(|e| OotleWasmError::Stealth(e.to_string()))?;
 
     let tag = crypto.derive_stealth_output_tag(network, &nonce_secret, &view_key, &resource_address);
 
@@ -162,7 +160,7 @@ pub fn create_stealth_output_witness(params: CreateStealthOutputWitnessParams<'_
             encrypted_data,
             resource_view_key,
         },
-        spend_condition,
+        auth,
         tag,
     };
 
@@ -205,7 +203,7 @@ mod tests {
         let nonce = RistrettoPublicKey::from_secret_key(&mask);
         let spend_pk: tari_template_lib_types::crypto::RistrettoPublicKeyBytes = nonce.to_byte_type();
         format!(
-            r#"[{{"witness":{{"amount":{},"mask":"{}","sender_public_nonce":"{}","minimum_value_promise":0,"encrypted_data":"{}"}},"spend_condition":{{"Signed":"{}"}},"tag":0}}]"#,
+            r#"[{{"witness":{{"amount":{},"mask":"{}","sender_public_nonce":"{}","minimum_value_promise":0,"encrypted_data":"{}"}},"auth":{{"Key":"{}"}},"tag":0}}]"#,
             amount,
             hex::encode(mask.as_bytes()),
             hex::encode(nonce.as_bytes()),
@@ -240,7 +238,7 @@ mod tests {
 
     #[test]
     fn generate_extended_bullet_proof_non_empty() {
-        // Flat OutputWitnessJson (no spend_condition / tag wrapper).
+        // Flat OutputWitnessJson (no auth / tag wrapper).
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let nonce = RistrettoPublicKey::from_secret_key(&mask);
         let witness_json = format!(
@@ -284,8 +282,9 @@ mod tests {
         let stmt: StealthOutputsStatement = serde_json::from_str(&result.statement_json).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
         assert_eq!(stmt.outputs.len(), 1);
-        // The default pay_to produces a one-time stealth spend key.
-        assert!(matches!(stmt.outputs[0].spend_condition, SpendCondition::Signed(_)));
+        // The default pay_to produces a one-time stealth spend key (key path, no condition tree).
+        assert!(stmt.outputs[0].auth.spend_key().is_some());
+        assert!(stmt.outputs[0].auth.condition_root().is_none());
     }
 
     #[test]
@@ -347,9 +346,7 @@ mod tests {
         .unwrap();
         let stealth_secret = RistrettoSecretKey::from_canonical_bytes(&stealth_secret_bytes).unwrap();
         let derived_pub = RistrettoPublicKey::from_secret_key(&stealth_secret);
-        let SpendCondition::Signed(expected) = witness.spend_condition else {
-            panic!("expected a Signed spend condition");
-        };
+        let expected = witness.auth.spend_key().expect("expected a key-path spend_key");
         assert_eq!(derived_pub.to_byte_type(), expected);
     }
 
@@ -373,7 +370,9 @@ mod tests {
         .unwrap();
 
         let witness: StealthOutputWitnessJson = serde_json::from_str(&json).unwrap();
-        assert!(matches!(witness.spend_condition, SpendCondition::AccessRule(_)));
+        // An AccessRule pay_to produces a single-leaf condition tree (a condition_root, no key path).
+        assert!(witness.auth.spend_key().is_none());
+        assert!(witness.auth.condition_root().is_some());
 
         let result = generate_stealth_outputs_statement(&format!("[{json}]"), 0).unwrap();
         let stmt: StealthOutputsStatement = serde_json::from_str(&result.statement_json).unwrap();

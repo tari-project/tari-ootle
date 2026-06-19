@@ -253,7 +253,9 @@ CREATE TABLE stealth_outputs
     encrypted_data         BLOB     NOT NULL DEFAULT '',
     tag_byte               INTEGER  NOT NULL,
     memo_json              TEXT     NULL,
-    spend_condition        TEXT     NOT NULL,
+    -- Spend authorisation (TIP-0006): at least one of spend_key / condition_root is set.
+    spend_key              TEXT     NULL,
+    condition_root         TEXT     NULL,
     minimum_value_promise  BIGINT   NOT NULL,
     is_burnt               BOOLEAN  NOT NULL DEFAULT 0,
     is_frozen              BOOLEAN  NOT NULL DEFAULT 0,

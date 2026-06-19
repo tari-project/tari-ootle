@@ -19,11 +19,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{
-    address::{ComponentAddressStr, ResourceAddressStr},
-    bytes::{PublicKeyBytes, SecretKeyBytes},
-    error::OotleSdkError,
-    numeric::BoundaryAmount,
+use crate::{
+    seed,
+    types::{
+        address::{ComponentAddressStr, ResourceAddressStr},
+        bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
+        error::OotleSdkError,
+        numeric::BoundaryAmount,
+    },
 };
 
 // These crypto-material newtypes use the same lowercase-hex wire contract as `crate::types::bytes`:
@@ -476,46 +479,124 @@ impl StealthEntropy {
     /// call it, then run the deterministic path against the pinned result. Every per-output slice
     /// is filled with the optional ElGamal/ZK nonces present — the build ignores the unused slots
     /// when the corresponding output has no `resource_view_key`. Drawing them unconditionally keeps
-    /// `from_os_rng` independent of the intent's view-key shape.
+    /// the bundle independent of the intent's view-key shape.
+    ///
+    /// Draws one [`BuildSeed`] from the OS RNG and expands it via [`StealthEntropy::from_seed`], so
+    /// the random and seeded paths share one derivation — there is no separate "unsafe" branch.
     pub fn from_os_rng(num_outputs: usize) -> Self {
-        let mut rng = rand::rng();
+        Self::from_seed(&random_seed(), num_outputs)
+    }
+
+    /// Expands a single [`BuildSeed`] into a full entropy bundle with one [`PerOutputEntropy`] per
+    /// output (`num_outputs`). Every scalar is derived by the domain-separated KDF in
+    /// [`crate::seed`], so the same seed + the same `num_outputs` always reproduces identical bytes.
+    ///
+    /// Every per-output slice fills the optional ElGamal/ZK nonces; the build ignores the unused slots
+    /// when the corresponding output has no `resource_view_key`. Filling them unconditionally keeps the
+    /// bundle independent of the intent's view-key shape, matching the OS-RNG path exactly.
+    ///
+    /// The rails ([`StealthEntropy::validate`]) run before returning: a future KDF regression that
+    /// produced a zero or duplicated scalar would surface here, not in shipped bytes.
+    pub fn from_seed(seed: &BuildSeed, num_outputs: usize) -> Self {
         let per_output = (0..num_outputs)
-            .map(|_| PerOutputEntropy {
-                mask: random_secret(&mut rng),
-                sender_nonce: random_secret(&mut rng),
-                aead_nonce: random_secret(&mut rng),
-                elgamal_nonce: Some(random_secret(&mut rng)),
-                zk_nonces: Some([
-                    random_secret(&mut rng),
-                    random_secret(&mut rng),
-                    random_secret(&mut rng),
-                ]),
+            .map(|i| {
+                let i = i as u64;
+                PerOutputEntropy {
+                    mask: seed::derive_mask(seed, i),
+                    sender_nonce: seed::derive_sender_nonce(seed, i),
+                    aead_nonce: seed::derive_aead_nonce(seed, i),
+                    elgamal_nonce: Some(seed::derive_elgamal_nonce(seed, i)),
+                    zk_nonces: Some(seed::derive_zk_nonces(seed, i)),
+                }
             })
             .collect();
-        Self {
+        let entropy = Self {
             per_output,
-            balance_proof_nonce: random_secret(&mut rng),
-            bulletproof_seed: random_secret(&mut rng),
-            ephemeral_seal_nonce: random_secret(&mut rng),
-            ephemeral_auth_nonce: random_secret(&mut rng),
-            ephemeral_sign_nonce: random_secret(&mut rng),
+            balance_proof_nonce: seed::derive_balance_proof_nonce(seed),
+            bulletproof_seed: seed::derive_bulletproof_seed(seed),
+            ephemeral_seal_nonce: seed::derive_ephemeral_seal_nonce(seed),
+            ephemeral_auth_nonce: seed::derive_ephemeral_auth_nonce(seed),
+            ephemeral_sign_nonce: seed::derive_ephemeral_sign_nonce(seed),
+        };
+        entropy
+            .validate()
+            .expect("KDF-derived entropy is non-zero and pairwise-distinct by construction");
+        entropy
+    }
+
+    /// Defense-in-depth rails over a derived bundle: every consumed secret must be non-zero and the
+    /// flattened set pairwise-distinct. The KDF guarantees both; this assert catches a future KDF bug
+    /// before degenerate bytes ship.
+    ///
+    /// The non-zero check on the AEAD nonce covers `[..24]` — the only slice XChaCha20-Poly1305
+    /// consumes (the trailing 8 bytes are ignored, so an otherwise non-zero scalar with a zero
+    /// 24-byte prefix is still a degenerate nonce). Pairwise distinctness compares the full 32-byte
+    /// scalars uniformly: two identical AEAD nonces collide on all 32 bytes too, so this loses no
+    /// detection power while keeping the comparison length-uniform.
+    ///
+    /// Returns [`OotleSdkError::Validation`] naming the offending field.
+    pub fn validate(&self) -> Result<(), OotleSdkError> {
+        // (label, full scalar bytes, consumed slice) for every secret in the bundle. The consumed
+        // slice differs from the full bytes only for the AEAD nonce.
+        let mut scalars: Vec<(String, &[u8], &[u8])> = Vec::new();
+        for (i, po) in self.per_output.iter().enumerate() {
+            scalars.push((format!("per_output[{i}].mask"), po.mask.as_bytes(), po.mask.as_bytes()));
+            scalars.push((
+                format!("per_output[{i}].sender_nonce"),
+                po.sender_nonce.as_bytes(),
+                po.sender_nonce.as_bytes(),
+            ));
+            scalars.push((
+                format!("per_output[{i}].aead_nonce"),
+                po.aead_nonce.as_bytes(),
+                &po.aead_nonce.as_bytes()[..24],
+            ));
+            if let Some(n) = &po.elgamal_nonce {
+                scalars.push((format!("per_output[{i}].elgamal_nonce"), n.as_bytes(), n.as_bytes()));
+            }
+            if let Some(zk) = &po.zk_nonces {
+                for (k, n) in zk.iter().enumerate() {
+                    scalars.push((format!("per_output[{i}].zk_nonces[{k}]"), n.as_bytes(), n.as_bytes()));
+                }
+            }
         }
+        let bundle: [(&str, &SecretKeyBytes); 5] = [
+            ("balance_proof_nonce", &self.balance_proof_nonce),
+            ("bulletproof_seed", &self.bulletproof_seed),
+            ("ephemeral_seal_nonce", &self.ephemeral_seal_nonce),
+            ("ephemeral_auth_nonce", &self.ephemeral_auth_nonce),
+            ("ephemeral_sign_nonce", &self.ephemeral_sign_nonce),
+        ];
+        for (label, v) in bundle {
+            scalars.push((label.to_string(), v.as_bytes(), v.as_bytes()));
+        }
+
+        for (label, _, consumed) in &scalars {
+            if consumed.iter().all(|&b| b == 0) {
+                return Err(OotleSdkError::Validation(format!(
+                    "derived entropy {label} is all-zero"
+                )));
+            }
+        }
+        for i in 0..scalars.len() {
+            for j in (i + 1)..scalars.len() {
+                if scalars[i].1 == scalars[j].1 {
+                    return Err(OotleSdkError::Validation(format!(
+                        "derived entropy {} collides with {}",
+                        scalars[i].0, scalars[j].0
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
-/// Draws a 32-byte secret from the supplied RNG. Used only by [`StealthEntropy::from_os_rng`].
-///
-/// Every entropy field is consumed by the deterministic stealth build as a **canonical Ristretto
-/// scalar** (the AEAD nonce uses only the leading 24 bytes, but those still come from a canonical
-/// scalar's encoding). Drawing raw uniform 32 bytes would occasionally yield a non-canonical scalar
-/// that the build path rejects with `OotleSdkError::Key`. We instead draw 64 uniform bytes and reduce
-/// them via [`RistrettoSecretKey::from_uniform_bytes`], which always yields a canonical scalar — this
-/// also avoids depending on `tari_crypto`'s `rand_core` version (it differs from the crate's `rand`).
-fn random_secret<R: rand::RngExt>(rng: &mut R) -> SecretKeyBytes {
-    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
-    let wide = rng.random::<[u8; 64]>();
-    let sk = RistrettoSecretKey::from_uniform_bytes(&wide).expect("64 uniform bytes reduce to a canonical scalar");
-    SecretKeyBytes::from_bytes(sk.as_bytes()).expect("RistrettoSecretKey is always 32 bytes")
+/// Draws a fresh 32-byte [`BuildSeed`] from the OS RNG. This is the single RNG entry point the random
+/// build paths use; everything downstream is a deterministic expansion of this seed.
+pub fn random_seed() -> BuildSeed {
+    use rand::RngExt;
+    BuildSeed::from_array(rand::rng().random::<[u8; 32]>())
 }
 
 #[cfg(test)]
@@ -780,6 +861,97 @@ mod tests {
     fn from_os_rng_zero_outputs() {
         let e = StealthEntropy::from_os_rng(0);
         assert!(e.per_output.is_empty());
+    }
+
+    // (h2) from_os_rng still yields a rails-passing bundle on every draw.
+    #[test]
+    fn from_os_rng_passes_rails() {
+        for _ in 0..8 {
+            StealthEntropy::from_os_rng(3).validate().unwrap();
+        }
+    }
+
+    // (i) from_seed is deterministic: same seed + count ⇒ identical bundle.
+    #[test]
+    fn from_seed_is_deterministic() {
+        let seed = BuildSeed::from_array([0x11; 32]);
+        assert_eq!(StealthEntropy::from_seed(&seed, 2), StealthEntropy::from_seed(&seed, 2));
+    }
+
+    // (j) Distinct seeds yield distinct bundles.
+    #[test]
+    fn from_seed_distinct_seeds_differ() {
+        let a = StealthEntropy::from_seed(&BuildSeed::from_array([0x11; 32]), 2);
+        let b = StealthEntropy::from_seed(&BuildSeed::from_array([0x22; 32]), 2);
+        assert_ne!(a, b);
+    }
+
+    // (k) Index binding (D3): the same per-output field differs across outputs, so cross-output
+    // reuse of x_m (the leak vector) is structurally impossible.
+    #[test]
+    fn from_seed_binds_output_index() {
+        let e = StealthEntropy::from_seed(&BuildSeed::from_array([0x11; 32]), 2);
+        let xm0 = &e.per_output[0].zk_nonces.as_ref().unwrap()[1];
+        let xm1 = &e.per_output[1].zk_nonces.as_ref().unwrap()[1];
+        assert_ne!(xm0, xm1, "x_m must differ across outputs");
+        assert_ne!(e.per_output[0].mask, e.per_output[1].mask);
+    }
+
+    // (l) A freshly-derived bundle passes the rails (non-zero + pairwise-distinct).
+    #[test]
+    fn from_seed_passes_rails() {
+        StealthEntropy::from_seed(&BuildSeed::from_array([0x11; 32]), 3)
+            .validate()
+            .unwrap();
+    }
+
+    // (m) The rails reject a hand-built bundle with a duplicated scalar.
+    #[test]
+    fn validate_rejects_duplicate_scalar() {
+        let mut e = sample_entropy();
+        e.balance_proof_nonce = e.bulletproof_seed.clone();
+        let err = e.validate().unwrap_err();
+        assert!(matches!(err, OotleSdkError::Validation(_)));
+    }
+
+    // (n) The rails reject an all-zero consumed scalar.
+    #[test]
+    fn validate_rejects_zero_scalar() {
+        let mut e = sample_entropy();
+        e.balance_proof_nonce = SecretKeyBytes::from_array([0; 32]);
+        let err = e.validate().unwrap_err();
+        assert!(matches!(err, OotleSdkError::Validation(_)));
+    }
+
+    // (n2) The AEAD nonce rail checks the consumed [..24] slice: a zero 24-byte prefix is rejected
+    // even when the ignored trailing 8 bytes are non-zero.
+    #[test]
+    fn validate_rejects_zero_aead_prefix() {
+        let mut e = sample_entropy();
+        let mut bytes = [0u8; 32];
+        bytes[24..].copy_from_slice(&[0xff; 8]);
+        e.per_output[0].aead_nonce = SecretKeyBytes::from_array(bytes);
+        let err = e.validate().unwrap_err();
+        assert!(matches!(err, OotleSdkError::Validation(_)));
+    }
+
+    // (o) The seed rail rejects the all-zero seed but accepts a non-zero one.
+    #[test]
+    fn build_seed_rejects_zero() {
+        assert!(matches!(
+            BuildSeed::from_array([0; 32]).validate_nonzero().unwrap_err(),
+            OotleSdkError::Validation(_)
+        ));
+        BuildSeed::from_array([0x01; 32]).validate_nonzero().unwrap();
+    }
+
+    // (p) random_seed draws differ across calls and are non-zero.
+    #[test]
+    fn random_seed_is_random_nonzero() {
+        let a = random_seed();
+        let b = random_seed();
+        assert_ne!(a, b);
+        a.validate_nonzero().unwrap();
     }
 
     // Crypto-material newtype basics still round-trip via the macro impls.

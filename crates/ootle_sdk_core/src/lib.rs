@@ -19,6 +19,7 @@ pub mod keys;
 pub mod public_transfer;
 pub mod resolved_transfer;
 pub mod result;
+pub mod seed;
 pub mod stealth;
 pub mod substate_decode;
 pub mod tx;
@@ -66,6 +67,7 @@ pub use resolved_transfer::{
     seal_and_encode_public_transfer_production,
 };
 pub use result::{finalized_from_execute_result, parse_dry_run_result, parse_finalized_result};
+pub use seed::{derive_cosign_nonce, derive_transfer_nonces};
 pub use stealth::{
     StealthBuildCtx,
     StealthKeys,

@@ -236,6 +236,16 @@ fixed_byte_newtype!(
     PublicKeyBytes,
     RISTRETTO_KEY_LEN
 );
+fixed_byte_newtype!(
+    /// A 32-byte build seed: the single piece of caller-supplied randomness a build/seal expands into
+    /// all the nonce material it consumes.
+    ///
+    /// Unlike [`SecretKeyBytes`] this is **not** required to be a canonical Ristretto scalar — it is
+    /// hashed (domain-separated) to derive scalars, never used as a scalar directly, so any 32 bytes
+    /// are valid input. The all-zero seed is rejected by the derivation rails as a degenerate input.
+    BuildSeed,
+    RISTRETTO_KEY_LEN
+);
 secret_byte_newtype!(
     /// A Ristretto secret key (32 bytes), boundary form. Crosses the boundary only as an explicit
     /// caller-supplied key. Secret material — no `Copy`/`Hash`.
@@ -261,6 +271,19 @@ var_byte_newtype!(
     /// The submit-ready BOR-encoded transaction bytes.
     EncodedTransactionBytes
 );
+
+impl BuildSeed {
+    /// Rejects the all-zero seed as a degenerate input before any derivation runs.
+    ///
+    /// An all-zero seed is the canonical "uninitialized buffer" mistake; refusing it up front turns a
+    /// silent loss of entropy into an explicit [`OotleSdkError::Validation`].
+    pub fn validate_nonzero(&self) -> Result<(), OotleSdkError> {
+        if self.0.iter().all(|&b| b == 0) {
+            return Err(OotleSdkError::Validation("build seed must not be all-zero".to_string()));
+        }
+        Ok(())
+    }
+}
 
 impl PublicKeyBytes {
     /// Builds from the internal [`RistrettoPublicKeyBytes`].

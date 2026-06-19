@@ -24,6 +24,7 @@ pub mod stealth;
 
 pub use address::{ComponentAddressStr, ResourceAddressStr};
 pub use bytes::{
+    BuildSeed,
     EncodedTransactionBytes,
     NonceSecretBytes,
     PublicKeyBytes,

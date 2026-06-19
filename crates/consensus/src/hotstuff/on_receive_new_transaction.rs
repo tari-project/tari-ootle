@@ -15,15 +15,23 @@ use crate::{
     hotstuff::error::HotStuffError,
     messages::MissingTransactionsResponse,
     tracing::TraceTimer,
-    traits::{BlockTransactionExecutor, ConsensusSpec},
+    traits::{BlockTransactionValidator, ConsensusSpec},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_new_transaction";
 
+/// Where a transaction entered consensus from, which determines how much validation it still requires.
+enum TransactionSource {
+    /// Received from our own mempool, where it has already passed full validation.
+    OwnMempool,
+    /// Requested from a peer as a missing transaction; not yet validated locally.
+    Requested,
+}
+
 pub struct OnReceiveNewTransaction<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
-    executor: TConsensusSpec::TransactionExecutor,
+    validator: TConsensusSpec::TransactionValidator,
     tx_missing_transactions: mpsc::UnboundedSender<Vec<TransactionId>>,
 }
 
@@ -33,13 +41,13 @@ where TConsensusSpec: ConsensusSpec
     pub fn new(
         store: TConsensusSpec::StateStore,
         transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
-        executor: TConsensusSpec::TransactionExecutor,
+        validator: TConsensusSpec::TransactionValidator,
         tx_missing_transactions: mpsc::UnboundedSender<Vec<TransactionId>>,
     ) -> Self {
         Self {
             store,
             transaction_pool,
-            executor,
+            validator,
             tx_missing_transactions,
         }
     }
@@ -58,9 +66,13 @@ where TConsensusSpec: ConsensusSpec
             let mut batch = Vec::with_capacity(recs.len());
             debug!(target: LOG_TARGET, "Processing {} requested transactions", recs.len());
             for transaction in recs {
-                if let Some(validate_data) =
-                    self.validate_new_transaction(tx, current_epoch, transaction, local_committee_info)?
-                {
+                if let Some(validate_data) = self.validate_new_transaction(
+                    tx,
+                    current_epoch,
+                    transaction,
+                    local_committee_info,
+                    TransactionSource::Requested,
+                )? {
                     debug!(
                         target: LOG_TARGET,
                         "Transaction {} must sequence: {}.",
@@ -101,8 +113,13 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
     ) -> Result<Option<TransactionRecord>, HotStuffError> {
         self.store.with_write_tx(|tx| {
-            let Some(validate_data) =
-                self.validate_new_transaction(tx, current_epoch, transaction, local_committee_info)?
+            let Some(validate_data) = self.validate_new_transaction(
+                tx,
+                current_epoch,
+                transaction,
+                local_committee_info,
+                TransactionSource::OwnMempool,
+            )?
             else {
                 return Ok(None);
             };
@@ -132,6 +149,7 @@ where TConsensusSpec: ConsensusSpec
         current_epoch: Epoch,
         rec: TransactionRecord,
         local_committee_info: &CommitteeInfo,
+        source: TransactionSource,
     ) -> Result<Option<NewTransactionValidation>, HotStuffError> {
         if self.transaction_pool.exists(&**tx, rec.id())? {
             return Ok(None);
@@ -146,12 +164,18 @@ where TConsensusSpec: ConsensusSpec
             return Ok(None);
         }
 
-        let result = self.executor.validate(&**tx, current_epoch, rec.transaction());
+        // Mempool-originated transactions have already passed full validation; their structural properties are
+        // immutable, so only the epoch-dependent rules are re-checked. Peer-requested transactions have not been
+        // validated locally and are validated in full.
+        let result = match source {
+            TransactionSource::OwnMempool => self.validator.validate_epoch(current_epoch, rec.transaction()),
+            TransactionSource::Requested => self.validator.validate_full(current_epoch, rec.transaction()),
+        };
 
         if let Err(err) = result {
             warn!(
                 target: LOG_TARGET,
-                "Transaction {} received from validator (missing transactions) failed validation and will be ignored: {}", rec.id(), err
+                "Transaction {} failed validation and will be ignored: {}", rec.id(), err
             );
             return Ok(None);
         }

@@ -9,8 +9,7 @@ use tari_consensus::{
 };
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_storage::consensus_models::TransactionPool;
-use tari_ootle_transaction::{Network, Transaction};
-use tari_ootle_transaction_validation::{BoxedValidator, TransactionValidationError};
+use tari_ootle_transaction::Network;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -26,6 +25,7 @@ use crate::{
 };
 
 mod block_transaction_executor;
+mod block_transaction_validator;
 mod handle;
 mod leader_selection;
 #[cfg(feature = "metrics")]
@@ -34,6 +34,7 @@ mod signer_service;
 pub mod spec;
 
 pub use block_transaction_executor::*;
+pub use block_transaction_validator::*;
 pub use handle::*;
 pub use signer_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
@@ -45,8 +46,6 @@ use crate::{
     consensus::spec::{ValidatorNodeStateStore, ValidatorTransactionProcessor},
     p2p::NopLogger,
 };
-
-pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
 
 pub async fn spawn(
     network: Network,
@@ -61,7 +60,8 @@ pub async fn spawn(
     client_factory: TariValidatorNodeRpcClientFactory,
     hooks: <TariConsensusSpec as ConsensusSpec>::Hooks,
     shutdown_signal: ShutdownSignal,
-    transaction_executor: TariBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>,
+    transaction_executor: TariBlockTransactionExecutor<ValidatorTransactionProcessor>,
+    transaction_validator: TariBlockTransactionValidator,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
@@ -96,6 +96,7 @@ pub async fn spawn(
         signing_service.clone(),
         transaction_pool,
         transaction_executor,
+        transaction_validator,
         tx_hotstuff_events.clone(),
         hooks,
         shutdown_signal.clone(),

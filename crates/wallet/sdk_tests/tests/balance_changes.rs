@@ -87,7 +87,7 @@ fn transaction_changes_can_span_accounts_and_vaults() {
 
     for (account, expected_delta) in [(Test::test_account_address(), "25"), (second_account, "9")] {
         let changes = accounts
-            .get_balance_changes(&account, 0, 10, None, Some(&transaction_id))
+            .get_balance_changes(&account, 0, 10, None, Some(&transaction_id), None)
             .unwrap();
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].revealed_delta, expected_delta);
@@ -132,7 +132,7 @@ fn scan_and_recovery_are_deduplicated_and_failed_history_rolls_back_balance() {
             .unwrap()
     );
     let changes = accounts
-        .get_balance_changes(&Test::test_account_address(), 0, 10, None, None)
+        .get_balance_changes(&Test::test_account_address(), 0, 10, None, None, None)
         .unwrap();
     assert_eq!(changes.len(), 2);
     assert_eq!(changes[0].source, BalanceChangeSource::Recovery);
@@ -153,7 +153,7 @@ fn scan_and_recovery_are_deduplicated_and_failed_history_rolls_back_balance() {
     );
     assert_eq!(
         accounts
-            .count_balance_changes(&Test::test_account_address(), None, None)
+            .count_balance_changes(&Test::test_account_address(), None, None, None)
             .unwrap(),
         2
     );
@@ -198,7 +198,7 @@ fn replayed_transaction_cannot_update_a_vault_without_a_new_history_row() {
     );
     assert_eq!(
         accounts
-            .count_balance_changes(&Test::test_account_address(), None, None)
+            .count_balance_changes(&Test::test_account_address(), None, None, None)
             .unwrap(),
         2
     );

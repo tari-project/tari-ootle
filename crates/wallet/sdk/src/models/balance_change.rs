@@ -18,6 +18,25 @@ pub enum BalanceChangeSource {
     Recovery,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum BalanceChangeSourceType {
+    Transaction,
+    Scan,
+    Recovery,
+}
+
+impl BalanceChangeSourceType {
+    pub const fn as_key_str(self) -> &'static str {
+        match self {
+            Self::Transaction => "transaction",
+            Self::Scan => "scan",
+            Self::Recovery => "recovery",
+        }
+    }
+}
+
 impl BalanceChangeSource {
     pub const fn as_key_str(self) -> &'static str {
         match self {

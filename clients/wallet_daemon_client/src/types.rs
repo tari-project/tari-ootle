@@ -50,6 +50,7 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         AuthoredTemplateModel,
         BalanceChange,
+        BalanceChangeSourceType,
         DerivedKeyIndex,
         KeyBranch,
         KeyId,
@@ -467,6 +468,7 @@ pub struct AccountsGetBalanceChangesRequest {
     pub limit: u32,
     pub resource_address: Option<ResourceAddress>,
     pub transaction_id: Option<TransactionId>,
+    pub source_type: Option<BalanceChangeSourceType>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1659,7 +1661,7 @@ pub struct AddressBookDeleteResponse {}
 
 #[cfg(test)]
 mod tests {
-    use tari_ootle_wallet_sdk::models::BalanceChangeSource;
+    use tari_ootle_wallet_sdk::models::{BalanceChangeSource, BalanceChangeSourceType};
 
     use super::*;
 
@@ -1672,6 +1674,7 @@ mod tests {
             "limit": 10,
             "resource_address": null,
             "transaction_id": transaction_id.to_string(),
+            "source_type": "transaction",
         }))
         .unwrap();
 
@@ -1680,6 +1683,7 @@ mod tests {
         assert_eq!(request.limit, 10);
         assert_eq!(request.resource_address, None);
         assert_eq!(request.transaction_id, Some(transaction_id));
+        assert_eq!(request.source_type, Some(BalanceChangeSourceType::Transaction));
     }
 
     #[test]

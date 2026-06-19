@@ -145,6 +145,7 @@ export * from "./types/wallet-types/ConfidentialTransferRequest";
 export * from "./types/wallet-types/SettingsSetResponse";
 export * from "./types/wallet-types/AuthListSessionsRequest";
 export * from "./types/wallet-types/BalanceChangeSource";
+export * from "./types/wallet-types/BalanceChangeSourceType";
 export * from "./types/wallet-types/AuthRefreshResponse";
 export * from "./types/wallet-types/WebauthnAlreadyRegisteredRequest";
 export * from "./types/wallet-types/TransferStatementRequest";

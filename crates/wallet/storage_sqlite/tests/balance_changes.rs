@@ -11,7 +11,7 @@ use tari_crypto::{
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_sdk::{
-    models::{BalanceChangeSource, KeyBranch, KeyId, VaultModel},
+    models::{BalanceChangeSource, BalanceChangeSourceType, KeyBranch, KeyId, VaultModel},
     storage::{CommittableStore, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
@@ -148,7 +148,7 @@ fn records_signed_deltas_metadata_and_filters() {
 
     let mut tx = store.create_read_tx().unwrap();
     let changes = tx
-        .balance_changes_get_by_account(&account_address(), 0, 10, None, None)
+        .balance_changes_get_by_account(&account_address(), 0, 10, None, None, None)
         .unwrap();
     assert_eq!(changes.len(), 3);
     assert!(changes.windows(2).all(|pair| pair[0].id > pair[1].id));
@@ -172,23 +172,23 @@ fn records_signed_deltas_metadata_and_filters() {
     assert_eq!(decrease.revealed_after, Amount::from(40u64));
 
     let by_resource = tx
-        .balance_changes_get_by_account(&account_address(), 0, 10, Some(&first_resource), None)
+        .balance_changes_get_by_account(&account_address(), 0, 10, Some(&first_resource), None, None)
         .unwrap();
     assert_eq!(by_resource.len(), 2);
     assert_eq!(
-        tx.balance_changes_count_by_account(&account_address(), Some(&first_resource), None)
+        tx.balance_changes_count_by_account(&account_address(), Some(&first_resource), None, None)
             .unwrap(),
         2
     );
 
     let by_transaction = tx
-        .balance_changes_get_by_account(&account_address(), 0, 10, None, Some(&transaction_id))
+        .balance_changes_get_by_account(&account_address(), 0, 10, None, Some(&transaction_id), None)
         .unwrap();
     assert_eq!(by_transaction.len(), 1);
     assert_eq!(by_transaction[0].revealed_delta, "100");
     assert_eq!(by_transaction[0].confidential_delta, "7");
     assert_eq!(
-        tx.balance_changes_count_by_account(&account_address(), None, Some(&transaction_id))
+        tx.balance_changes_count_by_account(&account_address(), None, Some(&transaction_id), None)
             .unwrap(),
         1
     );
@@ -257,15 +257,21 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
 
     let mut tx = store.create_read_tx().unwrap();
     assert_eq!(
-        tx.balance_changes_count_by_account(&account_address(), None, None)
+        tx.balance_changes_count_by_account(&account_address(), None, None, Some(BalanceChangeSourceType::Scan))
+            .unwrap(),
+        1
+    );
+
+    assert_eq!(
+        tx.balance_changes_count_by_account(&account_address(), None, None, None)
             .unwrap(),
         3
     );
     let first_page = tx
-        .balance_changes_get_by_account(&account_address(), 0, 2, None, None)
+        .balance_changes_get_by_account(&account_address(), 0, 2, None, None, None)
         .unwrap();
     let second_page = tx
-        .balance_changes_get_by_account(&account_address(), 2, 2, None, None)
+        .balance_changes_get_by_account(&account_address(), 2, 2, None, None, None)
         .unwrap();
     assert_eq!(first_page.len(), 2);
     assert_eq!(second_page.len(), 1);

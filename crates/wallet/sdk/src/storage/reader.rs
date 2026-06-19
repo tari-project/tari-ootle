@@ -24,6 +24,7 @@ use crate::{
         ApiKey,
         AuthoredTemplateModel,
         BalanceChange,
+        BalanceChangeSourceType,
         ConfidentialOutputModel,
         Config,
         KeyType,
@@ -111,12 +112,14 @@ pub trait WalletStoreReader {
         limit: usize,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<&TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
     ) -> Result<Vec<BalanceChange>, WalletStorageError>;
     fn balance_changes_count_by_account(
         &mut self,
         account_addr: &ComponentAddress,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<&TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
     ) -> Result<u64, WalletStorageError>;
 
     // Resources

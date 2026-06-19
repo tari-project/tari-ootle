@@ -399,11 +399,13 @@ pub async fn handle_get_balance_changes(
         limit,
         req.resource_address.as_ref(),
         req.transaction_id.as_ref(),
+        req.source_type,
     )?;
     let total = accounts_api.count_balance_changes(
         account.component_address(),
         req.resource_address.as_ref(),
         req.transaction_id.as_ref(),
+        req.source_type,
     )?;
 
     Ok(AccountsGetBalanceChangesResponse { changes, total })
@@ -1653,6 +1655,7 @@ mod balance_change_handler_tests {
             limit: 1,
             resource_address: Some(first_resource),
             transaction_id: None,
+            source_type: None,
         })
         .await
         .unwrap();

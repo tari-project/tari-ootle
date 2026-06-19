@@ -32,6 +32,7 @@ use tari_ootle_wallet_sdk::{
         ApiKey,
         AuthoredTemplateModel,
         BalanceChange,
+        BalanceChangeSourceType,
         ConfidentialOutputModel,
         Config,
         KeyType,
@@ -730,6 +731,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         limit: usize,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<&TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
     ) -> Result<Vec<BalanceChange>, WalletStorageError> {
         const OPERATION: &str = "balance_changes_get_by_account";
         use crate::schema::{account_balance_changes, accounts, vaults};
@@ -762,6 +764,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
         if let Some(transaction_id) = transaction_id {
             query = query.filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()));
         }
+        if let Some(source_type) = source_type {
+            query = query.filter(account_balance_changes::source_type.eq(source_type.as_key_str()));
+        }
 
         query
             .order((
@@ -790,6 +795,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         account_addr: &ComponentAddress,
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<&TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
     ) -> Result<u64, WalletStorageError> {
         const OPERATION: &str = "balance_changes_count_by_account";
         use crate::schema::{account_balance_changes, accounts};
@@ -813,6 +819,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
         }
         if let Some(transaction_id) = transaction_id {
             query = query.filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()));
+        }
+        if let Some(source_type) = source_type {
+            query = query.filter(account_balance_changes::source_type.eq(source_type.as_key_str()));
         }
 
         let count = query

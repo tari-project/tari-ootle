@@ -865,6 +865,46 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn balance_changes_promote_scan_to_transaction(
+        &mut self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+        after_revealed_balance: &Amount,
+        after_confidential_balance: &Amount,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "balance_changes_promote_scan_to_transaction";
+        use crate::schema::{account_balance_changes, vaults};
+
+        let vault_db_id = vaults::table
+            .select(vaults::id)
+            .filter(vaults::address.eq(vault_id.to_string()))
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "vault".to_string(),
+                key: vault_id.to_string(),
+            })?;
+
+        diesel::update(
+            account_balance_changes::table
+                .filter(account_balance_changes::vault_id.eq(vault_db_id))
+                .filter(account_balance_changes::source.eq("Scan"))
+                .filter(account_balance_changes::transaction_id.is_null())
+                .filter(account_balance_changes::after_revealed_balance.eq(after_revealed_balance.to_string()))
+                .filter(account_balance_changes::after_confidential_balance.eq(after_confidential_balance.to_string())),
+        )
+        .set((
+            account_balance_changes::source.eq("Transaction"),
+            account_balance_changes::transaction_id.eq(Some(transaction_id.to_string())),
+        ))
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
     fn vaults_lock_revealed_funds(
         &mut self,
         lock_id: WalletLockId,

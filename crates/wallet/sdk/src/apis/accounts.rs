@@ -279,6 +279,24 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         Ok(count)
     }
 
+    pub fn balance_changes_promote_scan_to_transaction(
+        &self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+        after_revealed_balance: &Amount,
+        after_confidential_balance: &Amount,
+    ) -> Result<(), AccountsApiError> {
+        self.store.with_write_tx(|tx| {
+            tx.balance_changes_promote_scan_to_transaction(
+                vault_id,
+                transaction_id,
+                after_revealed_balance,
+                after_confidential_balance,
+            )
+        })?;
+        Ok(())
+    }
+
     pub fn get_vault_balance(&self, vault_address: &VaultId) -> Result<VaultBalance, AccountsApiError> {
         let vault = self.store.with_read_tx(|tx| tx.vaults_get(vault_address))?;
         Ok(VaultBalance {

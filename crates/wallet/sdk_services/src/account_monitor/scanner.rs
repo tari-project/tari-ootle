@@ -297,6 +297,20 @@ where TSpec: WalletSdkSpec
                 &source,
             )?;
             has_changed = true;
+        } else if let BalanceChangeSource::Transaction { transaction_id } = &source {
+            if let Err(e) = accounts_api.balance_changes_promote_scan_to_transaction(
+                &vault_id,
+                transaction_id,
+                &new_balance,
+                &new_confidential_balance,
+            ) {
+                warn!(
+                    target: LOG_TARGET,
+                    "Failed to promote scan entry for vault {}: {}",
+                    vault_id,
+                    e
+                );
+            }
         }
 
         Ok(has_changed)

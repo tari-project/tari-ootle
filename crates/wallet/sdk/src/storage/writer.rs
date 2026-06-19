@@ -141,6 +141,18 @@ pub trait WalletStoreWriter: CommittableStore {
         source: &BalanceChangeSource,
     ) -> Result<(), WalletStorageError>;
 
+    /// Promote a scan entry to a transaction entry. Called when a transaction finalizes and the
+    /// vault balance was already updated by a prior scan. Finds the matching scan entry for the
+    /// same vault with the same final balances and updates its source to Transaction with the
+    /// given transaction_id.
+    fn balance_changes_promote_scan_to_transaction(
+        &mut self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+        after_revealed_balance: &Amount,
+        after_confidential_balance: &Amount,
+    ) -> Result<(), WalletStorageError>;
+
     fn vaults_lock_revealed_funds(
         &mut self,
         lock_id: WalletLockId,

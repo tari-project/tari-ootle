@@ -47,17 +47,24 @@ fn branch_hash(a: Hash32, b: Hash32) -> Hash32 {
         .result()
 }
 
-/// Folds one level into the next: adjacent pairs become branches, a trailing unpaired node is
-/// promoted unchanged.
-fn fold_level(level: &[Hash32]) -> Vec<Hash32> {
-    level
-        .chunks(2)
-        .map(|pair| match pair {
-            [left, right] => branch_hash(*left, *right),
-            [unpaired] => *unpaired,
-            _ => unreachable!("chunks(2) yields slices of length 1 or 2"),
-        })
-        .collect()
+/// Folds one level into the next in place, halving `buf` and truncating to the new length: adjacent
+/// pairs become branches, a trailing unpaired node is promoted unchanged.
+///
+/// Each parent is written at an index at or below the pair it hashes (`write <= read`), so the
+/// overwrite never clobbers a node still to be read.
+fn fold_level(buf: &mut Vec<Hash32>) {
+    let len = buf.len();
+    let (mut read, mut write) = (0, 0);
+    while read + 1 < len {
+        buf[write] = branch_hash(buf[read], buf[read + 1]);
+        read += 2;
+        write += 1;
+    }
+    if read < len {
+        buf[write] = buf[read]; // promote trailing unpaired node
+        write += 1;
+    }
+    buf.truncate(write);
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -94,7 +101,7 @@ impl MerkleTree {
     pub fn root(&self) -> Hash32 {
         let mut level = self.leaves.clone();
         while level.len() > 1 {
-            level = fold_level(&level);
+            fold_level(&mut level);
         }
         level[0]
     }
@@ -103,12 +110,12 @@ impl MerkleTree {
     pub fn proof_for(&self, leaf: Hash32) -> Option<MerkleProof> {
         let mut idx = self.leaves.binary_search(&leaf).ok()?;
         let mut level = self.leaves.clone();
-        let mut siblings = Vec::new();
+        let mut siblings = Vec::with_capacity(level.len().next_power_of_two().trailing_zeros() as usize);
         while level.len() > 1 {
             if let Some(&sibling) = level.get(idx ^ 1) {
                 siblings.push(sibling);
             }
-            level = fold_level(&level);
+            fold_level(&mut level);
             idx /= 2;
         }
         Some(MerkleProof { siblings })

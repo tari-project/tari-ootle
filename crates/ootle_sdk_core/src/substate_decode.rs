@@ -124,9 +124,7 @@ pub struct ResourceBalance {
 /// truncating) on a value that exceeds the `u64` range.
 fn amount_to_u64(amount: tari_template_lib_types::Amount, context: &str) -> Result<u64, OotleSdkError> {
     amount.to_u64_checked().ok_or_else(|| {
-        OotleSdkError::Validation(format!(
-            "{context}: balance {amount} does not fit in a u64 (> 2^64-1)"
-        ))
+        OotleSdkError::Validation(format!("{context}: balance {amount} does not fit in a u64 (> 2^64-1)"))
     })
 }
 

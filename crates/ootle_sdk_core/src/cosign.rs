@@ -179,7 +179,7 @@ pub fn add_signature(
     let secret = parse_secret_key(signer_secret)?;
     let nonce = parse_nonce_secret(nonce)?;
     let message = cosign_auth_message(&seal_public_key.to_internal(), &unsigned.unsigned);
-    let sig = RistrettoSchnorr::sign_with_nonce_and_message(&secret, nonce, &message)
+    let sig = RistrettoSchnorr::sign_with_nonce_and_message(&secret, nonce, message)
         .map_err(|e| OotleSdkError::Key(format!("deterministic co-sign signing failed: {e}")))?;
     Ok(authorization_from_parts(&secret, sig))
 }

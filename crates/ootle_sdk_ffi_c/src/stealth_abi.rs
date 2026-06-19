@@ -137,7 +137,7 @@ struct StealthKeysJson {
 }
 
 impl StealthKeysJson {
-    fn to_core(self) -> StealthKeys {
+    fn into_core(self) -> StealthKeys {
         StealthKeys::new(self.account_secret, self.auth_nonce, self.seal_nonce)
     }
 }
@@ -151,7 +151,7 @@ struct StealthProductionKeysJson {
 }
 
 impl StealthProductionKeysJson {
-    fn to_core(self) -> StealthKeys {
+    fn into_core(self) -> StealthKeys {
         let placeholder = NonceSecretBytes::from_array([0u8; 32]);
         StealthKeys::new(self.account_secret, placeholder.clone(), placeholder)
     }
@@ -243,7 +243,7 @@ pub unsafe extern "C" fn ootle_build_and_encode_stealth_transfer(
                 &intent,
                 &fetched,
                 &spend_secrets,
-                &keys.to_core(),
+                &keys.into_core(),
                 &entropy,
             ) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(
@@ -289,7 +289,7 @@ pub unsafe extern "C" fn ootle_build_and_encode_stealth_transfer_production(
                 &intent,
                 &fetched,
                 &spend_secrets,
-                &keys.to_core(),
+                &keys.into_core(),
             ) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(
                     &encoded,
@@ -512,7 +512,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode_stealth(
             let entropy: StealthEntropy = parse_json(entropy_json, "entropy")?;
 
             let partial = ready_or_err(state)?;
-            match seal_and_encode_stealth_transfer_deterministic(network, partial, &keys.to_core(), &entropy) {
+            match seal_and_encode_stealth_transfer_deterministic(network, partial, &keys.into_core(), &entropy) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(
                     &encoded,
                     "encoded stealth transfer",
@@ -550,7 +550,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode_stealth_production(
             let keys: StealthProductionKeysJson = parse_json(keys_json, "keys")?;
 
             let partial = ready_or_err(state)?;
-            match seal_and_encode_stealth_transfer_production(network, partial, &keys.to_core()) {
+            match seal_and_encode_stealth_transfer_production(network, partial, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(
                     &encoded,
                     "encoded stealth transfer",
@@ -847,5 +847,5 @@ pub unsafe extern "C" fn ootle_stealth_partial_transaction_free(handle: *mut Oot
     }
     // SAFETY: pointer originated from `Box::into_raw` in this library, is the matching kind, and has
     // not been consumed.
-    let _ = unsafe { Box::from_raw(handle) };
+    drop(unsafe { Box::from_raw(handle) });
 }

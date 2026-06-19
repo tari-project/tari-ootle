@@ -743,14 +743,14 @@ fn resolve_vault(
     for vault_id in vault_ids {
         match cache.get(&vault_id) {
             Some(Some(value)) => {
-                if let SubstateValue::Vault(vault) = value {
-                    if *vault.resource_address() == resource {
-                        push_unique(resolved, SubstateRequirement::unversioned(vault_id.clone()));
-                        if resource != TARI_TOKEN {
-                            push_unique(resolved, SubstateRequirement::unversioned(resource));
-                        }
-                        matched = true;
+                if let SubstateValue::Vault(vault) = value &&
+                    *vault.resource_address() == resource
+                {
+                    push_unique(resolved, SubstateRequirement::unversioned(vault_id.clone()));
+                    if resource != TARI_TOKEN {
+                        push_unique(resolved, SubstateRequirement::unversioned(resource));
                     }
+                    matched = true;
                 }
             },
             // Fetched-but-absent vault: keep looking at the others.

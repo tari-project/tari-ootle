@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_ootle_transaction = { workspace = true }
+tari_ootle_transaction = { workspace = true, features = ["serde"] }
 tari_ootle_template_metadata = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
@@ -20,14 +20,12 @@ tari_ootle_wallet_crypto = { workspace = true, features = ["serde"] }
 tari_ootle_address = { workspace = true }
 ootle-network = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
-ootle-wasm-core = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
 
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 hex = { workspace = true }
-base64 = { workspace = true }
 rand = { workspace = true }
 blake2 = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }

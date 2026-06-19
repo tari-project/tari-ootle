@@ -895,7 +895,7 @@ fn stealth_send_stealth_seal_seed() -> Fixture {
     let owner_pk = RistrettoPublicKey::from_secret_key(&owner_secret);
     let owner_pk_bytes = PublicKeyBytes::from_bytes(owner_pk.as_bytes()).expect("32-byte pk");
 
-    let substate_id = stealth_utxo_substate_id(&stealth_resource().as_str().to_string(), &commitment_hex).expect("id");
+    let substate_id = stealth_utxo_substate_id(stealth_resource().as_str(), &commitment_hex).expect("id");
     let fetched = vec![FetchedSubstate {
         substate_id: substate_id.to_string(),
         version: 0,
@@ -2191,7 +2191,6 @@ fn generic_seals_byte_identically_to_hand_built() {
         seal_and_encode_public_transfer,
     };
     use tari_ootle_transaction::{TransactionBuilder, args};
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
     let intent = generic_transfer_intent();
     let keys = generic_keys().to_core();
@@ -2210,7 +2209,7 @@ fn generic_seals_byte_identically_to_hand_built() {
             Amount::new(1_000_000)
         ])
         .put_last_instruction_output_on_workspace("bucket")
-        .create_account(RistrettoPublicKeyBytes::from(generic_recipient_pk().to_internal()))
+        .create_account(generic_recipient_pk().to_internal())
         .with_min_epoch(Some(tari_ootle_common_types::Epoch(1)))
         .with_max_epoch(Some(tari_ootle_common_types::Epoch(10)))
         .build_unsigned();
@@ -2437,6 +2436,7 @@ fn regen_fixtures() {
 
 /// Runner (always on). Asserts every committed fixture reproduces byte-for-byte.
 #[test]
+#[allow(clippy::too_many_lines)] // one linear runner over every fixture group; clearer inline
 fn run_golden_vectors() {
     let fixtures = load_all_fixtures();
     assert!(

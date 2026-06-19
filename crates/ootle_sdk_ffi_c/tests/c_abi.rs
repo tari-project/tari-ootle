@@ -1243,6 +1243,39 @@ fn stealth_send_args(fx: &serde_json::Value) -> StealthSendArgs {
     }
 }
 
+/// The from-account component + its vault, as the indexer returns them. The two-phase live driver
+/// declares both as wants (the fee + any revealed input draw on the account), so a test must serve
+/// them before a transfer resolves. The addresses match the stealth fixtures (`component_aa..` /
+/// `resource_01..`, vault `vault_cc..`); the JSON was captured from the core's looped-resolution helpers.
+const ACCOUNT_SUBSTATES: &str = r#"[{"substate_id":"component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","substate_value":{"Component":{"body":{"state":[{"@cbor":"tag","tag":132,"value":{"@cbor":"bytes","hex":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}]},"header":{"access_rules":{"default":"DenyAll","method_access":{}},"entity_id":"00","owner_rule":"None","template_address":"0000000000000000000000000000000000000000000000000000000000000000"}}},"version":0},{"substate_id":"vault_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","substate_value":{"Vault":{"freeze_flags":0,"resource_container":{"Fungible":{"address":"resource_0101010101010101010101010101010101010101010101010101010101010101","amount":"1000000","locked_amount":"0"}}}},"version":0}]"#;
+
+/// The from-account component + vault batch alone (no stealth UTXO) — resolves the account wants while
+/// any required stealth UTXO stays unsupplied (drives the missing-UTXO error path).
+fn account_substates_batch() -> CArg {
+    CArg::new(ACCOUNT_SUBSTATES)
+}
+
+/// The from-account component + vault PLUS the fixture's own fetched substates (the stealth input
+/// UTXO, if any) — everything the live two-phase driver needs to resolve the transfer.
+fn account_plus_fixture_batch(fx: &serde_json::Value) -> CArg {
+    let mut batch: Vec<serde_json::Value> = serde_json::from_str(ACCOUNT_SUBSTATES).unwrap();
+    if let Some(arr) = fx["input"].get("fetched").and_then(|v| v.as_array()) {
+        batch.extend(arr.iter().cloned());
+    }
+    CArg::new(&serde_json::to_string(&batch).unwrap())
+}
+
+/// Counts the `stealth_utxo` wants in a build's `want_list` (the account component + vault wants are
+/// `specific_substate` / `vault_for_resource`, never `stealth_utxo`).
+fn count_stealth_utxo_wants(want_list: &serde_json::Value) -> usize {
+    want_list
+        .as_array()
+        .expect("want_list array")
+        .iter()
+        .filter(|w| w["kind"] == "stealth_utxo")
+        .count()
+}
+
 /// A well-formed `EncodedPublicTransfer` envelope has a non-empty hex `encoded_transaction` + a
 /// 64-hex-char `transaction_id`. The send vectors compare *semantically* (the proofs are not
 /// byte-stable), and the semantic-decode equivalence is asserted by the core's own golden-vector
@@ -1284,35 +1317,41 @@ fn stealth_one_shot_send_round_trips() {
     unsafe { ootle_result_free(result) };
 }
 
-/// (b) two-phase stealth handle flow (revealed-only — no stealth inputs): build → apply (empty
-/// batch resolves immediately) → seal (consumes the dedicated stealth handle).
+/// (b) two-phase stealth handle flow (revealed-only — no stealth inputs): build → apply (the
+/// from-account component + vault resolve the account wants) → seal (consumes the dedicated stealth
+/// handle).
 #[test]
 fn stealth_two_phase_handle_flow() {
     let fx = load_fixture("stealth_transfer/account_key_seal_with_revealed_input.json");
     let a = stealth_send_args(&fx);
 
-    // 1) build → dedicated stealth handle + want list (no stealth inputs ⇒ empty want list).
+    // 1) build → dedicated stealth handle + want list (no stealth inputs ⇒ only the from-account component + vault
+    //    wants, no stealth_utxo want).
     let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr(), a.entropy.ptr()) };
     assert!(ok(&built), "stealth build failed: {}", error_code(&built));
     assert!(!built.handle.is_null(), "stealth build returns a handle");
     let want_body = data_json(&built);
-    assert!(
-        want_body["want_list"].as_array().is_some(),
-        "stealth build data_json carries a want_list array"
-    );
-    assert!(
-        want_body["want_list"].as_array().unwrap().is_empty(),
+    let wants = want_body["want_list"].as_array().expect("want_list array");
+    assert_eq!(wants.len(), 2, "the from-account component + vault wants");
+    assert_eq!(
+        count_stealth_utxo_wants(&want_body["want_list"]),
+        0,
         "a revealed-only transfer has no stealth UTXO wants"
     );
     let handle = built.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(built) }; // frees strings; handle stays live (threaded forward).
 
-    // 2a) apply an empty batch (no inputs to fetch) → resolves immediately.
-    let empty = CArg::new("[]");
-    let applied = unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, empty.ptr(), empty.ptr()) };
+    // 2a) apply the from-account component + vault → the account wants resolve.
+    let account = account_substates_batch();
+    let applied =
+        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, account.ptr(), a.spend_secrets.ptr()) };
     assert!(ok(&applied), "stealth apply failed: {}", error_code(&applied));
     assert!(!applied.handle.is_null(), "apply threads the handle forward");
-    assert_eq!(data_json(&applied)["status"], "resolved", "no inputs ⇒ resolved");
+    assert_eq!(
+        data_json(&applied)["status"],
+        "resolved",
+        "the from-account component + vault resolve the transfer"
+    );
     let resolved = applied.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(applied) };
 
@@ -1339,13 +1378,17 @@ fn stealth_two_phase_multi_round_converges() {
     assert_eq!(all_fetched.len(), 1, "fixture has one stealth input UTXO");
     let utxo_id = all_fetched[0]["substate_id"].as_str().unwrap().to_string();
 
-    // 1) build → handle + a want list naming the stealth UTXO.
+    // 1) build → handle + a want list naming the from-account component + vault plus the stealth UTXO.
     let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr(), a.entropy.ptr()) };
     assert!(ok(&built), "stealth build failed: {}", error_code(&built));
     let want_body = data_json(&built);
     let wants = want_body["want_list"].as_array().expect("want_list array");
-    assert_eq!(wants.len(), 1, "one stealth UTXO want");
-    assert_eq!(wants[0]["kind"], "stealth_utxo", "the want is a stealth_utxo");
+    assert_eq!(wants.len(), 3, "from-account component + vault + one stealth UTXO want");
+    assert_eq!(
+        count_stealth_utxo_wants(&want_body["want_list"]),
+        1,
+        "exactly one stealth_utxo want"
+    );
     let mut handle = built.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(built) };
 
@@ -1368,9 +1411,10 @@ fn stealth_two_phase_multi_round_converges() {
     assert!(!applied1.handle.is_null(), "need_more threads the handle forward");
     unsafe { ootle_result_free(applied1) };
 
-    // Round 2: fetch exactly the UTXO fetch_ids named → resolves.
+    // Round 2: fetch the named ids (from-account component + vault + the UTXO) → resolves.
+    let batch = account_plus_fixture_batch(&fx);
     let applied2 =
-        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, a.fetched.ptr(), a.spend_secrets.ptr()) };
+        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, batch.ptr(), a.spend_secrets.ptr()) };
     assert!(ok(&applied2), "round 2 apply failed: {}", error_code(&applied2));
     assert_eq!(
         data_json(&applied2)["status"],
@@ -1402,7 +1446,7 @@ fn stealth_apply_missing_required_utxo_errors() {
     unsafe { ootle_result_free(built) };
 
     let empty = CArg::new("[]");
-    // Round 1: empty → need_more.
+    // Round 1: empty → need_more (the from-account component, vault, and UTXO are all requested).
     let applied1 =
         unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, empty.ptr(), a.spend_secrets.ptr()) };
     assert!(ok(&applied1));
@@ -1410,9 +1454,11 @@ fn stealth_apply_missing_required_utxo_errors() {
     handle = applied1.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(applied1) };
 
-    // Round 2: still empty → the id is now definitively absent → error, handle consumed.
+    // Round 2: serve the from-account component + vault but NOT the UTXO → the account resolves while
+    // the requested UTXO id is now definitively absent → error, handle consumed.
+    let account = account_substates_batch();
     let applied2 =
-        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, empty.ptr(), a.spend_secrets.ptr()) };
+        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, account.ptr(), a.spend_secrets.ptr()) };
     assert!(!ok(&applied2), "a missing required UTXO must error");
     assert_eq!(error_code(&applied2), "INVALID");
     assert!(
@@ -2000,6 +2046,7 @@ fn stealth_build_outputs_statement_error_envelopes() {
 /// `ITERS`; we assert it stays far below that. Functional correctness is covered by the tests above —
 /// this isolates the alloc/free balance.
 #[test]
+#[allow(clippy::too_many_lines)] // leak loop over every ABI entry point; meaningful only as one counted body
 fn no_leaks_over_many_round_trips() {
     const ITERS: usize = 500;
 
@@ -2050,6 +2097,8 @@ fn no_leaks_over_many_round_trips() {
     let s = stealth_send_args(&stealth_send);
     // An empty fetched batch for the stealth two-phase loop's round-1 `need_more` step.
     let empty_batch = CArg::new("[]");
+    // Round-2 batch: the from-account component + vault plus the input UTXO → the loop resolves.
+    let account_utxo_batch = account_plus_fixture_batch(&stealth_send);
 
     let scan_fx = load_fixture("stealth_scan/mine_basic.json");
     let scan_input = &scan_fx["input"]["stealth_scan_input"];
@@ -2188,8 +2237,9 @@ fn no_leaks_over_many_round_trips() {
         sh = sapplied1.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
         unsafe { ootle_result_free(sapplied1) };
 
-        let sapplied2 =
-            unsafe { ootle_apply_fetched_substates_stealth(sh, s.network, s.fetched.ptr(), s.spend_secrets.ptr()) };
+        let sapplied2 = unsafe {
+            ootle_apply_fetched_substates_stealth(sh, s.network, account_utxo_batch.ptr(), s.spend_secrets.ptr())
+        };
         assert!(ok(&sapplied2));
         sh = sapplied2.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
         unsafe { ootle_result_free(sapplied2) };

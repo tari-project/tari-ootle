@@ -377,7 +377,7 @@ mod tests {
     fn fungible_vault(resource: ResourceAddress, amount: u64) -> Vault {
         Vault::new(ResourceContainer::public_fungible(
             resource,
-            Amount::new(amount as u128),
+            Amount::new(u128::from(amount)),
         ))
     }
 

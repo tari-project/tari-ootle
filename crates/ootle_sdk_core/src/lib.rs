@@ -1,3 +1,6 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
 #![forbid(unsafe_code)]
 //! `ootle-sdk-core` — synchronous, pure transaction-construction primitives for the Ootle network.
 //!

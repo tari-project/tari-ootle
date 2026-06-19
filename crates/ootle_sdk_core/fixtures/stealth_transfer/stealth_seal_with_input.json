@@ -127,6 +127,7 @@
                   "revealed_input_bucket": null,
                   "statement": {
                     "balance_proof": null,
+                    "covenant_claims": [],
                     "inputs_statement": {
                       "inputs": [
                         {

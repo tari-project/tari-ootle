@@ -614,7 +614,7 @@ mod tests {
         let owner_pk = RistrettoPublicKey::from_secret_key(&owner_account_secret);
         let owner_pk_bytes = PublicKeyBytes::from_bytes(owner_pk.as_bytes()).unwrap();
 
-        let substate_id = stealth_utxo_substate_id(&tari_resource().as_str().to_string(), &commitment_hex).unwrap();
+        let substate_id = stealth_utxo_substate_id(tari_resource().as_str(), &commitment_hex).unwrap();
         let fetched = vec![FetchedSubstate {
             substate_id: substate_id.to_string(),
             version: 0,

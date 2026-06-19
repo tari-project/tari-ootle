@@ -153,6 +153,11 @@ pub fn decode_stealth_utxo(
             (StealthPayTo::StealthPublicKey, Some(spend_pk))
         },
         SpendCondition::AccessRule(_) => (StealthPayTo::AccessRuleAllowAll, None),
+        SpendCondition::Script(_) => {
+            return Err(OotleSdkError::Stealth(format!(
+                "spend-script (TIP-0006) UTXO '{substate_id}' is not supported by the SDK scan/decode path"
+            )));
+        },
     };
 
     // The scanning tag is only meaningful for a stealth-addressed (`Signed`) output: the receiver

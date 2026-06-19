@@ -76,10 +76,10 @@ mod opt_lower_hex {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
         let s = Option::<String>::deserialize(d)?;
-        if let Some(h) = &s {
-            if h.chars().any(|c| c.is_ascii_uppercase()) {
-                return Err(D::Error::custom("expected lowercase hex"));
-            }
+        if let Some(h) = &s &&
+            h.chars().any(|c| c.is_ascii_uppercase())
+        {
+            return Err(D::Error::custom("expected lowercase hex"));
         }
         Ok(s)
     }
@@ -469,12 +469,12 @@ impl GenericTransactionIntent {
     pub fn validate_blob_indices(&self) -> Result<(), OotleSdkError> {
         let n = self.blobs.len();
         for instr in self.fee_instructions.iter().chain(&self.instructions) {
-            if let InstructionSpec::PublishTemplate { blob_index, .. } = instr {
-                if (*blob_index as usize) >= n {
-                    return Err(OotleSdkError::Validation(format!(
-                        "publish_template references blob index {blob_index} but only {n} blob(s) are present"
-                    )));
-                }
+            if let InstructionSpec::PublishTemplate { blob_index, .. } = instr &&
+                (*blob_index as usize) >= n
+            {
+                return Err(OotleSdkError::Validation(format!(
+                    "publish_template references blob index {blob_index} but only {n} blob(s) are present"
+                )));
             }
         }
         Ok(())
@@ -837,9 +837,10 @@ mod tests {
         .unwrap();
         // A heterogeneous list still lowers each element via its own typed encoder; the native side
         // builds the equivalent CBOR array of those same encodings.
-        let mut elements = Vec::new();
-        elements.push(tari_bor::to_value(&component).unwrap());
-        elements.push(tari_bor::to_value(&resource).unwrap());
+        let elements = vec![
+            tari_bor::to_value(&component).unwrap(),
+            tari_bor::to_value(&resource).unwrap(),
+        ];
         let expected = native(&tari_bor::Value::Array(elements));
         assert_eq!(
             dsl, expected,

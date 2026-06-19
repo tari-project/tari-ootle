@@ -220,6 +220,8 @@ pub(crate) fn resolve_one_stealth_utxo(
         *seal_signer = Some(entry);
     } else if !required_signers.contains(&entry) {
         required_signers.push(entry);
+    } else {
+        // Already a required signer — nothing to record.
     }
 
     // Record the recovered witness.
@@ -228,6 +230,7 @@ pub(crate) fn resolve_one_stealth_utxo(
             value: decrypted.value(),
             mask: decrypted.mask().clone(),
         },
+        spend_condition: None,
     });
 
     // Add the UTXO substate as a transaction input.

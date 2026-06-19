@@ -7709,13 +7709,11 @@ dependencies = [
 
 [[package]]
 name = "ootle-sdk-core"
-version = "0.33.5"
+version = "0.35.0"
 dependencies = [
- "base64 0.22.1",
  "blake2 0.10.6",
  "hex",
  "ootle-network",
- "ootle-wasm-core",
  "ootle_byte_type",
  "rand 0.10.1",
  "serde",
@@ -7808,7 +7806,7 @@ dependencies = [
 
 [[package]]
 name = "ootle_sdk_ffi_c"
-version = "0.33.5"
+version = "0.35.0"
 dependencies = [
  "cbindgen",
  "hex",

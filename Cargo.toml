@@ -146,8 +146,8 @@ tari_bor = { version = "0.14", path = "crates/tari_bor", default-features = fals
 
 ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.9" }
 ootle_serde = { path = "crates/ootle_serde", version = "0.3" }
-ootle-wasm-core = { path = "crates/ootle_wasm/core", version = "0.33" }
-ootle-sdk-core = { path = "crates/ootle_sdk_core", version = "0.33" }
+ootle-wasm-core = { path = "crates/ootle_wasm/core", version = "0.35" }
+ootle-sdk-core = { path = "crates/ootle_sdk_core", version = "0.35" }
 
 # external minotari/tari dependencies
 minotari_app_grpc = "5.4.0-pre.5"

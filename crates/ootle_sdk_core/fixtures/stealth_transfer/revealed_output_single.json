@@ -120,6 +120,7 @@
                   },
                   "statement": {
                     "balance_proof": null,
+                    "covenant_claims": [],
                     "inputs_statement": {
                       "inputs": [],
                       "revealed_amount": "1500000"

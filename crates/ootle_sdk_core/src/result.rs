@@ -256,7 +256,7 @@ fn fee_receipt_summary(finalize: &FinalizeResult) -> FeeReceipt {
         cost_breakdown: receipt
             .fee_breakdown()
             .iter()
-            .map(|(source, amount)| (fee_source_name(source).to_string(), *amount))
+            .map(|(source, amount)| (fee_source_name(*source).to_string(), *amount))
             .collect(),
     }
 }
@@ -264,7 +264,7 @@ fn fee_receipt_summary(finalize: &FinalizeResult) -> FeeReceipt {
 /// The stable, SDK-owned name for a [`FeeSource`] — exhaustive so a new upstream variant fails to
 /// compile here (forcing an explicit decision) rather than silently changing a boundary string. Kept
 /// SDK-owned (not the upstream `Debug`) so the `cost_breakdown` keys hosts read are a stable contract.
-fn fee_source_name(source: &FeeSource) -> &'static str {
+fn fee_source_name(source: FeeSource) -> &'static str {
     match source {
         FeeSource::Initial => "Initial",
         FeeSource::RuntimeCall => "RuntimeCall",

@@ -122,7 +122,7 @@ pub(crate) fn resolved_unsigned(partial: PartialTransaction) -> Result<UnsignedT
 pub(crate) fn canonicalize_inputs(unsigned: &mut UnsignedTransaction) {
     let UnsignedTransaction::V1(v1) = unsigned;
     let mut inputs: Vec<_> = std::mem::take(&mut v1.inputs).into_iter().collect();
-    inputs.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    inputs.sort_by_key(|a| a.to_string());
     // The set we took out already had unique substate ids: `IndexSet` de-dups on `SubstateRequirement`'s
     // `Hash`/`Eq`, which ignore the version field, and `into_unsigned` only folds an input in when no entry with
     // the same substate id is already present. So re-collecting the sorted `Vec` into the `IndexSet` below cannot
@@ -366,7 +366,7 @@ mod tests {
             use std::str::FromStr;
             tari_ootle_common_types::SubstateRequirement::unversioned(SubstateId::from_str(s).unwrap()).to_string()
         };
-        inputs.sort_by(|a, b| canonical(&a.substate_id).cmp(&canonical(&b.substate_id)));
+        inputs.sort_by_key(|a| canonical(&a.substate_id));
         explicit_intent.inputs = inputs;
 
         let explicit = build_and_encode_public_transfer(Network::Esmeralda, &explicit_intent, &det_keys()).unwrap();

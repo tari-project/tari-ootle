@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn u128_round_trips_full_width() {
         // A value > u64::MAX exercising the high word, and the all-ones edge.
-        for v in [(1u128 << 64) + 7, u128::MAX, u64::MAX as u128] {
+        for v in [(1u128 << 64) + 7, u128::MAX, u128::from(u64::MAX)] {
             assert_eq!(U128::from(v).to_u128(), v, "round-trip failed for {v}");
         }
         let max = U128::from(u128::MAX);

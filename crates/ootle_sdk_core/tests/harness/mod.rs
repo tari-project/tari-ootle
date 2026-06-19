@@ -573,6 +573,7 @@ fn scan_value(result: &Option<ootle_sdk_core::types::stealth::DecryptedOutput>) 
 /// This is the single place that maps `operation` → core call, used by **both** the generator (to
 /// fill `expected`) and the runner (to check it). Keeping them on one code path guarantees the
 /// generator and runner can never silently diverge.
+#[allow(clippy::too_many_lines)] // one match arm per fixture operation; see doc above
 pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
     match fixture.operation.as_str() {
         OP_BUILD_AND_ENCODE_PUBLIC_TRANSFER => {
@@ -1149,6 +1150,8 @@ fn collect_json(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
             collect_json(&path, out);
         } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
             out.push(path);
+        } else {
+            // Non-JSON file (e.g. a README) — skip.
         }
     }
 }

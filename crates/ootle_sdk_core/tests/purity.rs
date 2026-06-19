@@ -1,3 +1,6 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
 //! Purity guard: the `ootle-sdk-core` crate must never pull a forbidden dependency into its tree.
 //!
 //! See `README.md`. If this test fails, a `tokio` / `reqwest` / `uniffi` / `cbindgen` /

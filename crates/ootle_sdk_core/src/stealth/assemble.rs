@@ -128,10 +128,10 @@ pub fn assemble_stealth_transfer_statement(
 
     // Local pre-flight: the inputs and outputs must balance. The only way a freshly-generated proof
     // fails to verify is an input/output value imbalance.
-    if let Some(balance_proof) = &balance_proof {
-        if !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement) {
-            return Err(OotleSdkError::Stealth("inputs and outputs do not balance".to_string()));
-        }
+    if let Some(balance_proof) = &balance_proof &&
+        !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement)
+    {
+        return Err(OotleSdkError::Stealth("inputs and outputs do not balance".to_string()));
     }
 
     // Assemble the full transfer statement.
@@ -139,6 +139,7 @@ pub fn assemble_stealth_transfer_statement(
         inputs_statement,
         outputs_statement,
         balance_proof,
+        covenant_claims: vec![],
     };
 
     // Full pre-flight: the engine's own validation must accept the statement. `None` view key — the
@@ -407,7 +408,7 @@ fn resolve_stealth_inputs(
     let wants = WantList::from_stealth_inputs(intent);
     let mut partial = seed_partial(network, intent, entropy, wants.clone())?;
     // The one-shot path assembles directly from the resolver below; the stashed ctx is unused here.
-    let _ = partial.take_stealth_ctx();
+    drop(partial.take_stealth_ctx());
 
     // Short-circuit: no stealth inputs ⇒ nothing to resolve.
     if wants.0.is_empty() {
@@ -805,7 +806,7 @@ mod tests {
                 commitment: commitment_bytes,
                 owner_account_pk: pk_bytes(9),
             }],
-            outputs: intent_out.outputs.clone(),
+            outputs: intent_out.outputs,
             revealed_input_amount: 0,
             revealed_output_amount: 0,
             min_epoch: None,
@@ -984,7 +985,7 @@ mod tests {
         });
 
         let owner_pk = pk_bytes(9);
-        let substate_id = stealth_utxo_substate_id(&tari_resource().as_str().to_string(), &commitment_hex).unwrap();
+        let substate_id = stealth_utxo_substate_id(tari_resource().as_str(), &commitment_hex).unwrap();
         let fetched = vec![FetchedSubstate {
             substate_id: substate_id.to_string(),
             version: 0,
@@ -997,7 +998,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![StealthInputSpec {
                 commitment: crate::types::stealth::CommitmentBytes::from_hex(&commitment_hex).unwrap(),
-                owner_account_pk: owner_pk.clone(),
+                owner_account_pk: owner_pk,
             }],
             outputs: vec![output_spec(value)],
             revealed_input_amount: 0,
@@ -1092,7 +1093,7 @@ mod tests {
         });
 
         let owner_pk = pk_bytes(9);
-        let substate_id = stealth_utxo_substate_id(&tari_resource().as_str().to_string(), &commitment_hex).unwrap();
+        let substate_id = stealth_utxo_substate_id(tari_resource().as_str(), &commitment_hex).unwrap();
         let fetched = vec![FetchedSubstate {
             substate_id: substate_id.to_string(),
             version: 0,
@@ -1106,7 +1107,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![StealthInputSpec {
                 commitment: crate::types::stealth::CommitmentBytes::from_hex(&commitment_hex).unwrap(),
-                owner_account_pk: owner_pk.clone(),
+                owner_account_pk: owner_pk,
             }],
             outputs: vec![output_spec(value)],
             revealed_input_amount: 0,
@@ -1143,6 +1144,7 @@ mod tests {
     /// The assembled product matches the one-shot path's output for the same inputs (same
     /// deterministic statement fields).
     #[test]
+    #[allow(clippy::too_many_lines)] // end-to-end fetch-loop test; clearer as one linear body
     fn two_phase_loop_converges_and_matches_one_shot() {
         use tari_engine_types::{
             Utxo,
@@ -1181,7 +1183,7 @@ mod tests {
         });
 
         let owner_pk = pk_bytes(9);
-        let substate_id = stealth_utxo_substate_id(&tari_resource().as_str().to_string(), &commitment_hex).unwrap();
+        let substate_id = stealth_utxo_substate_id(tari_resource().as_str(), &commitment_hex).unwrap();
         let fetched = vec![FetchedSubstate {
             substate_id: substate_id.to_string(),
             version: 0,
@@ -1194,7 +1196,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![StealthInputSpec {
                 commitment: crate::types::stealth::CommitmentBytes::from_hex(&commitment_hex).unwrap(),
-                owner_account_pk: owner_pk.clone(),
+                owner_account_pk: owner_pk,
             }],
             outputs: vec![output_spec(value)],
             revealed_input_amount: 0,

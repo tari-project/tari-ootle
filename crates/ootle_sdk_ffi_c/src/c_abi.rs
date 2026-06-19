@@ -370,7 +370,7 @@ struct DeterministicKeysJson {
 }
 
 impl DeterministicKeysJson {
-    fn to_core(self) -> DeterministicTransferKeys {
+    fn into_core(self) -> DeterministicTransferKeys {
         match self.seal_secret {
             None => DeterministicTransferKeys::single_key(self.account_secret, self.auth_nonce, self.seal_nonce),
             Some(seal_secret) => DeterministicTransferKeys::separate_signer(
@@ -390,7 +390,7 @@ struct ProductionKeysJson {
 }
 
 impl ProductionKeysJson {
-    fn to_core(self) -> PublicTransferKeys {
+    fn into_core(self) -> PublicTransferKeys {
         PublicTransferKeys::new(self.account_secret)
     }
 }
@@ -538,7 +538,7 @@ pub unsafe extern "C" fn ootle_build_and_encode_public_transfer(
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
             let intent: PublicTransferIntent = parse_json(intent_json, "intent")?;
             let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
-            match build_and_encode_public_transfer(network, &intent, &keys.to_core()) {
+            match build_and_encode_public_transfer(network, &intent, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -564,7 +564,7 @@ pub unsafe extern "C" fn ootle_build_and_encode_public_transfer_production(
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
             let intent: PublicTransferIntent = parse_json(intent_json, "intent")?;
             let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
-            match build_and_encode_public_transfer_production(network, &intent, &keys.to_core()) {
+            match build_and_encode_public_transfer_production(network, &intent, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -966,7 +966,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode(
         flatten((|| {
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
             let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
-            match seal_and_encode_public_transfer(partial, &keys.to_core()) {
+            match seal_and_encode_public_transfer(partial, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -996,7 +996,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode_production(
         flatten((|| {
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
             let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
-            match seal_and_encode_public_transfer_production(partial, &keys.to_core()) {
+            match seal_and_encode_public_transfer_production(partial, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -1115,7 +1115,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode_with_auth(
             let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
             let authorizations_json = unsafe { required_str(authorizations_json, "authorizations_json") }?;
             let authorizations: Vec<Authorization> = parse_json(authorizations_json, "authorizations")?;
-            match seal_and_encode_with_auth(partial, &keys.to_core(), &authorizations) {
+            match seal_and_encode_with_auth(partial, &keys.into_core(), &authorizations) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -1148,7 +1148,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode_with_auth_production(
             let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
             let authorizations_json = unsafe { required_str(authorizations_json, "authorizations_json") }?;
             let authorizations: Vec<Authorization> = parse_json(authorizations_json, "authorizations")?;
-            match seal_and_encode_with_auth_production(partial, &keys.to_core(), &authorizations) {
+            match seal_and_encode_with_auth_production(partial, &keys.into_core(), &authorizations) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -1202,7 +1202,7 @@ pub unsafe extern "C" fn ootle_string_free(s: *mut c_char) {
         return;
     }
     // SAFETY: pointer originated from `CString::into_raw` in this library.
-    let _ = unsafe { CString::from_raw(s) };
+    drop(unsafe { CString::from_raw(s) });
 }
 
 /// Frees the three heap C strings owned by an [`OotleResult`] (`error_code`, `error_message`,
@@ -1246,5 +1246,5 @@ pub unsafe extern "C" fn ootle_partial_transaction_free(handle: *mut OotlePartia
     }
     // SAFETY: pointer originated from `Box::into_raw` in this library, is the matching kind, and has
     // not been consumed.
-    let _ = unsafe { Box::from_raw(handle) };
+    drop(unsafe { Box::from_raw(handle) });
 }

@@ -3,13 +3,25 @@
 
 //! Purity guard: the `ootle_sdk_core` crate must never pull a forbidden dependency into its tree.
 //!
-//! See `README.md`. If this test fails, a `tokio` / `reqwest` / `uniffi` / `cbindgen` /
-//! `wasm-bindgen` crept into the dependency tree — back it out; the work belongs in a host or a
-//! facade, not in `ootle_sdk_core`.
+//! See `README.md`. If this test fails, an async runtime/executor (`tokio` / `async-std` / `smol` /
+//! `futures-executor`), `async-trait`, or a host/binding-generator crate (`reqwest` / `uniffi` /
+//! `cbindgen` / `wasm-bindgen`) crept into the dependency tree — back it out; the work belongs in a
+//! host or a facade, not in `ootle_sdk_core`. Note `futures` *primitives* (combinators) are not
+//! banned: they imply no runtime.
 
 use std::process::Command;
 
-const FORBIDDEN: &[&str] = &["tokio", "reqwest", "uniffi", "cbindgen", "wasm-bindgen"];
+const FORBIDDEN: &[&str] = &[
+    "tokio",
+    "async-std",
+    "smol",
+    "futures-executor",
+    "async-trait",
+    "reqwest",
+    "uniffi",
+    "cbindgen",
+    "wasm-bindgen",
+];
 
 #[test]
 fn dependency_tree_is_pure() {

@@ -8,8 +8,10 @@ wrap this crate; all I/O, async, and binding-generator concerns live in those ho
 
 ## The hard rule — forbidden dependencies (Decision D1/D2)
 
-This crate must have **no** `tokio`, `reqwest`, `async`/`await`, `wasm-bindgen`, `uniffi`, or
-`cbindgen` anywhere in its source **or its dependency tree**. It is generator-agnostic: zero
+This crate must have **no** async runtime or executor (`tokio`, `async-std`, `smol`,
+`futures-executor`), no `async-trait`, and no `reqwest`, `uniffi`, `cbindgen`, or `wasm-bindgen`
+anywhere in its source **or its dependency tree**. (`futures` *primitives* — combinators — are a
+common transitive dep and are not banned; they imply no runtime.) It is generator-agnostic: zero
 `#[uniffi(...)]` / `#[wasm_bindgen]` / cbindgen attributes on any type. Boundary types are plain
 Rust. `#![forbid(unsafe_code)]` at the crate root.
 
@@ -19,7 +21,7 @@ the work belongs in a host or a later facade.
 Verify purity with:
 
 ```sh
-cargo tree -p ootle_sdk_core | grep -E 'tokio|reqwest|uniffi|cbindgen|wasm-bindgen'
+cargo tree -p ootle_sdk_core | grep -E 'tokio|async-std|smol|futures-executor|async-trait|reqwest|uniffi|cbindgen|wasm-bindgen'
 ```
 
 It must print nothing.

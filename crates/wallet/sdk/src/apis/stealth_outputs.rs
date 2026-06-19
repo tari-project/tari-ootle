@@ -303,9 +303,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             )?;
 
             inputs_with_masks.push(UnblindedInputToSpend {
-                witness: StealthInputWitness {
-                    mask_and_value: decrypted.mask_and_value,
-                },
+                witness: StealthInputWitness::new(decrypted.mask_and_value),
             });
         }
         Ok(inputs_with_masks)

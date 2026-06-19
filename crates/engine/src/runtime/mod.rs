@@ -46,6 +46,7 @@ pub mod scope;
 pub use locking::{LockError, LockState};
 mod address_allocation;
 mod pay_fee;
+mod spend_script_execution;
 mod state_store;
 mod tracker_auth;
 mod validation;

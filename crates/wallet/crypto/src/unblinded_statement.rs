@@ -77,4 +77,23 @@ impl DecryptedData {
 #[derive(Debug, Clone)]
 pub struct StealthInputWitness {
     pub mask_and_value: MaskAndValue,
+    /// The spend condition of the UTXO being spent. Required to partition inputs by covenant when generating
+    /// covenant balance proofs (TIP-0006); `None` for inputs that do not participate in a covenant.
+    pub spend_condition: Option<SpendCondition>,
+}
+
+impl StealthInputWitness {
+    pub fn new(mask_and_value: MaskAndValue) -> Self {
+        Self {
+            mask_and_value,
+            spend_condition: None,
+        }
+    }
+
+    pub fn with_spend_condition(mask_and_value: MaskAndValue, spend_condition: SpendCondition) -> Self {
+        Self {
+            mask_and_value,
+            spend_condition: Some(spend_condition),
+        }
+    }
 }

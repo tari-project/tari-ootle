@@ -200,6 +200,7 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
             inputs_statement,
             outputs_statement,
             balance_proof,
+            covenant_claims: Vec::new(),
         };
 
         if let Err(err) = validate_transfer(&transfer, None) {

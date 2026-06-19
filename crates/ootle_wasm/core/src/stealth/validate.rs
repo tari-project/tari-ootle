@@ -51,9 +51,7 @@ mod tests {
         let output_mask = RistrettoSecretKey::random(&mut rng);
         let owner_pk = RistrettoPublicKey::from_secret_key(&output_mask);
 
-        let inputs = [StealthInputWitness {
-            mask_and_value: MaskAndValue::new(500, input_mask),
-        }];
+        let inputs = [StealthInputWitness::new(MaskAndValue::new(500, input_mask))];
         let outputs = [StealthOutputWitness {
             witness: OutputWitness {
                 amount: 500,

@@ -12,8 +12,8 @@ use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{
-        ConsensusTransactionValidator,
         TariBlockTransactionExecutor,
+        TariBlockTransactionValidator,
         leader_selection::RoundRobinLeaderStrategy,
         signer_service::TariSignatureService,
         // template_metadata_hooks::TemplateMetadataHooks,
@@ -46,6 +46,6 @@ impl ConsensusSpec for TariConsensusSpec {
     type SignerService = TariSignatureService;
     type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
-    type TransactionExecutor =
-        TariBlockTransactionExecutor<ValidatorTransactionProcessor, ConsensusTransactionValidator>;
+    type TransactionExecutor = TariBlockTransactionExecutor<ValidatorTransactionProcessor>;
+    type TransactionValidator = TariBlockTransactionValidator;
 }

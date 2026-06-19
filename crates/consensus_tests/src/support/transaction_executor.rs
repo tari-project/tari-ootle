@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
+use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError, BlockTransactionValidator};
 use tari_engine::state_store::{StateWriter, memory::MemoryStateStore, new_memory_store};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
@@ -20,7 +20,6 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     StateStore,
-    StateStoreReadTransaction,
     consensus_models::{LockedEpoch, TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
@@ -66,16 +65,19 @@ impl TestBlockTransactionProcessor {
     }
 }
 
-impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBlockTransactionProcessor {
-    fn validate<TTx: StateStoreReadTransaction>(
-        &self,
-        _tx: &TTx,
-        _current_epoch: Epoch,
-        _transaction: &Transaction,
-    ) -> Result<(), BlockTransactionExecutorError> {
+impl BlockTransactionValidator for TestBlockTransactionProcessor {
+    type Error = BlockTransactionExecutorError;
+
+    fn validate_full(&self, _current_epoch: Epoch, _transaction: &Transaction) -> Result<(), Self::Error> {
         Ok(())
     }
 
+    fn validate_epoch(&self, _current_epoch: Epoch, _transaction: &Transaction) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBlockTransactionProcessor {
     #[allow(clippy::too_many_lines)]
     fn execute(
         &self,

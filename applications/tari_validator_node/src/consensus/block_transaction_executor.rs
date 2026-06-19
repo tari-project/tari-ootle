@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use log::info;
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
@@ -15,31 +15,23 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_ootle_app_utilities::transaction_executor::TransactionExecutor;
-use tari_ootle_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
+use tari_ootle_common_types::{SubstateRequirement, VersionedSubstateId};
 use tari_ootle_storage::{
     StateStore,
-    StateStoreReadTransaction,
     consensus_models::{LockedEpoch, TransactionExecution, VersionedSubstateIdLockIntent},
 };
 use tari_ootle_transaction::Transaction;
-use tari_ootle_transaction_validation::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_executor";
 
-#[derive(Debug)]
-pub struct TariBlockTransactionExecutor<TExecutor, TValidator> {
+#[derive(Debug, Clone)]
+pub struct TariBlockTransactionExecutor<TExecutor> {
     executor: TExecutor,
-    validator: Arc<TValidator>,
 }
 
-impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>, TValidator>
-    TariBlockTransactionExecutor<TExecutor, TValidator>
-{
-    pub fn new(executor: TExecutor, validator: TValidator) -> Self {
-        Self {
-            executor,
-            validator: Arc::new(validator),
-        }
+impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>> TariBlockTransactionExecutor<TExecutor> {
+    pub fn new(executor: TExecutor) -> Self {
+        Self { executor }
     }
 
     fn add_substates_to_memory_db<'a, I: IntoIterator<Item = (&'a SubstateRequirement, &'a Substate)>>(
@@ -56,25 +48,11 @@ impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>, TValidator>
     }
 }
 
-impl<TExecutor, TStateStore, TValidator> BlockTransactionExecutor<TStateStore>
-    for TariBlockTransactionExecutor<TExecutor, TValidator>
+impl<TExecutor, TStateStore> BlockTransactionExecutor<TStateStore> for TariBlockTransactionExecutor<TExecutor>
 where
     TStateStore: StateStore,
     TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>,
-    for<'a> TValidator: Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError>,
 {
-    fn validate<TTx: StateStoreReadTransaction>(
-        &self,
-        _tx: &TTx,
-        current_epoch: Epoch,
-        transaction: &Transaction,
-    ) -> Result<(), BlockTransactionExecutorError> {
-        self.validator
-            .validate(&ValidationContext { current_epoch }, transaction)
-            // TODO: see if we can avoid the err as string
-            .map_err(|e| BlockTransactionExecutorError::TransactionValidationError(e.to_string()))
-    }
-
     fn execute(
         &self,
         transaction: &Transaction,
@@ -133,16 +111,4 @@ where
         info!(target: LOG_TARGET, "Transaction {} executed in {:.2?}. {}", id, exec.result().execution_time, exec.result().finalize.result);
         Ok(exec)
     }
-}
-
-impl<TExecutor: Clone, TValidator> Clone for TariBlockTransactionExecutor<TExecutor, TValidator> {
-    fn clone(&self) -> Self {
-        Self {
-            executor: self.executor.clone(),
-            validator: self.validator.clone(),
-        }
-    }
-}
-pub struct ValidationContext {
-    pub current_epoch: Epoch,
 }

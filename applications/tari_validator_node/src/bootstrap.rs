@@ -78,7 +78,6 @@ use tari_ootle_transaction_validation::{
     TransactionValidationError,
     TransactionWeightValidator,
     Validator,
-    WithContext,
 };
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
@@ -102,7 +101,7 @@ use crate::{
         self,
         ConsensusHandle,
         TariBlockTransactionExecutor,
-        ValidationContext,
+        TariBlockTransactionValidator,
         spec::ValidatorTemplateProvider,
     },
     file_l1_submitter::FileLayerOneSubmitter,
@@ -316,9 +315,10 @@ pub async fn spawn_services(
             global_db.clone(),
         )),
     );
-    let transaction_executor = TariBlockTransactionExecutor::new(
-        transaction_processor,
-        create_consensus_transaction_validator(config.network, template_provider.clone()).boxed(),
+    let transaction_executor = TariBlockTransactionExecutor::new(transaction_processor);
+    let transaction_validator = TariBlockTransactionValidator::new(
+        create_mempool_transaction_validator(config.network, template_provider.clone()).boxed(),
+        EpochRangeValidator::new().boxed(),
     );
 
     #[cfg(feature = "metrics")]
@@ -344,6 +344,7 @@ pub async fn spawn_services(
         metrics,
         shutdown.clone(),
         transaction_executor,
+        transaction_validator,
         tx_hotstuff_events,
         consensus_constants.clone(),
     )
@@ -482,15 +483,6 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
         .and_then(TransactionWeightValidator::new(max_transaction_weight))
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
-}
-
-pub fn create_consensus_transaction_validator<TProvider: TemplateProvider>(
-    network: Network,
-    template_manager: TProvider,
-) -> impl Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError> {
-    WithContext::<ValidationContext, _, _>::new()
-        .map_context(|_| (), create_mempool_transaction_validator(network, template_manager))
-        .map_context(|c| c.current_epoch, EpochRangeValidator::new())
 }
 
 async fn create_base_layer_client(

@@ -46,7 +46,7 @@ use crate::{
     apply_fetched_substates,
     keys::DeterministicTransferKeys,
     public_transfer::EncodedPublicTransfer,
-    resolved_transfer::seal_and_encode_public_transfer,
+    resolved_transfer::seal_and_encode_public_transfer_with_seed,
     types::{
         error::OotleSdkError,
         generic_intent::{
@@ -65,7 +65,7 @@ use crate::{
 
 /// Round 1 for a generic intent: emit the instruction list onto a builder and derive the want set,
 /// returning a [`PartialTransaction`] + [`WantList`] the host drives through
-/// `apply_fetched_substates → … → seal_and_encode_public_transfer`.
+/// `apply_fetched_substates → … → seal_and_encode_public_transfer[_with_seed]`.
 ///
 /// **Explicit-input short-circuit:** if `intent.inputs` is non-empty this returns a partial already
 /// carrying those inputs and an empty want list (the first `apply_fetched_substates` with an empty
@@ -119,12 +119,12 @@ pub(crate) fn build_unsigned_instructions_with_extra_wants(
 }
 
 /// One-shot convenience for the single-round case: build with wants → apply exactly one fetched
-/// batch → seal/encode deterministically.
+/// batch → seal/encode (seed-reproducible).
 ///
 /// If applying `fetched` does not fully resolve the partial this returns
 /// [`OotleSdkError::Resolution`]; it does not loop. Drive multi-round resolution via
 /// [`apply_fetched_substates`].
-pub fn resolve_and_encode_instructions(
+pub fn resolve_and_encode_instructions_with_seed(
     network: Network,
     intent: &GenericTransactionIntent,
     fetched: &[FetchedSubstate],
@@ -132,7 +132,7 @@ pub fn resolve_and_encode_instructions(
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
     let (partial, _wants) = build_unsigned_instructions_with_wants(network, intent)?;
     match apply_fetched_substates(partial, fetched)? {
-        Resolution::Resolved(resolved) => seal_and_encode_public_transfer(resolved, keys),
+        Resolution::Resolved(resolved) => seal_and_encode_public_transfer_with_seed(resolved, keys),
         Resolution::NeedMore { want_list, .. } => Err(OotleSdkError::Resolution(format!(
             "single-round resolution incomplete: {} want(s) still outstanding after the fetched batch — fetch the \
              remaining substates and drive the multi-round loop via apply_fetched_substates",
@@ -533,7 +533,7 @@ mod tests {
         keys::DeterministicTransferKeys,
         types::{
             address::{ComponentAddressStr, ResourceAddressStr},
-            bytes::{NonceSecretBytes, PublicKeyBytes, SecretKeyBytes},
+            bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
             intent::InputRef,
             numeric::BoundaryAmount,
         },
@@ -550,8 +550,7 @@ mod tests {
     fn det_keys() -> DeterministicTransferKeys {
         DeterministicTransferKeys::single_key(
             SecretKeyBytes::from_bytes(fixed_scalar(11).as_bytes()).unwrap(),
-            NonceSecretBytes::from_bytes(fixed_scalar(22).as_bytes()).unwrap(),
-            NonceSecretBytes::from_bytes(fixed_scalar(33).as_bytes()).unwrap(),
+            BuildSeed::from_array([0x42; 32]),
         )
     }
 
@@ -871,7 +870,7 @@ mod tests {
         let intent = transfer_intent(vec![InputRef::versioned(from_component().to_string(), 0)]);
 
         // Generic path: lower → resolve (empty batch, explicit inputs) → seal/encode deterministically.
-        let generic = resolve_and_encode_instructions(Network::Esmeralda, &intent, &[], &det_keys()).unwrap();
+        let generic = resolve_and_encode_instructions_with_seed(Network::Esmeralda, &intent, &[], &det_keys()).unwrap();
 
         // Hand-built path: the IDENTICAL instruction sequence via the builder's own methods, then the
         // SAME seal/encode leaves the generic path reuses.
@@ -895,7 +894,7 @@ mod tests {
                 Resolution::Resolved(p) => p,
                 Resolution::NeedMore { .. } => panic!("expected Resolved"),
             };
-            seal_and_encode_public_transfer(resolved, &det_keys()).unwrap()
+            seal_and_encode_public_transfer_with_seed(resolved, &det_keys()).unwrap()
         };
 
         assert_eq!(
@@ -922,7 +921,7 @@ mod tests {
                 fetched(SubstateId::Vault(from_vault_id()), vault_substate_json(TARI_TOKEN)),
             ];
             match apply_fetched_substates(partial, &batch).unwrap() {
-                Resolution::Resolved(p) => seal_and_encode_public_transfer(p, &det_keys()).unwrap(),
+                Resolution::Resolved(p) => seal_and_encode_public_transfer_with_seed(p, &det_keys()).unwrap(),
                 Resolution::NeedMore { .. } => panic!("expected Resolved"),
             }
         };
@@ -943,7 +942,7 @@ mod tests {
                 vault_substate_json(TARI_TOKEN),
             )];
             match apply_fetched_substates(partial, &r2).unwrap() {
-                Resolution::Resolved(p) => seal_and_encode_public_transfer(p, &det_keys()).unwrap(),
+                Resolution::Resolved(p) => seal_and_encode_public_transfer_with_seed(p, &det_keys()).unwrap(),
                 Resolution::NeedMore { .. } => panic!("expected Resolved"),
             }
         };

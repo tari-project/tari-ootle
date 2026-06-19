@@ -2,9 +2,9 @@
   "name": "arg_dsl/address_vault",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.33.5",
-    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
-    "generated_by": "ootle-sdk-core golden-vector generator"
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "encode_arg",
   "input": {

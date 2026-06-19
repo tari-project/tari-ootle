@@ -63,11 +63,12 @@ extern "C" {
 #endif // __cplusplus
 
 /**
- * Builds, deterministically seals (pinned nonces) and BOR-encodes a public transfer in one call.
+ * Builds, seal+encodes a public transfer in one call (random-nonce default: a fresh OS-RNG seed).
  *
- * `intent_json` is a `PublicTransferIntent`; `keys_json` is `{account_secret, auth_nonce, seal_nonce
- * [, seal_secret]}` (all lowercase hex). On success `data_json` is the `EncodedPublicTransfer`
- * (`{encoded_transaction, transaction_id}`, lowercase hex). Reproducible byte-for-byte.
+ * `intent_json` is a `PublicTransferIntent`; `keys_json` is `{account_secret}` (lowercase hex). On
+ * success `data_json` is the `EncodedPublicTransfer` (`{encoded_transaction, transaction_id}`,
+ * lowercase hex). The bytes/id are **not** reproducible — the safe default for real submission. Use
+ * [`ootle_build_and_encode_public_transfer_with_seed`] for reproducible bytes.
  *
  * # Safety
  * `intent_json` and `keys_json` must be valid NUL-terminated UTF-8 C strings. The returned envelope
@@ -78,15 +79,16 @@ OotleResult ootle_build_and_encode_public_transfer(uint8_t network,
                                                    const char *keys_json);
 
 /**
- * Production (random-nonce) counterpart of [`ootle_build_and_encode_public_transfer`]. `keys_json` is
- * `{account_secret}` (lowercase hex). The bytes/id are **not** reproducible — for real submission.
+ * Seed-reproducible counterpart of [`ootle_build_and_encode_public_transfer`]. `keys_json` is
+ * `{account_secret, seed [, seal_secret]}` (all lowercase hex). Reproducible byte-for-byte from the
+ * seed + intent.
  *
  * # Safety
  * As [`ootle_build_and_encode_public_transfer`].
  */
-OotleResult ootle_build_and_encode_public_transfer_production(uint8_t network,
-                                                              const char *intent_json,
-                                                              const char *keys_json);
+OotleResult ootle_build_and_encode_public_transfer_with_seed(uint8_t network,
+                                                             const char *intent_json,
+                                                             const char *keys_json);
 
 /**
  * Mints a fresh **account** keypair from `OsRng` (production). On success `data_json` is
@@ -228,7 +230,7 @@ OotleResult ootle_build_unsigned(uint8_t network,
  * Lowers a generic instruction list + typed-arg DSL ([`GenericTransactionIntent`]) into an unsigned
  * transaction. Returns the same opaque handle + want-list envelope as [`ootle_build_unsigned`]; finish
  * it with [`ootle_apply_fetched_substates`] then [`ootle_seal_and_encode`] /
- * [`ootle_seal_and_encode_production`].
+ * [`ootle_seal_and_encode_with_seed`].
  *
  * On success the envelope carries the opaque handle (in `handle`) and the want list in `data_json`
  * (`{"want_list":[…]}`). Bad intent JSON ⇒ `"PARSE"`; an out-of-range blob index / unbound workspace
@@ -284,11 +286,12 @@ OotleResult ootle_apply_fetched_substates(OotlePartialTransaction *handle,
                                           const char *fetched_json);
 
 /**
- * Seals (deterministically, pinned nonces) and BOR-encodes a **resolved** partial.
+ * Seals (random-nonce default: a fresh OS-RNG seed) and BOR-encodes a **resolved** partial.
  *
- * **Consumes** `handle`. `keys_json` is `{account_secret, auth_nonce, seal_nonce [, seal_secret]}`
- * (lowercase hex). On success `data_json` is the `EncodedPublicTransfer`. A still-unresolved partial
- * ⇒ a `RESOLUTION` error (the handle is still consumed). No handle is returned.
+ * **Consumes** `handle`. `keys_json` is `{account_secret}` (lowercase hex). On success `data_json` is
+ * the `EncodedPublicTransfer`. A still-unresolved partial ⇒ a `RESOLUTION` error (the handle is still
+ * consumed). No handle is returned. The bytes/id are not reproducible — use
+ * [`ootle_seal_and_encode_with_seed`] for reproducible bytes.
  *
  * # Safety
  * `handle` must be a non-null, not-yet-consumed pointer from the two-phase ops. `keys_json` must be a
@@ -299,14 +302,14 @@ OotleResult ootle_seal_and_encode(OotlePartialTransaction *handle,
                                   const char *keys_json);
 
 /**
- * Production (random-nonce) counterpart of [`ootle_seal_and_encode`]. **Consumes** `handle`.
- * `keys_json` is `{account_secret}`. The bytes/id are not reproducible.
+ * Seed-reproducible counterpart of [`ootle_seal_and_encode`]. **Consumes** `handle`. `keys_json` is
+ * `{account_secret, seed [, seal_secret]}` (lowercase hex). Reproducible byte-for-byte from the seed.
  *
  * # Safety
  * As [`ootle_seal_and_encode`].
  */
-OotleResult ootle_seal_and_encode_production(OotlePartialTransaction *handle,
-                                             const char *keys_json);
+OotleResult ootle_seal_and_encode_with_seed(OotlePartialTransaction *handle,
+                                            const char *keys_json);
 
 /**
  * Derives the serializable [`UnsignedTransactionRecord`] party A ships to party B, from a resolved
@@ -349,14 +352,13 @@ OotleResult ootle_add_signature(uint8_t network,
                                 const char *signer_secret_hex);
 
 /**
- * Seals a resolved partial **with attached authorizations** (deterministically, pinned nonces) and
- * BOR-encodes it. **Consumes** `handle` (exactly like [`ootle_seal_and_encode`]).
+ * Seals a resolved partial **with attached authorizations** (random-nonce default: a fresh OS-RNG
+ * seed) and BOR-encodes it. **Consumes** `handle` (exactly like [`ootle_seal_and_encode`]).
  *
- * `keys_json` reuses the `DeterministicKeysJson` mirror (`{account_secret, auth_nonce, seal_nonce
- * [, seal_secret]}`); `auth_nonce` is unused on this path (the authorizations are supplied, not
- * produced here). `authorizations_json` is a JSON array
+ * `keys_json` is `{account_secret}` (lowercase hex). `authorizations_json` is a JSON array
  * `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`. An empty array behaves like the plain
- * single-key seal. On success `data_json` is the `EncodedPublicTransfer`.
+ * single-key seal. On success `data_json` is the `EncodedPublicTransfer`. The bytes/id are not
+ * reproducible — use [`ootle_seal_and_encode_with_auth_with_seed`] for reproducible bytes.
  *
  * # Safety
  * `handle` must be a non-null, not-yet-consumed public handle. `keys_json` and `authorizations_json`
@@ -368,15 +370,20 @@ OotleResult ootle_seal_and_encode_with_auth(OotlePartialTransaction *handle,
                                             const char *authorizations_json);
 
 /**
- * Production (random-nonce) counterpart of [`ootle_seal_and_encode_with_auth`]. **Consumes** `handle`.
- * `keys_json` is `{account_secret}`. The bytes/id are not reproducible.
+ * Seed-reproducible counterpart of [`ootle_seal_and_encode_with_auth`]. **Consumes** `handle`.
+ *
+ * `keys_json` reuses the `DeterministicKeysJson` mirror (`{account_secret, seed [, seal_secret]}`);
+ * only the seal nonce expanded from `seed` is consumed (the authorizations are supplied, not produced
+ * here). `authorizations_json` is a JSON array `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`.
+ * An empty array behaves like the plain single-key seal. On success `data_json` is the
+ * `EncodedPublicTransfer`. Reproducible byte-for-byte from the seed.
  *
  * # Safety
  * As [`ootle_seal_and_encode_with_auth`].
  */
-OotleResult ootle_seal_and_encode_with_auth_production(OotlePartialTransaction *handle,
-                                                       const char *keys_json,
-                                                       const char *authorizations_json);
+OotleResult ootle_seal_and_encode_with_auth_with_seed(OotlePartialTransaction *handle,
+                                                      const char *keys_json,
+                                                      const char *authorizations_json);
 
 /**
  * Parses a raw indexer finalized-result JSON string into the typed `FinalizedResult`.
@@ -434,8 +441,8 @@ void ootle_result_free(OotleResult result);
 void ootle_partial_transaction_free(OotlePartialTransaction *handle);
 
 /**
- * One-shot deterministic stealth send: build (resolve inputs + assemble) and seal/encode in one call,
- * with every nonce/mask/seed pinned by `entropy_json`.
+ * One-shot random-nonce default stealth send: build (resolve inputs + assemble) and seal/encode in
+ * one call, expanding all proof + seal entropy from a fresh OS-RNG seed.
  *
  * Arguments (all `const char*` UTF-8 JSON unless noted):
  * - `network` — the L1 network discriminant byte.
@@ -444,52 +451,52 @@ void ootle_partial_transaction_free(OotlePartialTransaction *handle);
  *   wanted `utxo_<…>` ids are a pure function of each input's resource + commitment).
  * - `spend_secrets_json` — a JSON array of lowercase-hex secret scalars, one **positional** per `intent.inputs`, used
  *   to decrypt each input's spend mask.
- * - `keys_json` — `{account_secret, auth_nonce, seal_nonce}` (all lowercase hex).
- * - `entropy_json` — a `StealthEntropy` bundle (per-output + global pinned randomness).
+ * - `keys_json` — `{account_secret}` (lowercase hex).
  *
  * On success `data_json` is the `EncodedPublicTransfer` (`{encoded_transaction, transaction_id}`,
- * lowercase hex; the wire shape is shared with the public path). The bytes are deterministic for the
- * signatures this function produces; the embedded proofs are not byte-stable, so callers compare
- * *semantically* rather than byte-for-byte.
+ * lowercase hex; the wire shape is shared with the public path). The bytes/id are **not** reproducible
+ * — use [`ootle_build_and_encode_stealth_transfer_with_seed`] for the reproducible path.
  *
  * # Safety
- * `intent_json`, `fetched_json`, `spend_secrets_json`, `keys_json`, and `entropy_json` must each be a
- * valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
- * [`ootle_result_free`](crate::ootle_result_free). The secrets/entropy cross as transient hex JSON and
- * are dropped at the end of the call; the facade does not zero them.
+ * `intent_json`, `fetched_json`, `spend_secrets_json`, and `keys_json` must each be a valid
+ * NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). The secrets cross as transient hex JSON and are
+ * dropped at the end of the call; the facade does not zero them.
  */
 OotleResult ootle_build_and_encode_stealth_transfer(uint8_t network,
                                                     const char *intent_json,
                                                     const char *fetched_json,
                                                     const char *spend_secrets_json,
-                                                    const char *keys_json,
-                                                    const char *entropy_json);
+                                                    const char *keys_json);
 
 /**
- * Production (random-entropy) counterpart of [`ootle_build_and_encode_stealth_transfer`]. Fills the
- * proof + seal entropy from `OsRng` internally, so there is **no** `entropy_json` argument and the
- * bytes/id are **not** reproducible (correct for real submission). `keys_json` is `{account_secret}`
- * (the seal/auth nonces are drawn from `OsRng` on this path, so the caller supplies only the secret).
+ * Seed-reproducible counterpart of [`ootle_build_and_encode_stealth_transfer`]. The single build seed
+ * in `keys_json` (`{account_secret, seed}`, lowercase hex) expands into **both** the account-key
+ * authorization + seal nonces and the proof + seal-side entropy, so the result is reproducible from
+ * the seed + intent (except the aggregated bulletproof, which is never byte-stable — compare
+ * *semantically*).
  *
  * # Safety
- * As [`ootle_build_and_encode_stealth_transfer`], minus `entropy_json`.
+ * As [`ootle_build_and_encode_stealth_transfer`].
  */
-OotleResult ootle_build_and_encode_stealth_transfer_production(uint8_t network,
-                                                               const char *intent_json,
-                                                               const char *fetched_json,
-                                                               const char *spend_secrets_json,
-                                                               const char *keys_json);
+OotleResult ootle_build_and_encode_stealth_transfer_with_seed(uint8_t network,
+                                                              const char *intent_json,
+                                                              const char *fetched_json,
+                                                              const char *spend_secrets_json,
+                                                              const char *keys_json);
 
 /**
- * Deterministically seeds the stealth input-resolution loop, returning the opaque stealth handle (in
- * `OotleResult.handle`) **plus** the want list in `data_json` (`{"want_list":[…]}` — the serde form of
- * `WantList`'s inner `Vec<WantItem>`).
+ * Seeds the stealth input-resolution loop (random-nonce default: a fresh OS-RNG seed), returning the
+ * opaque stealth handle (in `OotleResult.handle`) **plus** the want list in `data_json`
+ * (`{"want_list":[…]}` — the serde form of `WantList`'s inner `Vec<WantItem>`).
  *
- * Takes `intent_json` + `entropy_json` only — **no** up-front `fetched`/`spend_secrets` (the host
- * drives the fetch loop). The host fetches the wanted substates, then calls
+ * Takes `intent_json` only — **no** up-front `fetched`/`spend_secrets` (the host drives the fetch
+ * loop). The host fetches the wanted substates, then calls
  * [`ootle_apply_fetched_substates_stealth`] until it returns `{"status":"resolved"}`, at which point
  * the threaded handle wraps the assembled partial ready for [`ootle_seal_and_encode_stealth`]. The
- * pinned `entropy` is stashed in the handle so the final apply can assemble without re-passing it.
+ * expanded entropy is stashed in the handle so the final apply can assemble without re-passing it. The
+ * eventual bytes are **not** reproducible — use [`ootle_build_stealth_unsigned_with_seed`] for the
+ * reproducible path.
  *
  * Pass the returned handle only to the `ootle_*_stealth*` consumers /
  * [`ootle_stealth_partial_transaction_free`]. Routing it to the public-path consumers / free
@@ -497,26 +504,27 @@ OotleResult ootle_build_and_encode_stealth_transfer_production(uint8_t network,
  * returns an `INVALID` error and leaves the handle intact.
  *
  * # Safety
- * `intent_json` and `entropy_json` must each be a valid NUL-terminated UTF-8 C string. The returned
- * envelope must be freed with [`ootle_result_free`](crate::ootle_result_free); the returned `handle`
- * must be consumed by [`ootle_apply_fetched_substates_stealth`] (each round) and ultimately
+ * `intent_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed
+ * with [`ootle_result_free`](crate::ootle_result_free); the returned `handle` must be consumed by
+ * [`ootle_apply_fetched_substates_stealth`] (each round) and ultimately
  * [`ootle_seal_and_encode_stealth`], or freed with [`ootle_stealth_partial_transaction_free`].
  */
 OotleResult ootle_build_stealth_unsigned(uint8_t network,
-                                         const char *intent_json,
-                                         const char *entropy_json);
+                                         const char *intent_json);
 
 /**
- * Production (random-entropy) counterpart of [`ootle_build_stealth_unsigned`]. Fills the proof entropy
- * from `OsRng` internally (no `entropy_json`); the resulting handle's eventual bytes are **not**
- * reproducible. Returns the handle + want list; drive the loop with
- * [`ootle_apply_fetched_substates_stealth`] and seal with [`ootle_seal_and_encode_stealth_production`].
+ * Seed-reproducible counterpart of [`ootle_build_stealth_unsigned`]. `seed_hex` is the lowercase-hex
+ * 32-byte build seed expanded into the stashed proof + seal-side entropy, so the eventual sealed bytes
+ * are reproducible from the seed (except the aggregated bulletproof). A bad/odd/uppercase/wrong-length
+ * `seed_hex` ⇒ `"PARSE"`; an all-zero seed ⇒ `"VALIDATION"`.
  *
  * # Safety
- * As [`ootle_build_stealth_unsigned`], minus `entropy_json`.
+ * `intent_json` and `seed_hex` must each be a valid NUL-terminated UTF-8 C string. The returned
+ * handle lifecycle is identical to [`ootle_build_stealth_unsigned`].
  */
-OotleResult ootle_build_stealth_unsigned_production(uint8_t network,
-                                                    const char *intent_json);
+OotleResult ootle_build_stealth_unsigned_with_seed(uint8_t network,
+                                                   const char *intent_json,
+                                                   const char *seed_hex);
 
 /**
  * Applies a fetched batch of substates to the stealth resolver and reports resolution status.
@@ -538,7 +546,7 @@ OotleResult ootle_build_stealth_unsigned_production(uint8_t network,
  *
  * # Safety
  * `handle` must be a non-null pointer previously returned by [`ootle_build_stealth_unsigned`] /
- * [`ootle_build_stealth_unsigned_production`] / this fn and not yet consumed. `fetched_json` and
+ * [`ootle_build_stealth_unsigned_with_seed`] / this fn and not yet consumed. `fetched_json` and
  * `spend_secrets_json` must each be a valid NUL-terminated UTF-8 C string. The returned envelope must
  * be freed with [`ootle_result_free`](crate::ootle_result_free).
  */
@@ -548,13 +556,14 @@ OotleResult ootle_apply_fetched_substates_stealth(OotleStealthPartialTransaction
                                                   const char *spend_secrets_json);
 
 /**
- * Deterministically seals + BOR-encodes a stealth partial from [`ootle_build_stealth_unsigned`].
+ * Random-nonce default seal + BOR-encode of a stealth partial from [`ootle_build_stealth_unsigned`].
  *
  * **Consumes** `handle` (taken by value — treat the pointer you passed as invalid afterwards, even on
  * error). `network` must be the transfer's network (the partial does not carry it; different networks
- * yield different stealth keys). `keys_json` is `{account_secret, auth_nonce, seal_nonce}`;
- * `entropy_json` supplies the stealth/ephemeral seal nonces. On success `data_json` is the
- * `EncodedPublicTransfer`. No handle is returned.
+ * yield different stealth keys). `keys_json` is `{account_secret}`; the seal nonces are expanded from
+ * a fresh OS-RNG seed. On success `data_json` is the `EncodedPublicTransfer`. No handle is returned.
+ * The bytes/id are not reproducible — use [`ootle_seal_and_encode_stealth_with_seed`] for the
+ * reproducible path.
  *
  * On a processing error the input handle is still consumed and freed; the returned envelope carries no
  * handle. (Passing a *null* handle is a precondition violation that yields an `"INVALID"` envelope and
@@ -562,26 +571,26 @@ OotleResult ootle_apply_fetched_substates_stealth(OotleStealthPartialTransaction
  *
  * # Safety
  * `handle` must be a non-null pointer previously returned by [`ootle_build_stealth_unsigned`] and not
- * yet consumed or freed. `keys_json` and `entropy_json` must each be a valid NUL-terminated UTF-8 C
- * string. The returned envelope must be freed with [`ootle_result_free`](crate::ootle_result_free). Do
- * **not** free `handle` afterwards — it is consumed here.
+ * yet consumed or freed. `keys_json` must be a valid NUL-terminated UTF-8 C string. The returned
+ * envelope must be freed with [`ootle_result_free`](crate::ootle_result_free). Do **not** free
+ * `handle` afterwards — it is consumed here.
  */
 OotleResult ootle_seal_and_encode_stealth(OotleStealthPartialTransaction *handle,
                                           uint8_t network,
-                                          const char *keys_json,
-                                          const char *entropy_json);
+                                          const char *keys_json);
 
 /**
- * Production (random-entropy) counterpart of [`ootle_seal_and_encode_stealth`]. **Consumes** `handle`.
- * Takes no `entropy_json` (the seal nonces are drawn from `OsRng`); `keys_json` is `{account_secret}`
- * (the caller supplies only the secret on this path). The bytes/id are not reproducible.
+ * Seed-reproducible counterpart of [`ootle_seal_and_encode_stealth`]. **Consumes** `handle`. The
+ * single build seed in `keys_json` (`{account_secret, seed}`) expands into **both** the account-key
+ * seal/auth nonces and the stealth/ephemeral seal nonces, so the seal-side signatures are reproducible
+ * from the seed. On success `data_json` is the `EncodedPublicTransfer`.
  *
  * # Safety
- * As [`ootle_seal_and_encode_stealth`], minus `entropy_json`.
+ * As [`ootle_seal_and_encode_stealth`].
  */
-OotleResult ootle_seal_and_encode_stealth_production(OotleStealthPartialTransaction *handle,
-                                                     uint8_t network,
-                                                     const char *keys_json);
+OotleResult ootle_seal_and_encode_stealth_with_seed(OotleStealthPartialTransaction *handle,
+                                                    uint8_t network,
+                                                    const char *keys_json);
 
 /**
  * Scans an inbound stealth UTXO with a view secret and decides whether it is addressed to the scanner.
@@ -686,14 +695,14 @@ OotleResult ootle_validate_stealth_transfer(uint8_t network,
                                             const char *sealed_encoded_transaction_hex);
 
 /**
- * Builds the aggregated stealth **outputs statement** for an intent's outputs deterministically (every
- * nonce/mask pinned via the supplied `entropy`), returning the statement JSON + the aggregated output
- * mask. **Stateless — returns no handle.**
+ * Builds the aggregated stealth **outputs statement** for an intent's outputs seed-reproducibly (every
+ * nonce/mask expanded from the supplied build seed), returning the statement JSON + the aggregated
+ * output mask. **Stateless — returns no handle.**
  *
  * - `network` — the L1 network discriminant byte.
  * - `intent_json` — a [`StealthTransferIntent`] carrying the `outputs` (and `revealed_output_amount`).
- * - `entropy_json` — a [`StealthEntropy`] whose `per_output` slice pins every output's mask/nonces; its length
- *   **must** equal `intent.outputs.len()` (the core errors `"VALIDATION"` otherwise).
+ * - `seed_hex` — the lowercase-hex 32-byte build seed; it is expanded into one per-output entropy slice per
+ *   `intent.outputs` entry.
  *
  * On success `data_json` is a JSON object:
  * ```json
@@ -701,24 +710,24 @@ OotleResult ootle_validate_stealth_transfer(uint8_t network,
  * ```
  * **Semantic, not byte-stable:** the statement's aggregated bulletproof (`agg_range_proof`) is
  * byte-unstable across runs, so it is recursively **nulled** in `outputs_statement`; every other
- * statement field and the `aggregated_output_mask` (a 32-byte scalar) **are** byte-reproducible.
+ * statement field and the `aggregated_output_mask` (a 32-byte scalar) **are** reproducible from the seed.
  *
- * Malformed `intent`/`entropy` JSON yields `"PARSE"`; a length-mismatched/invalid entropy yields
- * `"VALIDATION"`; a null arg or unknown network yields `"INVALID"`.
+ * Malformed `intent` JSON yields `"PARSE"`; a bad/odd/uppercase/wrong-length `seed_hex` yields
+ * `"PARSE"`; an all-zero seed yields `"VALIDATION"`; a null arg or unknown network yields `"INVALID"`.
  *
  * # Safety
- * `intent_json` and `entropy_json` must each be a valid NUL-terminated UTF-8 C string. The returned
+ * `intent_json` and `seed_hex` must each be a valid NUL-terminated UTF-8 C string. The returned
  * envelope must be freed with [`ootle_result_free`](crate::ootle_result_free). It never carries a
  * handle — do **not** call [`ootle_stealth_partial_transaction_free`] on its result.
  */
-OotleResult ootle_build_stealth_outputs_statement(uint8_t network,
-                                                  const char *intent_json,
-                                                  const char *entropy_json);
+OotleResult ootle_build_stealth_outputs_statement_with_seed(uint8_t network,
+                                                            const char *intent_json,
+                                                            const char *seed_hex);
 
 /**
  * Frees an opaque [`OotleStealthPartialTransaction`] handle. Null-safe; call **exactly once**, and
  * **only** for a handle that was never consumed by [`ootle_seal_and_encode_stealth`] /
- * [`ootle_seal_and_encode_stealth_production`] (those take the handle by value). Freeing a consumed
+ * [`ootle_seal_and_encode_stealth_with_seed`] (those take the handle by value). Freeing a consumed
  * handle is a use-after-free.
  *
  * **Kind-guarded:** if the handle is actually a public-path `OotlePartialTransaction` (misrouted), it

@@ -2,9 +2,9 @@
   "name": "stealth_outputs_statement/single_output_with_view_key",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.33.5",
-    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
-    "generated_by": "ootle-sdk-core golden-vector generator"
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_stealth_outputs_statement",
   "compare": "semantic",
@@ -36,26 +36,7 @@
       "dry_run": false,
       "pay_fee_from_revealed": false
     },
-    "stealth_entropy": {
-      "per_output": [
-        {
-          "mask": "5000000000000000000000000000000000000000000000000000000000000000",
-          "sender_nonce": "5100000000000000000000000000000000000000000000000000000000000000",
-          "aead_nonce": "5200000000000000000000000000000000000000000000000000000000000000",
-          "elgamal_nonce": "5300000000000000000000000000000000000000000000000000000000000000",
-          "zk_nonces": [
-            "5400000000000000000000000000000000000000000000000000000000000000",
-            "5500000000000000000000000000000000000000000000000000000000000000",
-            "5600000000000000000000000000000000000000000000000000000000000000"
-          ]
-        }
-      ],
-      "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
-      "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
-    }
+    "stealth_seed": "5050505050505050505050505050505050505050505050505050505050505050"
   },
   "expected": {
     "stealth_outputs_statement": {
@@ -63,29 +44,29 @@
       "outputs": [
         {
           "output": {
-            "commitment": "00f0b13fdde621d64e9f9a14ac7a7dac6e7a6925b3176d76c36775ad5eda194b",
-            "encrypted_data": "5e07f92ecda6cc46326ff04036dfdd025200000000000000000000000000000000000000000000006453b420375097c1e2956f19fff4adf6da7d55b8f9f47b72c09d9e9718cc126be725629c16e20396",
+            "commitment": "5870524c140fed48f8366a778bf15c08e8ac5d206c458d13c69d663a9fdd8f34",
+            "encrypted_data": "450c38428f19a2296117166ec2cafa53bad0666b7218d1f9951d6c5db09600c160fb6247a1b22d35308856b1527ef9f6292c1ede5644f96c7bd1d6eb4034a9d65ffc45ca1e5f3f4d80b173046352d623",
             "minimum_value_promise": 0,
-            "sender_public_nonce": "2c821028f4a86c13543739321743ae39255d5027df75326b9bc04dcc088f6a5e",
+            "sender_public_nonce": "c809525257ae273a5d94e07198d531dd18cd75584d7508052be8762fcbec8e32",
             "viewable_balance_proof": {
-              "c_prime": "56a5159d58c7bc05d7748e165a645e0849428e77569bf9d9c54a1176450ef50c",
-              "e_prime": "00359e264e6de18489e9c362dc32725a38c93f72d61b53ff5beb64c38bb90c14",
-              "elgamal_encrypted": "fe9464bc096a1b9b5ea5cb45e6c0fa6e14093aa5a3c587de5b8b92095cc0d55b",
-              "elgamal_public_nonce": "a2c1c88b3a5a6c86b9ee4431d2bdb9d42dc145a33501f00da00f9a2eeb60d82f",
-              "r_prime": "2cef5189e3fb8c48cd2acf84b1165474beaf4a2f6bc28cdad715d6884257885d",
-              "s_m": "64cf6b0dd843261e8268c307a58eae264d81bf5cac90ce6723579b5986a16705",
-              "s_r": "206af82654312aa64c1e064fb2eb183af3e239a07f1cb3bb34f75d63fb1d3502",
-              "s_v": "d614b3298548d7c42c4564d10575f94d7fd815c9515078bdf5ff725426624304"
+              "c_prime": "2cf7dcc1564d6d5dae027ebbbb52848525ec0a76315b275e5249977c3cc2ea55",
+              "e_prime": "86433823879d19beda588faf53cd33c7fb0b750c0c8b93a09c4d1e831936f34a",
+              "elgamal_encrypted": "e4b216a5b1cc15530886d55bf82757f32edb79b62c89e2cdba96f68254a84b46",
+              "elgamal_public_nonce": "020e6bc34af0f810995186188540324f3f75c2e1f28945781a35326db3258b4c",
+              "r_prime": "44253e756155382532e5630bf00de6a577f936dfb06359adf433ee55d416c215",
+              "s_m": "f5c84f92d120f288aadccf74e91db715566a744e6877fa6e5e827b4e14b86f0c",
+              "s_r": "9cbeb6f78219beddfe05bdd151db4096918f24d501a0cc326753ed104f874f0e",
+              "s_v": "a7656fcafe8f5f97c49899eeaf97ad6c7e5129f61f098a31b5930d7a2a95d402"
             }
           },
           "spend_condition": {
-            "Signed": "da7a4c4fd39d253ae5d6e4dfe135c6c82e4c52a73dde164a413be867ef70cc76"
+            "Signed": "283472177bb8754d7f369f91a361783fa81c9e78cf986d8ca0ea947f6350cb2c"
           },
-          "tag": 770320300
+          "tag": 372632453
         }
       ],
       "revealed_output_amount": "0"
     },
-    "aggregated_output_mask": "5000000000000000000000000000000000000000000000000000000000000000"
+    "aggregated_output_mask": "1ac8fb104c30df1801da6093e08c1bef6f3eb8ef98e5479e3e674a1f1fea420b"
   }
 }

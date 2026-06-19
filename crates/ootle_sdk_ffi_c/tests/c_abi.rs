@@ -33,10 +33,13 @@ use ootle_sdk_ffi_c::{
     ootle_apply_fetched_substates,
     ootle_apply_fetched_substates_stealth,
     ootle_build_and_encode_public_transfer,
+    ootle_build_and_encode_public_transfer_with_seed,
     ootle_build_and_encode_stealth_transfer,
+    ootle_build_and_encode_stealth_transfer_with_seed,
     ootle_build_faucet_claim,
-    ootle_build_stealth_outputs_statement,
+    ootle_build_stealth_outputs_statement_with_seed,
     ootle_build_stealth_unsigned,
+    ootle_build_stealth_unsigned_with_seed,
     ootle_build_unsigned,
     ootle_build_unsigned_instructions,
     ootle_decode_stealth_utxo,
@@ -55,8 +58,9 @@ use ootle_sdk_ffi_c::{
     ootle_scan_stealth_substate,
     ootle_seal_and_encode,
     ootle_seal_and_encode_stealth,
-    ootle_seal_and_encode_stealth_production,
+    ootle_seal_and_encode_stealth_with_seed,
     ootle_seal_and_encode_with_auth,
+    ootle_seal_and_encode_with_seed,
     ootle_stealth_partial_transaction_free,
     ootle_unsigned_record_for_cosign,
     ootle_validate_stealth_transfer,
@@ -162,7 +166,7 @@ fn one_shot_build_and_encode_reproduces_vector_bytes() {
     let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
     let keys = CArg::new(&serde_json::to_string(&input["keys"]).unwrap());
 
-    let result = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
+    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
     assert!(ok(&result), "expected success, got code {}", error_code(&result));
     assert_eq!(error_code(&result), "", "success envelope has an empty error_code");
     assert!(result.handle.is_null(), "one-shot op returns no handle");
@@ -178,6 +182,41 @@ fn one_shot_build_and_encode_reproduces_vector_bytes() {
     );
 
     unsafe { ootle_result_free(result) };
+}
+
+/// The random-nonce default `ootle_build_and_encode_public_transfer` (account-secret-only keys) is
+/// **structural-only**: it returns a well-formed encoded transfer, and two calls differ (fresh seed
+/// each call). No byte-equality against a committed vector (the seal nonces are non-deterministic).
+#[test]
+fn one_shot_random_default_is_structural_and_non_reproducible() {
+    let fx = load_fixture("public_transfer/single_key_basic.json");
+    let input = &fx["input"];
+    let network = network_byte(&input["network"]);
+    let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
+    // The random symbol takes only `{account_secret}` (no seed).
+    let keys = CArg::new(
+        &serde_json::to_string(&serde_json::json!({ "account_secret": input["keys"]["account_secret"] })).unwrap(),
+    );
+
+    let a = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
+    assert!(ok(&a), "expected success, got code {}", error_code(&a));
+    assert!(a.handle.is_null(), "one-shot op returns no handle");
+    let a_out = data_json(&a);
+    assert!(
+        !a_out["encoded_transaction"].as_str().unwrap().is_empty(),
+        "random default produces non-empty bytes"
+    );
+    let a_tx = a_out["transaction_id"].as_str().unwrap().to_string();
+    unsafe { ootle_result_free(a) };
+
+    let b = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
+    assert!(ok(&b));
+    let b_tx = data_json(&b)["transaction_id"].as_str().unwrap().to_string();
+    unsafe { ootle_result_free(b) };
+    assert_ne!(
+        a_tx, b_tx,
+        "the random-nonce default seals a fresh transaction id each call"
+    );
 }
 
 // --- (2) two-phase handle flow ------------------------------------------------------------------
@@ -216,7 +255,7 @@ fn two_phase_handle_flow_reproduces_resolved_vector_bytes() {
     unsafe { ootle_result_free(applied) };
 
     // 3) seal_and_encode → consumes handle, returns encoded bytes.
-    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
+    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
     assert!(sealed.handle.is_null(), "seal returns no handle");
     let out = data_json(&sealed);
@@ -301,7 +340,7 @@ fn two_phase_multi_round_converges_via_discovered_fetch_ids() {
     unsafe { ootle_result_free(applied2) };
 
     // Seal → identical bytes to the single-batch vector (the fetch order does not affect the seal).
-    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
+    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
     let out = data_json(&sealed);
     assert_eq!(
@@ -372,7 +411,7 @@ fn generic_build_instructions_flow_reproduces_vector_bytes() {
     unsafe { ootle_result_free(applied) };
 
     // 3) The existing public seal consumes it → byte-identical to the committed vector.
-    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
+    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
     let out = data_json(&sealed);
     assert_eq!(
@@ -459,7 +498,7 @@ fn faucet_claim_flow_reproduces_vector_bytes() {
     unsafe { ootle_result_free(applied) };
 
     // 3) Seal → byte-identical to the committed vector.
-    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
+    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
     let out = data_json(&sealed);
     assert_eq!(
@@ -549,10 +588,10 @@ fn malformed_intent_json_is_a_parse_error() {
     let network = network_byte(&serde_json::json!("esmeralda"));
     let intent = CArg::new("{ this is not valid json");
     let keys = CArg::new(
-        r#"{"account_secret":"6500000000000000000000000000000000000000000000000000000000000000","auth_nonce":"6600000000000000000000000000000000000000000000000000000000000000","seal_nonce":"6700000000000000000000000000000000000000000000000000000000000000"}"#,
+        r#"{"account_secret":"6500000000000000000000000000000000000000000000000000000000000000","seed":"6600000000000000000000000000000000000000000000000000000000000000"}"#,
     );
 
-    let result = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
+    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
     assert!(!ok(&result), "malformed JSON must not succeed");
     assert_eq!(error_code(&result), "PARSE");
     assert!(result.data_json.is_null(), "error envelope carries no data_json");
@@ -569,10 +608,10 @@ fn malformed_secret_key_is_a_key_error() {
     let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
     // 0xff..ff is a valid-width but non-canonical Ristretto scalar → KEY error from the core.
     let keys = CArg::new(
-        r#"{"account_secret":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","auth_nonce":"6600000000000000000000000000000000000000000000000000000000000000","seal_nonce":"6700000000000000000000000000000000000000000000000000000000000000"}"#,
+        r#"{"account_secret":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","seed":"6600000000000000000000000000000000000000000000000000000000000000"}"#,
     );
 
-    let result = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
+    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
     assert!(!ok(&result));
     assert_eq!(error_code(&result), "KEY");
     unsafe { ootle_result_free(result) };
@@ -586,10 +625,10 @@ fn bad_key_width_is_a_parse_error() {
     let network = network_byte(&input["network"]);
     let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
     let keys = CArg::new(
-        r#"{"account_secret":"6500","auth_nonce":"6600000000000000000000000000000000000000000000000000000000000000","seal_nonce":"6700000000000000000000000000000000000000000000000000000000000000"}"#,
+        r#"{"account_secret":"6500","seed":"6600000000000000000000000000000000000000000000000000000000000000"}"#,
     );
 
-    let result = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
+    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
     assert!(!ok(&result));
     assert_eq!(error_code(&result), "PARSE");
     unsafe { ootle_result_free(result) };
@@ -661,7 +700,7 @@ fn free_fns_are_null_safe() {
 fn build_stealth_handle_as_public() -> *mut ootle_sdk_ffi_c::OotlePartialTransaction {
     let fx = load_fixture("stealth_transfer/stealth_seal_with_input.json");
     let a = stealth_send_args(&fx);
-    let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr(), a.entropy.ptr()) };
+    let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr()) };
     assert!(ok(&built), "stealth build failed: {}", error_code(&built));
     let handle = built.handle; // typed `*mut OotlePartialTransaction` (the cross-cast in the envelope)
     unsafe { ootle_result_free(built) };
@@ -757,9 +796,8 @@ fn public_handle_to_stealth_seal_is_invalid_not_ub() {
     let stealth = handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     let net = network_byte(&serde_json::json!("esmeralda"));
     let keys = CArg::new("{}");
-    let entropy = CArg::new("{}");
 
-    let r = unsafe { ootle_seal_and_encode_stealth(stealth, net, keys.ptr(), entropy.ptr()) };
+    let r = unsafe { ootle_seal_and_encode_stealth_with_seed(stealth, net, keys.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     assert!(r.handle.is_null());
@@ -773,7 +811,7 @@ fn public_handle_to_stealth_seal_is_invalid_not_ub() {
 
     let handle = build_public_handle();
     let stealth = handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
-    let r = unsafe { ootle_seal_and_encode_stealth_production(stealth, net, keys.ptr()) };
+    let r = unsafe { ootle_seal_and_encode_stealth(stealth, net, keys.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     assert!(r.handle.is_null());
@@ -1182,7 +1220,7 @@ fn cosign_seal_with_auth_rejects_wrong_kind_handle() {
     // Build a STEALTH handle and misroute it to the public seal-with-auth fn.
     let stealth_fx = load_fixture("stealth_transfer/stealth_seal_with_input.json");
     let s = stealth_send_args(&stealth_fx);
-    let sbuilt = unsafe { ootle_build_stealth_unsigned(s.network, s.intent.ptr(), s.entropy.ptr()) };
+    let sbuilt = unsafe { ootle_build_stealth_unsigned(s.network, s.intent.ptr()) };
     assert!(ok(&sbuilt));
     let sh = sbuilt.handle; // cross-cast `*mut OotlePartialTransaction`
     unsafe { ootle_result_free(sbuilt) };
@@ -1206,9 +1244,9 @@ fn abi_version_is_the_stable_tag() {
     assert!(!p.is_null());
     let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
     assert_eq!(
-        s, "ootle-sdk-ffi-c/14",
-        "the ABI tag the Go SDK asserts against (bumped for the GenericTransactionIntent extra_inputs field + the \
-         ootle_build_faucet_claim entry point)"
+        s, "ootle-sdk-ffi-c/15",
+        "the ABI tag the Go SDK asserts against (bumped for the seed-based host contract + the inverted \
+         random/_with_seed naming)"
     );
     // Static pointer — explicitly NOT freed (freeing it would be UB).
 }
@@ -1223,7 +1261,10 @@ struct StealthSendArgs {
     fetched: CArg,
     spend_secrets: CArg,
     keys: CArg,
-    entropy: CArg,
+    /// The `{account_secret}`-only keys mirror for the random-nonce default symbols.
+    account_only_keys: CArg,
+    /// The fixture's build seed (lowercase hex) for the `_with_seed` build symbols.
+    seed_hex: CArg,
 }
 
 fn stealth_send_args(fx: &serde_json::Value) -> StealthSendArgs {
@@ -1233,13 +1274,15 @@ fn stealth_send_args(fx: &serde_json::Value) -> StealthSendArgs {
     let empty = serde_json::Value::Array(vec![]);
     let fetched = input.get("fetched").unwrap_or(&empty);
     let spend_secrets = input.get("spend_secrets").unwrap_or(&empty);
+    let account_only = serde_json::json!({ "account_secret": input["stealth_keys"]["account_secret"] });
     StealthSendArgs {
         network: network_byte(&input["network"]),
         intent: CArg::new(&serde_json::to_string(&input["stealth_intent"]).unwrap()),
         fetched: CArg::new(&serde_json::to_string(fetched).unwrap()),
         spend_secrets: CArg::new(&serde_json::to_string(spend_secrets).unwrap()),
         keys: CArg::new(&serde_json::to_string(&input["stealth_keys"]).unwrap()),
-        entropy: CArg::new(&serde_json::to_string(&input["stealth_entropy"]).unwrap()),
+        account_only_keys: CArg::new(&serde_json::to_string(&account_only).unwrap()),
+        seed_hex: CArg::new(input["stealth_keys"]["seed"].as_str().expect("stealth_keys.seed hex")),
     }
 }
 
@@ -1301,13 +1344,12 @@ fn stealth_one_shot_send_round_trips() {
     let a = stealth_send_args(&fx);
 
     let result = unsafe {
-        ootle_build_and_encode_stealth_transfer(
+        ootle_build_and_encode_stealth_transfer_with_seed(
             a.network,
             a.intent.ptr(),
             a.fetched.ptr(),
             a.spend_secrets.ptr(),
             a.keys.ptr(),
-            a.entropy.ptr(),
         )
     };
     assert!(ok(&result), "stealth one-shot failed: {}", error_code(&result));
@@ -1327,7 +1369,7 @@ fn stealth_two_phase_handle_flow() {
 
     // 1) build → dedicated stealth handle + want list (no stealth inputs ⇒ only the from-account component + vault
     //    wants, no stealth_utxo want).
-    let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr(), a.entropy.ptr()) };
+    let built = unsafe { ootle_build_stealth_unsigned_with_seed(a.network, a.intent.ptr(), a.seed_hex.ptr()) };
     assert!(ok(&built), "stealth build failed: {}", error_code(&built));
     assert!(!built.handle.is_null(), "stealth build returns a handle");
     let want_body = data_json(&built);
@@ -1356,7 +1398,7 @@ fn stealth_two_phase_handle_flow() {
     unsafe { ootle_result_free(applied) };
 
     // 2b) seal → consumes the handle, returns encoded bytes, no handle.
-    let sealed = unsafe { ootle_seal_and_encode_stealth(resolved, a.network, a.keys.ptr(), a.entropy.ptr()) };
+    let sealed = unsafe { ootle_seal_and_encode_stealth_with_seed(resolved, a.network, a.keys.ptr()) };
     assert!(ok(&sealed), "stealth seal failed: {}", error_code(&sealed));
     assert!(sealed.handle.is_null(), "stealth seal returns no handle");
     assert_well_formed_encoded(&data_json(&sealed));
@@ -1379,7 +1421,7 @@ fn stealth_two_phase_multi_round_converges() {
     let utxo_id = all_fetched[0]["substate_id"].as_str().unwrap().to_string();
 
     // 1) build → handle + a want list naming the from-account component + vault plus the stealth UTXO.
-    let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr(), a.entropy.ptr()) };
+    let built = unsafe { ootle_build_stealth_unsigned_with_seed(a.network, a.intent.ptr(), a.seed_hex.ptr()) };
     assert!(ok(&built), "stealth build failed: {}", error_code(&built));
     let want_body = data_json(&built);
     let wants = want_body["want_list"].as_array().expect("want_list array");
@@ -1425,7 +1467,7 @@ fn stealth_two_phase_multi_round_converges() {
     unsafe { ootle_result_free(applied2) };
 
     // Seal → a well-formed encoded transfer (semantic compare for stealth send).
-    let sealed = unsafe { ootle_seal_and_encode_stealth(resolved, a.network, a.keys.ptr(), a.entropy.ptr()) };
+    let sealed = unsafe { ootle_seal_and_encode_stealth_with_seed(resolved, a.network, a.keys.ptr()) };
     assert!(ok(&sealed), "stealth seal failed: {}", error_code(&sealed));
     assert_well_formed_encoded(&data_json(&sealed));
     unsafe { ootle_result_free(sealed) };
@@ -1440,7 +1482,7 @@ fn stealth_apply_missing_required_utxo_errors() {
     let fx = load_fixture("stealth_transfer/stealth_seal_with_input.json");
     let a = stealth_send_args(&fx);
 
-    let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr(), a.entropy.ptr()) };
+    let built = unsafe { ootle_build_stealth_unsigned_with_seed(a.network, a.intent.ptr(), a.seed_hex.ptr()) };
     assert!(ok(&built));
     let mut handle = built.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(built) };
@@ -1475,7 +1517,7 @@ fn abandoned_stealth_handle_is_freed_cleanly() {
     let fx = load_fixture("stealth_transfer/stealth_seal_with_input.json");
     let a = stealth_send_args(&fx);
 
-    let built = unsafe { ootle_build_stealth_unsigned(a.network, a.intent.ptr(), a.entropy.ptr()) };
+    let built = unsafe { ootle_build_stealth_unsigned_with_seed(a.network, a.intent.ptr(), a.seed_hex.ptr()) };
     assert!(ok(&built));
     let handle = built.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(built) };
@@ -1730,14 +1772,7 @@ fn stealth_error_envelopes() {
     // Malformed intent JSON → PARSE.
     let bad_intent = CArg::new("{ not json");
     let r = unsafe {
-        ootle_build_and_encode_stealth_transfer(
-            net,
-            bad_intent.ptr(),
-            empty.ptr(),
-            empty.ptr(),
-            empty_obj.ptr(),
-            empty_obj.ptr(),
-        )
+        ootle_build_and_encode_stealth_transfer(net, bad_intent.ptr(), empty.ptr(), empty.ptr(), empty_obj.ptr())
     };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "PARSE");
@@ -1746,7 +1781,7 @@ fn stealth_error_envelopes() {
     unsafe { ootle_result_free(r) };
 
     // Null intent → INVALID.
-    let r = unsafe { ootle_build_stealth_unsigned(net, std::ptr::null(), empty_obj.ptr()) };
+    let r = unsafe { ootle_build_stealth_unsigned(net, std::ptr::null()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
@@ -1765,21 +1800,14 @@ fn stealth_error_envelopes() {
     unsafe { ootle_result_free(r) };
 
     // Null handle to stealth seal → INVALID.
-    let r = unsafe { ootle_seal_and_encode_stealth(std::ptr::null_mut(), net, empty_obj.ptr(), empty_obj.ptr()) };
+    let r = unsafe { ootle_seal_and_encode_stealth(std::ptr::null_mut(), net, empty_obj.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
 
     // Unknown network byte → INVALID.
     let r = unsafe {
-        ootle_build_and_encode_stealth_transfer(
-            0xff,
-            empty_obj.ptr(),
-            empty.ptr(),
-            empty.ptr(),
-            empty_obj.ptr(),
-            empty_obj.ptr(),
-        )
+        ootle_build_and_encode_stealth_transfer(0xff, empty_obj.ptr(), empty.ptr(), empty.ptr(), empty_obj.ptr())
     };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
@@ -1793,13 +1821,12 @@ fn stealth_error_envelopes() {
 fn seal_stealth_hex(fx: &serde_json::Value) -> String {
     let a = stealth_send_args(fx);
     let sealed = unsafe {
-        ootle_build_and_encode_stealth_transfer(
+        ootle_build_and_encode_stealth_transfer_with_seed(
             a.network,
             a.intent.ptr(),
             a.fetched.ptr(),
             a.spend_secrets.ptr(),
             a.keys.ptr(),
-            a.entropy.ptr(),
         )
     };
     assert!(ok(&sealed), "seal for validate test failed: {}", error_code(&sealed));
@@ -1929,7 +1956,7 @@ fn stealth_validate_error_envelopes() {
 struct OutputsStatementArgs {
     network: u8,
     intent: CArg,
-    entropy: CArg,
+    seed_hex: CArg,
 }
 
 fn outputs_statement_args(fx: &serde_json::Value) -> OutputsStatementArgs {
@@ -1937,7 +1964,7 @@ fn outputs_statement_args(fx: &serde_json::Value) -> OutputsStatementArgs {
     OutputsStatementArgs {
         network: network_byte(&input["network"]),
         intent: CArg::new(&serde_json::to_string(&input["stealth_intent"]).unwrap()),
-        entropy: CArg::new(&serde_json::to_string(&input["stealth_entropy"]).unwrap()),
+        seed_hex: CArg::new(input["stealth_seed"].as_str().expect("stealth_seed hex")),
     }
 }
 
@@ -1953,8 +1980,9 @@ fn stealth_build_outputs_statement_reproduces_vector_fields() {
         let fx = load_fixture(rel);
         let args = outputs_statement_args(&fx);
 
-        let result =
-            unsafe { ootle_build_stealth_outputs_statement(args.network, args.intent.ptr(), args.entropy.ptr()) };
+        let result = unsafe {
+            ootle_build_stealth_outputs_statement_with_seed(args.network, args.intent.ptr(), args.seed_hex.ptr())
+        };
         assert!(ok(&result), "fixture {rel}: build failed: {}", error_code(&result));
         assert!(
             result.handle.is_null(),
@@ -1994,8 +2022,8 @@ fn stealth_build_outputs_statement_reproduces_vector_fields() {
     }
 }
 
-/// Error envelopes: malformed intent → PARSE; entropy/output length mismatch → VALIDATION; null arg →
-/// INVALID; unknown network → INVALID.
+/// Error envelopes: malformed intent → PARSE; all-zero seed → VALIDATION; bad seed hex → PARSE; null
+/// arg → INVALID; unknown network → INVALID.
 #[test]
 fn stealth_build_outputs_statement_error_envelopes() {
     let fx = load_fixture("stealth_outputs_statement/single_output_no_view_key.json");
@@ -2004,35 +2032,34 @@ fn stealth_build_outputs_statement_error_envelopes() {
 
     // Malformed intent JSON → PARSE.
     let bad_intent = CArg::new("{not json");
-    let r = unsafe { ootle_build_stealth_outputs_statement(net, bad_intent.ptr(), args.entropy.ptr()) };
+    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, bad_intent.ptr(), args.seed_hex.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "PARSE");
     assert!(r.handle.is_null());
     unsafe { ootle_result_free(r) };
 
-    // Empty entropy.per_output against a non-empty intent.outputs → VALIDATION (core length check).
-    let empty_entropy = serde_json::json!({
-        "per_output": [],
-        "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
-        "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
-        "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
-        "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
-        "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
-    });
-    let empty_entropy = CArg::new(&empty_entropy.to_string());
-    let r = unsafe { ootle_build_stealth_outputs_statement(net, args.intent.ptr(), empty_entropy.ptr()) };
+    // An all-zero seed is rejected by the rail → VALIDATION.
+    let zero_seed = CArg::new(&"00".repeat(32));
+    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, args.intent.ptr(), zero_seed.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "VALIDATION");
     unsafe { ootle_result_free(r) };
 
+    // A wrong-length seed hex → PARSE.
+    let short_seed = CArg::new(&"aa".repeat(16));
+    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, args.intent.ptr(), short_seed.ptr()) };
+    assert!(!ok(&r));
+    assert_eq!(error_code(&r), "PARSE");
+    unsafe { ootle_result_free(r) };
+
     // Null intent arg → INVALID.
-    let r = unsafe { ootle_build_stealth_outputs_statement(net, std::ptr::null(), args.entropy.ptr()) };
+    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, std::ptr::null(), args.seed_hex.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
 
     // Unknown network byte → INVALID.
-    let r = unsafe { ootle_build_stealth_outputs_statement(0xff, args.intent.ptr(), args.entropy.ptr()) };
+    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(0xff, args.intent.ptr(), args.seed_hex.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
@@ -2216,8 +2243,7 @@ fn no_leaks_over_many_round_trips() {
                 s.intent.ptr(),
                 s.fetched.ptr(),
                 s.spend_secrets.ptr(),
-                s.keys.ptr(),
-                s.entropy.ptr(),
+                s.account_only_keys.ptr(),
             )
         };
         assert!(ok(&sr));
@@ -2226,7 +2252,7 @@ fn no_leaks_over_many_round_trips() {
         // stealth two-phase send (build → apply×2 over the NeedMore loop → seal, threading +
         // consuming the dedicated stealth handle). Round 1 supplies an empty batch (need_more), round
         // 2 supplies the input UTXO (resolved) — exercising the multi-round path inside the leak loop.
-        let sbuilt = unsafe { ootle_build_stealth_unsigned(s.network, s.intent.ptr(), s.entropy.ptr()) };
+        let sbuilt = unsafe { ootle_build_stealth_unsigned(s.network, s.intent.ptr()) };
         assert!(ok(&sbuilt));
         let mut sh = sbuilt.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
         unsafe { ootle_result_free(sbuilt) };
@@ -2244,7 +2270,7 @@ fn no_leaks_over_many_round_trips() {
         sh = sapplied2.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
         unsafe { ootle_result_free(sapplied2) };
 
-        let ssealed = unsafe { ootle_seal_and_encode_stealth(sh, s.network, s.keys.ptr(), s.entropy.ptr()) };
+        let ssealed = unsafe { ootle_seal_and_encode_stealth(sh, s.network, s.account_only_keys.ptr()) };
         assert!(ok(&ssealed));
         let sealed_hex = data_json(&ssealed)["encoded_transaction"]
             .as_str()
@@ -2263,7 +2289,7 @@ fn no_leaks_over_many_round_trips() {
         // a public consumer + the public free must be rejected WITHOUT consuming/freeing it, then freed
         // correctly with the stealth free fn. A wrong-kind consume that leaked (or a wrong-kind free
         // that double-freed) would show up here as net growth across the loop.
-        let smis = unsafe { ootle_build_stealth_unsigned(s.network, s.intent.ptr(), s.entropy.ptr()) };
+        let smis = unsafe { ootle_build_stealth_unsigned(s.network, s.intent.ptr()) };
         assert!(ok(&smis));
         let smis_handle = smis.handle; // cross-cast `*mut OotlePartialTransaction`
         unsafe { ootle_result_free(smis) };
@@ -2309,7 +2335,8 @@ fn no_leaks_over_many_round_trips() {
         unsafe { ootle_result_free(fscan) };
 
         // stealth build outputs statement: deterministic statement + mask.
-        let ostmt = unsafe { ootle_build_stealth_outputs_statement(os.network, os.intent.ptr(), os.entropy.ptr()) };
+        let ostmt =
+            unsafe { ootle_build_stealth_outputs_statement_with_seed(os.network, os.intent.ptr(), os.seed_hex.ptr()) };
         assert!(ok(&ostmt));
         unsafe { ootle_result_free(ostmt) };
 

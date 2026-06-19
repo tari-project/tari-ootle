@@ -39,8 +39,8 @@ use ootle_sdk_core::{
     StealthKeys,
     account_balances,
     apply_fetched_substates,
-    build_and_encode_public_transfer,
-    build_and_encode_stealth_transfer_deterministic,
+    build_and_encode_public_transfer_with_seed,
+    build_and_encode_stealth_transfer_with_seed,
     build_faucet_claim_with_wants,
     decode_stealth_utxo,
     decode_substate,
@@ -52,11 +52,11 @@ use ootle_sdk_core::{
     keys::DeterministicTransferKeys,
     parse_address,
     parse_finalized_result,
-    resolve_and_encode_instructions,
-    resolve_and_encode_public_transfer,
-    seal_and_encode_public_transfer,
+    resolve_and_encode_instructions_with_seed,
+    resolve_and_encode_public_transfer_with_seed,
+    seal_and_encode_public_transfer_with_seed,
     types::{
-        bytes::{NonceSecretBytes, PublicKeyBytes, SecretKeyBytes},
+        bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
         intent::PublicTransferIntent,
         network::Network,
     },
@@ -316,12 +316,13 @@ pub struct VectorInput {
     /// The stealth transfer intent. Present only for `build_stealth_outputs_statement` vectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stealth_intent: Option<ootle_sdk_core::types::stealth::StealthTransferIntent>,
-    /// The pinned stealth entropy. Present for `build_stealth_outputs_statement` and the
-    /// full `build_and_encode_stealth_transfer` vectors.
+    /// The build seed expanded into the stealth proof entropy. Present only for the
+    /// `build_stealth_outputs_statement` vectors (the full-send vectors carry their seed in
+    /// `stealth_keys.seed`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stealth_entropy: Option<ootle_sdk_core::types::stealth::StealthEntropy>,
-    /// The pinned stealth seal-key bundle. Present only for `build_and_encode_stealth_transfer`
-    /// vectors.
+    pub stealth_seed: Option<BuildSeed>,
+    /// The pinned stealth seal-key bundle (carries the build seed). Present only for
+    /// `build_and_encode_stealth_transfer` vectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stealth_keys: Option<VectorStealthKeys>,
     /// The per-input view-only spend secrets (positional, one per `stealth_intent.inputs`) that
@@ -383,10 +384,10 @@ pub struct VectorInput {
     /// Party B's co-signer secret key, feeding the co-sign ops. Present only for the co-sign vectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cosign_signer_secret: Option<SecretKeyBytes>,
-    /// Party B's pinned authorization nonce secret (deterministic co-sign). Present only for the
-    /// co-sign vectors.
+    /// Party B's build seed, expanded into the cosign authorization nonce (seed-reproducible co-sign).
+    /// Present only for the co-sign vectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cosign_signer_nonce: Option<NonceSecretBytes>,
+    pub cosign_signer_seed: Option<BuildSeed>,
 }
 
 /// The arguments to [`ootle_sdk_core::scan_stealth_output`], serialized language-neutrally
@@ -413,20 +414,14 @@ pub struct StealthScanInput {
 pub struct VectorStealthKeys {
     /// The account secret key.
     pub account_secret: SecretKeyBytes,
-    /// The pinned account-key authorization nonce.
-    pub auth_nonce: NonceSecretBytes,
-    /// The pinned account-key seal nonce.
-    pub seal_nonce: NonceSecretBytes,
+    /// The build seed expanded into the account-key authorization + seal nonces.
+    pub seed: BuildSeed,
 }
 
 impl VectorStealthKeys {
     /// Reconstitutes the core stealth seal-key bundle.
     pub fn to_core(&self) -> StealthKeys {
-        StealthKeys::new(
-            self.account_secret.clone(),
-            self.auth_nonce.clone(),
-            self.seal_nonce.clone(),
-        )
+        StealthKeys::new(self.account_secret.clone(), self.seed)
     }
 }
 
@@ -437,10 +432,8 @@ impl VectorStealthKeys {
 pub struct VectorKeys {
     /// The account secret key (authorization signer + seal signer for the single-key path).
     pub account_secret: SecretKeyBytes,
-    /// The pinned nonce secret for the authorization signature.
-    pub auth_nonce: NonceSecretBytes,
-    /// The pinned nonce secret for the seal signature.
-    pub seal_nonce: NonceSecretBytes,
+    /// The build seed the seal expands into the pinned authorization + seal nonces.
+    pub seed: BuildSeed,
     /// `None` ⇒ single-key (account key seals); `Some` ⇒ a distinct seal signer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seal_secret: Option<SecretKeyBytes>,
@@ -450,17 +443,10 @@ impl VectorKeys {
     /// Reconstitutes the core key bundle the operation consumes.
     pub fn to_core(&self) -> DeterministicTransferKeys {
         match &self.seal_secret {
-            None => DeterministicTransferKeys::single_key(
-                self.account_secret.clone(),
-                self.auth_nonce.clone(),
-                self.seal_nonce.clone(),
-            ),
-            Some(seal_secret) => DeterministicTransferKeys::separate_signer(
-                self.account_secret.clone(),
-                self.auth_nonce.clone(),
-                seal_secret.clone(),
-                self.seal_nonce.clone(),
-            ),
+            None => DeterministicTransferKeys::single_key(self.account_secret.clone(), self.seed),
+            Some(seal_secret) => {
+                DeterministicTransferKeys::separate_signer(self.account_secret.clone(), seal_secret.clone(), self.seed)
+            },
         }
     }
 }
@@ -589,7 +575,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 .keys
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: encode op requires `input.keys`", fixture.name));
-            let out = build_and_encode_public_transfer(network, intent, &keys.to_core())
+            let out = build_and_encode_public_transfer_with_seed(network, intent, &keys.to_core())
                 .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
             ExpectedOutput {
                 encoded_transaction: out.encoded_transaction.to_hex(),
@@ -616,7 +602,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                     fixture.name
                 )
             });
-            let out = resolve_and_encode_public_transfer(network, intent, fetched, &keys.to_core())
+            let out = resolve_and_encode_public_transfer_with_seed(network, intent, fetched, &keys.to_core())
                 .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
             ExpectedOutput {
                 encoded_transaction: out.encoded_transaction.to_hex(),
@@ -640,7 +626,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: encode op requires `input.keys`", fixture.name));
             let fetched = input.fetched.as_deref().unwrap_or(&[]);
-            let out = resolve_and_encode_instructions(network, intent, fetched, &keys.to_core())
+            let out = resolve_and_encode_instructions_with_seed(network, intent, fetched, &keys.to_core())
                 .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
             ExpectedOutput {
                 encoded_transaction: out.encoded_transaction.to_hex(),
@@ -676,7 +662,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                     fixture.name
                 ),
             };
-            let out = seal_and_encode_public_transfer(resolved, &keys.to_core())
+            let out = seal_and_encode_public_transfer_with_seed(resolved, &keys.to_core())
                 .unwrap_or_else(|e| panic!("fixture `{}`: seal failed: {e}", fixture.name));
             ExpectedOutput {
                 encoded_transaction: out.encoded_transaction.to_hex(),
@@ -712,14 +698,11 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 .stealth_intent
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: stealth op requires `input.stealth_intent`", fixture.name));
-            let entropy = input.stealth_entropy.as_ref().unwrap_or_else(|| {
-                panic!(
-                    "fixture `{}`: stealth op requires `input.stealth_entropy`",
-                    fixture.name
-                )
-            });
+            let seed = input
+                .stealth_seed
+                .unwrap_or_else(|| panic!("fixture `{}`: stealth op requires `input.stealth_seed`", fixture.name));
             let (stmt, mask) =
-                ootle_sdk_core::stealth::build_stealth_outputs_statement_deterministic(network, intent, entropy)
+                ootle_sdk_core::stealth::build_stealth_outputs_statement_with_seed(network, intent, &seed)
                     .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
             // Record the deterministic fields: serialize the statement, then null out the
             // (byte-unstable) aggregated range proof so the semantic compare is stable.
@@ -744,24 +727,20 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                     fixture.name
                 )
             });
-            let entropy = input.stealth_entropy.as_ref().unwrap_or_else(|| {
-                panic!(
-                    "fixture `{}`: stealth send requires `input.stealth_entropy`",
-                    fixture.name
-                )
-            });
             let keys = input
                 .stealth_keys
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: stealth send requires `input.stealth_keys`", fixture.name));
             let fetched = input.fetched.as_deref().unwrap_or(&[]);
-            let out = build_and_encode_stealth_transfer_deterministic(
+            // The keys bundle's build seed drives both the account-key nonces and the proof entropy.
+            let seed = keys.seed;
+            let out = build_and_encode_stealth_transfer_with_seed(
                 network,
                 intent,
                 fetched,
                 &input.spend_secrets,
                 &keys.to_core(),
-                entropy,
+                &seed,
             )
             .unwrap_or_else(|e| panic!("fixture `{}`: stealth send failed: {e}", fixture.name));
             ExpectedOutput {
@@ -962,8 +941,8 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
             }
         },
         OP_COSIGN_ADD_SIGNATURE => {
-            let (record, seal_pk, signer_secret, nonce) = cosign_authorize_inputs(fixture);
-            let auth = ootle_sdk_core::add_signature(&record, &seal_pk, &signer_secret, &nonce)
+            let (record, seal_pk, signer_secret, seed) = cosign_authorize_inputs(fixture);
+            let auth = ootle_sdk_core::add_signature_with_seed(&record, &seal_pk, &signer_secret, &seed)
                 .unwrap_or_else(|e| panic!("fixture `{}`: cosign add_signature failed: {e}", fixture.name));
             let value = serde_json::to_value(&auth).expect("Authorization serializes");
             ExpectedOutput {
@@ -972,15 +951,15 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
             }
         },
         OP_COSIGN_SEAL_WITH_AUTH => {
-            let (record, seal_pk, signer_secret, nonce) = cosign_authorize_inputs(fixture);
-            let auth = ootle_sdk_core::add_signature(&record, &seal_pk, &signer_secret, &nonce)
+            let (record, seal_pk, signer_secret, seed) = cosign_authorize_inputs(fixture);
+            let auth = ootle_sdk_core::add_signature_with_seed(&record, &seal_pk, &signer_secret, &seed)
                 .unwrap_or_else(|e| panic!("fixture `{}`: cosign add_signature failed: {e}", fixture.name));
             let keys = fixture
                 .input
                 .keys
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: cosign seal requires `input.keys`", fixture.name));
-            let out = ootle_sdk_core::seal_and_encode_with_auth(
+            let out = ootle_sdk_core::seal_and_encode_with_auth_with_seed(
                 cosign_resolved_partial(fixture),
                 &keys.to_core(),
                 std::slice::from_ref(&auth),
@@ -1037,7 +1016,7 @@ fn cosign_authorize_inputs(
     ootle_sdk_core::UnsignedTransactionRecord,
     PublicKeyBytes,
     SecretKeyBytes,
-    NonceSecretBytes,
+    BuildSeed,
 ) {
     let record = ootle_sdk_core::unsigned_record_for_cosign(&cosign_resolved_partial(fixture))
         .unwrap_or_else(|e| panic!("fixture `{}`: unsigned_record_for_cosign failed: {e}", fixture.name));
@@ -1054,13 +1033,13 @@ fn cosign_authorize_inputs(
             fixture.name
         )
     });
-    let nonce = fixture.input.cosign_signer_nonce.clone().unwrap_or_else(|| {
+    let seed = fixture.input.cosign_signer_seed.unwrap_or_else(|| {
         panic!(
-            "fixture `{}`: cosign op requires `input.cosign_signer_nonce`",
+            "fixture `{}`: cosign op requires `input.cosign_signer_seed`",
             fixture.name
         )
     });
-    (record, seal_pk, signer_secret, nonce)
+    (record, seal_pk, signer_secret, seed)
 }
 
 /// Decodes a keygen fixture's lowercase-hex `input.seed` into a fixed 32-byte seed (panics with a clear
@@ -1180,7 +1159,7 @@ pub fn provenance_with_rev(git_rev: &str) -> Provenance {
     Provenance {
         core_version: env!("CARGO_PKG_VERSION").to_string(),
         git_rev: git_rev.to_string(),
-        generated_by: "ootle-sdk-core golden-vector generator".to_string(),
+        generated_by: "ootle_sdk_core golden-vector generator".to_string(),
     }
 }
 

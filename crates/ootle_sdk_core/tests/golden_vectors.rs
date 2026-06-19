@@ -72,7 +72,7 @@ use ootle_sdk_core::{
     InstructionSpec,
     types::{
         address::{ComponentAddressStr, ResourceAddressStr},
-        bytes::{NonceSecretBytes, PublicKeyBytes, SecretKeyBytes},
+        bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
         intent::{InputRef, PublicTransferIntent, TransferRecipient},
         network::Network,
         numeric::BoundaryAmount,
@@ -172,8 +172,7 @@ fn sample_input() -> VectorInput {
 
     let keys = VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(11)),
-        auth_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(22)),
-        seal_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(33)),
+        seed: BuildSeed::from_array([22u8; 32]),
         seal_secret: None,
     };
 
@@ -227,8 +226,7 @@ fn single_key_basic_input() -> VectorInput {
 
     let keys = VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(101)),
-        auth_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(102)),
-        seal_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(103)),
+        seed: BuildSeed::from_array([102u8; 32]),
         seal_secret: None,
     };
 
@@ -366,8 +364,7 @@ fn resolve_single_key_basic_input() -> VectorInput {
 
     let keys = VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(111)),
-        auth_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(112)),
-        seal_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(113)),
+        seed: BuildSeed::from_array([112u8; 32]),
         seal_secret: None,
     };
 
@@ -644,44 +641,15 @@ fn stealth_pk(seed: u8) -> PublicKeyBytes {
     PublicKeyBytes::from_bytes(pk.as_bytes()).expect("32-byte pk")
 }
 
-/// A fixed canonical secret scalar as a boundary `SecretKeyBytes`.
-fn stealth_secret(seed: u8) -> SecretKeyBytes {
-    SecretKeyBytes::from_array(fixed_scalar_bytes(seed))
-}
-
 /// The TARI stealth resource address as a boundary string.
 fn stealth_resource() -> ResourceAddressStr {
     ResourceAddressStr::parse(tari_template_lib_types::constants::STEALTH_TARI_RESOURCE_ADDRESS.to_string())
         .expect("valid resource")
 }
 
-/// One pinned per-output entropy slice (with or without the ElGamal/ZK nonces for a view-key output).
-fn stealth_per_output(base: u8, with_view: bool) -> ootle_sdk_core::types::stealth::PerOutputEntropy {
-    ootle_sdk_core::types::stealth::PerOutputEntropy {
-        mask: stealth_secret(base),
-        sender_nonce: stealth_secret(base + 1),
-        aead_nonce: stealth_secret(base + 2),
-        elgamal_nonce: with_view.then(|| stealth_secret(base + 3)),
-        zk_nonces: with_view.then(|| {
-            [
-                stealth_secret(base + 4),
-                stealth_secret(base + 5),
-                stealth_secret(base + 6),
-            ]
-        }),
-    }
-}
-
-/// The pinned entropy bundle for a single-output stealth vector.
-fn stealth_entropy(base: u8, with_view: bool) -> ootle_sdk_core::types::stealth::StealthEntropy {
-    ootle_sdk_core::types::stealth::StealthEntropy {
-        per_output: vec![stealth_per_output(base, with_view)],
-        balance_proof_nonce: stealth_secret(200),
-        bulletproof_seed: stealth_secret(201),
-        ephemeral_seal_nonce: stealth_secret(202),
-        ephemeral_auth_nonce: stealth_secret(203),
-        ephemeral_sign_nonce: stealth_secret(204),
-    }
+/// A fixed build seed (per-fixture-distinct via `byte`) the stealth ops expand into proof entropy.
+fn stealth_build_seed(byte: u8) -> BuildSeed {
+    BuildSeed::from_array([byte; 32])
 }
 
 /// Builds a single-output stealth intent (optionally with a resource view key).
@@ -720,7 +688,7 @@ fn stealth_intent(amount: u64, with_view: bool) -> ootle_sdk_core::types::stealt
 fn stealth_fixture_seed(
     name: &str,
     intent: ootle_sdk_core::types::stealth::StealthTransferIntent,
-    entropy: ootle_sdk_core::types::stealth::StealthEntropy,
+    seed: BuildSeed,
 ) -> Fixture {
     Fixture {
         name: name.to_string(),
@@ -731,7 +699,7 @@ fn stealth_fixture_seed(
         input: VectorInput {
             network: Some(Network::Esmeralda),
             stealth_intent: Some(intent),
-            stealth_entropy: Some(entropy),
+            stealth_seed: Some(seed),
             ..Default::default()
         },
         expected: harness::ExpectedOutput::default(),
@@ -743,7 +711,7 @@ fn stealth_single_output_seed() -> Fixture {
     stealth_fixture_seed(
         "stealth_outputs_statement/single_output_no_view_key",
         stealth_intent(1_000_000, false),
-        stealth_entropy(70, false),
+        stealth_build_seed(70),
     )
 }
 
@@ -752,7 +720,7 @@ fn stealth_view_key_output_seed() -> Fixture {
     stealth_fixture_seed(
         "stealth_outputs_statement/single_output_with_view_key",
         stealth_intent(2_500_000, true),
-        stealth_entropy(80, true),
+        stealth_build_seed(80),
     )
 }
 
@@ -794,11 +762,12 @@ const STEALTH_TRANSFER_VECTORS: &[(&str, fn() -> Fixture)] = &[
 ];
 
 /// The pinned stealth seal-key bundle the send vectors use (canonical low scalars).
-fn stealth_send_keys() -> VectorStealthKeys {
+fn stealth_send_keys(seed_byte: u8) -> VectorStealthKeys {
     VectorStealthKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(11)),
-        auth_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(22)),
-        seal_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(33)),
+        // The build seed expands into both the account-key nonces and the proof entropy; a distinct
+        // byte per fixture keeps the vectors independent.
+        seed: BuildSeed::from_array([seed_byte; 32]),
     }
 }
 
@@ -922,8 +891,7 @@ fn stealth_send_stealth_seal_seed() -> Fixture {
     let input = VectorInput {
         network: Some(Network::Esmeralda),
         stealth_intent: Some(intent),
-        stealth_entropy: Some(stealth_entropy(90, false)),
-        stealth_keys: Some(stealth_send_keys()),
+        stealth_keys: Some(stealth_send_keys(90)),
         fetched: Some(fetched),
         spend_secrets: vec![SecretKeyBytes::from_bytes(view_secret.as_bytes()).expect("32-byte secret")],
         ..Default::default()
@@ -951,8 +919,7 @@ fn stealth_send_account_key_seed() -> Fixture {
     let input = VectorInput {
         network: Some(Network::Esmeralda),
         stealth_intent: Some(intent),
-        stealth_entropy: Some(stealth_entropy(110, false)),
-        stealth_keys: Some(stealth_send_keys()),
+        stealth_keys: Some(stealth_send_keys(110)),
         ..Default::default()
     };
     stealth_send_fixture_seed("stealth_transfer/account_key_seal_with_revealed_input", input)
@@ -981,8 +948,7 @@ fn stealth_send_revealed_output_single_seed() -> Fixture {
     let input = VectorInput {
         network: Some(Network::Esmeralda),
         stealth_intent: Some(intent),
-        stealth_entropy: Some(stealth_entropy(130, false)),
-        stealth_keys: Some(stealth_send_keys()),
+        stealth_keys: Some(stealth_send_keys(130)),
         ..Default::default()
     };
     stealth_send_fixture_seed("stealth_transfer/revealed_output_single", input)
@@ -994,7 +960,7 @@ fn stealth_send_revealed_output_single_seed() -> Fixture {
 /// 1_500_000. The deposit fold emits a `take_from_bucket` + `create_account_with_bucket` per output
 /// (`output-sub-bucket-{i}`). `revealed_input > 0` ⇒ account-key seal.
 fn stealth_send_revealed_output_multi_seed() -> Fixture {
-    use ootle_sdk_core::types::stealth::{StealthEntropy, StealthTransferIntent};
+    use ootle_sdk_core::types::stealth::StealthTransferIntent;
     let intent = StealthTransferIntent {
         from_account: stealth_send_from_component(),
         resource_address: stealth_resource(),
@@ -1011,20 +977,10 @@ fn stealth_send_revealed_output_multi_seed() -> Fixture {
         dry_run: false,
         pay_fee_from_revealed: false,
     };
-    // Two outputs ⇒ two pinned per-output entropy slices (no view keys).
-    let entropy = StealthEntropy {
-        per_output: vec![stealth_per_output(140, false), stealth_per_output(150, false)],
-        balance_proof_nonce: stealth_secret(200),
-        bulletproof_seed: stealth_secret(201),
-        ephemeral_seal_nonce: stealth_secret(202),
-        ephemeral_auth_nonce: stealth_secret(203),
-        ephemeral_sign_nonce: stealth_secret(204),
-    };
     let input = VectorInput {
         network: Some(Network::Esmeralda),
         stealth_intent: Some(intent),
-        stealth_entropy: Some(entropy),
-        stealth_keys: Some(stealth_send_keys()),
+        stealth_keys: Some(stealth_send_keys(140)),
         ..Default::default()
     };
     stealth_send_fixture_seed("stealth_transfer/revealed_output_multi", input)
@@ -1926,8 +1882,7 @@ fn generic_recipient_pk() -> PublicKeyBytes {
 fn generic_keys() -> VectorKeys {
     VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(74)),
-        auth_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(75)),
-        seal_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(76)),
+        seed: BuildSeed::from_array([75u8; 32]),
         seal_secret: None,
     }
 }
@@ -2187,8 +2142,8 @@ fn generic_seals_byte_identically_to_hand_built() {
         PartialTransaction,
         Resolution,
         apply_fetched_substates,
-        resolve_and_encode_instructions,
-        seal_and_encode_public_transfer,
+        resolve_and_encode_instructions_with_seed,
+        seal_and_encode_public_transfer_with_seed,
     };
     use tari_ootle_transaction::{TransactionBuilder, args};
 
@@ -2196,7 +2151,7 @@ fn generic_seals_byte_identically_to_hand_built() {
     let keys = generic_keys().to_core();
 
     // Generic front-end path.
-    let generic = resolve_and_encode_instructions(Network::Esmeralda, &intent, &[], &keys).unwrap();
+    let generic = resolve_and_encode_instructions_with_seed(Network::Esmeralda, &intent, &[], &keys).unwrap();
 
     // Hand-built path: the identical instruction sequence + the same seal/encode leaves. Inputs are
     // carried ONLY by `new_with_explicit_inputs` (the generic path also never calls `with_inputs`),
@@ -2215,7 +2170,7 @@ fn generic_seals_byte_identically_to_hand_built() {
         .build_unsigned();
     let partial = PartialTransaction::new_with_explicit_inputs(unsigned, vec![explicit_input]);
     let hand = match apply_fetched_substates(partial, &[]).unwrap() {
-        Resolution::Resolved(p) => seal_and_encode_public_transfer(p, &keys).unwrap(),
+        Resolution::Resolved(p) => seal_and_encode_public_transfer_with_seed(p, &keys).unwrap(),
         Resolution::NeedMore { .. } => panic!("expected Resolved"),
     };
 
@@ -2310,8 +2265,7 @@ fn cosign_a_seal_pk_hex() -> String {
 fn cosign_a_keys() -> VectorKeys {
     VectorKeys {
         account_secret: cosign_a_account_secret(),
-        auth_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(122)),
-        seal_nonce: NonceSecretBytes::from_array(fixed_scalar_bytes(125)),
+        seed: BuildSeed::from_array([122u8; 32]),
         seal_secret: None,
     }
 }
@@ -2338,7 +2292,7 @@ fn cosign_input() -> VectorInput {
         cosign_seal_pk: Some(cosign_a_seal_pk_hex()),
         // Party B's co-signer key (distinct from A) + pinned authorization nonce.
         cosign_signer_secret: Some(SecretKeyBytes::from_array(fixed_scalar_bytes(123))),
-        cosign_signer_nonce: Some(NonceSecretBytes::from_array(fixed_scalar_bytes(124))),
+        cosign_signer_seed: Some(BuildSeed::from_array([124u8; 32])),
         ..Default::default()
     }
 }
@@ -2471,9 +2425,9 @@ fn run_golden_vectors() {
             let input = &fixture.input;
             let network = input.network.expect("stealth fixture has a network");
             let intent = input.stealth_intent.as_ref().expect("stealth fixture has an intent");
-            let entropy = input.stealth_entropy.as_ref().expect("stealth fixture has entropy");
+            let seed = input.stealth_seed.expect("stealth fixture has a seed");
             let (stmt, _mask) =
-                ootle_sdk_core::stealth::build_stealth_outputs_statement_deterministic(network, intent, entropy)
+                ootle_sdk_core::stealth::build_stealth_outputs_statement_with_seed(network, intent, &seed)
                     .unwrap_or_else(|e| panic!("stealth fixture `{}`: build failed: {e}", fixture.name));
             // If any output carries a resource view key, the validator needs it (the viewable-balance
             // proof is checked against it). The vectors use a single resource view key per statement.
@@ -2540,21 +2494,18 @@ fn run_golden_vectors() {
                 .stealth_intent
                 .as_ref()
                 .expect("stealth-send fixture has an intent");
-            let entropy = input
-                .stealth_entropy
-                .as_ref()
-                .expect("stealth-send fixture has entropy");
             let keys = input.stealth_keys.as_ref().expect("stealth-send fixture has keys");
+            let seed = keys.seed;
             let fetched = input.fetched.as_deref().unwrap_or(&[]);
 
             // (1) Re-build, re-seal, and validate every signature on the freshly sealed transaction.
-            let out = ootle_sdk_core::build_and_encode_stealth_transfer_deterministic(
+            let out = ootle_sdk_core::build_and_encode_stealth_transfer_with_seed(
                 network,
                 intent,
                 fetched,
                 &input.spend_secrets,
                 &keys.to_core(),
-                entropy,
+                &seed,
             )
             .unwrap_or_else(|e| panic!("stealth-send fixture `{}`: build failed: {e}", fixture.name));
             let tx = tari_ootle_transaction::TransactionEnvelope::from_raw(

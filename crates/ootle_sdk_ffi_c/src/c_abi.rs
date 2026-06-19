@@ -23,14 +23,14 @@ use ootle_sdk_core::{
     PartialTransaction,
     Resolution,
     UnsignedTransactionRecord,
-    add_signature_production,
+    add_signature,
     apply_fetched_substates,
     build_and_encode_public_transfer,
-    build_and_encode_public_transfer_production,
+    build_and_encode_public_transfer_with_seed,
     build_faucet_claim_with_wants,
     build_public_transfer_unsigned_with_wants,
     build_unsigned_instructions_with_wants,
-    cosign::{seal_and_encode_with_auth, seal_and_encode_with_auth_production},
+    cosign::{seal_and_encode_with_auth, seal_and_encode_with_auth_with_seed},
     derive_account_address,
     derive_account_keypair_from_seed,
     derive_view_keypair_from_seed,
@@ -40,9 +40,9 @@ use ootle_sdk_core::{
     keys::{DeterministicTransferKeys, PublicTransferKeys},
     parse_address,
     parse_finalized_result,
-    resolved_transfer::{seal_and_encode_public_transfer, seal_and_encode_public_transfer_production},
+    resolved_transfer::{seal_and_encode_public_transfer, seal_and_encode_public_transfer_with_seed},
     types::{
-        bytes::{NonceSecretBytes, PublicKeyBytes, SecretKeyBytes},
+        bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
         error::OotleSdkError,
         generic_intent::GenericTransactionIntent,
         intent::PublicTransferIntent,
@@ -55,7 +55,7 @@ use serde::Deserialize;
 /// static pointer). The Go SDK asserts this at startup to detect a header/lib mismatch. Bump on any
 /// breaking ABI change (a changed signature, envelope layout, or handle contract) so a stale lib is
 /// caught loudly rather than mis-marshalled.
-const ABI_VERSION: &[u8] = b"ootle-sdk-ffi-c/14\0";
+const ABI_VERSION: &[u8] = b"ootle-sdk-ffi-c/15\0";
 
 /// The kind discriminant that guards opaque-handle **type confusion** across the FFI.
 ///
@@ -359,12 +359,12 @@ pub(crate) fn output_json<T: serde::Serialize>(value: &T, what: &str) -> Result<
 // --- Facade-local key mirrors (the core key bundles do not derive Deserialize) --------------------
 
 /// Wire mirror of [`DeterministicTransferKeys`] (the core type holds secret newtypes and does **not**
-/// derive `Deserialize`). All fields are lowercase hex.
+/// derive `Deserialize`). All fields are lowercase hex; `seed` is the 32-byte build seed the seal
+/// expands into its pinned nonces.
 #[derive(Debug, Deserialize)]
 struct DeterministicKeysJson {
     account_secret: SecretKeyBytes,
-    auth_nonce: NonceSecretBytes,
-    seal_nonce: NonceSecretBytes,
+    seed: BuildSeed,
     #[serde(default)]
     seal_secret: Option<SecretKeyBytes>,
 }
@@ -372,13 +372,10 @@ struct DeterministicKeysJson {
 impl DeterministicKeysJson {
     fn into_core(self) -> DeterministicTransferKeys {
         match self.seal_secret {
-            None => DeterministicTransferKeys::single_key(self.account_secret, self.auth_nonce, self.seal_nonce),
-            Some(seal_secret) => DeterministicTransferKeys::separate_signer(
-                self.account_secret,
-                self.auth_nonce,
-                seal_secret,
-                self.seal_nonce,
-            ),
+            None => DeterministicTransferKeys::single_key(self.account_secret, self.seed),
+            Some(seal_secret) => {
+                DeterministicTransferKeys::separate_signer(self.account_secret, seal_secret, self.seed)
+            },
         }
     }
 }
@@ -432,7 +429,7 @@ impl ViewKeyPairJson {
 
 /// Decodes a `seed_hex` argument into a fixed 32-byte seed, mapping any bad/odd/uppercase hex or a
 /// wrong length to a `PARSE` envelope.
-fn seed_from_hex(seed_hex: &str) -> Result<[u8; 32], OotleResult> {
+pub(crate) fn seed_from_hex(seed_hex: &str) -> Result<[u8; 32], OotleResult> {
     if seed_hex.chars().any(|c| c.is_ascii_uppercase()) {
         return Err(OotleResult::err("PARSE", "seed_hex must be lowercase hex"));
     }
@@ -516,11 +513,12 @@ pub(crate) fn flatten(r: Result<OotleResult, OotleResult>) -> OotleResult {
 
 // --- One-shot ops ---------------------------------------------------------------------------------
 
-/// Builds, deterministically seals (pinned nonces) and BOR-encodes a public transfer in one call.
+/// Builds, seal+encodes a public transfer in one call (random-nonce default: a fresh OS-RNG seed).
 ///
-/// `intent_json` is a `PublicTransferIntent`; `keys_json` is `{account_secret, auth_nonce, seal_nonce
-/// [, seal_secret]}` (all lowercase hex). On success `data_json` is the `EncodedPublicTransfer`
-/// (`{encoded_transaction, transaction_id}`, lowercase hex). Reproducible byte-for-byte.
+/// `intent_json` is a `PublicTransferIntent`; `keys_json` is `{account_secret}` (lowercase hex). On
+/// success `data_json` is the `EncodedPublicTransfer` (`{encoded_transaction, transaction_id}`,
+/// lowercase hex). The bytes/id are **not** reproducible — the safe default for real submission. Use
+/// [`ootle_build_and_encode_public_transfer_with_seed`] for reproducible bytes.
 ///
 /// # Safety
 /// `intent_json` and `keys_json` must be valid NUL-terminated UTF-8 C strings. The returned envelope
@@ -537,7 +535,7 @@ pub unsafe extern "C" fn ootle_build_and_encode_public_transfer(
             let intent_json = unsafe { required_str(intent_json, "intent_json") }?;
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
             let intent: PublicTransferIntent = parse_json(intent_json, "intent")?;
-            let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
+            let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
             match build_and_encode_public_transfer(network, &intent, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
@@ -546,13 +544,14 @@ pub unsafe extern "C" fn ootle_build_and_encode_public_transfer(
     })
 }
 
-/// Production (random-nonce) counterpart of [`ootle_build_and_encode_public_transfer`]. `keys_json` is
-/// `{account_secret}` (lowercase hex). The bytes/id are **not** reproducible — for real submission.
+/// Seed-reproducible counterpart of [`ootle_build_and_encode_public_transfer`]. `keys_json` is
+/// `{account_secret, seed [, seal_secret]}` (all lowercase hex). Reproducible byte-for-byte from the
+/// seed + intent.
 ///
 /// # Safety
 /// As [`ootle_build_and_encode_public_transfer`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ootle_build_and_encode_public_transfer_production(
+pub unsafe extern "C" fn ootle_build_and_encode_public_transfer_with_seed(
     network: u8,
     intent_json: *const c_char,
     keys_json: *const c_char,
@@ -563,8 +562,8 @@ pub unsafe extern "C" fn ootle_build_and_encode_public_transfer_production(
             let intent_json = unsafe { required_str(intent_json, "intent_json") }?;
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
             let intent: PublicTransferIntent = parse_json(intent_json, "intent")?;
-            let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
-            match build_and_encode_public_transfer_production(network, &intent, &keys.into_core()) {
+            let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
+            match build_and_encode_public_transfer_with_seed(network, &intent, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -814,7 +813,7 @@ pub unsafe extern "C" fn ootle_build_unsigned(network: u8, intent_json: *const c
 /// Lowers a generic instruction list + typed-arg DSL ([`GenericTransactionIntent`]) into an unsigned
 /// transaction. Returns the same opaque handle + want-list envelope as [`ootle_build_unsigned`]; finish
 /// it with [`ootle_apply_fetched_substates`] then [`ootle_seal_and_encode`] /
-/// [`ootle_seal_and_encode_production`].
+/// [`ootle_seal_and_encode_with_seed`].
 ///
 /// On success the envelope carries the opaque handle (in `handle`) and the want list in `data_json`
 /// (`{"want_list":[…]}`). Bad intent JSON ⇒ `"PARSE"`; an out-of-range blob index / unbound workspace
@@ -939,11 +938,12 @@ pub unsafe extern "C" fn ootle_apply_fetched_substates(
     })
 }
 
-/// Seals (deterministically, pinned nonces) and BOR-encodes a **resolved** partial.
+/// Seals (random-nonce default: a fresh OS-RNG seed) and BOR-encodes a **resolved** partial.
 ///
-/// **Consumes** `handle`. `keys_json` is `{account_secret, auth_nonce, seal_nonce [, seal_secret]}`
-/// (lowercase hex). On success `data_json` is the `EncodedPublicTransfer`. A still-unresolved partial
-/// ⇒ a `RESOLUTION` error (the handle is still consumed). No handle is returned.
+/// **Consumes** `handle`. `keys_json` is `{account_secret}` (lowercase hex). On success `data_json` is
+/// the `EncodedPublicTransfer`. A still-unresolved partial ⇒ a `RESOLUTION` error (the handle is still
+/// consumed). No handle is returned. The bytes/id are not reproducible — use
+/// [`ootle_seal_and_encode_with_seed`] for reproducible bytes.
 ///
 /// # Safety
 /// `handle` must be a non-null, not-yet-consumed pointer from the two-phase ops. `keys_json` must be a
@@ -965,7 +965,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode(
 
         flatten((|| {
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
-            let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
+            let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
             match seal_and_encode_public_transfer(partial, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
@@ -974,13 +974,13 @@ pub unsafe extern "C" fn ootle_seal_and_encode(
     })
 }
 
-/// Production (random-nonce) counterpart of [`ootle_seal_and_encode`]. **Consumes** `handle`.
-/// `keys_json` is `{account_secret}`. The bytes/id are not reproducible.
+/// Seed-reproducible counterpart of [`ootle_seal_and_encode`]. **Consumes** `handle`. `keys_json` is
+/// `{account_secret, seed [, seal_secret]}` (lowercase hex). Reproducible byte-for-byte from the seed.
 ///
 /// # Safety
 /// As [`ootle_seal_and_encode`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ootle_seal_and_encode_production(
+pub unsafe extern "C" fn ootle_seal_and_encode_with_seed(
     handle: *mut OotlePartialTransaction,
     keys_json: *const c_char,
 ) -> OotleResult {
@@ -995,8 +995,8 @@ pub unsafe extern "C" fn ootle_seal_and_encode_production(
 
         flatten((|| {
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
-            let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
-            match seal_and_encode_public_transfer_production(partial, &keys.into_core()) {
+            let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
+            match seal_and_encode_public_transfer_with_seed(partial, &keys.into_core()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
@@ -1071,7 +1071,7 @@ pub unsafe extern "C" fn ootle_add_signature(
             let signer_secret_hex = unsafe { required_str(signer_secret_hex, "signer_secret_hex") }?;
             let signer_secret = secret_key_from_hex(signer_secret_hex, "signer_secret_hex")?;
 
-            match add_signature_production(&record, &seal_pk, &signer_secret) {
+            match add_signature(&record, &seal_pk, &signer_secret) {
                 Ok(auth) => Ok(OotleResult::ok_json(&output_json(
                     &serde_json::json!({ "authorization": auth }),
                     "authorization",
@@ -1082,14 +1082,13 @@ pub unsafe extern "C" fn ootle_add_signature(
     })
 }
 
-/// Seals a resolved partial **with attached authorizations** (deterministically, pinned nonces) and
-/// BOR-encodes it. **Consumes** `handle` (exactly like [`ootle_seal_and_encode`]).
+/// Seals a resolved partial **with attached authorizations** (random-nonce default: a fresh OS-RNG
+/// seed) and BOR-encodes it. **Consumes** `handle` (exactly like [`ootle_seal_and_encode`]).
 ///
-/// `keys_json` reuses the `DeterministicKeysJson` mirror (`{account_secret, auth_nonce, seal_nonce
-/// [, seal_secret]}`); `auth_nonce` is unused on this path (the authorizations are supplied, not
-/// produced here). `authorizations_json` is a JSON array
+/// `keys_json` is `{account_secret}` (lowercase hex). `authorizations_json` is a JSON array
 /// `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`. An empty array behaves like the plain
-/// single-key seal. On success `data_json` is the `EncodedPublicTransfer`.
+/// single-key seal. On success `data_json` is the `EncodedPublicTransfer`. The bytes/id are not
+/// reproducible — use [`ootle_seal_and_encode_with_auth_with_seed`] for reproducible bytes.
 ///
 /// # Safety
 /// `handle` must be a non-null, not-yet-consumed public handle. `keys_json` and `authorizations_json`
@@ -1112,7 +1111,7 @@ pub unsafe extern "C" fn ootle_seal_and_encode_with_auth(
 
         flatten((|| {
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
-            let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
+            let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
             let authorizations_json = unsafe { required_str(authorizations_json, "authorizations_json") }?;
             let authorizations: Vec<Authorization> = parse_json(authorizations_json, "authorizations")?;
             match seal_and_encode_with_auth(partial, &keys.into_core(), &authorizations) {
@@ -1123,13 +1122,18 @@ pub unsafe extern "C" fn ootle_seal_and_encode_with_auth(
     })
 }
 
-/// Production (random-nonce) counterpart of [`ootle_seal_and_encode_with_auth`]. **Consumes** `handle`.
-/// `keys_json` is `{account_secret}`. The bytes/id are not reproducible.
+/// Seed-reproducible counterpart of [`ootle_seal_and_encode_with_auth`]. **Consumes** `handle`.
+///
+/// `keys_json` reuses the `DeterministicKeysJson` mirror (`{account_secret, seed [, seal_secret]}`);
+/// only the seal nonce expanded from `seed` is consumed (the authorizations are supplied, not produced
+/// here). `authorizations_json` is a JSON array `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`.
+/// An empty array behaves like the plain single-key seal. On success `data_json` is the
+/// `EncodedPublicTransfer`. Reproducible byte-for-byte from the seed.
 ///
 /// # Safety
 /// As [`ootle_seal_and_encode_with_auth`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ootle_seal_and_encode_with_auth_production(
+pub unsafe extern "C" fn ootle_seal_and_encode_with_auth_with_seed(
     handle: *mut OotlePartialTransaction,
     keys_json: *const c_char,
     authorizations_json: *const c_char,
@@ -1145,10 +1149,10 @@ pub unsafe extern "C" fn ootle_seal_and_encode_with_auth_production(
 
         flatten((|| {
             let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
-            let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
+            let keys: DeterministicKeysJson = parse_json(keys_json, "keys")?;
             let authorizations_json = unsafe { required_str(authorizations_json, "authorizations_json") }?;
             let authorizations: Vec<Authorization> = parse_json(authorizations_json, "authorizations")?;
-            match seal_and_encode_with_auth_production(partial, &keys.into_core(), &authorizations) {
+            match seal_and_encode_with_auth_with_seed(partial, &keys.into_core(), &authorizations) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }

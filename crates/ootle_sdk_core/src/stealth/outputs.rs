@@ -6,11 +6,11 @@
 //!
 //! Two entry points per build op:
 //!
-//! - `*_deterministic(.., &StealthEntropy)` — the vector path. Every nonce/mask is **injected** from the pinned
-//!   [`StealthEntropy`]; this path calls **no** RNG. It is reproducible for everything except the aggregated
-//!   bulletproof (see below).
-//! - `*_production(..)` — fills a [`StealthEntropy`] from the OS RNG via [`StealthEntropy::from_os_rng`], then
-//!   delegates to the deterministic path. The OS RNG is the only randomness it adds.
+//! - `*_with_seed(.., &BuildSeed)` — the seed-reproducible path. The seed is expanded by the KDF into a
+//!   [`StealthEntropy`] bundle; this path calls **no** RNG of its own. It is reproducible for everything except the
+//!   aggregated bulletproof (see below).
+//! - the un-suffixed default — expands a fresh OS-RNG seed via [`StealthEntropy::from_os_rng`], then delegates to the
+//!   shared body. The OS RNG is the only randomness it adds.
 //!
 //! ## Why the aggregated bulletproof is not byte-reproducible
 //!
@@ -64,7 +64,7 @@ use tari_template_lib_types::{
 };
 
 use crate::types::{
-    bytes::SecretKeyBytes,
+    bytes::{BuildSeed, SecretKeyBytes},
     error::OotleSdkError,
     network::Network,
     stealth::{PerOutputEntropy, StealthEntropy, StealthMemo, StealthOutputSpec, StealthPayTo, StealthTransferIntent},
@@ -181,12 +181,14 @@ pub fn build_stealth_output_witness(
 }
 
 /// Builds the aggregated [`StealthOutputsStatement`] for every output in `intent`, plus the
-/// aggregated output mask (the sum of the per-output masks), from the pinned [`StealthEntropy`].
+/// aggregated output mask (the sum of the per-output masks), from an internally-expanded
+/// [`StealthEntropy`].
 ///
+/// `entropy` is produced by the KDF expansion ([`StealthEntropy::from_seed`]) — never host-supplied.
 /// Calls **no** RNG itself; the aggregated bulletproof's internal randomness lives inside
 /// `tari_crypto`. The viewable-balance proof, AEAD ciphertext, commitments, spend conditions and tags
-/// **are** byte-reproducible (injected entropy).
-pub fn build_stealth_outputs_statement_deterministic(
+/// **are** byte-reproducible (from the expanded entropy).
+pub(crate) fn build_stealth_outputs_statement_from_entropy(
     network: Network,
     intent: &StealthTransferIntent,
     entropy: &StealthEntropy,
@@ -276,15 +278,28 @@ pub fn build_stealth_outputs_statement_deterministic(
     Ok((statement, agg_mask_bytes))
 }
 
-/// The production entry point: fills a [`crate::types::stealth::StealthEntropy`] from the OS RNG, then
-/// runs the deterministic path. The resulting `agg_range_proof` (and thus the whole statement) is
-/// **not** reproducible — that is correct for real submission.
-pub fn build_stealth_outputs_statement_production(
+/// The seed-reproducible entry point: expands `seed` into the per-output + bundle entropy, then builds
+/// the statement. The viewable-balance proof, AEAD ciphertext, commitments, spend conditions and tags
+/// are byte-reproducible from the seed; the aggregated bulletproof is not ([SC-BULLETPROOF]).
+pub fn build_stealth_outputs_statement_with_seed(
+    network: Network,
+    intent: &StealthTransferIntent,
+    seed: &BuildSeed,
+) -> Result<(StealthOutputsStatement, SecretKeyBytes), OotleSdkError> {
+    seed.validate_nonzero()?;
+    let entropy = StealthEntropy::from_seed(seed, intent.outputs.len());
+    build_stealth_outputs_statement_from_entropy(network, intent, &entropy)
+}
+
+/// The random-nonce default entry point: expands a fresh OS-RNG seed, then builds the statement. The
+/// resulting `agg_range_proof` (and thus the whole statement) is **not** reproducible — the safe
+/// default for real submission.
+pub fn build_stealth_outputs_statement(
     network: Network,
     intent: &StealthTransferIntent,
 ) -> Result<(StealthOutputsStatement, SecretKeyBytes), OotleSdkError> {
     let entropy = StealthEntropy::from_os_rng(intent.outputs.len());
-    build_stealth_outputs_statement_deterministic(network, intent, &entropy)
+    build_stealth_outputs_statement_from_entropy(network, intent, &entropy)
 }
 
 #[cfg(test)]
@@ -391,8 +406,8 @@ mod tests {
     fn deterministic_path_is_reproducible_except_bulletproof() {
         let it = intent(vec![output_spec(1000, false)], 0);
         let e = entropy_for(&[(10, false)]);
-        let (s1, m1) = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap();
-        let (s2, m2) = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap();
+        let (s1, m1) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
+        let (s2, m2) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
         assert_eq!(m1, m2, "aggregated mask must be reproducible");
         assert_eq!(
             s1.outputs, s2.outputs,
@@ -409,7 +424,7 @@ mod tests {
     fn built_statement_validates() {
         let it = intent(vec![output_spec(5000, false)], 0);
         let e = entropy_for(&[(20, false)]);
-        let (stmt, _) = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap();
+        let (stmt, _) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
         assert_eq!(stmt.outputs.len(), 1);
     }
@@ -421,7 +436,7 @@ mod tests {
         spec.minimum_value_promise = 101;
         let it = intent(vec![spec], 0);
         let e = entropy_for(&[(30, false)]);
-        let err = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap_err();
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
 
@@ -430,7 +445,7 @@ mod tests {
     fn rejects_output_entropy_count_mismatch() {
         let it = intent(vec![output_spec(100, false), output_spec(200, false)], 0);
         let e = entropy_for(&[(40, false)]); // only one slice for two outputs
-        let err = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap_err();
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
 
@@ -438,7 +453,7 @@ mod tests {
     #[test]
     fn production_path_validates() {
         let it = intent(vec![output_spec(7777, false)], 0);
-        let (stmt, _) = build_stealth_outputs_statement_production(Network::LocalNet, &it).unwrap();
+        let (stmt, _) = build_stealth_outputs_statement(Network::LocalNet, &it).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
     }
 
@@ -447,7 +462,7 @@ mod tests {
     fn view_key_output_has_viewable_balance_proof() {
         let it = intent(vec![output_spec(9000, true)], 0);
         let e = entropy_for(&[(50, true)]);
-        let (stmt, _) = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap();
+        let (stmt, _) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
         assert!(stmt.outputs[0].output.viewable_balance_proof.is_some());
         // The view key validation path accepts it.
         let view_key = RistrettoPublicKey::from_canonical_bytes(pk_bytes(5).as_bytes()).unwrap();
@@ -459,7 +474,7 @@ mod tests {
     fn view_key_output_without_zk_nonces_is_rejected() {
         let it = intent(vec![output_spec(9000, true)], 0);
         let e = entropy_for(&[(50, false)]); // no elgamal/zk nonces
-        let err = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap_err();
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
 
@@ -468,7 +483,7 @@ mod tests {
     fn no_output_revealed_only() {
         let it = intent(vec![], 1_000_000);
         let e = entropy_for(&[]);
-        let (stmt, mask) = build_stealth_outputs_statement_deterministic(Network::LocalNet, &it, &e).unwrap();
+        let (stmt, mask) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
         assert!(stmt.outputs.is_empty());
         assert!(stmt.agg_range_proof.is_empty());
         assert_eq!(mask, SecretKeyBytes::from_array([0u8; 32]));
@@ -506,5 +521,51 @@ mod tests {
         .unwrap();
         assert_eq!(decrypted.value(), amount);
         assert_eq!(decrypted.mask().as_bytes(), witness.witness.mask.as_bytes());
+    }
+
+    // --- Seed entry-point: anti-leak + reproducibility + rails -----------------------------------
+
+    /// A multi-output view-key build derives a **distinct per-output `x_m`** for each output (the
+    /// commitment-mask ZK nonce). Cross-output reuse — the leak path `mask = (s_m − s_m')/(e − e')` —
+    /// is therefore structurally impossible: the two outputs' masks are independent seed derivations
+    /// bound to the output index.
+    #[test]
+    fn two_view_key_outputs_use_distinct_per_output_zk_nonces() {
+        let seed = BuildSeed::from_array([0x5e; 32]);
+        let entropy = StealthEntropy::from_seed(&seed, 2);
+        let zk0 = entropy.per_output[0].zk_nonces.as_ref().unwrap();
+        let zk1 = entropy.per_output[1].zk_nonces.as_ref().unwrap();
+        // x_m is index 1 of [x_v, x_m, x_r].
+        assert_ne!(zk0[1], zk1[1], "per-output x_m must differ across outputs");
+        // Index-swap changes them: an x_m for output 0 is never an x_m for output 1.
+        assert_ne!(zk0[1], zk1[1]);
+        // Every flattened scalar across both outputs is distinct (the rail asserts this too).
+        entropy.validate().expect("seed-derived entropy is pairwise-distinct");
+    }
+
+    /// Same seed + same intent ⇒ identical statement for every byte-stable field (the aggregated
+    /// bulletproof is excluded per SC-BULLETPROOF).
+    #[test]
+    fn with_seed_is_reproducible_modulo_bulletproof() {
+        let seed = BuildSeed::from_array([0x77; 32]);
+        let it = intent(vec![output_spec(1_000_000, true)], 0);
+        let (a, ma) = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &seed).unwrap();
+        let (b, mb) = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &seed).unwrap();
+        assert_eq!(ma, mb, "aggregated output mask is reproducible");
+        assert_eq!(
+            a.outputs, b.outputs,
+            "every output field (incl. the viewable proof) is reproducible"
+        );
+        assert_eq!(a.revealed_output_amount, b.revealed_output_amount);
+        // The aggregated bulletproof is the only non-byte-stable field — deliberately not compared.
+    }
+
+    /// An all-zero seed is rejected by the rail before any derivation runs.
+    #[test]
+    fn with_seed_zero_seed_is_a_validation_error() {
+        let it = intent(vec![output_spec(1_000_000, false)], 0);
+        let err = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &BuildSeed::from_array([0u8; 32]))
+            .unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
     }
 }

@@ -36,8 +36,8 @@ pub mod outputs;
 
 pub use outputs::{
     build_stealth_output_witness,
-    build_stealth_outputs_statement_deterministic,
-    build_stealth_outputs_statement_production,
+    build_stealth_outputs_statement,
+    build_stealth_outputs_statement_with_seed,
 };
 
 /// Stealth **input** resolution: the UTXO fetch-want variant + the decrypt-in-core path that recovers
@@ -60,10 +60,10 @@ pub use assemble::{
     StealthResolution,
     apply_fetched_substates_stealth,
     assemble_stealth_transfer_statement,
-    build_stealth_transfer_unsigned_deterministic,
-    build_stealth_transfer_unsigned_production,
+    build_stealth_transfer_unsigned,
+    build_stealth_transfer_unsigned_with_seed,
     build_stealth_unsigned_with_wants,
-    build_stealth_unsigned_with_wants_production,
+    build_stealth_unsigned_with_wants_with_seed,
 };
 pub use partial::{StealthPartialTransaction, StealthSignatureRequirementsState};
 
@@ -73,10 +73,10 @@ pub mod sign_seal;
 
 pub use sign_seal::{
     StealthKeys,
-    build_and_encode_stealth_transfer_deterministic,
-    build_and_encode_stealth_transfer_production,
-    seal_and_encode_stealth_transfer_deterministic,
-    seal_and_encode_stealth_transfer_production,
+    build_and_encode_stealth_transfer,
+    build_and_encode_stealth_transfer_with_seed,
+    seal_and_encode_stealth_transfer,
+    seal_and_encode_stealth_transfer_with_seed,
 };
 
 /// Stealth **receive / scan**: the pure, RNG-free `scan_stealth_output` that decrypts an inbound

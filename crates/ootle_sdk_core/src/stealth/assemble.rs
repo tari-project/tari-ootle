@@ -45,11 +45,11 @@ use crate::{
     inputs::{FetchedSubstate, PartialTransaction, Resolution, WantList, apply_fetched_substates_with_secrets},
     stealth::{
         inputs::spend_secrets_map,
-        outputs::build_stealth_outputs_statement_deterministic,
+        outputs::build_stealth_outputs_statement_from_entropy,
         partial::{StealthPartialTransaction, StealthSignatureRequirementsState},
     },
     types::{
-        bytes::SecretKeyBytes,
+        bytes::{BuildSeed, SecretKeyBytes},
         error::OotleSdkError,
         network::Network,
         stealth::{StealthEntropy, StealthTransferIntent},
@@ -297,35 +297,40 @@ pub enum StealthResolution {
     Resolved(StealthPartialTransaction),
 }
 
-/// Seed the host-driven resolver + the stealth-UTXO want list.
+/// Seed the host-driven resolver + the stealth-UTXO want list (seed-reproducible: the build seed
+/// expands into the stashed proof + seal entropy).
 ///
 /// The host then drives the fetch loop: fetch the want-list seed ids, call
 /// [`apply_fetched_substates_stealth`], and on `NeedMore` fetch the returned `fetch_ids` and repeat
-/// until `Resolved`. `intent` + `entropy` are stashed in the returned resolver (via
+/// until `Resolved`. `intent` + the expanded entropy are stashed in the returned resolver (via
 /// [`StealthBuildCtx`]) so the final `apply` can assemble without the host re-passing them — the host
 /// never derives ids or re-supplies the build inputs.
-pub fn build_stealth_unsigned_with_wants(
+pub fn build_stealth_unsigned_with_wants_with_seed(
     network: Network,
     intent: &StealthTransferIntent,
-    entropy: &StealthEntropy,
+    seed: &BuildSeed,
 ) -> Result<(PartialTransaction, WantList), OotleSdkError> {
+    seed.validate_nonzero()?;
+    let entropy = StealthEntropy::from_seed(seed, intent.outputs.len());
     // The live driver resolves the from-account component + vault (the fee + optional revealed-input
     // withdraw reference the account) in addition to the stealth-UTXO inputs, so all are declared.
     let want_list = WantList::from_stealth_inputs_with_account(intent);
-    let partial = seed_partial(network, intent, entropy, want_list.clone())?;
+    let partial = seed_partial(network, intent, &entropy, want_list.clone())?;
     Ok((partial, want_list))
 }
 
-/// The **production** seed: like [`build_stealth_unsigned_with_wants`] but fills the pinned proof +
-/// seal entropy from the OS RNG (RNG only on `*_production` paths) and stashes it in the resolver, so
-/// the eventual sealed bytes are **not** reproducible (correct for real submission). The host drives
-/// the same fetch loop; the entropy never crosses the boundary.
-pub fn build_stealth_unsigned_with_wants_production(
+/// The **random-nonce default** seed: like [`build_stealth_unsigned_with_wants_with_seed`] but expands
+/// the proof + seal entropy from a fresh OS-RNG seed and stashes it in the resolver, so the eventual
+/// sealed bytes are **not** reproducible (the safe default for real submission). The host drives the
+/// same fetch loop; the entropy never crosses the boundary.
+pub fn build_stealth_unsigned_with_wants(
     network: Network,
     intent: &StealthTransferIntent,
 ) -> Result<(PartialTransaction, WantList), OotleSdkError> {
     let entropy = StealthEntropy::from_os_rng(intent.outputs.len());
-    build_stealth_unsigned_with_wants(network, intent, &entropy)
+    let want_list = WantList::from_stealth_inputs_with_account(intent);
+    let partial = seed_partial(network, intent, &entropy, want_list.clone())?;
+    Ok((partial, want_list))
 }
 
 /// Fold a fetched batch into the resolver, returning either a `NeedMore` with the
@@ -437,7 +442,7 @@ fn resolve_stealth_inputs(
 /// The shared assembly tail — runs the post-resolution work (outputs statement from `entropy`, balance
 /// proof, the `validate_transfer` pre-flight, and building the [`StealthPartialTransaction`]) on a
 /// fully-resolved resolver. Called by **both** the one-shot path
-/// ([`build_stealth_transfer_unsigned_deterministic`]) **and** the looped path
+/// ([`build_stealth_transfer_unsigned_with_seed`]) **and** the looped path
 /// ([`apply_fetched_substates_stealth`]), so there is exactly one assembly implementation.
 fn assemble_resolved_stealth(
     network: Network,
@@ -445,8 +450,8 @@ fn assemble_resolved_stealth(
     partial: PartialTransaction,
     entropy: &StealthEntropy,
 ) -> Result<StealthPartialTransaction, OotleSdkError> {
-    // Outputs statement + aggregate output mask (injected entropy).
-    let (outputs_statement, agg_output_mask) = build_stealth_outputs_statement_deterministic(network, intent, entropy)?;
+    // Outputs statement + aggregate output mask (expanded entropy).
+    let (outputs_statement, agg_output_mask) = build_stealth_outputs_statement_from_entropy(network, intent, entropy)?;
 
     let agg_input_mask = partial.agg_input_mask().clone();
     let sig_reqs = signature_requirements_from_partial(&partial);
@@ -475,34 +480,39 @@ fn assemble_resolved_stealth(
 /// **`spend_secrets`** are the per-input view-only secrets (one per `intent.inputs`, positional),
 /// used to decrypt the input masks. They are borrowed for the call only and never stored.
 ///
-/// The deterministic path calls no RNG of its own; the bulletproof + balance-proof nonces come from
-/// the reused crypto leaves, so the proofs are not byte-stable (semantic comparison only).
-pub fn build_stealth_transfer_unsigned_deterministic(
+/// The seed-reproducible path calls no RNG of its own; the bulletproof + balance-proof nonces come
+/// from the reused crypto leaves, so the proofs are not byte-stable (semantic comparison only).
+pub fn build_stealth_transfer_unsigned_with_seed(
     network: Network,
     intent: &StealthTransferIntent,
     fetched_utxos: &[FetchedSubstate],
     spend_secrets: &[SecretKeyBytes],
-    entropy: &StealthEntropy,
+    seed: &BuildSeed,
 ) -> Result<StealthPartialTransaction, OotleSdkError> {
+    seed.validate_nonzero()?;
+    let entropy = StealthEntropy::from_seed(seed, intent.outputs.len());
+
     // Resolve + decrypt the stealth inputs (drives the resolver to completion over the up-front
     // batch).
     let secrets = spend_secrets_map(intent, spend_secrets)?;
-    let partial = resolve_stealth_inputs(network, intent, entropy, fetched_utxos, &secrets)?;
+    let partial = resolve_stealth_inputs(network, intent, &entropy, fetched_utxos, &secrets)?;
 
     // The shared assembly tail (also used by the looped `apply` path).
-    assemble_resolved_stealth(network, intent, partial, entropy)
+    assemble_resolved_stealth(network, intent, partial, &entropy)
 }
 
-/// The production full-pipeline entry point: fills the proof entropy from the OS RNG, then runs the
-/// deterministic path. The resulting statement is **not** reproducible (correct for real submission).
-pub fn build_stealth_transfer_unsigned_production(
+/// The random-nonce default full-pipeline entry point: expands the proof entropy from a fresh OS-RNG
+/// seed. The resulting statement is **not** reproducible (the safe default for real submission).
+pub fn build_stealth_transfer_unsigned(
     network: Network,
     intent: &StealthTransferIntent,
     fetched_utxos: &[FetchedSubstate],
     spend_secrets: &[SecretKeyBytes],
 ) -> Result<StealthPartialTransaction, OotleSdkError> {
     let entropy = StealthEntropy::from_os_rng(intent.outputs.len());
-    build_stealth_transfer_unsigned_deterministic(network, intent, fetched_utxos, spend_secrets, &entropy)
+    let secrets = spend_secrets_map(intent, spend_secrets)?;
+    let partial = resolve_stealth_inputs(network, intent, &entropy, fetched_utxos, &secrets)?;
+    assemble_resolved_stealth(network, intent, partial, &entropy)
 }
 
 #[cfg(test)]
@@ -521,7 +531,7 @@ mod tests {
             address::{ComponentAddressStr, ResourceAddressStr},
             bytes::PublicKeyBytes,
             numeric::BoundaryAmount,
-            stealth::{PerOutputEntropy, StealthInputSpec, StealthOutputSpec, StealthPayTo},
+            stealth::{StealthInputSpec, StealthOutputSpec, StealthPayTo},
         },
     };
 
@@ -570,25 +580,15 @@ mod tests {
         }
     }
 
-    fn per_entropy(base: u8) -> PerOutputEntropy {
-        PerOutputEntropy {
-            mask: secret(base),
-            sender_nonce: secret(base + 1),
-            aead_nonce: secret(base + 2),
-            elgamal_nonce: None,
-            zk_nonces: None,
-        }
+    /// A fixed build seed for the seed-reproducible paths; `byte` distinguishes per-test seeds.
+    fn seed_for(byte: u8) -> BuildSeed {
+        BuildSeed::from_array([byte; 32])
     }
 
-    fn entropy_for(num_outputs: usize, base: u8) -> StealthEntropy {
-        StealthEntropy {
-            per_output: (0..num_outputs).map(|i| per_entropy(base + (i as u8) * 8)).collect(),
-            balance_proof_nonce: secret(200),
-            bulletproof_seed: secret(201),
-            ephemeral_seal_nonce: secret(202),
-            ephemeral_auth_nonce: secret(203),
-            ephemeral_sign_nonce: secret(204),
-        }
+    /// Expands a fixed build seed into a `num_outputs`-wide entropy bundle (mirrors what the public
+    /// seed paths derive internally), for the internal entropy-taking assembly helpers.
+    fn entropy_for(num_outputs: usize, byte: u8) -> StealthEntropy {
+        StealthEntropy::from_seed(&seed_for(byte), num_outputs)
     }
 
     /// A fixed vault id for the from-account in the looped-resolution tests.
@@ -671,12 +671,16 @@ mod tests {
         }
     }
 
-    /// Drives the outputs + assembly paths directly (no stealth inputs ⇒ no fetch loop).
+    /// Drives the outputs + assembly paths directly with an explicit entropy bundle (no stealth inputs
+    /// ⇒ no fetch loop). Mirrors `build_stealth_transfer_unsigned_with_seed`'s body but feeds a chosen
+    /// entropy, so a test can compare against a direct outputs-statement build using the same bundle.
     fn assemble_from_intent(
         intent: &StealthTransferIntent,
         entropy: &StealthEntropy,
     ) -> Result<StealthPartialTransaction, OotleSdkError> {
-        build_stealth_transfer_unsigned_deterministic(Network::LocalNet, intent, &[], &[], entropy)
+        let secrets = spend_secrets_map(intent, &[])?;
+        let partial = resolve_stealth_inputs(Network::LocalNet, intent, entropy, &[], &secrets)?;
+        assemble_resolved_stealth(Network::LocalNet, intent, partial, entropy)
     }
 
     fn stealth_transfer_instructions(unsigned: &UnsignedTransaction) -> Vec<&Instruction> {
@@ -789,7 +793,7 @@ mod tests {
         // Output side: gives the output commitment + the aggregate output mask.
         let intent_out = balanced_intent(value, 0); // revealed_input 0 ⇒ no bucket
         let (outputs_statement, agg_output_mask) =
-            build_stealth_outputs_statement_deterministic(Network::LocalNet, &intent_out, &entropy).unwrap();
+            build_stealth_outputs_statement_from_entropy(Network::LocalNet, &intent_out, &entropy).unwrap();
 
         // Input side: a fabricated stealth input of the same value with a freely-chosen mask.
         let input_mask = RistrettoSecretKey::from_canonical_bytes(secret(150).as_bytes()).unwrap();
@@ -874,7 +878,7 @@ mod tests {
 
         // Direct outputs statement.
         let (direct_outputs, _) =
-            build_stealth_outputs_statement_deterministic(Network::LocalNet, &intent, &entropy).unwrap();
+            build_stealth_outputs_statement_from_entropy(Network::LocalNet, &intent, &entropy).unwrap();
         let direct_inputs = build_inputs_statement(&intent).unwrap();
 
         let partial = assemble_from_intent(&intent, &entropy).unwrap();
@@ -960,7 +964,7 @@ mod tests {
         use crate::{inputs::FetchedSubstate, stealth::inputs::stealth_utxo_substate_id};
 
         let value = 1_000_000u64;
-        let entropy = entropy_for(1, 80);
+        let seed = seed_for(80);
 
         // The stealth input: a known (value, mask) encrypted to a known view secret via a known nonce.
         let input_mask = RistrettoSecretKey::from_canonical_bytes(secret(160).as_bytes()).unwrap();
@@ -1010,14 +1014,9 @@ mod tests {
         };
 
         let spend_secrets = vec![SecretKeyBytes::from_bytes(view_secret.as_bytes()).unwrap()];
-        let partial = build_stealth_transfer_unsigned_deterministic(
-            Network::LocalNet,
-            &intent,
-            &fetched,
-            &spend_secrets,
-            &entropy,
-        )
-        .unwrap();
+        let partial =
+            build_stealth_transfer_unsigned_with_seed(Network::LocalNet, &intent, &fetched, &spend_secrets, &seed)
+                .unwrap();
 
         // One StealthTransfer, no revealed-input bucket, balance proof present.
         let txs = stealth_transfer_instructions(partial.unsigned());
@@ -1069,7 +1068,7 @@ mod tests {
         use crate::{inputs::FetchedSubstate, stealth::inputs::stealth_utxo_substate_id};
 
         let value = 1_000_000u64;
-        let entropy = entropy_for(1, 80);
+        let seed = seed_for(80);
 
         let input_mask = RistrettoSecretKey::from_canonical_bytes(secret(160).as_bytes()).unwrap();
         let nonce_secret = RistrettoSecretKey::from_canonical_bytes(secret(161).as_bytes()).unwrap();
@@ -1119,14 +1118,9 @@ mod tests {
         };
 
         let spend_secrets = vec![SecretKeyBytes::from_bytes(view_secret.as_bytes()).unwrap()];
-        let partial = build_stealth_transfer_unsigned_deterministic(
-            Network::LocalNet,
-            &intent,
-            &fetched,
-            &spend_secrets,
-            &entropy,
-        )
-        .unwrap();
+        let partial =
+            build_stealth_transfer_unsigned_with_seed(Network::LocalNet, &intent, &fetched, &spend_secrets, &seed)
+                .unwrap();
 
         // The account key seals; the stealth input is demoted to a required signer (not the seal signer).
         let sig_reqs = partial.signature_requirements();
@@ -1158,7 +1152,7 @@ mod tests {
         use crate::stealth::{assemble::StealthResolution, inputs::stealth_utxo_substate_id};
 
         let value = 1_000_000u64;
-        let entropy = entropy_for(1, 90);
+        let seed = seed_for(90);
 
         // The stealth input: a known (value, mask) encrypted to a known view secret via a known nonce.
         let input_mask = RistrettoSecretKey::from_canonical_bytes(secret(170).as_bytes()).unwrap();
@@ -1210,7 +1204,8 @@ mod tests {
 
         // Seed the resolver + want list. The live want set carries the from-account component + vault
         // wants plus exactly one stealth UTXO want.
-        let (partial, want_list) = build_stealth_unsigned_with_wants(Network::LocalNet, &intent, &entropy).unwrap();
+        let (partial, want_list) =
+            build_stealth_unsigned_with_wants_with_seed(Network::LocalNet, &intent, &seed).unwrap();
         assert_eq!(
             want_list
                 .0
@@ -1253,14 +1248,9 @@ mod tests {
 
         // The looped product matches the one-shot path for the same inputs (deterministic statement
         // fields — the proofs are non-byte-stable, so compare the structural statement).
-        let one_shot = build_stealth_transfer_unsigned_deterministic(
-            Network::LocalNet,
-            &intent,
-            &fetched,
-            &spend_secrets,
-            &entropy,
-        )
-        .unwrap();
+        let one_shot =
+            build_stealth_transfer_unsigned_with_seed(Network::LocalNet, &intent, &fetched, &spend_secrets, &seed)
+                .unwrap();
 
         let looped_stmt = transfer_statement(assembled.unsigned());
         let one_shot_stmt = transfer_statement(one_shot.unsigned());
@@ -1311,7 +1301,7 @@ mod tests {
     #[test]
     fn two_phase_loop_missing_required_utxo_errors() {
         let value = 1_000_000u64;
-        let entropy = entropy_for(1, 100);
+        let seed = seed_for(100);
 
         // A stealth input whose UTXO is never supplied.
         let input_mask = RistrettoSecretKey::from_canonical_bytes(secret(180).as_bytes()).unwrap();
@@ -1336,7 +1326,7 @@ mod tests {
         };
         let spend_secrets = vec![secret(181)];
 
-        let (partial, _wants) = build_stealth_unsigned_with_wants(Network::LocalNet, &intent, &entropy).unwrap();
+        let (partial, _wants) = build_stealth_unsigned_with_wants_with_seed(Network::LocalNet, &intent, &seed).unwrap();
 
         // Drive the loop serving only the from-account component + vault (never the UTXO). Once the
         // account resolves, the still-missing UTXO is marked definitively absent and errors `INVALID`.

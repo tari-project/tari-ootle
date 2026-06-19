@@ -2,9 +2,9 @@
   "name": "stealth_transfer/account_key_seal_with_revealed_input",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.33.5",
-    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
-    "generated_by": "ootle-sdk-core golden-vector generator"
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
   "compare": "semantic",
@@ -36,26 +36,9 @@
       "dry_run": false,
       "pay_fee_from_revealed": false
     },
-    "stealth_entropy": {
-      "per_output": [
-        {
-          "mask": "6e00000000000000000000000000000000000000000000000000000000000000",
-          "sender_nonce": "6f00000000000000000000000000000000000000000000000000000000000000",
-          "aead_nonce": "7000000000000000000000000000000000000000000000000000000000000000",
-          "elgamal_nonce": null,
-          "zk_nonces": null
-        }
-      ],
-      "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
-      "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
-    },
     "stealth_keys": {
       "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
-      "auth_nonce": "1600000000000000000000000000000000000000000000000000000000000000",
-      "seal_nonce": "2100000000000000000000000000000000000000000000000000000000000000"
+      "seed": "6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e"
     }
   },
   "expected": {
@@ -130,16 +113,16 @@
                       "outputs": [
                         {
                           "output": {
-                            "commitment": "4ccd7231a8705017901c97646ad5378e18972d54d3ab6d741279e484bdabc37c",
-                            "encrypted_data": "01dc06361d9b326e8ee03d36a5c342107000000000000000000000000000000000000000000000000cf6ac97284ba341ec52ad5ca79d415010bede17e75cbf522725422996f83cecd69ab3e961eff9e7",
+                            "commitment": "143086ad43aa1616c6cdce330dcef1eb62c13f68e9dd951fe8e4b3baefe38c04",
+                            "encrypted_data": "346177052d619a4efa29cda2e0beaf88dedd6ea7b3c1fc7393e65c07f826496e978a15cbfd7cf5542454815f003d312f5bb3fc9d1326c29a35de7d806ac3f8d1a0ed3289aa3d316069088a4765e2fd23",
                             "minimum_value_promise": 0,
-                            "sender_public_nonce": "a016f6650b36cded7e2909c403dd847abcae14473eec1c3377524ba5c5c2884a",
+                            "sender_public_nonce": "2a63f45e65e68b2b658b2ed9da291468fcaffc9e4a54545823f24eb20f40cb5b",
                             "viewable_balance_proof": null
                           },
                           "spend_condition": {
-                            "Signed": "da255ed73b035d262eeeb5d449337dd8e39f95b4da00341ac4514fd2779fca27"
+                            "Signed": "c29511b7c76f135419e43e504e71874315b77d297e338605e163a666ac58770a"
                           },
-                          "tag": 3900720164
+                          "tag": 1530044695
                         }
                       ],
                       "revealed_output_amount": "0"

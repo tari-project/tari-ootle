@@ -20,12 +20,12 @@
 //!
 //! ## Three entry points
 //!
-//! - [`seal_and_encode_public_transfer`] — deterministic (vector) path: a resolved partial + pinned nonces ⇒
+//! - [`seal_and_encode_public_transfer`] — random-nonce default: a resolved partial sealed with a fresh OS-RNG seed.
+//! - [`seal_and_encode_public_transfer_with_seed`] — seed-reproducible: a resolved partial + a build seed ⇒
 //!   byte-for-byte reproducible bytes + id.
-//! - [`seal_and_encode_public_transfer_production`] — production (random-nonce) path.
-//! - [`resolve_and_encode_public_transfer`] — convenience for the single-round case: build-with-wants → apply one
-//!   fetched batch → seal/encode, returning a clear [`OotleSdkError::Resolution`] if the fetch left a required want
-//!   unsatisfied.
+//! - [`resolve_and_encode_public_transfer_with_seed`] — convenience for the single-round case: build-with-wants → apply
+//!   one fetched batch → seal/encode (seed-reproducible), returning a clear [`OotleSdkError::Resolution`] if the fetch
+//!   left a required want unsatisfied.
 
 use tari_ootle_transaction::UnsignedTransaction;
 
@@ -44,13 +44,13 @@ use crate::{
     },
 };
 
-/// Seals (deterministically, with pinned nonce secrets) and BOR-encodes a **resolved**
-/// [`PartialTransaction`]. Byte-for-byte reproducible across calls with identical inputs — the
-/// resolved-path counterpart of [`crate::build_and_encode_public_transfer`].
+/// Seals (seed-reproducible: nonces expanded from the bundle's build seed) and BOR-encodes a
+/// **resolved** [`PartialTransaction`]. Byte-for-byte reproducible across calls with the same seed —
+/// the resolved-path counterpart of [`crate::build_and_encode_public_transfer_with_seed`].
 ///
 /// The partial must be fully resolved (no outstanding **required** wants). A partial still carrying
 /// wants ⇒ [`OotleSdkError::Resolution`] (rather than silently sealing an incomplete input set).
-pub fn seal_and_encode_public_transfer(
+pub fn seal_and_encode_public_transfer_with_seed(
     partial: PartialTransaction,
     keys: &DeterministicTransferKeys,
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
@@ -59,9 +59,10 @@ pub fn seal_and_encode_public_transfer(
     encode(transaction, id)
 }
 
-/// Production counterpart of [`seal_and_encode_public_transfer`]: seals a resolved partial with the
-/// stock random nonce. The bytes/id are **not** reproducible — use this for real submission.
-pub fn seal_and_encode_public_transfer_production(
+/// Random-nonce default: seals a resolved partial with a fresh OS-RNG seed. The bytes/id are **not**
+/// reproducible — the safe default for real submission. Use
+/// [`seal_and_encode_public_transfer_with_seed`] for golden vectors.
+pub fn seal_and_encode_public_transfer(
     partial: PartialTransaction,
     keys: &PublicTransferKeys,
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
@@ -78,7 +79,7 @@ pub fn seal_and_encode_public_transfer_production(
 /// insufficient) this returns
 /// [`OotleSdkError::Resolution`] — it does **not** loop or panic. Multi-round resolution stays the
 /// host's job via [`apply_fetched_substates`](crate::apply_fetched_substates).
-pub fn resolve_and_encode_public_transfer(
+pub fn resolve_and_encode_public_transfer_with_seed(
     network: Network,
     intent: &PublicTransferIntent,
     fetched: &[FetchedSubstate],
@@ -86,7 +87,7 @@ pub fn resolve_and_encode_public_transfer(
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
     let (partial, _wants) = build_public_transfer_unsigned_with_wants(network, intent)?;
     match crate::apply_fetched_substates(partial, fetched)? {
-        Resolution::Resolved(resolved) => seal_and_encode_public_transfer(resolved, keys),
+        Resolution::Resolved(resolved) => seal_and_encode_public_transfer_with_seed(resolved, keys),
         Resolution::NeedMore { want_list, .. } => Err(OotleSdkError::Resolution(format!(
             "single-round resolution incomplete: {} want(s) still outstanding after the fetched batch — fetch the \
              remaining substates and drive the multi-round loop via apply_fetched_substates",
@@ -177,11 +178,11 @@ mod tests {
     use super::*;
     use crate::{
         apply_fetched_substates,
-        build_and_encode_public_transfer,
+        build_and_encode_public_transfer_with_seed,
         tx::verify_all_signatures,
         types::{
             address::{ComponentAddressStr, ResourceAddressStr},
-            bytes::{NonceSecretBytes, PublicKeyBytes, SecretKeyBytes},
+            bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
             intent::{InputRef, TransferRecipient},
             numeric::BoundaryAmount,
         },
@@ -200,11 +201,7 @@ mod tests {
     }
 
     fn det_keys() -> DeterministicTransferKeys {
-        DeterministicTransferKeys::single_key(
-            account_secret_bytes(),
-            NonceSecretBytes::from_bytes(fixed_scalar(22).as_bytes()).unwrap(),
-            NonceSecretBytes::from_bytes(fixed_scalar(33).as_bytes()).unwrap(),
-        )
+        DeterministicTransferKeys::single_key(account_secret_bytes(), BuildSeed::from_array([0x42; 32]))
     }
 
     fn from_component() -> ComponentAddress {
@@ -306,14 +303,14 @@ mod tests {
     /// identical bytes **and** identical id on the resolved path.
     #[test]
     fn deterministic_resolved_path_is_byte_reproducible() {
-        let a = resolve_and_encode_public_transfer(
+        let a = resolve_and_encode_public_transfer_with_seed(
             Network::Esmeralda,
             &resolved_intent(),
             &full_fetched_batch(),
             &det_keys(),
         )
         .unwrap();
-        let b = resolve_and_encode_public_transfer(
+        let b = resolve_and_encode_public_transfer_with_seed(
             Network::Esmeralda,
             &resolved_intent(),
             &full_fetched_batch(),
@@ -340,7 +337,7 @@ mod tests {
     fn resolved_id_matches_sealed_transaction_id() {
         let unsigned = resolved_unsigned(resolved_partial()).unwrap();
         let (transaction, id) = seal_public_transfer_deterministic(unsigned, &det_keys()).unwrap();
-        let out = seal_and_encode_public_transfer(resolved_partial(), &det_keys()).unwrap();
+        let out = seal_and_encode_public_transfer_with_seed(resolved_partial(), &det_keys()).unwrap();
         assert_eq!(out.transaction_id.as_bytes(), id.as_bytes());
         assert_eq!(out.transaction_id.as_bytes(), transaction.calculate_id().as_bytes());
     }
@@ -351,7 +348,7 @@ mod tests {
     #[test]
     fn resolved_equals_explicit_for_equivalent_input_set() {
         // Resolved path → the from-component + the from-vault + the resource as inputs.
-        let resolved = seal_and_encode_public_transfer(resolved_partial(), &det_keys()).unwrap();
+        let resolved = seal_and_encode_public_transfer_with_seed(resolved_partial(), &det_keys()).unwrap();
 
         // Explicit path with the SAME inputs, in the canonical (sorted) order the seal path imposes.
         let mut explicit_intent = resolved_intent();
@@ -369,7 +366,8 @@ mod tests {
         inputs.sort_by_key(|a| canonical(&a.substate_id));
         explicit_intent.inputs = inputs;
 
-        let explicit = build_and_encode_public_transfer(Network::Esmeralda, &explicit_intent, &det_keys()).unwrap();
+        let explicit =
+            build_and_encode_public_transfer_with_seed(Network::Esmeralda, &explicit_intent, &det_keys()).unwrap();
         assert_eq!(
             resolved.encoded_transaction, explicit.encoded_transaction,
             "resolved and explicit sealed bytes must match for the equivalent input set"
@@ -389,8 +387,9 @@ mod tests {
             SubstateId::Component(recipient_component()),
             component_substate_json(&[]),
         )];
-        let err = resolve_and_encode_public_transfer(Network::Esmeralda, &resolved_intent(), &batch, &det_keys())
-            .unwrap_err();
+        let err =
+            resolve_and_encode_public_transfer_with_seed(Network::Esmeralda, &resolved_intent(), &batch, &det_keys())
+                .unwrap_err();
         assert_eq!(err.code(), "RESOLUTION");
     }
 
@@ -401,7 +400,7 @@ mod tests {
         let (partial, _wants) =
             build_public_transfer_unsigned_with_wants(Network::Esmeralda, &resolved_intent()).unwrap();
         // Not resolved yet (no fetch applied).
-        let err = seal_and_encode_public_transfer(partial, &det_keys()).unwrap_err();
+        let err = seal_and_encode_public_transfer_with_seed(partial, &det_keys()).unwrap_err();
         assert_eq!(err.code(), "RESOLUTION");
     }
 
@@ -410,7 +409,7 @@ mod tests {
     #[test]
     fn production_resolved_path_produces_valid_bytes() {
         let keys = PublicTransferKeys::new(account_secret_bytes());
-        let out = seal_and_encode_public_transfer_production(resolved_partial(), &keys).unwrap();
+        let out = seal_and_encode_public_transfer(resolved_partial(), &keys).unwrap();
         assert!(!out.encoded_transaction.as_bytes().is_empty());
         assert_eq!(out.transaction_id.as_bytes().len(), 32);
     }
@@ -432,12 +431,12 @@ mod tests {
         // Round 2: fetch the from-vault.
         let r2 = vec![fetched(SubstateId::Vault(from_vault_id()), vault_substate_json())];
         let two_round = match apply_fetched_substates(partial, &r2).unwrap() {
-            Resolution::Resolved(p) => seal_and_encode_public_transfer(p, &det_keys()).unwrap(),
+            Resolution::Resolved(p) => seal_and_encode_public_transfer_with_seed(p, &det_keys()).unwrap(),
             Resolution::NeedMore { .. } => panic!("expected Resolved"),
         };
 
         // Single-round path (component + vault in one batch).
-        let single_round = seal_and_encode_public_transfer(resolved_partial(), &det_keys()).unwrap();
+        let single_round = seal_and_encode_public_transfer_with_seed(resolved_partial(), &det_keys()).unwrap();
 
         assert_eq!(
             two_round, single_round,

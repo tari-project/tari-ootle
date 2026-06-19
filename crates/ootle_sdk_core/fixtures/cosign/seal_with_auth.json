@@ -2,9 +2,9 @@
   "name": "cosign/seal_with_auth",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.33.5",
-    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
-    "generated_by": "ootle-sdk-core golden-vector generator"
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "cosign_seal_with_auth",
   "compare": "semantic",
@@ -25,8 +25,7 @@
     },
     "keys": {
       "account_secret": "7900000000000000000000000000000000000000000000000000000000000000",
-      "auth_nonce": "7a00000000000000000000000000000000000000000000000000000000000000",
-      "seal_nonce": "7d00000000000000000000000000000000000000000000000000000000000000"
+      "seed": "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
     },
     "fetched": [
       {
@@ -77,7 +76,7 @@
     ],
     "cosign_seal_pk": "e2bf41576c1f0fcb1b7fdd5980f8f1f57f6d3f132fd44ec03c75e42360a42029",
     "cosign_signer_secret": "7b00000000000000000000000000000000000000000000000000000000000000",
-    "cosign_signer_nonce": "7c00000000000000000000000000000000000000000000000000000000000000"
+    "cosign_signer_seed": "7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c"
   },
   "expected": {
     "sealed_transaction_semantic": {

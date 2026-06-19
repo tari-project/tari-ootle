@@ -10,9 +10,9 @@
 //! 2. **Stealth seal** (`!must_sign_with_account_key && seal_signer.is_some()`, or the first input promoted to seal
 //!    signer): seal with the one-time key `c+k` derived from the seal input's `public_nonce` via
 //!    [`owner_stealth_dh_secret`](tari_ootle_wallet_crypto::kdfs::owner_stealth_dh_secret).
-//! 3. **Ephemeral seal** (`can_sign_with_ephemeral_key()`): seal with a one-time ephemeral key — pinned via
-//!    [`StealthEntropy::ephemeral_seal_nonce`] (used as the ephemeral *secret*) on the deterministic path, drawn from
-//!    `OsRng` on the production path.
+//! 3. **Ephemeral seal** (`can_sign_with_ephemeral_key()`): seal with a one-time ephemeral key — expanded into
+//!    [`StealthEntropy::ephemeral_seal_nonce`] (used as the ephemeral *secret*) from the supplied seed on the
+//!    seed-reproducible path, or from a fresh OS-RNG seed on the random-nonce default path.
 //!
 //! Each signature uses the deterministic signing leaf [`crate::tx::sign_with_pinned_nonce`] over the
 //! `create_message_v1` digests, and [`crate::tx::bor_encode`] encodes the result. The
@@ -32,11 +32,11 @@
 //! ## Auth-nonce derivation (positional contract)
 //!
 //! [`StealthEntropy`] carries a single `ephemeral_auth_nonce`; a transfer may have *several*
-//! `other_signers` that each need a distinct authorization nonce. The deterministic path domain-separates
-//! the base auth nonce per signer index so it stays RNG-free and reproducible without a crypto-leaf
-//! change. Signer 0 uses the base nonce verbatim, so the common single-signer case is unaffected; index
+//! `other_signers` that each need a distinct authorization nonce. The seal path domain-separates the
+//! base auth nonce per signer index so it stays RNG-free and reproducible without a crypto-leaf change.
+//! Signer 0 uses the base nonce verbatim, so the common single-signer case is unaffected; index
 //! `i > 0` uses `H(base_nonce || i)` reduced to a canonical scalar. The account-key auth signature (case
-//! i) uses [`StealthKeys::auth_nonce`].
+//! i) uses the auth nonce expanded from [`StealthKeys::seed`].
 
 use ootle_network::Network as InternalNetwork;
 use tari_crypto::{
@@ -60,43 +60,38 @@ use crate::{
     keys::public_key_bytes_from_secret,
     public_transfer::EncodedPublicTransfer,
     stealth::{
-        assemble::build_stealth_transfer_unsigned_deterministic,
+        assemble::build_stealth_transfer_unsigned_with_seed,
         partial::{StealthPartialTransaction, StealthSignatureRequirementsState},
     },
     tx::{bor_encode, sign_with_pinned_nonce},
     types::{
-        bytes::{EncodedTransactionBytes, NonceSecretBytes, SecretKeyBytes, TransactionIdBytes},
+        bytes::{BuildSeed, EncodedTransactionBytes, NonceSecretBytes, SecretKeyBytes, TransactionIdBytes},
         error::OotleSdkError,
         network::Network,
-        stealth::{StealthEntropy, StealthTransferIntent},
+        stealth::{StealthEntropy, StealthTransferIntent, random_seed},
     },
 };
 
 /// The caller-supplied secret bundle a stealth seal consumes.
 ///
 /// The account secret is required for **all three** seal cases: case (i) seals with it directly;
-/// cases (ii)/(iii) derive the `c+k` one-time keys / authorize stealth signers from it. The two pinned
-/// nonces are consumed **only** by the account-key seal (case i) — the stealth/ephemeral seal nonces
-/// come from [`StealthEntropy`] (so a host that only ever does a stealth/ephemeral transfer can pass
-/// arbitrary canonical scalars here, but they are still required so the bundle stays one shape).
+/// cases (ii)/(iii) derive the `c+k` one-time keys / authorize stealth signers from it. The build seed
+/// expands into the account-key authorization + seal nonces the account-key seal (case i) consumes —
+/// the stealth/ephemeral seal nonces come from [`StealthEntropy`] (so a host that only ever does a
+/// stealth/ephemeral transfer never has those derived nonces read, but the seed is still required so
+/// the bundle stays one shape).
 #[derive(Debug, Clone)]
 pub struct StealthKeys {
     /// Account secret key (seals directly in case i; derives `c+k` in cases ii/iii).
     pub account_secret: SecretKeyBytes,
-    /// Pinned nonce for the **account-key** authorization signature (case i only).
-    pub auth_nonce: NonceSecretBytes,
-    /// Pinned nonce for the **account-key** seal signature (case i only).
-    pub seal_nonce: NonceSecretBytes,
+    /// The 32-byte build seed expanded into the **account-key** authorization + seal nonces (case i only).
+    pub seed: BuildSeed,
 }
 
 impl StealthKeys {
-    /// Builds the bundle from the account secret and the two pinned account-key nonces.
-    pub fn new(account_secret: SecretKeyBytes, auth_nonce: NonceSecretBytes, seal_nonce: NonceSecretBytes) -> Self {
-        Self {
-            account_secret,
-            auth_nonce,
-            seal_nonce,
-        }
+    /// Builds the bundle from the account secret and the build seed.
+    pub fn new(account_secret: SecretKeyBytes, seed: BuildSeed) -> Self {
+        Self { account_secret, seed }
     }
 }
 
@@ -180,10 +175,10 @@ struct SealPlan {
     auth_signatures: Vec<TransactionSignature>,
 }
 
-/// The pinned account-key nonces case (i) consumes: the seal nonce and the account-key authorization
-/// nonce. On the deterministic path these come from [`StealthKeys`]; on the production path they are
-/// freshly drawn from `OsRng` (so a reused `StealthKeys` bundle never reuses a Schnorr nonce — nonce
-/// reuse across two messages with the same key leaks the secret).
+/// The account-key nonces case (i) consumes: the seal nonce and the account-key authorization nonce.
+/// On the seed-reproducible path these are expanded from [`StealthKeys::seed`]; on the random-nonce
+/// default path they are expanded from a fresh OS-RNG seed (so a reused `StealthKeys` bundle never
+/// reuses a Schnorr nonce — nonce reuse across two messages with the same key leaks the secret).
 struct AccountKeyNonces {
     seal_nonce: RistrettoSecretKey,
     auth_nonce: RistrettoSecretKey,
@@ -282,27 +277,37 @@ fn effective_seal_signer(sig_reqs: &StealthSignatureRequirementsState) -> Option
     sig_reqs.seal_signer.as_ref().or_else(|| sig_reqs.other_signers.first())
 }
 
-/// Seals + encodes an already-assembled [`StealthPartialTransaction`] **deterministically** (every
-/// nonce/key pinned via `keys`/`entropy`). Returns submit-ready BOR bytes + the transaction id.
+/// Seals + encodes an already-assembled [`StealthPartialTransaction`] **seed-reproducibly** (every
+/// nonce/key expanded from `keys.seed` + `seed`). Returns submit-ready BOR bytes + the transaction id.
 ///
-/// The seal case is driven by the partial's [`StealthSignatureRequirementsState`]. The bytes are
-/// byte-stable *for the signatures this function produces*, but the embedded proofs are not, so the
-/// full send vectors compare semantically.
-pub fn seal_and_encode_stealth_transfer_deterministic(
+/// `keys.seed` expands into the account-key (case i) authorization + seal nonces; `seed` expands into
+/// the stealth/ephemeral seal nonces (cases ii/iii) and the stealth-key auth base. The seal case is
+/// driven by the partial's [`StealthSignatureRequirementsState`]. The bytes are byte-stable *for the
+/// signatures this function produces*, but the embedded proofs are not, so the full send vectors
+/// compare semantically.
+pub fn seal_and_encode_stealth_transfer_with_seed(
     network: Network,
     partial: StealthPartialTransaction,
     keys: &StealthKeys,
-    entropy: &StealthEntropy,
+    seed: &BuildSeed,
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
+    keys.seed.validate_nonzero()?;
     let internal_network: InternalNetwork = network.into();
     let account_secret = parse_secret(&keys.account_secret)?;
 
     let (unsigned, sig_reqs) = partial.into_parts();
     let UnsignedTransaction::V1(mut unsigned_v1) = unsigned;
 
+    // The seal-side entropy (case-ii/iii stealth/ephemeral nonces + the stealth-key auth base). `0`
+    // outputs is enough — the seal-side fields are always present (the per-output proof entropy is
+    // unused here; the proofs were already built).
+    let entropy = StealthEntropy::from_seed(seed, 0);
+
+    // The account-key (case i) seal/auth nonces, expanded from the keys bundle's own seed.
+    let (auth_nonce_bytes, seal_nonce_bytes) = crate::seed::derive_transfer_nonces(&keys.seed);
     let account_key_nonces = AccountKeyNonces {
-        seal_nonce: parse_nonce(&keys.seal_nonce)?,
-        auth_nonce: parse_nonce(&keys.auth_nonce)?,
+        seal_nonce: parse_nonce(&seal_nonce_bytes)?,
+        auth_nonce: parse_nonce(&auth_nonce_bytes)?,
     };
 
     let plan = plan_seal(
@@ -310,7 +315,7 @@ pub fn seal_and_encode_stealth_transfer_deterministic(
         &account_secret,
         &sig_reqs,
         account_key_nonces,
-        entropy,
+        &entropy,
         &unsigned_v1,
     )?;
 
@@ -319,16 +324,15 @@ pub fn seal_and_encode_stealth_transfer_deterministic(
     encode(transaction, id)
 }
 
-/// Seals + encodes an already-assembled [`StealthPartialTransaction`] on the **production** path:
-/// every signature nonce (the account-key seal/auth nonces, the stealth-key auth nonces, the
-/// stealth/ephemeral seal nonces, and the ephemeral seal *key*) is drawn fresh from `OsRng`, so the
-/// output is **not** reproducible (correct for real submission) and, crucially, a reused `StealthKeys`
-/// bundle never reuses a Schnorr nonce.
+/// Seals + encodes an already-assembled [`StealthPartialTransaction`] on the **random-nonce default**
+/// path: every signature nonce (the account-key seal/auth nonces, the stealth-key auth nonces, the
+/// stealth/ephemeral seal nonces, and the ephemeral seal *key*) is expanded from a fresh OS-RNG seed,
+/// so the output is **not** reproducible (the safe default for real submission) and, crucially, a
+/// reused `StealthKeys` bundle never reuses a Schnorr nonce.
 ///
 /// `keys.account_secret` is still consumed (it seals case i and derives the case-ii/iii keys); the
-/// `keys.seal_nonce`/`keys.auth_nonce` fields are **ignored** on this path — they are overridden by
-/// the freshly-drawn nonces below.
-pub fn seal_and_encode_stealth_transfer_production(
+/// `keys.seed` field is **ignored** on this path — the nonces come from the freshly-drawn seed below.
+pub fn seal_and_encode_stealth_transfer(
     network: Network,
     partial: StealthPartialTransaction,
     keys: &StealthKeys,
@@ -396,36 +400,35 @@ fn encode(transaction: Transaction, id: TransactionId) -> Result<EncodedPublicTr
     })
 }
 
-/// Full-pipeline deterministic send: build → sign/seal/encode in one call.
+/// Full-pipeline seed-reproducible send: build → sign/seal/encode in one call. `seed` expands into all
+/// proof + seal-side entropy; `keys.seed` expands into the account-key (case i) nonces.
 ///
 /// `fetched_utxos` are every stealth-input UTXO substate, fetched up front; `spend_secrets` are the
 /// per-input view-only secrets (one per `intent.inputs`, positional) used to decrypt the input masks.
-pub fn build_and_encode_stealth_transfer_deterministic(
+pub fn build_and_encode_stealth_transfer_with_seed(
     network: Network,
     intent: &StealthTransferIntent,
     fetched_utxos: &[FetchedSubstate],
     spend_secrets: &[SecretKeyBytes],
     keys: &StealthKeys,
-    entropy: &StealthEntropy,
+    seed: &BuildSeed,
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
-    let partial =
-        build_stealth_transfer_unsigned_deterministic(network, intent, fetched_utxos, spend_secrets, entropy)?;
-    seal_and_encode_stealth_transfer_deterministic(network, partial, keys, entropy)
+    let partial = build_stealth_transfer_unsigned_with_seed(network, intent, fetched_utxos, spend_secrets, seed)?;
+    seal_and_encode_stealth_transfer_with_seed(network, partial, keys, seed)
 }
 
-/// Full-pipeline production send: fills the proof + seal entropy from `OsRng`, then builds + seals.
-/// The output is **not** reproducible (correct for real submission).
-pub fn build_and_encode_stealth_transfer_production(
+/// Full-pipeline random-nonce default send: expands the proof + seal entropy from a fresh OS-RNG seed,
+/// then builds + seals. The output is **not** reproducible (the safe default for real submission).
+pub fn build_and_encode_stealth_transfer(
     network: Network,
     intent: &StealthTransferIntent,
     fetched_utxos: &[FetchedSubstate],
     spend_secrets: &[SecretKeyBytes],
     keys: &StealthKeys,
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
-    let entropy = StealthEntropy::from_os_rng(intent.outputs.len());
-    let partial =
-        build_stealth_transfer_unsigned_deterministic(network, intent, fetched_utxos, spend_secrets, &entropy)?;
-    seal_and_encode_stealth_transfer_production(network, partial, keys)
+    let seed = random_seed();
+    let partial = build_stealth_transfer_unsigned_with_seed(network, intent, fetched_utxos, spend_secrets, &seed)?;
+    seal_and_encode_stealth_transfer(network, partial, keys)
 }
 
 #[cfg(test)]
@@ -457,7 +460,7 @@ mod tests {
             address::{ComponentAddressStr, ResourceAddressStr},
             bytes::PublicKeyBytes,
             numeric::BoundaryAmount,
-            stealth::{PerOutputEntropy, StealthInputSpec, StealthOutputSpec, StealthPayTo},
+            stealth::{StealthInputSpec, StealthOutputSpec, StealthPayTo},
         },
     };
 
@@ -473,8 +476,9 @@ mod tests {
         SecretKeyBytes::from_bytes(fixed_scalar(seed).as_bytes()).unwrap()
     }
 
-    fn nonce(seed: u8) -> NonceSecretBytes {
-        NonceSecretBytes::from_bytes(fixed_scalar(seed).as_bytes()).unwrap()
+    /// A fixed build seed for the seed-reproducible seal/build paths.
+    fn build_seed(byte: u8) -> BuildSeed {
+        BuildSeed::from_array([byte; 32])
     }
 
     fn pk_bytes(seed: u8) -> PublicKeyBytes {
@@ -507,29 +511,8 @@ mod tests {
         }
     }
 
-    fn per_entropy(base: u8) -> PerOutputEntropy {
-        PerOutputEntropy {
-            mask: secret(base),
-            sender_nonce: secret(base + 1),
-            aead_nonce: secret(base + 2),
-            elgamal_nonce: None,
-            zk_nonces: None,
-        }
-    }
-
-    fn entropy_for(num_outputs: usize, base: u8) -> StealthEntropy {
-        StealthEntropy {
-            per_output: (0..num_outputs).map(|i| per_entropy(base + (i as u8) * 8)).collect(),
-            balance_proof_nonce: secret(200),
-            bulletproof_seed: secret(201),
-            ephemeral_seal_nonce: secret(202),
-            ephemeral_auth_nonce: secret(203),
-            ephemeral_sign_nonce: secret(204),
-        }
-    }
-
     fn stealth_keys() -> StealthKeys {
-        StealthKeys::new(secret(11), nonce(22), nonce(33))
+        StealthKeys::new(secret(11), build_seed(0x42))
     }
 
     /// Builds an ephemeral-case (iii) partial.
@@ -576,6 +559,11 @@ mod tests {
         }
     }
 
+    /// The build seed the stealth send tests expand into proof + seal-side entropy.
+    fn send_seed() -> BuildSeed {
+        build_seed(0x90)
+    }
+
     /// Builds a stealth-seal (case ii) partial from a fabricated, decryptable stealth UTXO input
     /// balanced against an equal-value output. Returns the partial + the (view_secret, public_nonce,
     /// owner_account_secret) so the test can reconstruct the expected c+k seal key.
@@ -583,10 +571,10 @@ mod tests {
         StealthPartialTransaction,
         RistrettoSecretKey,
         RistrettoPublicKey,
-        StealthEntropy,
+        BuildSeed,
     ) {
         let value = 1_000_000u64;
-        let entropy = entropy_for(1, 80);
+        let seed = send_seed();
 
         let input_mask = fixed_scalar(160);
         let nonce_secret = fixed_scalar(161);
@@ -640,9 +628,8 @@ mod tests {
 
         let spend_secrets = vec![SecretKeyBytes::from_bytes(view_secret.as_bytes()).unwrap()];
         let partial =
-            build_stealth_transfer_unsigned_deterministic(NETWORK, &intent, &fetched, &spend_secrets, &entropy)
-                .unwrap();
-        (partial, owner_account_secret, public_nonce, entropy)
+            build_stealth_transfer_unsigned_with_seed(NETWORK, &intent, &fetched, &spend_secrets, &seed).unwrap();
+        (partial, owner_account_secret, public_nonce, seed)
     }
 
     /// Builds an account-key-seal (case i) partial: a stealth output funded by a revealed-input
@@ -661,8 +648,7 @@ mod tests {
             dry_run: false,
             pay_fee_from_revealed: false,
         };
-        let entropy = entropy_for(1, 40);
-        build_stealth_transfer_unsigned_deterministic(NETWORK, &intent, &[], &[], &entropy).unwrap()
+        build_stealth_transfer_unsigned_with_seed(NETWORK, &intent, &[], &[], &send_seed()).unwrap()
     }
 
     fn decode(out: &EncodedPublicTransfer) -> Transaction {
@@ -674,32 +660,33 @@ mod tests {
     // (a) Ephemeral seal — signatures verify, id is 32 bytes, bytes non-empty.
     #[test]
     fn ephemeral_seal_signatures_verify() {
-        let entropy = entropy_for(0, 10);
+        let seed = send_seed();
         let partial = ephemeral_partial();
-        let out = seal_and_encode_stealth_transfer_deterministic(NETWORK, partial, &stealth_keys(), &entropy).unwrap();
+        let out = seal_and_encode_stealth_transfer_with_seed(NETWORK, partial, &stealth_keys(), &seed).unwrap();
         assert!(!out.encoded_transaction.as_bytes().is_empty());
         assert_eq!(out.transaction_id.as_bytes().len(), 32);
         let tx = decode(&out);
         assert!(verify_all_signatures(&tx), "ephemeral seal signature must verify");
 
-        // The seal key is the pinned ephemeral key (ephemeral_seal_nonce as secret), NOT the account key.
-        let eph_pk = public_key_bytes_from_secret(&fixed_scalar(202));
+        // The seal key is the seed-expanded ephemeral key (ephemeral_seal_nonce as secret), NOT the account key.
+        let eph_secret = parse_secret(&crate::seed::derive_ephemeral_seal_nonce(&seed)).unwrap();
+        let eph_pk = public_key_bytes_from_secret(&eph_secret);
         assert_eq!(tx.seal_signature().public_key(), &eph_pk, "ephemeral key seals");
         let account_pk = public_key_bytes_from_secret(&fixed_scalar(11));
         assert_ne!(tx.seal_signature().public_key(), &account_pk, "not the account key");
     }
 
-    // (b) Ephemeral seal — reproducibility (semantic): identical entropy ⇒ identical ephemeral seal key
+    // (b) Ephemeral seal — reproducibility (semantic): identical seed ⇒ identical ephemeral seal key
     //     + verifying signatures across two runs. (The underlying tx body carries a balance proof +
     //     bulletproof whose nonces are drawn in the reused crypto leaves, so the raw bytes move — the
     //     seal-side determinism this module owns is what we assert.)
     #[test]
     fn ephemeral_seal_is_reproducible() {
-        let entropy = entropy_for(0, 10);
-        let a = seal_and_encode_stealth_transfer_deterministic(NETWORK, ephemeral_partial(), &stealth_keys(), &entropy)
-            .unwrap();
-        let b = seal_and_encode_stealth_transfer_deterministic(NETWORK, ephemeral_partial(), &stealth_keys(), &entropy)
-            .unwrap();
+        let seed = send_seed();
+        let a =
+            seal_and_encode_stealth_transfer_with_seed(NETWORK, ephemeral_partial(), &stealth_keys(), &seed).unwrap();
+        let b =
+            seal_and_encode_stealth_transfer_with_seed(NETWORK, ephemeral_partial(), &stealth_keys(), &seed).unwrap();
         let (ta, tb) = (decode(&a), decode(&b));
         assert_eq!(
             ta.seal_signature().public_key(),
@@ -712,11 +699,11 @@ mod tests {
     // (c) Stealth seal (c+k) — signatures verify; the seal public key equals (c+k)·G.
     #[test]
     fn stealth_seal_signatures_verify_and_key_matches() {
-        let (partial, account_secret, public_nonce, entropy) = stealth_seal_partial();
+        let (partial, account_secret, public_nonce, seed) = stealth_seal_partial();
         assert!(!partial.signature_requirements().must_sign_with_account_key);
         assert!(partial.signature_requirements().seal_signer.is_some());
 
-        let out = seal_and_encode_stealth_transfer_deterministic(NETWORK, partial, &stealth_keys(), &entropy).unwrap();
+        let out = seal_and_encode_stealth_transfer_with_seed(NETWORK, partial, &stealth_keys(), &seed).unwrap();
         let tx = decode(&out);
         assert!(verify_all_signatures(&tx), "stealth seal signatures must verify");
 
@@ -736,8 +723,7 @@ mod tests {
     fn account_key_seal_signatures_verify() {
         let partial = account_key_partial();
         assert!(partial.signature_requirements().must_sign_with_account_key);
-        let entropy = entropy_for(1, 40);
-        let out = seal_and_encode_stealth_transfer_deterministic(NETWORK, partial, &stealth_keys(), &entropy).unwrap();
+        let out = seal_and_encode_stealth_transfer_with_seed(NETWORK, partial, &stealth_keys(), &send_seed()).unwrap();
         let tx = decode(&out);
         assert!(
             verify_all_signatures(&tx),
@@ -753,19 +739,19 @@ mod tests {
     #[test]
     fn production_paths_produce_bytes_and_id() {
         // Ephemeral.
-        let eph = seal_and_encode_stealth_transfer_production(NETWORK, ephemeral_partial(), &stealth_keys()).unwrap();
+        let eph = seal_and_encode_stealth_transfer(NETWORK, ephemeral_partial(), &stealth_keys()).unwrap();
         assert!(!eph.encoded_transaction.as_bytes().is_empty());
         assert_eq!(eph.transaction_id.as_bytes().len(), 32);
 
         // Stealth seal.
         let (partial, _, _, _) = stealth_seal_partial();
-        let st = seal_and_encode_stealth_transfer_production(NETWORK, partial, &stealth_keys()).unwrap();
+        let st = seal_and_encode_stealth_transfer(NETWORK, partial, &stealth_keys()).unwrap();
         assert!(!st.encoded_transaction.as_bytes().is_empty());
         assert_eq!(st.transaction_id.as_bytes().len(), 32);
         assert!(verify_all_signatures(&decode(&st)));
 
         // Account key.
-        let ak = seal_and_encode_stealth_transfer_production(NETWORK, account_key_partial(), &stealth_keys()).unwrap();
+        let ak = seal_and_encode_stealth_transfer(NETWORK, account_key_partial(), &stealth_keys()).unwrap();
         assert!(!ak.encoded_transaction.as_bytes().is_empty());
         assert_eq!(ak.transaction_id.as_bytes().len(), 32);
         assert!(verify_all_signatures(&decode(&ak)));
@@ -775,9 +761,8 @@ mod tests {
     //     true (builder default; the auth sig covers the seal key per the stock semantics).
     #[test]
     fn is_seal_signer_authorized_flag_set() {
-        let entropy = entropy_for(0, 10);
         let eph =
-            seal_and_encode_stealth_transfer_deterministic(NETWORK, ephemeral_partial(), &stealth_keys(), &entropy)
+            seal_and_encode_stealth_transfer_with_seed(NETWORK, ephemeral_partial(), &stealth_keys(), &send_seed())
                 .unwrap();
         let eph_tx = decode(&eph);
         assert!(
@@ -785,14 +770,9 @@ mod tests {
             "ephemeral (0 auth sigs) ⇒ is_seal_signer_authorized must be true"
         );
 
-        let ak_entropy = entropy_for(1, 40);
-        let ak = seal_and_encode_stealth_transfer_deterministic(
-            NETWORK,
-            account_key_partial(),
-            &stealth_keys(),
-            &ak_entropy,
-        )
-        .unwrap();
+        let ak =
+            seal_and_encode_stealth_transfer_with_seed(NETWORK, account_key_partial(), &stealth_keys(), &send_seed())
+                .unwrap();
         assert!(
             decode(&ak).is_seal_signer_authorized(),
             "account-key path ⇒ is_seal_signer_authorized must be true"
@@ -805,10 +785,10 @@ mod tests {
     //     because the embedded balance proof + bulletproof draw fresh nonces in the crypto leaves).
     #[test]
     fn stealth_seal_reproducible_modulo_proofs() {
-        let (partial_a, _, _, entropy) = stealth_seal_partial();
+        let (partial_a, _, _, seed) = stealth_seal_partial();
         let (partial_b, _, _, _) = stealth_seal_partial();
-        let a = seal_and_encode_stealth_transfer_deterministic(NETWORK, partial_a, &stealth_keys(), &entropy).unwrap();
-        let b = seal_and_encode_stealth_transfer_deterministic(NETWORK, partial_b, &stealth_keys(), &entropy).unwrap();
+        let a = seal_and_encode_stealth_transfer_with_seed(NETWORK, partial_a, &stealth_keys(), &seed).unwrap();
+        let b = seal_and_encode_stealth_transfer_with_seed(NETWORK, partial_b, &stealth_keys(), &seed).unwrap();
         let (ta, tb) = (decode(&a), decode(&b));
         assert_eq!(
             ta.seal_signature().public_key(),
@@ -821,10 +801,9 @@ mod tests {
     // (h) Malformed account secret ⇒ KEY error, never a panic.
     #[test]
     fn malformed_account_secret_is_key_error() {
-        let entropy = entropy_for(0, 10);
-        let bad = StealthKeys::new(SecretKeyBytes::from_array([0xff; 32]), nonce(22), nonce(33));
+        let bad = StealthKeys::new(SecretKeyBytes::from_array([0xff; 32]), build_seed(0x42));
         let err =
-            seal_and_encode_stealth_transfer_deterministic(NETWORK, ephemeral_partial(), &bad, &entropy).unwrap_err();
+            seal_and_encode_stealth_transfer_with_seed(NETWORK, ephemeral_partial(), &bad, &send_seed()).unwrap_err();
         assert_eq!(err.code(), "KEY");
     }
 }

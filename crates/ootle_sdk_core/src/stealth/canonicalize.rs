@@ -99,12 +99,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        build_and_encode_public_transfer,
+        build_and_encode_public_transfer_with_seed,
         keys::DeterministicTransferKeys,
         public_transfer::EncodedPublicTransfer,
         types::{
             address::{ComponentAddressStr, ResourceAddressStr},
-            bytes::{NonceSecretBytes, PublicKeyBytes, SecretKeyBytes},
+            bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
             intent::{InputRef, PublicTransferIntent, TransferRecipient},
             numeric::BoundaryAmount,
         },
@@ -136,10 +136,9 @@ mod tests {
         };
         let keys = DeterministicTransferKeys::single_key(
             SecretKeyBytes::from_array(scalar_bytes(11)),
-            NonceSecretBytes::from_array(scalar_bytes(22)),
-            NonceSecretBytes::from_array(scalar_bytes(33)),
+            BuildSeed::from_array([0x42; 32]),
         );
-        build_and_encode_public_transfer(Network::Esmeralda, &intent, &keys).unwrap()
+        build_and_encode_public_transfer_with_seed(Network::Esmeralda, &intent, &keys).unwrap()
     }
 
     #[test]

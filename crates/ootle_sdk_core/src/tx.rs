@@ -7,9 +7,9 @@
 //!
 //! - [`seal_public_transfer`] — the **production** path. It uses the stock random-nonce [`UnsealedTransaction::seal`],
 //!   so the bytes and id are unique per call (this is fine — and desirable — for real submission).
-//! - [`seal_public_transfer_deterministic`] — the **deterministic** path. It threads caller-supplied nonce secrets
-//!   through [`RistrettoSchnorr::sign_with_nonce_and_message`], reconstructing both the authorization and the seal
-//!   signatures with pinned nonces. With identical inputs it yields byte-identical encoded bytes **and** an identical
+//! - [`seal_public_transfer_deterministic`] — the **seed-reproducible** path. It expands the bundle's build seed into
+//!   the pinned authorization + seal nonces and threads them through [`RistrettoSchnorr::sign_with_nonce_and_message`],
+//!   reconstructing both signatures. With identical inputs it yields byte-identical encoded bytes **and** an identical
 //!   transaction id (the id chains the signatures).
 //!
 //! ### Why determinism needs pinned nonces
@@ -72,8 +72,9 @@ pub fn seal_public_transfer(
     Ok((transaction, id))
 }
 
-/// Seals an [`UnsignedTransaction`] **deterministically** with caller-supplied nonce secrets.
-/// With identical inputs this is byte-for-byte reproducible (bytes **and** id).
+/// Seals an [`UnsignedTransaction`] **deterministically** with the authorization + seal nonces
+/// expanded from the bundle's build seed. With the same seed + inputs this is byte-for-byte
+/// reproducible (bytes **and** id). A zero seed ⇒ [`OotleSdkError::Validation`].
 ///
 /// For the single-key path (`keys.seal_secret == None`) the account key is both the authorization
 /// signer and the seal signer. A separate seal key is supported when `keys.seal_secret` is `Some`.
@@ -81,9 +82,11 @@ pub fn seal_public_transfer_deterministic(
     unsigned: UnsignedTransaction,
     keys: &DeterministicTransferKeys,
 ) -> Result<(Transaction, TransactionId), OotleSdkError> {
+    keys.seed.validate_nonzero()?;
     let account_secret = parse_secret_key(&keys.account_secret)?;
-    let auth_nonce = parse_nonce_secret(&keys.auth_nonce)?;
-    let seal_nonce = parse_nonce_secret(&keys.seal_nonce)?;
+    let (auth_nonce_bytes, seal_nonce_bytes) = crate::seed::derive_transfer_nonces(&keys.seed);
+    let auth_nonce = parse_nonce_secret(&auth_nonce_bytes)?;
+    let seal_nonce = parse_nonce_secret(&seal_nonce_bytes)?;
 
     // The seal signer is either a separate key or the account key (single-key path).
     let seal_secret = match &keys.seal_secret {
@@ -166,17 +169,19 @@ pub fn seal_public_transfer_with_auth(
 /// nonce so the bytes/id are byte-for-byte reproducible. The supplied `auth_signatures` are attached
 /// verbatim; the seal signer is `keys.seal_secret` if present, else `keys.account_secret`.
 ///
-/// `keys.auth_nonce` is **unused** on this path: this function does not produce its own authorization
-/// signature (the authorizations are supplied), only the seal signature.
+/// The seed's authorization nonce is **unused** on this path: this function does not produce its own
+/// authorization signature (the authorizations are supplied), only the seal signature.
 ///
-/// Identical `is_seal_signer_authorized` rule as the production twin.
+/// Identical `is_seal_signer_authorized` rule as the random twin.
 pub fn seal_public_transfer_with_auth_deterministic(
     unsigned: UnsignedTransaction,
     keys: &DeterministicTransferKeys,
     auth_signatures: Vec<TransactionSignature>,
 ) -> Result<(Transaction, TransactionId), OotleSdkError> {
+    keys.seed.validate_nonzero()?;
     let account_secret = parse_secret_key(&keys.account_secret)?;
-    let seal_nonce = parse_nonce_secret(&keys.seal_nonce)?;
+    let (_auth_nonce_bytes, seal_nonce_bytes) = crate::seed::derive_transfer_nonces(&keys.seed);
+    let seal_nonce = parse_nonce_secret(&seal_nonce_bytes)?;
     let seal_secret = match &keys.seal_secret {
         Some(s) => parse_secret_key(s)?,
         None => account_secret,

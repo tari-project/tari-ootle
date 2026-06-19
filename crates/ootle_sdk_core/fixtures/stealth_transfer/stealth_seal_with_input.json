@@ -2,9 +2,9 @@
   "name": "stealth_transfer/stealth_seal_with_input",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.33.5",
-    "git_rev": "3b697a66fffbe638eea2593cb73b99eb61689f73",
-    "generated_by": "ootle-sdk-core golden-vector generator"
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
   "compare": "semantic",
@@ -19,7 +19,7 @@
             "is_frozen": false,
             "output": {
               "output": {
-                "encrypted_data": "07a63942e8ef469a843bca2cbf6a05de101a6b077766a796d159193b273ff22e38dd1e3afb78e635ccd6a8bbf71658366e52c13b71d073f0c8104f33ca040ea1f054205cc7778a140674af390ae24371",
+                "encrypted_data": "ffd35ef0d7a891570a164b5df43a4e70359b96a93d4eaed0969ac26b439969ff3df40e006fe6744a9ef39d11f3d357f64fbcb72438dd71512eab898d9e23c6b0719a22676d2276a90364feb341dc162d",
                 "minimum_value_promise": 0,
                 "public_nonce": "f2cce6415ff090eea8d0f041e356f28f3be3aa53ccc69867288e7432028fca23",
                 "viewable_balance": null
@@ -64,26 +64,9 @@
       "dry_run": false,
       "pay_fee_from_revealed": false
     },
-    "stealth_entropy": {
-      "per_output": [
-        {
-          "mask": "5a00000000000000000000000000000000000000000000000000000000000000",
-          "sender_nonce": "5b00000000000000000000000000000000000000000000000000000000000000",
-          "aead_nonce": "5c00000000000000000000000000000000000000000000000000000000000000",
-          "elgamal_nonce": null,
-          "zk_nonces": null
-        }
-      ],
-      "balance_proof_nonce": "c800000000000000000000000000000000000000000000000000000000000000",
-      "bulletproof_seed": "c900000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_seal_nonce": "ca00000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_auth_nonce": "cb00000000000000000000000000000000000000000000000000000000000000",
-      "ephemeral_sign_nonce": "cc00000000000000000000000000000000000000000000000000000000000000"
-    },
     "stealth_keys": {
       "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
-      "auth_nonce": "1600000000000000000000000000000000000000000000000000000000000000",
-      "seal_nonce": "2100000000000000000000000000000000000000000000000000000000000000"
+      "seed": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
     },
     "spend_secrets": [
       "a200000000000000000000000000000000000000000000000000000000000000"
@@ -141,16 +124,16 @@
                       "outputs": [
                         {
                           "output": {
-                            "commitment": "f4e61dd8a35ffeab6e00e73c187b3ef1c5d8ce92d112c0ed5dabf73fba26866d",
-                            "encrypted_data": "4a7a689cb4d62a0fe637a8cd3a6783d95c0000000000000000000000000000000000000000000000a8380809c8db5ca89b73b21a395b8de7e70d847e36a5bf63924775d1ee2c3f45710f3cfc78522cac",
+                            "commitment": "a422410dd4430276a8b3ac9e2352b2787db57548187895157914eb621dbe4c59",
+                            "encrypted_data": "aeb21295a10115b9e3206aa572f15280d0a3bc4592a8a0a13710ad11b9948edf380a2c7505e5b023d762a20fa6c4626981dbde9ec00c03de2e6086ef7969522b8206211954836af820d9b479f2af6fdd",
                             "minimum_value_promise": 0,
-                            "sender_public_nonce": "bc67cfdc0b57f716b6879eb4c623d6e2fd0ab4d63a8589af49ec57e1c5b7ba45",
+                            "sender_public_nonce": "4ad5eb613bdf083afe27c5ee18648e788d439be4b825d0ac63ca75ff42268e36",
                             "viewable_balance_proof": null
                           },
                           "spend_condition": {
-                            "Signed": "3c70deea3c25923b1371dec24d2d16e6c5bc04f8c7dae6e6d0d088e79de01a32"
+                            "Signed": "e461b029fa778a1fabfcfd1f4945bb1ee7543c14bb679d58c16ae6056c0af376"
                           },
-                          "tag": 1465720523
+                          "tag": 1321982421
                         }
                       ],
                       "revealed_output_amount": "0"

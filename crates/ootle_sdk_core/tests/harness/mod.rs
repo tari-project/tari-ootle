@@ -276,11 +276,11 @@ fn is_bytes_compare(s: &str) -> bool {
 /// Records what produced a fixture so a regenerated fixture is traceable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provenance {
-    /// The `ootle-sdk-core` crate version that generated the fixture.
+    /// The `ootle_sdk_core` crate version that generated the fixture.
     pub core_version: String,
     /// The git revision (`git rev-parse HEAD`) at generation time, or `"unknown"`.
     pub git_rev: String,
-    /// What generated it, e.g. `ootle-sdk-core golden-vector generator`.
+    /// What generated it, e.g. `ootle_sdk_core golden-vector generator`.
     pub generated_by: String,
 }
 

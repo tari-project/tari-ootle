@@ -10,7 +10,7 @@
 //!   only writer of `expected`** — humans never hand-edit it.
 //!
 //!   ```text
-//!   OOTLE_REGEN_FIXTURES=1 cargo test -p ootle-sdk-core --test golden_vectors regen_fixtures
+//!   OOTLE_REGEN_FIXTURES=1 cargo test -p ootle_sdk_core --test golden_vectors regen_fixtures
 //!   ```
 //!
 //! - **Runner** ([`run_golden_vectors`]) — always on. Loads every fixture, runs the named operation over its `input`,
@@ -3012,7 +3012,7 @@ fn regen_is_idempotent() {
             committed,
             regenerated,
             "regeneration is not idempotent for {} — the committed fixture is stale; rerun OOTLE_REGEN_FIXTURES=1 \
-             cargo test -p ootle-sdk-core --test golden_vectors regen_fixtures",
+             cargo test -p ootle_sdk_core --test golden_vectors regen_fixtures",
             path.display(),
         );
     }

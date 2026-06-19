@@ -1,6 +1,6 @@
 [package]
 name = "ootle_sdk_ffi_c"
-description = "Flat C ABI facade over ootle-sdk-core — extern \"C\" JSON-over-bytes surface + opaque handle for Go/C/C++ hosts"
+description = "Flat C ABI facade over ootle_sdk_core — extern \"C\" JSON-over-bytes surface + opaque handle for Go/C/C++ hosts"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -13,7 +13,7 @@ license.workspace = true
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-ootle-sdk-core = { workspace = true }
+ootle_sdk_core = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 hex = { workspace = true }

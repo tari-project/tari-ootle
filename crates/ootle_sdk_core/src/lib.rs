@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 #![forbid(unsafe_code)]
-//! `ootle-sdk-core` — synchronous, pure transaction-construction primitives for the Ootle network.
+//! `ootle_sdk_core` — synchronous, pure transaction-construction primitives for the Ootle network.
 //!
 //! Every entry point is a pure, synchronous function: it maps a developer intent to submit-ready
 //! BOR-encoded transaction bytes (and decodes results on the way back). It performs no I/O — no

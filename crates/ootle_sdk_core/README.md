@@ -1,4 +1,4 @@
-# `ootle-sdk-core`
+# `ootle_sdk_core`
 
 The **pure, synchronous fat core** for Tari Ootle SDKs.
 
@@ -19,7 +19,7 @@ the work belongs in a host or a later facade.
 Verify purity with:
 
 ```sh
-cargo tree -p ootle-sdk-core | grep -E 'tokio|reqwest|uniffi|cbindgen|wasm-bindgen'
+cargo tree -p ootle_sdk_core | grep -E 'tokio|reqwest|uniffi|cbindgen|wasm-bindgen'
 ```
 
 It must print nothing.

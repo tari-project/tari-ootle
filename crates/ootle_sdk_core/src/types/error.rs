@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! The single structured error envelope for `ootle-sdk-core`.
+//! The single structured error envelope for `ootle_sdk_core`.
 //!
 //! Every variant carries a **stable machine code** via [`OotleSdkError::code`]. Host SDKs branch on
 //! that code, so the codes are part of the public contract: never rename an existing code. The crate
@@ -9,7 +9,7 @@
 
 use thiserror::Error;
 
-/// The one error type crossing the `ootle-sdk-core` boundary.
+/// The one error type crossing the `ootle_sdk_core` boundary.
 ///
 /// Each variant maps 1:1 to a stable [`code`](OotleSdkError::code) that host SDKs match on.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

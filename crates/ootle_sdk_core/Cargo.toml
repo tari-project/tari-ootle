@@ -1,5 +1,5 @@
 [package]
-name = "ootle-sdk-core"
+name = "ootle_sdk_core"
 description = "Pure, synchronous fat core for Tari Ootle SDKs — intent → submit-ready BOR bytes"
 version.workspace = true
 edition.workspace = true

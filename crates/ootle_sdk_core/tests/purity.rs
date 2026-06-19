@@ -1,11 +1,11 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! Purity guard: the `ootle-sdk-core` crate must never pull a forbidden dependency into its tree.
+//! Purity guard: the `ootle_sdk_core` crate must never pull a forbidden dependency into its tree.
 //!
 //! See `README.md`. If this test fails, a `tokio` / `reqwest` / `uniffi` / `cbindgen` /
 //! `wasm-bindgen` crept into the dependency tree — back it out; the work belongs in a host or a
-//! facade, not in `ootle-sdk-core`.
+//! facade, not in `ootle_sdk_core`.
 
 use std::process::Command;
 
@@ -14,7 +14,7 @@ const FORBIDDEN: &[&str] = &["tokio", "reqwest", "uniffi", "cbindgen", "wasm-bin
 #[test]
 fn dependency_tree_is_pure() {
     let output = Command::new(env!("CARGO"))
-        .args(["tree", "-p", "ootle-sdk-core", "--edges", "normal,build"])
+        .args(["tree", "-p", "ootle_sdk_core", "--edges", "normal,build"])
         .output()
         .expect("failed to run `cargo tree`");
 
@@ -41,6 +41,6 @@ fn dependency_tree_is_pure() {
 
     assert!(
         offenders.is_empty(),
-        "forbidden dependency(ies) {offenders:?} found in ootle-sdk-core tree:\n{tree}"
+        "forbidden dependency(ies) {offenders:?} found in ootle_sdk_core tree:\n{tree}"
     );
 }

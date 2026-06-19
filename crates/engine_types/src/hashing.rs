@@ -128,6 +128,8 @@ pub enum EngineHashDomainLabel {
     CovenantBalanceProof,
     ValueProof,
     Blob,
+    SpendScriptLeaf,
+    SpendScriptBranch,
 }
 
 impl EngineHashDomainLabel {
@@ -155,6 +157,8 @@ impl EngineHashDomainLabel {
             Self::CovenantBalanceProof => "CovenantBalanceProof",
             Self::ValueProof => "ValueProof",
             Self::Blob => "Blob",
+            Self::SpendScriptLeaf => "SpendScriptLeaf",
+            Self::SpendScriptBranch => "SpendScriptBranch",
         }
     }
 }

@@ -1536,6 +1536,7 @@ mod balance_change_handler_tests {
     };
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn balance_changes_handler_authorizes_filters_and_paginates() {
         let temp = tempfile::tempdir().unwrap();
         let store = SqliteWalletStore::try_open(temp.path().join("wallet.sqlite")).unwrap();

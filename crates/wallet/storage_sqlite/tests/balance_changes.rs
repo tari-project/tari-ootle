@@ -328,7 +328,7 @@ fn promotes_matching_scan_change_to_transaction_source() {
 }
 
 #[test]
-fn does_not_promote_ambiguous_scan_change_to_transaction_source() {
+fn promotes_latest_matching_scan_change_to_transaction_source() {
     let (store, first_vault, _, _, _) = setup_store();
     let transaction = build_transaction(4);
     let transaction_id = transaction.calculate_id();
@@ -363,6 +363,10 @@ fn does_not_promote_ambiguous_scan_change_to_transaction_source() {
     let mut tx = store.create_write_tx().unwrap();
     let current = tx.vaults_get(&first_vault).unwrap();
     assert!(
+        tx.balance_changes_promote_scan_to_transaction(&current, transaction_id)
+            .unwrap()
+    );
+    assert!(
         !tx.balance_changes_promote_scan_to_transaction(&current, transaction_id)
             .unwrap()
     );
@@ -370,13 +374,14 @@ fn does_not_promote_ambiguous_scan_change_to_transaction_source() {
     drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
-    assert!(
-        !tx.balance_changes_exists_for_transaction(&first_vault, &transaction_id)
-            .unwrap()
-    );
+    let transaction_changes = tx
+        .balance_changes_get_by_account(&account_address(), 0, 10, None, Some(&transaction_id), None)
+        .unwrap();
+    assert_eq!(transaction_changes.len(), 1);
+    assert_eq!(transaction_changes[0].revealed_delta, "-10");
     assert_eq!(
         tx.balance_changes_count_by_account(&account_address(), None, None, Some(BalanceChangeSourceType::Scan))
             .unwrap(),
-        3
+        2
     );
 }

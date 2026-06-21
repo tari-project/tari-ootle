@@ -213,7 +213,7 @@ fn transaction_source_promotes_existing_scan_for_same_balance() {
 }
 
 #[test]
-fn transaction_source_does_not_promote_ambiguous_scan_for_same_balance() {
+fn transaction_source_promotes_latest_matching_scan_for_same_balance() {
     let test = Test::new();
     let accounts = test.sdk().accounts_api();
     let vault = Test::test_vault_address();
@@ -236,21 +236,22 @@ fn transaction_source_does_not_promote_ambiguous_scan_for_same_balance() {
         );
     }
 
+    let source = BalanceChangeSource::Transaction { transaction_id };
     assert!(
-        !accounts
-            .update_vault_balance_and_record_change(
-                vault,
-                Amount::from(10u64),
-                Amount::zero(),
-                BalanceChangeSource::Transaction { transaction_id },
-            )
+        accounts
+            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
             .unwrap()
     );
     assert!(
         !accounts
-            .has_balance_change_for_transaction(&vault, &transaction_id)
+            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
             .unwrap()
     );
+    let transaction_changes = accounts
+        .get_balance_changes(&Test::test_account_address(), 0, 10, None, Some(&transaction_id), None)
+        .unwrap();
+    assert_eq!(transaction_changes.len(), 1);
+    assert_eq!(transaction_changes[0].revealed_delta, "-10");
     assert_eq!(
         accounts
             .count_balance_changes(
@@ -260,7 +261,7 @@ fn transaction_source_does_not_promote_ambiguous_scan_for_same_balance() {
                 Some(BalanceChangeSourceType::Scan),
             )
             .unwrap(),
-        3
+        2
     );
 }
 

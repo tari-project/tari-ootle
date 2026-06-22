@@ -405,6 +405,6 @@ export const useGetBalanceChanges = (
         resource_address: resourceAddress ?? null,
         transaction_id: transactionId ?? null,
       }),
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   });
 };

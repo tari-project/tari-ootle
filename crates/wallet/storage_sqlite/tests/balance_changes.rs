@@ -13,7 +13,13 @@ use tari_ootle_wallet_sdk::{
         KeyId,
         VaultModel,
     },
-    storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_lib_types::{
@@ -542,7 +548,7 @@ fn promote_scan_to_transaction() {
         assert_eq!(post_promote.len(), 1);
         match &post_promote[0].source {
             BalanceChangeSource::Transaction { transaction_id } => {
-                assert_eq!(*transaction_id, tx_id);
+                assert_eq!(transaction_id, &tx_id);
             },
             _ => panic!("Expected Transaction source after promotion"),
         }

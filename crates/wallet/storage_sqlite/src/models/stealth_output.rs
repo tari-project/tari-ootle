@@ -27,22 +27,9 @@ fn reconstruct_spend_authorization(
     condition_root: Option<&str>,
 ) -> Result<SpendAuthorization, WalletStorageError> {
     let spend_key = spend_key
-        .map(RistrettoPublicKeyBytes::from_hex)
-        .transpose()
-        .map_err(|_| WalletStorageError::DecodingError {
-            operation: "try_into_output",
-            item: "output spend_key",
-            details: "Corrupt db: invalid spend_key hex".to_string(),
-        })?;
-    let condition_root =
-        condition_root
-            .map(Hash32::from_hex)
-            .transpose()
-            .map_err(|_| WalletStorageError::DecodingError {
-                operation: "try_into_output",
-                item: "output condition_root",
-                details: "Corrupt db: invalid condition_root hex".to_string(),
-            })?;
+        .map(deserialize_hex_try_from::<RistrettoPublicKeyBytes, _>)
+        .transpose()?;
+    let condition_root = condition_root.map(deserialize_hex_try_from::<Hash32, _>).transpose()?;
     match (spend_key, condition_root) {
         (Some(spend_key), Some(condition_root)) => Ok(SpendAuthorization::KeyAndScript {
             spend_key,

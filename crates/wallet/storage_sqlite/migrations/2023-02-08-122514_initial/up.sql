@@ -262,7 +262,9 @@ CREATE TABLE stealth_outputs
     is_on_chain            BOOLEAN  NOT NULL,
     is_condition_spendable BOOLEAN  NOT NULL,
     created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Mirror the SpendAuthorization enum: an output must be spendable by at least one path.
+    CHECK (spend_key IS NOT NULL OR condition_root IS NOT NULL)
 );
 
 CREATE UNIQUE INDEX stealth_outputs_uniq_resource_addr_commitment ON stealth_outputs (resource_address, commitment);

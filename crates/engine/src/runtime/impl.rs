@@ -129,7 +129,14 @@ use tari_template_lib::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
         engine_args::{SignatureAction, SignatureVerifyArg},
         metadata,
-        stealth::{CurrentInputView, SpendAuthorization, SpendCondition, StealthTransferStatement, TemplateFunction},
+        stealth::{
+            CurrentInputView,
+            SpendAuthorization,
+            SpendCondition,
+            SpendWitness,
+            StealthTransferStatement,
+            TemplateFunction,
+        },
     },
 };
 
@@ -588,12 +595,17 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Ok(func.clone())
     }
 
-    /// Resolves and evaluates the script-path witnesses of a transfer before the spend is executed, so that a rejection
-    /// leaves the inputs unspent. For every input carrying a [`SpendWitness::ScriptPath`] the revealed leaf is checked
-    /// for inclusion under the UTXO's committed `condition_root`; a `TemplateFunction` leaf is then run as a WASM
-    /// predicate. Key-path witnesses and `AccessRule` leaves are not touched here — they are checked inline (WASM-free)
-    /// inside `execute_stealth_transfer`.
-    fn evaluate_input_spend_scripts(
+    /// Authorises every spent input of a transfer before the spend executes, so that a rejection leaves the inputs
+    /// unspent. This is the single, mandatory authorization gate for stealth spends; the execution path
+    /// ([`WorkingState::validate_and_spend_stealth_utxos`]) performs no auth of its own.
+    ///
+    /// Each input's committed [`SpendAuthorization`] is read once, then the per-input [`SpendWitness`] selects the
+    /// path:
+    /// - **key path** — the output's `spend_key` must be present and its signer badge in the transaction's auth scope;
+    /// - **script path** — the revealed leaf must be included under the output's committed `condition_root` (the
+    ///   inclusion proof is verified exactly once, here), then the leaf is evaluated: an `AccessRule` leaf natively, a
+    ///   `TemplateFunction` leaf as a read-only WASM predicate.
+    fn verify_input_authorizations(
         &mut self,
         resource_address: ResourceAddressRef,
         statement: &StealthTransferStatement,
@@ -605,59 +617,100 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             .tracker
             .read_with(|state| state.resolve_resource_address_ref(resource_address))?;
 
-        // Resolve every script-path input's committed `condition_root` up front: a covenant predicate partitions inputs
-        // by `condition_root`, so it needs the roots of all inputs, not just the one it gates. Key-path inputs (which
-        // never join a covenant partition) are recorded as `None`.
-        let input_condition_roots = self.tracker.write_with(|state| {
+        // Read each input's committed authorisation once, parallel to the statement's inputs.
+        let input_auths = self.tracker.write_with(|state| {
             statement
                 .inputs_statement
                 .inputs
                 .iter()
-                .map(|input| {
-                    if input.witness.is_key_path() {
-                        Ok(None)
-                    } else {
-                        state.get_stealth_utxo_condition_root(resolved, input)
-                    }
-                })
+                .map(|input| state.get_stealth_utxo_spend_auth(resolved, input))
                 .collect::<Result<Vec<_>, RuntimeError>>()
         })?;
 
+        // A covenant predicate partitions inputs by `condition_root`, so it needs the roots of all inputs, not just the
+        // one it gates. Key-path inputs (which never join a covenant partition) contribute `None`.
+        let input_condition_roots = statement
+            .inputs_statement
+            .inputs
+            .iter()
+            .zip(&input_auths)
+            .map(|(input, auth)| {
+                if input.witness.is_key_path() {
+                    None
+                } else {
+                    auth.condition_root()
+                }
+            })
+            .collect::<Vec<_>>();
+
         for (index, input) in statement.inputs_statement.inputs.iter().enumerate() {
-            let Some((leaf, proof)) = input.witness.as_script_path() else {
-                continue;
-            };
-            // A `condition_root` is required to spend via the script path; resolved above as `Some` for script-path
-            // inputs.
-            let root = input_condition_roots[index].ok_or_else(|| {
-                RuntimeError::ResourceError(ResourceError::InvalidSpend {
-                    details: format!(
-                        "Script-path witness provided for stealth UTXO {} which has no condition_root",
-                        input.commitment
-                    ),
-                })
-            })?;
-            // Bind the revealed leaf to the committed root before running it, so the spender cannot substitute a leaf
-            // that was never committed.
-            if !stealth::verify_inclusion(stealth::condition_leaf_hash(leaf), proof, root) {
-                return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
-                    details: format!(
-                        "Revealed spend condition leaf is not committed in the condition_root of stealth UTXO {}",
-                        input.commitment
-                    ),
-                }));
-            }
-            // Only `TemplateFunction` leaves run a WASM predicate; `AccessRule` leaves are checked inline during
-            // execution.
-            if let SpendCondition::TemplateFunction(tf) = leaf {
-                self.evaluate_spend_script(
-                    tf,
-                    index as u32,
-                    input.commitment,
-                    root,
-                    statement,
-                    &input_condition_roots,
-                )?;
+            match &input.witness {
+                SpendWitness::KeyPath => {
+                    let Some(pk) = input_auths[index].spend_key() else {
+                        return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                            details: format!(
+                                "Key-path witness provided for stealth UTXO {} which has no spend_key",
+                                input.commitment
+                            ),
+                        }));
+                    };
+                    let badge = NonFungibleAddress::from_public_key(pk);
+                    let in_scope = self
+                        .tracker
+                        .read_with(|state| state.base_call_scope().auth_scope().contains_badge(&badge));
+                    if !in_scope {
+                        return Err(RuntimeError::ResourceError(
+                            ResourceError::RequiredSignatureMissingForStealthUtxo {
+                                commitment: input.commitment,
+                                public_key: pk,
+                            },
+                        ));
+                    }
+                },
+                SpendWitness::ScriptPath { leaf, proof } => {
+                    // A `condition_root` is required to spend via the script path.
+                    let root = input_condition_roots[index].ok_or_else(|| {
+                        RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                            details: format!(
+                                "Script-path witness provided for stealth UTXO {} which has no condition_root",
+                                input.commitment
+                            ),
+                        })
+                    })?;
+                    // Bind the revealed leaf to the committed root before evaluating it, so the spender cannot
+                    // substitute a leaf that was never committed.
+                    if !stealth::verify_inclusion(stealth::condition_leaf_hash(leaf), proof, root) {
+                        return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                            details: format!(
+                                "Revealed spend condition leaf is not committed in the condition_root of stealth UTXO \
+                                 {}",
+                                input.commitment
+                            ),
+                        }));
+                    }
+                    match leaf {
+                        SpendCondition::AccessRule(access_rule) => {
+                            let allowed = self
+                                .tracker
+                                .read_with(|state| state.authorization().check_access_rule(access_rule))?;
+                            if !allowed {
+                                return Err(RuntimeError::AccessDenied {
+                                    action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
+                                });
+                            }
+                        },
+                        SpendCondition::TemplateFunction(tf) => {
+                            self.evaluate_spend_script(
+                                tf,
+                                index as u32,
+                                input.commitment,
+                                root,
+                                statement,
+                                &input_condition_roots,
+                            )?;
+                        },
+                    }
+                },
             }
         }
         Ok(())
@@ -2057,6 +2110,12 @@ where
                     return Err(RuntimeError::FeePaymentInMainIntent);
                 }
 
+                // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate as
+                // `stealth_transfer`, so a rejection leaves the inputs unspent. Fees are always paid in TARI.
+                if let Some(ref statement) = arg.statement {
+                    self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
+                }
+
                 self.tracker.write_with(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
@@ -3372,14 +3431,15 @@ where
         // only creation-time invariant is that an output is spendable by at least one path (`spend_key` or
         // `condition_root` is `Some`), enforced by `validate_stealth_outputs_statement` during execution.
 
-        // (T2) Spend time: evaluate the predicate for every input carrying a script-path witness BEFORE the spend
-        // executes, so a rejection leaves the inputs unspent. This is the authoritative, mandatory security gate.
+        // (T2) Spend time: authorise every input BEFORE the spend executes, so a rejection leaves the inputs unspent.
+        // This is the authoritative, mandatory security gate for all spend paths (key path, AccessRule, and WASM
+        // predicate).
         //
         // Covenant soundness invariant: a covenant balance proof binds the partition's output commitments but trusts
         // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
         // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
         // wraparound forgery in the covenant check.
-        self.evaluate_input_spend_scripts(resource_address.clone(), &statement)?;
+        self.verify_input_authorizations(resource_address.clone(), &statement)?;
 
         self.tracker.write_with(|state_mut| {
             let Some(container) =

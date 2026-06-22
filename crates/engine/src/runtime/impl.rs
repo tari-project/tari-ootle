@@ -857,29 +857,40 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         input_condition_roots: &[Option<Hash32>],
         data: &[u8],
     ) -> Result<(), RuntimeError> {
-        // Covenant/output predicates introspect the transfer; epoch and hashlock predicates do not. `witness_data` is
-        // unused here (only a WASM `TemplateFunction` reads it via the host op), so it is left empty.
-        let exec = SpendScriptExecution::new(
-            statement,
-            input_condition_roots,
-            input_index,
-            input_commitment,
-            current_input_condition_root,
-            Vec::new(),
-        );
         let satisfied = match predicate {
             BuiltinPredicate::AfterEpoch(unlock_epoch) => self.tracker.get_current_epoch()?.as_u64() >= *unlock_epoch,
             BuiltinPredicate::BeforeEpoch(deadline_epoch) => {
                 self.tracker.get_current_epoch()?.as_u64() < *deadline_epoch
             },
-            BuiltinPredicate::OutputPreservesCondition => exec.output_preserves_condition(),
-            BuiltinPredicate::OutputTo {
-                condition_root,
-                min_value,
-            } => exec.has_output_to(condition_root, *min_value),
-            BuiltinPredicate::BalancePreserved => exec.covenant_balanced(0),
-            BuiltinPredicate::BalancePreservedWithAllowance(max_revealed) => exec.covenant_balanced(*max_revealed),
             BuiltinPredicate::HashLock { hash, alg } => stealth::hashlock_digest(*alg, data) == *hash,
+            // Covenant/output predicates introspect the transfer, so they need the execution context — which clones
+            // the input/output views. Build it only for them (lazily), never for the cheap epoch/hashlock checks.
+            // `witness_data` is left empty: only a WASM `TemplateFunction` reads it via the host op.
+            BuiltinPredicate::OutputPreservesCondition |
+            BuiltinPredicate::OutputTo { .. } |
+            BuiltinPredicate::BalancePreserved |
+            BuiltinPredicate::BalancePreservedWithAllowance(_) => {
+                let exec = SpendScriptExecution::new(
+                    statement,
+                    input_condition_roots,
+                    input_index,
+                    input_commitment,
+                    current_input_condition_root,
+                    Vec::new(),
+                );
+                match predicate {
+                    BuiltinPredicate::OutputPreservesCondition => exec.output_preserves_condition(),
+                    BuiltinPredicate::OutputTo {
+                        condition_root,
+                        min_value,
+                    } => exec.has_output_to(condition_root, *min_value),
+                    BuiltinPredicate::BalancePreserved => exec.covenant_balanced(0),
+                    BuiltinPredicate::BalancePreservedWithAllowance(max_revealed) => {
+                        exec.covenant_balanced(*max_revealed)
+                    },
+                    _ => unreachable!("guarded by the outer match arm"),
+                }
+            },
         };
         if !satisfied {
             return Err(RuntimeError::SpendConditionNotMet {

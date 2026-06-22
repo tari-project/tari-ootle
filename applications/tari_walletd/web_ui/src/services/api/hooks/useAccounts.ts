@@ -26,6 +26,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AccountOrKeyId,
   BadgeUsage,
+  BalanceChangeSourceType,
   ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
@@ -393,10 +394,11 @@ export const useGetBalanceChanges = (
   transactionId?: string,
   offset: number = 0,
   limit: number = 100,
+  sourceType?: BalanceChangeSourceType | null,
 ) => {
   return useQuery({
     enabled: !!account,
-    queryKey: [`balance_changes_${account}_${resourceAddress ?? ""}_${transactionId ?? ""}_${offset}_${limit}`],
+    queryKey: [`balance_changes_${account}_${resourceAddress ?? ""}_${transactionId ?? ""}_${sourceType ?? ""}_${offset}_${limit}`],
     queryFn: () =>
       getBalanceChanges({
         account: { ComponentAddress: account! },
@@ -404,7 +406,9 @@ export const useGetBalanceChanges = (
         limit,
         resource_address: resourceAddress ?? null,
         transaction_id: transactionId ?? null,
+        source_type: sourceType ?? null,
       }),
+    placeholderData: (previousData) => previousData,
     refetchInterval: 30000,
   });
 };

@@ -1515,23 +1515,12 @@ pub async fn handle_get_balance_changes(
         })
         .transpose()?;
 
-    let changes = sdk
+    let (changes, total) = sdk
         .accounts_api()
-        .balance_changes_get_by_account(
+        .balance_changes_get_with_count(
             account.component_address(),
             req.offset.unwrap_or(0),
             req.limit.unwrap_or(100),
-            req.resource_address.as_ref(),
-            tx_id,
-            req.source_type,
-            req.start_time.as_deref(),
-            req.end_time.as_deref(),
-        )?;
-
-    let total = sdk
-        .accounts_api()
-        .balance_changes_count_by_account(
-            account.component_address(),
             req.resource_address.as_ref(),
             tx_id,
             req.source_type,

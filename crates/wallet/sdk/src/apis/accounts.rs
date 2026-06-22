@@ -277,6 +277,40 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         Ok(count)
     }
 
+    pub fn balance_changes_get_with_count(
+        &self,
+        account: &ComponentAddress,
+        offset: u64,
+        limit: u64,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+    ) -> Result<(Vec<BalanceChange>, u64), AccountsApiError> {
+        self.store.with_read_tx(|tx| {
+            let changes = tx.balance_changes_get_by_account(
+                account,
+                offset,
+                limit,
+                resource_address,
+                transaction_id,
+                source_type,
+                start_time,
+                end_time,
+            )?;
+            let total = tx.balance_changes_count_by_account(
+                account,
+                resource_address,
+                transaction_id,
+                source_type,
+                start_time,
+                end_time,
+            )?;
+            Ok((changes, total))
+        })
+    }
+
     pub fn balance_changes_promote_scan_to_transaction(
         &self,
         vault_id: &VaultId,

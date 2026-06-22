@@ -517,7 +517,7 @@ fn promote_scan_to_transaction() {
 
     // Verify the scan entry was created (reader drops after scope, harmless rollback on read-only)
     {
-        let reader = db.create_read_tx().unwrap();
+        let mut reader = db.create_read_tx().unwrap();
         let pre_promote = reader
             .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
             .unwrap();
@@ -541,7 +541,7 @@ fn promote_scan_to_transaction() {
     }
 
     {
-        let reader = db.create_read_tx().unwrap();
+        let mut reader = db.create_read_tx().unwrap();
         let post_promote = reader
             .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
             .unwrap();
@@ -573,7 +573,7 @@ fn promote_scan_to_transaction() {
     }
 
     {
-        let reader = db.create_read_tx().unwrap();
+        let mut reader = db.create_read_tx().unwrap();
         let after_dup = reader
             .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
             .unwrap();

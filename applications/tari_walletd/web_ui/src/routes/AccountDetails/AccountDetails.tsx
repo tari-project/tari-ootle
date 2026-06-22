@@ -50,42 +50,32 @@ import { useState } from "react";
 import { IoAdd } from "react-icons/io5";
 import { Form, useParams } from "react-router-dom";
 import { useAccountsGet, useAccountsGetBalances } from "../../services/api/hooks/useAccounts";
-import { BalanceChangeHistory, BalanceChangeHistoryDialog } from "./BalanceChangeHistory";
+import { BalanceChangeHistory, BalanceChangeHistoryAction } from "./BalanceChangeHistory";
 
 function BalanceRow({ balance, accountAddress }: { balance: BalanceEntry; accountAddress: ComponentAddress }) {
-  const [showChanges, setShowChanges] = useState(false);
   const currency = {
     symbol: balance.token_symbol || "",
     decimals: balance.divisibility,
   } as Currency;
 
   return (
-    <>
-      <TableRow key={balance.resource_address}>
-        <DataTableCell>
-          <CopyAddress address={balance.resource_address} display={balance.token_symbol || balance.resource_address} />
-        </DataTableCell>
-        <DataTableCell>{balance.resource_type}</DataTableCell>
-        <DataTableCell>{formatCurrency(balance.balance, currency)}</DataTableCell>
-        <DataTableCell>{formatCurrency(balance.confidential_balance, currency)}</DataTableCell>
-        <DataTableCell>
-          {balance.vault_address && (
-            <Button size="small" variant="text" onClick={() => setShowChanges(true)}>
-              View changes
-            </Button>
-          )}
-        </DataTableCell>
-      </TableRow>
-      {showChanges && balance.vault_address && (
-        <BalanceChangeHistoryDialog
-          open={showChanges}
-          onClose={() => setShowChanges(false)}
-          accountAddress={accountAddress}
-          resourceAddress={balance.resource_address}
-          resourceLabel={balance.token_symbol}
-        />
-      )}
-    </>
+    <TableRow key={balance.resource_address}>
+      <DataTableCell>
+        <CopyAddress address={balance.resource_address} display={balance.token_symbol || balance.resource_address} />
+      </DataTableCell>
+      <DataTableCell>{balance.resource_type}</DataTableCell>
+      <DataTableCell>{formatCurrency(balance.balance, currency)}</DataTableCell>
+      <DataTableCell>{formatCurrency(balance.confidential_balance, currency)}</DataTableCell>
+      <DataTableCell>
+        {balance.vault_address && (
+          <BalanceChangeHistoryAction
+            accountAddress={accountAddress}
+            resourceAddress={balance.resource_address}
+            resourceLabel={balance.token_symbol}
+          />
+        )}
+      </DataTableCell>
+    </TableRow>
   );
 }
 

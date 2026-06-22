@@ -35,7 +35,7 @@ import { FluidTableCell } from "@components/StyledComponents";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { BalanceChangeHistoryDialog } from "@routes/AccountDetails/BalanceChangeHistory";
+import { BalanceChangeHistoryAction } from "@routes/AccountDetails/BalanceChangeHistory";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
 import { TransferNftDialog } from "@routes/AssetVault/NFTs/components/SendNft";
 import useAccountStore from "@store/accountStore";
@@ -100,7 +100,6 @@ function BalanceRow({
   const navigate = useNavigate();
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
   const showBalance = useAccountStore((state) => state.showBalance);
-  const [showChanges, setShowChanges] = useState(false);
 
   const stealthUXTOs = resource_type === "Stealth" && (
     <Tooltip title="View Stealth UTXOs">
@@ -116,60 +115,51 @@ function BalanceRow({
   );
 
   return (
-    <>
-      <TableRow key={token_symbol || resource_address}>
-        <FluidTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</FluidTableCell>
-        <FluidTableCell>
-          <Stack
-            direction={{
-              xs: "column-reverse",
-              md: "row",
-            }}
-            gap={isLg ? 1 : 0.3}
-          >
-            <CopyAddress
-              address={resource_address}
-              display={shortenString(resource_address, isLg ? 3 : 1, isLg ? 6 : 4)}
-            />
-            <TypeChip type={resource_type} symbol={token_symbol} compact />
-          </Stack>
-        </FluidTableCell>
-        <FluidTableCell align="right">
-          {showBalance ? `${bigintToDecimalString(balance, divisibility)} ${token_symbol}` : "********"}
-        </FluidTableCell>
-        <FluidTableCell align="right">
-          <ConfidentialBalance
-            show={showBalance}
-            resourceType={resource_type}
-            balance={confidential_balance}
-            divisibility={divisibility}
-            token_symbol={token_symbol}
+    <TableRow key={token_symbol || resource_address}>
+      <FluidTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</FluidTableCell>
+      <FluidTableCell>
+        <Stack
+          direction={{
+            xs: "column-reverse",
+            md: "row",
+          }}
+          gap={isLg ? 1 : 0.3}
+        >
+          <CopyAddress
+            address={resource_address}
+            display={shortenString(resource_address, isLg ? 3 : 1, isLg ? 6 : 4)}
           />
-        </FluidTableCell>
-        <FluidTableCell align="right">
-          <Stack direction="row" gap={1} justifyContent="flex-end">
-            {vault_address && (
-              <Button size="small" variant="text" onClick={() => setShowChanges(true)}>
-                View changes
-              </Button>
-            )}
-            <Button size="small" variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
-              Send
-            </Button>
-            {stealthUXTOs}
-          </Stack>
-        </FluidTableCell>
-      </TableRow>
-      {showChanges && vault_address && (
-        <BalanceChangeHistoryDialog
-          open={showChanges}
-          onClose={() => setShowChanges(false)}
-          accountAddress={accountAddress}
-          resourceAddress={resource_address}
-          resourceLabel={token_symbol}
+          <TypeChip type={resource_type} symbol={token_symbol} compact />
+        </Stack>
+      </FluidTableCell>
+      <FluidTableCell align="right">
+        {showBalance ? `${bigintToDecimalString(balance, divisibility)} ${token_symbol}` : "********"}
+      </FluidTableCell>
+      <FluidTableCell align="right">
+        <ConfidentialBalance
+          show={showBalance}
+          resourceType={resource_type}
+          balance={confidential_balance}
+          divisibility={divisibility}
+          token_symbol={token_symbol}
         />
-      )}
-    </>
+      </FluidTableCell>
+      <FluidTableCell align="right">
+        <Stack direction="row" gap={1} justifyContent="flex-end">
+          {vault_address && (
+            <BalanceChangeHistoryAction
+              accountAddress={accountAddress}
+              resourceAddress={resource_address}
+              resourceLabel={token_symbol}
+            />
+          )}
+          <Button size="small" variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
+            Send
+          </Button>
+          {stealthUXTOs}
+        </Stack>
+      </FluidTableCell>
+    </TableRow>
   );
 }
 

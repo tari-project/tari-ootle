@@ -395,7 +395,7 @@ pub async fn handle_get_balance_changes(
     let offset = usize::try_from(req.offset)
         .map_err(|e| invalid_params("offset", Some(&format!("offset overflowed usize: {e}"))))?;
     let accounts_api = sdk.accounts_api();
-    let changes = accounts_api.get_balance_changes(
+    let page = accounts_api.get_balance_changes(
         account.component_address(),
         offset,
         limit,
@@ -403,14 +403,10 @@ pub async fn handle_get_balance_changes(
         req.transaction_id.as_ref(),
         req.source_type,
     )?;
-    let total = accounts_api.count_balance_changes(
-        account.component_address(),
-        req.resource_address.as_ref(),
-        req.transaction_id.as_ref(),
-        req.source_type,
-    )?;
-
-    Ok(AccountsGetBalanceChangesResponse { changes, total })
+    Ok(AccountsGetBalanceChangesResponse {
+        changes: page.changes,
+        total: page.total,
+    })
 }
 
 pub async fn handle_get(
@@ -1513,6 +1509,7 @@ mod balance_change_handler_tests {
     use std::str::FromStr;
 
     use axum_extra::headers::{Authorization, authorization::Bearer};
+    use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
     use tari_ootle_address::Network;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_wallet_sdk::{
@@ -1520,7 +1517,13 @@ mod balance_change_handler_tests {
         cipher_seed::CipherSeedRestore,
         models::{BalanceChangeSource, EpochBirthday, KeyBranch, KeyId},
     };
-    use tari_ootle_wallet_sdk_services::{indexer_rest_api::IndexerRestApiNetworkInterface, notify::Notify};
+    use tari_ootle_wallet_sdk_services::{
+        account_monitor::AccountMonitor,
+        indexer_rest_api::IndexerRestApiNetworkInterface,
+        notify::Notify,
+        transaction_service::TransactionService,
+        utxo_scanner::StealthUtxoScannerWorker,
+    };
     use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
     use tari_ootle_walletd_client::permissions::Permissions;
     use tari_shutdown::Shutdown;
@@ -1532,7 +1535,6 @@ mod balance_change_handler_tests {
         WalletSdk,
         config::{WalletDaemonAuth, WalletDaemonConfig},
         handlers::{HandlerContext, auth::create_authenticator},
-        services::spawn_services,
     };
 
     #[tokio::test]
@@ -1601,6 +1603,7 @@ mod balance_change_handler_tests {
         accounts
             .update_vault_balance_and_record_change(
                 first_vault,
+                1,
                 Amount::from(100u64),
                 Amount::zero(),
                 BalanceChangeSource::Scan,
@@ -1609,6 +1612,7 @@ mod balance_change_handler_tests {
         accounts
             .update_vault_balance_and_record_change(
                 first_vault,
+                2,
                 Amount::from(150u64),
                 Amount::zero(),
                 BalanceChangeSource::Recovery,
@@ -1617,6 +1621,7 @@ mod balance_change_handler_tests {
         accounts
             .update_vault_balance_and_record_change(
                 second_vault,
+                1,
                 Amount::from(200u64),
                 Amount::zero(),
                 BalanceChangeSource::Scan,
@@ -1625,21 +1630,19 @@ mod balance_change_handler_tests {
 
         let notify = Notify::new(10);
         let mut shutdown = Shutdown::new();
-        let services = spawn_services(
-            shutdown.to_signal(),
-            notify.clone(),
-            sdk.clone(),
-            temp.path().to_path_buf(),
-            false,
-        );
+        let (transaction_service, transaction_service_handle) =
+            TransactionService::new(notify.clone(), sdk.clone(), shutdown.to_signal());
+        let (utxo_worker, utxo_scanner_handle) = StealthUtxoScannerWorker::new(sdk.clone(), notify.clone()).spawn();
+        let (account_monitor, account_monitor_handle) =
+            AccountMonitor::new(notify.clone(), sdk.clone(), utxo_scanner_handle, shutdown.to_signal());
         let mut config = WalletDaemonConfig::default();
         config.network = Network::LocalNet;
         config.authentication = WalletDaemonAuth::None;
         let context = HandlerContext::new(
             sdk,
             notify,
-            services.transaction_service_handle.clone(),
-            services.account_monitor_handle.clone(),
+            transaction_service_handle,
+            account_monitor_handle,
             config.clone(),
             create_authenticator(&config, store).unwrap(),
             SafePassword::from_str("test jwt secret").unwrap(),
@@ -1678,12 +1681,16 @@ mod balance_change_handler_tests {
             })
             .await
             .unwrap_err();
-        assert!(missing_account_err.to_string().contains("Not found"));
+        let rpc_error = missing_account_err.downcast_ref::<JsonRpcError>().unwrap();
+        assert!(matches!(
+            rpc_error.error_reason(),
+            JsonRpcErrorReason::ApplicationError(404)
+        ));
 
         shutdown.trigger();
-        tokio::time::timeout(Duration::from_secs(5), services.services_fut)
-            .await
-            .unwrap()
-            .unwrap();
+        drop(account_monitor);
+        drop(transaction_service);
+        utxo_worker.abort();
+        drop(utxo_worker.await);
     }
 }

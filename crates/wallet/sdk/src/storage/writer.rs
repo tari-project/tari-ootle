@@ -131,13 +131,15 @@ pub trait WalletStoreWriter: CommittableStore {
     fn balance_changes_insert(
         &mut self,
         current_vault: &VaultModel,
+        vault_version: u32,
         revealed_after: Amount,
         confidential_after: Amount,
         source: BalanceChangeSource,
     ) -> Result<bool, WalletStorageError>;
-    fn balance_changes_promote_scan_to_transaction(
+    fn balance_changes_attribute_transaction(
         &mut self,
-        current_vault: &VaultModel,
+        vault_id: &VaultId,
+        vault_version: u32,
         transaction_id: TransactionId,
     ) -> Result<bool, WalletStorageError>;
     fn vaults_lock_revealed_funds(

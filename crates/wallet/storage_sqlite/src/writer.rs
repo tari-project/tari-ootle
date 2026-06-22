@@ -41,7 +41,6 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
-        BalanceChange,
         BalanceChangeSource,
         BalanceChangeSourceType,
         ConfidentialOutputModel,
@@ -793,51 +792,28 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn balance_changes_insert(
         &mut self,
         current_vault: &VaultModel,
+        vault_version: u32,
         revealed_after: Amount,
         confidential_after: Amount,
         source: BalanceChangeSource,
     ) -> Result<bool, WalletStorageError> {
         const OPERATION: &str = "balance_changes_insert";
-        use crate::schema::{account_balance_changes, vaults};
+        use crate::schema::account_balance_changes;
 
-        if current_vault.revealed_balance == revealed_after && current_vault.confidential_balance == confidential_after
-        {
-            return Err(WalletStorageError::bad_query(
-                OPERATION,
-                "balance change cannot be zero",
-            ));
-        }
-
-        let (vault_id, account_id, resource_address) = vaults::table
-            .select((vaults::id, vaults::account_id, vaults::resource_address))
-            .filter(vaults::address.eq(current_vault.id.to_string()))
-            .first::<(i32, i32, String)>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "vault".to_string(),
-                key: current_vault.id.to_string(),
-            })?;
         let transaction_id = source.transaction_id().map(|id| id.to_string());
         let values = (
-            account_balance_changes::account_id.eq(account_id),
-            account_balance_changes::vault_id.eq(vault_id),
-            account_balance_changes::resource_address.eq(resource_address),
+            account_balance_changes::account_address.eq(current_vault.account_address.to_string()),
+            account_balance_changes::vault_address.eq(current_vault.id.to_string()),
+            account_balance_changes::vault_version.eq(i64::from(vault_version)),
+            account_balance_changes::resource_address.eq(current_vault.resource_address.to_string()),
+            account_balance_changes::token_symbol.eq(&current_vault.token_symbol),
+            account_balance_changes::divisibility.eq(i32::from(current_vault.divisibility)),
             account_balance_changes::source_type.eq(source.as_key_str()),
             account_balance_changes::transaction_id.eq(transaction_id),
             account_balance_changes::revealed_before.eq(current_vault.revealed_balance.to_string()),
             account_balance_changes::revealed_after.eq(revealed_after.to_string()),
             account_balance_changes::confidential_before.eq(current_vault.confidential_balance.to_string()),
             account_balance_changes::confidential_after.eq(confidential_after.to_string()),
-            account_balance_changes::revealed_delta.eq(BalanceChange::signed_delta(
-                current_vault.revealed_balance,
-                revealed_after,
-            )),
-            account_balance_changes::confidential_delta.eq(BalanceChange::signed_delta(
-                current_vault.confidential_balance,
-                confidential_after,
-            )),
         );
         let inserted = diesel::insert_into(account_balance_changes::table)
             .values(values)
@@ -847,63 +823,40 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(inserted == 1)
     }
 
-    fn balance_changes_promote_scan_to_transaction(
+    fn balance_changes_attribute_transaction(
         &mut self,
-        current_vault: &VaultModel,
+        vault_id: &VaultId,
+        vault_version: u32,
         transaction_id: TransactionId,
     ) -> Result<bool, WalletStorageError> {
-        const OPERATION: &str = "balance_changes_promote_scan_to_transaction";
-        use crate::schema::{account_balance_changes, vaults};
+        const OPERATION: &str = "balance_changes_attribute_transaction";
+        use crate::schema::account_balance_changes;
 
-        let vault_id = vaults::table
-            .select(vaults::id)
-            .filter(vaults::address.eq(current_vault.id.to_string()))
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "vault".to_string(),
-                key: current_vault.id.to_string(),
-            })?;
-
+        let vault_address = vault_id.to_string();
         let transaction_id = transaction_id.to_string();
         let already_linked = account_balance_changes::table
-            .filter(account_balance_changes::vault_id.eq(vault_id))
+            .filter(account_balance_changes::vault_address.eq(&vault_address))
             .filter(account_balance_changes::transaction_id.eq(&transaction_id))
             .count()
             .get_result::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))? >
             0;
         if already_linked {
-            return Ok(false);
+            return Ok(true);
         }
 
-        let matching_change_id = account_balance_changes::table
-            .select(account_balance_changes::id)
-            .filter(account_balance_changes::vault_id.eq(vault_id))
-            .filter(account_balance_changes::source_type.eq(BalanceChangeSource::Scan.as_key_str()))
-            .filter(account_balance_changes::transaction_id.is_null())
-            .filter(account_balance_changes::revealed_after.eq(current_vault.revealed_balance.to_string()))
-            .filter(account_balance_changes::confidential_after.eq(current_vault.confidential_balance.to_string()))
-            .order((
-                account_balance_changes::created_at.desc(),
-                account_balance_changes::id.desc(),
-            ))
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        let Some(change_id) = matching_change_id else {
-            return Ok(false);
-        };
-
-        let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(change_id)))
-            .set((
-                account_balance_changes::source_type.eq(BalanceChangeSourceType::Transaction.as_key_str()),
-                account_balance_changes::transaction_id.eq(Some(transaction_id)),
-            ))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        let updated = diesel::update(
+            account_balance_changes::table
+                .filter(account_balance_changes::vault_address.eq(vault_address))
+                .filter(account_balance_changes::vault_version.eq(i64::from(vault_version)))
+                .filter(account_balance_changes::transaction_id.is_null()),
+        )
+        .set((
+            account_balance_changes::source_type.eq(BalanceChangeSourceType::Transaction.as_key_str()),
+            account_balance_changes::transaction_id.eq(Some(transaction_id)),
+        ))
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         Ok(updated == 1)
     }
 

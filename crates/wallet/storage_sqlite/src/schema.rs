@@ -20,17 +20,18 @@ diesel::table! {
 diesel::table! {
     account_balance_changes (id) {
         id -> Integer,
-        account_id -> Integer,
-        vault_id -> Integer,
+        account_address -> Text,
+        vault_address -> Text,
+        vault_version -> BigInt,
         resource_address -> Text,
+        token_symbol -> Nullable<Text>,
+        divisibility -> Integer,
         source_type -> Text,
         transaction_id -> Nullable<Text>,
         revealed_before -> Text,
         revealed_after -> Text,
         confidential_before -> Text,
         confidential_after -> Text,
-        revealed_delta -> Text,
-        confidential_delta -> Text,
         created_at -> Timestamp,
     }
 }
@@ -314,8 +315,6 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(account_balance_changes -> accounts (account_id));
-diesel::joinable!(account_balance_changes -> vaults (vault_id));
 diesel::joinable!(confidential_outputs -> accounts (account_id));
 diesel::joinable!(confidential_outputs -> vaults (vault_id));
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));

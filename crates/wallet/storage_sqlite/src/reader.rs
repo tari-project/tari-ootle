@@ -31,7 +31,7 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
-        BalanceChange,
+        BalanceChangePage,
         BalanceChangeSourceType,
         ConfidentialOutputModel,
         Config,
@@ -724,7 +724,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
     }
 
     // -------------------------------- Balance changes -------------------------------- //
-    fn balance_changes_get_by_account(
+    fn balance_changes_get_page_by_account(
         &mut self,
         account_addr: &ComponentAddress,
         offset: usize,
@@ -732,31 +732,12 @@ impl WalletStoreReader for ReadTransaction<'_> {
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<&TransactionId>,
         source_type: Option<BalanceChangeSourceType>,
-    ) -> Result<Vec<BalanceChange>, WalletStorageError> {
-        const OPERATION: &str = "balance_changes_get_by_account";
-        use crate::schema::{account_balance_changes, accounts, vaults};
-
-        let account_id = accounts::table
-            .select(accounts::id)
-            .filter(accounts::address.eq(account_addr.to_string()))
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "account".to_string(),
-                key: account_addr.to_string(),
-            })?;
+    ) -> Result<BalanceChangePage, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_get_page_by_account";
+        use crate::schema::account_balance_changes;
 
         let mut query = account_balance_changes::table
-            .inner_join(vaults::table)
-            .filter(account_balance_changes::account_id.eq(account_id))
-            .select((
-                account_balance_changes::all_columns,
-                vaults::address,
-                vaults::token_symbol,
-                vaults::divisibility,
-            ))
+            .filter(account_balance_changes::account_address.eq(account_addr.to_string()))
             .into_boxed();
         if let Some(resource_address) = resource_address {
             query = query.filter(account_balance_changes::resource_address.eq(resource_address.to_string()));
@@ -768,86 +749,41 @@ impl WalletStoreReader for ReadTransaction<'_> {
             query = query.filter(account_balance_changes::source_type.eq(source_type.as_key_str()));
         }
 
-        query
+        let changes = query
             .order((
                 account_balance_changes::created_at.desc(),
                 account_balance_changes::id.desc(),
             ))
             .offset(offset as i64)
             .limit(limit as i64)
-            .load::<(models::BalanceChangeRecord, String, Option<String>, i32)>(self.connection())
+            .load::<models::BalanceChangeRecord>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .into_iter()
-            .map(|(row, vault_address, token_symbol, divisibility)| {
-                let vault_address =
-                    VaultId::from_str(&vault_address).map_err(|e| WalletStorageError::DecodingError {
-                        operation: OPERATION,
-                        item: "vault_address",
-                        details: e.to_string(),
-                    })?;
-                row.try_into_balance_change(*account_addr, vault_address, token_symbol, divisibility)
-            })
-            .collect()
-    }
+            .map(models::BalanceChangeRecord::try_into_balance_change)
+            .collect::<Result<Vec<_>, _>>()?;
 
-    fn balance_changes_count_by_account(
-        &mut self,
-        account_addr: &ComponentAddress,
-        resource_address: Option<&ResourceAddress>,
-        transaction_id: Option<&TransactionId>,
-        source_type: Option<BalanceChangeSourceType>,
-    ) -> Result<u64, WalletStorageError> {
-        const OPERATION: &str = "balance_changes_count_by_account";
-        use crate::schema::{account_balance_changes, accounts};
-
-        let account_id = accounts::table
-            .select(accounts::id)
-            .filter(accounts::address.eq(account_addr.to_string()))
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "account".to_string(),
-                key: account_addr.to_string(),
-            })?;
-        let mut query = account_balance_changes::table
-            .filter(account_balance_changes::account_id.eq(account_id))
+        let mut count_query = account_balance_changes::table
+            .filter(account_balance_changes::account_address.eq(account_addr.to_string()))
             .into_boxed();
         if let Some(resource_address) = resource_address {
-            query = query.filter(account_balance_changes::resource_address.eq(resource_address.to_string()));
+            count_query =
+                count_query.filter(account_balance_changes::resource_address.eq(resource_address.to_string()));
         }
         if let Some(transaction_id) = transaction_id {
-            query = query.filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()));
+            count_query = count_query.filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()));
         }
         if let Some(source_type) = source_type {
-            query = query.filter(account_balance_changes::source_type.eq(source_type.as_key_str()));
+            count_query = count_query.filter(account_balance_changes::source_type.eq(source_type.as_key_str()));
         }
 
-        let count = query
+        let total = count_query
             .count()
             .get_result::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        Ok(count as u64)
-    }
-
-    fn balance_changes_exists_for_transaction(
-        &mut self,
-        vault_id: &VaultId,
-        transaction_id: &TransactionId,
-    ) -> Result<bool, WalletStorageError> {
-        const OPERATION: &str = "balance_changes_exists_for_transaction";
-        use crate::schema::{account_balance_changes, vaults};
-
-        let count = account_balance_changes::table
-            .inner_join(vaults::table)
-            .filter(vaults::address.eq(vault_id.to_string()))
-            .filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()))
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        Ok(count > 0)
+        Ok(BalanceChangePage {
+            changes,
+            total: total as u64,
+        })
     }
 
     // -------------------------------- Resources -------------------------------- //

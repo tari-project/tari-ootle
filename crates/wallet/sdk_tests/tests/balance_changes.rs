@@ -73,6 +73,7 @@ fn transaction_changes_can_span_accounts_and_vaults() {
         accounts
             .update_vault_balance_and_record_change(
                 Test::test_vault_address(),
+                1,
                 Amount::from(25u64),
                 Amount::from(5u64),
                 source
@@ -81,22 +82,22 @@ fn transaction_changes_can_span_accounts_and_vaults() {
     );
     assert!(
         accounts
-            .update_vault_balance_and_record_change(second_vault, Amount::from(9u64), Amount::zero(), source)
+            .update_vault_balance_and_record_change(second_vault, 1, Amount::from(9u64), Amount::zero(), source)
             .unwrap()
     );
 
     for (account, expected_delta) in [(Test::test_account_address(), "25"), (second_account, "9")] {
-        let changes = accounts
+        let page = accounts
             .get_balance_changes(&account, 0, 10, None, Some(&transaction_id), None)
             .unwrap();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].revealed_delta, expected_delta);
-        assert_eq!(changes[0].source, source);
+        assert_eq!(page.total, 1);
+        assert_eq!(page.changes[0].revealed_delta, expected_delta);
+        assert_eq!(page.changes[0].source, source);
     }
 }
 
 #[test]
-fn scan_and_recovery_are_deduplicated_and_failed_history_rolls_back_balance() {
+fn scan_and_recovery_are_deduplicated_and_duplicate_version_cannot_update_balance() {
     let test = Test::new();
     let accounts = test.sdk().accounts_api();
     let vault = Test::test_vault_address();
@@ -105,6 +106,7 @@ fn scan_and_recovery_are_deduplicated_and_failed_history_rolls_back_balance() {
         accounts
             .update_vault_balance_and_record_change(
                 vault,
+                1,
                 Amount::from(10u64),
                 Amount::zero(),
                 BalanceChangeSource::Scan
@@ -115,6 +117,7 @@ fn scan_and_recovery_are_deduplicated_and_failed_history_rolls_back_balance() {
         !accounts
             .update_vault_balance_and_record_change(
                 vault,
+                1,
                 Amount::from(10u64),
                 Amount::zero(),
                 BalanceChangeSource::Scan
@@ -125,42 +128,45 @@ fn scan_and_recovery_are_deduplicated_and_failed_history_rolls_back_balance() {
         accounts
             .update_vault_balance_and_record_change(
                 vault,
+                2,
                 Amount::from(12u64),
                 Amount::zero(),
                 BalanceChangeSource::Recovery,
             )
             .unwrap()
     );
-    let changes = accounts
+    let page = accounts
         .get_balance_changes(&Test::test_account_address(), 0, 10, None, None, None)
         .unwrap();
-    assert_eq!(changes.len(), 2);
-    assert_eq!(changes[0].source, BalanceChangeSource::Recovery);
-    assert_eq!(changes[1].source, BalanceChangeSource::Scan);
+    assert_eq!(page.total, 2);
+    assert_eq!(page.changes[0].source, BalanceChangeSource::Recovery);
+    assert_eq!(page.changes[1].source, BalanceChangeSource::Scan);
 
     let result = accounts.update_vault_balance_and_record_change(
         vault,
+        2,
         Amount::from(99u64),
         Amount::zero(),
         BalanceChangeSource::Transaction {
             transaction_id: TransactionId::default(),
         },
     );
-    assert!(result.is_err());
+    assert!(!result.unwrap());
     assert_eq!(
         accounts.get_vault_balance(&vault).unwrap().revealed,
         Amount::from(12u64)
     );
     assert_eq!(
         accounts
-            .count_balance_changes(&Test::test_account_address(), None, None, None)
-            .unwrap(),
+            .get_balance_changes(&Test::test_account_address(), 0, 10, None, None, None)
+            .unwrap()
+            .total,
         2
     );
 }
 
 #[test]
-fn transaction_source_promotes_existing_scan_for_same_balance() {
+fn transaction_source_attributes_existing_scan_for_exact_vault_version() {
     let test = Test::new();
     let accounts = test.sdk().accounts_api();
     let vault = Test::test_vault_address();
@@ -174,6 +180,7 @@ fn transaction_source_promotes_existing_scan_for_same_balance() {
         accounts
             .update_vault_balance_and_record_change(
                 vault,
+                7,
                 Amount::from(10u64),
                 Amount::zero(),
                 BalanceChangeSource::Scan,
@@ -183,85 +190,35 @@ fn transaction_source_promotes_existing_scan_for_same_balance() {
     let source = BalanceChangeSource::Transaction { transaction_id };
     assert!(
         accounts
-            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
+            .attribute_balance_change_to_transaction(&vault, 7, transaction_id)
             .unwrap()
     );
     assert!(
-        !accounts
-            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
+        accounts
+            .attribute_balance_change_to_transaction(&vault, 99, transaction_id)
             .unwrap()
     );
 
-    let changes = accounts
+    let page = accounts
         .get_balance_changes(&Test::test_account_address(), 0, 10, None, Some(&transaction_id), None)
         .unwrap();
-    assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].source, source);
-    assert_eq!(changes[0].transaction_id, Some(transaction_id));
-    assert_eq!(changes[0].revealed_delta, "10");
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].source, source);
+    assert_eq!(page.changes[0].transaction_id, Some(transaction_id));
+    assert_eq!(page.changes[0].revealed_delta, "10");
     assert_eq!(
         accounts
-            .count_balance_changes(
+            .get_balance_changes(
                 &Test::test_account_address(),
+                0,
+                10,
                 None,
                 None,
                 Some(BalanceChangeSourceType::Scan),
             )
-            .unwrap(),
+            .unwrap()
+            .total,
         0
-    );
-}
-
-#[test]
-fn transaction_source_promotes_latest_matching_scan_for_same_balance() {
-    let test = Test::new();
-    let accounts = test.sdk().accounts_api();
-    let vault = Test::test_vault_address();
-    let transaction = build_transaction();
-    let transaction_id = transaction.calculate_id();
-    test.store()
-        .with_write_tx(|tx| tx.transactions_insert(&transaction, None, &[Test::test_account_address()], false))
-        .unwrap();
-
-    for amount in [10u64, 20, 10] {
-        assert!(
-            accounts
-                .update_vault_balance_and_record_change(
-                    vault,
-                    Amount::from(amount),
-                    Amount::zero(),
-                    BalanceChangeSource::Scan,
-                )
-                .unwrap()
-        );
-    }
-
-    let source = BalanceChangeSource::Transaction { transaction_id };
-    assert!(
-        accounts
-            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
-            .unwrap()
-    );
-    assert!(
-        !accounts
-            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
-            .unwrap()
-    );
-    let transaction_changes = accounts
-        .get_balance_changes(&Test::test_account_address(), 0, 10, None, Some(&transaction_id), None)
-        .unwrap();
-    assert_eq!(transaction_changes.len(), 1);
-    assert_eq!(transaction_changes[0].revealed_delta, "-10");
-    assert_eq!(
-        accounts
-            .count_balance_changes(
-                &Test::test_account_address(),
-                None,
-                None,
-                Some(BalanceChangeSourceType::Scan),
-            )
-            .unwrap(),
-        2
     );
 }
 
@@ -278,24 +235,15 @@ fn replayed_transaction_cannot_update_a_vault_without_a_new_history_row() {
 
     let source = BalanceChangeSource::Transaction { transaction_id };
     assert!(
-        !accounts
-            .has_balance_change_for_transaction(&vault, &transaction_id)
-            .unwrap()
-    );
-    assert!(
         accounts
-            .update_vault_balance_and_record_change(vault, Amount::from(10u64), Amount::zero(), source)
-            .unwrap()
-    );
-    assert!(
-        accounts
-            .has_balance_change_for_transaction(&vault, &transaction_id)
+            .update_vault_balance_and_record_change(vault, 1, Amount::from(10u64), Amount::zero(), source)
             .unwrap()
     );
     assert!(
         accounts
             .update_vault_balance_and_record_change(
                 vault,
+                2,
                 Amount::from(20u64),
                 Amount::zero(),
                 BalanceChangeSource::Scan,
@@ -304,7 +252,7 @@ fn replayed_transaction_cannot_update_a_vault_without_a_new_history_row() {
     );
     assert!(
         !accounts
-            .update_vault_balance_and_record_change(vault, Amount::from(15u64), Amount::zero(), source)
+            .update_vault_balance_and_record_change(vault, 1, Amount::from(15u64), Amount::zero(), source)
             .unwrap()
     );
 
@@ -314,8 +262,9 @@ fn replayed_transaction_cannot_update_a_vault_without_a_new_history_row() {
     );
     assert_eq!(
         accounts
-            .count_balance_changes(&Test::test_account_address(), None, None, None)
-            .unwrap(),
+            .get_balance_changes(&Test::test_account_address(), 0, 10, None, None, None)
+            .unwrap()
+            .total,
         2
     );
 }

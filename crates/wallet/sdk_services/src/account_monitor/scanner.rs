@@ -150,8 +150,15 @@ where TSpec: WalletSdkSpec
             };
             self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
                 .await?;
-            self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), source)
-                .await?;
+            self.refresh_vault(
+                account_addr,
+                *vault_id,
+                versioned_vault_substate_id.version(),
+                &latest_vault,
+                Default::default(),
+                source,
+            )
+            .await?;
 
             substate_api.save_child(
                 account_substate_id.substate_id(),
@@ -174,6 +181,7 @@ where TSpec: WalletSdkSpec
         &self,
         account_address: ComponentAddress,
         vault_id: VaultId,
+        vault_version: u32,
         latest_vault: &Vault,
         updated_nft_data: HashMap<NonFungibleId, NonFungibleContainer>,
         source: BalanceChangeSource,
@@ -222,13 +230,14 @@ where TSpec: WalletSdkSpec
         }
 
         if let Some(transaction_id) = source.transaction_id() &&
-            accounts_api.has_balance_change_for_transaction(&vault_id, &transaction_id)?
+            accounts_api.attribute_balance_change_to_transaction(&vault_id, vault_version, transaction_id)?
         {
             info!(
                 target: LOG_TARGET,
-                "🔒️ transaction {} already recorded for vault {}; skipping replayed vault update",
+                "🔒️ transaction {} already attributed to vault {} version {}; skipping replayed vault update",
                 transaction_id,
-                vault_id
+                vault_id,
+                vault_version,
             );
             return Ok(false);
         }
@@ -280,6 +289,7 @@ where TSpec: WalletSdkSpec
 
         if accounts_api.update_vault_balance_and_record_change(
             vault_id,
+            vault_version,
             new_balance,
             new_confidential_balance,
             source,
@@ -522,7 +532,12 @@ where TSpec: WalletSdkSpec
             let mut has_changed = false;
             for vault_id in value.vault_ids() {
                 // Any vaults we process here do not need to be reprocesed later
-                if let Some(vault) = vaults.remove(vault_id).and_then(|s| s.substate_value().vault()) {
+                if let Some(vault_substate) = vaults.remove(vault_id) {
+                    let vault_version = vault_substate.version();
+                    let Some(vault) = vault_substate.substate_value().vault() else {
+                        error!(target: LOG_TARGET, "🏦 Substate {} is not a vault. This should be impossible.", vault_id);
+                        continue;
+                    };
                     has_changed |= self
                         .add_vault_to_account_if_not_exist(&account_address, *vault_id, vault)
                         .await?;
@@ -547,6 +562,7 @@ where TSpec: WalletSdkSpec
                         .refresh_vault(
                             account_address,
                             *vault_id,
+                            vault_version,
                             vault,
                             updated_nfts,
                             BalanceChangeSource::Transaction { transaction_id: tx_id },
@@ -627,6 +643,7 @@ where TSpec: WalletSdkSpec
             self.refresh_vault(
                 account_addr,
                 vault_id,
+                substate.version(),
                 vault,
                 updated_nfts,
                 BalanceChangeSource::Transaction { transaction_id: tx_id },

@@ -10,11 +10,14 @@ use time::PrimitiveDateTime;
 #[non_exhaustive]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum BalanceChangeSource {
+    /// Observed while processing this wallet transaction's finalized substate diff.
     Transaction {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         transaction_id: TransactionId,
     },
+    /// Observed while synchronizing the account from on-chain state.
     Scan,
+    /// Observed while restoring the account from wallet recovery.
     Recovery,
 }
 
@@ -37,18 +40,24 @@ impl BalanceChangeSourceType {
 }
 
 impl BalanceChangeSource {
-    pub const fn as_key_str(self) -> &'static str {
-        match self {
-            Self::Transaction { .. } => "transaction",
-            Self::Scan => "scan",
-            Self::Recovery => "recovery",
-        }
+    pub fn as_key_str(self) -> &'static str {
+        BalanceChangeSourceType::from(self).as_key_str()
     }
 
     pub fn transaction_id(self) -> Option<TransactionId> {
         match self {
             Self::Transaction { transaction_id } => Some(transaction_id),
             Self::Scan | Self::Recovery => None,
+        }
+    }
+}
+
+impl From<BalanceChangeSource> for BalanceChangeSourceType {
+    fn from(source: BalanceChangeSource) -> Self {
+        match source {
+            BalanceChangeSource::Transaction { .. } => Self::Transaction,
+            BalanceChangeSource::Scan => Self::Scan,
+            BalanceChangeSource::Recovery => Self::Recovery,
         }
     }
 }
@@ -73,6 +82,12 @@ pub struct BalanceChange {
     pub transaction_id: Option<TransactionId>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_at: PrimitiveDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BalanceChangePage {
+    pub changes: Vec<BalanceChange>,
+    pub total: u64,
 }
 
 impl BalanceChange {

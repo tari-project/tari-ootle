@@ -9,7 +9,6 @@ use tari_ootle_wallet_sdk::{
     models::{BalanceChange, BalanceChangeSource},
     storage::WalletStorageError,
 };
-use tari_template_lib_types::{ComponentAddress, VaultId};
 use time::PrimitiveDateTime;
 
 use crate::{schema::account_balance_changes, serialization::deserialize_hex_try_from};
@@ -18,28 +17,23 @@ use crate::{schema::account_balance_changes, serialization::deserialize_hex_try_
 #[diesel(table_name = account_balance_changes)]
 pub struct BalanceChangeRecord {
     pub id: i32,
-    pub account_id: i32,
-    pub vault_id: i32,
+    pub account_address: String,
+    pub vault_address: String,
+    pub vault_version: i64,
     pub resource_address: String,
+    pub token_symbol: Option<String>,
+    pub divisibility: i32,
     pub source_type: String,
     pub transaction_id: Option<String>,
     pub revealed_before: String,
     pub revealed_after: String,
     pub confidential_before: String,
     pub confidential_after: String,
-    pub revealed_delta: String,
-    pub confidential_delta: String,
     pub created_at: PrimitiveDateTime,
 }
 
 impl BalanceChangeRecord {
-    pub fn try_into_balance_change(
-        self,
-        account_address: ComponentAddress,
-        vault_address: VaultId,
-        token_symbol: Option<String>,
-        divisibility: i32,
-    ) -> Result<BalanceChange, WalletStorageError> {
+    pub fn try_into_balance_change(self) -> Result<BalanceChange, WalletStorageError> {
         const OPERATION: &str = "balance_change_record_to_model";
         let transaction_id = self
             .transaction_id
@@ -64,23 +58,28 @@ impl BalanceChangeRecord {
             },
         };
 
+        let revealed_before = parse_value(OPERATION, "revealed_before", &self.revealed_before)?;
+        let revealed_after = parse_value(OPERATION, "revealed_after", &self.revealed_after)?;
+        let confidential_before = parse_value(OPERATION, "confidential_before", &self.confidential_before)?;
+        let confidential_after = parse_value(OPERATION, "confidential_after", &self.confidential_after)?;
+
         Ok(BalanceChange {
             id: self.id,
-            account_address,
-            vault_address,
+            account_address: parse_value(OPERATION, "account_address", &self.account_address)?,
+            vault_address: parse_value(OPERATION, "vault_address", &self.vault_address)?,
             resource_address: parse_value(OPERATION, "resource_address", &self.resource_address)?,
-            token_symbol,
-            divisibility: u8::try_from(divisibility).map_err(|e| WalletStorageError::DecodingError {
+            token_symbol: self.token_symbol,
+            divisibility: u8::try_from(self.divisibility).map_err(|e| WalletStorageError::DecodingError {
                 operation: OPERATION,
                 item: "divisibility",
                 details: e.to_string(),
             })?,
-            revealed_before: parse_value(OPERATION, "revealed_before", &self.revealed_before)?,
-            revealed_after: parse_value(OPERATION, "revealed_after", &self.revealed_after)?,
-            confidential_before: parse_value(OPERATION, "confidential_before", &self.confidential_before)?,
-            confidential_after: parse_value(OPERATION, "confidential_after", &self.confidential_after)?,
-            revealed_delta: self.revealed_delta,
-            confidential_delta: self.confidential_delta,
+            revealed_before,
+            revealed_after,
+            confidential_before,
+            confidential_after,
+            revealed_delta: BalanceChange::signed_delta(revealed_before, revealed_after),
+            confidential_delta: BalanceChange::signed_delta(confidential_before, confidential_after),
             source,
             transaction_id,
             created_at: self.created_at,

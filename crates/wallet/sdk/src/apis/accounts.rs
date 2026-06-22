@@ -33,7 +33,7 @@ use crate::{
         Account,
         AccountUpdate,
         AccountWithAddress,
-        BalanceChange,
+        BalanceChangePage,
         BalanceChangeSource,
         BalanceChangeSourceType,
         EpochBirthday,
@@ -211,21 +211,25 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
     pub fn update_vault_balance_and_record_change(
         &self,
         vault_address: VaultId,
+        vault_version: u32,
         revealed_balance: Amount,
         confidential_balance: Amount,
         source: BalanceChangeSource,
     ) -> Result<bool, AccountsApiError> {
-        Ok(self.store.with_write_tx(|tx| {
+        Ok(self.store.with_write_tx(|tx| -> Result<_, WalletStorageError> {
             let current_vault = tx.vaults_get(&vault_address)?;
             if current_vault.revealed_balance == revealed_balance &&
                 current_vault.confidential_balance == confidential_balance
             {
-                if let Some(transaction_id) = source.transaction_id() {
-                    return tx.balance_changes_promote_scan_to_transaction(&current_vault, transaction_id);
-                }
                 return Ok(false);
             }
-            if !tx.balance_changes_insert(&current_vault, revealed_balance, confidential_balance, source)? {
+            if !tx.balance_changes_insert(
+                &current_vault,
+                vault_version,
+                revealed_balance,
+                confidential_balance,
+                source,
+            )? {
                 return Ok(false);
             }
             tx.vaults_update(vault_address, revealed_balance, confidential_balance)?;
@@ -241,9 +245,9 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         resource_address: Option<&ResourceAddress>,
         transaction_id: Option<&TransactionId>,
         source_type: Option<BalanceChangeSourceType>,
-    ) -> Result<Vec<BalanceChange>, AccountsApiError> {
-        let changes = self.store.with_read_tx(|tx| {
-            tx.balance_changes_get_by_account(
+    ) -> Result<BalanceChangePage, AccountsApiError> {
+        let page = self.store.with_read_tx(|tx| {
+            tx.balance_changes_get_page_by_account(
                 account_address,
                 offset,
                 limit,
@@ -252,31 +256,19 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
                 source_type,
             )
         })?;
-        Ok(changes)
+        Ok(page)
     }
 
-    pub fn count_balance_changes(
-        &self,
-        account_address: &ComponentAddress,
-        resource_address: Option<&ResourceAddress>,
-        transaction_id: Option<&TransactionId>,
-        source_type: Option<BalanceChangeSourceType>,
-    ) -> Result<u64, AccountsApiError> {
-        let count = self.store.with_read_tx(|tx| {
-            tx.balance_changes_count_by_account(account_address, resource_address, transaction_id, source_type)
-        })?;
-        Ok(count)
-    }
-
-    pub fn has_balance_change_for_transaction(
+    pub fn attribute_balance_change_to_transaction(
         &self,
         vault_id: &VaultId,
-        transaction_id: &TransactionId,
+        vault_version: u32,
+        transaction_id: TransactionId,
     ) -> Result<bool, AccountsApiError> {
-        let exists = self
+        let attributed = self
             .store
-            .with_read_tx(|tx| tx.balance_changes_exists_for_transaction(vault_id, transaction_id))?;
-        Ok(exists)
+            .with_write_tx(|tx| tx.balance_changes_attribute_transaction(vault_id, vault_version, transaction_id))?;
+        Ok(attributed)
     }
 
     pub fn get_vault_balance(&self, vault_address: &VaultId) -> Result<VaultBalance, AccountsApiError> {

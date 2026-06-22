@@ -33,9 +33,8 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };
+use tari_ootle_template_provider::TemplateConfig;
 use tari_ootle_transaction::Network;
-
-use crate::memory_cache_template_provider::TemplateConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {

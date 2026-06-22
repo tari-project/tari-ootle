@@ -11577,6 +11577,7 @@ dependencies = [
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
  "tari_ootle_template_metadata",
+ "tari_ootle_template_provider",
  "tari_ootle_transaction",
  "tari_ootle_transaction_validation",
  "tari_rpc_framework",
@@ -11953,6 +11954,23 @@ dependencies = [
  "thiserror 2.0.18",
  "ts-rs",
  "url",
+]
+
+[[package]]
+name = "tari_ootle_template_provider"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "dashmap 5.5.3",
+ "log",
+ "mini-moka",
+ "serde",
+ "std-semaphore",
+ "tari_engine",
+ "tari_ootle_common_types",
+ "tari_template_builtin",
+ "tari_template_lib_types",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -12752,7 +12770,6 @@ dependencies = [
  "clap 3.2.25",
  "config",
  "console-subscriber",
- "dashmap 5.5.3",
  "futures 0.3.31",
  "include_dir",
  "lazy_static",
@@ -12761,7 +12778,6 @@ dependencies = [
  "log",
  "log4rs",
  "mime_guess",
- "mini-moka",
  "ootle_byte_type",
  "prometheus-client",
  "rand 0.10.1",
@@ -12769,7 +12785,6 @@ dependencies = [
  "serde_json",
  "serde_json5",
  "sqlite_message_logger",
- "std-semaphore",
  "tari_base_node_client",
  "tari_bor",
  "tari_common",
@@ -12787,6 +12802,7 @@ dependencies = [
  "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
+ "tari_ootle_template_provider",
  "tari_ootle_transaction",
  "tari_ootle_transaction_validation",
  "tari_rpc_framework",

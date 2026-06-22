@@ -11,6 +11,7 @@ mod substate_store;
 mod sync;
 mod tasks;
 mod transaction_executor;
+mod transaction_validator;
 
 pub use block_store::*;
 pub use certificate::*;
@@ -24,6 +25,7 @@ use tari_ootle_common_types::DerivableFromPublicKey;
 use tari_ootle_storage::StateStore;
 pub(crate) use tasks::*;
 pub use transaction_executor::*;
+pub use transaction_validator::*;
 
 use crate::traits::hooks::ConsensusHooks;
 
@@ -36,6 +38,7 @@ pub trait ConsensusSpec: Send + Sync + Clone + 'static {
     type SignerService: ValidatorSignatureVerifierService + ValidatorSignerService + Send + Sync + Clone + 'static;
     type SyncManager: SyncManager + Send + Sync + 'static;
     type TransactionExecutor: BlockTransactionExecutor<Self::StateStore> + Send + Sync + Clone + 'static;
+    type TransactionValidator: BlockTransactionValidator + Send + Sync + Clone + 'static;
     type InboundMessaging: InboundMessaging<Addr = Self::Addr> + Send + Sync + 'static;
     type OutboundMessaging: OutboundMessaging<Addr = Self::Addr> + Clone + Send + Sync + 'static;
     type Hooks: ConsensusHooks + Clone + Send + Sync + 'static;

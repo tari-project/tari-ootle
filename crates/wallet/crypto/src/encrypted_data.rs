@@ -50,7 +50,24 @@ pub fn encrypt_data(
     memo: Option<&Memo>,
 ) -> Result<EncryptedData, WalletCryptoError> {
     let commitment = get_commitment_factory().commit_value(mask, amount).to_byte_type();
-    let encrypted_data = encrypt_data_inner(encryption_key, &commitment, amount, mask, memo)?;
+    let encrypted_data = encrypt_data_inner(encryption_key, &commitment, amount, mask, memo, None)?;
+    Ok(encrypted_data)
+}
+
+/// Like [`encrypt_data`], but the caller may supply the XChaCha20-Poly1305 nonce instead of having
+/// one drawn at random. When `aead_nonce` is `Some`, those 24 bytes are used verbatim, making the
+/// produced [`EncryptedData`] deterministic and reproducible for a given key/value/mask/memo; this
+/// is intended for deterministic builders and test vectors. When `aead_nonce` is `None`, the result
+/// is identical to [`encrypt_data`] (a fresh random nonce). The encryption itself is unchanged.
+pub fn encrypt_data_with_nonce(
+    amount: u64,
+    mask: &RistrettoSecretKey,
+    encryption_key: &RistrettoSecretKey,
+    memo: Option<&Memo>,
+    aead_nonce: Option<[u8; EncryptedData::SIZE_NONCE]>,
+) -> Result<EncryptedData, WalletCryptoError> {
+    let commitment = get_commitment_factory().commit_value(mask, amount).to_byte_type();
+    let encrypted_data = encrypt_data_inner(encryption_key, &commitment, amount, mask, memo, aead_nonce)?;
     Ok(encrypted_data)
 }
 
@@ -105,6 +122,7 @@ fn encrypt_data_inner(
     value: u64,
     mask: &RistrettoSecretKey,
     memo: Option<&Memo>,
+    injected_nonce: Option<[u8; EncryptedData::SIZE_NONCE]>,
 ) -> Result<EncryptedData, WalletCryptoError> {
     fn payload_slice_mut(bytes: &mut [u8]) -> &mut [u8] {
         bytes
@@ -124,12 +142,19 @@ fn encrypt_data_inner(
             .expect("invariant violation: nonce length is less than payload_offset")
     }
 
-    // Produce a secure random nonce and the AEAD. The nonce is drawn via `rand` (backed by getrandom
-    // 0.4) rather than aead's `OsRng` (rand_core 0.6 -> getrandom 0.2). Both are CSPRNGs, but routing
-    // through `rand` keeps wasm32 builds on a single getrandom backend instead of dragging in
-    // getrandom 0.2's JS env-detection import shim. See crates/ootle_wasm.
-    let mut nonce_bytes = [0u8; EncryptedData::SIZE_NONCE];
-    rand::rng().fill_bytes(&mut nonce_bytes);
+    // Produce the AEAD nonce: use the caller-supplied nonce when present, otherwise draw a secure
+    // random one. The random nonce is drawn via `rand`
+    // (backed by getrandom 0.4) rather than aead's `OsRng` (rand_core 0.6 -> getrandom 0.2). Both are
+    // CSPRNGs, but routing through `rand` keeps wasm32 builds on a single getrandom backend instead of
+    // dragging in getrandom 0.2's JS env-detection import shim. See crates/ootle_wasm.
+    let nonce_bytes = match injected_nonce {
+        Some(bytes) => bytes,
+        None => {
+            let mut bytes = [0u8; EncryptedData::SIZE_NONCE];
+            rand::rng().fill_bytes(&mut bytes);
+            bytes
+        },
+    };
     let nonce = XNonce::from_slice(&nonce_bytes);
     let aead_key = inner_encrypted_data_kdf_aead(encryption_key, commitment);
     let cipher = XChaCha20Poly1305::new(GenericArray::from_slice(aead_key.reveal()));
@@ -266,7 +291,7 @@ mod tests {
         let amount = 100;
         let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
         let mask = RistrettoSecretKey::random(&mut rand::rng());
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, None).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, None, None).unwrap();
 
         let (value, msk, memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
         assert_eq!(value, amount);
@@ -282,7 +307,7 @@ mod tests {
         let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let memo = Memo::new_message("The quick brown fox jumps over the lazy dog").unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         assert!(!String::from_utf8_lossy(encrypted.as_bytes()).contains("the lazy dog"));
 
         let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
@@ -292,7 +317,7 @@ mod tests {
 
         // Test with bytes
         let memo = Memo::new_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
         assert_eq!(value, amount);
         assert_eq!(msk, mask);
@@ -300,7 +325,7 @@ mod tests {
 
         // With empty memo
         let memo = Memo::new_bytes([]).unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
         assert_eq!(value, amount);
         assert_eq!(msk, mask);
@@ -308,7 +333,7 @@ mod tests {
 
         // With max bytes
         let memo = Memo::new_bytes([0u8; Memo::MAX_BYTES_LENGTH]).unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
         assert_eq!(value, amount);
         assert_eq!(msk, mask);
@@ -316,7 +341,7 @@ mod tests {
 
         // With a sender address (no pay ref)
         let memo = Memo::new_sender_address([1u8; 32], [2u8; 32], &[]).unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
         assert_eq!(value, amount);
         assert_eq!(msk, mask);
@@ -324,7 +349,7 @@ mod tests {
 
         // With a sender address that carries a max-length pay ref (lands in the largest tier)
         let memo = Memo::new_sender_address([3u8; 32], [4u8; 32], &[5u8; 64]).unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, false).unwrap();
         assert_eq!(value, amount);
         assert_eq!(msk, mask);
@@ -340,18 +365,18 @@ mod tests {
 
         // "Big deposit" encodes to 13 bytes (tag + len + 11), landing in the 32-byte tier.
         let memo = Memo::new_message("Big deposit").unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         assert_eq!(encrypted.len(), EncryptedData::min_size() + 32);
         assert!(encrypted.len() < EncryptedData::max_size());
 
         // A memo that overflows a tier rounds up to the next one (here 33 encoded bytes -> 64-byte tier).
         let memo = Memo::new_bytes(vec![0u8; 31]).unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         assert_eq!(encrypted.len(), EncryptedData::min_size() + 64);
 
         // A maximum-length memo still uses the top tier (== max_size).
         let memo = Memo::new_bytes(vec![0u8; Memo::MAX_BYTES_LENGTH]).unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
         assert_eq!(encrypted.len(), EncryptedData::max_size());
 
         // Round-trip still works through the padding.
@@ -409,7 +434,7 @@ mod tests {
         let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let memo = Memo::new_message("The quick brown fox jumps over the lazy dog").unwrap();
-        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo)).unwrap();
+        let encrypted = encrypt_data_inner(&key, &commitment, amount, &mask, Some(&memo), None).unwrap();
 
         let (value, msk, decrypted_memo) = decrypt_inner(&key, &commitment, &encrypted, true).unwrap();
         assert_eq!(value, amount);

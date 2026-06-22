@@ -1,0 +1,19 @@
+{
+  "name": "keys/view_from_seed",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "derive_view_key_from_seed",
+  "input": {
+    "seed": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+  },
+  "expected": {
+    "keypair": {
+      "view_public_key": "06f832c34f9c91611d7e0b3eeb85a39f55e8f20798ae30adebec385e83983746",
+      "view_secret": "33b5c65c952e4e2515affcbf9d36ca07614c3070e8a0f6013988ec2b76986504"
+    }
+  }
+}

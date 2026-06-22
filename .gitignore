@@ -76,3 +76,4 @@ clients/validator_node_grpc_client/package-lock.json
 .claude/
 .rtk/
 
+scripts/__pycache__/

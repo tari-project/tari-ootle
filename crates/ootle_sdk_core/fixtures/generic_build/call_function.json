@@ -1,0 +1,49 @@
+{
+  "name": "generic_build/call_function",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "build_and_encode_instructions",
+  "input": {
+    "network": "esmeralda",
+    "keys": {
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
+      "seed": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b"
+    },
+    "fetched": [],
+    "generic_intent": {
+      "fee": 2000,
+      "fee_payment": {
+        "FromAccount": "component_7171717171717171717171717171717171717171717171717171717171717171"
+      },
+      "fee_instructions": [],
+      "instructions": [
+        {
+          "CallFunction": {
+            "template_address": "7777777777777777777777777777777777777777777777777777777777777777",
+            "function": "take_free_coins",
+            "args": []
+          }
+        }
+      ],
+      "blobs": [],
+      "inputs": [
+        {
+          "substate_id": "component_7171717171717171717171717171717171717171717171717171717171717171",
+          "version": 0
+        }
+      ],
+      "extra_inputs": [],
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false
+    }
+  },
+  "expected": {
+    "encoded_transaction": "820081828289182681820283820081d88058207171717171717171717171717171717171717171717171717171717171717171677061795f6665658182018145821907d00081820183582077777777777777777777777777777777777777777777777777777777777777776f74616b655f667265655f636f696e73808182820081d8805820717171717171717171717171717171717171717171717171717171717171717100f6f6f5f4818081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820886705465665776ed4dd4d43b4fc4dbbb43b957f6e507426c9064f84939c706458209785991a2e232c091b6d8da6c5568aed4c867b864aab9603527041fe891f620d825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820b6758cd02e922e84a5d6a5cff72cd1a963140b1634f2ef54b2ab8cd0fd1b291258207968ea0c4af3fa4f1e4ab414192a26a57a6174fdaef5373d76cc4952c5d3ca08",
+    "transaction_id": "de771a00b6a33a03330963487b879c793d63d2aa53b84a398038c7d09a67bb4f"
+  }
+}

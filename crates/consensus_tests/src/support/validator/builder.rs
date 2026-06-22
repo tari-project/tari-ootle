@@ -185,6 +185,7 @@ impl ValidatorBuilder {
             signing_service,
             transaction_pool,
             transaction_executor.clone(),
+            transaction_executor.clone(),
             tx_events.clone(),
             NoopHooks,
             shutdown_signal.clone(),

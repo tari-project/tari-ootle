@@ -11447,6 +11447,7 @@ dependencies = [
  "rand 0.10.1",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tari_bor",
  "tari_crypto",
  "tari_hashing",

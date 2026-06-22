@@ -13,6 +13,7 @@ use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness,
 use tari_template_lib::types::{
     Amount,
     EncryptedData,
+    bytes::Bytes,
     crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
     stealth::{SpendAuthorization, SpendCondition, StealthOutputsStatement, StealthTransferStatement},
 };
@@ -133,6 +134,7 @@ impl StealthSecretTransferData {
             OutputAuth::Conditions(conditions) => InputSpec::with_auth(mask_and_value, InputAuthSpec::ScriptPath {
                 conditions: conditions.clone(),
                 leaf: conditions[0].clone(),
+                data: Bytes::default(),
             }),
         }
     }
@@ -253,8 +255,8 @@ where
         .map(Into::into)
         .map(|input: InputSpec| match input.auth() {
             InputAuthSpec::KeyPath => StealthInputWitness::new(input.mask_and_value().clone()),
-            InputAuthSpec::ScriptPath { conditions, leaf } => {
-                let (witness, root) = stealth::script_path_witness(conditions, leaf).unwrap();
+            InputAuthSpec::ScriptPath { conditions, leaf, data } => {
+                let (witness, root) = stealth::script_path_witness_with_data(conditions, leaf, data.clone()).unwrap();
                 StealthInputWitness::with_script_path(input.mask_and_value().clone(), witness, root)
             },
         });

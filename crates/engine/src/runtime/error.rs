@@ -187,6 +187,8 @@ pub enum RuntimeError {
     ForbiddenInReadOnlyContext { operation: &'static str },
     #[error("Spend script rejected the spend: {details}")]
     SpendScriptRejected { details: Box<RuntimeError> },
+    #[error("Spend condition not met: {details}")]
+    SpendConditionNotMet { details: String },
     #[error("Spend context is only available during spend-script execution")]
     SpendContextUnavailable,
     #[error("Invalid method address rule for {template_name}: {details}")]

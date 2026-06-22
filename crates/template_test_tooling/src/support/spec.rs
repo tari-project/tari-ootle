@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_wallet_crypto::MaskAndValue;
-use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, stealth::SpendCondition};
+use tari_template_lib::types::{bytes::Bytes, crypto::RistrettoPublicKeyBytes, stealth::SpendCondition};
 
 /// How a generated stealth output is gated for spending (TIP-0006).
 #[derive(Debug, Clone)]
@@ -85,21 +85,29 @@ impl From<(u64, OutputAuthSpec)> for OutputSpec {
 pub enum InputAuthSpec {
     /// Key-path spend.
     KeyPath,
-    /// Script-path spend: reveal `leaf` from the UTXO's committed `conditions` set, with its inclusion proof.
+    /// Script-path spend: reveal `leaf` from the UTXO's committed `conditions` set, with its inclusion proof, supplying
+    /// a witness `data` blob the leaf interprets (e.g. a hashlock preimage).
     ScriptPath {
         conditions: Vec<SpendCondition>,
         leaf: SpendCondition,
+        data: Bytes,
     },
 }
 
 impl InputAuthSpec {
     /// A script-path spend over a single-leaf condition tree (the common case): the committed set is `{condition}` and
-    /// that condition is the revealed leaf.
+    /// that condition is the revealed leaf, with no witness data.
     pub fn single(condition: SpendCondition) -> Self {
         Self::ScriptPath {
             conditions: vec![condition.clone()],
             leaf: condition,
+            data: Bytes::default(),
         }
+    }
+
+    /// A script-path spend revealing `leaf` from `conditions`, supplying a witness `data` blob the leaf interprets.
+    pub fn script_path(conditions: Vec<SpendCondition>, leaf: SpendCondition, data: Bytes) -> Self {
+        Self::ScriptPath { conditions, leaf, data }
     }
 }
 

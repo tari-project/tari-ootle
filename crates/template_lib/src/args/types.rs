@@ -969,6 +969,9 @@ pub enum SpendContextAction {
         #[n(0)]
         max_revealed: u64,
     },
+    /// The raw spender-supplied witness `data` blob for the invoking input (empty if none was provided).
+    #[n(7)]
+    WitnessData,
 }
 
 /// A spend-context introspection operation argument.

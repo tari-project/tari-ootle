@@ -23,6 +23,14 @@ and verify balances.
 Confidential stealth transfers with input/output commitments, encrypted memos,
 change handling, and stealth spending authorizers.
 
+### `stealth_spend_conditions`
+
+TIP-0006 spend conditions — condition trees (MAST) with builtin predicates. Takes free coins
+from the faucet and locks them, for a destination account, behind a hash time-locked contract
+(HTLC): a two-leaf condition tree of `BuiltinPredicate` leaves (a `HashLock` plus
+`BeforeEpoch`/`AfterEpoch` timelocks) combined with `SpendCondition::All`, attached to a stealth
+`Output` via `Output::with_spend_conditions`. Posts a real transaction on localnet.
+
 ### `claim_burn`
 
 Claim a Layer 1 (minotari) burn into an Ootle account.

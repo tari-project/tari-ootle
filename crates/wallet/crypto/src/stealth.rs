@@ -3,10 +3,15 @@
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::stealth::MerkleTree;
+/// The canonical digest for a
+/// [`BuiltinPredicate::HashLock`](tari_template_lib_types::stealth::BuiltinPredicate::HashLock)
+/// preimage, re-exported so a wallet can build a hashlock condition without depending on `tari_engine_types`.
+pub use tari_engine_types::stealth::hashlock_digest;
+use tari_engine_types::{limits::STEALTH_LIMITS, stealth::MerkleTree};
 use tari_template_lib_types::{
     Amount,
     Hash32,
+    bytes::Bytes,
     crypto::RistrettoPublicKeyBytes,
     stealth::{
         CovenantBalanceClaim,
@@ -59,15 +64,38 @@ pub fn pay_to_output_authorization(
         PayTo::TemplateFunction(tf) => Ok(SpendAuthorization::Script(condition_root(&[
             SpendCondition::TemplateFunction(tf.clone()),
         ])?)),
+        PayTo::Conditions(conditions) => Ok(SpendAuthorization::Script(condition_root(conditions)?)),
     }
 }
 
 /// Builds a script-path [`SpendWitness`] revealing `leaf` from the committed `conditions` set, returning it alongside
-/// the committed `condition_root` to record against the spent input.
+/// the committed `condition_root` to record against the spent input. Use [`script_path_witness_with_data`] when the
+/// leaf has a predicate that consumes spender-supplied data (e.g. a hashlock preimage).
 pub fn script_path_witness(
     conditions: &[SpendCondition],
     leaf: &SpendCondition,
 ) -> Result<(SpendWitness, Hash32), WalletCryptoError> {
+    script_path_witness_with_data(conditions, leaf, Bytes::default())
+}
+
+/// Builds a script-path [`SpendWitness`] revealing `leaf`, supplying a witness `data` blob the leaf interprets (e.g. a
+/// hashlock preimage, or a CBOR structure a `TemplateFunction` decodes). The blob must not exceed
+/// `STEALTH_LIMITS.max_witness_data_len`.
+pub fn script_path_witness_with_data(
+    conditions: &[SpendCondition],
+    leaf: &SpendCondition,
+    data: Bytes,
+) -> Result<(SpendWitness, Hash32), WalletCryptoError> {
+    let max_witness_data_len = STEALTH_LIMITS.max_witness_data_len;
+    if data.len() > max_witness_data_len {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "data",
+            details: format!(
+                "witness data is {} bytes, exceeding the limit of {max_witness_data_len}",
+                data.len()
+            ),
+        });
+    }
     let tree = MerkleTree::from_conditions(conditions).map_err(|e| WalletCryptoError::InvalidArgument {
         name: "conditions",
         details: e.to_string(),
@@ -79,10 +107,7 @@ pub fn script_path_witness(
             details: "Revealed leaf is not a member of the committed condition set".to_string(),
         })?;
     Ok((
-        SpendWitness::ScriptPath {
-            leaf: leaf.clone(),
-            proof,
-        },
+        SpendWitness::script_path_with_data(leaf.clone(), proof, data),
         tree.root(),
     ))
 }

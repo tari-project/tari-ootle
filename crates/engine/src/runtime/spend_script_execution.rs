@@ -1,6 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_engine_types::crypto::validate_covenant_balance_proof;
 use tari_template_lib::types::{
     Amount,
     Hash32,
@@ -28,6 +29,9 @@ pub(crate) struct SpendScriptExecution {
     /// The covenant sub-balance proofs supplied by the spender, matched by partition index when the predicate invokes
     /// `AssertCovenantBalanced`.
     pub covenant_claims: Vec<CovenantBalanceClaim>,
+    /// The raw spender-supplied witness `data` blob for the invoking input, exposed to a `TemplateFunction` predicate
+    /// via `SpendContext::data`.
+    pub witness_data: Vec<u8>,
 }
 
 impl SpendScriptExecution {
@@ -40,6 +44,7 @@ impl SpendScriptExecution {
         input_index: u32,
         input_commitment: PedersenCommitmentBytes,
         current_input_condition_root: Hash32,
+        witness_data: Vec<u8>,
     ) -> Self {
         Self {
             inputs: statement
@@ -68,6 +73,69 @@ impl SpendScriptExecution {
             current_input_commitment: input_commitment,
             current_input_condition_root,
             covenant_claims: statement.covenant_claims.clone(),
+            witness_data,
         }
+    }
+
+    /// "Stay in the vault": every stealth output preserves the invoking `condition_root`, and there is at least one
+    /// output. Bounds only the surviving outputs' `condition_root`, not the revealed amount.
+    pub(crate) fn output_preserves_condition(&self) -> bool {
+        !self.outputs.is_empty() &&
+            self.outputs
+                .iter()
+                .all(|o| o.auth.condition_root() == Some(self.current_input_condition_root))
+    }
+
+    /// At least one stealth output commits `condition_root` and promises at least `min_value`.
+    pub(crate) fn has_output_to(&self, condition_root: &Hash32, min_value: u64) -> bool {
+        self.outputs
+            .iter()
+            .any(|o| o.auth.condition_root() == Some(*condition_root) && o.minimum_value_promise >= min_value)
+    }
+
+    /// Verifies the covenant sub-balance proof for the invoking partition (keyed by `current_input_condition_root`),
+    /// returning whether its value is conserved up to a cleartext outflow of at most `max_revealed`.
+    ///
+    /// The partition is every input and output sharing that root. A claim is matched by the index of its partition's
+    /// first input — no root is compared across the claim boundary; the proof signature binds the partition. A missing
+    /// claim, an outflow over the allowance, or an invalid proof all yield `false`.
+    pub(crate) fn covenant_balanced(&self, max_revealed: u64) -> bool {
+        let me = self.current_input_condition_root;
+
+        let Some(first_input_index) = self.input_condition_roots.iter().position(|root| *root == Some(me)) else {
+            return false;
+        };
+        let Some(claim) = self
+            .covenant_claims
+            .iter()
+            .find(|claim| claim.partition_input_index as usize == first_input_index)
+        else {
+            return false;
+        };
+        if claim.revealed_amount > Amount::from_u64(max_revealed) {
+            return false;
+        }
+
+        let input_commitments = self
+            .inputs
+            .iter()
+            .zip(&self.input_condition_roots)
+            .filter(|(_, root)| **root == Some(me))
+            .map(|(input, _)| input.commitment)
+            .collect::<Vec<_>>();
+        let output_commitments = self
+            .outputs
+            .iter()
+            .filter(|output| output.auth.condition_root() == Some(me))
+            .map(|output| output.commitment)
+            .collect::<Vec<_>>();
+
+        validate_covenant_balance_proof(
+            &me,
+            claim.revealed_amount,
+            &input_commitments,
+            &output_commitments,
+            &claim.signature,
+        )
     }
 }

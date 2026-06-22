@@ -9,6 +9,10 @@ use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
+use tari_engine_types::{
+    limits::STEALTH_LIMITS,
+    stealth::{MerkleTree, hashlock_digest},
+};
 use tari_ootle_common_types::{
     RistrettoSchnorrBlake2bVerifier,
     crypto::create_key_pair_from_seed,
@@ -24,7 +28,7 @@ use tari_template_lib::types::{
     bytes::Bytes,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::{NoSignatureDomain, PublicKey, RistrettoPublicKeyBytes, Signature},
-    stealth::{SpendCondition, TemplateFunction},
+    stealth::{BuiltinPredicate, HashAlg, SpendCondition, SpendWitness, TemplateFunction},
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -228,6 +232,7 @@ fn multi_leaf_tree_spends_via_any_committed_leaf() {
         InputAuthSpec::ScriptPath {
             conditions: leaves.clone(),
             leaf: leaves[2].clone(),
+            data: Bytes::default(),
         },
     );
     let transfer =
@@ -266,6 +271,7 @@ fn revealing_a_leaf_not_in_the_tree_is_rejected() {
         InputAuthSpec::ScriptPath {
             conditions: forged.clone(),
             leaf: forged[0].clone(),
+            data: Bytes::default(),
         },
     );
     let transfer =
@@ -907,4 +913,436 @@ fn script_path_witness_increases_transaction_weight() {
         script_tx.calculate_transaction_weight().as_u64() > key_tx.calculate_transaction_weight().as_u64(),
         "A script-path spend should weigh more than an equivalent key-path spend",
     );
+}
+
+// -------------------------------- Builtin predicates -------------------------------- //
+
+fn builtin(predicate: BuiltinPredicate) -> SpendCondition {
+    SpendCondition::Builtin(predicate)
+}
+
+/// A flat `All` conjunction leaf over `conditions`.
+fn all(conditions: Vec<SpendCondition>) -> SpendCondition {
+    SpendCondition::All(conditions.into_boxed_slice())
+}
+
+/// Submits a stealth transfer spending the minted UTXO and asserts success.
+fn submit_expect_success(test: &mut TemplateTest, resx: ResourceAddress, transfer: StealthSecretTransferData) {
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+}
+
+/// Submits a stealth transfer spending the minted UTXO and asserts it is rejected with a reason containing `expected`.
+fn submit_expect_rejected(
+    test: &mut TemplateTest,
+    resx: ResourceAddress,
+    transfer: StealthSecretTransferData,
+    expected: &str,
+) {
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, expected);
+}
+
+/// Spends the single minted UTXO via a script path revealing `leaf` from a single-leaf tree, supplying the witness
+/// `data` blob the leaf interprets, into `output`.
+fn spend_leaf_with_data(
+    mint: &StealthSecretTransferData,
+    leaf: SpendCondition,
+    data: Bytes,
+    output: impl Into<OutputAuthSpec>,
+) -> StealthSecretTransferData {
+    let input = InputSpec::with_auth(
+        MaskAndValue {
+            mask: mint.output_masks[0].clone(),
+            value: 100,
+        },
+        InputAuthSpec::script_path(vec![leaf.clone()], leaf, data),
+    );
+    stealth::generate_transfer_data([input], 0u64, [out(100, output)], 0u64)
+}
+
+// ---- Timelocks ----
+
+#[test]
+fn builtin_after_epoch_allows_when_reached() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (resx, mint) = mint_utxo(&mut test, builtin(BuiltinPredicate::AfterEpoch(0)));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn builtin_after_epoch_rejects_before_unlock() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (resx, mint) = mint_utxo(&mut test, builtin(BuiltinPredicate::AfterEpoch(u64::MAX)));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn builtin_before_epoch_allows_before_deadline() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (resx, mint) = mint_utxo(&mut test, builtin(BuiltinPredicate::BeforeEpoch(u64::MAX)));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn builtin_before_epoch_rejects_at_or_after_deadline() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (resx, mint) = mint_utxo(&mut test, builtin(BuiltinPredicate::BeforeEpoch(0)));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+// ---- Covenants ----
+
+#[test]
+fn builtin_output_preserves_condition_allows_preserving_output() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::OutputPreservesCondition);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    let transfer = spend_into(&mint, covenant);
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn builtin_output_preserves_condition_rejects_changed_output() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::OutputPreservesCondition);
+    let (resx, mint) = mint_utxo(&mut test, covenant);
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn builtin_balance_preserved_allows_full_conservation() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::BalancePreserved);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn builtin_balance_preserved_rejects_value_leaving_partition() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::BalancePreserved);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, key_path(test.to_public_key_bytes()))]);
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn builtin_balance_with_allowance_allows_within_cap() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::BalancePreservedWithAllowance(30));
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    let transfer = spend_with_covenant(&mint, &covenant, vec![
+        out(70, covenant.clone()),
+        out(30, key_path(test.to_public_key_bytes())),
+    ]);
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn builtin_balance_with_allowance_rejects_over_cap() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::BalancePreservedWithAllowance(30));
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    let transfer = spend_with_covenant(&mint, &covenant, vec![
+        out(60, covenant.clone()),
+        out(40, key_path(test.to_public_key_bytes())),
+    ]);
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn builtin_output_to_allows_required_output() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let target = SpendCondition::AccessRule(AccessRule::AllowAll);
+    let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
+    let covenant = builtin(BuiltinPredicate::OutputTo {
+        condition_root: target_root,
+        min_value: 0,
+    });
+    let (resx, mint) = mint_utxo(&mut test, covenant);
+    let transfer = spend_into(&mint, conditions(vec![target]));
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn builtin_output_to_rejects_when_target_absent() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let target = SpendCondition::AccessRule(AccessRule::AllowAll);
+    let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
+    let covenant = builtin(BuiltinPredicate::OutputTo {
+        condition_root: target_root,
+        min_value: 0,
+    });
+    let (resx, mint) = mint_utxo(&mut test, covenant);
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+// ---- Hashlock (witness-carrying) ----
+
+#[test]
+fn hashlock_allows_correct_preimage() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let preimage = b"open sesame".to_vec();
+    let leaf = builtin(BuiltinPredicate::HashLock {
+        hash: hashlock_digest(HashAlg::Sha256, &preimage),
+        alg: HashAlg::Sha256,
+    });
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(preimage),
+        key_path(test.to_public_key_bytes()),
+    );
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn hashlock_rejects_wrong_preimage() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = builtin(BuiltinPredicate::HashLock {
+        hash: hashlock_digest(HashAlg::Sha256, b"open sesame"),
+        alg: HashAlg::Sha256,
+    });
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(b"wrong".to_vec()),
+        key_path(test.to_public_key_bytes()),
+    );
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn hashlock_rejects_empty_data() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = builtin(BuiltinPredicate::HashLock {
+        hash: hashlock_digest(HashAlg::Sha256, b"open sesame"),
+        alg: HashAlg::Sha256,
+    });
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    // No witness data supplied: the digest of an empty preimage cannot match, so the spend is rejected.
+    let transfer = spend_leaf_with_data(&mint, leaf, Bytes::default(), key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+// ---- HTLC: hashlock AND key, composed via `All` ----
+
+#[test]
+fn htlc_claim_requires_both_preimage_and_signer() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let preimage = b"htlc secret".to_vec();
+    // Claim path = reveal the preimage AND prove ownership of the claimant's badge (the test signer). The access rule
+    // consumes no witness data, so the hashlock remains the sole consumer of the `data` blob.
+    let leaf = all(vec![
+        builtin(BuiltinPredicate::HashLock {
+            hash: hashlock_digest(HashAlg::Sha256, &preimage),
+            alg: HashAlg::Sha256,
+        }),
+        SpendCondition::AccessRule(AccessRule::AllowAll),
+    ]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(preimage),
+        key_path(test.to_public_key_bytes()),
+    );
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+// ---- TemplateFunction reading witness data ----
+
+#[test]
+fn template_function_reads_matching_witness_data() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let expected = vec![1u8, 2, 3, 4];
+    // The predicate commits `expected` as a bound arg and compares it to the uncommitted witness `data`.
+    let leaf = script_condition(script_template, "require_witness_data", vec![encode_arg(&expected)]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(expected),
+        key_path(test.to_public_key_bytes()),
+    );
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn template_function_rejects_mismatched_witness_data() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let leaf = script_condition(script_template, "require_witness_data", vec![encode_arg(&vec![
+        1u8, 2, 3, 4,
+    ])]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(vec![9u8, 9, 9]),
+        key_path(test.to_public_key_bytes()),
+    );
+    submit_expect_rejected(&mut test, resx, transfer, "Spend script rejected the spend");
+}
+
+// ---- All conjunction ----
+
+#[test]
+fn all_conjunction_allows_when_every_condition_holds() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = all(vec![
+        builtin(BuiltinPredicate::AfterEpoch(0)),
+        SpendCondition::AccessRule(AccessRule::AllowAll),
+    ]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn all_conjunction_rejects_when_a_builtin_fails() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = all(vec![
+        builtin(BuiltinPredicate::AfterEpoch(u64::MAX)),
+        SpendCondition::AccessRule(AccessRule::AllowAll),
+    ]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn all_conjunction_rejects_when_access_rule_fails() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = all(vec![
+        builtin(BuiltinPredicate::AfterEpoch(0)),
+        SpendCondition::AccessRule(AccessRule::DenyAll),
+    ]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Access Denied");
+}
+
+// ---- All conjunction: structural limits (DoS protection) ----
+
+#[test]
+fn empty_all_conjunction_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![all(vec![])]));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Empty All conjunction");
+}
+
+#[test]
+fn nested_all_conjunction_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = all(vec![all(vec![SpendCondition::AccessRule(AccessRule::AllowAll)])]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Nested All conjunction");
+}
+
+#[test]
+fn oversized_all_conjunction_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let conds =
+        vec![SpendCondition::AccessRule(AccessRule::AllowAll); STEALTH_LIMITS.max_conditions_per_conjunction + 1];
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![all(conds)]));
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "exceeding the limit");
+}
+
+#[test]
+fn oversized_witness_data_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = builtin(BuiltinPredicate::HashLock {
+        hash: hashlock_digest(HashAlg::Sha256, b"x"),
+        alg: HashAlg::Sha256,
+    });
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    // Build a valid script-path spend, then swap in an over-limit `data` blob (the wallet builder would reject it, so
+    // it is injected directly to exercise the engine's bound).
+    let mut transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(b"x".to_vec()),
+        key_path(test.to_public_key_bytes()),
+    );
+    if let SpendWitness::ScriptPath { leaf, proof, .. } = transfer.statement.inputs_statement.inputs[0].witness.clone()
+    {
+        let oversized = Bytes::from_vec(vec![0u8; STEALTH_LIMITS.max_witness_data_len + 1]);
+        transfer.statement.inputs_statement.inputs[0].witness =
+            SpendWitness::script_path_with_data(leaf, proof, oversized);
+    }
+    submit_expect_rejected(&mut test, resx, transfer, "exceeding the limit");
+}
+
+// ---- Sole-consumer rule: a data-consuming builtin may not share its leaf with another consumer ----
+
+#[test]
+fn data_consuming_builtin_with_template_function_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    // A hashlock (data consumer) AND-ed with a TemplateFunction (which may also read `data`) is ambiguous: the blob
+    // cannot be both the hashlock's whole preimage and the template's input, so the leaf is rejected at spend time.
+    let leaf = all(vec![
+        builtin(BuiltinPredicate::HashLock {
+            hash: hashlock_digest(HashAlg::Sha256, b"secret"),
+            alg: HashAlg::Sha256,
+        }),
+        script_condition(script_template, "always_ok", vec![]),
+    ]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(b"secret".to_vec()),
+        key_path(test.to_public_key_bytes()),
+    );
+    submit_expect_rejected(&mut test, resx, transfer, "sole consumer of the witness data");
+}
+
+#[test]
+fn two_data_consuming_builtins_in_one_leaf_are_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = all(vec![
+        builtin(BuiltinPredicate::HashLock {
+            hash: hashlock_digest(HashAlg::Sha256, b"a"),
+            alg: HashAlg::Sha256,
+        }),
+        builtin(BuiltinPredicate::HashLock {
+            hash: hashlock_digest(HashAlg::Sha256, b"b"),
+            alg: HashAlg::Sha256,
+        }),
+    ]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(
+        &mint,
+        leaf,
+        Bytes::from_vec(b"a".to_vec()),
+        key_path(test.to_public_key_bytes()),
+    );
+    submit_expect_rejected(&mut test, resx, transfer, "at most one may consume the witness data");
 }

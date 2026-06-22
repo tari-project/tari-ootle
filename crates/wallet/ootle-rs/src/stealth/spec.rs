@@ -6,7 +6,11 @@ use std::{num::NonZeroU64, ops::Not};
 use indexmap::IndexSet;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
-use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag, stealth::TemplateFunction};
+use tari_template_lib_types::{
+    ResourceAddress,
+    crypto::UtxoTag,
+    stealth::{SpendCondition, TemplateFunction},
+};
 
 use crate::Address;
 
@@ -157,6 +161,15 @@ impl Output {
     /// revealing and satisfying `template_function`.
     pub fn with_spend_script(self, template_function: TemplateFunction) -> Self {
         self.with_pay_to(PayTo::TemplateFunction(template_function))
+    }
+
+    /// Gate this output's spend on a condition tree (MAST) of alternative spend conditions. The output commits the
+    /// Merkle root over `conditions`; a spender later reveals exactly ONE leaf plus an inclusion proof. Each leaf may
+    /// be a native access rule, a WASM predicate ([`TemplateFunction`]), a
+    /// [`BuiltinPredicate`](tari_template_lib_types::stealth::BuiltinPredicate) (timelock, hashlock, covenant), or an
+    /// [`All`](SpendCondition::All) conjunction of them.
+    pub fn with_spend_conditions(self, conditions: Vec<SpendCondition>) -> Self {
+        self.with_pay_to(PayTo::Conditions(conditions))
     }
 
     pub fn with_utxo_tag(mut self, utxo_tag: UtxoTag) -> Self {

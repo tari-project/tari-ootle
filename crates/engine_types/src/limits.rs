@@ -70,9 +70,22 @@ pub const MAX_TOKEN_SYMBOL_LEN: usize = 10;
 pub struct StealthLimits {
     pub max_inputs: usize,
     pub max_outputs: usize,
+    /// Maximum number of conditions in a single `SpendCondition::All` conjunction (TIP-0006). A revealed leaf is
+    /// evaluated in full at spend time, and a builtin predicate (e.g. a covenant balance proof or a hashlock) runs
+    /// native, unmetered work — so an unbounded conjunction would be a denial-of-service amplifier. This caps the
+    /// worst-case work of evaluating one leaf. The condition tree itself supplies breadth (a spender reveals only one
+    /// leaf plus a logarithmic inclusion proof), so the tree's size is not a spend-time cost and is not bounded here.
+    pub max_conditions_per_conjunction: usize,
+    /// Maximum size, in bytes, of the witness `data` blob a script-path spend may supply (`SpendWitness::ScriptPath`).
+    /// The blob is processed natively by the revealed leaf's predicates, so it is bounded to cap that work. A hashlock
+    /// preimage or a signature is far smaller; this leaves room for a small CBOR structure a `TemplateFunction`
+    /// decodes.
+    pub max_witness_data_len: usize,
 }
 
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
     max_outputs: 8,
+    max_conditions_per_conjunction: 16,
+    max_witness_data_len: 4096,
 };

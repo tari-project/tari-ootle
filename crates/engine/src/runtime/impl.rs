@@ -31,7 +31,7 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
     component::Component,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
-    crypto::{OutputBody, validate_covenant_balance_proof},
+    crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
@@ -130,6 +130,7 @@ use tari_template_lib::{
         engine_args::{SignatureAction, SignatureVerifyArg},
         metadata,
         stealth::{
+            BuiltinPredicate,
             CurrentInputView,
             SpendAuthorization,
             SpendCondition,
@@ -667,7 +668,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                         ));
                     }
                 },
-                SpendWitness::ScriptPath { leaf, proof } => {
+                SpendWitness::ScriptPath { leaf, proof, data } => {
                     // A `condition_root` is required to spend via the script path.
                     let root = input_condition_roots[index].ok_or_else(|| {
                         RuntimeError::ResourceError(ResourceError::InvalidSpend {
@@ -677,6 +678,21 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                             ),
                         })
                     })?;
+                    // Witness data is processed natively by the leaf's predicates, so bound its size.
+                    let max_witness_data_len = limits::STEALTH_LIMITS.max_witness_data_len;
+                    if data.len() > max_witness_data_len {
+                        return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                            details: format!(
+                                "Spend witness data for stealth UTXO {} is {} bytes, exceeding the limit of \
+                                 {max_witness_data_len}",
+                                input.commitment,
+                                data.len()
+                            ),
+                        }));
+                    }
+                    // The revealed leaf is untrusted spender data: validate its structure before hashing, so an
+                    // adversarial nesting cannot exhaust the stack in the hasher or the evaluator.
+                    Self::validate_condition_structure(leaf, &input.commitment)?;
                     // Bind the revealed leaf to the committed root before evaluating it, so the spender cannot
                     // substitute a leaf that was never committed.
                     if !stealth::verify_inclusion(stealth::condition_leaf_hash(leaf), proof, root) {
@@ -688,30 +704,187 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                             ),
                         }));
                     }
-                    match leaf {
-                        SpendCondition::AccessRule(access_rule) => {
-                            let allowed = self
-                                .tracker
-                                .read_with(|state| state.authorization().check_access_rule(access_rule))?;
-                            if !allowed {
-                                return Err(RuntimeError::AccessDenied {
-                                    action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
-                                });
-                            }
-                        },
-                        SpendCondition::TemplateFunction(tf) => {
-                            self.evaluate_spend_script(
-                                tf,
-                                index as u32,
-                                input.commitment,
-                                root,
-                                statement,
-                                &input_condition_roots,
-                            )?;
-                        },
-                    }
+                    self.evaluate_condition_leaf(
+                        leaf,
+                        index as u32,
+                        input.commitment,
+                        root,
+                        statement,
+                        &input_condition_roots,
+                        data.as_slice(),
+                    )?;
                 },
             }
+        }
+        Ok(())
+    }
+
+    /// Validates a revealed condition leaf's structure before it is hashed or evaluated.
+    ///
+    /// A conjunction ([`SpendCondition::All`]) must be non-empty and flat — nesting `All` inside `All` is rejected —
+    /// which bounds the recursion depth of hashing and evaluation to a single level, and not exceed
+    /// `STEALTH_LIMITS.max_conditions_per_conjunction`.
+    ///
+    /// A data-consuming builtin (e.g. a hashlock) reads the entire witness `data` blob as its own raw input and cannot
+    /// know the blob's shape relative to siblings, so it must be the sole consumer of `data` in its leaf: a leaf may
+    /// hold at most one data-consuming builtin, and one may not share a leaf with a `TemplateFunction` (which may also
+    /// read `data`). Context-only conditions (timelocks, covenants, access rules) consume nothing and compose freely.
+    fn validate_condition_structure(
+        leaf: &SpendCondition,
+        commitment: &PedersenCommitmentBytes,
+    ) -> Result<(), RuntimeError> {
+        let reject = |details: String| Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }));
+
+        let conditions: &[SpendCondition] = if let SpendCondition::All(conditions) = leaf {
+            if conditions.is_empty() {
+                return reject(format!(
+                    "Empty All conjunction in spend condition for stealth UTXO {commitment}"
+                ));
+            }
+            let max_conditions = limits::STEALTH_LIMITS.max_conditions_per_conjunction;
+            if conditions.len() > max_conditions {
+                return reject(format!(
+                    "All conjunction in spend condition for stealth UTXO {commitment} has {} conditions, exceeding \
+                     the limit of {max_conditions}",
+                    conditions.len()
+                ));
+            }
+            if conditions.iter().any(SpendCondition::is_all) {
+                return reject(format!(
+                    "Nested All conjunction in spend condition for stealth UTXO {commitment}"
+                ));
+            }
+            conditions
+        } else {
+            std::slice::from_ref(leaf)
+        };
+
+        let data_owning_builtins = conditions.iter().filter(|c| c.is_data_owning_builtin()).count();
+        if data_owning_builtins > 1 {
+            return reject(format!(
+                "Spend condition for stealth UTXO {commitment} has {data_owning_builtins} data-consuming builtins; at \
+                 most one may consume the witness data"
+            ));
+        }
+        if data_owning_builtins == 1 && conditions.iter().any(SpendCondition::is_template_function) {
+            return reject(format!(
+                "Spend condition for stealth UTXO {commitment} pairs a data-consuming builtin with a \
+                 TemplateFunction; a data-consuming builtin must be the sole consumer of the witness data"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Evaluates a revealed condition leaf that has already been proven included in the committed root. A conjunction
+    /// requires every child to hold (logical AND); an [`AccessRule`] leaf is checked against the auth scope; a
+    /// [`TemplateFunction`] runs as a read-only WASM predicate; a [`BuiltinPredicate`] runs natively. The single
+    /// witness `data` blob is shared by the whole leaf; each predicate interprets it as it expects (a data-consuming
+    /// builtin owns it entirely, which `validate_condition_structure` guarantees by rejecting any other consumer).
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_condition_leaf(
+        &mut self,
+        leaf: &SpendCondition,
+        input_index: u32,
+        input_commitment: PedersenCommitmentBytes,
+        root: Hash32,
+        statement: &StealthTransferStatement,
+        input_condition_roots: &[Option<Hash32>],
+        data: &[u8],
+    ) -> Result<(), RuntimeError> {
+        match leaf {
+            SpendCondition::AccessRule(access_rule) => {
+                let allowed = self
+                    .tracker
+                    .read_with(|state| state.authorization().check_access_rule(access_rule))?;
+                if !allowed {
+                    return Err(RuntimeError::AccessDenied {
+                        action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
+                    });
+                }
+            },
+            SpendCondition::TemplateFunction(tf) => {
+                self.evaluate_spend_script(
+                    tf,
+                    input_index,
+                    input_commitment,
+                    root,
+                    statement,
+                    input_condition_roots,
+                    data,
+                )?;
+            },
+            SpendCondition::Builtin(predicate) => {
+                self.evaluate_builtin(
+                    predicate,
+                    input_index,
+                    input_commitment,
+                    root,
+                    statement,
+                    input_condition_roots,
+                    data,
+                )?;
+            },
+            SpendCondition::All(conditions) => {
+                // Structure validated by `validate_condition_structure`: non-empty and flat (no nested `All`).
+                for condition in conditions {
+                    self.evaluate_condition_leaf(
+                        condition,
+                        input_index,
+                        input_commitment,
+                        root,
+                        statement,
+                        input_condition_roots,
+                        data,
+                    )?;
+                }
+            },
+        }
+        Ok(())
+    }
+
+    /// Evaluates a single native [`BuiltinPredicate`] over the spending transfer, rejecting the spend with
+    /// [`RuntimeError::SpendConditionNotMet`] if it does not hold. A data-consuming predicate (e.g. a hashlock) reads
+    /// the entire witness `data` blob as raw bytes; `validate_condition_structure` guarantees it is the leaf's sole
+    /// consumer, so the whole blob is unambiguously its input.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_builtin(
+        &mut self,
+        predicate: &BuiltinPredicate,
+        input_index: u32,
+        input_commitment: PedersenCommitmentBytes,
+        current_input_condition_root: Hash32,
+        statement: &StealthTransferStatement,
+        input_condition_roots: &[Option<Hash32>],
+        data: &[u8],
+    ) -> Result<(), RuntimeError> {
+        // Covenant/output predicates introspect the transfer; epoch and hashlock predicates do not. `witness_data` is
+        // unused here (only a WASM `TemplateFunction` reads it via the host op), so it is left empty.
+        let exec = SpendScriptExecution::new(
+            statement,
+            input_condition_roots,
+            input_index,
+            input_commitment,
+            current_input_condition_root,
+            Vec::new(),
+        );
+        let satisfied = match predicate {
+            BuiltinPredicate::AfterEpoch(unlock_epoch) => self.tracker.get_current_epoch()?.as_u64() >= *unlock_epoch,
+            BuiltinPredicate::BeforeEpoch(deadline_epoch) => {
+                self.tracker.get_current_epoch()?.as_u64() < *deadline_epoch
+            },
+            BuiltinPredicate::OutputPreservesCondition => exec.output_preserves_condition(),
+            BuiltinPredicate::OutputTo {
+                condition_root,
+                min_value,
+            } => exec.has_output_to(condition_root, *min_value),
+            BuiltinPredicate::BalancePreserved => exec.covenant_balanced(0),
+            BuiltinPredicate::BalancePreservedWithAllowance(max_revealed) => exec.covenant_balanced(*max_revealed),
+            BuiltinPredicate::HashLock { hash, alg } => stealth::hashlock_digest(*alg, data) == *hash,
+        };
+        if !satisfied {
+            return Err(RuntimeError::SpendConditionNotMet {
+                details: format!("builtin predicate not satisfied: {predicate:?}"),
+            });
         }
         Ok(())
     }
@@ -719,6 +892,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// Invokes a single `TemplateFunction` spend-condition predicate inside a read-only restricted frame. Returning
     /// normally authorises the spend; any panic — a deliberate `assert!`, out-of-gas, or a blocked state mutation
     /// (`WriteInReadOnlyContext`) — aborts it as `SpendScriptRejected`.
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_spend_script(
         &mut self,
         tf: &TemplateFunction,
@@ -727,6 +901,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         current_input_condition_root: Hash32,
         statement: &StealthTransferStatement,
         input_condition_roots: &[Option<Hash32>],
+        witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
         // and bound-arg encoding are validated immediately before invoking.
@@ -738,6 +913,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             input_index,
             input_commitment,
             current_input_condition_root,
+            witness_data.to_vec(),
         );
 
         // Assemble the call args as [bound args..., injected SpendContext handle], exactly as the auth hook appends
@@ -3335,55 +3511,9 @@ where
             SpendContextAction::RevealedInputAmount => Ok(InvokeResult::encode(&ctx.revealed_input_amount)?),
             SpendContextAction::RevealedOutputAmount => Ok(InvokeResult::encode(&ctx.revealed_output_amount)?),
             SpendContextAction::AssertCovenantBalanced { max_revealed } => {
-                // The partition is keyed by the executing UTXO's committed `condition_root`.
-                let me = ctx.current_input_condition_root;
-
-                // A claim is keyed by the index of its partition's first input. Locate that index for this partition
-                // and match the claim by it — no root is compared across the claim boundary; the proof signature binds
-                // the partition.
-                let Some(first_input_index) = ctx.input_condition_roots.iter().position(|root| *root == Some(me))
-                else {
-                    return Ok(InvokeResult::encode(&false)?);
-                };
-
-                let maybe_claim = ctx
-                    .covenant_claims
-                    .iter()
-                    .find(|claim| claim.partition_input_index as usize == first_input_index);
-
-                let Some(claim) = maybe_claim else {
-                    return Ok(InvokeResult::encode(&false)?);
-                };
-                if claim.revealed_amount > Amount::from_u64(max_revealed) {
-                    return Ok(InvokeResult::encode(&false)?);
-                }
-
-                let input_commitments = ctx
-                    .inputs
-                    .iter()
-                    .zip(&ctx.input_condition_roots)
-                    .filter(|(_, root)| **root == Some(me))
-                    .map(|(input, _)| input.commitment)
-                    .collect::<Vec<_>>();
-                let output_commitments = ctx
-                    .outputs
-                    .iter()
-                    .filter(|output| output.auth.condition_root() == Some(me))
-                    .map(|output| output.commitment)
-                    .collect::<Vec<_>>();
-
-                // The covenant is satisfied only if a claim exists at this partition's position, its declared outflow
-                // is within the allowance, and the sub-balance proof verifies. A missing or invalid claim yields
-                // `false`, which the predicate turns into a rejected spend.
-                let satisfied = validate_covenant_balance_proof(
-                    &me,
-                    claim.revealed_amount,
-                    &input_commitments,
-                    &output_commitments,
-                    &claim.signature,
-                );
-                Ok(InvokeResult::encode(&satisfied)?)
+                Ok(InvokeResult::encode(&ctx.covenant_balanced(max_revealed))?)
             },
+            SpendContextAction::WitnessData => Ok(InvokeResult::encode(&ctx.witness_data)?),
         }
     }
 

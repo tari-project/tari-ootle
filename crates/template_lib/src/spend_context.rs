@@ -89,6 +89,17 @@ impl SpendContext {
         Consensus::current_epoch()
     }
 
+    /// The raw spender-supplied witness `data` blob for the input being spent (empty if none was provided).
+    ///
+    /// Unlike the predicate's committed arguments, this is uncommitted spend-time data. Decode it into the expected
+    /// shape (e.g. `tari_bor::decode`) or use the raw bytes directly; the blob is bounded by
+    /// `STEALTH_LIMITS.max_witness_data_len`.
+    pub fn data(&self) -> Vec<u8> {
+        Self::invoke(SpendContextAction::WitnessData)
+            .decode()
+            .expect("SpendContext::data returned invalid data")
+    }
+
     // ------------------------------ Covenant helpers ------------------------------ //
     // These are thin assertions over `outputs()` / `invoking_condition()`. Authors compose them; the engine treats
     // them as ordinary predicate logic.

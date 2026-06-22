@@ -494,67 +494,83 @@ fn promote_scan_to_transaction() {
     let (account_address, vault_id, resource_address) = setup_account_and_vault(&db);
 
     // Insert a Scan entry with after_balance = 500 (simulating scanner seeing a tx's effect)
-    let mut tx = db.create_write_tx().unwrap();
-    tx.balance_changes_insert(
-        &vault_id,
-        &resource_address,
-        &Amount::from(100u64),
-        &Amount::from(500u64),
-        &Amount::from(0u64),
-        &Amount::from(0u64),
-        &BalanceChangeSource::Scan,
-    )
-    .unwrap();
-    tx.commit().unwrap();
-
-    let pre_promote = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
+    {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.balance_changes_insert(
+            &vault_id,
+            &resource_address,
+            &Amount::from(100u64),
+            &Amount::from(500u64),
+            &Amount::from(0u64),
+            &Amount::from(0u64),
+            &BalanceChangeSource::Scan,
+        )
         .unwrap();
-    assert_eq!(pre_promote.len(), 1);
-    assert_eq!(pre_promote[0].source, BalanceChangeSource::Scan);
+        tx.commit().unwrap();
+    }
+
+    // Verify the scan entry was created (reader drops after scope, harmless rollback on read-only)
+    {
+        let reader = db.create_read_tx().unwrap();
+        let pre_promote = reader
+            .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
+            .unwrap();
+        assert_eq!(pre_promote.len(), 1);
+        assert_eq!(pre_promote[0].source, BalanceChangeSource::Scan);
+    }
 
     // Promote the scan to a transaction
     let tx_id = make_tx_id(42);
-    let mut promote_tx = db.create_write_tx().unwrap();
-    promote_tx
-        .balance_changes_promote_scan_to_transaction(
-            &vault_id,
-            &tx_id,
-            &Amount::from(500u64),
-            &Amount::from(0u64),
-        )
-        .unwrap();
-    promote_tx.commit().unwrap();
-
-    let post_promote = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
-        .unwrap();
-    assert_eq!(post_promote.len(), 1);
-    match &post_promote[0].source {
-        BalanceChangeSource::Transaction { transaction_id } => {
-            assert_eq!(*transaction_id, tx_id);
-        },
-        _ => panic!("Expected Transaction source after promotion"),
+    {
+        let mut promote_tx = db.create_write_tx().unwrap();
+        promote_tx
+            .balance_changes_promote_scan_to_transaction(
+                &vault_id,
+                &tx_id,
+                &Amount::from(500u64),
+                &Amount::from(0u64),
+            )
+            .unwrap();
+        promote_tx.commit().unwrap();
     }
-    assert_eq!(
-        post_promote[0].transaction_id,
-        Some(tx_id.to_string())
-    );
+
+    {
+        let reader = db.create_read_tx().unwrap();
+        let post_promote = reader
+            .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
+            .unwrap();
+        assert_eq!(post_promote.len(), 1);
+        match &post_promote[0].source {
+            BalanceChangeSource::Transaction { transaction_id } => {
+                assert_eq!(*transaction_id, tx_id);
+            },
+            _ => panic!("Expected Transaction source after promotion"),
+        }
+        assert_eq!(
+            post_promote[0].transaction_id,
+            Some(tx_id.to_string())
+        );
+    }
 
     // Verify that promoting again with same balances is a no-op
-    let mut dup_promote_tx = db.create_write_tx().unwrap();
-    dup_promote_tx
-        .balance_changes_promote_scan_to_transaction(
-            &vault_id,
-            &tx_id,
-            &Amount::from(500u64),
-            &Amount::from(0u64),
-        )
-        .unwrap();
-    dup_promote_tx.commit().unwrap();
+    {
+        let mut dup_promote_tx = db.create_write_tx().unwrap();
+        dup_promote_tx
+            .balance_changes_promote_scan_to_transaction(
+                &vault_id,
+                &tx_id,
+                &Amount::from(500u64),
+                &Amount::from(0u64),
+            )
+            .unwrap();
+        dup_promote_tx.commit().unwrap();
+    }
 
-    let after_dup = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
-        .unwrap();
-    assert_eq!(after_dup.len(), 1, "No duplicate row created on re-promotion");
+    {
+        let reader = db.create_read_tx().unwrap();
+        let after_dup = reader
+            .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
+            .unwrap();
+        assert_eq!(after_dup.len(), 1, "No duplicate row created on re-promotion");
+    }
 }

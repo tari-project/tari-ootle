@@ -39,27 +39,33 @@ impl MinoTariNodeProcess {
     pub async fn get_identity(&self) -> anyhow::Result<String> {
         // We cannot call identify because we'd need to override the allowed methods via cli, and this is not
         // supported. So we read from the base node identity file. The node writes this file a short while after
-        // its process starts, so we poll for it rather than failing on the first miss.
+        // its process starts, and the write is not atomic, so we poll until the file both exists and parses
+        // rather than failing on the first miss.
         let id_file = self.instance.base_path().join("config").join("base_node_id.json");
 
         const MAX_ATTEMPTS: usize = 20;
         const RETRY_INTERVAL: Duration = Duration::from_millis(500);
-        let contents = {
-            let mut attempt = 0;
-            loop {
-                match fs::read_to_string(&id_file).await {
-                    Ok(contents) => break contents,
-                    Err(err) if err.kind() == std::io::ErrorKind::NotFound && attempt < MAX_ATTEMPTS => {
-                        attempt += 1;
-                        sleep(RETRY_INTERVAL).await;
-                    },
+        let mut attempt = 0;
+        let identity = loop {
+            attempt += 1;
+            match fs::read_to_string(&id_file).await {
+                // A non-atomic write can leave the file briefly empty or partial, so an unparseable read is
+                // treated the same as a missing one and retried.
+                Ok(contents) => match serde_json5::from_str::<serde_json::Value>(&contents) {
+                    Ok(identity) => break identity,
+                    Err(_) if attempt < MAX_ATTEMPTS => sleep(RETRY_INTERVAL).await,
                     Err(err) => {
-                        return Err(err).with_context(|| format!("Loading base node ID failed {}", id_file.display()));
+                        return Err(err).with_context(|| format!("Parsing base node ID failed {}", id_file.display()));
                     },
-                }
+                },
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound && attempt < MAX_ATTEMPTS => {
+                    sleep(RETRY_INTERVAL).await;
+                },
+                Err(err) => {
+                    return Err(err).with_context(|| format!("Loading base node ID failed {}", id_file.display()));
+                },
             }
         };
-        let identity = serde_json5::from_str::<serde_json::Value>(&contents)?;
         let public_key = identity["public_key"]
             .as_str()
             .ok_or_else(|| anyhow!("public_key not found or not a string"))?;

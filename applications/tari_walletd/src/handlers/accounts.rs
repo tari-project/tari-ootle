@@ -28,8 +28,6 @@ use tari_ootle_wallet_sdk::{
     models::{
         AccountWithAddress,
         BalanceChange,
-        BalanceChangeSource,
-        BalanceChangeSourceType,
         KeyBranch,
         NewAccountData,
         StealthUtxoSpendKeyId,
@@ -1512,7 +1510,7 @@ pub async fn handle_get_balance_changes(
         .transaction_id
         .as_ref()
         .map(|s| {
-            s.parse::<tari_ootle_transaction::TransactionId>()
+            tari_ootle_transaction::TransactionId::from_hex(s)
                 .map_err(|e| invalid_params("transaction_id", Some(&e.to_string())))
         })
         .transpose()?;
@@ -1591,32 +1589,34 @@ mod balance_change_handler_tests {
         )
         .unwrap();
 
-        let mut tx = db.create_write_tx().unwrap();
-        tx.accounts_insert(
-            Some("test"),
-            &account_address,
-            KeyId::derived(KeyBranch::Account, 0),
-            Some(KeyId::derived(KeyBranch::Account, 0)),
-            &RistrettoPublicKeyBytes::default(),
-            &Default::default(),
-            Epoch::zero(),
-            false,
-            false,
-        )
-        .unwrap();
-        tx.vaults_insert(VaultModel {
-            account_address,
-            id: vault_id,
-            resource_address,
-            resource_type: ResourceType::Fungible,
-            confidential_balance: Amount::zero(),
-            revealed_balance: Amount::zero(),
-            locked_revealed_balance: Amount::zero(),
-            token_symbol: Some("TARI".to_string()),
-            divisibility: 6,
-        })
-        .unwrap();
-        tx.commit().unwrap();
+        {
+            let mut tx = db.create_write_tx().unwrap();
+            tx.accounts_insert(
+                Some("test"),
+                &account_address,
+                KeyId::derived(KeyBranch::Account, 0),
+                Some(KeyId::derived(KeyBranch::Account, 0)),
+                &RistrettoPublicKeyBytes::default(),
+                &Default::default(),
+                Epoch::zero(),
+                false,
+                false,
+            )
+            .unwrap();
+            tx.vaults_insert(VaultModel {
+                account_address,
+                id: vault_id,
+                resource_address,
+                resource_type: ResourceType::Fungible,
+                confidential_balance: Amount::zero(),
+                revealed_balance: Amount::zero(),
+                locked_revealed_balance: Amount::zero(),
+                token_symbol: Some("TARI".to_string()),
+                divisibility: 6,
+            })
+            .unwrap();
+            tx.commit().unwrap();
+        }
         (db, account_address, vault_id, resource_address)
     }
 

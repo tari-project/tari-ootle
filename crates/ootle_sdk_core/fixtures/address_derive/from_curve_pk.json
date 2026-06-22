@@ -1,0 +1,16 @@
+{
+  "name": "address_derive/from_curve_pk",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "derive_account_address",
+  "input": {
+    "account_public_key": "44f53520926ec81fbd5a387845beb7df85a96a24ece18738bdcfa6a7822a176d"
+  },
+  "expected": {
+    "component_address": "component_23e5679a3e55e58e32318b94e258b73e72e3164b658f187fe5de833a861e2d45"
+  }
+}

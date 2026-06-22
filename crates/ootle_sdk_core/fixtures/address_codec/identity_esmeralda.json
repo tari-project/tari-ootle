@@ -1,0 +1,18 @@
+{
+  "name": "address_codec/identity_esmeralda",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "format_identity_address",
+  "input": {
+    "network": "esmeralda",
+    "account_public_key": "f6f89e316e6ba5f05e5250ddd4a5d3ed39dcd038cf812cc6a154b6ec0951d25f",
+    "view_only_key": "06f832c34f9c91611d7e0b3eeb85a39f55e8f20798ae30adebec385e83983746"
+  },
+  "expected": {
+    "bech32m": "otl_esm_17mufuvtwdwjlqhjj2rwaffwna5uae5pce7qje34p2jmwcz236f0sd7pjcd8eeytpr4lqk0htsk3e740g7gre3t3s4h47cwz7swvrw3sep2qlu"
+  }
+}

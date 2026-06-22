@@ -1,0 +1,158 @@
+{
+  "name": "stealth_transfer/stealth_seal_with_input",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "build_and_encode_stealth_transfer",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "fetched": [
+      {
+        "substate_id": "utxo_0101010101010101010101010101010101010101010101010101010101010101_52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
+        "version": 0,
+        "substate_value": {
+          "Utxo": {
+            "is_frozen": false,
+            "output": {
+              "output": {
+                "encrypted_data": "ffd35ef0d7a891570a164b5df43a4e70359b96a93d4eaed0969ac26b439969ff3df40e006fe6744a9ef39d11f3d357f64fbcb72438dd71512eab898d9e23c6b0719a22676d2276a90364feb341dc162d",
+                "minimum_value_promise": 0,
+                "public_nonce": "f2cce6415ff090eea8d0f041e356f28f3be3aa53ccc69867288e7432028fca23",
+                "viewable_balance": null
+              },
+              "spend_condition": {
+                "AccessRule": "AllowAll"
+              },
+              "tag": 0
+            }
+          }
+        }
+      }
+    ],
+    "stealth_intent": {
+      "from_account": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [
+        {
+          "commitment": "52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
+          "owner_account_pk": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42"
+        }
+      ],
+      "outputs": [
+        {
+          "destination_account_pk": "94741f5d5d52755ece4f23f044ee27d5d1ea1e2bd196b462166b16152a9d0259",
+          "destination_view_pk": "da80862773358b466ffadfe0b3293ab3d9fd53c5ea6c955358f568322daf6a57",
+          "amount": 1000000,
+          "revealed_amount": 0,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": null,
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 0,
+      "revealed_output_amount": 0,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_keys": {
+      "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
+      "seed": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    },
+    "spend_secrets": [
+      "a200000000000000000000000000000000000000000000000000000000000000"
+    ]
+  },
+  "expected": {
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821907d000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [
+              {
+                "substate_id": "utxo_0101010101010101010101010101010101010101010101010101010101010101_52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
+                "version": null
+              }
+            ],
+            "instructions": [
+              {
+                "StealthTransfer": {
+                  "resource_address_ref": {
+                    "Address": "resource_0101010101010101010101010101010101010101010101010101010101010101"
+                  },
+                  "revealed_input_bucket": null,
+                  "statement": {
+                    "balance_proof": null,
+                    "covenant_claims": [],
+                    "inputs_statement": {
+                      "inputs": [
+                        {
+                          "commitment": "52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60"
+                        }
+                      ],
+                      "revealed_amount": "0"
+                    },
+                    "outputs_statement": {
+                      "agg_range_proof": null,
+                      "outputs": [
+                        {
+                          "output": {
+                            "commitment": "a422410dd4430276a8b3ac9e2352b2787db57548187895157914eb621dbe4c59",
+                            "encrypted_data": "aeb21295a10115b9e3206aa572f15280d0a3bc4592a8a0a13710ad11b9948edf380a2c7505e5b023d762a20fa6c4626981dbde9ec00c03de2e6086ef7969522b8206211954836af820d9b479f2af6fdd",
+                            "minimum_value_promise": 0,
+                            "sender_public_nonce": "4ad5eb613bdf083afe27c5ee18648e788d439be4b825d0ac63ca75ff42268e36",
+                            "viewable_balance_proof": null
+                          },
+                          "spend_condition": {
+                            "Signed": "e461b029fa778a1fabfcfd1f4945bb1ee7543c14bb679d58c16ae6056c0af376"
+                          },
+                          "tag": 1321982421
+                        }
+                      ],
+                      "revealed_output_amount": "0"
+                    }
+                  }
+                }
+              }
+            ],
+            "is_seal_signer_authorized": true,
+            "max_epoch": null,
+            "min_epoch": null,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "8e7d51d6426c66815606efad91f3bcf78efa0bf678af35bffec65b993b33280f",
+          "signature": null
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "address_derive/from_seed_account_pk",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "derive_account_address",
+  "input": {
+    "account_public_key": "f6f89e316e6ba5f05e5250ddd4a5d3ed39dcd038cf812cc6a154b6ec0951d25f"
+  },
+  "expected": {
+    "component_address": "component_26cf65a80010d961aa64950a5677fd9d3852adcf3618aa7fe171f6dda8b961ae"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "stealth_outputs_statement/single_output_no_view_key",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "build_stealth_outputs_statement",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "stealth_intent": {
+      "from_account": "component_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [],
+      "outputs": [
+        {
+          "destination_account_pk": "b820df4d8d7d59f2e4870aa19597e694109bc2eeb6a47e51bf2d0e5c897f2769",
+          "destination_view_pk": "6c5b1a8e7953516748b072c48d336d798ace16087b21fc3b63f200c8fe55e857",
+          "amount": 1000000,
+          "revealed_amount": 0,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": null,
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 0,
+      "revealed_output_amount": 0,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_seed": "4646464646464646464646464646464646464646464646464646464646464646"
+  },
+  "expected": {
+    "stealth_outputs_statement": {
+      "agg_range_proof": null,
+      "outputs": [
+        {
+          "output": {
+            "commitment": "1acc86f1e32afd260b2fff7b24a887a8d42151ec6d3ba81012251a2d17dde713",
+            "encrypted_data": "b800f9e20cbc01705c37c2f5ec0476ef6fab6bb2cd12a05eca3fe622d1cab8fdec6866d5d0074164c33ad74c0df12b5980a67c368727caa7ec7a9731a1783acb2581af4d557aefd5c06a8a248ba954cf",
+            "minimum_value_promise": 0,
+            "sender_public_nonce": "de31f808bb663542b50e70d13c3ba978bca3eb2e972e4518aa4040edfd434354",
+            "viewable_balance_proof": null
+          },
+          "spend_condition": {
+            "Signed": "e8c5ae61d10d9d7c9e745733fbf748da7dafed082b6a3bb26bb88f36ee68102d"
+          },
+          "tag": 1462557849
+        }
+      ],
+      "revealed_output_amount": "0"
+    },
+    "aggregated_output_mask": "b13520ba294ee6b7eb58a1577981412c1f7b7a661f9bbc7cb642c245607ce903"
+  }
+}

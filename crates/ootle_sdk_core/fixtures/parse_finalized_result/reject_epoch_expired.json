@@ -1,0 +1,119 @@
+{
+  "name": "parse_finalized_result/reject_epoch_expired",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "parse_finalized_result",
+  "input": {
+    "raw_result": {
+      "Finalized": {
+        "abort_details": null,
+        "execution_result": {
+          "execute_epoch": null,
+          "execution_time": {
+            "nanos": 0,
+            "secs": 1
+          },
+          "finalize": {
+            "events": [
+              {
+                "payload": {
+                  "amount": "1000000"
+                },
+                "substate_id": "component_4141414141414141414141414141414141414141414141414141414141414141",
+                "template_address": "0000000000000000000000000000000000000000000000000000000000000000",
+                "topic": "std.deposit"
+              }
+            ],
+            "execution_results": [],
+            "fee_receipt": {
+              "cost_breakdown": {
+                "breakdown": {
+                  "Initial": 1000,
+                  "Storage": 9007199254740999
+                }
+              },
+              "total_fee_overcharge": 0,
+              "total_fee_payment": 9007199254742992,
+              "total_fees_paid": 9007199254742492
+            },
+            "logs": [
+              {
+                "level": "Info",
+                "message": "transfer executed"
+              }
+            ],
+            "result": {
+              "Reject": {
+                "Abort": {
+                  "reason": "EpochExpired"
+                }
+              }
+            },
+            "transaction_hash": "5151515151515151515151515151515151515151515151515151515151515151"
+          },
+          "wasm_execution_points": 0
+        },
+        "execution_time": {
+          "nanos": 0,
+          "secs": 1
+        },
+        "final_decision": {
+          "Abort": "EpochExpired"
+        },
+        "finalized_time": "2026-06-12 00:00:00.0"
+      }
+    }
+  },
+  "expected": {
+    "parsed": {
+      "events": [
+        {
+          "payload": [
+            [
+              "amount",
+              "1000000"
+            ]
+          ],
+          "substate_id": "component_4141414141414141414141414141414141414141414141414141414141414141",
+          "template_address": "0000000000000000000000000000000000000000000000000000000000000000",
+          "topic": "std.deposit"
+        }
+      ],
+      "fee_receipt": {
+        "cost_breakdown": [
+          [
+            "Initial",
+            1000
+          ],
+          [
+            "Storage",
+            9007199254740999
+          ]
+        ],
+        "total_fee_overcharge": 0,
+        "total_fee_payment": 9007199254742992,
+        "total_fees_paid": 9007199254742492
+      },
+      "logs": [
+        {
+          "level": "INFO",
+          "message": "transfer executed"
+        }
+      ],
+      "submit": {
+        "outcome": {
+          "Reject": {
+            "abort_code": "EPOCH_EXPIRED",
+            "code": "ABORT",
+            "message": "Abnormal abort: EpochExpired"
+          }
+        },
+        "transaction_id": "5151515151515151515151515151515151515151515151515151515151515151"
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "name": "stealth_outputs_statement/single_output_with_view_key",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "build_stealth_outputs_statement",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "stealth_intent": {
+      "from_account": "component_5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [],
+      "outputs": [
+        {
+          "destination_account_pk": "b820df4d8d7d59f2e4870aa19597e694109bc2eeb6a47e51bf2d0e5c897f2769",
+          "destination_view_pk": "6c5b1a8e7953516748b072c48d336d798ace16087b21fc3b63f200c8fe55e857",
+          "amount": 2500000,
+          "revealed_amount": 0,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": "a02d8c83a3f70f13144d1ee8f24814df735f324093999a366138719e59ec4606",
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 0,
+      "revealed_output_amount": 0,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_seed": "5050505050505050505050505050505050505050505050505050505050505050"
+  },
+  "expected": {
+    "stealth_outputs_statement": {
+      "agg_range_proof": null,
+      "outputs": [
+        {
+          "output": {
+            "commitment": "5870524c140fed48f8366a778bf15c08e8ac5d206c458d13c69d663a9fdd8f34",
+            "encrypted_data": "450c38428f19a2296117166ec2cafa53bad0666b7218d1f9951d6c5db09600c160fb6247a1b22d35308856b1527ef9f6292c1ede5644f96c7bd1d6eb4034a9d65ffc45ca1e5f3f4d80b173046352d623",
+            "minimum_value_promise": 0,
+            "sender_public_nonce": "c809525257ae273a5d94e07198d531dd18cd75584d7508052be8762fcbec8e32",
+            "viewable_balance_proof": {
+              "c_prime": "2cf7dcc1564d6d5dae027ebbbb52848525ec0a76315b275e5249977c3cc2ea55",
+              "e_prime": "86433823879d19beda588faf53cd33c7fb0b750c0c8b93a09c4d1e831936f34a",
+              "elgamal_encrypted": "e4b216a5b1cc15530886d55bf82757f32edb79b62c89e2cdba96f68254a84b46",
+              "elgamal_public_nonce": "020e6bc34af0f810995186188540324f3f75c2e1f28945781a35326db3258b4c",
+              "r_prime": "44253e756155382532e5630bf00de6a577f936dfb06359adf433ee55d416c215",
+              "s_m": "f5c84f92d120f288aadccf74e91db715566a744e6877fa6e5e827b4e14b86f0c",
+              "s_r": "9cbeb6f78219beddfe05bdd151db4096918f24d501a0cc326753ed104f874f0e",
+              "s_v": "a7656fcafe8f5f97c49899eeaf97ad6c7e5129f61f098a31b5930d7a2a95d402"
+            }
+          },
+          "spend_condition": {
+            "Signed": "283472177bb8754d7f369f91a361783fa81c9e78cf986d8ca0ea947f6350cb2c"
+          },
+          "tag": 372632453
+        }
+      ],
+      "revealed_output_amount": "0"
+    },
+    "aggregated_output_mask": "1ac8fb104c30df1801da6093e08c1bef6f3eb8ef98e5479e3e674a1f1fea420b"
+  }
+}

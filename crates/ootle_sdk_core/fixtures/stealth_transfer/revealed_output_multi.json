@@ -1,0 +1,219 @@
+{
+  "name": "stealth_transfer/revealed_output_multi",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "build_and_encode_stealth_transfer",
+  "compare": "semantic",
+  "input": {
+    "network": "esmeralda",
+    "stealth_intent": {
+      "from_account": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+      "fee": 2000,
+      "inputs": [],
+      "outputs": [
+        {
+          "destination_account_pk": "94741f5d5d52755ece4f23f044ee27d5d1ea1e2bd196b462166b16152a9d0259",
+          "destination_view_pk": "da80862773358b466ffadfe0b3293ab3d9fd53c5ea6c955358f568322daf6a57",
+          "amount": 500000,
+          "revealed_amount": 1000000,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": null,
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        },
+        {
+          "destination_account_pk": "e882b131016b52c1d3337080187cf768423efccbb517bb495ab812c4160ff44e",
+          "destination_view_pk": "f64746d3c92b13050ed8d80236a7f0007c3b3f962f5ba793d19a601ebb1df403",
+          "amount": 500000,
+          "revealed_amount": 500000,
+          "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
+          "resource_view_key": null,
+          "memo": null,
+          "pay_to": "StealthPublicKey",
+          "utxo_tag": null,
+          "minimum_value_promise": 0
+        }
+      ],
+      "revealed_input_amount": 2500000,
+      "revealed_output_amount": 1500000,
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false,
+      "pay_fee_from_revealed": false
+    },
+    "stealth_keys": {
+      "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
+      "seed": "8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c"
+    }
+  },
+  "expected": {
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [
+            {
+              "public_key": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42",
+              "signature": null
+            }
+          ],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821907d000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [],
+            "instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "d88358200101010101010101010101010101010101010101010101010101010101010101"
+                    },
+                    {
+                      "Literal": "821a002625a000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "method": "withdraw"
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 0
+                }
+              },
+              {
+                "StealthTransfer": {
+                  "resource_address_ref": {
+                    "Address": "resource_0101010101010101010101010101010101010101010101010101010101010101"
+                  },
+                  "revealed_input_bucket": {
+                    "id": 0,
+                    "offset": null
+                  },
+                  "statement": {
+                    "balance_proof": null,
+                    "covenant_claims": [],
+                    "inputs_statement": {
+                      "inputs": [],
+                      "revealed_amount": "2500000"
+                    },
+                    "outputs_statement": {
+                      "agg_range_proof": null,
+                      "outputs": [
+                        {
+                          "output": {
+                            "commitment": "d0fd63d267f702be56b7e963941c00efb41e996b73c6ec359585ff724fee1716",
+                            "encrypted_data": "01d58d7015ffa768e8969b1ff6162f2f5f2ba07d41a4d9f20edd9834bf3ea28453e9d75b791ece45c5fee6f41070d9a917649b7a84bc36cc5232b10ebf6baa95aac1ff0c405aaf311dfe596bcde325ce",
+                            "minimum_value_promise": 0,
+                            "sender_public_nonce": "766314e9a2330876723fcfd4b5734552b8ef4eff821e5c6733a9ad8aab5de770",
+                            "viewable_balance_proof": null
+                          },
+                          "spend_condition": {
+                            "Signed": "9a8af7509e07834f4a389f2e9ecb7065323997bf9a3363772be1fd0c19cd3903"
+                          },
+                          "tag": 2428349404
+                        },
+                        {
+                          "output": {
+                            "commitment": "74f50163e8037eda676a6d704fc123b2d986679661b7df201dd570de22131637",
+                            "encrypted_data": "12adcce1606d63fc563898a69fde3e72ae473aa24b0c156476bb4e49ef84b7f5a1b7ffaa9860968cc2440eef268eb802d6e4f029344da32ad9d6cba81399de59c0105c19c974e2a793590646afc322a6",
+                            "minimum_value_promise": 0,
+                            "sender_public_nonce": "56dbfd92f5dc4537f8d6e907a8583221e523a1dbeb9483338ce621465658bf5a",
+                            "viewable_balance_proof": null
+                          },
+                          "spend_condition": {
+                            "Signed": "d4c5f1ebbac289345b8415a2f79d425ae887a902b5c98b702af7b14b8b1a3c6c"
+                          },
+                          "tag": 1352421003
+                        }
+                      ],
+                      "revealed_output_amount": "1500000"
+                    }
+                  }
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 1
+                }
+              },
+              {
+                "TakeFromBucket": {
+                  "amount": "1000000",
+                  "input_bucket": {
+                    "id": 1,
+                    "offset": null
+                  },
+                  "output_bucket": 2
+                }
+              },
+              {
+                "CreateAccount": {
+                  "access_rules": null,
+                  "bucket_workspace_id": {
+                    "id": 2,
+                    "offset": null
+                  },
+                  "owner_public_key": "94741f5d5d52755ece4f23f044ee27d5d1ea1e2bd196b462166b16152a9d0259",
+                  "owner_rule": null
+                }
+              },
+              {
+                "TakeFromBucket": {
+                  "amount": "500000",
+                  "input_bucket": {
+                    "id": 1,
+                    "offset": null
+                  },
+                  "output_bucket": 3
+                }
+              },
+              {
+                "CreateAccount": {
+                  "access_rules": null,
+                  "bucket_workspace_id": {
+                    "id": 3,
+                    "offset": null
+                  },
+                  "owner_public_key": "e882b131016b52c1d3337080187cf768423efccbb517bb495ab812c4160ff44e",
+                  "owner_rule": null
+                }
+              }
+            ],
+            "is_seal_signer_authorized": true,
+            "max_epoch": null,
+            "min_epoch": null,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42",
+          "signature": null
+        }
+      }
+    }
+  }
+}

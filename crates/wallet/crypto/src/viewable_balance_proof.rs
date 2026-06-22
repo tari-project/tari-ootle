@@ -23,24 +23,51 @@ pub fn generate_elgamal_viewable_balance_proof(
     view_key: &RistrettoPublicKey,
 ) -> Result<ViewableBalanceProof, StealthProofError> {
     let mut rng = rand::rng();
-    let (elgamal_secret_nonce, elgamal_public_nonce) = RistrettoPublicKey::random_keypair(&mut rng);
-    let r = &elgamal_secret_nonce;
+    let elgamal_secret_nonce = RistrettoSecretKey::random(&mut rng);
+    let x_v = RistrettoSecretKey::random(&mut rng);
+    let x_m = RistrettoSecretKey::random(&mut rng);
+    let x_r = RistrettoSecretKey::random(&mut rng);
+    generate_elgamal_viewable_balance_proof_seeded(
+        mask,
+        output_amount,
+        commitment,
+        view_key,
+        &elgamal_secret_nonce,
+        &x_v,
+        &x_m,
+        &x_r,
+    )
+}
+
+/// Like [`generate_elgamal_viewable_balance_proof`], but the four ZK nonces are supplied by the
+/// caller (the ElGamal ephemeral nonce `r` plus the proof nonces `x_v`, `x_m`, `x_r`) instead of
+/// being drawn at random. With fixed nonces the produced proof is deterministic and reproducible,
+/// which is intended for deterministic builders and test vectors. The proof is otherwise identical
+/// to the random-nonce path.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_elgamal_viewable_balance_proof_seeded(
+    mask: &RistrettoSecretKey,
+    output_amount: u64,
+    commitment: &PedersenCommitment,
+    view_key: &RistrettoPublicKey,
+    elgamal_secret_nonce: &RistrettoSecretKey,
+    x_v: &RistrettoSecretKey,
+    x_m: &RistrettoSecretKey,
+    x_r: &RistrettoSecretKey,
+) -> Result<ViewableBalanceProof, StealthProofError> {
+    let elgamal_public_nonce = RistrettoPublicKey::from_secret_key(elgamal_secret_nonce);
+    let r = elgamal_secret_nonce;
     let output_amount_as_secret = RistrettoSecretKey::from(output_amount);
 
     // E = v.G + rP
     let elgamal_encrypted = RistrettoPublicKey::from_secret_key(&output_amount_as_secret) + r * view_key;
 
-    // Nonces
-    let x_v = RistrettoSecretKey::random(&mut rng);
-    let x_m = RistrettoSecretKey::random(&mut rng);
-    let x_r = RistrettoSecretKey::random(&mut rng);
-
     // C' = x_m.G + x_v.H
-    let c_prime = get_commitment_factory().commit(&x_m, &x_v);
+    let c_prime = get_commitment_factory().commit(x_m, x_v);
     // E' = x_v.G + x_r.P
-    let e_prime = RistrettoPublicKey::from_secret_key(&x_v) + &x_r * view_key;
+    let e_prime = RistrettoPublicKey::from_secret_key(x_v) + x_r * view_key;
     // R' = x_r.G
-    let r_prime = RistrettoPublicKey::from_secret_key(&x_r);
+    let r_prime = RistrettoPublicKey::from_secret_key(x_r);
 
     // Create challenge
     let elgamal_encrypted = elgamal_encrypted.to_byte_type();
@@ -64,13 +91,13 @@ pub fn generate_elgamal_viewable_balance_proof(
     //       time. The challenge is never a secret (in all current usages), so non-zeroed memory is not an issue.
 
     // sv = ev + x_v
-    let s_v = RistrettoSchnorr::sign_raw_uniform(&output_amount_as_secret, x_v, &e)
+    let s_v = RistrettoSchnorr::sign_raw_uniform(&output_amount_as_secret, x_v.clone(), &e)
         .expect("INVARIANT VIOLATION: sv RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
     // sm = em + x_m
-    let s_m = RistrettoSchnorr::sign_raw_uniform(mask, x_m, &e)
+    let s_m = RistrettoSchnorr::sign_raw_uniform(mask, x_m.clone(), &e)
         .expect("INVARIANT VIOLATION: sm RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
     // sr = er + x_r
-    let s_r = RistrettoSchnorr::sign_raw_uniform(r, x_r, &e)
+    let s_r = RistrettoSchnorr::sign_raw_uniform(r, x_r.clone(), &e)
         .expect("INVARIANT VIOLATION: sr RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
 
     Ok(ViewableBalanceProof {

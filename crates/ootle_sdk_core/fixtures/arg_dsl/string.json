@@ -1,0 +1,18 @@
+{
+  "name": "arg_dsl/string",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "encode_arg",
+  "input": {
+    "arg_value": {
+      "String": "withdraw"
+    }
+  },
+  "expected": {
+    "encoded_arg_bytes": "687769746864726177"
+  }
+}

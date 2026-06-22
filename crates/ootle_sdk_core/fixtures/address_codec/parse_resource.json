@@ -1,0 +1,19 @@
+{
+  "name": "address_codec/parse_resource",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "parse_address",
+  "input": {
+    "address": "resource_1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "expected": {
+    "parsed_address": {
+      "canonical": "resource_1111111111111111111111111111111111111111111111111111111111111111",
+      "kind": "resource"
+    }
+  }
+}

@@ -3,7 +3,7 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.35.0",
-    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "git_rev": "0634fac32d77faefa1a196071423ddbc3c4abbe5",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
@@ -124,6 +124,9 @@
                       "agg_range_proof": null,
                       "outputs": [
                         {
+                          "auth": {
+                            "Key": "9a8af7509e07834f4a389f2e9ecb7065323997bf9a3363772be1fd0c19cd3903"
+                          },
                           "output": {
                             "commitment": "d0fd63d267f702be56b7e963941c00efb41e996b73c6ec359585ff724fee1716",
                             "encrypted_data": "01d58d7015ffa768e8969b1ff6162f2f5f2ba07d41a4d9f20edd9834bf3ea28453e9d75b791ece45c5fee6f41070d9a917649b7a84bc36cc5232b10ebf6baa95aac1ff0c405aaf311dfe596bcde325ce",
@@ -131,21 +134,18 @@
                             "sender_public_nonce": "766314e9a2330876723fcfd4b5734552b8ef4eff821e5c6733a9ad8aab5de770",
                             "viewable_balance_proof": null
                           },
-                          "spend_condition": {
-                            "Signed": "9a8af7509e07834f4a389f2e9ecb7065323997bf9a3363772be1fd0c19cd3903"
-                          },
                           "tag": 2428349404
                         },
                         {
+                          "auth": {
+                            "Key": "d4c5f1ebbac289345b8415a2f79d425ae887a902b5c98b702af7b14b8b1a3c6c"
+                          },
                           "output": {
                             "commitment": "74f50163e8037eda676a6d704fc123b2d986679661b7df201dd570de22131637",
                             "encrypted_data": "12adcce1606d63fc563898a69fde3e72ae473aa24b0c156476bb4e49ef84b7f5a1b7ffaa9860968cc2440eef268eb802d6e4f029344da32ad9d6cba81399de59c0105c19c974e2a793590646afc322a6",
                             "minimum_value_promise": 0,
                             "sender_public_nonce": "56dbfd92f5dc4537f8d6e907a8583221e523a1dbeb9483338ce621465658bf5a",
                             "viewable_balance_proof": null
-                          },
-                          "spend_condition": {
-                            "Signed": "d4c5f1ebbac289345b8415a2f79d425ae887a902b5c98b702af7b14b8b1a3c6c"
                           },
                           "tag": 1352421003
                         }

@@ -31,7 +31,7 @@
 //! additive seeded seams added to `tari_ootle_wallet_crypto`
 //! ([`encrypt_data_with_nonce`](tari_ootle_wallet_crypto::encrypted_data::encrypt_data_with_nonce),
 //! [`generate_elgamal_viewable_balance_proof_seeded`](tari_ootle_wallet_crypto::viewable_balance_proof::generate_elgamal_viewable_balance_proof_seeded)).
-//! So `commitment`, `sender_public_nonce`, `encrypted_data`, `spend_condition`, `tag`, and
+//! So `commitment`, `sender_public_nonce`, `encrypted_data`, `auth`, `tag`, and
 //! `viewable_balance_proof` are all byte-reproducible on the deterministic path; only
 //! `agg_range_proof` varies run-to-run.
 
@@ -52,6 +52,7 @@ use tari_ootle_wallet_crypto::{
     encrypted_data::encrypt_data_with_nonce,
     kdfs,
     memo::Memo,
+    stealth::condition_root,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof_seeded,
 };
 use tari_template_lib_types::{
@@ -60,7 +61,7 @@ use tari_template_lib_types::{
     ResourceAddress,
     access_rules::AccessRule,
     crypto::UtxoTag,
-    stealth::{SpendCondition, StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
+    stealth::{SpendAuthorization, SpendCondition, StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
 };
 
 use crate::types::{
@@ -151,13 +152,17 @@ pub fn build_stealth_output_witness(
     .map_err(|e| OotleSdkError::Stealth(format!("AEAD encrypt failed: {e}")))?;
 
     let crypto = StealthCryptoApi::new();
-    let spend_condition = match output_spec.pay_to {
+    let auth = match output_spec.pay_to {
         StealthPayTo::StealthPublicKey => {
             let owner_public_key =
                 crypto.derive_stealth_owner_public_key(internal_network, &account_key, &nonce_secret);
-            SpendCondition::Signed(owner_public_key.to_byte_type())
+            SpendAuthorization::Key(owner_public_key.to_byte_type())
         },
-        StealthPayTo::AccessRuleAllowAll => SpendCondition::AccessRule(AccessRule::AllowAll),
+        // An `AccessRule::AllowAll` output is gated by a single-leaf condition tree; commit its root.
+        StealthPayTo::AccessRuleAllowAll => SpendAuthorization::Script(
+            condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)])
+                .map_err(|e| OotleSdkError::Stealth(format!("compute allow-all condition root: {e}")))?,
+        ),
     };
 
     // An explicit tag overrides the derived one; otherwise derive the UTXO scanning tag.
@@ -175,7 +180,7 @@ pub fn build_stealth_output_witness(
             encrypted_data,
             resource_view_key,
         },
-        spend_condition,
+        auth,
         tag,
     })
 }
@@ -257,7 +262,7 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
                 minimum_value_promise: unblinded.minimum_value_promise,
                 viewable_balance_proof,
             },
-            spend_condition: witness.spend_condition.clone(),
+            auth: witness.auth.clone(),
             tag: witness.tag,
         });
     }

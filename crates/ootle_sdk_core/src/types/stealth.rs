@@ -380,14 +380,14 @@ pub struct InboundStealthOutput {
     /// The sender's ephemeral public nonce `R` (32 bytes); the receiver pairs it with their view
     /// secret to re-derive the AEAD key (DH commutativity).
     pub sender_public_nonce: PublicKeyBytes,
-    /// The spend condition controlling how the one-time key is derived (`StealthPublicKey` for a
-    /// `Signed` output addressed to a recipient account, `AccessRuleAllowAll` otherwise). For a
+    /// The spend authorisation controlling how the one-time key is derived (`StealthPublicKey` for a
+    /// `Key` output addressed to a recipient account, `AccessRuleAllowAll` otherwise). For a
     /// `StealthPublicKey` output, the embedded one-time spend public key is [`spend_public_key`].
     ///
     /// [`spend_public_key`]: InboundStealthOutput::spend_public_key
     pub pay_to: StealthPayTo,
     /// For a `StealthPayTo::StealthPublicKey` output, the on-chain one-time spend public key
-    /// (`SpendCondition::Signed`). When present and the caller supplies their account secret, the
+    /// (`SpendAuthorization::Key`). When present and the caller supplies their account secret, the
     /// scanner verifies the output is addressed to that account. `None` for `AccessRuleAllowAll`.
     pub spend_public_key: Option<PublicKeyBytes>,
     /// The UTXO scanning tag (4 bytes), when present. Verified against the receiver-derived tag when

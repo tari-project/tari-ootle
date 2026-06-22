@@ -41,7 +41,11 @@ use tari_engine_types::{
     UtxoOutput,
     substate::{SubstateId, SubstateValue},
 };
-use tari_template_lib_types::stealth::SpendCondition;
+use tari_ootle_wallet_crypto::stealth::condition_root;
+use tari_template_lib_types::{
+    access_rules::AccessRule,
+    stealth::{SpendAuthorization, SpendCondition},
+};
 
 use crate::types::{
     address::ResourceAddressStr,
@@ -64,7 +68,7 @@ use crate::types::{
 /// `context` is a caller-supplied label (the substate id for the spend path, a generic description
 /// for the receive path) woven into the error messages so failures stay diagnosable from either site.
 ///
-/// Returns the cloned [`UtxoOutput`] (the spend path needs `encrypted_data` + `spend_condition`; the
+/// Returns the cloned [`UtxoOutput`] (the spend path needs `encrypted_data` + `auth`; the
 /// receive path needs all of it) plus the recovered nonce.
 pub(crate) fn extract_utxo_output(
     value: &SubstateValue,
@@ -106,9 +110,10 @@ pub(crate) fn extract_utxo_output(
 /// Field map:
 /// - `commitment` / `resource_address` ← parsed from `substate_id`,
 /// - `encrypted_data` / `sender_public_nonce` ← the output body,
-/// - `pay_to` / `spend_public_key` ← the UTXO's [`SpendCondition`] ([`Signed`](SpendCondition::Signed) ⇒
-///   [`StealthPublicKey`](StealthPayTo::StealthPublicKey) + the one-time spend key;
-///   [`AccessRule`](SpendCondition::AccessRule) ⇒ [`AccessRuleAllowAll`](StealthPayTo::AccessRuleAllowAll)),
+/// - `pay_to` / `spend_public_key` ← the UTXO's [`SpendAuthorization`] ([`Key`](SpendAuthorization::Key) ⇒
+///   [`StealthPublicKey`](StealthPayTo::StealthPublicKey) + the one-time spend key; the single-leaf
+///   `AccessRule::AllowAll` [`Script`](SpendAuthorization::Script) root ⇒
+///   [`AccessRuleAllowAll`](StealthPayTo::AccessRuleAllowAll)),
 /// - `utxo_tag` ← the UTXO's tag.
 ///
 /// `substate_value` is the indexer's `SubstateValue` JSON, passed through verbatim — the same neutral
@@ -145,15 +150,20 @@ pub fn decode_stealth_utxo(
         .map_err(|e| OotleSdkError::Key(format!("public nonce is not 32 bytes: {e}")))?;
     let encrypted_data = EncryptedDataBytes::from_bytes(output.output.encrypted_data.as_bytes());
 
-    // Map the on-chain spend condition onto the boundary pay-to selector + the one-time spend key.
-    let (pay_to, spend_public_key) = match &output.spend_condition {
-        SpendCondition::Signed(pk) => {
+    // Map the on-chain spend authorisation onto the boundary pay-to selector + the one-time spend key. A
+    // condition tree commits only an opaque root, so the only script-path output the SDK can recognise is the
+    // single-leaf `AccessRule::AllowAll` tree it builds itself; any other committed root (an arbitrary TIP-0006
+    // spend script) is not introspectable here and is unsupported.
+    let allow_all_root = condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)])
+        .map_err(|e| OotleSdkError::Stealth(format!("compute allow-all condition root: {e}")))?;
+    let (pay_to, spend_public_key) = match &output.auth {
+        SpendAuthorization::Key(pk) => {
             let spend_pk = PublicKeyBytes::from_bytes(pk.as_bytes())
                 .map_err(|e| OotleSdkError::Key(format!("malformed spend public key in '{substate_id}': {e}")))?;
             (StealthPayTo::StealthPublicKey, Some(spend_pk))
         },
-        SpendCondition::AccessRule(_) => (StealthPayTo::AccessRuleAllowAll, None),
-        SpendCondition::Script(_) => {
+        SpendAuthorization::Script(root) if *root == allow_all_root => (StealthPayTo::AccessRuleAllowAll, None),
+        SpendAuthorization::Script(_) | SpendAuthorization::KeyAndScript { .. } => {
             return Err(OotleSdkError::Stealth(format!(
                 "spend-script (TIP-0006) UTXO '{substate_id}' is not supported by the SDK scan/decode path"
             )));
@@ -243,11 +253,11 @@ mod tests {
         let resource_internal = resource();
         let tag = crypto.derive_stealth_output_tag(internal_network, &nonce_secret, &view_pk, &resource_internal);
 
-        let spend_condition = if with_signed {
+        let auth = if with_signed {
             let owner_pk = crypto.derive_stealth_owner_public_key(internal_network, &account_pk, &nonce_secret);
-            SpendCondition::Signed(owner_pk.to_byte_type())
+            SpendAuthorization::Key(owner_pk.to_byte_type())
         } else {
-            SpendCondition::AccessRule(AccessRule::AllowAll)
+            SpendAuthorization::Script(condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap())
         };
 
         let output_body = OutputBody {
@@ -258,7 +268,7 @@ mod tests {
         };
         let utxo = Utxo::new(UtxoOutput {
             output: output_body,
-            spend_condition,
+            auth,
             tag,
         });
 

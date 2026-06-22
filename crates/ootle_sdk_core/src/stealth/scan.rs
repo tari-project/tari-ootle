@@ -170,10 +170,10 @@ pub fn scan_stealth_output(
             }
         }
 
-        // Spend-condition check for a `StealthPublicKey` output carrying a one-time spend key.
+        // Authorisation check for a `StealthPublicKey` output carrying a one-time spend key.
         // The receiver re-derives the one-time spend secret `s = H(account_sk·R) + account_sk`
         // via `derive_stealth_owner_secret(network, account_sk, sender_nonce)` and compares its
-        // public key to the on-chain `SpendCondition::Signed(..)` key. A `StealthPublicKey` output
+        // public key to the on-chain `SpendAuthorization::Key(..)` key. A `StealthPublicKey` output
         // ALWAYS carries the one-time spend key on the wire; its absence is malformed input.
         if output.pay_to == StealthPayTo::StealthPublicKey {
             let spend_pk_bytes = output.spend_public_key.as_ref().ok_or_else(|| {

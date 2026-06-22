@@ -834,8 +834,12 @@ fn stealth_send_stealth_seal_seed() -> Fixture {
         crypto::{OutputBody, commit_u64_amount},
         substate::SubstateValue,
     };
-    use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
-    use tari_template_lib_types::{access_rules::AccessRule, crypto::UtxoTag, stealth::SpendCondition};
+    use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
+    use tari_template_lib_types::{
+        access_rules::AccessRule,
+        crypto::UtxoTag,
+        stealth::{SpendAuthorization, SpendCondition},
+    };
 
     let value = 1_000_000u64;
     let input_mask = RistrettoSecretKey::from_canonical_bytes(&fixed_scalar_bytes(160)).expect("canonical");
@@ -855,7 +859,7 @@ fn stealth_send_stealth_seal_seed() -> Fixture {
             minimum_value_promise: 0,
             viewable_balance: None,
         },
-        spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+        auth: SpendAuthorization::Script(condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap()),
         tag: UtxoTag::new(0),
     });
 
@@ -1141,7 +1145,7 @@ fn stealth_decode_utxo_seed() -> Fixture {
         substate::SubstateValue,
     };
     use tari_ootle_wallet_crypto::{StealthCryptoApi, encrypted_data::encrypt_data, kdfs};
-    use tari_template_lib_types::{crypto::UtxoTag, stealth::SpendCondition};
+    use tari_template_lib_types::{crypto::UtxoTag, stealth::SpendAuthorization};
 
     let net = Network::Esmeralda;
     let internal_network: ootle_network::Network = net.into();
@@ -1171,7 +1175,7 @@ fn stealth_decode_utxo_seed() -> Fixture {
     };
     let utxo = Utxo::new(UtxoOutput {
         output: output_body,
-        spend_condition: SpendCondition::Signed(owner_pk.to_byte_type()),
+        auth: SpendAuthorization::Key(owner_pk.to_byte_type()),
         tag: UtxoTag::new(tag.value()),
     });
 

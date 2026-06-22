@@ -3,7 +3,7 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.35.0",
-    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "git_rev": "0634fac32d77faefa1a196071423ddbc3c4abbe5",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
@@ -112,15 +112,15 @@
                       "agg_range_proof": null,
                       "outputs": [
                         {
+                          "auth": {
+                            "Key": "36ae5794c21d3c59fb797ed25397a6477b9c7fa693c400a7613a1cdf000fd535"
+                          },
                           "output": {
                             "commitment": "8cccbd21fabb0d708b6901fd338f75096913a49ea14b5073ec6ef5961e0f6876",
                             "encrypted_data": "1f2af1f27ab016bce9c08415f73e9dd04cd85f19ac3fb4007eea97cb7da4a2070a2cfa70959334e491065122c038aad949435ca867f1745f3b88ed70000eefc51a0df8e520fb69c66d299eb153ceec57",
                             "minimum_value_promise": 0,
                             "sender_public_nonce": "681632c04e69a8c222a60eb9646f8992206a05b0977f6804562cc03c983b4b16",
                             "viewable_balance_proof": null
-                          },
-                          "spend_condition": {
-                            "Signed": "36ae5794c21d3c59fb797ed25397a6477b9c7fa693c400a7613a1cdf000fd535"
                           },
                           "tag": 930317972
                         }

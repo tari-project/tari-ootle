@@ -958,8 +958,12 @@ mod tests {
             crypto::{OutputBody, commit_u64_amount},
             substate::SubstateValue,
         };
-        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
-        use tari_template_lib_types::{access_rules::AccessRule, crypto::UtxoTag, stealth::SpendCondition};
+        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
+        use tari_template_lib_types::{
+            access_rules::AccessRule,
+            crypto::UtxoTag,
+            stealth::{SpendAuthorization, SpendCondition},
+        };
 
         use crate::{inputs::FetchedSubstate, stealth::inputs::stealth_utxo_substate_id};
 
@@ -984,7 +988,9 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance: None,
             },
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 
@@ -1062,8 +1068,12 @@ mod tests {
             crypto::{OutputBody, commit_u64_amount},
             substate::SubstateValue,
         };
-        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
-        use tari_template_lib_types::{access_rules::AccessRule, crypto::UtxoTag, stealth::SpendCondition};
+        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
+        use tari_template_lib_types::{
+            access_rules::AccessRule,
+            crypto::UtxoTag,
+            stealth::{SpendAuthorization, SpendCondition},
+        };
 
         use crate::{inputs::FetchedSubstate, stealth::inputs::stealth_utxo_substate_id};
 
@@ -1087,7 +1097,9 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance: None,
             },
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 
@@ -1146,8 +1158,12 @@ mod tests {
             crypto::{OutputBody, commit_u64_amount},
             substate::SubstateValue,
         };
-        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
-        use tari_template_lib_types::{access_rules::AccessRule, crypto::UtxoTag, stealth::SpendCondition};
+        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
+        use tari_template_lib_types::{
+            access_rules::AccessRule,
+            crypto::UtxoTag,
+            stealth::{SpendAuthorization, SpendCondition},
+        };
 
         use crate::stealth::{assemble::StealthResolution, inputs::stealth_utxo_substate_id};
 
@@ -1172,7 +1188,9 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance: None,
             },
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 

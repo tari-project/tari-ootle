@@ -106,5 +106,3 @@ impl BalanceChange {
         }
     }
 }
-
-

@@ -288,7 +288,6 @@ where TSpec: WalletSdkSpec
 
             accounts_api.balance_changes_insert(
                 &vault_id,
-                &account_address,
                 latest_vault.resource_address(),
                 &before_revealed,
                 &new_balance,

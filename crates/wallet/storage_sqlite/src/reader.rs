@@ -744,11 +744,12 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<i32>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "account".to_string(),
-                key: account.to_string(),
-            })?;
+            // Unknown account -> empty result set (friendlier than NotFound for SDK callers)
+            .unwrap_or(-1);
+
+        if account_id == -1 {
+            return Ok(Vec::new());
+        }
 
         let mut rows = account_balance_changes::table
             .inner_join(vaults::table)
@@ -773,10 +774,24 @@ impl WalletStoreReader for ReadTransaction<'_> {
         }
 
         if let Some(start) = start_time {
+            let start = time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339)
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "start_time",
+                    details: e.to_string(),
+                })?;
+            let start = time::PrimitiveDateTime::new(start.date(), start.time());
             rows = rows.filter(account_balance_changes::created_at.ge(start));
         }
 
         if let Some(end) = end_time {
+            let end = time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339)
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "end_time",
+                    details: e.to_string(),
+                })?;
+            let end = time::PrimitiveDateTime::new(end.date(), end.time());
             rows = rows.filter(account_balance_changes::created_at.le(end));
         }
 
@@ -819,11 +834,12 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<i32>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "account".to_string(),
-                key: account.to_string(),
-            })?;
+            // Unknown account -> zero count (friendlier than NotFound for SDK callers)
+            .unwrap_or(-1);
+
+        if account_id == -1 {
+            return Ok(0);
+        }
 
         let mut query = account_balance_changes::table
             .filter(account_balance_changes::account_id.eq(account_id))
@@ -839,9 +855,23 @@ impl WalletStoreReader for ReadTransaction<'_> {
             query = query.filter(account_balance_changes::source.eq(st.as_key_str()));
         }
         if let Some(start) = start_time {
+            let start = time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339)
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "start_time",
+                    details: e.to_string(),
+                })?;
+            let start = time::PrimitiveDateTime::new(start.date(), start.time());
             query = query.filter(account_balance_changes::created_at.ge(start));
         }
         if let Some(end) = end_time {
+            let end = time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339)
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "end_time",
+                    details: e.to_string(),
+                })?;
+            let end = time::PrimitiveDateTime::new(end.date(), end.time());
             query = query.filter(account_balance_changes::created_at.le(end));
         }
 

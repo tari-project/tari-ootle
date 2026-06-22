@@ -792,7 +792,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn balance_changes_insert(
         &mut self,
         vault_address: &VaultId,
-        _account_address: &ComponentAddress,
         resource_address: &ResourceAddress,
         before_revealed_balance: &Amount,
         after_revealed_balance: &Amount,
@@ -838,15 +837,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             account_balance_changes::transaction_id.eq(transaction_id),
         );
 
-        let rows_affected = diesel::insert_into(account_balance_changes::table)
+        diesel::insert_into(account_balance_changes::table)
             .values(values)
             .on_conflict_do_nothing()
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        if rows_affected == 0 {
-            return Ok(());
-        }
 
         Ok(())
     }

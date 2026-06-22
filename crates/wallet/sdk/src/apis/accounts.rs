@@ -222,7 +222,6 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
     pub fn balance_changes_insert(
         &self,
         vault_address: &VaultId,
-        account_address: &ComponentAddress,
         resource_address: &ResourceAddress,
         before_revealed_balance: &Amount,
         after_revealed_balance: &Amount,
@@ -233,7 +232,6 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         self.store.with_write_tx(|tx| {
             tx.balance_changes_insert(
                 vault_address,
-                account_address,
                 resource_address,
                 before_revealed_balance,
                 after_revealed_balance,

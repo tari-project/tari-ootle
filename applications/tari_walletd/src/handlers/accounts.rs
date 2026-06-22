@@ -1487,7 +1487,11 @@ fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
         confidential_delta: change.confidential_delta,
         source: change.source,
         transaction_id: change.transaction_id,
-        created_at: format!("{}Z", change.created_at.to_string().replace(' ', 'T')),
+        created_at: change
+            .created_at
+            .assume_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| change.created_at.to_string()),
     }
 }
 
@@ -1640,7 +1644,7 @@ mod balance_change_handler_tests {
             created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
         };
         let entry = balance_change_to_entry(tx);
-        assert!(entry.source.starts_with("Transaction:"));
+        assert!(matches!(entry.source, BalanceChangeSource::Transaction { .. }));
         assert!(entry.transaction_id.is_some());
 
         let scan = BalanceChange {
@@ -1657,7 +1661,7 @@ mod balance_change_handler_tests {
             created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
         };
         let entry = balance_change_to_entry(scan);
-        assert_eq!(entry.source, "Scan");
+        assert_eq!(entry.source, BalanceChangeSource::Scan);
         assert!(entry.transaction_id.is_none());
 
         let recovery = BalanceChange {
@@ -1674,7 +1678,7 @@ mod balance_change_handler_tests {
             created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
         };
         let entry = balance_change_to_entry(recovery);
-        assert_eq!(entry.source, "Recovery");
+        assert_eq!(entry.source, BalanceChangeSource::Recovery);
         assert!(entry.transaction_id.is_none());
     }
 
@@ -1688,7 +1692,6 @@ mod balance_change_handler_tests {
         // Insert tx-driven change
         tx.balance_changes_insert(
             &vault_id,
-            &account_address,
             &resource_address,
             &Amount::from(0u64),
             &Amount::from(1000u64),
@@ -1701,7 +1704,7 @@ mod balance_change_handler_tests {
 
         // Simulate what handle_get_balance_changes does: query with pagination and filters
         let changes = tx
-            .balance_changes_get_by_account(&account_address, 0, 10, None, None)
+            .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
             .unwrap();
         assert_eq!(changes.len(), 1);
 
@@ -1710,29 +1713,29 @@ mod balance_change_handler_tests {
         assert_eq!(entry.after_revealed_balance, "1000");
         assert_eq!(entry.revealed_delta, "1000");
         assert_eq!(entry.confidential_delta, "500");
-        assert!(entry.source.starts_with("Transaction:"));
+        assert!(matches!(entry.source, BalanceChangeSource::Transaction { .. }));
 
         // Test filter by transaction_id
         let changes = tx
-            .balance_changes_get_by_account(&account_address, 0, 10, None, Some(tx_id))
+            .balance_changes_get_by_account(&account_address, 0, 10, None, Some(tx_id), None, None, None)
             .unwrap();
         assert_eq!(changes.len(), 1);
 
         // Test filter by resource_address
         let changes = tx
-            .balance_changes_get_by_account(&account_address, 0, 10, Some(&resource_address), None)
+            .balance_changes_get_by_account(&account_address, 0, 10, Some(&resource_address), None, None, None, None)
             .unwrap();
         assert_eq!(changes.len(), 1);
 
         // Test count
         let total = tx
-            .balance_changes_count_by_account(&account_address, None, None)
+            .balance_changes_count_by_account(&account_address, None, None, None, None, None)
             .unwrap();
         assert_eq!(total, 1);
 
         // Test pagination: empty page beyond data
         let changes = tx
-            .balance_changes_get_by_account(&account_address, 10, 10, None, None)
+            .balance_changes_get_by_account(&account_address, 10, 10, None, None, None, None, None)
             .unwrap();
         assert!(changes.is_empty());
     }

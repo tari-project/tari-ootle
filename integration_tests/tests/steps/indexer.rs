@@ -13,7 +13,7 @@ use integration_tests::{
     indexer::{IndexerProcess, spawn_indexer},
 };
 use libp2p::Multiaddr;
-use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
+use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional, shard::Shard};
 
 #[when(expr = "indexer {word} connects to all other validators")]
 async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: String) {
@@ -441,29 +441,32 @@ async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, 
         remaining_attempts -= 1;
         let state = client.get_network_sync_state().await.unwrap();
         if let Some(ref progress) = state.sync_progress {
-            if progress.last_state_versions.is_empty() {
-                integration_tests::cucumber_log!(
-                    "Waiting for indexer {} to sync. Current epoch: {}, no checkpoint progress yet",
-                    indexer_name,
-                    prev_epoch
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
-            }
-            if let Some((shard, (state_version, epoch))) = progress
-                .last_state_versions
+            // The indexer is synced once it has scanned every shard up to the version the network has
+            // committed. Readiness is a per-shard version comparison, not an epoch comparison: a shard
+            // whose last change was in an earlier epoch has no transition to advance its scanned epoch
+            // into prev_epoch, so requiring `scanned_epoch >= prev_epoch` stalls forever on idle shards.
+            // Shards with no committed state (version 0) require nothing to be synced.
+            let indexer_version_for = |shard: Shard| {
+                progress
+                    .last_state_versions
+                    .iter()
+                    .find(|(s, _)| *s == shard)
+                    .map(|(_, (v, _))| *v)
+            };
+            if let Some((shard, network_version)) = state_versions
                 .iter()
-                // If the indexer is not at the epoch and not scanned to the state version for the shard, we are not synced
-                .find(|(s, (v, e))| *e < prev_epoch || state_versions.get(s).is_none_or(|sv| sv > v))
+                .filter(|(_, sv)| sv.as_u64() > 0)
+                .find(|(s, sv)| indexer_version_for(**s).is_none_or(|v| v < **sv))
             {
+                let scanned_version = indexer_version_for(*shard);
                 integration_tests::cucumber_log!(
-                    "Waiting for indexer {} to sync. Current epoch: {}, shard_group: {}, state_version: {}, scanned \
-                     epoch: {}",
+                    "Waiting for indexer {} to sync. Current epoch: {}, shard: {}, network version: {}, indexer \
+                     version: {}",
                     indexer_name,
                     prev_epoch,
                     shard,
-                    state_version,
-                    epoch
+                    network_version,
+                    scanned_version.display()
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 continue;

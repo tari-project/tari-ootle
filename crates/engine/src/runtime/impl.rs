@@ -132,9 +132,11 @@ use tari_template_lib::{
         stealth::{
             BuiltinPredicate,
             CurrentInputView,
+            MerkleProof,
             SpendAuthorization,
             SpendCondition,
             SpendWitness,
+            StealthInput,
             StealthTransferStatement,
             TemplateFunction,
         },
@@ -669,67 +671,89 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                     }
                 },
                 SpendWitness::ScriptPath { leaf, proof, data } => {
-                    // A `condition_root` is required to spend via the script path.
-                    let root = input_condition_roots[index].ok_or_else(|| {
-                        RuntimeError::ResourceError(ResourceError::InvalidSpend {
-                            details: format!(
-                                "Script-path witness provided for stealth UTXO {} which has no condition_root",
-                                input.commitment
-                            ),
-                        })
-                    })?;
-                    // Witness data is processed natively by the leaf's predicates, so bound its size.
-                    let max_witness_data_len = limits::STEALTH_LIMITS.max_witness_data_len;
-                    if data.len() > max_witness_data_len {
-                        return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
-                            details: format!(
-                                "Spend witness data for stealth UTXO {} is {} bytes, exceeding the limit of \
-                                 {max_witness_data_len}",
-                                input.commitment,
-                                data.len()
-                            ),
-                        }));
-                    }
-                    // The inclusion proof is spender-supplied and each sibling costs a native hash, so bound its
-                    // length before folding it in `verify_inclusion`.
-                    let max_inclusion_proof_len = limits::STEALTH_LIMITS.max_inclusion_proof_len;
-                    if proof.siblings.len() > max_inclusion_proof_len {
-                        return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
-                            details: format!(
-                                "Inclusion proof for stealth UTXO {} has {} siblings, exceeding the limit of \
-                                 {max_inclusion_proof_len}",
-                                input.commitment,
-                                proof.siblings.len()
-                            ),
-                        }));
-                    }
-                    // The revealed leaf is untrusted spender data: validate its structure before hashing, so an
-                    // adversarial nesting cannot exhaust the stack in the hasher or the evaluator.
-                    Self::validate_condition_structure(leaf, &input.commitment)?;
-                    // Bind the revealed leaf to the committed root before evaluating it, so the spender cannot
-                    // substitute a leaf that was never committed.
-                    if !stealth::verify_inclusion(stealth::condition_leaf_hash(leaf), proof, root) {
-                        return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
-                            details: format!(
-                                "Revealed spend condition leaf is not committed in the condition_root of stealth UTXO \
-                                 {}",
-                                input.commitment
-                            ),
-                        }));
-                    }
-                    self.evaluate_condition_leaf(
+                    self.verify_script_path_authorization(
                         leaf,
-                        index as u32,
-                        input.commitment,
-                        root,
+                        proof,
+                        data,
+                        index,
+                        input,
                         statement,
                         &input_condition_roots,
-                        data.as_slice(),
                     )?;
                 },
             }
         }
         Ok(())
+    }
+
+    /// Verifies one script-path input authorisation: bounds the spender-supplied witness data and inclusion proof,
+    /// validates the revealed leaf's structure, binds it to the committed `condition_root`, then evaluates it.
+    #[allow(clippy::too_many_arguments)]
+    fn verify_script_path_authorization(
+        &mut self,
+        leaf: &SpendCondition,
+        proof: &MerkleProof,
+        data: &Bytes,
+        index: usize,
+        input: &StealthInput,
+        statement: &StealthTransferStatement,
+        input_condition_roots: &[Option<Hash32>],
+    ) -> Result<(), RuntimeError> {
+        // A `condition_root` is required to spend via the script path.
+        let root = input_condition_roots[index].ok_or_else(|| {
+            RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                details: format!(
+                    "Script-path witness provided for stealth UTXO {} which has no condition_root",
+                    input.commitment
+                ),
+            })
+        })?;
+        // Witness data is processed natively by the leaf's predicates, so bound its size.
+        let max_witness_data_len = limits::STEALTH_LIMITS.max_witness_data_len;
+        if data.len() > max_witness_data_len {
+            return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                details: format!(
+                    "Spend witness data for stealth UTXO {} is {} bytes, exceeding the limit of {max_witness_data_len}",
+                    input.commitment,
+                    data.len()
+                ),
+            }));
+        }
+        // The inclusion proof is spender-supplied and each sibling costs a native hash, so bound its length before
+        // folding it in `verify_inclusion`.
+        let max_inclusion_proof_len = limits::STEALTH_LIMITS.max_inclusion_proof_len;
+        if proof.siblings.len() > max_inclusion_proof_len {
+            return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                details: format!(
+                    "Inclusion proof for stealth UTXO {} has {} siblings, exceeding the limit of \
+                     {max_inclusion_proof_len}",
+                    input.commitment,
+                    proof.siblings.len()
+                ),
+            }));
+        }
+        // The revealed leaf is untrusted spender data: validate its structure before hashing, so an adversarial
+        // nesting cannot exhaust the stack in the hasher or the evaluator.
+        Self::validate_condition_structure(leaf, &input.commitment)?;
+        // Bind the revealed leaf to the committed root before evaluating it, so the spender cannot substitute a leaf
+        // that was never committed.
+        if !stealth::verify_inclusion(stealth::condition_leaf_hash(leaf), proof, root) {
+            return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                details: format!(
+                    "Revealed spend condition leaf is not committed in the condition_root of stealth UTXO {}",
+                    input.commitment
+                ),
+            }));
+        }
+        self.evaluate_condition_leaf(
+            leaf,
+            index as u32,
+            input.commitment,
+            root,
+            statement,
+            input_condition_roots,
+            data.as_slice(),
+        )
     }
 
     /// Validates a revealed condition leaf's structure before it is hashed or evaluated.

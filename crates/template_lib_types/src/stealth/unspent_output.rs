@@ -1,7 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use minicbor::{CborLen, Decode, Encode};
+use minicbor::{CborLen, Decode, Decoder, Encode, data::Type, decode};
 use tari_bor::adapters::boxed_slice;
 use tari_template_abi::rust::prelude::*;
 
@@ -116,7 +116,11 @@ impl StealthUnspentOutput {
 
 /// A spend condition leaf (v0) committed in a [`StealthUnspentOutput::condition_root`] tree. A script-path spend
 /// reveals one leaf and an inclusion proof; the engine recomputes the root and, on a match, evaluates the leaf.
-#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+///
+/// `Decode` is hand-written (see below) rather than derived: the `All` variant is self-recursive, so a derived decode
+/// would recurse on the call stack and a deeply nested adversarial payload could overflow it during decode — before
+/// any validation runs. The hand-written decode threads a depth counter bounded by [`tari_bor::MAX_DECODE_DEPTH`].
+#[derive(Debug, Clone, Encode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -163,6 +167,80 @@ impl SpendCondition {
     /// builtin owns the whole blob, so it must be the sole `data` consumer in its leaf (enforced at spend time).
     pub const fn is_data_owning_builtin(&self) -> bool {
         matches!(self, Self::Builtin(predicate) if predicate.consumes_data())
+    }
+}
+
+impl<'b, C> Decode<'b, C> for SpendCondition {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
+        decode_spend_condition(d, ctx, 0)
+    }
+}
+
+fn decode_spend_condition<'b, C>(
+    d: &mut Decoder<'b>,
+    ctx: &mut C,
+    depth: usize,
+) -> Result<SpendCondition, decode::Error> {
+    if depth >= tari_bor::MAX_DECODE_DEPTH {
+        return Err(decode::Error::message(
+            "SpendCondition nesting exceeds the maximum decode depth",
+        ));
+    }
+
+    // minicbor's derived enum framing is a definite 2-element array of `[variant index, body]`.
+    let pos = d.position();
+    if d.array()? != Some(2) {
+        return Err(decode::Error::message("expected SpendCondition enum (2-element array)").at(pos));
+    }
+    let variant_pos = d.position();
+    match d.i64()? {
+        0 => decode_variant_field(d, ctx, |d, ctx| AccessRule::decode(d, ctx)).map(SpendCondition::AccessRule),
+        1 => decode_variant_field(d, ctx, |d, ctx| TemplateFunction::decode(d, ctx))
+            .map(SpendCondition::TemplateFunction),
+        2 => decode_variant_field(d, ctx, |d, ctx| BuiltinPredicate::decode(d, ctx)).map(SpendCondition::Builtin),
+        3 => decode_variant_field(d, ctx, |d, ctx| decode_condition_slice(d, ctx, depth + 1)).map(SpendCondition::All),
+        n => Err(decode::Error::unknown_variant(n).at(variant_pos)),
+    }
+}
+
+// Decodes one `All` boxed slice, recursing at the incremented depth. Reuses the `boxed_slice` adapter's element loop
+// (and its `MAX_PREALLOC` cap) via a depth-threading decoder.
+fn decode_condition_slice<'b, C>(
+    d: &mut Decoder<'b>,
+    ctx: &mut C,
+    depth: usize,
+) -> Result<Box<[SpendCondition]>, decode::Error> {
+    boxed_slice::decode_with_fn(d, ctx, |d, ctx| decode_spend_condition(d, ctx, depth))
+}
+
+// Every `SpendCondition` variant carries a single field at index 0. minicbor's derive encodes a variant body as an
+// array; read the field at position 0 and skip any trailing positions, handling the indefinite-length form.
+fn decode_variant_field<'b, C, T>(
+    d: &mut Decoder<'b>,
+    ctx: &mut C,
+    decode_field: impl FnOnce(&mut Decoder<'b>, &mut C) -> Result<T, decode::Error>,
+) -> Result<T, decode::Error> {
+    let pos = d.position();
+    match d.array()? {
+        Some(0) => Err(decode::Error::missing_value(0).at(pos)),
+        Some(len) => {
+            let field = decode_field(d, ctx)?;
+            for _ in 1..len {
+                d.skip()?;
+            }
+            Ok(field)
+        },
+        None => {
+            if matches!(d.datatype()?, Type::Break) {
+                return Err(decode::Error::missing_value(0).at(pos));
+            }
+            let field = decode_field(d, ctx)?;
+            while !matches!(d.datatype()?, Type::Break) {
+                d.skip()?;
+            }
+            d.skip()?;
+            Ok(field)
+        },
     }
 }
 
@@ -277,4 +355,63 @@ pub enum HashAlg {
     Blake2b256,
     #[n(1)]
     Sha256,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leaf() -> SpendCondition {
+        SpendCondition::Builtin(BuiltinPredicate::AfterEpoch(0))
+    }
+
+    // Wraps `leaf()` in `depth` nested `All` conjunctions.
+    fn nested_all(depth: usize) -> SpendCondition {
+        let mut cond = leaf();
+        for _ in 0..depth {
+            cond = SpendCondition::All(Box::new([cond]));
+        }
+        cond
+    }
+
+    #[test]
+    fn spend_condition_roundtrips_all_variants() {
+        let cases = [
+            SpendCondition::AccessRule(AccessRule::AllowAll),
+            SpendCondition::TemplateFunction(TemplateFunction::new(
+                Hash32::from_array([0u8; 32]),
+                FunctionName::try_from("transfer").unwrap(),
+                vec![Bytes::from_vec(vec![1, 2, 3])],
+            )),
+            SpendCondition::Builtin(BuiltinPredicate::AfterEpoch(7)),
+            SpendCondition::All(Box::new([leaf(), SpendCondition::AccessRule(AccessRule::AllowAll)])),
+            nested_all(4),
+        ];
+        for cond in cases {
+            let bytes = tari_bor::encode(&cond).unwrap();
+            let decoded: SpendCondition = tari_bor::decode(&bytes).unwrap();
+            assert_eq!(decoded, cond, "hand-written decode must match derived encode");
+        }
+    }
+
+    #[test]
+    fn spend_condition_decodes_up_to_max_depth() {
+        // One level below the limit decodes and round-trips; at the limit it is rejected.
+        let ok = nested_all(tari_bor::MAX_DECODE_DEPTH - 1);
+        let bytes = tari_bor::encode(&ok).unwrap();
+        assert_eq!(tari_bor::decode::<SpendCondition>(&bytes).unwrap(), ok);
+
+        let too_deep = nested_all(tari_bor::MAX_DECODE_DEPTH);
+        let bytes = tari_bor::encode(&too_deep).unwrap();
+        assert!(tari_bor::decode::<SpendCondition>(&bytes).is_err());
+    }
+
+    #[test]
+    fn spend_condition_rejects_deeply_nested_payload_without_overflow() {
+        // A tiny-per-level payload that a recursive decode without a depth bound would overflow the stack on (a process
+        // abort). Each `All` level is the 4 bytes `82 03 81 81` (variant index 3). The depth guard rejects it as a
+        // clean error long before the recursion can overflow.
+        let bytes: Vec<u8> = (0..100_000).flat_map(|_| [0x82u8, 0x03, 0x81, 0x81]).collect();
+        assert!(tari_bor::decode::<SpendCondition>(&bytes).is_err());
+    }
 }

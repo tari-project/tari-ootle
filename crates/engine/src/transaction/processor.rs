@@ -188,8 +188,8 @@ where
                 finalize: FinalizeResult::new_rejected(
                     id.as_hash(),
                     RejectReason::ExecutionFailure(format!(
-                        "Transaction contains {publish_template_count} publish-template instructions, but at most {} \
-                         is allowed",
+                        "Transaction contains {publish_template_count} publish-template instructions, but the maximum \
+                         allowed is {}",
                         limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION
                     )),
                 ),

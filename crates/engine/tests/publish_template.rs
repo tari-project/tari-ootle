@@ -105,15 +105,12 @@ fn rejects_more_than_one_publish_template() {
     let (account_address, owner_proof, account_key, _) = test.create_funded_account_with_keypair();
 
     // The per-transaction publish-template cap is checked before any binary is validated, so these (invalid) binaries
-    // never reach WASM validation: the transaction is rejected for carrying two PublishTemplate instructions.
-    let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
-            .pay_fee_from_component(account_address, 200_000u64)
-            .publish_template(vec![1u8, 2, 3])
-            .publish_template(vec![4u8, 5, 6])
-            .build_and_seal(&account_key),
-        vec![owner_proof],
-    );
+    // never reach WASM validation: the transaction is rejected for carrying too many PublishTemplate instructions.
+    let mut builder = Transaction::builder_localnet().pay_fee_from_component(account_address, 200_000u64);
+    for i in 0..=limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION {
+        builder = builder.publish_template(vec![i as u8]);
+    }
+    let reason = test.execute_expect_failure(builder.build_and_seal(&account_key), vec![owner_proof]);
 
     let RejectReason::ExecutionFailure(error) = reason else {
         panic!("expected ExecutionFailure, got {reason:?}");
@@ -121,7 +118,7 @@ fn rejects_more_than_one_publish_template() {
     assert!(
         error.contains("publish-template instructions") &&
             error.contains(&format!(
-                "at most {} is allowed",
+                "the maximum allowed is {}",
                 limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION
             )),
         "unexpected reject reason: {error}"

@@ -104,18 +104,24 @@ mod tests {
     }
 
     #[test]
-    fn accepts_single_publish_template() {
-        let tx = tx_with_instructions(vec![publish_template()]);
+    fn accepts_publish_templates_at_the_limit() {
+        let tx = tx_with_instructions(
+            (0..MAX_PUBLISH_TEMPLATES_PER_TRANSACTION)
+                .map(|_| publish_template())
+                .collect(),
+        );
         PublishTemplateLimitValidator::new().validate(&(), &tx).unwrap();
     }
 
     #[test]
     fn rejects_multiple_publish_templates() {
-        let tx = tx_with_instructions(vec![publish_template(), publish_template()]);
+        let over_limit = MAX_PUBLISH_TEMPLATES_PER_TRANSACTION + 1;
+        let tx = tx_with_instructions((0..over_limit).map(|_| publish_template()).collect());
         let err = PublishTemplateLimitValidator::new().validate(&(), &tx).unwrap_err();
         assert!(matches!(
             err,
-            TransactionValidationError::TooManyPublishTemplateInstructions { max: 1, actual: 2, .. }
+            TransactionValidationError::TooManyPublishTemplateInstructions { max, actual, .. }
+            if max == MAX_PUBLISH_TEMPLATES_PER_TRANSACTION && actual == over_limit
         ));
     }
 }

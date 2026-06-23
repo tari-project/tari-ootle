@@ -9,12 +9,14 @@ use crate::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::stealth_limits";
 
-/// Rejects transactions whose aggregate stealth-transfer work exceeds the per-transaction caps in `STEALTH_LIMITS`.
+/// Rejects transactions whose stealth-transfer work exceeds the per-transfer or per-transaction caps in
+/// `STEALTH_LIMITS`.
 ///
 /// Verifying a stealth transfer is native, unmetered crypto (a bulletproof range proof plus an ElGamal proof per
 /// output), so without a per-transaction cap a single transaction could stack enough verification to push the
-/// proposing leader past the block time. The engine enforces the same caps during execution; this rejects such
-/// transactions at ingress, before they are gossiped, stored and executed.
+/// proposing leader past the block time. The engine enforces the same per-transfer and per-transaction caps during
+/// execution; this mirrors them to reject doomed transactions at ingress, before they are gossiped, stored and
+/// executed.
 #[derive(Debug, Clone, Default)]
 pub struct StealthTransactionLimitsValidator;
 
@@ -35,9 +37,25 @@ impl Validator<Transaction> for StealthTransactionLimitsValidator {
 
         for instruction in transaction.instructions().iter().chain(transaction.fee_instructions()) {
             if let Instruction::StealthTransfer { statement, .. } = instruction {
+                let transfer_inputs = statement.inputs_statement.inputs.len();
+                let transfer_outputs = statement.outputs_statement.outputs.len();
+                // Mirror the engine's per-transfer limits (check_stealth_transfer_limits) so a single oversized
+                // transfer is rejected at ingress rather than aborting during execution.
+                self.check(
+                    "per-transfer inputs",
+                    transfer_inputs,
+                    STEALTH_LIMITS.max_inputs,
+                    transaction,
+                )?;
+                self.check(
+                    "per-transfer outputs",
+                    transfer_outputs,
+                    STEALTH_LIMITS.max_outputs,
+                    transaction,
+                )?;
                 transfers += 1;
-                inputs += statement.inputs_statement.inputs.len();
-                outputs += statement.outputs_statement.outputs.len();
+                inputs += transfer_inputs;
+                outputs += transfer_outputs;
             }
         }
 
@@ -169,14 +187,39 @@ mod tests {
     #[test]
     fn accepts_transaction_at_the_caps() {
         let limits = STEALTH_LIMITS;
-        // One transfer that sits exactly on the input and output caps, plus filler transfers up to the transfer cap.
-        let mut statements = vec![statement(
-            limits.max_total_inputs_per_transaction,
-            limits.max_total_outputs_per_transaction,
-        )];
-        statements.extend((1..limits.max_transfers_per_transaction).map(|_| statement(0, 0)));
+        // Distribute the total input/output caps across transfers so every transfer also respects the per-transfer
+        // limits: 32 transfers of (32 inputs, 8 outputs) = 1024 inputs and 256 outputs (both exactly on the cap),
+        // padded with empty transfers up to the 64-transfer cap.
+        let mut statements = (0..32).map(|_| statement(32, limits.max_outputs)).collect::<Vec<_>>();
+        statements.extend((statements.len()..limits.max_transfers_per_transaction).map(|_| statement(0, 0)));
         let tx = tx_with_stealth_transfers(statements);
         StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap();
+    }
+
+    #[test]
+    fn rejects_transfer_exceeding_per_transfer_outputs() {
+        let tx = tx_with_stealth_transfers(vec![statement(0, STEALTH_LIMITS.max_outputs + 1)]);
+        let err = StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(
+            err,
+            TransactionValidationError::ExceedsStealthTransactionLimit {
+                limit: "per-transfer outputs",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_transfer_exceeding_per_transfer_inputs() {
+        let tx = tx_with_stealth_transfers(vec![statement(STEALTH_LIMITS.max_inputs + 1, 0)]);
+        let err = StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(
+            err,
+            TransactionValidationError::ExceedsStealthTransactionLimit {
+                limit: "per-transfer inputs",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -191,8 +234,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_too_many_total_inputs() {
-        let tx = tx_with_stealth_transfers(vec![statement(STEALTH_LIMITS.max_total_inputs_per_transaction + 1, 0)]);
+    fn rejects_too_many_total_inputs_summed_across_transfers() {
+        // Two transfers, each within the per-transfer input limit, that together exceed the per-transaction total —
+        // proving the validator sums across the transaction rather than catching it per-transfer.
+        let per = STEALTH_LIMITS.max_total_inputs_per_transaction / 2 + 1;
+        assert!(per <= STEALTH_LIMITS.max_inputs);
+        let tx = tx_with_stealth_transfers(vec![statement(per, 0), statement(per, 0)]);
         let err = StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap_err();
         assert!(matches!(
             err,
@@ -202,9 +249,14 @@ mod tests {
 
     #[test]
     fn rejects_too_many_total_outputs_summed_across_transfers() {
-        // Split the over-cap output total across two transfers to prove the validator sums across the transaction.
-        let per = STEALTH_LIMITS.max_total_outputs_per_transaction / 2 + 1;
-        let tx = tx_with_stealth_transfers(vec![statement(0, per), statement(0, per)]);
+        // Spread the over-cap output total across transfers that each respect the per-transfer output limit, proving
+        // the validator sums across the transaction.
+        let n_transfers = STEALTH_LIMITS.max_total_outputs_per_transaction / STEALTH_LIMITS.max_outputs + 1;
+        let tx = tx_with_stealth_transfers(
+            (0..n_transfers)
+                .map(|_| statement(0, STEALTH_LIMITS.max_outputs))
+                .collect(),
+        );
         let err = StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap_err();
         assert!(matches!(
             err,

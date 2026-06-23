@@ -2,22 +2,18 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use log::warn;
+use tari_engine_types::limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION;
 use tari_ootle_transaction::{Instruction, Transaction};
 
 use crate::{TransactionValidationError, Validator};
 
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::publish_template_limits";
 
-/// Maximum number of `PublishTemplate` instructions permitted in a single transaction.
-///
-/// Publishing a template registers a new global substate and carries a WASM binary up to
-/// `ENGINE_LIMITS.max_template_binary_size_bytes` (1.5 MiB). A transaction is treated as global as soon as it
-/// contains one (`Transaction::is_global`). Capping at one keeps each publishing transaction to a single, bounded
-/// template registration: multiple publishes would multiply binary size, template validation and storage cost in one
-/// transaction with no benefit a caller cannot get by submitting separate transactions.
-pub const MAX_PUBLISH_TEMPLATES_PER_TRANSACTION: usize = 1;
-
 /// Rejects transactions carrying more than [`MAX_PUBLISH_TEMPLATES_PER_TRANSACTION`] `PublishTemplate` instructions.
+///
+/// This mirrors the engine's execution-time cap at ingress, rejecting such transactions before they are gossiped,
+/// stored and executed. The engine remains the consensus authority; see
+/// [`tari_engine_types::limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION`].
 #[derive(Debug, Clone, Default)]
 pub struct PublishTemplateLimitValidator;
 

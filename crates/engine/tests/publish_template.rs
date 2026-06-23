@@ -99,6 +99,32 @@ fn publish_template_too_big_binary() {
     });
 }
 
+#[test]
+fn rejects_more_than_one_publish_template() {
+    let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+    let (account_address, owner_proof, account_key, _) = test.create_funded_account_with_keypair();
+
+    // The per-transaction publish-template cap is checked before any binary is validated, so these (invalid) binaries
+    // never reach WASM validation: the transaction is rejected for carrying too many PublishTemplate instructions.
+    let mut builder = Transaction::builder_localnet().pay_fee_from_component(account_address, 200_000u64);
+    for i in 0..=limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION {
+        builder = builder.publish_template(vec![i as u8]);
+    }
+    let reason = test.execute_expect_failure(builder.build_and_seal(&account_key), vec![owner_proof]);
+
+    let RejectReason::ExecutionFailure(error) = reason else {
+        panic!("expected ExecutionFailure, got {reason:?}");
+    };
+    assert!(
+        error.contains("publish-template instructions") &&
+            error.contains(&format!(
+                "the maximum allowed is {}",
+                limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION
+            )),
+        "unexpected reject reason: {error}"
+    );
+}
+
 fn generate_random_binary(size_in_bytes: usize) -> Vec<u8> {
     iter::repeat_with(random).take(size_in_bytes).collect()
 }

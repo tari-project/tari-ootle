@@ -51,7 +51,7 @@ function SourceLabel({ source }: { source: BalanceChangeSource }) {
   if (source.type === "Recovery") {
     return <span>Recovery</span>;
   }
-  return <span>{source.type}</span>;
+  return null;
 }
 
 function TimestampCell({ created_at }: { created_at: string }) {

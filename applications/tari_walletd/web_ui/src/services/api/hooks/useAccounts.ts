@@ -407,6 +407,8 @@ export const useGetBalanceChanges = (
         resource_address: resourceAddress ?? null,
         transaction_id: transactionId ?? null,
         source_type: sourceType ?? null,
+        start_time: null,
+        end_time: null,
       }),
     placeholderData: (previousData) => previousData,
     refetchInterval: 30000,

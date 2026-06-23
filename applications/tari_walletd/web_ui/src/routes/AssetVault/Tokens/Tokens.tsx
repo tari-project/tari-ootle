@@ -41,6 +41,7 @@ import useAccountStore from "@store/accountStore";
 import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
 import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { IoDocumentTextOutline, IoWalletOutline } from "react-icons/io5";
 import ClaimCoinsButton from "./components/ClaimCoinsButton";
 import BalanceChangeDialog from "./BalanceChangeDialog";
@@ -91,6 +92,7 @@ function BalanceRow({
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
   const showBalance = useAccountStore((state) => state.showBalance);
   const [showChanges, setShowChanges] = useState(false);
+  const navigate = useNavigate();
 
   const stealthUXTOs = resource_type === "Stealth" && (
     <Tooltip title="View Stealth UTXOs">

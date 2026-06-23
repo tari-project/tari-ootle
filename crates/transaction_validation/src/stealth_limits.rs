@@ -117,12 +117,14 @@ mod tests {
         UnsealedTransactionV1,
         UnsignedTransactionV1,
     };
-    use tari_template_lib::prelude::SpendAuthorization;
-    use tari_template_lib::types::{
-        Amount,
-        EncryptedData,
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
-        stealth::{StealthInput, StealthTransferStatement, StealthUnspentOutput, UnspentOutput},
+    use tari_template_lib::{
+        prelude::SpendAuthorization,
+        types::{
+            Amount,
+            EncryptedData,
+            crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
+            stealth::{StealthInput, StealthTransferStatement, StealthUnspentOutput, UnspentOutput},
+        },
     };
 
     use super::*;

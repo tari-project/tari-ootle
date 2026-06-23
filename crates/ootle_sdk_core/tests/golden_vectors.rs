@@ -1134,8 +1134,7 @@ fn stealth_scan_not_mine_seed() -> Fixture {
 
 /// The committed stealth-decode vectors. Each authors only the deterministic `input` (substate id +
 /// value); the generator owns `expected.inbound_output`.
-const STEALTH_DECODE_VECTORS: &[VectorCase] =
-    &[("stealth_scan/decode_utxo.json", stealth_decode_utxo_seed)];
+const STEALTH_DECODE_VECTORS: &[VectorCase] = &[("stealth_scan/decode_utxo.json", stealth_decode_utxo_seed)];
 
 /// Vector — `decode_utxo`: a fabricated `StealthPublicKey` UTXO substate (id + value) decodes into
 /// the receive-shaped `InboundStealthOutput` the scanner consumes. Built from the same fixed scan

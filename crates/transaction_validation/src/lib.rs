@@ -23,6 +23,8 @@ mod network;
 pub use network::*;
 mod signature;
 pub use signature::*;
+mod stealth_limits;
+pub use stealth_limits::*;
 mod template_exists;
 pub use template_exists::*;
 mod weight;

@@ -71,6 +71,7 @@ use tari_ootle_transaction::{Network, Transaction};
 use tari_ootle_transaction_validation::{
     BasicValidations,
     EpochRangeValidator,
+    StealthTransactionLimitsValidator,
     TemplateExistsValidator,
     TransactionDryRunValidator,
     TransactionNetworkValidator,
@@ -481,6 +482,9 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
         .and_then(BasicValidations::new())
         // Cheap structural check — reject over-weight transactions before verifying signatures.
         .and_then(TransactionWeightValidator::new(max_transaction_weight))
+        // Reject transactions whose aggregate stealth-transfer work exceeds the per-transaction caps before
+        // verifying signatures or executing.
+        .and_then(StealthTransactionLimitsValidator::new())
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
 }

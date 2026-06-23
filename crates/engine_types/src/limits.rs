@@ -68,11 +68,27 @@ pub const MAX_DIVISIBILITY: u8 = 18;
 pub const MAX_TOKEN_SYMBOL_LEN: usize = 10;
 
 pub struct StealthLimits {
+    /// Maximum stealth inputs in a single transfer statement.
     pub max_inputs: usize,
+    /// Maximum stealth outputs in a single transfer statement.
     pub max_outputs: usize,
+    /// Maximum number of stealth transfers across a whole transaction.
+    pub max_transfers_per_transaction: usize,
+    /// Maximum total stealth inputs across a whole transaction.
+    pub max_total_inputs_per_transaction: usize,
+    /// Maximum total stealth outputs across a whole transaction.
+    pub max_total_outputs_per_transaction: usize,
 }
 
+/// Verifying a stealth transfer is native, unmetered work dominated by the per-output bulletproof range proof and
+/// ElGamal viewable-balance proof (~1ms per output on x86-class hardware). The per-transfer limits bound one statement;
+/// the per-transaction limits bound the aggregate so a single transaction cannot stack enough stealth verification to
+/// exceed the block execution budget and stall the proposing leader. The per-transaction caps are a consensus-relevant
+/// execution rule enforced uniformly during execution, not just a mempool heuristic.
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
     max_outputs: 8,
+    max_transfers_per_transaction: 64,
+    max_total_inputs_per_transaction: 1024,
+    max_total_outputs_per_transaction: 256,
 };

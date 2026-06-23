@@ -347,7 +347,7 @@ mod tests {
         let stealth_secret = RistrettoSecretKey::from_canonical_bytes(&stealth_secret_bytes).unwrap();
         let derived_pub = RistrettoPublicKey::from_secret_key(&stealth_secret);
         let expected = witness.auth.spend_key().expect("expected a key-path spend_key");
-        assert_eq!(derived_pub.to_byte_type(), expected);
+        assert_eq!(derived_pub.to_byte_type(), *expected);
     }
 
     #[test]

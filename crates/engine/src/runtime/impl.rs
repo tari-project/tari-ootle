@@ -690,6 +690,19 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                             ),
                         }));
                     }
+                    // The inclusion proof is spender-supplied and each sibling costs a native hash, so bound its
+                    // length before folding it in `verify_inclusion`.
+                    let max_inclusion_proof_len = limits::STEALTH_LIMITS.max_inclusion_proof_len;
+                    if proof.siblings.len() > max_inclusion_proof_len {
+                        return Err(RuntimeError::ResourceError(ResourceError::InvalidSpend {
+                            details: format!(
+                                "Inclusion proof for stealth UTXO {} has {} siblings, exceeding the limit of \
+                                 {max_inclusion_proof_len}",
+                                input.commitment,
+                                proof.siblings.len()
+                            ),
+                        }));
+                    }
                     // The revealed leaf is untrusted spender data: validate its structure before hashing, so an
                     // adversarial nesting cannot exhaust the stack in the hasher or the evaluator.
                     Self::validate_condition_structure(leaf, &input.commitment)?;

@@ -81,6 +81,12 @@ pub struct StealthLimits {
     /// preimage or a signature is far smaller; this leaves room for a small CBOR structure a `TemplateFunction`
     /// decodes.
     pub max_witness_data_len: usize,
+    /// Maximum number of sibling hashes in a script-path inclusion proof (`MerkleProof`). The proof is
+    /// spender-supplied and each sibling costs one native hash in `verify_inclusion`, so its length is bounded to
+    /// keep that work constant. A proof of length `n` corresponds to a condition tree of up to `2^n` leaves, so
+    /// this ceiling is far beyond any real tree (whose breadth is otherwise unbounded — see
+    /// `max_conditions_per_conjunction`).
+    pub max_inclusion_proof_len: usize,
 }
 
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
@@ -88,4 +94,5 @@ pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_outputs: 8,
     max_conditions_per_conjunction: 16,
     max_witness_data_len: 4096,
+    max_inclusion_proof_len: 32,
 };

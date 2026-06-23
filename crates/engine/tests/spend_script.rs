@@ -23,12 +23,13 @@ use tari_template_lib::types::{
     AccessRule,
     Amount,
     FunctionName,
+    Hash32,
     ResourceAddress,
     TemplateAddress,
     bytes::Bytes,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::{NoSignatureDomain, PublicKey, RistrettoPublicKeyBytes, Signature},
-    stealth::{BuiltinPredicate, HashAlg, SpendCondition, SpendWitness, TemplateFunction},
+    stealth::{BuiltinPredicate, HashAlg, MerkleProof, SpendCondition, SpendWitness, TemplateFunction},
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -1365,6 +1366,25 @@ fn oversized_witness_data_is_rejected() {
         let oversized = Bytes::from_vec(vec![0u8; STEALTH_LIMITS.max_witness_data_len + 1]);
         transfer.statement.inputs_statement.inputs[0].witness =
             SpendWitness::script_path_with_data(leaf, proof, oversized);
+    }
+    submit_expect_rejected(&mut test, resx, transfer, "exceeding the limit");
+}
+
+#[test]
+fn oversized_inclusion_proof_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = builtin(BuiltinPredicate::AfterEpoch(0));
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
+    // Build a valid single-leaf script-path spend, then swap in an over-limit inclusion proof. The length check runs
+    // before verify_inclusion, so the spend is rejected for the oversized proof rather than for a non-member leaf.
+    let mut transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    if let SpendWitness::ScriptPath { leaf, data, .. } = transfer.statement.inputs_statement.inputs[0].witness.clone() {
+        let oversized = MerkleProof::new(vec![
+            Hash32::from_array([0u8; 32]);
+            STEALTH_LIMITS.max_inclusion_proof_len + 1
+        ]);
+        transfer.statement.inputs_statement.inputs[0].witness =
+            SpendWitness::script_path_with_data(leaf, oversized, data);
     }
     submit_expect_rejected(&mut test, resx, transfer, "exceeding the limit");
 }

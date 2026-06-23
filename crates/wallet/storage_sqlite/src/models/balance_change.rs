@@ -2,10 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::{Identifiable, Queryable};
-use tari_ootle_wallet_sdk::{
-    models::BalanceChangeSource,
-    storage::WalletStorageError,
-};
+use tari_ootle_wallet_sdk::{models::BalanceChangeSource, storage::WalletStorageError};
 use tari_template_lib_types::VaultId;
 use time::PrimitiveDateTime;
 
@@ -72,12 +69,10 @@ pub(crate) fn parse_balance_change_source(
                     details: "Transaction source requires a transaction_id".to_string(),
                 })
                 .and_then(|id| {
-                    tari_ootle_transaction::TransactionId::from_hex(id).map_err(|e| {
-                        WalletStorageError::DecodingError {
-                            operation: "parse_balance_change_source",
-                            item: "transaction_id",
-                            details: e.to_string(),
-                        }
+                    tari_ootle_transaction::TransactionId::from_hex(id).map_err(|e| WalletStorageError::DecodingError {
+                        operation: "parse_balance_change_source",
+                        item: "transaction_id",
+                        details: e.to_string(),
                     })
                 })?;
             Ok(BalanceChangeSource::Transaction { transaction_id: tx_id })

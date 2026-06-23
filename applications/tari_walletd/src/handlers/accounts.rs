@@ -1515,18 +1515,16 @@ pub async fn handle_get_balance_changes(
         })
         .transpose()?;
 
-    let (changes, total) = sdk
-        .accounts_api()
-        .balance_changes_get_with_count(
-            account.component_address(),
-            req.offset.unwrap_or(0),
-            req.limit.unwrap_or(100),
-            req.resource_address.as_ref(),
-            tx_id,
-            req.source_type,
-            req.start_time.as_deref(),
-            req.end_time.as_deref(),
-        )?;
+    let (changes, total) = sdk.accounts_api().balance_changes_get_with_count(
+        account.component_address(),
+        req.offset.unwrap_or(0),
+        req.limit.unwrap_or(100),
+        req.resource_address.as_ref(),
+        tx_id,
+        req.source_type,
+        req.start_time.as_deref(),
+        req.end_time.as_deref(),
+    )?;
 
     let changes = changes.into_iter().map(balance_change_to_entry).collect();
 
@@ -1565,18 +1563,14 @@ mod balance_change_handler_tests {
         let db = SqliteWalletStore::try_open(":memory:").unwrap();
         db.run_migrations().unwrap();
 
-        let account_address = ComponentAddress::from_str(
-            "component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8ffffffff",
-        )
-        .unwrap();
-        let vault_id = VaultId::from_str(
-            "vault_0000000000000000000000000000000000000000000000000000000000000001",
-        )
-        .unwrap();
-        let resource_address = ResourceAddress::from_str(
-            "resource_0000000000000000000000000000000000000000000000000000000000000001",
-        )
-        .unwrap();
+        let account_address =
+            ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8ffffffff")
+                .unwrap();
+        let vault_id =
+            VaultId::from_str("vault_0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let resource_address =
+            ResourceAddress::from_str("resource_0000000000000000000000000000000000000000000000000000000000000001")
+                .unwrap();
 
         {
             let mut tx = db.create_write_tx().unwrap();
@@ -1611,10 +1605,8 @@ mod balance_change_handler_tests {
 
     #[test]
     fn balance_change_to_entry_converts_all_sources() {
-        let vault_id = VaultId::from_str(
-            "vault_0000000000000000000000000000000000000000000000000000000000000001",
-        )
-        .unwrap();
+        let vault_id =
+            VaultId::from_str("vault_0000000000000000000000000000000000000000000000000000000000000001").unwrap();
         let resource = "resource_0000000000000000000000000000000000000000000000000000000000000001";
 
         let tx = BalanceChange {

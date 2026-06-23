@@ -828,7 +828,10 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             account_balance_changes::after_revealed_balance.eq(after_revealed_balance.to_string()),
             account_balance_changes::before_confidential_balance.eq(before_confidential_balance.to_string()),
             account_balance_changes::after_confidential_balance.eq(after_confidential_balance.to_string()),
-            account_balance_changes::revealed_delta.eq(BalanceChange::compute_delta(*before_revealed_balance, *after_revealed_balance)),
+            account_balance_changes::revealed_delta.eq(BalanceChange::compute_delta(
+                *before_revealed_balance,
+                *after_revealed_balance,
+            )),
             account_balance_changes::confidential_delta.eq(BalanceChange::compute_delta(
                 *before_confidential_balance,
                 *after_confidential_balance,

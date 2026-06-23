@@ -754,11 +754,11 @@ impl WalletStoreReader for ReadTransaction<'_> {
         let mut rows = account_balance_changes::table
             .inner_join(vaults::table)
             .filter(account_balance_changes::account_id.eq(account_id))
-            .select((
-                account_balance_changes::all_columns,
-                vaults::address,
+            .select((account_balance_changes::all_columns, vaults::address))
+            .order((
+                account_balance_changes::created_at.desc(),
+                account_balance_changes::id.desc(),
             ))
-            .order((account_balance_changes::created_at.desc(), account_balance_changes::id.desc()))
             .into_boxed();
 
         if let Some(resource_addr) = resource_address {
@@ -774,22 +774,26 @@ impl WalletStoreReader for ReadTransaction<'_> {
         }
 
         if let Some(start) = start_time {
-            let start = time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "start_time",
-                    details: e.to_string(),
+            let start =
+                time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "start_time",
+                        details: e.to_string(),
+                    }
                 })?;
             let start = time::PrimitiveDateTime::new(start.date(), start.time());
             rows = rows.filter(account_balance_changes::created_at.ge(start));
         }
 
         if let Some(end) = end_time {
-            let end = time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "end_time",
-                    details: e.to_string(),
+            let end =
+                time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "end_time",
+                        details: e.to_string(),
+                    }
                 })?;
             let end = time::PrimitiveDateTime::new(end.date(), end.time());
             rows = rows.filter(account_balance_changes::created_at.le(end));
@@ -804,13 +808,12 @@ impl WalletStoreReader for ReadTransaction<'_> {
         results
             .into_iter()
             .map(|(row, vault_address_str)| {
-                let vault_address = VaultId::from_str(&vault_address_str).map_err(|e| {
-                    WalletStorageError::DecodingError {
+                let vault_address =
+                    VaultId::from_str(&vault_address_str).map_err(|e| WalletStorageError::DecodingError {
                         operation: OPERATION,
                         item: "vault address",
                         details: e.to_string(),
-                    }
-                })?;
+                    })?;
                 row.try_into_balance_change(vault_address)
             })
             .collect()
@@ -855,21 +858,25 @@ impl WalletStoreReader for ReadTransaction<'_> {
             query = query.filter(account_balance_changes::source.eq(st.as_key_str()));
         }
         if let Some(start) = start_time {
-            let start = time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "start_time",
-                    details: e.to_string(),
+            let start =
+                time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "start_time",
+                        details: e.to_string(),
+                    }
                 })?;
             let start = time::PrimitiveDateTime::new(start.date(), start.time());
             query = query.filter(account_balance_changes::created_at.ge(start));
         }
         if let Some(end) = end_time {
-            let end = time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "end_time",
-                    details: e.to_string(),
+            let end =
+                time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "end_time",
+                        details: e.to_string(),
+                    }
                 })?;
             let end = time::PrimitiveDateTime::new(end.date(), end.time());
             query = query.filter(account_balance_changes::created_at.le(end));

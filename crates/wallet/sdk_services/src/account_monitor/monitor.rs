@@ -179,7 +179,10 @@ where
                 break;
             }
             for account in &accounts {
-                let is_updated = self.scanner.refresh_account(*account.component_address(), BalanceChangeSource::Scan).await?;
+                let is_updated = self
+                    .scanner
+                    .refresh_account(*account.component_address(), BalanceChangeSource::Scan)
+                    .await?;
                 if self.enable_periodic_scanning_of_utxos {
                     self.refresh_stealth_utxos(*account.component_address()).await?;
                 }

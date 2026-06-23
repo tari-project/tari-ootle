@@ -153,8 +153,14 @@ where TSpec: WalletSdkSpec
             if let Some(account_addr) = account_substate_id.substate_id().as_component_address() {
                 self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
                     .await?;
-                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default(), source.clone())
-                    .await?;
+                self.refresh_vault(
+                    account_addr,
+                    *vault_id,
+                    &latest_vault,
+                    Default::default(),
+                    source.clone(),
+                )
+                .await?;
             }
 
             self.notify.notify(AccountChangedEvent {

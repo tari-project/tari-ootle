@@ -180,9 +180,7 @@ async fn handler(
             "create_free_test_coins" => {
                 call_handler(context, value, token, accounts::handle_create_free_test_coins).await
             },
-            "get_balance_changes" => {
-                call_handler(context, value, token, accounts::handle_get_balance_changes).await
-            },
+            "get_balance_changes" => call_handler(context, value, token, accounts::handle_get_balance_changes).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("confidential", method)) => match method {

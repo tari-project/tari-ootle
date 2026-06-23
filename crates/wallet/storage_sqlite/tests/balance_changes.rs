@@ -6,20 +6,8 @@ use std::str::FromStr;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
-    models::{
-        BalanceChangeSource,
-        BalanceChangeSourceType,
-        KeyBranch,
-        KeyId,
-        VaultModel,
-    },
-    storage::{
-        CommittableStore,
-        ReadableWalletStore,
-        WalletStoreReader,
-        WalletStoreWriter,
-        WriteableWalletStore,
-    },
+    models::{BalanceChangeSource, BalanceChangeSourceType, KeyBranch, KeyId, VaultModel},
+    storage::{CommittableStore, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_lib_types::{
@@ -38,18 +26,12 @@ fn make_tx_id(val: u8) -> TransactionId {
 }
 
 fn setup_account_and_vault(db: &SqliteWalletStore) -> (ComponentAddress, VaultId, ResourceAddress) {
-    let account_address = ComponentAddress::from_str(
-        "component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8ffffffff",
-    )
-    .unwrap();
-    let vault_id = VaultId::from_str(
-        "vault_0000000000000000000000000000000000000000000000000000000000000001",
-    )
-    .unwrap();
-    let resource_address = ResourceAddress::from_str(
-        "resource_0000000000000000000000000000000000000000000000000000000000000001",
-    )
-    .unwrap();
+    let account_address =
+        ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8ffffffff")
+            .unwrap();
+    let vault_id = VaultId::from_str("vault_0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+    let resource_address =
+        ResourceAddress::from_str("resource_0000000000000000000000000000000000000000000000000000000000000001").unwrap();
 
     let mut tx = db.create_write_tx().unwrap();
     tx.accounts_insert(
@@ -127,14 +109,10 @@ fn multi_vault_transaction() {
     db.run_migrations().unwrap();
     let (account_address, vault_id_1, resource_address_1) = setup_account_and_vault(&db);
 
-    let vault_id_2 = VaultId::from_str(
-        "vault_0000000000000000000000000000000000000000000000000000000000000002",
-    )
-    .unwrap();
-    let resource_address_2 = ResourceAddress::from_str(
-        "resource_0000000000000000000000000000000000000000000000000000000000000002",
-    )
-    .unwrap();
+    let vault_id_2 =
+        VaultId::from_str("vault_0000000000000000000000000000000000000000000000000000000000000002").unwrap();
+    let resource_address_2 =
+        ResourceAddress::from_str("resource_0000000000000000000000000000000000000000000000000000000000000002").unwrap();
 
     {
         let mut tx = db.create_write_tx().unwrap();
@@ -188,7 +166,16 @@ fn multi_vault_transaction() {
     assert_eq!(changes_by_tx.len(), 2);
 
     let changes_by_resource = tx
-        .balance_changes_get_by_account(&account_address, 0, 10, Some(&resource_address_1), None, None, None, None)
+        .balance_changes_get_by_account(
+            &account_address,
+            0,
+            10,
+            Some(&resource_address_1),
+            None,
+            None,
+            None,
+            None,
+        )
         .unwrap();
     assert_eq!(changes_by_resource.len(), 1);
 }
@@ -438,7 +425,9 @@ fn time_range_filter() {
         &Amount::from(100u64),
         &Amount::from(0u64),
         &Amount::from(0u64),
-        &BalanceChangeSource::Transaction { transaction_id: tx_id_1 },
+        &BalanceChangeSource::Transaction {
+            transaction_id: tx_id_1,
+        },
     )
     .unwrap();
     // Small delay to ensure different created_at timestamps
@@ -450,7 +439,9 @@ fn time_range_filter() {
         &Amount::from(200u64),
         &Amount::from(0u64),
         &Amount::from(0u64),
-        &BalanceChangeSource::Transaction { transaction_id: tx_id_2 },
+        &BalanceChangeSource::Transaction {
+            transaction_id: tx_id_2,
+        },
     )
     .unwrap();
     tx.commit().unwrap();
@@ -464,31 +455,13 @@ fn time_range_filter() {
     // Filter with start_time set to a time before both entries should return both
     let early = "2020-01-01T00:00:00Z";
     let filtered = tx
-        .balance_changes_get_by_account(
-            &account_address,
-            0,
-            10,
-            None,
-            None,
-            None,
-            Some(early),
-            None,
-        )
+        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, Some(early), None)
         .unwrap();
     assert_eq!(filtered.len(), 2, "Both entries are after 2020");
 
     // Filter with end_time before a known time should give 0 results
     let before_earliest = tx
-        .balance_changes_get_by_account(
-            &account_address,
-            0,
-            10,
-            None,
-            None,
-            None,
-            None,
-            Some(early),
-        )
+        .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, Some(early))
         .unwrap();
     assert_eq!(before_earliest.len(), 0, "No changes before 2020");
 }
@@ -530,12 +503,7 @@ fn promote_scan_to_transaction() {
     {
         let mut promote_tx = db.create_write_tx().unwrap();
         promote_tx
-            .balance_changes_promote_scan_to_transaction(
-                &vault_id,
-                &tx_id,
-                &Amount::from(500u64),
-                &Amount::from(0u64),
-            )
+            .balance_changes_promote_scan_to_transaction(&vault_id, &tx_id, &Amount::from(500u64), &Amount::from(0u64))
             .unwrap();
         promote_tx.commit().unwrap();
     }
@@ -552,22 +520,14 @@ fn promote_scan_to_transaction() {
             },
             _ => panic!("Expected Transaction source after promotion"),
         }
-        assert_eq!(
-            post_promote[0].transaction_id,
-            Some(tx_id.to_string())
-        );
+        assert_eq!(post_promote[0].transaction_id, Some(tx_id.to_string()));
     }
 
     // Verify that promoting again with same balances is a no-op
     {
         let mut dup_promote_tx = db.create_write_tx().unwrap();
         dup_promote_tx
-            .balance_changes_promote_scan_to_transaction(
-                &vault_id,
-                &tx_id,
-                &Amount::from(500u64),
-                &Amount::from(0u64),
-            )
+            .balance_changes_promote_scan_to_transaction(&vault_id, &tx_id, &Amount::from(500u64), &Amount::from(0u64))
             .unwrap();
         dup_promote_tx.commit().unwrap();
     }

@@ -22,6 +22,7 @@ pub struct BalanceChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 #[serde(tag = "type")]
 pub enum BalanceChangeSource {
     Transaction { transaction_id: TransactionId },
@@ -31,6 +32,7 @@ pub enum BalanceChangeSource {
 
 /// Lightweight source type enum for filtering — no data payload.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum BalanceChangeSourceType {
     Transaction,
     Scan,

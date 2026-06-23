@@ -67,6 +67,7 @@ use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_ootle_template_provider::MemoryCacheTemplateProvider;
 use tari_ootle_transaction::{Network, Transaction};
 use tari_ootle_transaction_validation::{
     BasicValidations,
@@ -107,7 +108,6 @@ use crate::{
         spec::ValidatorTemplateProvider,
     },
     file_l1_submitter::FileLayerOneSubmitter,
-    memory_cache_template_provider::MemoryCacheTemplateProvider,
     migrations,
     p2p::{
         NopLogger,

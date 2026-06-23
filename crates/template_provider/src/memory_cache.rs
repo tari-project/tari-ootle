@@ -10,11 +10,11 @@ use tari_ootle_common_types::services::template_provider::{
     TemplateProviderMetadata,
 };
 use tari_template_builtin::all_builtin_templates;
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib_types::TemplateAddress;
 
 use crate::cmap_semaphore;
 
-const LOG_TARGET: &str = "tari::validator::memory_cache_template_provider";
+const LOG_TARGET: &str = "tari::ootle::template_provider::memory_cache";
 const CONCURRENT_ACCESS_LIMIT: isize = 100;
 
 /// Multiplier applied to the WASM source byte count when weighing cache
@@ -46,19 +46,24 @@ impl TemplateConfig {
     }
 }
 
-/// Outermost layer of the validator-node template provider chain.
+/// Outermost layer of the template provider chain.
 ///
 /// Holds an in-memory moka cache of `LoadedTemplate`s keyed by address and a
 /// per-address semaphore to coalesce concurrent first-fetches. Builtin
 /// templates are precompiled into the cache at construction time. Everything
-/// else delegates to `inner` on miss — typically a
-/// `tari_engine::wasm::DiskCachedWasmTemplateProvider` wrapping the raw state
-/// store, so the layering is:
+/// else delegates to `inner` on miss. The validator node layers it as:
 ///
 /// ```text
 /// MemoryCacheTemplateProvider          (this)
 ///   └── DiskCachedWasmTemplateProvider (compiled-module disk cache + compile)
 ///         └── ValidatorNodeStateStore  (raw PublishedTemplate bytes from rocksdb)
+/// ```
+///
+/// while the indexer layers it as:
+///
+/// ```text
+/// MemoryCacheTemplateProvider          (this)
+///   └── LazyTemplateProvider           (on-demand fetch: disk cache → local store → network)
 /// ```
 #[derive(Clone)]
 pub struct MemoryCacheTemplateProvider<TInner> {

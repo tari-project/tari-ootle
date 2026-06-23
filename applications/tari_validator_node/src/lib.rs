@@ -22,7 +22,6 @@
 
 mod base_layer;
 mod bootstrap;
-mod cmap_semaphore;
 mod config;
 pub mod consensus;
 #[cfg(feature = "metrics")]
@@ -33,7 +32,6 @@ mod genesis_state;
 #[cfg(feature = "web_ui")]
 mod http_ui;
 mod json_rpc;
-mod memory_cache_template_provider;
 #[cfg(feature = "metrics")]
 mod metrics;
 mod migrations;

@@ -3,5 +3,9 @@ import type { Hash32 } from "./Hash32";
 
 /**
  * An inclusion proof for a condition-tree (MAST) leaf: the sibling hashes from the leaf up to the root, bottom-first.
+ *
+ * Carries no direction bits — the engine re-sorts each pair lexicographically on the way up. This type is pure data
+ * (no hashing), so it lives beside the spend witness in the WASM-safe crate while the hashing stays native in
+ * `tari_engine_types`.
  */
 export type MerkleProof = { siblings: Array<Hash32> };

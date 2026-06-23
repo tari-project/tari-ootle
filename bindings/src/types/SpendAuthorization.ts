@@ -4,6 +4,15 @@ import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 
 /**
  * How a stealth output is authorised at spend time (TIP-0006): a key path, a committed condition tree, or both.
+ *
+ * Modelled as an enum rather than a pair of `Option`s so the unspendable `{no key, no conditions}` state is
+ * unrepresentable — by construction in memory and at the decode boundary, with no runtime invariant to enforce.
+ *
+ * - **Key** — a one-time "stealth" public key; spendable by proving ownership of it (a signature, via the
+ *   transaction's auth scope).
+ * - **Script** — the Merkle root (MAST) committing the set of alternative [`SpendCondition`] leaves; spendable by
+ *   revealing one leaf plus an inclusion proof.
+ * - **KeyAndScript** — either path is admissible; the per-input `SpendWitness` selects which.
  */
 export type SpendAuthorization =
   | { Key: RistrettoPublicKeyBytes }

@@ -5,6 +5,10 @@ import type { UtxoTag } from "./UtxoTag";
 
 /**
  * A read-only view of a stealth output being created, as exposed to a spend script via the `SpendContext` host op.
+ *
+ * Confidential values remain hidden — only the commitment, `minimum_value_promise`, the output's
+ * [`SpendAuthorization`] and tag are visible. This is exactly what enables covenants: a predicate can assert
+ * properties of the outputs it produces (e.g. that they preserve its own `condition_root`).
  */
 export type StealthOutputView = {
   commitment: PedersenCommitmentBytes;

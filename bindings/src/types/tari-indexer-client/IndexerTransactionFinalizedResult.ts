@@ -13,9 +13,4 @@ export type IndexerTransactionFinalizedResult =
         abort_details: string | null;
       };
     }
-  | {
-      Rejected: {
-        details: string;
-        rejected_time: string;
-      };
-    };
+  | { Rejected: { details: string; rejected_time: string } };

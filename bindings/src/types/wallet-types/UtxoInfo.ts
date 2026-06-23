@@ -16,6 +16,9 @@ export type UtxoInfo = {
    * wallet's configured network. `None` for all other memo types.
    */
   sender_address: OotleAddress | null;
+  /**
+   * How this UTXO is authorised at spend time (key path, condition tree, or both).
+   */
   auth: SpendAuthorization;
   is_burnt: boolean;
   is_frozen: boolean;

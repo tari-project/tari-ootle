@@ -3,6 +3,10 @@ import type { AccessRule } from "./AccessRule";
 import type { BuiltinPredicate } from "./BuiltinPredicate";
 import type { TemplateFunction } from "./TemplateFunction";
 
+/**
+ * A spend condition leaf (v0) committed in a [`StealthUnspentOutput::condition_root`] tree. A script-path spend
+ * reveals one leaf and an inclusion proof; the engine recomputes the root and, on a match, evaluates the leaf.
+ */
 export type SpendCondition =
   | { AccessRule: AccessRule }
   | { TemplateFunction: TemplateFunction }

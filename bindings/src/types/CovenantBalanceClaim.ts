@@ -4,11 +4,11 @@ import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 
 /**
  * A covenant sub-balance proof (TIP-0006 `AssertCovenantBalanced`) covering one partition of the transfer: the inputs
- * and outputs that share a `SpendCondition::Script`. It proves the partition's committed value is conserved into
- * outputs carrying that condition save for an exact cleartext `revealed_amount`, without exposing confidential values.
+ * and outputs that share a `condition_root`. It proves the partition's committed value is conserved into outputs
+ * carrying that root save for an exact cleartext `revealed_amount`, without exposing confidential values.
  *
- * A claim is keyed by `partition_input_index` rather than by restating its (potentially large) spend condition; the
- * engine matches it to its partition by that index. The condition is bound into `signature`, so a claim cannot be
+ * A claim is keyed by `partition_input_index` rather than by restating its condition root; the engine matches it to
+ * its partition by that index. The partition's `condition_root` is bound into `signature`, so a claim cannot be
  * validated against the wrong partition.
  */
 export type CovenantBalanceClaim = {

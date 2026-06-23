@@ -9,5 +9,8 @@ import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 export type CurrentInputView = {
   index: number;
   commitment: PedersenCommitmentBytes;
+  /**
+   * The committed condition-tree root of the UTXO being spent. Always `Some` while a script-path predicate runs.
+   */
   condition_root: Hash32 | null;
 };

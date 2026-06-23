@@ -24,7 +24,7 @@ use std::{sync::Arc, time::Instant};
 
 use log::*;
 use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult},
+    commit_result::{ExecuteResult, FinalizeResult, RejectReason},
     component::{Component, derive_component_address_from_public_key},
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
@@ -173,6 +173,32 @@ where
                 })?;
 
         let instructions = executable.into_instructions();
+
+        // A transaction may publish at most one template. Enforced here during execution — a consensus rule every
+        // validator applies deterministically — so it holds even for transactions that reach execution without
+        // passing the mempool ingress validator that mirrors it.
+        let publish_template_count = instructions
+            .fee
+            .iter()
+            .chain(&instructions.main)
+            .filter(|instruction| matches!(instruction, Instruction::PublishTemplate { .. }))
+            .count();
+        if publish_template_count > limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION {
+            return Ok(ExecuteResult {
+                finalize: FinalizeResult::new_rejected(
+                    id.as_hash(),
+                    RejectReason::ExecutionFailure(format!(
+                        "Transaction contains {publish_template_count} publish-template instructions, but the maximum \
+                         allowed is {}",
+                        limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION
+                    )),
+                ),
+                execution_time: timer.elapsed(),
+                execute_epoch: execute_epoch.map(Into::into),
+                wasm_execution_points: 0,
+            });
+        }
+
         let blobs = std::sync::Arc::new(instructions.blobs);
 
         let mut runtime_interface = Box::new(RuntimeInterfaceImpl::initialize(

@@ -20,12 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use log::{debug, info};
+use log::info;
 use tari_engine::{fees::FeeTable, state_store::new_memory_store, traits::ClaimProofVerifier};
 use tari_engine_types::{
     commit_result::ExecuteResult,
@@ -38,12 +35,14 @@ use tari_ootle_common_types::SubstateRequirementRef;
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_transaction::Transaction;
 use tari_template_lib_types::constants::TARI_TOKEN;
-use tokio::task;
+use tokio::{runtime::Handle, task};
 
 use crate::{
-    dry_run::{error::DryRunTransactionProcessorError, package::Package},
+    dry_run::{
+        error::DryRunTransactionProcessorError,
+        template_provider::{DryRunTemplateProvider, build_dry_run_template_provider},
+    },
     substate_manager::SubstateManager,
-    template_manager::TemplateManager,
 };
 
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
@@ -52,7 +51,7 @@ const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 pub struct DryRunTransactionProcessor {
     fee_table: FeeTable,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    template_manager: TemplateManager,
+    template_provider: DryRunTemplateProvider,
     substate_manager: SubstateManager,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
@@ -61,17 +60,19 @@ impl DryRunTransactionProcessor {
     pub fn new(
         fee_table: FeeTable,
         epoch_manager: EpochManagerHandle<PeerAddress>,
-        template_manager: TemplateManager,
         substate_manager: SubstateManager,
+        wasm_cache_dir: PathBuf,
         claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, std::io::Error> {
+        let handle = Handle::try_current().map_err(std::io::Error::other)?;
+        let template_provider = build_dry_run_template_provider(handle, substate_manager.clone(), wasm_cache_dir)?;
+        Ok(Self {
             fee_table,
             epoch_manager,
-            template_manager,
+            template_provider,
             substate_manager,
             claim_burn_proof_verifier: Arc::new(claim_burn_proof_verifier),
-        }
+        })
     }
 
     pub async fn process_transaction(
@@ -95,8 +96,6 @@ impl DryRunTransactionProcessor {
             found_substates.insert(TARI_TOKEN.into(), tari_token);
         }
 
-        let package = self.construct_template_package(&transaction, &found_substates).await?;
-
         let virtual_substates = self.get_virtual_substates().await?;
 
         let mut state_store = new_memory_store();
@@ -104,7 +103,7 @@ impl DryRunTransactionProcessor {
 
         // execute the payload in the WASM engine and return the result
         let processor = TariTransactionProcessor::new(
-            package,
+            self.template_provider.clone(),
             self.fee_table.clone(),
             true,
             self.claim_burn_proof_verifier.clone(),
@@ -115,34 +114,6 @@ impl DryRunTransactionProcessor {
         .await??;
 
         Ok(exec_output.result)
-    }
-
-    async fn construct_template_package(
-        &self,
-        transaction: &Transaction,
-        inputs: &HashMap<SubstateId, Substate>,
-    ) -> Result<Package, DryRunTransactionProcessorError> {
-        let component_templates = inputs.values().filter_map(|substate| {
-            substate
-                .substate_value()
-                .as_component()
-                .map(|component| component.template_address())
-        });
-
-        let req_templates = transaction
-            .referenced_templates_iter()
-            .chain(component_templates)
-            .collect::<HashSet<_>>();
-
-        debug!(
-            target: LOG_TARGET,
-            "Fetching {} required templates for transaction {}",
-            req_templates.len(),
-            transaction.calculate_id()
-        );
-
-        let templates = self.template_manager.fetch_and_load_templates(req_templates).await?;
-        Ok(Package::new(templates))
     }
 
     async fn fetch_input_substates(

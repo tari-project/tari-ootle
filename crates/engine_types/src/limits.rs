@@ -67,6 +67,16 @@ pub const MAX_DIVISIBILITY: u8 = 18;
 
 pub const MAX_TOKEN_SYMBOL_LEN: usize = 10;
 
+/// Maximum number of `PublishTemplate` instructions a single transaction may contain.
+///
+/// Publishing a template registers a new global substate and carries a WASM binary up to
+/// [`ENGINE_LIMITS`]`.max_template_binary_size_bytes`. Capping at one keeps each publishing transaction to a single,
+/// bounded template registration; multiple publishes would stack several large binaries and their validation/storage
+/// cost into one transaction with no benefit a caller cannot get from separate transactions. The engine enforces this
+/// during execution — a consensus rule applied uniformly by every validator — and the mempool mirrors it to reject
+/// such transactions at ingress.
+pub const MAX_PUBLISH_TEMPLATES_PER_TRANSACTION: usize = 1;
+
 pub struct StealthLimits {
     /// Maximum stealth inputs in a single transfer statement.
     pub max_inputs: usize,

@@ -117,11 +117,12 @@ mod tests {
         UnsealedTransactionV1,
         UnsignedTransactionV1,
     };
+    use tari_template_lib::prelude::SpendAuthorization;
     use tari_template_lib::types::{
         Amount,
         EncryptedData,
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
-        stealth::{SpendCondition, StealthInput, StealthTransferStatement, StealthUnspentOutput, UnspentOutput},
+        stealth::{StealthInput, StealthTransferStatement, StealthUnspentOutput, UnspentOutput},
     };
 
     use super::*;
@@ -139,7 +140,7 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance_proof: None,
             },
-            spend_condition: SpendCondition::Signed(RistrettoPublicKeyBytes::zero()),
+            auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
             tag: UtxoTag::new(0),
         }
     }

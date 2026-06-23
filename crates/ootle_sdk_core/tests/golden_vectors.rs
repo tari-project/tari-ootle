@@ -114,6 +114,10 @@ use tari_template_lib_types::{
 /// *real*, cross-validated public-transfer vectors live alongside it (see [`REAL_VECTORS`]).
 const SAMPLE_REL_PATH: &str = "public_transfer/sample_single_key_basic.json";
 
+/// One golden-vector case: a label (the fixture file's relative path) and the seed builder that produces its
+/// [`Fixture`]. Aliased so the `&[VectorCase]` tables below read cleanly.
+type VectorCase = (&'static str, fn() -> Fixture);
+
 /// The first **real** (non-sample), cross-validated public-transfer vectors. Each is seeded
 /// from its `input` builder if the file is missing; the generator owns `expected`. The runner
 /// (`run_golden_vectors`) and the `ootle-rs` orchestration-parity cross-check
@@ -122,7 +126,7 @@ const SAMPLE_REL_PATH: &str = "public_transfer/sample_single_key_basic.json";
 /// - `single_key_basic` — a plain single-key public transfer (modest amount).
 /// - `large_amount` — same scenario with an amount `> 2^53` µTari, proving the u64-safe path carries it intact
 ///   end-to-end.
-const REAL_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const REAL_VECTORS: &[VectorCase] = &[
     ("public_transfer/single_key_basic.json", single_key_basic_fixture_seed),
     ("public_transfer/large_amount.json", large_amount_fixture_seed),
 ];
@@ -131,7 +135,7 @@ const REAL_VECTORS: &[(&str, fn() -> Fixture)] = &[
 /// **no** explicit inputs, plus a fabricated fetched batch that resolves the 3-item want set. These
 /// lock the resolved seal/encode bytes — incl. the canonical resolved-input ordering and the u64
 /// boundary surviving resolution (`resolve_large_amount`).
-const RESOLVE_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const RESOLVE_VECTORS: &[VectorCase] = &[
     (
         "resolve_public_transfer/single_key_basic.json",
         resolve_single_key_basic_fixture_seed,
@@ -421,7 +425,7 @@ fn resolve_large_amount_fixture_seed() -> Fixture {
 
 /// The 3 committed result-parse vectors: a full Accept (fees + event + diff), an AcceptFeeRejectRest,
 /// and a Reject whose reason is `Abort{EpochExpired}` — the canonical-AbortReason drift case.
-const PARSE_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const PARSE_VECTORS: &[VectorCase] = &[
     ("parse_finalized_result/accept.json", parse_accept_fixture_seed),
     (
         "parse_finalized_result/accept_fee_reject_rest.json",
@@ -623,7 +627,7 @@ fn parse_dry_run_fixture_seed() -> Fixture {
 
 /// The committed stealth outputs-statement vectors. Each authors only the deterministic `input`; the
 /// generator owns `expected`.
-const STEALTH_OUTPUTS_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const STEALTH_OUTPUTS_VECTORS: &[VectorCase] = &[
     (
         "stealth_outputs_statement/single_output_no_view_key.json",
         stealth_single_output_seed,
@@ -742,7 +746,7 @@ fn stealth_view_key_output_seed() -> Fixture {
 
 /// The committed full stealth-send vectors. Each authors only the deterministic `input`; the
 /// generator owns `expected`.
-const STEALTH_TRANSFER_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const STEALTH_TRANSFER_VECTORS: &[VectorCase] = &[
     (
         "stealth_transfer/stealth_seal_with_input.json",
         stealth_send_stealth_seal_seed,
@@ -999,7 +1003,7 @@ fn stealth_send_revealed_output_multi_seed() -> Fixture {
 
 /// The committed stealth-scan vectors. Each authors only the deterministic `input`; the generator
 /// owns `expected`.
-const STEALTH_SCAN_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const STEALTH_SCAN_VECTORS: &[VectorCase] = &[
     ("stealth_scan/mine_basic.json", stealth_scan_mine_basic_seed),
     ("stealth_scan/not_mine.json", stealth_scan_not_mine_seed),
 ];
@@ -1130,7 +1134,7 @@ fn stealth_scan_not_mine_seed() -> Fixture {
 
 /// The committed stealth-decode vectors. Each authors only the deterministic `input` (substate id +
 /// value); the generator owns `expected.inbound_output`.
-const STEALTH_DECODE_VECTORS: &[(&str, fn() -> Fixture)] =
+const STEALTH_DECODE_VECTORS: &[VectorCase] =
     &[("stealth_scan/decode_utxo.json", stealth_decode_utxo_seed)];
 
 /// Vector — `decode_utxo`: a fabricated `StealthPublicKey` UTXO substate (id + value) decodes into
@@ -1210,7 +1214,7 @@ fn stealth_decode_utxo_seed() -> Fixture {
 
 /// The committed substate-decode vectors. Each authors only the deterministic `input.substate_value`;
 /// the generator owns `expected.decoded_substate`.
-const SUBSTATE_DECODE_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const SUBSTATE_DECODE_VECTORS: &[VectorCase] = &[
     ("substate_decode/component.json", substate_decode_component_seed),
     (
         "substate_decode/fungible_vault.json",
@@ -1220,7 +1224,7 @@ const SUBSTATE_DECODE_VECTORS: &[(&str, fn() -> Fixture)] = &[
 
 /// The committed account-balances vectors. Each authors the account component + its vault
 /// `FetchedSubstate`s; the generator owns `expected.account_balances`.
-const ACCOUNT_BALANCES_VECTORS: &[(&str, fn() -> Fixture)] = &[(
+const ACCOUNT_BALANCES_VECTORS: &[VectorCase] = &[(
     "account_balances/multi_vault_u64.json",
     account_balances_multi_vault_seed,
 )];
@@ -1338,7 +1342,7 @@ fn account_balances_multi_vault_seed() -> Fixture {
 
 /// The committed keygen vectors. Each authors only the deterministic `input.seed`; the generator owns
 /// `expected.keypair`.
-const KEYGEN_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const KEYGEN_VECTORS: &[VectorCase] = &[
     ("keys/account_from_seed.json", keygen_account_seed),
     ("keys/view_from_seed.json", keygen_view_seed),
 ];
@@ -1392,7 +1396,7 @@ fn keygen_view_seed() -> Fixture {
 
 /// The committed account-address vectors. Each authors only `input.account_public_key`; the generator
 /// owns `expected.component_address`.
-const ADDRESS_DERIVE_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const ADDRESS_DERIVE_VECTORS: &[VectorCase] = &[
     ("address_derive/from_recipient_pk.json", address_recipient_pk),
     ("address_derive/from_curve_pk.json", address_curve_pk),
     ("address_derive/from_seed_account_pk.json", address_seed_account_pk),
@@ -1453,7 +1457,7 @@ fn address_seed_account_pk() -> Fixture {
 //     wallet-shaped `otl_…` round-trips its fields.
 
 /// The committed address-codec vectors (format + parse).
-const ADDRESS_CODEC_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const ADDRESS_CODEC_VECTORS: &[VectorCase] = &[
     ("address_codec/identity_mainnet.json", identity_mainnet),
     ("address_codec/identity_esmeralda.json", identity_esmeralda),
     (
@@ -1563,7 +1567,7 @@ fn parse_resource() -> Fixture {
 // the literal encoder and gets a byte wrong fails here. The Rust unit tests in
 // `src/types/generic_intent.rs` cross-check these same encodings against the builder's own
 // `InstructionArg::from_type` seam, so the vectors are anchored to the engine's wire format.
-const ARG_DSL_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const ARG_DSL_VECTORS: &[VectorCase] = &[
     ("arg_dsl/amount.json", arg_amount),
     ("arg_dsl/amount_above_2_pow_33.json", arg_amount_large),
     ("arg_dsl/u64.json", arg_u64),
@@ -1846,7 +1850,7 @@ fn arg_optional_none() -> Fixture {
 /// Pinned git rev for the generic-build fixtures so committing them does not churn `git_rev`.
 const GENERIC_BUILD_GIT_REV: &str = "78a836162980f2ddc1e18fd537f4542fc851f6a4";
 
-const GENERIC_BUILD_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const GENERIC_BUILD_VECTORS: &[VectorCase] = &[
     ("generic_build/call_method_transfer.json", generic_call_method_seed),
     ("generic_build/create_account.json", generic_create_account_seed),
     ("generic_build/call_function.json", generic_call_function_seed),
@@ -2248,7 +2252,7 @@ fn address_assert_matches_builder_recipient_derivation() {
 /// Pinned git rev for the co-sign fixtures so committing them does not churn `git_rev`.
 const COSIGN_GIT_REV: &str = "78a836162980f2ddc1e18fd537f4542fc851f6a4";
 
-const COSIGN_VECTORS: &[(&str, fn() -> Fixture)] = &[
+const COSIGN_VECTORS: &[VectorCase] = &[
     ("cosign/add_signature.json", cosign_add_signature_seed),
     ("cosign/seal_with_auth.json", cosign_seal_with_auth_seed),
 ];

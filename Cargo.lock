@@ -11059,7 +11059,7 @@ dependencies = [
 
 [[package]]
 name = "tari_bor"
-version = "0.14.1"
+version = "0.14.2"
 dependencies = [
  "borsh",
  "indexmap 2.13.0",
@@ -11989,6 +11989,7 @@ dependencies = [
  "anyhow",
  "indexmap 2.13.0",
  "log",
+ "tari_engine_types",
  "tari_networking",
  "tari_ootle_common_types",
  "tari_ootle_storage",

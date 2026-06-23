@@ -395,6 +395,12 @@ pub enum ArgumentValidationError {
     MaxStealthOutputsExceeded { max_outputs: usize, actual_outputs: usize },
     #[error("Maximum number of stealth inputs exceeded: max {max_inputs}, got {actual_inputs}")]
     MaxStealthInputsExceeded { max_inputs: usize, actual_inputs: usize },
+    #[error("Maximum number of stealth transfers per transaction exceeded: max {max_transfers}")]
+    MaxStealthTransfersPerTransactionExceeded { max_transfers: usize },
+    #[error("Maximum total stealth outputs per transaction exceeded: max {max_outputs}, got at least {actual_outputs}")]
+    MaxStealthOutputsPerTransactionExceeded { max_outputs: usize, actual_outputs: usize },
+    #[error("Maximum total stealth inputs per transaction exceeded: max {max_inputs}, got at least {actual_inputs}")]
+    MaxStealthInputsPerTransactionExceeded { max_inputs: usize, actual_inputs: usize },
     #[error("Too many arguments provided. Got {got}, max is {max}")]
     TooManyArguments { got: usize, max: usize },
     #[error("Blob index {index} out of bounds (transaction has {count} blob(s))")]

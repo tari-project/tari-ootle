@@ -54,4 +54,11 @@ pub enum TransactionValidationError {
         weight: u64,
         max_weight: u64,
     },
+    #[error("Transaction {transaction_id} exceeds the per-transaction stealth {limit} cap: max {max}, got {actual}")]
+    ExceedsStealthTransactionLimit {
+        transaction_id: TransactionId,
+        limit: &'static str,
+        max: usize,
+        actual: usize,
+    },
 }

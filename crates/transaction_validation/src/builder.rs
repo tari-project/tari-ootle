@@ -5,6 +5,7 @@ use tari_ootle_transaction::{Network, Transaction};
 
 use crate::{
     BasicValidations,
+    StealthTransactionLimitsValidator,
     TransactionNetworkValidator,
     TransactionSignatureValidator,
     TransactionValidationError,
@@ -27,5 +28,6 @@ pub fn create_structural_transaction_validator(
     TransactionNetworkValidator::new(network)
         .and_then(BasicValidations::new())
         .and_then(TransactionWeightValidator::new(max_transaction_weight))
+        .and_then(StealthTransactionLimitsValidator::new())
         .and_then(TransactionSignatureValidator)
 }

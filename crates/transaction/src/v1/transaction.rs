@@ -297,9 +297,18 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
         .map(|i| tari_bor::encoded_len(&i.witness).unwrap_or(0) as u64)
         .sum();
 
-    // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
-    100 + statement.inputs_statement.inputs.len() as u64 +
-        (statement.outputs_statement.outputs.len() as u64 * 2) +
+    // Fixed cost of a transfer (resource lock, balance-proof verification, basic validation).
+    const WEIGHT_PER_TRANSFER: u64 = 100;
+    // An input contributes a commitment aggregation and a substate lookup — cheap relative to an output.
+    const WEIGHT_PER_INPUT: u64 = 1;
+    // Each output is verified natively via an aggregated bulletproof range proof plus an ElGamal viewable-balance
+    // proof (~1ms/output on x86-class hardware) — the dominant cost of a transfer. Priced well above an input so the
+    // per-transaction and per-block weight budgets bound this unmetered native verification work.
+    const WEIGHT_PER_OUTPUT: u64 = 8;
+
+    WEIGHT_PER_TRANSFER +
+        statement.inputs_statement.inputs.len() as u64 * WEIGHT_PER_INPUT +
+        statement.outputs_statement.outputs.len() as u64 * WEIGHT_PER_OUTPUT +
         witness_bytes / SPEND_WITNESS_BYTE_DIVISOR
 }
 

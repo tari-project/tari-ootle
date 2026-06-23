@@ -13,6 +13,13 @@ pub enum OutputAuthSpec {
     KeyPath(RistrettoPublicKeyBytes),
     /// A condition tree (MAST) over the given leaves; the output commits its `condition_root`.
     Conditions(Vec<SpendCondition>),
+    /// Both paths: a key path (`spend_key`) and a condition tree over the given leaves (`KeyAndScript`). Used to test
+    /// that a covenant cannot be escaped by re-committing its `condition_root` while bolting on an unconditional key
+    /// path.
+    KeyAndConditions {
+        spend_key: RistrettoPublicKeyBytes,
+        conditions: Vec<SpendCondition>,
+    },
 }
 
 impl From<RistrettoPublicKeyBytes> for OutputAuthSpec {

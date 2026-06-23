@@ -239,6 +239,17 @@ where
                         OutputAuth::Conditions(conditions.clone()),
                     )
                 },
+                OutputAuthSpec::KeyAndConditions { spend_key, conditions } => {
+                    let root = stealth::condition_root(conditions).unwrap();
+                    (
+                        SpendAuthorization::KeyAndScript {
+                            spend_key: *spend_key,
+                            condition_root: root,
+                        },
+                        // The exploit reclaims this output via its key path, so record the key-path auth.
+                        OutputAuth::KeyPath(*spend_key),
+                    )
+                },
             };
             output_auths.push(auth);
 

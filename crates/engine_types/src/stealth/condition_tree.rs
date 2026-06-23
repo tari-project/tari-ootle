@@ -46,11 +46,11 @@ pub fn condition_leaf_hash(condition: &SpendCondition) -> Hash32 {
 }
 
 /// Hashes two child nodes into a branch, ordering them lexicographically so a proof needs no direction bits.
-fn branch_hash(a: Hash32, b: Hash32) -> Hash32 {
+fn branch_hash(a: &Hash32, b: &Hash32) -> Hash32 {
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
     hasher32(EngineHashDomainLabel::ConditionBranch)
-        .chain(&lo)
-        .chain(&hi)
+        .chain(lo)
+        .chain(hi)
         .result()
 }
 
@@ -63,7 +63,7 @@ fn fold_level(buf: &mut Vec<Hash32>) {
     let len = buf.len();
     let (mut read, mut write) = (0, 0);
     while read + 1 < len {
-        buf[write] = branch_hash(buf[read], buf[read + 1]);
+        buf[write] = branch_hash(&buf[read], &buf[read + 1]);
         read += 2;
         write += 1;
     }
@@ -147,7 +147,7 @@ pub fn compute_root(proof: &MerkleProof, leaf: Hash32) -> Hash32 {
     proof
         .siblings
         .iter()
-        .fold(leaf, |acc, &sibling| branch_hash(acc, sibling))
+        .fold(leaf, |acc, sibling| branch_hash(&acc, sibling))
 }
 
 /// Verifies that `leaf` is committed in `root` under `proof`.

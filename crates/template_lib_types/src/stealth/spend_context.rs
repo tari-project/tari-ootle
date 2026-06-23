@@ -39,6 +39,31 @@ pub struct StealthOutputView {
     pub tag: UtxoTag,
 }
 
+impl StealthOutputView {
+    /// Whether this output is authorised by exactly `Script(condition_root)` — a pure condition-tree lock with no key
+    /// path. A `KeyAndScript` output committing the same root is key-spendable next block, so it does not keep value
+    /// under the covenant and is not considered locked under the root.
+    pub fn is_locked_under(&self, condition_root: Hash32) -> bool {
+        self.auth == SpendAuthorization::Script(condition_root)
+    }
+}
+
+/// "Stay in the vault" covenant predicate: there is at least one stealth output and every one is re-locked under
+/// exactly `Script(condition_root)` (no key-path escape). Backs both the native `OutputPreservesCondition` builtin and
+/// the `SpendContext::require_output_preserves_condition` helper, so the host and guest evaluate it identically.
+pub fn outputs_preserve_condition(outputs: &[StealthOutputView], condition_root: Hash32) -> bool {
+    !outputs.is_empty() && outputs.iter().all(|o| o.is_locked_under(condition_root))
+}
+
+/// Value-flow covenant predicate: at least one stealth output is locked under exactly `Script(condition_root)` (no
+/// key-path escape) and promises at least `min_value`. Backs both the native `OutputTo` builtin and the
+/// `SpendContext::require_output_to` helper.
+pub fn has_output_to(outputs: &[StealthOutputView], condition_root: Hash32, min_value: u64) -> bool {
+    outputs
+        .iter()
+        .any(|o| o.is_locked_under(condition_root) && o.minimum_value_promise >= min_value)
+}
+
 /// Identifies the input whose spend condition is currently executing, including the `condition_root` committed by the
 /// UTXO being spent (so a covenant predicate can require outputs to preserve it).
 #[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]

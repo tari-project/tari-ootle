@@ -68,6 +68,15 @@ fn conditions(leaves: Vec<SpendCondition>) -> OutputAuthSpec {
     OutputAuthSpec::Conditions(leaves)
 }
 
+/// A `KeyAndScript` output authorisation: a key path (`spend_key`) plus a condition tree over `leaves`. Used to prove a
+/// covenant cannot be escaped by re-committing its `condition_root` while bolting on an unconditional key path.
+fn key_and_conditions(spend_key: RistrettoPublicKeyBytes, leaves: Vec<SpendCondition>) -> OutputAuthSpec {
+    OutputAuthSpec::KeyAndConditions {
+        spend_key,
+        conditions: leaves,
+    }
+}
+
 /// An output spec pairing a value with any authorisation (key path or condition tree).
 fn out(value: u64, auth: impl Into<OutputAuthSpec>) -> (u64, OutputAuthSpec) {
     (value, auth.into())
@@ -358,6 +367,26 @@ fn covenant_rejects_output_that_changes_condition() {
 
     // The output changes the condition to a key path (different condition_root) -> the covenant rejects the spend.
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+}
+
+#[test]
+fn covenant_rejects_output_with_added_key_path() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let covenant = script_condition(script_template, "preserve_covenant", vec![]);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+
+    // The output re-commits the covenant's condition_root but bolts on an unconditional key path (KeyAndScript). It
+    // would be key-spendable next block, escaping the covenant, so preserving the root alone must not satisfy it.
+    let transfer = spend_into(&mint, key_and_conditions(test.to_public_key_bytes(), vec![covenant]));
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
             .stealth_transfer(resx, transfer.statement)
@@ -1027,6 +1056,17 @@ fn builtin_output_preserves_condition_rejects_changed_output() {
 }
 
 #[test]
+fn builtin_output_preserves_condition_rejects_added_key_path() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::OutputPreservesCondition);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    // The output re-commits the covenant's condition_root but adds a key path (KeyAndScript). Comparing only the root
+    // would accept it; the key path is an escape, so the covenant must reject it.
+    let transfer = spend_into(&mint, key_and_conditions(test.to_public_key_bytes(), vec![covenant]));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
 fn builtin_balance_preserved_allows_full_conservation() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let covenant = builtin(BuiltinPredicate::BalancePreserved);
@@ -1041,6 +1081,20 @@ fn builtin_balance_preserved_rejects_value_leaving_partition() {
     let covenant = builtin(BuiltinPredicate::BalancePreserved);
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, key_path(test.to_public_key_bytes()))]);
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn builtin_balance_preserved_rejects_added_key_path() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = builtin(BuiltinPredicate::BalancePreserved);
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    // The conserved value flows to a KeyAndScript output re-committing the covenant root plus a key path. That key path
+    // would let it be key-spent next block, escaping conservation, so it must not count as in-partition.
+    let transfer = spend_with_covenant(&mint, &covenant, vec![out(
+        100,
+        key_and_conditions(test.to_public_key_bytes(), vec![covenant.clone()]),
+    )]);
     submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
 }
 
@@ -1093,6 +1147,22 @@ fn builtin_output_to_rejects_when_target_absent() {
     });
     let (resx, mint) = mint_utxo(&mut test, covenant);
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
+}
+
+#[test]
+fn builtin_output_to_rejects_added_key_path() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let target = SpendCondition::AccessRule(AccessRule::AllowAll);
+    let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
+    let covenant = builtin(BuiltinPredicate::OutputTo {
+        condition_root: target_root,
+        min_value: 0,
+    });
+    let (resx, mint) = mint_utxo(&mut test, covenant);
+    // The output commits the required target root but also a key path the payer keeps — not a clean payment to the
+    // target, since the payer can reclaim it. OutputTo must reject it.
+    let transfer = spend_into(&mint, key_and_conditions(test.to_public_key_bytes(), vec![target]));
     submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
 }
 

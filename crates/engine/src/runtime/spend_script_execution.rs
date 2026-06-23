@@ -6,7 +6,14 @@ use tari_template_lib::types::{
     Amount,
     Hash32,
     crypto::PedersenCommitmentBytes,
-    stealth::{CovenantBalanceClaim, StealthInputView, StealthOutputView, StealthTransferStatement},
+    stealth::{
+        CovenantBalanceClaim,
+        StealthInputView,
+        StealthOutputView,
+        StealthTransferStatement,
+        has_output_to,
+        outputs_preserve_condition,
+    },
 };
 
 /// The data a spend-script predicate can introspect, derived once from the spending `StealthTransferStatement` before
@@ -77,20 +84,18 @@ impl SpendScriptExecution {
         }
     }
 
-    /// "Stay in the vault": every stealth output preserves the invoking `condition_root`, and there is at least one
-    /// output. Bounds only the surviving outputs' `condition_root`, not the revealed amount.
+    /// "Stay in the vault": every stealth output is re-locked under exactly the invoking `condition_root` and nothing
+    /// else, and there is at least one output. The authorisation must be `Script(root)` with no key path — a
+    /// `KeyAndScript` output carrying the same root would be key-spendable next block, escaping the covenant, so it is
+    /// not a preserving output. Bounds only the surviving outputs' authorisation, not the revealed amount.
     pub(crate) fn output_preserves_condition(&self) -> bool {
-        !self.outputs.is_empty() &&
-            self.outputs
-                .iter()
-                .all(|o| o.auth.condition_root() == Some(self.current_input_condition_root))
+        outputs_preserve_condition(&self.outputs, self.current_input_condition_root)
     }
 
-    /// At least one stealth output commits `condition_root` and promises at least `min_value`.
+    /// At least one stealth output is authorised by exactly `Script(condition_root)` (no key-path escape) and promises
+    /// at least `min_value`.
     pub(crate) fn has_output_to(&self, condition_root: &Hash32, min_value: u64) -> bool {
-        self.outputs
-            .iter()
-            .any(|o| o.auth.condition_root() == Some(*condition_root) && o.minimum_value_promise >= min_value)
+        has_output_to(&self.outputs, *condition_root, min_value)
     }
 
     /// Verifies the covenant sub-balance proof for the invoking partition (keyed by `current_input_condition_root`),
@@ -123,10 +128,13 @@ impl SpendScriptExecution {
             .filter(|(_, root)| **root == Some(me))
             .map(|(input, _)| input.commitment)
             .collect::<Vec<_>>();
+        // Only outputs re-locked under exactly `Script(me)` stay in the partition; a `KeyAndScript` output committing
+        // the same root carries a key-path escape, so its value is not conserved within the covenant (see
+        // `StealthOutputView::is_locked_under`).
         let output_commitments = self
             .outputs
             .iter()
-            .filter(|output| output.auth.condition_root() == Some(me))
+            .filter(|output| output.is_locked_under(me))
             .map(|output| output.commitment)
             .collect::<Vec<_>>();
 

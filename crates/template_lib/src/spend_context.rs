@@ -6,7 +6,7 @@ use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{
     Amount,
     Hash32,
-    stealth::{CurrentInputView, StealthInputView, StealthOutputView},
+    stealth::{CurrentInputView, StealthInputView, StealthOutputView, has_output_to, outputs_preserve_condition},
 };
 
 use crate::{
@@ -110,15 +110,19 @@ impl SpendContext {
     // must be separate covenants.
 
     /// Recursive "stay in the vault" covenant: asserts that the transfer has at least one stealth output and that every
-    /// stealth output carries the same `condition_root` committed by the UTXO being spent.
+    /// stealth output is re-locked under exactly the `condition_root` committed by the UTXO being spent — a pure
+    /// `Script` authorisation with no key path. An output committing the same root but adding a key path is rejected:
+    /// it could be key-spent next block, escaping the covenant.
     ///
-    /// This bounds only the `condition_root` of surviving stealth outputs, not the revealed amount — compose it with a
+    /// This bounds only the authorisation of surviving stealth outputs, not the revealed amount — compose it with a
     /// revealed-output check if value must not leave the covenant as cleartext.
     pub fn require_output_preserves_condition(&self) {
-        let me = self.current_input().condition_root;
-        let outputs = self.outputs();
+        let me = self
+            .current_input()
+            .condition_root
+            .expect("spend script covenant: invoking input has no condition_root");
         assert!(
-            !outputs.is_empty() && outputs.iter().all(|o| o.auth.condition_root() == me),
+            outputs_preserve_condition(&self.outputs(), me),
             "spend script covenant: every output must preserve the invoking condition_root",
         );
     }
@@ -131,12 +135,12 @@ impl SpendContext {
         );
     }
 
-    /// Value-flow covenant: asserts at least one output commits `condition_root` and promises at least `min_value`.
+    /// Value-flow covenant: asserts at least one output is authorised by exactly `Script(condition_root)` — no key-path
+    /// escape — and promises at least `min_value`. A recipient wanting a key path must encode it as a leaf in their own
+    /// condition tree (keeping the output a pure `Script`), so the payment remains auditable.
     pub fn require_output_to(&self, condition_root: &Hash32, min_value: u64) {
         assert!(
-            self.outputs()
-                .iter()
-                .any(|o| o.auth.condition_root() == Some(*condition_root) && o.minimum_value_promise >= min_value),
+            has_output_to(&self.outputs(), *condition_root, min_value),
             "spend script covenant: required output not present",
         );
     }

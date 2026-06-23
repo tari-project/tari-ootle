@@ -8,7 +8,7 @@
 //! Bitcoin's `SHA256`). Hashing is native-only; a template never computes it.
 
 use blake2::Blake2b;
-use digest::{Digest, consts::U32};
+use digest::{Digest, consts::U32, generic_array::GenericArray};
 use sha2::Sha256;
 use tari_template_lib::types::{Hash32, stealth::HashAlg};
 
@@ -17,14 +17,14 @@ pub fn hashlock_digest(alg: HashAlg, preimage: &[u8]) -> Hash32 {
     let mut out = [0u8; 32];
     match alg {
         HashAlg::Blake2b256 => {
-            let mut hasher = Blake2b::<U32>::new();
-            hasher.update(preimage);
-            out.copy_from_slice(&hasher.finalize());
+            Blake2b::<U32>::new()
+                .chain_update(preimage)
+                .finalize_into(GenericArray::from_mut_slice(out.as_mut()));
         },
         HashAlg::Sha256 => {
-            let mut hasher = Sha256::new();
-            hasher.update(preimage);
-            out.copy_from_slice(&hasher.finalize());
+            Sha256::new()
+                .chain_update(preimage)
+                .finalize_into(GenericArray::from_mut_slice(out.as_mut()));
         },
     }
     Hash32::from_array(out)

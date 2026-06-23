@@ -61,4 +61,12 @@ pub enum TransactionValidationError {
         max: usize,
         actual: usize,
     },
+    #[error(
+        "Transaction {transaction_id} contains {actual} publish-template instructions, but at most {max} is allowed"
+    )]
+    TooManyPublishTemplateInstructions {
+        transaction_id: TransactionId,
+        max: usize,
+        actual: usize,
+    },
 }

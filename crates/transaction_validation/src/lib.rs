@@ -21,6 +21,8 @@ mod epoch_range;
 pub use epoch_range::*;
 mod network;
 pub use network::*;
+mod publish_template_limits;
+pub use publish_template_limits::*;
 mod signature;
 pub use signature::*;
 mod stealth_limits;

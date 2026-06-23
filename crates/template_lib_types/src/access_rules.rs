@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 //! Access control rules for template-related data like component methods and resources
 
-use minicbor::{CborLen, Decode, Encode};
+use minicbor::{CborLen, Decode, Decoder, Encode, data::Type, decode};
 use tari_bor::adapters::boxed_slice;
 use tari_template_abi::rust::{collections::BTreeMap, prelude::*};
 
@@ -48,7 +48,7 @@ impl AccessRule {
 }
 
 /// An enum that represents the possible ways to restrict access to components or resources
-#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -79,6 +79,88 @@ impl RestrictedAccessRule {
 
     pub fn or(self, other: Self) -> Self {
         Self::AnyOf(Box::new([self, other]))
+    }
+}
+
+// `Decode` is hand-written (not derived) because `RestrictedAccessRule` is self-recursive through
+// `AnyOf`/`AllOf` and decode input is untrusted: a derived recursive decode would overflow the stack
+// — an uncatchable process abort, not a recoverable error — on a maliciously deep payload, before any
+// validation runs. Threading the nesting depth bounds the recursion and turns over-nested input into
+// a clean error, mirroring the guard `tari_bor` applies to the dynamic `Value` tree. `Encode` and
+// `CborLen` stay derived, so this decode must match their wire framing; the round-trip tests enforce
+// that.
+impl<'b, C> Decode<'b, C> for RestrictedAccessRule {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
+        decode_restricted_access_rule(d, ctx, 0)
+    }
+}
+
+fn decode_restricted_access_rule<'b, C>(
+    d: &mut Decoder<'b>,
+    ctx: &mut C,
+    depth: usize,
+) -> Result<RestrictedAccessRule, decode::Error> {
+    if depth >= tari_bor::MAX_DECODE_DEPTH {
+        return Err(decode::Error::message(
+            "RestrictedAccessRule nesting exceeds the maximum decode depth",
+        ));
+    }
+
+    // minicbor's derived enum framing is a definite 2-element array of `[variant index, body]`.
+    let pos = d.position();
+    if d.array()? != Some(2) {
+        return Err(decode::Error::message("expected RestrictedAccessRule enum (2-element array)").at(pos));
+    }
+    let variant_pos = d.position();
+    match d.i64()? {
+        0 => decode_variant_field(d, ctx, |d, ctx| RequireRule::decode(d, ctx)).map(RestrictedAccessRule::Require),
+        1 => decode_variant_field(d, ctx, |d, ctx| decode_restricted_slice(d, ctx, depth + 1))
+            .map(RestrictedAccessRule::AnyOf),
+        2 => decode_variant_field(d, ctx, |d, ctx| decode_restricted_slice(d, ctx, depth + 1))
+            .map(RestrictedAccessRule::AllOf),
+        n => Err(decode::Error::unknown_variant(n).at(variant_pos)),
+    }
+}
+
+// Decodes one `AnyOf`/`AllOf` boxed slice, recursing at the incremented depth. Reuses the
+// `boxed_slice` adapter's element loop (and its `MAX_PREALLOC` cap) via a depth-threading decoder.
+fn decode_restricted_slice<'b, C>(
+    d: &mut Decoder<'b>,
+    ctx: &mut C,
+    depth: usize,
+) -> Result<Box<[RestrictedAccessRule]>, decode::Error> {
+    boxed_slice::decode_with_fn(d, ctx, |d, ctx| decode_restricted_access_rule(d, ctx, depth))
+}
+
+// Every `RestrictedAccessRule` variant carries a single field at index 0. minicbor's derive encodes a
+// variant body as an array and reads its fields by position; this mirrors that — decode position 0,
+// skip any further positions — so it accepts exactly what the derived decode would.
+fn decode_variant_field<'b, C, T>(
+    d: &mut Decoder<'b>,
+    ctx: &mut C,
+    decode_field: impl FnOnce(&mut Decoder<'b>, &mut C) -> Result<T, decode::Error>,
+) -> Result<T, decode::Error> {
+    let pos = d.position();
+    match d.array()? {
+        Some(0) => Err(decode::Error::missing_value(0).at(pos)),
+        Some(len) => {
+            let field = decode_field(d, ctx)?;
+            for _ in 1..len {
+                d.skip()?;
+            }
+            Ok(field)
+        },
+        None => {
+            if matches!(d.datatype()?, Type::Break) {
+                return Err(decode::Error::missing_value(0).at(pos));
+            }
+            let field = decode_field(d, ctx)?;
+            while !matches!(d.datatype()?, Type::Break) {
+                d.skip()?;
+            }
+            d.skip()?;
+            Ok(field)
+        },
     }
 }
 
@@ -718,5 +800,68 @@ mod tests {
 
     fn access_rule_from_requirement(requirement: RuleRequirement) -> AccessRule {
         AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(requirement)))
+    }
+
+    fn leaf_rule() -> RestrictedAccessRule {
+        RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::Resource(ResourceAddress::new(
+            ObjectKey::default(),
+        ))))
+    }
+
+    fn nested_any_of(depth: usize) -> RestrictedAccessRule {
+        let mut rule = leaf_rule();
+        for _ in 0..depth {
+            rule = RestrictedAccessRule::AnyOf(Box::new([rule]));
+        }
+        rule
+    }
+
+    #[test]
+    fn restricted_access_rule_roundtrips_all_variants() {
+        let component_address = ComponentAddress::new(ObjectKey::default());
+        let resource_address = ResourceAddress::new(ObjectKey::default());
+        let rules = [
+            leaf_rule(),
+            RestrictedAccessRule::Require(RequireRule::MOfN(
+                1,
+                Box::new([
+                    RuleRequirement::ScopedToComponent(component_address),
+                    RuleRequirement::Resource(resource_address),
+                ]),
+            )),
+            RestrictedAccessRule::AnyOf(Box::new([
+                RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::ScopedToComponent(
+                    component_address,
+                ))),
+                RestrictedAccessRule::AllOf(Box::new([leaf_rule()])),
+            ])),
+            nested_any_of(8),
+        ];
+        for rule in rules {
+            let bytes = tari_bor::encode(&rule).unwrap();
+            let decoded: RestrictedAccessRule = tari_bor::decode(&bytes).unwrap();
+            assert_eq!(decoded, rule);
+        }
+    }
+
+    #[test]
+    fn restricted_access_rule_decodes_up_to_max_depth() {
+        // One level below the limit decodes and round-trips; at the limit it is rejected.
+        let ok = nested_any_of(tari_bor::MAX_DECODE_DEPTH - 1);
+        let bytes = tari_bor::encode(&ok).unwrap();
+        assert_eq!(tari_bor::decode::<RestrictedAccessRule>(&bytes).unwrap(), ok);
+
+        let too_deep = nested_any_of(tari_bor::MAX_DECODE_DEPTH);
+        let bytes = tari_bor::encode(&too_deep).unwrap();
+        assert!(tari_bor::decode::<RestrictedAccessRule>(&bytes).is_err());
+    }
+
+    #[test]
+    fn restricted_access_rule_rejects_deeply_nested_payload_without_overflow() {
+        // A tiny-per-level payload that, decoded by a recursive decode without a depth bound, would
+        // overflow the stack (a process abort). Each `AnyOf` level is the 4 bytes `82 01 81 81`. The
+        // depth guard must reject it as a clean error long before the recursion can overflow.
+        let bytes: Vec<u8> = (0..100_000).flat_map(|_| [0x82u8, 0x01, 0x81, 0x81]).collect();
+        assert!(tari_bor::decode::<RestrictedAccessRule>(&bytes).is_err());
     }
 }

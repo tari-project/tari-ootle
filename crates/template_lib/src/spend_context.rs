@@ -117,9 +117,10 @@ impl SpendContext {
     /// This bounds only the authorisation of surviving stealth outputs, not the revealed amount — compose it with a
     /// revealed-output check if value must not leave the covenant as cleartext.
     pub fn require_output_preserves_condition(&self) {
-        let me = self
-            .current_input()
+        let view = self.current_input();
+        let me = view
             .condition_root
+            .as_ref()
             .expect("spend script covenant: invoking input has no condition_root");
         assert!(
             outputs_preserve_condition(&self.outputs(), me),
@@ -140,7 +141,7 @@ impl SpendContext {
     /// condition tree (keeping the output a pure `Script`), so the payment remains auditable.
     pub fn require_output_to(&self, condition_root: &Hash32, min_value: u64) {
         assert!(
-            has_output_to(&self.outputs(), *condition_root, min_value),
+            has_output_to(&self.outputs(), condition_root, min_value),
             "spend script covenant: required output not present",
         );
     }

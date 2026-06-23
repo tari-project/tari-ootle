@@ -227,7 +227,7 @@ fn generate_covenant_claims(
         let mut agg_output_mask = RistrettoSecretKey::default();
         let mut output_value = Amount::zero();
         let mut output_commitments = Vec::new();
-        for output in outputs.iter().filter(|o| o.auth.condition_root() == Some(root)) {
+        for output in outputs.iter().filter(|o| o.auth.condition_root() == Some(&root)) {
             agg_output_mask = agg_output_mask + &output.witness.mask;
             output_value = output_value
                 .checked_add(Amount::from_u64(output.witness.amount))

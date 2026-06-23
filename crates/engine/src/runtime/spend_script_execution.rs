@@ -89,13 +89,13 @@ impl SpendScriptExecution {
     /// `KeyAndScript` output carrying the same root would be key-spendable next block, escaping the covenant, so it is
     /// not a preserving output. Bounds only the surviving outputs' authorisation, not the revealed amount.
     pub(crate) fn output_preserves_condition(&self) -> bool {
-        outputs_preserve_condition(&self.outputs, self.current_input_condition_root)
+        outputs_preserve_condition(&self.outputs, &self.current_input_condition_root)
     }
 
     /// At least one stealth output is authorised by exactly `Script(condition_root)` (no key-path escape) and promises
     /// at least `min_value`.
     pub(crate) fn has_output_to(&self, condition_root: &Hash32, min_value: u64) -> bool {
-        has_output_to(&self.outputs, *condition_root, min_value)
+        has_output_to(&self.outputs, condition_root, min_value)
     }
 
     /// Verifies the covenant sub-balance proof for the invoking partition (keyed by `current_input_condition_root`),
@@ -134,7 +134,7 @@ impl SpendScriptExecution {
         let output_commitments = self
             .outputs
             .iter()
-            .filter(|output| output.is_locked_under(me))
+            .filter(|output| output.is_locked_under(&me))
             .map(|output| output.commitment)
             .collect::<Vec<_>>();
 

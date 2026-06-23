@@ -36,7 +36,7 @@ impl Utxo {
         self.output
     }
 
-    pub fn spender_public_key(&self) -> Option<RistrettoPublicKeyBytes> {
+    pub fn spender_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
         self.output().and_then(|o| o.auth.spend_key())
     }
 

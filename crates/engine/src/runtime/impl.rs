@@ -641,7 +641,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 if input.witness.is_key_path() {
                     None
                 } else {
-                    auth.condition_root()
+                    auth.condition_root().copied()
                 }
             })
             .collect::<Vec<_>>();
@@ -657,7 +657,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                             ),
                         }));
                     };
-                    let badge = NonFungibleAddress::from_public_key(pk);
+                    let badge = NonFungibleAddress::from_public_key(*pk);
                     let in_scope = self
                         .tracker
                         .read_with(|state| state.base_call_scope().auth_scope().contains_badge(&badge));
@@ -665,7 +665,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                         return Err(RuntimeError::ResourceError(
                             ResourceError::RequiredSignatureMissingForStealthUtxo {
                                 commitment: input.commitment,
-                                public_key: pk,
+                                public_key: *pk,
                             },
                         ));
                     }

@@ -75,20 +75,20 @@ pub enum SpendAuthorization {
 
 impl SpendAuthorization {
     /// The one-time key authorising a key-path spend, if this output has a key path.
-    pub fn spend_key(&self) -> Option<RistrettoPublicKeyBytes> {
+    pub fn spend_key(&self) -> Option<&RistrettoPublicKeyBytes> {
         match self {
-            Self::Key(key) | Self::KeyAndScript { spend_key: key, .. } => Some(*key),
+            Self::Key(key) | Self::KeyAndScript { spend_key: key, .. } => Some(key),
             Self::Script(_) => None,
         }
     }
 
     /// The committed condition-tree root authorising a script-path spend, if this output has a condition tree.
-    pub fn condition_root(&self) -> Option<Hash32> {
+    pub fn condition_root(&self) -> Option<&Hash32> {
         match self {
             Self::Script(root) |
             Self::KeyAndScript {
                 condition_root: root, ..
-            } => Some(*root),
+            } => Some(root),
             Self::Key(_) => None,
         }
     }

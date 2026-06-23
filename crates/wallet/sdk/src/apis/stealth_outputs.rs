@@ -583,7 +583,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                         let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret).to_byte_type();
                         // A key-path output is owned only if its spend_key is our derived stealth address. A
                         // condition-tree output (no spend_key) is recognised as viewable but not key-spendable here.
-                        if output.auth.spend_key().is_none_or(|pk| pk == stealth_address) {
+                        if output.auth.spend_key().is_none_or(|pk| *pk == stealth_address) {
                             (decrypted.value(), decrypted.memo, OutputStatus::Unspent)
                         } else {
                             warn!(

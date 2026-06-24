@@ -132,8 +132,8 @@ pub enum SpendCondition {
     /// introspects the spending `StealthTransferStatement` and rejects the spend by panicking.
     #[n(1)]
     TemplateFunction(#[n(0)] TemplateFunction),
-    /// Spend is gated on a native [`BuiltinPredicate`] — a consensus-fixed primitive (timelock, covenant, hashlock)
-    /// that needs no deployed template and is evaluated natively over the spending transfer.
+    /// Spend is gated on a native [`BuiltinPredicate`] — a consensus-fixed local spend predicate (timelock or hashlock)
+    /// that gates this input on a local fact, needs no deployed template, and is evaluated natively.
     #[n(2)]
     Builtin(#[n(0)] BuiltinPredicate),
     /// Conjunction: the spend is admissible only if every nested condition holds (logical AND). The condition tree
@@ -145,6 +145,11 @@ pub enum SpendCondition {
         #[cbor(with = "boxed_slice")]
         Box<[SpendCondition]>,
     ),
+    /// Spend is gated on a native [`Covenant`] — a consensus-fixed constraint over the spending transaction's outputs
+    /// and value flow. Like a [`BuiltinPredicate`] it needs no deployed template and runs natively, but it constrains
+    /// the resulting transaction rather than gating this input on a local fact.
+    #[n(4)]
+    Covenant(#[n(0)] Covenant),
 }
 
 impl SpendCondition {
@@ -199,6 +204,7 @@ fn decode_spend_condition<'b, C>(
             .map(SpendCondition::TemplateFunction),
         2 => decode_variant_field(d, ctx, |d, ctx| BuiltinPredicate::decode(d, ctx)).map(SpendCondition::Builtin),
         3 => decode_variant_field(d, ctx, |d, ctx| decode_condition_slice(d, ctx, depth + 1)).map(SpendCondition::All),
+        4 => decode_variant_field(d, ctx, |d, ctx| Covenant::decode(d, ctx)).map(SpendCondition::Covenant),
         n => Err(decode::Error::unknown_variant(n).at(variant_pos)),
     }
 }
@@ -276,7 +282,9 @@ impl TemplateFunction {
     }
 }
 
-/// A native, consensus-fixed spend predicate committed as a [`SpendCondition::Builtin`] leaf (TIP-0006).
+/// A native, consensus-fixed local spend predicate committed as a [`SpendCondition::Builtin`] leaf (TIP-0006): a
+/// timelock or hashlock that gates *this input* on a local fact. Constraints on the spending transaction's outputs are
+/// a [`Covenant`] instead.
 ///
 /// Unlike a [`TemplateFunction`], a builtin requires no deployed template and is evaluated natively by the engine —
 /// the canonical semantics live in trusted core code, so the set is append-only and a shipped variant is never
@@ -295,29 +303,12 @@ pub enum BuiltinPredicate {
     /// Absolute epoch deadline: admissible only while the current epoch is strictly before `deadline_epoch`.
     #[n(1)]
     BeforeEpoch(#[n(0)] u64),
-    /// "Stay in the vault" covenant: every stealth output of the transfer must preserve the invoking `condition_root`,
-    /// and there must be at least one such output.
-    #[n(2)]
-    OutputPreservesCondition,
-    /// Value-flow covenant: at least one stealth output must commit `condition_root` and promise at least `min_value`.
-    #[n(3)]
-    OutputTo {
-        #[n(0)]
-        condition_root: Hash32,
-        #[n(1)]
-        min_value: u64,
-    },
-    /// Value-conservation covenant (TIP-0006 Option A/C): the invoking partition's committed value is conserved into
-    /// outputs carrying its `condition_root`, save for an exact cleartext outflow of at most `max_revealed`. A
-    /// `max_revealed` of zero admits no cleartext escape (full conservation).
-    #[n(4)]
-    BalancePreserved(#[n(0)] u64),
     /// Hashlock: the witness `data` blob must be a preimage whose `alg` digest equals `hash`. As a data-consuming
     /// builtin it reads the entire blob as raw bytes, so it must be the sole `data` consumer in its leaf.
     ///
     /// A bare hashlock is satisfiable by anyone who learns the preimage; pair it with an [`AccessRule`] inside an
     /// [`SpendCondition::All`] to bind the claim to a key (the standard HTLC construction).
-    #[n(5)]
+    #[n(2)]
     HashLock {
         #[n(0)]
         hash: Hash32,
@@ -333,13 +324,38 @@ impl BuiltinPredicate {
     pub const fn consumes_data(&self) -> bool {
         match self {
             Self::HashLock { .. } => true,
-            Self::AfterEpoch(_) |
-            Self::BeforeEpoch(_) |
-            Self::OutputPreservesCondition |
-            Self::OutputTo { .. } |
-            Self::BalancePreserved(_) => false,
+            Self::AfterEpoch(_) | Self::BeforeEpoch(_) => false,
         }
     }
+}
+
+/// A native, consensus-fixed covenant committed as a [`SpendCondition::Covenant`] leaf (TIP-0006). Where a
+/// [`BuiltinPredicate`] gates an input on a local fact, a covenant constrains the *spending transaction* — which
+/// outputs the spent value may flow to, and that the value is conserved — so it propagates conditions forward. Each
+/// variant introspects the transfer's outputs natively, with canonical semantics in trusted core code. The set is a
+/// curated standard library of common value-routing constraints; anything bespoke is a [`TemplateFunction`] instead.
+#[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+pub enum Covenant {
+    /// "Stay in the vault": every stealth output of the transfer must preserve the invoking `condition_root`, and there
+    /// must be at least one such output.
+    #[n(0)]
+    OutputPreservesCondition,
+    /// Value-flow: at least one stealth output must commit `condition_root` and promise at least `min_value`.
+    #[n(1)]
+    OutputTo {
+        #[n(0)]
+        condition_root: Hash32,
+        #[n(1)]
+        min_value: u64,
+    },
+    /// Value-conservation (TIP-0006 Option A/C): the invoking partition's committed value is conserved into outputs
+    /// carrying its `condition_root`, save for an exact cleartext outflow of at most `max_revealed`. A `max_revealed`
+    /// of zero admits no cleartext escape (full conservation).
+    #[n(2)]
+    BalancePreserved(#[n(0)] u64),
 }
 
 /// The digest used by a [`BuiltinPredicate::HashLock`]. The preimage is hashed with no domain separation so a hashlock

@@ -29,7 +29,7 @@ use tari_template_lib::types::{
     bytes::Bytes,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::{NoSignatureDomain, PublicKey, RistrettoPublicKeyBytes, Signature},
-    stealth::{BuiltinPredicate, HashAlg, MerkleProof, SpendCondition, SpendWitness, TemplateFunction},
+    stealth::{BuiltinPredicate, Covenant, HashAlg, MerkleProof, SpendCondition, SpendWitness, TemplateFunction},
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -951,6 +951,10 @@ fn builtin(predicate: BuiltinPredicate) -> SpendCondition {
     SpendCondition::Builtin(predicate)
 }
 
+fn covenant(covenant: Covenant) -> SpendCondition {
+    SpendCondition::Covenant(covenant)
+}
+
 /// A flat `All` conjunction leaf over `conditions`.
 fn all(conditions: Vec<SpendCondition>) -> SpendCondition {
     SpendCondition::All(conditions.into_boxed_slice())
@@ -1041,7 +1045,7 @@ fn builtin_before_epoch_rejects_at_or_after_deadline() {
 #[test]
 fn builtin_output_preserves_condition_allows_preserving_output() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::OutputPreservesCondition);
+    let covenant = covenant(Covenant::OutputPreservesCondition);
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_into(&mint, covenant);
     submit_expect_success(&mut test, resx, transfer);
@@ -1050,7 +1054,7 @@ fn builtin_output_preserves_condition_allows_preserving_output() {
 #[test]
 fn builtin_output_preserves_condition_rejects_changed_output() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::OutputPreservesCondition);
+    let covenant = covenant(Covenant::OutputPreservesCondition);
     let (resx, mint) = mint_utxo(&mut test, covenant);
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
@@ -1059,7 +1063,7 @@ fn builtin_output_preserves_condition_rejects_changed_output() {
 #[test]
 fn builtin_output_preserves_condition_rejects_added_key_path() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::OutputPreservesCondition);
+    let covenant = covenant(Covenant::OutputPreservesCondition);
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     // The output re-commits the covenant's condition_root but adds a key path (KeyAndScript). Comparing only the root
     // would accept it; the key path is an escape, so the covenant must reject it.
@@ -1070,7 +1074,7 @@ fn builtin_output_preserves_condition_rejects_added_key_path() {
 #[test]
 fn builtin_balance_preserved_allows_full_conservation() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved(0));
+    let covenant = covenant(Covenant::BalancePreserved(0));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
     submit_expect_success(&mut test, resx, transfer);
@@ -1079,7 +1083,7 @@ fn builtin_balance_preserved_allows_full_conservation() {
 #[test]
 fn builtin_balance_preserved_rejects_value_leaving_partition() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved(0));
+    let covenant = covenant(Covenant::BalancePreserved(0));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, key_path(test.to_public_key_bytes()))]);
     submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
@@ -1088,7 +1092,7 @@ fn builtin_balance_preserved_rejects_value_leaving_partition() {
 #[test]
 fn builtin_balance_preserved_rejects_added_key_path() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved(0));
+    let covenant = covenant(Covenant::BalancePreserved(0));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     // The conserved value flows to a KeyAndScript output re-committing the covenant root plus a key path. That key path
     // would let it be key-spent next block, escaping conservation, so it must not count as in-partition.
@@ -1102,7 +1106,7 @@ fn builtin_balance_preserved_rejects_added_key_path() {
 #[test]
 fn builtin_balance_with_allowance_allows_within_cap() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved(30));
+    let covenant = covenant(Covenant::BalancePreserved(30));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![
         out(70, covenant.clone()),
@@ -1114,7 +1118,7 @@ fn builtin_balance_with_allowance_allows_within_cap() {
 #[test]
 fn builtin_balance_with_allowance_rejects_over_cap() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved(30));
+    let covenant = covenant(Covenant::BalancePreserved(30));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![
         out(60, covenant.clone()),
@@ -1128,7 +1132,7 @@ fn builtin_output_to_allows_required_output() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let target = SpendCondition::AccessRule(AccessRule::AllowAll);
     let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
-    let covenant = builtin(BuiltinPredicate::OutputTo {
+    let covenant = covenant(Covenant::OutputTo {
         condition_root: target_root,
         min_value: 0,
     });
@@ -1142,7 +1146,7 @@ fn builtin_output_to_rejects_when_target_absent() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let target = SpendCondition::AccessRule(AccessRule::AllowAll);
     let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
-    let covenant = builtin(BuiltinPredicate::OutputTo {
+    let covenant = covenant(Covenant::OutputTo {
         condition_root: target_root,
         min_value: 0,
     });
@@ -1156,7 +1160,7 @@ fn builtin_output_to_rejects_added_key_path() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let target = SpendCondition::AccessRule(AccessRule::AllowAll);
     let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
-    let covenant = builtin(BuiltinPredicate::OutputTo {
+    let covenant = covenant(Covenant::OutputTo {
         condition_root: target_root,
         min_value: 0,
     });

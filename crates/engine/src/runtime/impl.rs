@@ -131,6 +131,7 @@ use tari_template_lib::{
         metadata,
         stealth::{
             BuiltinPredicate,
+            Covenant,
             CurrentInputView,
             MerkleProof,
             SpendAuthorization,
@@ -851,14 +852,16 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 )?;
             },
             SpendCondition::Builtin(predicate) => {
-                self.evaluate_builtin(
-                    predicate,
+                self.evaluate_builtin(predicate, data)?;
+            },
+            SpendCondition::Covenant(covenant) => {
+                self.evaluate_covenant(
+                    covenant,
                     input_index,
                     input_commitment,
                     root,
                     statement,
                     input_condition_roots,
-                    data,
                 )?;
             },
             SpendCondition::All(conditions) => {
@@ -879,50 +882,59 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Ok(())
     }
 
-    /// Evaluates a single native [`BuiltinPredicate`] over the spending transfer, rejecting the spend with
-    /// [`RuntimeError::SpendConditionNotMet`] if it does not hold. A data-consuming predicate (e.g. a hashlock) reads
-    /// the entire witness `data` blob as raw bytes; `validate_condition_structure` guarantees it is the leaf's sole
-    /// consumer, so the whole blob is unambiguously its input.
-    #[allow(clippy::too_many_arguments)]
-    fn evaluate_builtin(
-        &mut self,
-        predicate: &BuiltinPredicate,
-        input_index: u32,
-        input_commitment: PedersenCommitmentBytes,
-        current_input_condition_root: Hash32,
-        statement: &StealthTransferStatement,
-        input_condition_roots: &[Option<Hash32>],
-        data: &[u8],
-    ) -> Result<(), RuntimeError> {
-        // Covenant/output predicates introspect the transfer, so they build a `SpendScriptExecution` (which clones the
-        // input/output views). A match arm is only evaluated when selected, so the cheap epoch/hashlock checks never
-        // pay for it. `witness_data` is empty: only a WASM `TemplateFunction` reads it, via the host op.
-        let exec = || {
-            SpendScriptExecution::new(
-                statement,
-                input_condition_roots,
-                input_index,
-                input_commitment,
-                current_input_condition_root,
-                Vec::new(),
-            )
-        };
+    /// Evaluates a single native [`BuiltinPredicate`] — a local spend predicate (timelock or hashlock) — rejecting the
+    /// spend with [`RuntimeError::SpendConditionNotMet`] if it does not hold. A data-consuming predicate (the hashlock)
+    /// reads the entire witness `data` blob as raw bytes; `validate_condition_structure` guarantees it is the leaf's
+    /// sole consumer, so the whole blob is unambiguously its input.
+    fn evaluate_builtin(&mut self, predicate: &BuiltinPredicate, data: &[u8]) -> Result<(), RuntimeError> {
         let satisfied = match predicate {
             BuiltinPredicate::AfterEpoch(unlock_epoch) => self.tracker.get_current_epoch()?.as_u64() >= *unlock_epoch,
             BuiltinPredicate::BeforeEpoch(deadline_epoch) => {
                 self.tracker.get_current_epoch()?.as_u64() < *deadline_epoch
             },
             BuiltinPredicate::HashLock { hash, alg } => stealth::hashlock_digest(*alg, data) == *hash,
-            BuiltinPredicate::OutputPreservesCondition => exec().output_preserves_condition(),
-            BuiltinPredicate::OutputTo {
-                condition_root,
-                min_value,
-            } => exec().has_output_to(condition_root, *min_value),
-            BuiltinPredicate::BalancePreserved(max_revealed) => exec().covenant_balanced(*max_revealed),
         };
         if !satisfied {
             return Err(RuntimeError::SpendConditionNotMet {
                 details: format!("builtin predicate not satisfied: {predicate:?}"),
+            });
+        }
+        Ok(())
+    }
+
+    /// Evaluates a single native [`Covenant`] over the spending transfer, rejecting the spend with
+    /// [`RuntimeError::SpendConditionNotMet`] if it does not hold. Every covenant introspects the transfer's outputs,
+    /// so it builds a [`SpendScriptExecution`] (which clones the input/output views). `witness_data` is empty: only a
+    /// WASM `TemplateFunction` reads it, via the host op.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_covenant(
+        &mut self,
+        covenant: &Covenant,
+        input_index: u32,
+        input_commitment: PedersenCommitmentBytes,
+        current_input_condition_root: Hash32,
+        statement: &StealthTransferStatement,
+        input_condition_roots: &[Option<Hash32>],
+    ) -> Result<(), RuntimeError> {
+        let exec = SpendScriptExecution::new(
+            statement,
+            input_condition_roots,
+            input_index,
+            input_commitment,
+            current_input_condition_root,
+            Vec::new(),
+        );
+        let satisfied = match covenant {
+            Covenant::OutputPreservesCondition => exec.output_preserves_condition(),
+            Covenant::OutputTo {
+                condition_root,
+                min_value,
+            } => exec.has_output_to(condition_root, *min_value),
+            Covenant::BalancePreserved(max_revealed) => exec.covenant_balanced(*max_revealed),
+        };
+        if !satisfied {
+            return Err(RuntimeError::SpendConditionNotMet {
+                details: format!("covenant not satisfied: {covenant:?}"),
             });
         }
         Ok(())

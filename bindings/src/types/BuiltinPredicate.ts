@@ -3,7 +3,9 @@ import type { Hash32 } from "./Hash32";
 import type { HashAlg } from "./HashAlg";
 
 /**
- * A native, consensus-fixed spend predicate committed as a [`SpendCondition::Builtin`] leaf (TIP-0006).
+ * A native, consensus-fixed local spend predicate committed as a [`SpendCondition::Builtin`] leaf (TIP-0006): a
+ * timelock or hashlock that gates *this input* on a local fact. Constraints on the spending transaction's outputs are
+ * a [`Covenant`] instead.
  *
  * Unlike a [`TemplateFunction`], a builtin requires no deployed template and is evaluated natively by the engine —
  * the canonical semantics live in trusted core code, so the set is append-only and a shipped variant is never
@@ -15,7 +17,4 @@ import type { HashAlg } from "./HashAlg";
 export type BuiltinPredicate =
   | { AfterEpoch: bigint }
   | { BeforeEpoch: bigint }
-  | "OutputPreservesCondition"
-  | { OutputTo: { condition_root: Hash32; min_value: bigint } }
-  | { BalancePreserved: bigint }
   | { HashLock: { hash: Hash32; alg: HashAlg } };

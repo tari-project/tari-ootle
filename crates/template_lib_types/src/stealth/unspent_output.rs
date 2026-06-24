@@ -114,7 +114,7 @@ impl StealthUnspentOutput {
     }
 }
 
-/// A spend-condition leaf (v0) committed in a [`StealthUnspentOutput::condition_root`] tree: a flat, non-empty
+/// A spend-condition leaf (v0) committed in a stealth output's [`SpendAuthorization`] condition tree: a flat, non-empty
 /// conjunction (logical AND) of [`AtomicCondition`]s. A script-path spend reveals one leaf and an inclusion proof; the
 /// engine recomputes the root and, on a match, requires every atom in the conjunction to hold.
 ///

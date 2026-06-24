@@ -918,8 +918,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 condition_root,
                 min_value,
             } => exec().has_output_to(condition_root, *min_value),
-            BuiltinPredicate::BalancePreserved => exec().covenant_balanced(0),
-            BuiltinPredicate::BalancePreservedWithAllowance(max_revealed) => exec().covenant_balanced(*max_revealed),
+            BuiltinPredicate::BalancePreserved(max_revealed) => exec().covenant_balanced(*max_revealed),
         };
         if !satisfied {
             return Err(RuntimeError::SpendConditionNotMet {

@@ -17,6 +17,5 @@ export type BuiltinPredicate =
   | { BeforeEpoch: bigint }
   | "OutputPreservesCondition"
   | { OutputTo: { condition_root: Hash32; min_value: bigint } }
-  | "BalancePreserved"
-  | { BalancePreservedWithAllowance: bigint }
+  | { BalancePreserved: bigint }
   | { HashLock: { hash: Hash32; alg: HashAlg } };

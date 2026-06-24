@@ -1070,7 +1070,7 @@ fn builtin_output_preserves_condition_rejects_added_key_path() {
 #[test]
 fn builtin_balance_preserved_allows_full_conservation() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved);
+    let covenant = builtin(BuiltinPredicate::BalancePreserved(0));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
     submit_expect_success(&mut test, resx, transfer);
@@ -1079,7 +1079,7 @@ fn builtin_balance_preserved_allows_full_conservation() {
 #[test]
 fn builtin_balance_preserved_rejects_value_leaving_partition() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved);
+    let covenant = builtin(BuiltinPredicate::BalancePreserved(0));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, key_path(test.to_public_key_bytes()))]);
     submit_expect_rejected(&mut test, resx, transfer, "Spend condition not met");
@@ -1088,7 +1088,7 @@ fn builtin_balance_preserved_rejects_value_leaving_partition() {
 #[test]
 fn builtin_balance_preserved_rejects_added_key_path() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreserved);
+    let covenant = builtin(BuiltinPredicate::BalancePreserved(0));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     // The conserved value flows to a KeyAndScript output re-committing the covenant root plus a key path. That key path
     // would let it be key-spent next block, escaping conservation, so it must not count as in-partition.
@@ -1102,7 +1102,7 @@ fn builtin_balance_preserved_rejects_added_key_path() {
 #[test]
 fn builtin_balance_with_allowance_allows_within_cap() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreservedWithAllowance(30));
+    let covenant = builtin(BuiltinPredicate::BalancePreserved(30));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![
         out(70, covenant.clone()),
@@ -1114,7 +1114,7 @@ fn builtin_balance_with_allowance_allows_within_cap() {
 #[test]
 fn builtin_balance_with_allowance_rejects_over_cap() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let covenant = builtin(BuiltinPredicate::BalancePreservedWithAllowance(30));
+    let covenant = builtin(BuiltinPredicate::BalancePreserved(30));
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let transfer = spend_with_covenant(&mint, &covenant, vec![
         out(60, covenant.clone()),

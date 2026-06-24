@@ -307,18 +307,17 @@ pub enum BuiltinPredicate {
         #[n(1)]
         min_value: u64,
     },
-    /// Full value-conservation covenant (TIP-0006 Option A): no cleartext value leaves the invoking partition.
+    /// Value-conservation covenant (TIP-0006 Option A/C): the invoking partition's committed value is conserved into
+    /// outputs carrying its `condition_root`, save for an exact cleartext outflow of at most `max_revealed`. A
+    /// `max_revealed` of zero admits no cleartext escape (full conservation).
     #[n(4)]
-    BalancePreserved,
-    /// Capped-withdrawal covenant (TIP-0006 Option C): at most `max_revealed` cleartext leaves the invoking partition.
-    #[n(5)]
-    BalancePreservedWithAllowance(#[n(0)] u64),
+    BalancePreserved(#[n(0)] u64),
     /// Hashlock: the witness `data` blob must be a preimage whose `alg` digest equals `hash`. As a data-consuming
     /// builtin it reads the entire blob as raw bytes, so it must be the sole `data` consumer in its leaf.
     ///
     /// A bare hashlock is satisfiable by anyone who learns the preimage; pair it with an [`AccessRule`] inside an
     /// [`SpendCondition::All`] to bind the claim to a key (the standard HTLC construction).
-    #[n(6)]
+    #[n(5)]
     HashLock {
         #[n(0)]
         hash: Hash32,
@@ -338,8 +337,7 @@ impl BuiltinPredicate {
             Self::BeforeEpoch(_) |
             Self::OutputPreservesCondition |
             Self::OutputTo { .. } |
-            Self::BalancePreserved |
-            Self::BalancePreservedWithAllowance(_) => false,
+            Self::BalancePreserved(_) => false,
         }
     }
 }

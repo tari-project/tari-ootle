@@ -81,6 +81,20 @@ impl<'a> ReadOnlyStateStore<'a> {
         Ok(vaults)
     }
 
+    pub fn get_vaults_for_component(
+        &self,
+        address: ComponentAddress,
+    ) -> Result<HashMap<VaultId, Vault>, StateStoreError> {
+        let component = self.get_component(address)?;
+        let indexed = component.body().to_indexed_well_known_types().unwrap();
+        let mut vaults = HashMap::with_capacity(indexed.vault_ids().len());
+        for id in indexed.vault_ids() {
+            let vault = self.get_vault(id)?;
+            vaults.insert(*id, vault);
+        }
+        Ok(vaults)
+    }
+
     pub fn get_resource(&self, resource_address: &ResourceAddress) -> Result<Resource, StateStoreError> {
         let substate = self.get_substate(&SubstateId::Resource(*resource_address))?;
         Ok(substate.into_substate_value().into_resource().unwrap())

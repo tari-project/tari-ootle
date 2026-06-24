@@ -3,7 +3,7 @@
 
 use tari_bor::BorError;
 use tari_engine_types::indexed_value::IndexedValueError;
-use tari_template_abi::version::WasmAbiVersion;
+use tari_template_abi::{TEMPLATE_DEF_CUSTOM_SECTION, version::WasmAbiVersion};
 use wasmer::{ExportError, InstantiationError, MemoryAccessError};
 
 use crate::runtime::RuntimeError;
@@ -101,6 +101,12 @@ pub enum WasmValidationError {
         function_name: String,
         return_type: tari_template_abi::Type,
     },
+    #[error(
+        "Module contains disallowed custom section `{name}`; only `{TEMPLATE_DEF_CUSTOM_SECTION}` is permitted. Strip \
+         debug and metadata sections before publishing (e.g. `wasm-opt --strip-debug --strip-producers` or \
+         `wasm-strip`)."
+    )]
+    DisallowedCustomSection { name: String },
 }
 
 impl From<wasmer::InstantiationError> for WasmExecutionError {

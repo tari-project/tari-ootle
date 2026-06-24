@@ -1,0 +1,22 @@
+[package]
+name = "tari_ootle_template_provider"
+description = "Shared template provider chain (in-memory cache + concurrent-load coalescing) for Tari Ootle, used by the validator node and indexer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_engine = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_template_lib_types = { workspace = true }
+tari_template_builtin = { workspace = true, features = ["templates"] }
+
+anyhow = { workspace = true }
+dashmap = { workspace = true }
+log = { workspace = true }
+mini-moka = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+std-semaphore = { workspace = true }
+thiserror = { workspace = true }

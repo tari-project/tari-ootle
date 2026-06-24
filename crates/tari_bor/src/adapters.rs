@@ -34,12 +34,24 @@ pub mod boxed_slice {
 
     pub fn decode<'b, C, T>(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Box<[T]>, minicbor::decode::Error>
     where T: Decode<'b, C> {
+        decode_with_fn(d, ctx, T::decode)
+    }
+
+    /// Like [`decode`], but decodes each element with a caller-supplied function rather than the
+    /// element's [`Decode`] impl. This lets a self-recursive type thread decode state — such as a
+    /// nesting-depth bound — through the element decode, which a derived `Decode` cannot. The
+    /// `MAX_PREALLOC` cap on the untrusted length header still applies.
+    pub fn decode_with_fn<'b, C, T>(
+        d: &mut Decoder<'b>,
+        ctx: &mut C,
+        mut decode_elem: impl FnMut(&mut Decoder<'b>, &mut C) -> Result<T, minicbor::decode::Error>,
+    ) -> Result<Box<[T]>, minicbor::decode::Error> {
         let len = d.array()?;
         match len {
             Some(n) => {
                 let mut out = Vec::with_capacity(n.min(super::MAX_PREALLOC) as usize);
                 for _ in 0..n {
-                    out.push(T::decode(d, ctx)?);
+                    out.push(decode_elem(d, ctx)?);
                 }
                 Ok(out.into_boxed_slice())
             },
@@ -50,7 +62,7 @@ pub mod boxed_slice {
                         d.skip()?;
                         break;
                     }
-                    out.push(T::decode(d, ctx)?);
+                    out.push(decode_elem(d, ctx)?);
                 }
                 Ok(out.into_boxed_slice())
             },

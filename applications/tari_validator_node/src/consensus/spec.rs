@@ -6,6 +6,7 @@ use tari_engine::state_store::memory::ReadOnlyMemoryStateStore;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
 use tari_ootle_p2p::PeerAddress;
+use tari_ootle_template_provider::MemoryCacheTemplateProvider;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 
 #[cfg(feature = "metrics")]
@@ -18,7 +19,6 @@ use crate::{
         signer_service::TariSignatureService,
         // template_metadata_hooks::TemplateMetadataHooks,
     },
-    memory_cache_template_provider::MemoryCacheTemplateProvider,
     p2p::{
         NopLogger,
         services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},

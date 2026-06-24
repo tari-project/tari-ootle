@@ -31,7 +31,7 @@ serde = { workspace = true, default-features = true }
 futures = { workspace = true }
 time = { workspace = true, features = ["serde", "serde-human-readable"] }
 thiserror = { workspace = true }
-ts-rs = { workspace = true }
+ts-rs = { workspace = true, optional = true }
 webauthn-rs = { workspace = true }
 keyring-core = { workspace = true }
 rand = { workspace = true }
@@ -41,6 +41,7 @@ tokio = { workspace = true, default-features = false, features = ["sync", "rt-mu
 
 [features]
 ts = [
+    "ts-rs",
     "tari_ootle_address/ts",
     "tari_bor/ts",
     "tari_engine_types/ts",

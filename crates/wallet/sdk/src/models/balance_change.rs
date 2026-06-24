@@ -31,8 +31,8 @@ pub enum BalanceChangeSource {
 }
 
 /// Lightweight source type enum for filtering — no data payload.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, ts_rs::TS)]
-#[cfg_attr(feature = "ts", ts(export, export_to = "wallet-types/"))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum BalanceChangeSourceType {
     Transaction,
     Scan,

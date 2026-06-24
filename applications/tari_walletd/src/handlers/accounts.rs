@@ -78,6 +78,7 @@ use tari_ootle_walletd_client::{
         GetBalanceChangesResponse,
         StealthTransferRequest,
         StealthTransferResponse,
+        WalletBalanceChangeSource,
     },
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -1483,7 +1484,7 @@ fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
         after_confidential_balance: change.after_confidential_balance,
         revealed_delta: change.revealed_delta,
         confidential_delta: change.confidential_delta,
-        source: change.source,
+        source: change.source.into(),
         transaction_id: change.transaction_id,
         created_at: change
             .created_at
@@ -1521,7 +1522,7 @@ pub async fn handle_get_balance_changes(
         req.limit.unwrap_or(100),
         req.resource_address.as_ref(),
         tx_id,
-        req.source_type,
+        req.source_type.map(Into::into),
         req.start_time.as_deref(),
         req.end_time.as_deref(),
     )?;
@@ -1625,7 +1626,7 @@ mod balance_change_handler_tests {
             created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
         };
         let entry = balance_change_to_entry(tx);
-        assert!(matches!(entry.source, BalanceChangeSource::Transaction { .. }));
+        assert!(matches!(entry.source, WalletBalanceChangeSource::Transaction { .. }));
         assert!(entry.transaction_id.is_some());
 
         let scan = BalanceChange {
@@ -1642,7 +1643,7 @@ mod balance_change_handler_tests {
             created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
         };
         let entry = balance_change_to_entry(scan);
-        assert_eq!(entry.source, BalanceChangeSource::Scan);
+        assert_eq!(entry.source, WalletBalanceChangeSource::Scan);
         assert!(entry.transaction_id.is_none());
 
         let recovery = BalanceChange {
@@ -1659,7 +1660,7 @@ mod balance_change_handler_tests {
             created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
         };
         let entry = balance_change_to_entry(recovery);
-        assert_eq!(entry.source, BalanceChangeSource::Recovery);
+        assert_eq!(entry.source, WalletBalanceChangeSource::Recovery);
         assert!(entry.transaction_id.is_none());
     }
 
@@ -1694,7 +1695,7 @@ mod balance_change_handler_tests {
         assert_eq!(entry.after_revealed_balance, "1000");
         assert_eq!(entry.revealed_delta, "1000");
         assert_eq!(entry.confidential_delta, "500");
-        assert!(matches!(entry.source, BalanceChangeSource::Transaction { .. }));
+        assert!(matches!(entry.source, WalletBalanceChangeSource::Transaction { .. }));
 
         // Test filter by transaction_id
         let changes = tx

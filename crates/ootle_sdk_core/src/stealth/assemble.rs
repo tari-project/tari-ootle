@@ -992,7 +992,7 @@ mod tests {
                 viewable_balance: None,
             },
             auth: SpendAuthorization::Script(
-                condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap(),
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
             ),
             tag: UtxoTag::new(0),
         });
@@ -1101,7 +1101,7 @@ mod tests {
                 viewable_balance: None,
             },
             auth: SpendAuthorization::Script(
-                condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap(),
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
             ),
             tag: UtxoTag::new(0),
         });
@@ -1192,7 +1192,7 @@ mod tests {
                 viewable_balance: None,
             },
             auth: SpendAuthorization::Script(
-                condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap(),
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
             ),
             tag: UtxoTag::new(0),
         });

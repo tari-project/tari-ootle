@@ -165,9 +165,9 @@ impl Output {
 
     /// Gate this output's spend on a condition tree (MAST) of alternative spend conditions. The output commits the
     /// Merkle root over `conditions`; a spender later reveals exactly ONE leaf plus an inclusion proof. Each leaf may
-    /// be a native access rule, a WASM predicate ([`TemplateFunction`]), a
-    /// [`BuiltinPredicate`](tari_template_lib_types::stealth::BuiltinPredicate) (timelock, hashlock, covenant), or an
-    /// [`All`](SpendCondition::All) conjunction of them.
+    /// be a native access rule, a WASM predicate ([`TemplateFunction`]), a native
+    /// [`BuiltinPredicate`](tari_template_lib_types::stealth::BuiltinPredicate) (timelock, hashlock) or covenant — and
+    /// a leaf is a conjunction (logical AND) of one or more such atoms.
     pub fn with_spend_conditions(self, conditions: Vec<SpendCondition>) -> Self {
         self.with_pay_to(PayTo::Conditions(conditions))
     }

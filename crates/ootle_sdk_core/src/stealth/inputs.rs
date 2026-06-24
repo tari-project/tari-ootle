@@ -331,7 +331,7 @@ mod tests {
         let utxo = Utxo::new(UtxoOutput {
             output: output_body,
             auth: SpendAuthorization::Script(
-                condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap(),
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
             ),
             tag: UtxoTag::new(0),
         });

@@ -10,6 +10,7 @@ export * from "./types/AllocatableAddressType";
 export * from "./types/Amount";
 export * from "./types/ArgDef";
 export * from "./types/Assertion";
+export * from "./types/AtomicCondition";
 export * from "./types/AuthHook";
 export * from "./types/Blob";
 export * from "./types/BlobHashes";

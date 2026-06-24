@@ -130,6 +130,7 @@ use tari_template_lib::{
         engine_args::{SignatureAction, SignatureVerifyArg},
         metadata,
         stealth::{
+            AtomicCondition,
             BuiltinPredicate,
             Covenant,
             CurrentInputView,
@@ -759,9 +760,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
     /// Validates a revealed condition leaf's structure before it is hashed or evaluated.
     ///
-    /// A conjunction ([`SpendCondition::All`]) must be non-empty and flat — nesting `All` inside `All` is rejected —
-    /// which bounds the recursion depth of hashing and evaluation to a single level, and not exceed
-    /// `STEALTH_LIMITS.max_conditions_per_conjunction`.
+    /// A leaf is a conjunction of atoms (logical AND). It must be non-empty and must not exceed
+    /// `STEALTH_LIMITS.max_conditions_per_conjunction`, which caps the worst-case work of evaluating one leaf.
     ///
     /// A data-consuming builtin (e.g. a hashlock) reads the entire witness `data` blob as its own raw input and cannot
     /// know the blob's shape relative to siblings, so it must be the sole consumer of `data` in its leaf: a leaf may
@@ -773,29 +773,20 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), RuntimeError> {
         let reject = |details: String| Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }));
 
-        let conditions: &[SpendCondition] = if let SpendCondition::All(conditions) = leaf {
-            if conditions.is_empty() {
-                return reject(format!(
-                    "Empty All conjunction in spend condition for stealth UTXO {commitment}"
-                ));
-            }
-            let max_conditions = limits::STEALTH_LIMITS.max_conditions_per_conjunction;
-            if conditions.len() > max_conditions {
-                return reject(format!(
-                    "All conjunction in spend condition for stealth UTXO {commitment} has {} conditions, exceeding \
-                     the limit of {max_conditions}",
-                    conditions.len()
-                ));
-            }
-            if conditions.iter().any(SpendCondition::is_all) {
-                return reject(format!(
-                    "Nested All conjunction in spend condition for stealth UTXO {commitment}"
-                ));
-            }
-            conditions
-        } else {
-            std::slice::from_ref(leaf)
-        };
+        let conditions = leaf.conditions();
+        if conditions.is_empty() {
+            return reject(format!(
+                "Empty conjunction in spend condition for stealth UTXO {commitment}"
+            ));
+        }
+        let max_conditions = limits::STEALTH_LIMITS.max_conditions_per_conjunction;
+        if conditions.len() > max_conditions {
+            return reject(format!(
+                "Conjunction in spend condition for stealth UTXO {commitment} has {} conditions, exceeding the limit \
+                 of {max_conditions}",
+                conditions.len()
+            ));
+        }
 
         let data_owning_builtins = conditions.iter().filter(|c| c.is_data_owning_builtin()).count();
         if data_owning_builtins > 1 {
@@ -804,7 +795,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                  most one may consume the witness data"
             ));
         }
-        if data_owning_builtins == 1 && conditions.iter().any(SpendCondition::is_template_function) {
+        if data_owning_builtins == 1 && conditions.iter().any(AtomicCondition::is_template_function) {
             return reject(format!(
                 "Spend condition for stealth UTXO {commitment} pairs a data-consuming builtin with a \
                  TemplateFunction; a data-consuming builtin must be the sole consumer of the witness data"
@@ -813,11 +804,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Ok(())
     }
 
-    /// Evaluates a revealed condition leaf that has already been proven included in the committed root. A conjunction
-    /// requires every child to hold (logical AND); an [`AccessRule`] leaf is checked against the auth scope; a
-    /// [`TemplateFunction`] runs as a read-only WASM predicate; a [`BuiltinPredicate`] runs natively. The single
-    /// witness `data` blob is shared by the whole leaf; each predicate interprets it as it expects (a data-consuming
-    /// builtin owns it entirely, which `validate_condition_structure` guarantees by rejecting any other consumer).
+    /// Evaluates a revealed condition leaf that has already been proven included in the committed root. The leaf is a
+    /// conjunction: every atom must hold (logical AND). The single witness `data` blob is shared by the whole leaf;
+    /// each atom interprets it as it expects (a data-consuming builtin owns it entirely, which
+    /// `validate_condition_structure` guarantees by rejecting any other consumer).
     #[allow(clippy::too_many_arguments)]
     fn evaluate_condition_leaf(
         &mut self,
@@ -829,8 +819,35 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         input_condition_roots: &[Option<Hash32>],
         data: &[u8],
     ) -> Result<(), RuntimeError> {
-        match leaf {
-            SpendCondition::AccessRule(access_rule) => {
+        for condition in leaf.conditions() {
+            self.evaluate_atomic_condition(
+                condition,
+                input_index,
+                input_commitment,
+                root,
+                statement,
+                input_condition_roots,
+                data,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Evaluates a single [`AtomicCondition`] of a conjunction leaf: an access rule against the auth scope, a WASM
+    /// [`TemplateFunction`], a native [`BuiltinPredicate`], or a native [`Covenant`].
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_atomic_condition(
+        &mut self,
+        condition: &AtomicCondition,
+        input_index: u32,
+        input_commitment: PedersenCommitmentBytes,
+        root: Hash32,
+        statement: &StealthTransferStatement,
+        input_condition_roots: &[Option<Hash32>],
+        data: &[u8],
+    ) -> Result<(), RuntimeError> {
+        match condition {
+            AtomicCondition::AccessRule(access_rule) => {
                 let allowed = self
                     .tracker
                     .read_with(|state| state.authorization().check_access_rule(access_rule))?;
@@ -840,7 +857,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                     });
                 }
             },
-            SpendCondition::TemplateFunction(tf) => {
+            AtomicCondition::TemplateFunction(tf) => {
                 self.evaluate_spend_script(
                     tf,
                     input_index,
@@ -851,10 +868,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                     data,
                 )?;
             },
-            SpendCondition::Builtin(predicate) => {
+            AtomicCondition::Builtin(predicate) => {
                 self.evaluate_builtin(predicate, data)?;
             },
-            SpendCondition::Covenant(covenant) => {
+            AtomicCondition::Covenant(covenant) => {
                 self.evaluate_covenant(
                     covenant,
                     input_index,
@@ -863,20 +880,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                     statement,
                     input_condition_roots,
                 )?;
-            },
-            SpendCondition::All(conditions) => {
-                // Structure validated by `validate_condition_structure`: non-empty and flat (no nested `All`).
-                for condition in conditions {
-                    self.evaluate_condition_leaf(
-                        condition,
-                        input_index,
-                        input_commitment,
-                        root,
-                        statement,
-                        input_condition_roots,
-                        data,
-                    )?;
-                }
             },
         }
         Ok(())

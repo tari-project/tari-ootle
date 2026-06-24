@@ -154,7 +154,7 @@ pub fn decode_stealth_utxo(
     // condition tree commits only an opaque root, so the only script-path output the SDK can recognise is the
     // single-leaf `AccessRule::AllowAll` tree it builds itself; any other committed root (an arbitrary TIP-0006
     // spend script) is not introspectable here and is unsupported.
-    let allow_all_root = condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)])
+    let allow_all_root = condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)])
         .map_err(|e| OotleSdkError::Stealth(format!("compute allow-all condition root: {e}")))?;
     let (pay_to, spend_public_key) = match &output.auth {
         SpendAuthorization::Key(pk) => {
@@ -257,7 +257,7 @@ mod tests {
             let owner_pk = crypto.derive_stealth_owner_public_key(internal_network, &account_pk, &nonce_secret);
             SpendAuthorization::Key(owner_pk.to_byte_type())
         } else {
-            SpendAuthorization::Script(condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap())
+            SpendAuthorization::Script(condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap())
         };
 
         let output_body = OutputBody {

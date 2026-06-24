@@ -8,8 +8,8 @@
 //! Merkle **root**; a spender later reveals exactly ONE leaf plus an inclusion proof, and the engine evaluates it.
 //!
 //! Each leaf can use **builtin predicates** ([`BuiltinPredicate`]) — native, consensus-fixed primitives that need no
-//! deployed template: timelocks (`AfterEpoch`/`BeforeEpoch`), a `HashLock`, and value covenants. Leaves are combined
-//! into a conjunction with [`SpendCondition::All`].
+//! deployed template: timelocks (`AfterEpoch`/`BeforeEpoch`), a `HashLock`, and value covenants. Each leaf is a
+//! conjunction (logical AND) of these atoms ([`AtomicCondition`]s).
 //!
 //! This example posts **two** transactions on localnet (default indexer `http://127.0.0.1:12500`):
 //!   1. **lock** — takes free coins from the faucet and locks them, paid to our own account, behind a **hash
@@ -38,7 +38,7 @@ use ootle_rs::{
         UtxoAddress,
         bytes::Bytes,
         constants::TARI_TOKEN,
-        stealth::{BuiltinPredicate, HashAlg, SpendCondition, StealthInput},
+        stealth::{AtomicCondition, BuiltinPredicate, HashAlg, SpendCondition, StealthInput},
     },
     transaction::TransactionSigner,
     wallet::OotleWallet,
@@ -79,14 +79,14 @@ async fn main() {
     // The claim window closes `deadline` epochs from now; after it, the refund path opens.
     let deadline = current_epoch + 50;
 
-    let claim = SpendCondition::All(Box::new([
-        SpendCondition::Builtin(BuiltinPredicate::HashLock {
+    let claim = SpendCondition::all([
+        AtomicCondition::Builtin(BuiltinPredicate::HashLock {
             hash,
             alg: HashAlg::Sha256,
         }),
-        SpendCondition::Builtin(BuiltinPredicate::BeforeEpoch(deadline)),
-    ]));
-    let refund = SpendCondition::Builtin(BuiltinPredicate::AfterEpoch(deadline));
+        AtomicCondition::Builtin(BuiltinPredicate::BeforeEpoch(deadline)),
+    ]);
+    let refund = SpendCondition::builtin(BuiltinPredicate::AfterEpoch(deadline));
     let conditions = vec![claim, refund];
 
     println!("\nHTLC condition tree ({} leaves):", conditions.len());
@@ -96,7 +96,7 @@ async fn main() {
     println!("  refund  : AfterEpoch({deadline})");
     // NOTE: these leaves are not bound to a key, so anyone who learns the preimage (or waits for the refund epoch) can
     // spend. For a real HTLC, AND each path with an `AccessRule` requiring the claimant's / refunder's key by adding it
-    // to the `SpendCondition::All` list.
+    // to the leaf's conjunction.
 
     let tari_token = TARI_TOKEN;
 

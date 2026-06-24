@@ -863,7 +863,7 @@ fn stealth_send_stealth_seal_seed() -> Fixture {
             minimum_value_promise: 0,
             viewable_balance: None,
         },
-        auth: SpendAuthorization::Script(condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)]).unwrap()),
+        auth: SpendAuthorization::Script(condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap()),
         tag: UtxoTag::new(0),
     });
 

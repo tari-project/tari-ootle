@@ -160,7 +160,7 @@ pub fn build_stealth_output_witness(
         },
         // An `AccessRule::AllowAll` output is gated by a single-leaf condition tree; commit its root.
         StealthPayTo::AccessRuleAllowAll => SpendAuthorization::Script(
-            condition_root(&[SpendCondition::AccessRule(AccessRule::AllowAll)])
+            condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)])
                 .map_err(|e| OotleSdkError::Stealth(format!("compute allow-all condition root: {e}")))?,
         ),
     };

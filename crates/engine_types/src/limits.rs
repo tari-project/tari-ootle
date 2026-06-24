@@ -82,7 +82,7 @@ pub struct StealthLimits {
     pub max_inputs: usize,
     /// Maximum stealth outputs in a single transfer statement.
     pub max_outputs: usize,
-    /// Maximum number of conditions in a single `SpendCondition::All` conjunction (TIP-0006). A revealed leaf is
+    /// Maximum number of conditions in a single `SpendCondition` conjunction (TIP-0006). A revealed leaf is
     /// evaluated in full at spend time, and a builtin predicate (e.g. a covenant balance proof or a hashlock) runs
     /// native, unmetered work — so an unbounded conjunction would be a denial-of-service amplifier. This caps the
     /// worst-case work of evaluating one leaf. The condition tree itself supplies breadth (a spender reveals only one

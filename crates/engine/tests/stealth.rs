@@ -660,7 +660,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
         public_key(pk3),
         public_key(pk4)
     ));
-    let access_condition = SpendCondition::AccessRule(rule);
+    let access_condition = SpendCondition::access_rule(rule);
     let outputs = vec![(100u64, access_condition.clone())];
     let mint = stealth::generate_mint_statement(outputs.clone(), 0u64, None);
     let (_, faucet_resx) = setup(&mut test, &mint, None);
@@ -732,8 +732,8 @@ fn transfer_restricted_by_access_rules_component_scope() {
         }],
         0u64,
         [
-            (10u64, SpendCondition::AccessRule(component_scope_rule.clone())),
-            (90u64, SpendCondition::AccessRule(component_scope_rule.clone())),
+            (10u64, SpendCondition::access_rule(component_scope_rule.clone())),
+            (90u64, SpendCondition::access_rule(component_scope_rule.clone())),
         ],
         0,
     );
@@ -756,20 +756,20 @@ fn transfer_restricted_by_access_rules_component_scope() {
                     mask: initial_transfer.output_masks[0].clone(),
                     value: 10,
                 },
-                SpendCondition::AccessRule(component_scope_rule.clone()),
+                SpendCondition::access_rule(component_scope_rule.clone()),
             ),
             (
                 MaskAndValue {
                     mask: initial_transfer.output_masks[1].clone(),
                     value: 90,
                 },
-                SpendCondition::AccessRule(component_scope_rule),
+                SpendCondition::access_rule(component_scope_rule),
             ),
         ],
         0u64,
         [
             // Anyone with the mask and value (i.e. view key) can spend!
-            (99u64, SpendCondition::AccessRule(AccessRule::AllowAll)),
+            (99u64, SpendCondition::access_rule(AccessRule::AllowAll)),
         ],
         1, // programmatic transfer in this template requires a revealed output amount
     );

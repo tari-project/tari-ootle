@@ -56,7 +56,7 @@ fn spend_script(template: TemplateAddress, function: &str, args: Vec<Bytes>) -> 
 
 /// A `TemplateFunction` spend-condition leaf gating on the given predicate.
 fn script_condition(template: TemplateAddress, function: &str, args: Vec<Bytes>) -> SpendCondition {
-    SpendCondition::TemplateFunction(spend_script(template, function, args))
+    SpendCondition::template_function(spend_script(template, function, args))
 }
 
 /// A key-path output authorisation owned by `pk`.
@@ -180,7 +180,7 @@ fn script_path_access_rule_leaf_allows_spend() {
     // An AccessRule leaf checked natively against the auth scope. `allow_all` is satisfied by any spender.
     let (resx, mint) = mint_utxo(
         &mut test,
-        conditions(vec![SpendCondition::AccessRule(AccessRule::AllowAll)]),
+        conditions(vec![SpendCondition::access_rule(AccessRule::AllowAll)]),
     );
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
@@ -199,7 +199,7 @@ fn script_path_access_rule_leaf_denies_spend() {
     // A DenyAll AccessRule leaf can never be satisfied.
     let (resx, mint) = mint_utxo(
         &mut test,
-        conditions(vec![SpendCondition::AccessRule(AccessRule::DenyAll)]),
+        conditions(vec![SpendCondition::access_rule(AccessRule::DenyAll)]),
     );
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
@@ -948,16 +948,16 @@ fn script_path_witness_increases_transaction_weight() {
 // -------------------------------- Builtin predicates -------------------------------- //
 
 fn builtin(predicate: BuiltinPredicate) -> SpendCondition {
-    SpendCondition::Builtin(predicate)
+    SpendCondition::builtin(predicate)
 }
 
 fn covenant(covenant: Covenant) -> SpendCondition {
-    SpendCondition::Covenant(covenant)
+    SpendCondition::covenant(covenant)
 }
 
-/// A flat `All` conjunction leaf over `conditions`.
+/// A conjunction (logical AND) leaf over the atoms of the given single-condition leaves.
 fn all(conditions: Vec<SpendCondition>) -> SpendCondition {
-    SpendCondition::All(conditions.into_boxed_slice())
+    SpendCondition::all(conditions.into_iter().flat_map(|c| c.into_conditions().into_vec()))
 }
 
 /// Submits a stealth transfer spending the minted UTXO and asserts success.
@@ -1130,7 +1130,7 @@ fn builtin_balance_with_allowance_rejects_over_cap() {
 #[test]
 fn builtin_output_to_allows_required_output() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let target = SpendCondition::AccessRule(AccessRule::AllowAll);
+    let target = SpendCondition::access_rule(AccessRule::AllowAll);
     let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
     let covenant = covenant(Covenant::OutputTo {
         condition_root: target_root,
@@ -1144,7 +1144,7 @@ fn builtin_output_to_allows_required_output() {
 #[test]
 fn builtin_output_to_rejects_when_target_absent() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let target = SpendCondition::AccessRule(AccessRule::AllowAll);
+    let target = SpendCondition::access_rule(AccessRule::AllowAll);
     let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
     let covenant = covenant(Covenant::OutputTo {
         condition_root: target_root,
@@ -1158,7 +1158,7 @@ fn builtin_output_to_rejects_when_target_absent() {
 #[test]
 fn builtin_output_to_rejects_added_key_path() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let target = SpendCondition::AccessRule(AccessRule::AllowAll);
+    let target = SpendCondition::access_rule(AccessRule::AllowAll);
     let target_root = MerkleTree::from_conditions([&target]).unwrap().root();
     let covenant = covenant(Covenant::OutputTo {
         condition_root: target_root,
@@ -1234,7 +1234,7 @@ fn htlc_claim_requires_both_preimage_and_signer() {
             hash: hashlock_digest(HashAlg::Sha256, &preimage),
             alg: HashAlg::Sha256,
         }),
-        SpendCondition::AccessRule(AccessRule::AllowAll),
+        SpendCondition::access_rule(AccessRule::AllowAll),
     ]);
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
     let transfer = spend_leaf_with_data(
@@ -1289,7 +1289,7 @@ fn all_conjunction_allows_when_every_condition_holds() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let leaf = all(vec![
         builtin(BuiltinPredicate::AfterEpoch(0)),
-        SpendCondition::AccessRule(AccessRule::AllowAll),
+        SpendCondition::access_rule(AccessRule::AllowAll),
     ]);
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
@@ -1301,7 +1301,7 @@ fn all_conjunction_rejects_when_a_builtin_fails() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let leaf = all(vec![
         builtin(BuiltinPredicate::AfterEpoch(u64::MAX)),
-        SpendCondition::AccessRule(AccessRule::AllowAll),
+        SpendCondition::access_rule(AccessRule::AllowAll),
     ]);
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
@@ -1313,37 +1313,28 @@ fn all_conjunction_rejects_when_access_rule_fails() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let leaf = all(vec![
         builtin(BuiltinPredicate::AfterEpoch(0)),
-        SpendCondition::AccessRule(AccessRule::DenyAll),
+        SpendCondition::access_rule(AccessRule::DenyAll),
     ]);
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     submit_expect_rejected(&mut test, resx, transfer, "Access Denied");
 }
 
-// ---- All conjunction: structural limits (DoS protection) ----
+// ---- Conjunction: structural limits (DoS protection) ----
 
 #[test]
-fn empty_all_conjunction_is_rejected() {
+fn empty_conjunction_is_rejected() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![all(vec![])]));
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
-    submit_expect_rejected(&mut test, resx, transfer, "Empty All conjunction");
+    submit_expect_rejected(&mut test, resx, transfer, "Empty conjunction");
 }
 
 #[test]
-fn nested_all_conjunction_is_rejected() {
-    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let leaf = all(vec![all(vec![SpendCondition::AccessRule(AccessRule::AllowAll)])]);
-    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf]));
-    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
-    submit_expect_rejected(&mut test, resx, transfer, "Nested All conjunction");
-}
-
-#[test]
-fn oversized_all_conjunction_is_rejected() {
+fn oversized_conjunction_is_rejected() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let conds =
-        vec![SpendCondition::AccessRule(AccessRule::AllowAll); STEALTH_LIMITS.max_conditions_per_conjunction + 1];
+        vec![SpendCondition::access_rule(AccessRule::AllowAll); STEALTH_LIMITS.max_conditions_per_conjunction + 1];
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![all(conds)]));
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     submit_expect_rejected(&mut test, resx, transfer, "exceeding the limit");

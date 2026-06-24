@@ -59,10 +59,10 @@ pub fn pay_to_output_authorization(
     match pay_to {
         PayTo::StealthPublicKey => Ok(SpendAuthorization::Key(derive_stealth_key())),
         PayTo::AccessRule(rule) => Ok(SpendAuthorization::Script(condition_root(&[
-            SpendCondition::AccessRule(rule.clone()),
+            SpendCondition::access_rule(rule.clone()),
         ])?)),
         PayTo::TemplateFunction(tf) => Ok(SpendAuthorization::Script(condition_root(&[
-            SpendCondition::TemplateFunction(tf.clone()),
+            SpendCondition::template_function(tf.clone()),
         ])?)),
         PayTo::Conditions(conditions) => Ok(SpendAuthorization::Script(condition_root(conditions)?)),
     }

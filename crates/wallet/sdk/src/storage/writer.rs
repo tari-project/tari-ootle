@@ -125,6 +125,7 @@ pub trait WalletStoreWriter: CommittableStore {
     fn vaults_update(
         &mut self,
         vault_id: VaultId,
+        vault_version: u32,
         revealed_balance: Amount,
         confidential_balance: Amount,
     ) -> Result<(), WalletStorageError>;

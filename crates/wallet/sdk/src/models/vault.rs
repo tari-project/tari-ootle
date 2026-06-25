@@ -7,6 +7,7 @@ use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, Resour
 pub struct VaultModel {
     pub account_address: ComponentAddress,
     pub id: VaultId,
+    pub vault_version: u32,
     pub resource_address: ResourceAddress,
     pub resource_type: ResourceType,
     pub confidential_balance: Amount,

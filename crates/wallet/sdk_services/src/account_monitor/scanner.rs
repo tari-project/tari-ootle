@@ -29,6 +29,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
+    Amount,
     ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
@@ -220,6 +221,7 @@ where TSpec: WalletSdkSpec
                 accounts_api.add_vault(
                     account_address,
                     vault_id,
+                    vault_version,
                     *latest_vault.resource_address(),
                     latest_vault.resource_type(),
                     token_symbol,
@@ -284,8 +286,12 @@ where TSpec: WalletSdkSpec
                 .await?;
         }
 
-        let outputs_api = self.wallet_sdk.confidential_outputs_api();
-        let new_confidential_balance = outputs_api.get_unspent_balance(&vault_id)?;
+        let new_confidential_balance = if latest_vault.resource_type().is_stealth() {
+            self.stealth_balance_for_account_resource(&account_address, latest_vault.resource_address())?
+        } else {
+            let outputs_api = self.wallet_sdk.confidential_outputs_api();
+            outputs_api.get_unspent_balance(&vault_id)?
+        };
 
         if accounts_api.update_vault_balance_and_record_change(
             vault_id,
@@ -306,6 +312,46 @@ where TSpec: WalletSdkSpec
         }
 
         Ok(has_changed)
+    }
+
+    pub(crate) fn record_stealth_balance_change(
+        &self,
+        account_address: ComponentAddress,
+        resource_address: ResourceAddress,
+    ) -> Result<bool, AccountMonitorError> {
+        let accounts_api = self.wallet_sdk.accounts_api();
+        let Some(vault) = accounts_api
+            .get_vault_by_resource(&account_address, &resource_address)
+            .optional()?
+        else {
+            debug!(target: LOG_TARGET, "No vault found for stealth resource {} in account {}; skipping balance-change recording", resource_address, account_address);
+            return Ok(false);
+        };
+        if !vault.resource_type.is_stealth() {
+            debug!(target: LOG_TARGET, "Vault {} for resource {} is not stealth; skipping UTXO balance-change recording", vault.id, resource_address);
+            return Ok(false);
+        }
+
+        let new_stealth_balance = self.stealth_balance_for_account_resource(&account_address, &resource_address)?;
+        Ok(accounts_api.update_vault_balance_and_record_change(
+            vault.id,
+            vault.vault_version,
+            vault.revealed_balance,
+            new_stealth_balance,
+            BalanceChangeSource::Scan,
+        )?)
+    }
+
+    fn stealth_balance_for_account_resource(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<Amount, AccountMonitorError> {
+        let balance = self
+            .wallet_sdk
+            .stealth_outputs_api()
+            .get_unspent_balance_for_account_resource(account_address, resource_address)?;
+        Ok(balance)
     }
 
     async fn associate_resource_with_account(
@@ -753,6 +799,7 @@ where TSpec: WalletSdkSpec
         accounts_api.add_vault(
             *account_addr,
             vault_id,
+            0,
             *vault.resource_address(),
             vault.resource_type(),
             token_symbol,

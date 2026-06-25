@@ -9,10 +9,19 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::{Transaction, TransactionId, args};
 use tari_ootle_wallet_sdk::{
-    models::{BalanceChangeSource, BalanceChangeSourceType, KeyBranch, KeyId},
+    models::{BalanceChangeSource, BalanceChangeSourceType, KeyBranch, KeyId, OutputStatus, StealthOutputModel},
     storage::{WalletStoreWriter, WriteableWalletStore},
 };
-use tari_template_lib::types::{Amount, ComponentAddress, ResourceType, VaultId, constants::TARI_TOKEN};
+use tari_template_lib::types::{
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    ResourceType,
+    VaultId,
+    constants::TARI_TOKEN,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    stealth::SpendCondition,
+};
 
 use crate::support::Test;
 
@@ -22,6 +31,32 @@ fn build_transaction() -> Transaction {
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])
         .build_and_seal(&RistrettoSecretKey::from(1))
+}
+
+fn stealth_output(account: ComponentAddress, value: u64, seed: u8) -> StealthOutputModel {
+    StealthOutputModel {
+        owner_account: account,
+        resource_address: TARI_TOKEN,
+        commitment: PedersenCommitmentBytes::from_array([seed; PedersenCommitmentBytes::length()]),
+        value,
+        sender_public_nonce: RistrettoPublicKeyBytes::from_bytes(
+            &[seed.wrapping_add(1); RistrettoPublicKeyBytes::length()],
+        )
+        .unwrap(),
+        view_only_key_id: KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+        owner_key_id: Some(KeyId::derived(KeyBranch::Account, 0)),
+        encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
+        tag_byte: UtxoTag::new(u32::from(seed)),
+        memo: None,
+        spend_condition: SpendCondition::Signed(RistrettoPublicKeyBytes::default()),
+        minimum_value_promise: 0,
+        status: OutputStatus::Unspent,
+        is_burnt: false,
+        is_frozen: false,
+        is_on_chain: true,
+        is_condition_spendable: true,
+        lock_id: None,
+    }
 }
 
 #[test]
@@ -48,6 +83,7 @@ fn transaction_changes_can_span_accounts_and_vaults() {
         .add_vault(
             second_account,
             second_vault,
+            0,
             TARI_TOKEN,
             ResourceType::Fungible,
             Some("XTR".to_string()),
@@ -162,6 +198,99 @@ fn scan_and_recovery_are_deduplicated_and_duplicate_version_cannot_update_balanc
             .unwrap()
             .total,
         2
+    );
+}
+
+#[test]
+fn scan_same_version_updates_existing_history_and_vault_snapshot() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let vault = Test::test_vault_address();
+
+    assert!(
+        accounts
+            .update_vault_balance_and_record_change(
+                vault,
+                1,
+                Amount::from(10u64),
+                Amount::zero(),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap()
+    );
+    assert!(
+        accounts
+            .update_vault_balance_and_record_change(
+                vault,
+                1,
+                Amount::from(15u64),
+                Amount::from(5u64),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap()
+    );
+
+    let page = accounts
+        .get_balance_changes(&Test::test_account_address(), 0, 10, None, None, None)
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].revealed_delta, "15");
+    assert_eq!(page.changes[0].confidential_delta, "5");
+
+    let balance = accounts.get_vault_balance(&vault).unwrap();
+    assert_eq!(balance.revealed, Amount::from(15u64));
+    assert_eq!(balance.confidential, Amount::from(5u64));
+}
+
+#[test]
+fn stealth_balance_helper_is_account_and_resource_scoped() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let second_account =
+        ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8bbbbbbbb")
+            .unwrap();
+    let second_vault =
+        VaultId::from_str("vault_00000000000000000000000000000000000000000000000000000000000000bb").unwrap();
+    accounts
+        .add_account(
+            Some("second"),
+            &second_account,
+            KeyId::derived(KeyBranch::ViewOnlyKey, 1),
+            KeyId::derived(KeyBranch::Account, 1),
+            Epoch::zero(),
+            true,
+            false,
+        )
+        .unwrap();
+    accounts
+        .add_vault(
+            second_account,
+            second_vault,
+            0,
+            TARI_TOKEN,
+            ResourceType::Stealth,
+            Some("TEST".to_string()),
+            6,
+        )
+        .unwrap();
+
+    let outputs = test.sdk().stealth_outputs_api();
+    outputs
+        .add_output(&stealth_output(Test::test_account_address(), 10, 10))
+        .unwrap();
+    outputs.add_output(&stealth_output(second_account, 99, 11)).unwrap();
+
+    assert_eq!(
+        outputs
+            .get_unspent_balance_for_account_resource(&Test::test_account_address(), &TARI_TOKEN)
+            .unwrap(),
+        Amount::from(10u64)
+    );
+    assert_eq!(
+        outputs
+            .get_unspent_balance_for_account_resource(&second_account, &TARI_TOKEN)
+            .unwrap(),
+        Amount::from(99u64)
     );
 }
 

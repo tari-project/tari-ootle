@@ -268,6 +268,7 @@ diesel::table! {
         resource_type -> Text,
         revealed_balance -> Text,
         confidential_balance -> Text,
+        vault_version -> Integer,
         token_symbol -> Nullable<Text>,
         divisibility -> Integer,
         created_at -> Timestamp,

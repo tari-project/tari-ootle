@@ -272,13 +272,19 @@ where
             WalletEvent::TransactionInvalid(event) => {
                 self.pending_accounts.remove(&event.transaction_id);
             },
+            WalletEvent::UtxoRecovered(event) => {
+                self.scanner
+                    .record_stealth_balance_change(event.account_address, *event.address.resource_address())?;
+            },
+            WalletEvent::UtxoSpent(event) => {
+                self.scanner
+                    .record_stealth_balance_change(event.account_address, *event.address.resource_address())?;
+            },
             WalletEvent::AccountCreatedOnChain(_) |
             WalletEvent::AccountChangedOnChain(_) |
             WalletEvent::AuthLoginRequest(_) |
             WalletEvent::UtxoRecoveryStarted(_) |
-            WalletEvent::UtxoRecovered(_) |
-            WalletEvent::UtxoRecoveryCompleted(_) |
-            WalletEvent::UtxoSpent(_) => {},
+            WalletEvent::UtxoRecoveryCompleted(_) => {},
         }
         Ok(())
     }

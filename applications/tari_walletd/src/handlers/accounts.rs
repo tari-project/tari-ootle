@@ -390,8 +390,10 @@ pub async fn handle_get_balance_changes(
         Crud::Read,
         Some(*account.component_address()),
     )])?;
+    const MAX_BALANCE_CHANGE_LIMIT: usize = 200;
     let limit = usize::try_from(req.limit)
-        .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {e}"))))?;
+        .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {e}"))))?
+        .min(MAX_BALANCE_CHANGE_LIMIT);
     let offset = usize::try_from(req.offset)
         .map_err(|e| invalid_params("offset", Some(&format!("offset overflowed usize: {e}"))))?;
     let accounts_api = sdk.accounts_api();
@@ -1593,6 +1595,7 @@ mod balance_change_handler_tests {
                 .add_vault(
                     account,
                     vault,
+                    0,
                     resource,
                     ResourceType::Fungible,
                     Some(symbol.to_string()),
@@ -1627,6 +1630,17 @@ mod balance_change_handler_tests {
                 BalanceChangeSource::Scan,
             )
             .unwrap();
+        for version in 2..=206 {
+            accounts
+                .update_vault_balance_and_record_change(
+                    second_vault,
+                    version,
+                    Amount::from(200u64 + u64::from(version)),
+                    Amount::zero(),
+                    BalanceChangeSource::Scan,
+                )
+                .unwrap();
+        }
 
         let notify = Notify::new(10);
         let mut shutdown = Shutdown::new();
@@ -1669,6 +1683,19 @@ mod balance_change_handler_tests {
         assert_eq!(response.changes[0].resource_address, first_resource);
         assert_eq!(response.changes[0].revealed_delta, "100");
         assert_eq!(response.changes[0].source, BalanceChangeSource::Scan);
+
+        let capped_response = handle_get_balance_changes(&context, Some(&bearer), AccountsGetBalanceChangesRequest {
+            account: "savings".into(),
+            offset: 0,
+            limit: u32::MAX,
+            resource_address: None,
+            transaction_id: None,
+            source_type: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(capped_response.total, 208);
+        assert_eq!(capped_response.changes.len(), 200);
 
         let missing_account_err =
             handle_get_balance_changes(&context, Some(&bearer), AccountsGetBalanceChangesRequest {

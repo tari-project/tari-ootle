@@ -320,6 +320,17 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(balance)
     }
 
+    pub fn get_unspent_balance_for_account_resource(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<Amount, StealthOutputsApiError> {
+        let outputs = self.store.with_read_tx(|tx| {
+            tx.stealth_outputs_get_unspent_by_account(account_address, Some(resource_address), false)
+        })?;
+        Ok(outputs.into_iter().map(|o| Amount::from(o.value)).sum::<Amount>())
+    }
+
     pub fn get_unspent_balance(
         &self,
         resource_address: &ResourceAddress,

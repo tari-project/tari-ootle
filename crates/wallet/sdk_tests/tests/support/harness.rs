@@ -101,6 +101,7 @@ impl Test {
             .add_vault(
                 Test::test_account_address(),
                 Test::test_vault_address(),
+                0,
                 STEALTH_TARI_RESOURCE_ADDRESS,
                 ResourceType::Stealth,
                 Some("TEST".to_string()),

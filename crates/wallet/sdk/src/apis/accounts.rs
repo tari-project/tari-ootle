@@ -223,16 +223,17 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             {
                 return Ok(false);
             }
-            if !tx.balance_changes_insert(
+            let recorded = tx.balance_changes_insert(
                 &current_vault,
                 vault_version,
                 revealed_balance,
                 confidential_balance,
                 source,
-            )? {
+            )?;
+            if !recorded && source.transaction_id().is_some() {
                 return Ok(false);
             }
-            tx.vaults_update(vault_address, revealed_balance, confidential_balance)?;
+            tx.vaults_update(vault_address, vault_version, revealed_balance, confidential_balance)?;
             Ok(true)
         })?)
     }
@@ -418,6 +419,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         &self,
         account_address: ComponentAddress,
         vault_address: VaultId,
+        vault_version: u32,
         resource_address: ResourceAddress,
         resource_type: ResourceType,
         token_symbol: Option<String>,
@@ -427,6 +429,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         tx.vaults_insert(VaultModel {
             account_address,
             id: vault_address,
+            vault_version,
             resource_address,
             resource_type,
             revealed_balance: Amount::zero(),

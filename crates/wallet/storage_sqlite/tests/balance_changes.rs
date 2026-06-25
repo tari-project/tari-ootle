@@ -89,6 +89,7 @@ fn setup_store_at(path: impl AsRef<Path>) -> (SqliteWalletStore, VaultId, VaultI
         tx.vaults_insert(VaultModel {
             account_address,
             id,
+            vault_version: 0,
             resource_address,
             resource_type,
             confidential_balance: Amount::zero(),
@@ -127,7 +128,7 @@ fn record_change(
         tx.balance_changes_insert(&current, vault_version, revealed_after, confidential_after, source)
             .unwrap()
     );
-    tx.vaults_update(vault_address, revealed_after, confidential_after)
+    tx.vaults_update(vault_address, vault_version, revealed_after, confidential_after)
         .unwrap();
     tx.commit().unwrap();
 }
@@ -376,6 +377,118 @@ fn attributes_only_the_exact_vault_version_across_round_trips_and_recovery() {
     assert_eq!(transaction_page.changes[0].source, BalanceChangeSource::Transaction {
         transaction_id: second_transaction_id,
     });
+}
+
+#[test]
+fn same_version_scan_updates_after_balance_and_deletes_net_zero_row() {
+    let (store, first_vault, _, _, _) = setup_store();
+    record_change(
+        &store,
+        first_vault,
+        1,
+        Amount::zero(),
+        Amount::from(10u64),
+        BalanceChangeSource::Scan,
+    );
+
+    let mut tx = store.create_write_tx().unwrap();
+    let current = tx.vaults_get(&first_vault).unwrap();
+    assert!(
+        tx.balance_changes_insert(
+            &current,
+            1,
+            Amount::zero(),
+            Amount::from(15u64),
+            BalanceChangeSource::Scan,
+        )
+        .unwrap()
+    );
+    tx.vaults_update(first_vault, 1, Amount::zero(), Amount::from(15u64))
+        .unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    let mut tx = store.create_read_tx().unwrap();
+    let page = tx
+        .balance_changes_get_page_by_account(&account_address(), 0, 10, None, None, None)
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].confidential_before, Amount::zero());
+    assert_eq!(page.changes[0].confidential_after, Amount::from(15u64));
+    assert_eq!(page.changes[0].confidential_delta, "15");
+    let vault = tx.vaults_get(&first_vault).unwrap();
+    assert_eq!(vault.vault_version, 1);
+    assert_eq!(vault.confidential_balance, Amount::from(15u64));
+    drop(tx);
+
+    let mut tx = store.create_write_tx().unwrap();
+    let current = tx.vaults_get(&first_vault).unwrap();
+    assert!(
+        tx.balance_changes_insert(&current, 1, Amount::zero(), Amount::zero(), BalanceChangeSource::Scan,)
+            .unwrap()
+    );
+    tx.vaults_update(first_vault, 1, Amount::zero(), Amount::zero())
+        .unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    let mut tx = store.create_read_tx().unwrap();
+    let page = tx
+        .balance_changes_get_page_by_account(&account_address(), 0, 10, None, None, None)
+        .unwrap();
+    assert_eq!(page.total, 0);
+    let vault = tx.vaults_get(&first_vault).unwrap();
+    assert_eq!(vault.confidential_balance, Amount::zero());
+}
+
+#[test]
+fn same_version_scan_does_not_clobber_transaction_row() {
+    let (store, first_vault, _, _, _) = setup_store();
+    let transaction = build_transaction(5);
+    let transaction_id = transaction.calculate_id();
+    let mut tx = store.create_write_tx().unwrap();
+    tx.transactions_insert(&transaction, None, &[account_address()], false)
+        .unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    record_change(
+        &store,
+        first_vault,
+        1,
+        Amount::from(10u64),
+        Amount::zero(),
+        BalanceChangeSource::Transaction { transaction_id },
+    );
+
+    let mut tx = store.create_write_tx().unwrap();
+    let current = tx.vaults_get(&first_vault).unwrap();
+    assert!(
+        !tx.balance_changes_insert(
+            &current,
+            1,
+            Amount::from(20u64),
+            Amount::zero(),
+            BalanceChangeSource::Scan,
+        )
+        .unwrap()
+    );
+    tx.vaults_update(first_vault, 1, Amount::from(20u64), Amount::zero())
+        .unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    let mut tx = store.create_read_tx().unwrap();
+    let page = tx
+        .balance_changes_get_page_by_account(&account_address(), 0, 10, None, None, None)
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].source, BalanceChangeSource::Transaction {
+        transaction_id
+    });
+    assert_eq!(page.changes[0].revealed_after, Amount::from(10u64));
+    let vault = tx.vaults_get(&first_vault).unwrap();
+    assert_eq!(vault.revealed_balance, Amount::from(20u64));
 }
 
 #[test]

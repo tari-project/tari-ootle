@@ -26,7 +26,13 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::{
     PeerAddress,
-    proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, GetHighQcRequest, SyncStateRequest},
+    proto::rpc::{
+        GetCheckpointsRequest,
+        GetCheckpointsResponse,
+        GetHighQcRequest,
+        SyncStateRequest,
+        sync_state_response,
+    },
 };
 use tari_ootle_storage::{
     ShardScopedTreeStoreReader,
@@ -158,7 +164,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         mut maybe_persisted_state_version: Option<Version>,
     ) -> Result<Option<Version>, RpcStateSyncError> {
         let checkpoint_shard_root = checkpoint.get_shard_root(shard);
-        let checkpoint_state_version = checkpoint.get_shard_state_version(shard);
 
         let initial_local_state_root = self
             .state_store
@@ -193,36 +198,79 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         // syncing states
         while let Some(result) = state_stream.next().await {
             let msg = result?;
+            let batch = match msg.response {
+                Some(sync_state_response::Response::Batch(batch)) => batch,
+                Some(sync_state_response::Response::Complete(complete)) => {
+                    // The stream always terminates with a completion marker. Verify the synced shard
+                    // root against the trusted checkpoint at our last committed version: the producer
+                    // streamed every transition up to the checkpoint epoch, so any gap to
+                    // checkpoint_state_version is tree-only (no substate change) and the root at our
+                    // last written version equals the checkpoint root. The marker's own version is the
+                    // producer's claim and is not trusted as the verification target.
+                    debug!(
+                        target: LOG_TARGET,
+                        "🛜 Stream complete for {shard} (peer reported v{}, locally committed v{})",
+                        complete.synced_to_version,
+                        maybe_persisted_state_version.unwrap_or(0),
+                    );
+                    let local_state_root = self.state_store.with_read_tx(|tx| {
+                        self.calculate_state_root_for_shard(tx, shard, maybe_persisted_state_version)
+                    })?;
+                    if local_state_root != checkpoint_shard_root {
+                        error!(
+                            target: LOG_TARGET,
+                            "❌ State root mismatch for {shard}. Checkpoint {expected} but got {actual}. Rolling back.",
+                            expected = checkpoint_shard_root,
+                            actual = local_state_root,
+                        );
+                        return Err(RpcStateSyncError::StateRootMismatch {
+                            expected: checkpoint_shard_root,
+                            actual: local_state_root,
+                        });
+                    }
+                    info!(
+                        target: LOG_TARGET,
+                        "🛜 ✅ State root for {shard} matches checkpoint: {local_state_root} (v{})",
+                        maybe_persisted_state_version.unwrap_or(0),
+                    );
+                    return Ok(maybe_persisted_state_version);
+                },
+                None => {
+                    return Err(RpcStateSyncError::InvalidResponse(anyhow!(
+                        "Received sync state response with no variant set."
+                    )));
+                },
+            };
 
-            if msg.updates.is_empty() {
+            if batch.updates.is_empty() {
                 return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                     "Received empty state transition batch."
                 )));
             }
-            if msg.updates.len() > STATE_SYNC_MAX_BATCH_SIZE {
+            if batch.updates.len() > STATE_SYNC_MAX_BATCH_SIZE {
                 return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                     "Received too many state updates in a batch: {}. Expected at most {}.",
-                    msg.updates.len(),
+                    batch.updates.len(),
                     STATE_SYNC_MAX_BATCH_SIZE
                 )));
             }
-            if msg.state_version < start_state_version {
+            if batch.state_version < start_state_version {
                 return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                     "Received state version {} that is less than the persisted state version {}.",
-                    msg.state_version,
+                    batch.state_version,
                     start_state_version
                 )));
             }
 
-            if expected_state_version.is_some_and(|v| v != msg.state_version) {
+            if expected_state_version.is_some_and(|v| v != batch.state_version) {
                 return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                     "Received state version {} that is not the expected state version {}.",
-                    msg.state_version,
+                    batch.state_version,
                     expected_state_version.unwrap()
                 )));
             }
 
-            let state_version = msg.state_version;
+            let state_version = batch.state_version;
             if state_version < last_state_version {
                 return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                     "Received state version {} that is less than the last state version {}.",
@@ -233,16 +281,16 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
             last_state_version = state_version;
 
-            self.stats.total_transitions += msg.updates.len() as u64;
+            self.stats.total_transitions += batch.updates.len() as u64;
 
-            tree_changes.reserve_exact(msg.updates.len());
-            updates.reserve_exact(msg.updates.len());
+            tree_changes.reserve_exact(batch.updates.len());
+            updates.reserve_exact(batch.updates.len());
 
-            let updates_for_state_version = msg
+            let updates_for_state_version = batch
                 .updates
                 .into_iter()
                 .map(|t| SubstateUpdateProof::try_from(t).map_err(RpcStateSyncError::InvalidResponse));
-            let msg_epoch = msg.epoch.map(Epoch::from).ok_or_else(|| {
+            let msg_epoch = batch.epoch.map(Epoch::from).ok_or_else(|| {
                 RpcStateSyncError::InvalidResponse(anyhow!("Received state transition with no epoch"))
             })?;
 
@@ -258,7 +306,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
             info!(target: LOG_TARGET, "🛜 Sync: {} state update(s), state version: v{}", updates.len(), state_version);
 
-            if msg.has_more {
+            if batch.has_more {
                 info!(
                     target: LOG_TARGET,
                     "🛜 Received more state updates for v{}. Continuing to buffer...",
@@ -272,7 +320,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
             expected_state_version = None;
 
-            // Verify and commit changes
+            // Commit the buffered changes for this state version. The shard root is verified once, on
+            // the terminal SyncComplete, against the trusted checkpoint.
             self.state_store.with_write_tx(|tx| {
                 info!(
                     target: LOG_TARGET,
@@ -288,7 +337,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     store.transaction(),
                     shard,
                     msg_epoch,
-                    msg.state_version,
+                    state_version,
                     updates.drain(..),
                 )?;
 
@@ -296,35 +345,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 if !tree_changes.is_empty() {
                     let mut state_tree = SpreadPrefixStateTree::new(&mut store);
                     info!(target: LOG_TARGET, "🛜 Committing {} state tree changes batch v{}", tree_changes.len(), state_version);
-                    let local_state_root = state_tree.batch_put_substate_changes(maybe_persisted_state_version, state_version, tree_changes.drain(..))?;
-                    // Only check the state root once we have reached the checkpoint state version
-                    // TODO: we should sync to multiple checkpoints to catch misbehaviour earlier
-                    if state_version == checkpoint_state_version {
-                        if local_state_root != checkpoint_shard_root {
-                            error!(
-                                target: LOG_TARGET,
-                                "❌ State root mismatch for {shard}. Checkpoint {expected} but got {actual}. Rolling back.",
-                                expected = checkpoint_shard_root,
-                                actual = local_state_root,
-                            );
-
-                            // rollback!
-                            return Err(RpcStateSyncError::StateRootMismatch {
-                                expected: checkpoint_shard_root,
-                                actual: local_state_root,
-                            });
-                        }
-                        info!(
-                            target: LOG_TARGET,
-                            "🛜 ✅ State root for {shard} matches checkpoint: {local_state_root} (v{state_version})",
-                        );
-
-                        maybe_persisted_state_version = Some(state_version);
-                        store.set_state_version(state_version)?;
-                        // Done
-                        return Ok(());
-                    }
-
+                    state_tree.batch_put_substate_changes(maybe_persisted_state_version, state_version, tree_changes.drain(..))?;
                     maybe_persisted_state_version = Some(state_version);
                     store.set_state_version(state_version)?;
                 }
@@ -333,9 +354,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             })?;
         }
 
-        info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{}", maybe_persisted_state_version.unwrap_or(1));
-
-        Ok(maybe_persisted_state_version)
+        // The stream ended without a SyncComplete - the peer closed early, so the sync is unverified.
+        Err(RpcStateSyncError::InvalidResponse(anyhow!(
+            "State sync stream for {shard} ended without a completion marker"
+        )))
     }
 
     fn calculate_state_root_for_shard(
@@ -854,16 +876,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         // case and conflates "no leaf at this epoch" with "no leaf at all".
         let leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get_any(tx).optional())?;
 
-        // Cold-start: no leaf has ever been written. Sync iff the oracle has moved past the
-        // birthday epoch — replicates pre-existing behaviour.
+        // Cold start: a node that has never entered consensus has no leaf block (a fresh node, or one
+        // whose state was wiped). The birthday epoch - the first epoch any validator was active on the
+        // network - is a cheap local proxy for "is there a previous epoch's checkpoint to adopt": if
+        // the oracle has moved past it there is prior committed state to sync; at or before it there is
+        // nothing, so we join consensus directly.
         let Some(leaf) = leaf_block else {
             let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
                 return Err(RpcStateSyncError::InvariantError {
-                    details: "Check sync called before epoch birthday was determined".to_string(),
+                    details: "Check sync called before the birthday epoch was determined".to_string(),
                 });
             };
             return Ok(if oracle_epoch > birthday_epoch {
-                // Cold start: no leaf, no probe — fall back to the oracle's current epoch.
                 SyncStatus::Behind { target_epoch: None }
             } else {
                 SyncStatus::UpToDate

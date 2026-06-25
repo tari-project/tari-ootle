@@ -515,6 +515,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 shard,
                 req.start_state_version,
                 end_epoch,
+                self.consensus.current_epoch(),
                 STATE_SYNC_MAX_BATCH_SIZE
                     .try_into()
                     .expect("STATE_SYNC_MAX_BATCH_SIZE is not zero"),

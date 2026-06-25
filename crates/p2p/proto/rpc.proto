@@ -262,10 +262,29 @@ message SyncStateRequest {
 }
 
 message SyncStateResponse {
+  oneof response {
+    SubstateBatch batch = 1;
+    SyncComplete complete = 2;
+  }
+}
+
+// A batch of substate updates at a single state version. A state version whose updates exceed the
+// stream batch size is split into multiple batches, all but the last carrying has_more = true.
+message SubstateBatch {
   uint64 state_version = 1;
   repeated SubstateUpdate updates = 2;
   bool has_more = 3;
   tari.ootle.common.Epoch epoch = 4;
+}
+
+// Terminal message of every sync_state stream, stating the version the shard is now synced to.
+// For an unbounded (sync-to-tip) request this is the committed state-tree tip and is authoritative
+// for the client's cursor - it advances the client over trailing versions that streamed no updates
+// (filtered out, or tree-only bumps). For a bounded (checkpoint) request the client verifies against
+// its own checkpoint, so this carries the producer's last streamed version.
+message SyncComplete {
+  uint64 synced_to_version = 1;
+  tari.ootle.common.Epoch epoch = 2;
 }
 
 enum TemplateType {

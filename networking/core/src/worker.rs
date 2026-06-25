@@ -767,6 +767,14 @@ where
             mdns::Event::Discovered(peers_and_addrs) => {
                 for (peer, addr) in peers_and_addrs {
                     debug!(target: LOG_TARGET, "📡 mDNS discovered peer {} at {}", peer, addr);
+                    // Persist the address so a later peer-id-only dial (e.g. an RPC session) can
+                    // resolve it through the peer store, rather than only succeeding while the
+                    // connection opened below is still live.
+                    self.swarm
+                        .behaviour_mut()
+                        .peer_store
+                        .store_mut()
+                        .add_address(&peer, &addr);
                     self.swarm
                         .dial(
                             DialOpts::peer_id(peer)

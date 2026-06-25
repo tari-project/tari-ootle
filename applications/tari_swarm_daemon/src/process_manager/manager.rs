@@ -464,19 +464,37 @@ impl ProcessManager {
                 }
             },
             StartInstance { instance_id, reply } => {
-                let executable = {
-                    let instance = self
-                        .instance_manager
-                        .instances()
-                        .find(|i| i.id() == instance_id)
-                        .ok_or_else(|| anyhow!("Instance with ID '{}' not found", instance_id))?;
-                    let instance_type = instance.instance_type();
-                    self.executable_manager
-                        .compile_executable_if_required(instance_type)
-                        .await?
+                let is_validator = self
+                    .instance_manager
+                    .instances()
+                    .find(|i| i.id() == instance_id)
+                    .map(|i| i.instance_type().is_validator())
+                    .ok_or_else(|| anyhow!("Instance with ID '{}' not found", instance_id))?;
+
+                let result = {
+                    let executable = {
+                        let instance = self
+                            .instance_manager
+                            .instances()
+                            .find(|i| i.id() == instance_id)
+                            .ok_or_else(|| anyhow!("Instance with ID '{}' not found", instance_id))?;
+                        let instance_type = instance.instance_type();
+                        self.executable_manager
+                            .compile_executable_if_required(instance_type)
+                            .await?
+                    };
+                    self.instance_manager.start_instance(instance_id, executable).await
                 };
 
-                let result = self.instance_manager.start_instance(instance_id, executable).await;
+                // A restarted validator comes up with an empty in-memory peer store and no seed
+                // peers, so it cannot rediscover its committee on its own (mDNS is unreliable on
+                // some hosts). Re-run manual peer wiring so the committee reconnects.
+                if result.is_ok() && is_validator && self.enable_manual_connect {
+                    if let Err(err) = self.connect_all_validators().await {
+                        log::error!("Failed to reconnect validators after restarting instance {instance_id}: {err}");
+                    }
+                }
+
                 if reply.send(result).is_err() {
                     log::warn!("Request cancelled before response could be sent")
                 }

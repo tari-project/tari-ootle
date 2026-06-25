@@ -58,7 +58,14 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         // filtered out for its subscription). Snapshotting first ensures the marker never reports
         // beyond what we streamed: anything committed after this point is left for the next round.
         let tip_at_start = if self.end_epoch.is_none() {
-            self.read_latest_tree_version()
+            match self.read_latest_tree_version() {
+                Ok(version) => version,
+                Err(err) => {
+                    error!(target: LOG_TARGET, "🌍 Error reading latest tree version for {}: {}", self.shard, err);
+                    self.send(Err(RpcStatus::log_internal_error(LOG_TARGET)(err))).await?;
+                    return Err(());
+                },
+            }
         } else {
             None
         };
@@ -109,18 +116,9 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         self.send_complete(tip_at_start, last_sent_version).await
     }
 
-    fn read_latest_tree_version(&self) -> Option<Version> {
-        match self
-            .store
+    fn read_latest_tree_version(&self) -> Result<Option<Version>, StorageError> {
+        self.store
             .with_read_tx(|tx| tx.state_tree_versions_get_latest(self.shard))
-        {
-            Ok(version) => version,
-            Err(err) => {
-                // Non-fatal: the completion marker is an optimisation; streamed batches are unaffected.
-                warn!(target: LOG_TARGET, "🌍 Failed to read latest tree version for {}: {}", self.shard, err);
-                None
-            },
-        }
     }
 
     /// Terminates every stream with a `SyncComplete` stating the version the client is now synced to.

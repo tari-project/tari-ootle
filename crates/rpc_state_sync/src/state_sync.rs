@@ -876,16 +876,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         // case and conflates "no leaf at this epoch" with "no leaf at all".
         let leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get_any(tx).optional())?;
 
-        // Cold-start: no leaf has ever been written. Sync iff the oracle has moved past the
-        // birthday epoch — replicates pre-existing behaviour.
+        // Cold start: a node that has never entered consensus has no leaf block (a fresh node, or one
+        // whose state was wiped). The birthday epoch - the first epoch any validator was active on the
+        // network - is a cheap local proxy for "is there a previous epoch's checkpoint to adopt": if
+        // the oracle has moved past it there is prior committed state to sync; at or before it there is
+        // nothing, so we join consensus directly.
         let Some(leaf) = leaf_block else {
             let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
                 return Err(RpcStateSyncError::InvariantError {
-                    details: "Check sync called before epoch birthday was determined".to_string(),
+                    details: "Check sync called before the birthday epoch was determined".to_string(),
                 });
             };
             return Ok(if oracle_epoch > birthday_epoch {
-                // Cold start: no leaf, no probe — fall back to the oracle's current epoch.
                 SyncStatus::Behind { target_epoch: None }
             } else {
                 SyncStatus::UpToDate

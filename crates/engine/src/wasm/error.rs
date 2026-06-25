@@ -23,6 +23,11 @@ pub enum WasmExecutionError {
     // NOTE this renders as "Wasm RuntimeError: <message>"
     #[error("Wasm {0}")]
     WasmRuntimeError(#[from] wasmer::RuntimeError),
+    #[error(
+        "Insufficient fees to pay for compute: consumed {consumed_points} WASM metering points, which exceeds what \
+         the paid fees cover. Increase the transaction fee."
+    )]
+    InsufficientFeesForCompute { consumed_points: u64 },
     #[error("Expected function {function} to return a pointer")]
     ExpectedPointerReturn { function: String },
     #[error("Memory access error: {0}")]

@@ -173,8 +173,17 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     target: LOG_TARGET,
                     "⛓️ {} validator node change(s) for epoch {}", node_changes.len(), epoch,
                 );
-                // Mark it as a birthday epoch if not already set
-                self.inner.set_birthday_epoch_if_unset(epoch + Epoch(1))?;
+                // The birthday epoch is the first epoch any validator became active on the network; it
+                // is used as a cheap floor for whether there is a previous epoch's checkpoint to sync.
+                // Derive it from an activation epoch in this change set rather than the triggering
+                // event's epoch, whose offset from the activation epoch differs between epoch oracle
+                // implementations.
+                if let Some(activation_epoch) = node_changes.iter().find_map(|c| match c {
+                    ValidatorNodeChange::Add { activation_epoch, .. } => Some(*activation_epoch),
+                    ValidatorNodeChange::Remove { .. } => None,
+                }) {
+                    self.inner.set_birthday_epoch_if_unset(activation_epoch)?;
+                }
 
                 for node_change in node_changes {
                     match node_change {

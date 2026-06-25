@@ -503,17 +503,57 @@ impl NetworkWideStateSync {
                 is_first_iter = false;
             }
             let msg = result?;
-            let msg_epoch = msg
+            let batch =
+                match msg.response {
+                    Some(rpc::sync_state_response::Response::Batch(batch)) => batch,
+                    Some(rpc::sync_state_response::Response::Complete(complete)) => {
+                        // Terminal watermark: advance recorded progress to the version the producer is
+                        // synced to. This covers trailing versions that streamed no updates because their
+                        // substates are all filtered out for our subscription - without it we could never
+                        // observe that we have caught up to such a shard and would re-sync it from scratch
+                        // every round.
+                        let synced_to = StateVersion::new(complete.synced_to_version);
+                        let msg_epoch = complete.epoch.map(Epoch::from).ok_or_else(|| {
+                            NetworkStateSyncError::InvalidStateUpdate {
+                                details: "Received sync completion without epoch".to_string(),
+                            }
+                        })?;
+                        last_version = synced_to;
+                        last_epoch = Some(msg_epoch);
+                        // Only persist when the watermark advances - a caught-up shard re-sends the same
+                        // version every round, and we must not write on every empty round.
+                        let already_synced = sync_plan_mut
+                            .sync_progress()
+                            .last_state_versions
+                            .get(&shard)
+                            .is_some_and(|(v, _)| synced_to <= *v);
+                        if !already_synced {
+                            sync_plan_mut.add_state_sync_progress(shard, synced_to, msg_epoch);
+                            let sync_progress_snapshot = sync_plan_mut.sync_progress().clone();
+                            self.store
+                                .clone()
+                                .with_write_tx(move |tx| tx.key_value_set(Key::SyncProgress, sync_progress_snapshot))
+                                .await?;
+                        }
+                        break;
+                    },
+                    None => {
+                        return Err(NetworkStateSyncError::InvalidStateUpdate {
+                            details: "Received sync state response with no variant set".to_string(),
+                        });
+                    },
+                };
+            let msg_epoch = batch
                 .epoch
                 .map(Epoch::from)
                 .ok_or_else(|| NetworkStateSyncError::InvalidStateUpdate {
                     details: "Received state update without epoch".to_string(),
                 })?;
             last_epoch = Some(msg_epoch);
-            let state_version = StateVersion::new(msg.state_version);
+            let state_version = StateVersion::new(batch.state_version);
             last_version = state_version;
 
-            for update in msg.updates {
+            for update in batch.updates {
                 let update =
                     SubstateUpdateProof::try_from(update).map_err(|e| NetworkStateSyncError::InvalidStateUpdate {
                         details: format!("Failed to convert substate update: {}", e),
@@ -533,7 +573,7 @@ impl NetworkWideStateSync {
                     &mut xtr_claimed,
                 )?;
             }
-            if msg.has_more {
+            if batch.has_more {
                 debug!(target: LOG_TARGET, "🌍️ more updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})");
                 continue;
             }

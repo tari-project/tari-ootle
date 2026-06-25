@@ -5,7 +5,7 @@ use std::io;
 
 use tempfile::tempdir;
 use thiserror::Error;
-use wasm_opt::{Feature, OptimizationError, OptimizationOptions};
+use wasm_opt::{Feature, OptimizationError, OptimizationOptions, Pass};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -45,6 +45,12 @@ pub async fn optimize_wasm_template(template_binary: &[u8]) -> Result<Vec<u8>, E
         .enable_feature(Feature::ReferenceTypes)
         .disable_feature(Feature::Simd)
         .disable_feature(Feature::RelaxedSimd)
+        // The engine rejects a published template carrying any custom section other than
+        // `tari_tdef` (`WasmModule::validate_code`). Strip the toolchain-emitted `name`,
+        // `producers` and `target_features` sections so the optimized binary is accepted.
+        .add_pass(Pass::StripDebug)
+        .add_pass(Pass::StripProducers)
+        .add_pass(Pass::StripTargetFeatuers)
         .run(input_file_path, output_file_path.as_path())?;
 
     let result = tokio::fs::read(output_file_path).await?;

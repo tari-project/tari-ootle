@@ -43,6 +43,7 @@ use wasmer::{
     WasmPtr,
     imports,
     sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, EngineBuilder, Target},
+    wasmparser::{Parser, Payload},
 };
 
 use crate::{
@@ -69,6 +70,12 @@ impl WasmModule {
     }
 
     pub fn validate_code(code: &[u8]) -> Result<TemplateDef, TemplateLoaderError> {
+        // Admission rule for externally-published templates: reject custom
+        // sections the engine does not consume before paying for the cranelift
+        // compile below. Only the registration path runs this; already-stored
+        // templates (and built-ins) load via `load_template_from_code` without
+        // it.
+        reject_disallowed_custom_sections(code).map_err(WasmExecutionError::from)?;
         // TODO: evaluate if there are acceptable cheaper ways to fully validate
         let loaded = Self::load_template_from_code(code)?;
         Ok(loaded.into_template_def())
@@ -317,6 +324,37 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Opti
     Ok(Some(template))
 }
 
+/// Custom sections the engine consumes and therefore admits into a published
+/// template. Everything else (DWARF `.debug_*`, the `name` section,
+/// `producers`, …) is semantically inert — cranelift ignores it — but is stored
+/// verbatim with the template and replicated across the whole validator
+/// committee, so it is rejected at registration.
+const ALLOWED_CUSTOM_SECTIONS: &[&str] = &[TEMPLATE_DEF_CUSTOM_SECTION];
+
+/// Reject a published template that carries any custom section other than those
+/// in [`ALLOWED_CUSTOM_SECTIONS`].
+///
+/// The scan defers to the cranelift compile in
+/// [`WasmModule::load_template_from_code`] for malformed input: a binary that
+/// `wasmparser` cannot parse will also fail wasmer's validation, so stopping at
+/// the first parse error lets that path report the canonical `CompileError`
+/// rather than a less precise one here.
+fn reject_disallowed_custom_sections(code: &[u8]) -> Result<(), WasmValidationError> {
+    for payload in Parser::new(0).parse_all(code) {
+        // Malformed wasm: stop and let the cranelift compile in
+        // `load_template_from_code` report the canonical CompileError.
+        let Ok(payload) = payload else { break };
+        if let Payload::CustomSection(reader) = payload &&
+            !ALLOWED_CUSTOM_SECTIONS.contains(&reader.name())
+        {
+            return Err(WasmValidationError::DisallowedCustomSection {
+                name: reader.name().to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn validate_instance<S: AsStoreMut>(
     store: &mut S,
     instance: &Instance,
@@ -440,4 +478,80 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
         },
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_uleb128(out: &mut Vec<u8>, mut value: u32) {
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if value == 0 {
+                break;
+            }
+        }
+    }
+
+    /// Build a header-only WASM module carrying the given named custom sections,
+    /// in order. `wasmparser` accepts magic+version plus custom sections, which
+    /// is all `reject_disallowed_custom_sections` inspects.
+    fn wasm_with_custom_sections(sections: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+        for (name, payload) in sections {
+            let mut body = Vec::new();
+            write_uleb128(&mut body, name.len() as u32);
+            body.extend_from_slice(name.as_bytes());
+            body.extend_from_slice(payload);
+            wasm.push(0); // custom section id
+            write_uleb128(&mut wasm, body.len() as u32);
+            wasm.extend_from_slice(&body);
+        }
+        wasm
+    }
+
+    #[test]
+    fn accepts_module_without_custom_sections() {
+        let wasm = wasm_with_custom_sections(&[]);
+        reject_disallowed_custom_sections(&wasm).expect("no custom sections is allowed");
+    }
+
+    #[test]
+    fn accepts_only_template_def_section() {
+        let wasm = wasm_with_custom_sections(&[(TEMPLATE_DEF_CUSTOM_SECTION, &[1, 2, 3, 4])]);
+        reject_disallowed_custom_sections(&wasm).expect("tari_tdef is allowed");
+    }
+
+    #[test]
+    fn rejects_name_section() {
+        let wasm = wasm_with_custom_sections(&[("name", &[0u8; 64])]);
+        match reject_disallowed_custom_sections(&wasm) {
+            Err(WasmValidationError::DisallowedCustomSection { name }) => assert_eq!(name, "name"),
+            other => panic!("expected DisallowedCustomSection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_dwarf_debug_section() {
+        let wasm = wasm_with_custom_sections(&[(".debug_info", &[0u8; 1024])]);
+        match reject_disallowed_custom_sections(&wasm) {
+            Err(WasmValidationError::DisallowedCustomSection { name }) => assert_eq!(name, ".debug_info"),
+            other => panic!("expected DisallowedCustomSection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_disallowed_section_alongside_template_def() {
+        let wasm =
+            wasm_with_custom_sections(&[(TEMPLATE_DEF_CUSTOM_SECTION, &[1, 2, 3, 4]), ("producers", &[0u8; 16])]);
+        match reject_disallowed_custom_sections(&wasm) {
+            Err(WasmValidationError::DisallowedCustomSection { name }) => assert_eq!(name, "producers"),
+            other => panic!("expected DisallowedCustomSection, got {other:?}"),
+        }
+    }
 }

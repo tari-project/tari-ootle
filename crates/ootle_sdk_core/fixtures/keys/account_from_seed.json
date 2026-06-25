@@ -1,0 +1,19 @@
+{
+  "name": "keys/account_from_seed",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "derive_account_key_from_seed",
+  "input": {
+    "seed": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+  },
+  "expected": {
+    "keypair": {
+      "account_public_key": "f6f89e316e6ba5f05e5250ddd4a5d3ed39dcd038cf812cc6a154b6ec0951d25f",
+      "account_secret": "62b68e1ef95edb2461279871c378d95a1189fe824f2dbcbcdb53d659d77d7a06"
+    }
+  }
+}

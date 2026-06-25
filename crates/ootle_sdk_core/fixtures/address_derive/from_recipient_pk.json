@@ -1,0 +1,16 @@
+{
+  "name": "address_derive/from_recipient_pk",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "derive_account_address",
+  "input": {
+    "account_public_key": "0707070707070707070707070707070707070707070707070707070707070707"
+  },
+  "expected": {
+    "component_address": "component_0f987d031de55aee41a7233426059b1c3506408832f3283eb2bdaed15a314021"
+  }
+}

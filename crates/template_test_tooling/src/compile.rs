@@ -1,7 +1,16 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{ffi::OsStr, fs, io, io::ErrorKind, path::Path, process::Command};
+use std::{
+    collections::hash_map::DefaultHasher,
+    ffi::{OsStr, OsString},
+    fs,
+    hash::{Hash, Hasher},
+    io,
+    io::ErrorKind,
+    path::Path,
+    process::Command,
+};
 
 use cargo_toml::{Manifest, Product};
 use tari_engine::wasm::WasmModule;
@@ -40,11 +49,35 @@ where
         ));
     }
 
+    let envs = envs
+        .into_iter()
+        .map(|(k, v)| (k.as_ref().to_os_string(), v.as_ref().to_os_string()))
+        .collect::<Vec<_>>();
+
+    // Compile each (features, envs) combination into a dedicated target directory. Cargo writes the
+    // same `release/<name>.wasm` path regardless of feature set, so sharing one target directory lets
+    // concurrent test compilations clobber each other: a build that rebuilds for a different
+    // fingerprint replaces the artifact while another process is reading it, surfacing as a spurious
+    // "No such file or directory" error.
+    let target_subdir = Path::new("target").join(target_dir_key(features, &envs));
+
     let mut command = Command::new("cargo");
     command
         .current_dir(pkg_dir)
         .envs(envs)
-        .args(["build", "--target", "wasm32-unknown-unknown", "--release"]);
+        // CARGO_TARGET_DIR is resolved relative to the command's working directory (pkg_dir).
+        .env("CARGO_TARGET_DIR", &target_subdir)
+        .args([
+            "build",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--release",
+            // Strip the `name`, `producers` and `target_features` custom sections the wasm
+            // toolchain emits. `WasmModule::validate_code` rejects a published template that
+            // carries any custom section other than `tari_tdef`, so templates must ship stripped.
+            "--config",
+            "profile.release.strip=\"symbols\"",
+        ]);
 
     if !features.is_empty() {
         command.arg("--features");
@@ -85,7 +118,7 @@ where
 
     // path of the wasm executable
     let path = pkg_dir
-        .join("target")
+        .join(&target_subdir)
         .join("wasm32-unknown-unknown")
         .join("release")
         .join(wasm_name)
@@ -93,4 +126,24 @@ where
 
     let code = fs::read(path).map_err(|e| io::Error::other(format!("Failed to read wasm file: {}", e)))?;
     Ok(WasmModule::from_code(code))
+}
+
+/// Builds a stable, per-(features, envs) subdirectory name for the package's cargo target directory.
+///
+/// Distinct feature sets and environments produce distinct cargo fingerprints yet the same
+/// `release/<name>.wasm` output path. Giving each combination its own target directory prevents a
+/// concurrent compile from replacing another's artifact while it is being read.
+fn target_dir_key(features: &[&str], envs: &[(OsString, OsString)]) -> String {
+    if features.is_empty() && envs.is_empty() {
+        return "default".to_string();
+    }
+
+    let mut hasher = DefaultHasher::new();
+    let mut features = features.to_vec();
+    features.sort_unstable();
+    features.hash(&mut hasher);
+    let mut envs = envs.iter().collect::<Vec<_>>();
+    envs.sort_unstable();
+    envs.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }

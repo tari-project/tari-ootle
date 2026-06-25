@@ -8,6 +8,7 @@ use tari_ootle_common_types::{Epoch, optional::Optional, shard::Shard};
 use tari_ootle_p2p::proto::rpc;
 use tari_ootle_storage::{
     StateStore,
+    StateStoreReadTransaction,
     StorageError,
     consensus_models::{StateTransition, StateVersionTransitions, SubstateValueFilterFlags},
 };
@@ -23,6 +24,7 @@ pub struct StateSyncTask<TStateStore: StateStore> {
     shard: Shard,
     start_state_version: Version,
     end_epoch: Option<Epoch>,
+    current_epoch: Epoch,
     batch_size: NonZeroUsize,
     value_filters: SubstateValueFilterFlags,
 }
@@ -34,6 +36,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         shard: Shard,
         start_state_version: Version,
         end_epoch: Option<Epoch>,
+        current_epoch: Epoch,
         batch_size: NonZeroUsize,
         value_filters: SubstateValueFilterFlags,
     ) -> Self {
@@ -43,44 +46,64 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             shard,
             start_state_version,
             end_epoch,
+            current_epoch,
             batch_size,
             value_filters,
         }
     }
 
     pub async fn run(mut self) -> Result<(), ()> {
+        // For an unbounded (sync-to-tip) request, snapshot the committed tree tip before scanning. The
+        // completion marker advances the client over trailing versions that stream no updates (all
+        // filtered out for its subscription). Snapshotting first ensures the marker never reports
+        // beyond what we streamed: anything committed after this point is left for the next round.
+        let tip_at_start = if self.end_epoch.is_none() {
+            match self.read_latest_tree_version() {
+                Ok(version) => version,
+                Err(err) => {
+                    error!(target: LOG_TARGET, "🌍 Error reading latest tree version for {}: {}", self.shard, err);
+                    self.send(Err(RpcStatus::log_internal_error(LOG_TARGET)(err))).await?;
+                    return Err(());
+                },
+            }
+        } else {
+            None
+        };
+
         let mut current_state_version = self.start_state_version;
         let mut counter = 0usize;
+        let mut last_sent_version: Option<Version> = None;
         loop {
             match self.fetch_next_batch(current_state_version) {
                 Ok(Some(transitions)) => {
-                    if !transitions.updates.is_empty() {
-                        debug!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) up to v{}", transitions.updates.len(), transitions.state_version);
-                    }
                     if let Some(end_epoch) = self.end_epoch {
                         // TODO(perf): might be better to not load in the first place, however also might incur the cost
                         // of a db index, more complex keys or loading from db anyway
                         if transitions.epoch > end_epoch {
                             info!(target: LOG_TARGET, "🌍 Reached end of requested epoch: {}", end_epoch);
-                            return Ok(());
+                            break;
                         }
+                    }
+                    if !transitions.updates.is_empty() {
+                        debug!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) up to v{}", transitions.updates.len(), transitions.state_version);
                     }
 
                     current_state_version = transitions.state_version + 1;
                     counter += transitions.updates.len();
 
-                    self.send_responses(transitions).await?;
+                    let state_version = transitions.state_version;
+                    let has_updates = !transitions.updates.is_empty();
+                    self.send_batches(transitions).await?;
+                    // A version whose updates are all filtered out streams no batch, so only versions we
+                    // actually sent count towards the client's recorded progress.
+                    if has_updates {
+                        last_sent_version = Some(state_version);
+                    }
                 },
                 Ok(None) => {
                     // TODO: differentiate between not found and end of stream
-                    // self.send(Err(RpcStatus::not_found(format!(
-                    //     "State transition not found with id={current_state_version}"
-                    // ))))
-                    // .await?;
-
                     debug!(target: LOG_TARGET, "🌍sync complete ({}). {} update(s) sent.", current_state_version, counter);
-                    // Finished
-                    return Ok(());
+                    break;
                 },
                 Err(err) => {
                     error!(target: LOG_TARGET, "🌍 Error fetching state transitions: {}", err);
@@ -89,6 +112,44 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                 },
             }
         }
+
+        self.send_complete(tip_at_start, last_sent_version).await
+    }
+
+    fn read_latest_tree_version(&self) -> Result<Option<Version>, StorageError> {
+        self.store
+            .with_read_tx(|tx| tx.state_tree_versions_get_latest(self.shard))
+    }
+
+    /// Terminates every stream with a `SyncComplete` stating the version the client is now synced to.
+    ///
+    /// For an unbounded request this is the committed tree tip (capped to what we streamed), letting the
+    /// client advance over trailing versions that streamed no updates - e.g. a shard whose latest
+    /// transitions are all substate types the client filtered out. Such a shard otherwise streams no
+    /// message at all, so the client could never observe that it has caught up and would re-scan it from
+    /// scratch every round, leaving any version comparison against the committed version unsatisfiable.
+    ///
+    /// For a bounded request the consumer verifies against its own checkpoint, so the reported version is
+    /// just our last streamed version - the consumer does not trust it as the sync target.
+    async fn send_complete(
+        &mut self,
+        tip_at_start: Option<Version>,
+        last_sent_version: Option<Version>,
+    ) -> Result<(), ()> {
+        let synced_to_version = match tip_at_start {
+            // Unbounded: advance to the committed tip, but never past a version we actually streamed.
+            Some(tip) => tip.max(last_sent_version.unwrap_or(0)),
+            // Bounded, or an unbounded shard with no committed state: report the last streamed version.
+            None => last_sent_version.unwrap_or_else(|| self.start_state_version.saturating_sub(1)),
+        };
+
+        self.send(Ok(rpc::SyncStateResponse {
+            response: Some(rpc::sync_state_response::Response::Complete(rpc::SyncComplete {
+                synced_to_version,
+                epoch: Some(self.current_epoch.into()),
+            })),
+        }))
+        .await
     }
 
     fn fetch_next_batch(
@@ -112,7 +173,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         Ok(())
     }
 
-    async fn send_responses(&mut self, transitions: StateVersionTransitions) -> Result<(), ()> {
+    async fn send_batches(&mut self, transitions: StateVersionTransitions) -> Result<(), ()> {
         let chunks = transitions.into_chunks(self.batch_size);
         let num_chunks = chunks.len();
 
@@ -120,10 +181,12 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             let updates = chunk.updates.into_iter().map(Into::into).collect();
 
             self.send(Ok(rpc::SyncStateResponse {
-                state_version: chunk.state_version,
-                updates,
-                has_more: i < num_chunks - 1,
-                epoch: Some(chunk.epoch.into()),
+                response: Some(rpc::sync_state_response::Response::Batch(rpc::SubstateBatch {
+                    state_version: chunk.state_version,
+                    updates,
+                    has_more: i < num_chunks - 1,
+                    epoch: Some(chunk.epoch.into()),
+                })),
             }))
             .await?;
         }

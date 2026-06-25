@@ -1,0 +1,24 @@
+[package]
+name = "ootle_sdk_ffi_c"
+description = "Flat C ABI facade over ootle_sdk_core — extern \"C\" JSON-over-bytes surface + opaque handle for Go/C/C++ hosts"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+# staticlib + cdylib for native (cgo/C/C++) hosts; rlib so the Rust integration tests can link the
+# crate and drive the `extern "C"` fns directly.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+ootle_sdk_core = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+hex = { workspace = true }
+
+[build-dependencies]
+# cbindgen generates `include/ootle_sdk.h` from the `extern "C"` surface at build time. New to the
+# workspace (no prior C-FFI). Pinned to the latest known-good release.
+cbindgen = "0.29.4"

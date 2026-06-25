@@ -41,6 +41,7 @@ members = [
     "crates/template_lib_types",
     "crates/template_macros",
     "crates/template_metadata",
+    "crates/template_provider",
     "crates/template_test_tooling",
     "crates/transaction_manifest",
     "crates/transaction",
@@ -60,6 +61,8 @@ members = [
     "crates/ootle_address",
     "crates/ootle_serde",
     "crates/ootle_byte_type",
+    "crates/ootle_sdk_core",
+    "crates/ootle_sdk_ffi_c",
     "integration_tests",
     "networking/core",
     "networking/swarm",
@@ -136,6 +139,7 @@ tari_ootle_transaction_validation = { path = "crates/transaction_validation" }
 # Template lib
 tari_ootle_template_build = { path = "crates/template_build", version = "0.8" }
 tari_ootle_template_metadata = { path = "crates/template_metadata", version = "0.8" }
+tari_ootle_template_provider = { path = "crates/template_provider" }
 tari_template_lib = { version = "0.28", path = "crates/template_lib" }
 tari_template_lib_types = { version = "0.28", path = "crates/template_lib_types", default-features = false }
 tari_template_abi = { version = "0.18", path = "crates/template_abi", default-features = false }
@@ -144,6 +148,8 @@ tari_bor = { version = "0.14", path = "crates/tari_bor", default-features = fals
 
 ootle_byte_type = { path = "crates/ootle_byte_type", version = "0.9" }
 ootle_serde = { path = "crates/ootle_serde", version = "0.3" }
+ootle-wasm-core = { path = "crates/ootle_wasm/core", version = "0.35" }
+ootle_sdk_core = { path = "crates/ootle_sdk_core", version = "0.35" }
 
 # external minotari/tari dependencies
 minotari_app_grpc = "5.4.0-pre.5"

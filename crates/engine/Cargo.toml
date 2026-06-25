@@ -57,3 +57,7 @@ tempfile = { workspace = true }
 [[bench]]
 name = "benchmarks"
 harness = false
+
+[[bench]]
+name = "stealth_cost"
+harness = false

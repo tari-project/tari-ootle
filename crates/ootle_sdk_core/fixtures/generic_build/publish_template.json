@@ -1,0 +1,52 @@
+{
+  "name": "generic_build/publish_template",
+  "schema_version": 1,
+  "provenance": {
+    "core_version": "0.35.0",
+    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "generated_by": "ootle_sdk_core golden-vector generator"
+  },
+  "operation": "build_and_encode_instructions",
+  "input": {
+    "network": "esmeralda",
+    "keys": {
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
+      "seed": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b"
+    },
+    "fetched": [],
+    "generic_intent": {
+      "fee": 2000,
+      "fee_payment": {
+        "FromAccount": "component_7171717171717171717171717171717171717171717171717171717171717171"
+      },
+      "fee_instructions": [],
+      "instructions": [
+        {
+          "PublishTemplate": {
+            "blob_index": 0,
+            "metadata_hash": null
+          }
+        }
+      ],
+      "blobs": [
+        {
+          "bytes": "0061736d01000000"
+        }
+      ],
+      "inputs": [
+        {
+          "substate_id": "component_7171717171717171717171717171717171717171717171717171717171717171",
+          "version": 0
+        }
+      ],
+      "extra_inputs": [],
+      "min_epoch": null,
+      "max_epoch": null,
+      "dry_run": false
+    }
+  },
+  "expected": {
+    "encoded_transaction": "820081828289182681820283820081d88058207171717171717171717171717171717171717171717171717171717171717171677061795f6665658182018145821907d00081820a81008182820081d8805820717171717171717171717171717171717171717171717171717171717171717100f6f6f5f4818181480061736d0100000081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820886705465665776ed4dd4d43b4fc4dbbb43b957f6e507426c9064f84939c706458203cd2522638a2fa37fcb3093a3dadfc80b4b0607f51f9fc5ecb13d9621e46c50f825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820b6758cd02e922e84a5d6a5cff72cd1a963140b1634f2ef54b2ab8cd0fd1b29125820f6776871dfcc9986c85d7d96d71e5139347910d0ba59892dc863a4386297c401",
+    "transaction_id": "fceb4a805bbf423ad27a0281dcf9bef61bb5c83e31b9fe15437166ff312e706e"
+  }
+}

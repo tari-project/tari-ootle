@@ -76,7 +76,7 @@ use crate::{
         scope::{CallFrame, CallScope},
         state_store::WorkingStateStore,
         tracker_auth::Authorization,
-        validation::check_stealth_transfer_limits,
+        validation::{StealthTransactionTotals, check_stealth_transfer_limits},
     },
     state_store::StateReader,
 };
@@ -112,6 +112,9 @@ pub(super) struct WorkingState<TStore> {
     /// the validator pays the cold compile/deserialise cost at most once per template per process,
     /// so charging it on every entry over-bills the user.
     loaded_template_charges: HashSet<TemplateAddress>,
+    /// Running tally of stealth-transfer work across this transaction, bounding the aggregate native verification cost
+    /// any one transaction can incur (see `limits::STEALTH_LIMITS`).
+    stealth_totals: StealthTransactionTotals,
 }
 
 impl<TStore: StateReader> WorkingState<TStore> {
@@ -143,6 +146,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             fee_state: FeeState::new(),
             loaded_template_charges: HashSet::new(),
             object_ids: ObjectIds::new(limits::ENGINE_LIMITS.max_substate_outputs),
+            stealth_totals: StealthTransactionTotals::default(),
         }
     }
 
@@ -1695,6 +1699,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<ResourceContainer>, RuntimeError> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
+        // Bound the aggregate stealth work across the whole transaction before doing this transfer's crypto, so a
+        // single transaction cannot stack enough native verification to stall the proposing leader.
+        self.stealth_totals
+            .account_transfer(&limits::STEALTH_LIMITS, &statement)?;
         let resource_address = self.resolve_resource_address_ref(resource_address)?;
 
         let resource_lock = self.read_lock_substate(SubstateId::Resource(resource_address))?;

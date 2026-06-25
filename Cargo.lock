@@ -1325,6 +1325,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbindgen"
+version = "0.29.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ecb53484c9c167ba674026b656d8a27d7657a58e6066aa902bfb1a4aa00ae20"
+dependencies = [
+ "clap 4.5.54",
+ "heck 0.5.0",
+ "indexmap 2.13.0",
+ "log",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.117",
+ "tempfile",
+ "toml 0.9.11+spec-1.1.0",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7760,6 +7779,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "ootle_sdk_core"
+version = "0.35.0"
+dependencies = [
+ "blake2 0.10.6",
+ "hex",
+ "ootle-network",
+ "ootle_byte_type",
+ "rand 0.10.1",
+ "serde",
+ "serde_json",
+ "tari_bor",
+ "tari_consensus_types",
+ "tari_crypto",
+ "tari_engine_types",
+ "tari_ootle_address",
+ "tari_ootle_common_types",
+ "tari_ootle_template_metadata",
+ "tari_ootle_transaction",
+ "tari_ootle_wallet_crypto",
+ "tari_template_builtin",
+ "tari_template_lib_types",
+ "thiserror 2.0.18",
+ "zeroize",
+]
+
+[[package]]
+name = "ootle_sdk_ffi_c"
+version = "0.35.0"
+dependencies = [
+ "cbindgen",
+ "hex",
+ "ootle_sdk_core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ootle_serde"
 version = "0.3.0"
 dependencies = [
@@ -11003,7 +11059,7 @@ dependencies = [
 
 [[package]]
 name = "tari_bor"
-version = "0.14.1"
+version = "0.14.2"
 dependencies = [
  "borsh",
  "indexmap 2.13.0",
@@ -11521,6 +11577,7 @@ dependencies = [
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
  "tari_ootle_template_metadata",
+ "tari_ootle_template_provider",
  "tari_ootle_transaction",
  "tari_ootle_transaction_validation",
  "tari_rpc_framework",
@@ -11900,6 +11957,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari_ootle_template_provider"
+version = "0.35.0"
+dependencies = [
+ "anyhow",
+ "dashmap 5.5.3",
+ "log",
+ "mini-moka",
+ "serde",
+ "std-semaphore",
+ "tari_engine",
+ "tari_ootle_common_types",
+ "tari_template_builtin",
+ "tari_template_lib_types",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tari_ootle_transaction"
 version = "0.35.0"
 dependencies = [
@@ -11932,6 +12006,7 @@ dependencies = [
  "anyhow",
  "indexmap 2.13.0",
  "log",
+ "tari_engine_types",
  "tari_networking",
  "tari_ootle_common_types",
  "tari_ootle_storage",
@@ -12696,7 +12771,6 @@ dependencies = [
  "clap 3.2.25",
  "config",
  "console-subscriber",
- "dashmap 5.5.3",
  "futures 0.3.31",
  "include_dir",
  "lazy_static",
@@ -12705,7 +12779,6 @@ dependencies = [
  "log",
  "log4rs",
  "mime_guess",
- "mini-moka",
  "ootle_byte_type",
  "prometheus-client",
  "rand 0.10.1",
@@ -12713,7 +12786,6 @@ dependencies = [
  "serde_json",
  "serde_json5",
  "sqlite_message_logger",
- "std-semaphore",
  "tari_base_node_client",
  "tari_bor",
  "tari_common",
@@ -12731,6 +12803,7 @@ dependencies = [
  "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
+ "tari_ootle_template_provider",
  "tari_ootle_transaction",
  "tari_ootle_transaction_validation",
  "tari_rpc_framework",

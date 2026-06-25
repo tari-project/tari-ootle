@@ -67,10 +67,13 @@ use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, global::GlobalDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_ootle_template_provider::MemoryCacheTemplateProvider;
 use tari_ootle_transaction::{Network, Transaction};
 use tari_ootle_transaction_validation::{
     BasicValidations,
     EpochRangeValidator,
+    PublishTemplateLimitValidator,
+    StealthTransactionLimitsValidator,
     TemplateExistsValidator,
     TransactionDryRunValidator,
     TransactionNetworkValidator,
@@ -105,7 +108,6 @@ use crate::{
         spec::ValidatorTemplateProvider,
     },
     file_l1_submitter::FileLayerOneSubmitter,
-    memory_cache_template_provider::MemoryCacheTemplateProvider,
     migrations,
     p2p::{
         NopLogger,
@@ -481,6 +483,10 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
         .and_then(BasicValidations::new())
         // Cheap structural check — reject over-weight transactions before verifying signatures.
         .and_then(TransactionWeightValidator::new(max_transaction_weight))
+        // Reject transactions whose aggregate stealth-transfer work exceeds the per-transaction caps before
+        // verifying signatures or executing.
+        .and_then(StealthTransactionLimitsValidator::new())
+        .and_then(PublishTemplateLimitValidator::new())
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
 }

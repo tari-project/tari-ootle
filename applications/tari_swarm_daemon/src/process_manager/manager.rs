@@ -464,25 +464,21 @@ impl ProcessManager {
                 }
             },
             StartInstance { instance_id, reply } => {
-                let is_validator = self
+                let (instance_type, is_validator) = self
                     .instance_manager
                     .instances()
                     .find(|i| i.id() == instance_id)
-                    .map(|i| i.instance_type().is_validator())
+                    .map(|i| {
+                        let instance_type = i.instance_type();
+                        (instance_type, instance_type.is_validator())
+                    })
                     .ok_or_else(|| anyhow!("Instance with ID '{}' not found", instance_id))?;
 
                 let result = {
-                    let executable = {
-                        let instance = self
-                            .instance_manager
-                            .instances()
-                            .find(|i| i.id() == instance_id)
-                            .ok_or_else(|| anyhow!("Instance with ID '{}' not found", instance_id))?;
-                        let instance_type = instance.instance_type();
-                        self.executable_manager
-                            .compile_executable_if_required(instance_type)
-                            .await?
-                    };
+                    let executable = self
+                        .executable_manager
+                        .compile_executable_if_required(instance_type)
+                        .await?;
                     self.instance_manager.start_instance(instance_id, executable).await
                 };
 

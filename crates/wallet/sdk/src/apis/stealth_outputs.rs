@@ -387,6 +387,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(exists)
     }
 
+    pub fn get_utxo_value(&self, address: &UtxoAddress) -> Result<u64, StealthOutputsApiError> {
+        let utxo = self.store.with_read_tx(|tx| {
+            tx.stealth_outputs_get_by_commitment(address.resource_address(), &address.id().into_commitment_bytes())
+        })?;
+        Ok(utxo.value)
+    }
+
     pub fn utxos_get_many(
         &self,
         resource_address: &ResourceAddress,

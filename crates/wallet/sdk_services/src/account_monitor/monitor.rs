@@ -19,10 +19,10 @@ use tari_ootle_wallet_sdk::{
         substate::SubstateApiError,
         transaction::TransactionApiError,
     },
-    models::{BalanceChangeSource, NewAccountData, WalletEvent},
+    models::{BalanceChangeSource, NewAccountData, UtxoRecoveredEvent, UtxoSpentEvent, WalletEvent},
 };
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib_types::{ComponentAddress, ResourceAddress};
+use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress};
 use tokio::{
     sync::{broadcast, mpsc},
     time,
@@ -250,6 +250,65 @@ where
         Ok(())
     }
 
+    async fn handle_utxo_recovered(&self, event: UtxoRecoveredEvent) -> Result<(), AccountMonitorError> {
+        let resource_address = *event.address.resource_address();
+        let accounts_api = self.wallet_sdk.accounts_api();
+
+        let vault = match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
+            Ok(vault) => vault,
+            Err(_) => {
+                // No vault for this resource — nothing to record (stealth-only resource without a vault)
+                return Ok(());
+            },
+        };
+
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let current_stealth_balance = stealth_outputs_api.get_unspent_balance(&resource_address)?.balance;
+        let utxo_amount = Amount::from(stealth_outputs_api.get_utxo_value(&event.address)?);
+        let before_stealth = (current_stealth_balance - utxo_amount).max(Amount::zero());
+
+        accounts_api.balance_changes_insert(
+            &vault.id,
+            &resource_address,
+            &vault.revealed_balance,
+            &vault.revealed_balance,
+            &before_stealth,
+            &current_stealth_balance,
+            &BalanceChangeSource::Scan,
+        )?;
+
+        Ok(())
+    }
+
+    async fn handle_utxo_spent(&self, event: UtxoSpentEvent) -> Result<(), AccountMonitorError> {
+        let resource_address = *event.address.resource_address();
+        let accounts_api = self.wallet_sdk.accounts_api();
+
+        let vault = match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
+            Ok(vault) => vault,
+            Err(_) => {
+                return Ok(());
+            },
+        };
+
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let current_stealth_balance = stealth_outputs_api.get_unspent_balance(&resource_address)?.balance;
+        let utxo_amount = Amount::from(stealth_outputs_api.get_utxo_value(&event.address)?);
+        let before_stealth = current_stealth_balance + utxo_amount;
+
+        accounts_api.balance_changes_insert(
+            &vault.id,
+            &resource_address,
+            &vault.revealed_balance,
+            &vault.revealed_balance,
+            &before_stealth,
+            &current_stealth_balance,
+            &BalanceChangeSource::Scan,
+        )?;
+
+        Ok(())
+    }
+
     async fn on_event(&mut self, event: WalletEvent) -> Result<(), AccountMonitorError> {
         debug!(target: LOG_TARGET, "🏦 Account monitor received event: {}", event);
         if let Err(err) = self.wallet_sdk.event_api().log_event(&event) {
@@ -276,9 +335,13 @@ where
             WalletEvent::AccountChangedOnChain(_) |
             WalletEvent::AuthLoginRequest(_) |
             WalletEvent::UtxoRecoveryStarted(_) |
-            WalletEvent::UtxoRecovered(_) |
-            WalletEvent::UtxoRecoveryCompleted(_) |
-            WalletEvent::UtxoSpent(_) => {},
+            WalletEvent::UtxoRecoveryCompleted(_) => {},
+            WalletEvent::UtxoRecovered(event) => {
+                self.handle_utxo_recovered(event).await?;
+            },
+            WalletEvent::UtxoSpent(event) => {
+                self.handle_utxo_spent(event).await?;
+            },
         }
         Ok(())
     }

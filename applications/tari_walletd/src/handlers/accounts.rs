@@ -78,7 +78,6 @@ use tari_ootle_walletd_client::{
         GetBalanceChangesResponse,
         StealthTransferRequest,
         StealthTransferResponse,
-        WalletBalanceChangeSource,
     },
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;

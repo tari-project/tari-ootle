@@ -1,3 +1,6 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
 use chrono::NaiveDateTime;
 use tari_ootle_transaction::transaction_id::TransactionId;
 use tari_template_lib::models::{Amount, ComponentAddress, ResourceAddress, VaultId};

@@ -1,3 +1,6 @@
+//   Copyright 2024 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
 use crate::{handlers::{context::HandlerContext, error::HandlerError}, sdk::models::balance_change::BalanceChange};
 use tari_ootle_transaction::transaction_id::TransactionId;
 use tari_template_lib::models::{ComponentAddress, ResourceAddress};

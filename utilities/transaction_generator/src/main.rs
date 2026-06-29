@@ -15,7 +15,7 @@ use anyhow::anyhow;
 use cli::Cli;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_transaction::Network;
+use tari_ootle_transaction::{Blob, Network};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::{
@@ -84,6 +84,12 @@ fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionB
     let network = args.network.unwrap_or(Network::LocalNet);
     match args.manifest.as_ref() {
         Some(manifest) => {
+            if args.random_signer && args.signer_secret_key.is_none() {
+                anyhow::bail!(
+                    "--random-signer requires --signer: a fresh random key seals each transaction, while the --signer \
+                     key is added as an additional signer (e.g. it owns the fee-paying account and authorises pay_fee)"
+                );
+            }
             let signer_key = args
                 .signer_secret_key
                 .as_ref()
@@ -105,7 +111,17 @@ fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionB
             }
             let templates = parse_templates(&args.templates)?;
             let inputs = parse_inputs(&args.inputs)?;
-            manifest::builder(signer_key, network, manifest, manifest_args, templates, inputs)
+            let blobs = parse_blobs(&args.blobs)?;
+            manifest::builder(
+                signer_key,
+                network,
+                manifest,
+                manifest_args,
+                templates,
+                inputs,
+                blobs,
+                args.random_signer,
+            )
         },
         None => Ok(Box::new(free_coins::builder(network))),
     }
@@ -118,6 +134,22 @@ fn parse_inputs(items: &[String]) -> anyhow::Result<Vec<SubstateRequirement>> {
             s.trim()
                 .parse::<SubstateRequirement>()
                 .map_err(|e| anyhow!("Invalid --input '{}': {}", s, e))
+        })
+        .collect()
+}
+
+fn parse_blobs(items: &[String]) -> anyhow::Result<HashMap<String, Blob>> {
+    items
+        .iter()
+        .map(|s| {
+            let (name, path) = s
+                .split_once('=')
+                .ok_or_else(|| anyhow!("Invalid --blob mapping '{}' (expected <name>=<file_path>)", s))?;
+            let name = name.trim();
+            let path = path.trim();
+            let bytes =
+                fs::read(path).map_err(|e| anyhow!("Failed to read blob '{}' from file '{}': {}", name, path, e))?;
+            Ok((name.to_string(), Blob::from(bytes)))
         })
         .collect()
 }

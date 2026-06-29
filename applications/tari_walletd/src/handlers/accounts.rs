@@ -88,7 +88,7 @@ use tari_template_lib_types::{
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
-    stealth::SpendCondition,
+    stealth::SpendAuthorization,
 };
 use tokio::task;
 
@@ -604,7 +604,7 @@ pub(crate) async fn execute_claim_burn(
             encrypted_data,
             resource_view_key: None,
         },
-        spend_condition: SpendCondition::Signed(stealth_output_owner_public_key.to_byte_type()),
+        auth: SpendAuthorization::Key(stealth_output_owner_public_key.to_byte_type()),
         tag,
     };
 

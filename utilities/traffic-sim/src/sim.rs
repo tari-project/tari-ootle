@@ -293,8 +293,10 @@ impl TrafficSim {
             .await?;
 
         let transaction = Transaction::builder(exchange_wallet.network.as_byte())
-            .pay_fee_from_component(*account.component_address(), 2000u64)
+            .pay_fee_from_component(*account.component_address(), 3000u64)
+            .allocate_component_address("sc")
             .call_function(stablecoin_template, "instantiate", args![
+                Workspace("sc"),
                 amount![10000000000000000000000000000],
                 "SSC",
                 metadata!(
@@ -304,7 +306,7 @@ impl TrafficSim {
                 ),
                 8,
                 view_key.public_key,
-                false
+                None::<()>
             ])
             .put_last_instruction_output_on_workspace("admin_badge")
             .call_method(*account.component_address(), "deposit", args![Workspace("admin_badge")])
@@ -354,8 +356,12 @@ impl TrafficSim {
 
         let (admin_badge, _) = finalize
             .created_resources()
-            .find(|(_, res)| res.resource_type().is_non_fungible() && res.metadata().contains_key("admin_badge"))
-            .ok_or_else(|| anyhow::anyhow!("Failed to find stablecoin resource in transaction finalize output"))?;
+            .find(|(_, res)| {
+                res.resource_type().is_non_fungible() && res.metadata().get("name").is_some_and(|n| n == "Admin")
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!("Failed to find stablecoin admin resource in transaction finalize output")
+            })?;
 
         let coin = Coin {
             template_address: stablecoin_template,
@@ -383,7 +389,9 @@ impl TrafficSim {
         admin_resource_address: ResourceAddress,
     ) -> anyhow::Result<()> {
         let mut exchange_wallet = self.connect_exchange_wallet().await?;
-        let resp = exchange_wallet.client.accounts_get_default().await?;
+
+        let resp = exchange_wallet.client.accounts_get("sim_default".into()).await?;
+        // let resp = exchange_wallet.client.accounts_get_default().await?;
         let exchange_account = AccountWithAddress::new(resp.account, resp.address);
         let exchange_account_key_id = exchange_account
             .account
@@ -462,7 +470,7 @@ impl TrafficSim {
                 .await?;
 
             let transaction = Transaction::builder(wallet.network.as_byte())
-                .pay_fee_from_component(*exchange_account.component_address(), 500u64)
+                .pay_fee_from_component(*exchange_account.component_address(), 2000u64)
                 .call_method(*exchange_account.component_address(), "create_proof_by_amount", args![
                     admin_resource_address,
                     1

@@ -3,5 +3,7 @@ import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 
 /**
  * A read-only view of a stealth input being spent, as exposed to a spend script via the `SpendContext` host op.
+ *
+ * Confidential values remain hidden — only the commitment is visible, exactly as the balance proof operates.
  */
 export type StealthInputView = { commitment: PedersenCommitmentBytes };

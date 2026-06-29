@@ -289,12 +289,12 @@ pub enum StealthResolution {
     NeedMore {
         /// The still-in-progress resolver, carrying the cache + accumulated stealth state + the
         /// stashed [`StealthBuildCtx`].
-        partial: PartialTransaction,
+        partial: Box<PartialTransaction>,
         /// The concrete substate ids the host must fetch next (the authoritative next-fetch set).
         fetch_ids: Vec<String>,
     },
     /// All stealth inputs resolved — the assembled transfer is ready to seal.
-    Resolved(StealthPartialTransaction),
+    Resolved(Box<StealthPartialTransaction>),
 }
 
 /// Seed the host-driven resolver + the stealth-UTXO want list (seed-reproducible: the build seed
@@ -358,14 +358,17 @@ pub fn apply_fetched_substates_stealth(
     match apply_fetched_substates_with_secrets(partial, fetched, &secrets)? {
         Resolution::Resolved(resolved) => {
             let assembled = assemble_resolved_stealth(network, &ctx.intent, resolved, &ctx.entropy)?;
-            Ok(StealthResolution::Resolved(assembled))
+            Ok(StealthResolution::Resolved(Box::new(assembled)))
         },
         Resolution::NeedMore {
             mut partial, fetch_ids, ..
         } => {
             // Not yet resolved — re-stash the context so the next round can assemble.
             partial.restore_stealth_ctx(ctx);
-            Ok(StealthResolution::NeedMore { partial, fetch_ids })
+            Ok(StealthResolution::NeedMore {
+                partial: Box::new(partial),
+                fetch_ids,
+            })
         },
     }
 }
@@ -958,8 +961,12 @@ mod tests {
             crypto::{OutputBody, commit_u64_amount},
             substate::SubstateValue,
         };
-        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
-        use tari_template_lib_types::{access_rules::AccessRule, crypto::UtxoTag, stealth::SpendCondition};
+        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
+        use tari_template_lib_types::{
+            access_rules::AccessRule,
+            crypto::UtxoTag,
+            stealth::{SpendAuthorization, SpendCondition},
+        };
 
         use crate::{inputs::FetchedSubstate, stealth::inputs::stealth_utxo_substate_id};
 
@@ -984,7 +991,9 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance: None,
             },
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 
@@ -1062,8 +1071,12 @@ mod tests {
             crypto::{OutputBody, commit_u64_amount},
             substate::SubstateValue,
         };
-        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
-        use tari_template_lib_types::{access_rules::AccessRule, crypto::UtxoTag, stealth::SpendCondition};
+        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
+        use tari_template_lib_types::{
+            access_rules::AccessRule,
+            crypto::UtxoTag,
+            stealth::{SpendAuthorization, SpendCondition},
+        };
 
         use crate::{inputs::FetchedSubstate, stealth::inputs::stealth_utxo_substate_id};
 
@@ -1087,7 +1100,9 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance: None,
             },
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 
@@ -1146,8 +1161,12 @@ mod tests {
             crypto::{OutputBody, commit_u64_amount},
             substate::SubstateValue,
         };
-        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
-        use tari_template_lib_types::{access_rules::AccessRule, crypto::UtxoTag, stealth::SpendCondition};
+        use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
+        use tari_template_lib_types::{
+            access_rules::AccessRule,
+            crypto::UtxoTag,
+            stealth::{SpendAuthorization, SpendCondition},
+        };
 
         use crate::stealth::{assemble::StealthResolution, inputs::stealth_utxo_substate_id};
 
@@ -1172,7 +1191,9 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance: None,
             },
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 
@@ -1232,13 +1253,13 @@ mod tests {
                 })
                 .collect();
             match apply_fetched_substates_stealth(p, Network::LocalNet, &batch, &spend_secrets).unwrap() {
-                StealthResolution::Resolved(a) => break a,
+                StealthResolution::Resolved(a) => break *a,
                 StealthResolution::NeedMore { partial, fetch_ids } => {
                     if fetch_ids.iter().any(|id| id == &substate_id.to_string()) {
                         saw_utxo_in_fetch = true;
                     }
                     to_serve = fetch_ids;
-                    partial_opt = Some(partial);
+                    partial_opt = Some(*partial);
                 },
             }
             round += 1;
@@ -1340,7 +1361,7 @@ mod tests {
                 Ok(StealthResolution::Resolved(_)) => panic!("must not resolve without the UTXO"),
                 Ok(StealthResolution::NeedMore { partial, fetch_ids }) => {
                     to_serve = fetch_ids;
-                    partial_opt = Some(partial);
+                    partial_opt = Some(*partial);
                 },
                 Err(e) => break e,
             }

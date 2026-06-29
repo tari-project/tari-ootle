@@ -5,7 +5,7 @@ use ootle_byte_type::ConvertFromByteType;
 use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_template_lib::types::{
     crypto::UtxoTag,
-    stealth::{SpendCondition, StealthOutputsStatement},
+    stealth::{SpendAuthorization, StealthOutputsStatement},
 };
 
 use crate::{
@@ -17,14 +17,14 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct ValidatedStealthOutput {
     pub output: ValidateOutputBody,
-    pub spend_condition: SpendCondition,
+    pub auth: SpendAuthorization,
     pub tag: UtxoTag,
 }
 
 impl ValidatedStealthOutput {
     pub fn into_utxo_output(self) -> UtxoOutput {
         UtxoOutput {
-            spend_condition: self.spend_condition,
+            auth: self.auth,
             output: self.output.into_output_body(),
             tag: self.tag,
         }
@@ -71,9 +71,11 @@ pub fn validate_stealth_outputs_statement(
                     viewable_balance,
                 };
 
+                // Unspendable `{no key, no conditions}` outputs are unrepresentable: `SpendAuthorization` has no such
+                // variant, so a decoded output is always spendable by construction — no runtime check needed.
                 Ok(ValidatedStealthOutput {
                     output,
-                    spend_condition: statement.spend_condition.clone(),
+                    auth: statement.auth.clone(),
                     tag: statement.tag,
                 })
             })

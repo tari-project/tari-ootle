@@ -23,14 +23,14 @@ use tari_ootle_wallet_crypto::{
     StealthCryptoApi,
     StealthOutputWitness,
     bullet_proof::generate_extended_bullet_proof,
-    pay_to::PayTo,
+    stealth::pay_to_output_authorization,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
 };
 use tari_template_lib_types::{
     Amount,
     EncryptedData,
     crypto::RistrettoPublicKeyBytes,
-    stealth::{SpendCondition, StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
+    stealth::{StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
 };
 use tokio::task;
 
@@ -82,11 +82,8 @@ impl<C: OutputMaskProvider + Send + Sync> StealthOutputStatementFactory for Loca
         let mut witnesses = Vec::with_capacity(specs.len());
         let mut agg_output_mask = RistrettoSecretKey::default();
         for spec in specs {
-            let StealthOutputWitness {
-                mut witness,
-                spend_condition,
-                tag,
-            } = create_output_witness(&self.credentials, spec).await?;
+            let StealthOutputWitness { mut witness, auth, tag } =
+                create_output_witness(&self.credentials, spec).await?;
 
             let commitment = witness.to_commitment();
             agg_output_mask = &agg_output_mask + &witness.mask;
@@ -106,7 +103,7 @@ impl<C: OutputMaskProvider + Send + Sync> StealthOutputStatementFactory for Loca
                     // Move the encrypted data out of the witness, we don't need it in the bullet proof generation
                     encrypted_data: mem::replace(&mut witness.encrypted_data, EncryptedData::empty()),
                 },
-                spend_condition,
+                auth,
                 tag,
             });
 
@@ -165,20 +162,13 @@ async fn create_output_witness<K: OutputMaskProvider>(
         memo.as_ref(),
     )?;
 
-    let spend_condition = match pay_to {
-        PayTo::StealthPublicKey => {
-            // Create stealth address that the destination can use at spend time
-            let output_owner_public_key = crypto_api.derive_stealth_owner_public_key(
-                destination.network(),
-                destination.account_key(),
-                &nonce_secret,
-            );
-
-            SpendCondition::Signed(output_owner_public_key.to_byte_type())
-        },
-        PayTo::AccessRule(access_rule) => SpendCondition::AccessRule(access_rule),
-        PayTo::Script(script) => SpendCondition::Script(script),
-    };
+    let auth = pay_to_output_authorization(&pay_to, || {
+        // Create stealth address that the destination can use at spend time
+        crypto_api
+            .derive_stealth_owner_public_key(destination.network(), destination.account_key(), &nonce_secret)
+            .to_byte_type()
+    })
+    .map_err(|e| StealthProviderError::UnexpectedError { details: e.to_string() })?;
 
     let witness = OutputWitness {
         amount: amount.get(),
@@ -200,7 +190,7 @@ async fn create_output_witness<K: OutputMaskProvider>(
 
     Ok(StealthOutputWitness {
         witness,
-        spend_condition,
+        auth,
         tag: derived_tag,
     })
 }

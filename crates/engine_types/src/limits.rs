@@ -97,6 +97,23 @@ pub struct StealthLimits {
     pub max_inputs: usize,
     /// Maximum stealth outputs in a single transfer statement.
     pub max_outputs: usize,
+    /// Maximum number of conditions in a single `SpendCondition` conjunction (TIP-0006). A revealed leaf is
+    /// evaluated in full at spend time, and a builtin predicate (e.g. a covenant balance proof or a hashlock) runs
+    /// native, unmetered work — so an unbounded conjunction would be a denial-of-service amplifier. This caps the
+    /// worst-case work of evaluating one leaf. The condition tree itself supplies breadth (a spender reveals only one
+    /// leaf plus a logarithmic inclusion proof), so the tree's size is not a spend-time cost and is not bounded here.
+    pub max_conditions_per_conjunction: usize,
+    /// Maximum size, in bytes, of the witness `data` blob a script-path spend may supply (`SpendWitness::ScriptPath`).
+    /// The blob is processed natively by the revealed leaf's predicates, so it is bounded to cap that work. A hashlock
+    /// preimage or a signature is far smaller; this leaves room for a small CBOR structure a `TemplateFunction`
+    /// decodes.
+    pub max_witness_data_len: usize,
+    /// Maximum number of sibling hashes in a script-path inclusion proof (`MerkleProof`). The proof is
+    /// spender-supplied and each sibling costs one native hash in `verify_inclusion`, so its length is bounded to
+    /// keep that work constant. A proof of length `n` corresponds to a condition tree of up to `2^n` leaves, so
+    /// this ceiling is far beyond any real tree (whose breadth is otherwise unbounded — see
+    /// `max_conditions_per_conjunction`).
+    pub max_inclusion_proof_len: usize,
     /// Maximum number of stealth transfers across a whole transaction.
     pub max_transfers_per_transaction: usize,
     /// Maximum total stealth inputs across a whole transaction.
@@ -113,6 +130,9 @@ pub struct StealthLimits {
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
     max_outputs: 8,
+    max_conditions_per_conjunction: 16,
+    max_witness_data_len: 4096,
+    max_inclusion_proof_len: 32,
     max_transfers_per_transaction: 64,
     max_total_inputs_per_transaction: 1024,
     max_total_outputs_per_transaction: 256,

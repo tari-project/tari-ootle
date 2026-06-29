@@ -937,14 +937,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             encrypted_data: output.output.encrypted_data.clone(),
             status: OutputStatus::LockedUnconfirmed,
             memo,
-            spend_condition: output.spend_condition.clone(),
+            auth: output.auth.clone(),
             minimum_value_promise: output.output.minimum_value_promise,
             tag_byte: output.tag,
             lock_id: Some(lock_id),
             is_burnt: false,
             is_frozen: false,
             is_on_chain: false,
-            is_condition_spendable: self.outputs_api.is_spendable_condition(&output.spend_condition),
+            is_condition_spendable: self.outputs_api.is_spendable_auth(&output.auth),
         })?;
         Ok(())
     }

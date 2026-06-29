@@ -3,11 +3,21 @@
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::ristretto::RistrettoSecretKey;
+/// The canonical digest for a
+/// [`BuiltinPredicate::HashLock`](tari_template_lib_types::stealth::BuiltinPredicate::HashLock)
+/// preimage, re-exported so a wallet can build a hashlock condition without depending on `tari_engine_types`.
+pub use tari_engine_types::stealth::hashlock_digest;
+use tari_engine_types::{limits::STEALTH_LIMITS, stealth::MerkleTree};
 use tari_template_lib_types::{
     Amount,
+    Hash32,
+    bytes::Bytes,
+    crypto::RistrettoPublicKeyBytes,
     stealth::{
         CovenantBalanceClaim,
+        SpendAuthorization,
         SpendCondition,
+        SpendWitness,
         StealthInput,
         StealthInputsStatement,
         StealthOutputsStatement,
@@ -24,8 +34,83 @@ use crate::{
     balance_proof::{generate_covenant_balance_proof_signature, generate_stealth_balance_proof_signature},
     bullet_proof::generate_extended_bullet_proof,
     error::StealthProofError,
+    pay_to::PayTo,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
 };
+
+/// Computes the committed condition-tree (MAST) root for a set of spend-condition leaves. The root is independent of
+/// leaf order. Native hashing lives in `tari_engine_types`; this is the wallet-side entry point for building a
+/// script-gated output.
+pub fn condition_root(conditions: &[SpendCondition]) -> Result<Hash32, WalletCryptoError> {
+    MerkleTree::from_conditions(conditions)
+        .map(|tree| tree.root())
+        .map_err(|e| WalletCryptoError::InvalidArgument {
+            name: "conditions",
+            details: e.to_string(),
+        })
+}
+
+/// Resolves a [`PayTo`] intent to a stealth output's [`SpendAuthorization`]. The one-time stealth key is derived lazily
+/// via `derive_stealth_key`, so it is only computed for the key-path intent.
+pub fn pay_to_output_authorization(
+    pay_to: &PayTo,
+    derive_stealth_key: impl FnOnce() -> RistrettoPublicKeyBytes,
+) -> Result<SpendAuthorization, WalletCryptoError> {
+    match pay_to {
+        PayTo::StealthPublicKey => Ok(SpendAuthorization::Key(derive_stealth_key())),
+        PayTo::AccessRule(rule) => Ok(SpendAuthorization::Script(condition_root(&[
+            SpendCondition::access_rule(rule.clone()),
+        ])?)),
+        PayTo::TemplateFunction(tf) => Ok(SpendAuthorization::Script(condition_root(&[
+            SpendCondition::template_function(tf.clone()),
+        ])?)),
+        PayTo::Conditions(conditions) => Ok(SpendAuthorization::Script(condition_root(conditions)?)),
+    }
+}
+
+/// Builds a script-path [`SpendWitness`] revealing `leaf` from the committed `conditions` set, returning it alongside
+/// the committed `condition_root` to record against the spent input. Use [`script_path_witness_with_data`] when the
+/// leaf has a predicate that consumes spender-supplied data (e.g. a hashlock preimage).
+pub fn script_path_witness(
+    conditions: &[SpendCondition],
+    leaf: &SpendCondition,
+) -> Result<(SpendWitness, Hash32), WalletCryptoError> {
+    script_path_witness_with_data(conditions, leaf, Bytes::default())
+}
+
+/// Builds a script-path [`SpendWitness`] revealing `leaf`, supplying a witness `data` blob the leaf interprets (e.g. a
+/// hashlock preimage, or a CBOR structure a `TemplateFunction` decodes). The blob must not exceed
+/// `STEALTH_LIMITS.max_witness_data_len`.
+pub fn script_path_witness_with_data(
+    conditions: &[SpendCondition],
+    leaf: &SpendCondition,
+    data: Bytes,
+) -> Result<(SpendWitness, Hash32), WalletCryptoError> {
+    let max_witness_data_len = STEALTH_LIMITS.max_witness_data_len;
+    if data.len() > max_witness_data_len {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "data",
+            details: format!(
+                "witness data is {} bytes, exceeding the limit of {max_witness_data_len}",
+                data.len()
+            ),
+        });
+    }
+    let tree = MerkleTree::from_conditions(conditions).map_err(|e| WalletCryptoError::InvalidArgument {
+        name: "conditions",
+        details: e.to_string(),
+    })?;
+    let proof = tree
+        .proof_for_condition(leaf)
+        .ok_or_else(|| WalletCryptoError::InvalidArgument {
+            name: "leaf",
+            details: "Revealed leaf is not a member of the committed condition set".to_string(),
+        })?;
+    Ok((
+        SpendWitness::script_path_with_data(leaf.clone(), proof, data),
+        tree.root(),
+    ))
+}
 
 pub fn create_transfer_statement<'a, Inputs, Outputs>(
     inputs: Inputs,
@@ -64,6 +149,7 @@ where
     for input in &inputs {
         inputs_to_spend.push(StealthInput {
             commitment: input.mask_and_value.to_commitment().to_byte_type(),
+            witness: input.witness.clone(),
         });
         agg_input_mask = agg_input_mask + &input.mask_and_value.mask;
     }
@@ -98,10 +184,10 @@ where
     })
 }
 
-/// Generates a [`CovenantBalanceClaim`] for each distinct `SpendCondition::Script` among the spent inputs, keyed by the
-/// index of the partition's first input. Inputs and outputs are partitioned by condition (matching the engine's
-/// verification), and each partition's proof attests that its committed input value equals its committed output value
-/// plus the exact cleartext outflow `revealed_amount = Σ input values - Σ output values`.
+/// Generates a [`CovenantBalanceClaim`] for each distinct `condition_root` among the script-path spent inputs, keyed by
+/// the index of the partition's first input. Inputs and outputs are partitioned by `condition_root` (matching the
+/// engine's verification), and each partition's proof attests that its committed input value equals its committed
+/// output value plus the exact cleartext outflow `revealed_amount = Σ input values - Σ output values`.
 ///
 /// A covenant partition may not receive more value than it spends in the same transaction (`revealed_amount` would be
 /// negative); deposit into a covenant separately.
@@ -110,17 +196,17 @@ fn generate_covenant_claims(
     outputs: &[&StealthOutputWitness],
 ) -> Result<Vec<CovenantBalanceClaim>, WalletCryptoError> {
     let mut claims = Vec::new();
-    let mut seen: Vec<&SpendCondition> = Vec::new();
+    let mut seen: Vec<Hash32> = Vec::new();
 
-    for (partition_input_index, condition) in inputs
+    for (partition_input_index, root) in inputs
         .iter()
         .enumerate()
-        .filter_map(|(index, input)| Some((index, input.spend_condition.as_ref()?)))
+        .filter_map(|(index, input)| Some((index, input.condition_root?)))
     {
-        if !matches!(condition, SpendCondition::Script(_)) || seen.contains(&condition) {
+        if seen.contains(&root) {
             continue;
         }
-        seen.push(condition);
+        seen.push(root);
 
         let value_overflow = || WalletCryptoError::InvalidArgument {
             name: "covenant",
@@ -130,7 +216,7 @@ fn generate_covenant_claims(
         let mut agg_input_mask = RistrettoSecretKey::default();
         let mut input_value = Amount::zero();
         let mut input_commitments = Vec::new();
-        for input in inputs.iter().filter(|i| i.spend_condition.as_ref() == Some(condition)) {
+        for input in inputs.iter().filter(|i| i.condition_root == Some(root)) {
             agg_input_mask = agg_input_mask + &input.mask_and_value.mask;
             input_value = input_value
                 .checked_add(Amount::from_u64(input.mask_and_value.value))
@@ -141,7 +227,7 @@ fn generate_covenant_claims(
         let mut agg_output_mask = RistrettoSecretKey::default();
         let mut output_value = Amount::zero();
         let mut output_commitments = Vec::new();
-        for output in outputs.iter().filter(|o| &o.spend_condition == condition) {
+        for output in outputs.iter().filter(|o| o.auth.condition_root() == Some(&root)) {
             agg_output_mask = agg_output_mask + &output.witness.mask;
             output_value = output_value
                 .checked_add(Amount::from_u64(output.witness.amount))
@@ -161,7 +247,7 @@ fn generate_covenant_claims(
             partition_input_index: partition_input_index as u32,
             revealed_amount,
             signature: generate_covenant_balance_proof_signature(
-                condition,
+                &root,
                 &agg_input_mask,
                 &agg_output_mask,
                 revealed_amount,
@@ -201,7 +287,7 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutp
 
             Ok::<_, StealthProofError>(StealthUnspentOutput {
                 output,
-                spend_condition: output_stmt.spend_condition.clone(),
+                auth: output_stmt.auth.clone(),
                 tag: output_stmt.tag,
             })
         })
@@ -224,7 +310,6 @@ mod tests {
         Amount,
         EncryptedData,
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
-        stealth::SpendCondition,
     };
 
     use super::*;
@@ -242,7 +327,7 @@ mod tests {
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                     resource_view_key: None,
                 },
-                spend_condition: SpendCondition::Signed(RistrettoPublicKeyBytes::default()),
+                auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
                 tag: UtxoTag::new(0),
             }],
             Amount::zero(),

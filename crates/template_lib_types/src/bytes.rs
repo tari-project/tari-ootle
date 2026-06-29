@@ -130,5 +130,46 @@ mod tests {
         let deserialized: Bytes = tari_bor::from_value(&val).unwrap();
         assert_eq!(original, deserialized);
         assert_eq!(arr, original.as_slice());
+
+        // The CBOR wire form must be a byte string (major type 2 = `0x40..=0x5f`), never an array of integers
+        // (major type 4). The top 3 bits of the head byte are the major type.
+        let raw = tari_bor::encode(&original).unwrap();
+        assert_eq!(
+            raw[0] >> 5,
+            2,
+            "Bytes must CBOR-encode as a byte string, got head byte 0x{:02x}",
+            raw[0]
+        );
+    }
+
+    // Regression: a self-describing format (JSON) has no native byte type, so `serialize_bytes` is rendered as an array
+    // of integers. The deserializer must read that array back, or any `Bytes`-bearing value (e.g. a stored transaction
+    // with a script-path witness) fails to decode.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn json_round_trips() {
+        let original = Bytes::from_vec(vec![0, 1, 2, 250, 255]);
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(json.starts_with('['), "expected a JSON array, got {json}");
+        let deserialized: Bytes = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    // A value decoded from JSON (an integer array) must re-encode to CBOR as the canonical byte string — identical to
+    // the original's CBOR — so a JSON -> CBOR round-trip (e.g. an indexer recomputing a transaction hash) cannot turn a
+    // byte string into `Array(int, int, ...)` and change the bytes.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn json_then_cbor_is_the_canonical_byte_string() {
+        let original = Bytes::from_vec(vec![1, 2, 3, 4, 5]);
+        let from_json: Bytes = serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+
+        let cbor_from_json = tari_bor::encode(&from_json).unwrap();
+        assert_eq!(cbor_from_json, tari_bor::encode(&original).unwrap());
+        assert_eq!(
+            cbor_from_json[0] >> 5,
+            2,
+            "JSON -> CBOR must yield a byte string, not an array"
+        );
     }
 }

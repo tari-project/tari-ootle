@@ -85,7 +85,7 @@ mod tests {
         Amount,
         EncryptedData,
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
-        stealth::{SpendCondition, StealthInput, StealthUnspentOutput, UnspentOutput},
+        stealth::{SpendAuthorization, StealthInput, StealthUnspentOutput, UnspentOutput},
     };
 
     use super::*;
@@ -93,6 +93,9 @@ mod tests {
     const LIMITS: StealthLimits = StealthLimits {
         max_inputs: 1000,
         max_outputs: 8,
+        max_conditions_per_conjunction: 16,
+        max_witness_data_len: 4096,
+        max_inclusion_proof_len: 32,
         max_transfers_per_transaction: 2,
         max_total_inputs_per_transaction: 3,
         max_total_outputs_per_transaction: 2,
@@ -111,7 +114,7 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance_proof: None,
             },
-            spend_condition: SpendCondition::Signed(RistrettoPublicKeyBytes::zero()),
+            auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
             tag: UtxoTag::new(0),
         }
     }

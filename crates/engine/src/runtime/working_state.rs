@@ -14,7 +14,6 @@ use tari_bor::encoded_len;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     Utxo,
-    UtxoOutput,
     ValidatorFeeWithdrawal,
     bucket::Bucket,
     component::Component,
@@ -57,7 +56,7 @@ use tari_template_lib::{
         access_rules::ResourceAuthAction,
         constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
         metadata,
-        stealth::{SpendCondition, StealthInput, StealthTransferStatement},
+        stealth::{SpendAuthorization, StealthInput, StealthTransferStatement},
     },
 };
 
@@ -299,6 +298,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(resource)
     }
 
+    /// Spends every input UTXO (down + frozen/burnt checks) and validates the confidential balance of the transfer.
+    /// Per-input *authorization* is not performed here: it is gated up front by
+    /// [`RuntimeInterfaceImpl::verify_input_authorizations`], which runs before this executes so a rejection leaves the
+    /// inputs unspent.
     pub fn validate_and_spend_stealth_utxos(
         &mut self,
         resource_address: ResourceAddress,
@@ -316,69 +319,32 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 }
                 .into());
             }
-
-            let output = utxo.output().ok_or_else(|| ResourceError::InvalidSpend {
-                details: format!("Utxo {} is burnt", address),
-            })?;
-
-            self.validate_spend_condition(output, input)?;
+            if utxo.output().is_none() {
+                return Err(ResourceError::InvalidSpend {
+                    details: format!("Utxo {} is burnt", address),
+                }
+                .into());
+            }
         }
 
         let valid_transfer = stealth::validate_transfer(stmt, view_key)?;
         Ok(valid_transfer)
     }
 
-    fn validate_spend_condition(&self, output: &UtxoOutput, input: &StealthInput) -> Result<(), RuntimeError> {
-        match &output.spend_condition {
-            SpendCondition::Signed(pk) => {
-                if !self
-                    .base_call_scope()
-                    .auth_scope()
-                    .contains_badge(&NonFungibleAddress::from_public_key(*pk))
-                {
-                    return Err(RuntimeError::ResourceError(
-                        ResourceError::RequiredSignatureMissingForStealthUtxo {
-                            commitment: input.commitment,
-                            public_key: *pk,
-                        },
-                    ));
-                }
-
-                Ok(())
-            },
-            SpendCondition::AccessRule(access_rule) => {
-                if !self.authorization().check_access_rule(access_rule)? {
-                    return Err(RuntimeError::AccessDenied {
-                        action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
-                    });
-                }
-
-                Ok(())
-            },
-            SpendCondition::Script(_) => {
-                // Spend scripts cannot be evaluated here: a WASM predicate must run via the
-                // `RuntimeInterfaceImpl` layer which holds the template provider and the re-entrant runtime
-                // pointer. They are therefore evaluated in `RuntimeInterfaceImpl::evaluate_input_spend_scripts`
-                // BEFORE the spend is executed, so by the time we reach this point the predicate has already
-                // authorised (or rejected, aborting the transfer) the spend.
-                Ok(())
-            },
-        }
-    }
-
-    /// Reads the spend condition of an unspent stealth UTXO without spending it, taking and releasing a read lock.
-    /// Used to drive spend-script evaluation at the `RuntimeInterfaceImpl` layer before the spend is executed.
-    pub fn get_stealth_utxo_spend_condition(
+    /// Reads the committed [`SpendAuthorization`] of an unspent stealth UTXO without spending it, taking and releasing
+    /// a read lock. Drives the pre-execute authorization pass
+    /// ([`RuntimeInterfaceImpl::verify_input_authorizations`]), which gates every input before the spend executes.
+    pub fn get_stealth_utxo_spend_auth(
         &mut self,
         resource_address: ResourceAddress,
         input: &StealthInput,
-    ) -> Result<SpendCondition, RuntimeError> {
+    ) -> Result<SpendAuthorization, RuntimeError> {
         let address = UtxoAddress::new(resource_address, input.commitment.into());
         let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Read)?;
         let result = (|| {
             let (_, value) = self.store.get_locked_substate(lock_id)?;
             let utxo = value.as_utxo().ok_or_else(|| RuntimeError::InvariantError {
-                function: "get_stealth_utxo_spend_condition",
+                function: "get_stealth_utxo_spend_auth",
                 details: format!("Substate at {} is not a UTXO", address),
             })?;
             if utxo.is_frozen() {
@@ -390,7 +356,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             let output = utxo.output().ok_or_else(|| ResourceError::InvalidSpend {
                 details: format!("Utxo {} is burnt", address),
             })?;
-            Ok(output.spend_condition.clone())
+            Ok(output.auth.clone())
         })();
         self.store.try_unlock(lock_id)?;
         result

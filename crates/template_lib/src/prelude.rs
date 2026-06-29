@@ -72,13 +72,16 @@ pub use tari_template_lib_types::{
     rule,
     stealth::{
         CurrentInputView,
+        MerkleProof,
+        SpendAuthorization,
         SpendCondition,
-        SpendScript,
+        SpendWitness,
         StealthInputView,
         StealthInputsStatement,
         StealthOutputView,
         StealthOutputsStatement,
         StealthTransferStatement,
+        TemplateFunction,
     },
 };
 #[cfg(all(feature = "macro", target_arch = "wasm32"))]

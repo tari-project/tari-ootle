@@ -119,9 +119,9 @@ pub struct OotleStealthPartialTransaction {
 /// cbindgen:no-export
 pub(crate) enum StealthHandleState {
     /// The in-progress two-phase resolver (build → apply* rounds).
-    Resolving(ootle_sdk_core::PartialTransaction),
+    Resolving(Box<ootle_sdk_core::PartialTransaction>),
     /// The assembled, ready-to-seal product (after the final apply resolves).
-    Ready(StealthPartialTransaction),
+    Ready(Box<StealthPartialTransaction>),
 }
 
 // --- Facade-local JSON mirrors --------------------------------------------------------------------
@@ -187,7 +187,7 @@ fn parse_spend_secrets(json: &str) -> Result<Vec<SecretKeyBytes>, OotleResult> {
 /// been consumed by the caller, so a still-resolving handle is a precondition violation, not a leak.
 fn ready_or_err(state: StealthHandleState) -> Result<StealthPartialTransaction, OotleResult> {
     match state {
-        StealthHandleState::Ready(p) => Ok(p),
+        StealthHandleState::Ready(p) => Ok(*p),
         StealthHandleState::Resolving(_) => Err(OotleResult::err(
             "STEALTH",
             "stealth handle is not yet resolved — drive ootle_apply_fetched_substates_stealth to \"resolved\" before \
@@ -336,7 +336,7 @@ pub unsafe extern "C" fn ootle_build_stealth_unsigned(network: u8, intent_json: 
                     let body = serde_json::json!({ "want_list": want_list.0 });
                     Ok(OotleResult::ok_stealth_handle_json(
                         &output_json(&body, "want list")?,
-                        StealthHandleState::Resolving(partial),
+                        StealthHandleState::Resolving(Box::new(partial)),
                     ))
                 },
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
@@ -372,7 +372,7 @@ pub unsafe extern "C" fn ootle_build_stealth_unsigned_with_seed(
                     let body = serde_json::json!({ "want_list": want_list.0 });
                     Ok(OotleResult::ok_stealth_handle_json(
                         &output_json(&body, "want list")?,
-                        StealthHandleState::Resolving(partial),
+                        StealthHandleState::Resolving(Box::new(partial)),
                     ))
                 },
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
@@ -433,7 +433,7 @@ pub unsafe extern "C" fn ootle_apply_fetched_substates_stealth(
             // The handle must still be a resolver; a `Ready` (already-assembled) handle has no more
             // inputs to apply — seal it instead.
             let partial = match state {
-                StealthHandleState::Resolving(p) => p,
+                StealthHandleState::Resolving(p) => *p,
                 StealthHandleState::Ready(_) => {
                     return Ok(OotleResult::err(
                         "STEALTH",

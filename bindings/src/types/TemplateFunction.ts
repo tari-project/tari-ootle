@@ -8,4 +8,18 @@ import type { Hash32 } from "./Hash32";
  * The condition fully commits to `{template, function, args}`, so a spender cannot substitute a different predicate.
  * Templates are immutable substates, so the referenced code cannot change once the output is committed.
  */
-export type SpendScript = { template: Hash32; function: string; args: Array<Bytes> };
+export type TemplateFunction = {
+  /**
+   * The template providing the predicate.
+   */
+  template: Hash32;
+  /**
+   * The stateless (`is_mut == false`) predicate function on that template.
+   */
+  function: string;
+  /**
+   * Bound parameters, positional — one CBOR-encoded value per leading (non-`SpendContext`) parameter, matching the
+   * engine's `Vec<Bytes>` call ABI. Baked into the condition at creation; the spender cannot alter them.
+   */
+  args: Array<Bytes>;
+};

@@ -35,5 +35,6 @@ fn fee_main() {
 }
 
 fn main() {
+    let template = blob!("template");
     publish_template!(template);
 }

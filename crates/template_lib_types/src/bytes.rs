@@ -103,7 +103,13 @@ impl AsRef<[u8]> for Bytes {
 /// Serialize using the optimal byte format. i.e. `Bytes` in ciborium instead of `Array(Integer(u8), ....])`
 #[cfg(feature = "serde")]
 pub fn serialize<S: serde::Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_bytes(v.as_ref())
+    use crate::hex::bytes_to_hex;
+    if s.is_human_readable() {
+        let st = bytes_to_hex(v.as_ref());
+        s.serialize_str(&st)
+    } else {
+        s.serialize_bytes(v.as_ref())
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -112,8 +118,17 @@ where
     D: serde::Deserializer<'de>,
     T: From<Box<[u8]>>,
 {
-    let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
-    Ok(bytes.into_owned().into())
+    use serde::de::{Deserialize, Error};
+
+    use crate::hex::bytes_from_hex;
+    if d.is_human_readable() {
+        let hex = Box::<str>::deserialize(d)?;
+        let bytes = bytes_from_hex(&hex).map_err(Error::custom)?;
+        Ok(bytes.into_boxed_slice().into())
+    } else {
+        let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
+        Ok(bytes.into_owned().into())
+    }
 }
 
 #[cfg(test)]

@@ -21,7 +21,7 @@ use tari_crypto::{
 };
 use tari_engine::{
     executables::Executable,
-    fees::{FeeModule, FeeTable},
+    fees::{FeeModule, FeeTable, WasmMeteringRate},
     runtime::{AuthParams, RuntimeModule},
     state_store::{
         StateWriter,
@@ -685,9 +685,14 @@ impl TemplateTest {
 
         modules.push(Box::new(self.track_calls.clone()));
 
-        if self.enable_fees {
+        // When fees are disabled there is no payment-funded compute bound (only the per-transaction
+        // hard cap), matching the absence of a fee module.
+        let wasm_metering_rate = if self.enable_fees {
             modules.push(Box::new(FeeModule::new(0, self.fee_table.clone(), false)));
-        }
+            WasmMeteringRate::from_fee_table(&self.fee_table)
+        } else {
+            WasmMeteringRate::unmetered()
+        };
 
         if self.auto_add_proofs_from_signers && proofs.is_empty() {
             proofs.extend(
@@ -708,6 +713,7 @@ impl TemplateTest {
             self.virtual_substates.clone().into(),
             Arc::from(modules.into_boxed_slice()),
             Arc::new(AlwaysPassesProofVerifier),
+            wasm_metering_rate,
         );
 
         let mut wrapped_transaction = WrappedTransaction::new(transaction);

@@ -90,3 +90,44 @@ impl FeeTable {
 fn non_zero(divisor: u64) -> u64 {
     if divisor == 0 { 1 } else { divisor }
 }
+
+/// The WASM-execution fee rate extracted from a [`FeeTable`], plus the conversion from fees paid
+/// into the compute budget they unlock. Lives outside [`FeeTable`] so the execution core
+/// (`StateTracker`) can enforce the per-transaction compute budget without depending on the
+/// `FeeModule`, which is an optional, observer-style runtime module.
+#[derive(Debug, Clone, Copy)]
+pub struct WasmMeteringRate {
+    per_point_cost: u64,
+    points_divisor: u64,
+}
+
+impl WasmMeteringRate {
+    pub fn from_fee_table(fee_table: &FeeTable) -> Self {
+        Self {
+            per_point_cost: fee_table.per_wasm_point_cost(),
+            points_divisor: fee_table.wasm_points_cost_divisor(),
+        }
+    }
+
+    /// A rate that does not price WASM execution, so no payment-funded compute bound applies (only
+    /// the per-transaction hard cap). Used when fees are disabled.
+    pub fn unmetered() -> Self {
+        Self {
+            per_point_cost: 0,
+            points_divisor: 1,
+        }
+    }
+
+    /// The WASM metering points that `fees_paid` microtari pre-fund: the inverse of the fee module's
+    /// charge (`points / divisor * per_point_cost`). `None` when WASM execution is not priced
+    /// (`per_point_cost == 0`) — payment cannot fund what is not charged, so no payment-derived
+    /// bound applies.
+    pub fn points_funded_by(&self, fees_paid: u64) -> Option<u64> {
+        if self.per_point_cost == 0 {
+            return None;
+        }
+        let funded =
+            u128::from(fees_paid).saturating_mul(u128::from(self.points_divisor)) / u128::from(self.per_point_cost);
+        Some(u64::try_from(funded).unwrap_or(u64::MAX))
+    }
+}

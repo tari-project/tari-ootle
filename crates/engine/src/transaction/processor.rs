@@ -67,6 +67,7 @@ use tari_template_lib::{
 
 use crate::{
     executables::{Executable, WeightedExecutable},
+    fees::WasmMeteringRate,
     runtime::{
         AuthParams,
         AuthorizationScope,
@@ -100,6 +101,7 @@ pub struct TransactionProcessor<TStore, TTemplateProvider> {
     virtual_substates: VirtualSubstates,
     modules: ModulesCollection<TStore>,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    wasm_metering_rate: WasmMeteringRate,
 }
 
 impl<TStore, TTemplateProvider> TransactionProcessor<TStore, TTemplateProvider>
@@ -114,6 +116,7 @@ where
         virtual_substates: VirtualSubstates,
         modules: ModulesCollection<TStore>,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+        wasm_metering_rate: WasmMeteringRate,
     ) -> Self {
         Self {
             template_provider,
@@ -122,6 +125,7 @@ where
             virtual_substates,
             modules,
             claim_burn_proof_verifier,
+            wasm_metering_rate,
         }
     }
 
@@ -137,6 +141,7 @@ where
             virtual_substates,
             modules,
             claim_burn_proof_verifier,
+            wasm_metering_rate,
         } = self;
 
         let execute_epoch = virtual_substates.current_epoch();
@@ -163,6 +168,7 @@ where
             initial_call_scope,
             id.as_hash(),
             transaction_weight,
+            wasm_metering_rate,
         );
 
         let transaction_signer_public_key =

@@ -3409,6 +3409,10 @@ where
         self.tracker.accumulated_wasm_points()
     }
 
+    fn wasm_point_allowance(&self) -> Option<u64> {
+        self.tracker.wasm_point_allowance()
+    }
+
     fn resolve_args(
         &self,
         prepend: Option<InstructionArg>,

@@ -189,7 +189,11 @@ mod tests {
     fn json_round_trips() {
         let original = Bytes::from_vec(vec![0, 1, 2, 250, 255]);
         let json = serde_json::to_string(&original).unwrap();
-        assert!(json.starts_with('['), "expected a JSON array, got {json}");
+        let deserialized: Bytes = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+
+        // json as an array
+        let json = serde_json::to_string(original.as_slice()).unwrap();
         let deserialized: Bytes = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
     }

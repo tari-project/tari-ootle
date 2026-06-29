@@ -131,11 +131,11 @@ impl borsh::BorshDeserialize for RistrettoPublicKeyBytes {
 mod tests {
 
     use minicbor::{CborLen, Decode, Encode};
-    use serde::{Deserialize, Serialize};
 
     use super::*;
 
-    #[derive(Serialize, Deserialize, Encode, Decode, CborLen)]
+    #[derive(Encode, Decode, CborLen)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     struct TestCase {
         #[n(0)]
         a: u32,

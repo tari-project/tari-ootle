@@ -259,6 +259,11 @@ pub trait RuntimeInterface {
     /// invocation. Used by `WasmProcess::invoke` to enforce `MAX_WASM_POINTS_PER_TRANSACTION`.
     fn wasm_points_consumed(&self) -> u64;
 
+    /// The maximum Wasmer metering points the transaction may consume given the fees paid so far,
+    /// used by `WasmProcess::invoke` to cap each call's allowance so unpaid compute cannot exceed
+    /// the grace. `None` means no payment-funded bound applies (only the per-transaction hard cap).
+    fn wasm_point_allowance(&self) -> Option<u64>;
+
     fn resolve_args(
         &self,
         prepend: Option<InstructionArg>,

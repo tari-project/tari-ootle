@@ -356,13 +356,31 @@ impl Invokable<Store> for WasmProcess {
         };
         let consumed = self.env.state().interface().wasm_points_consumed();
         let budget_remaining = limits::MAX_WASM_POINTS_PER_TRANSACTION.saturating_sub(consumed);
-        let points_before = per_call_cap.min(budget_remaining);
+        // Cap further to the compute the fees paid so far can cover (plus the free-compute grace).
+        // This bounds the compute an under-paying transaction can extract: it traps out-of-gas once
+        // it exhausts the paid allowance rather than running up to the per-transaction hard cap.
+        let paid_allowance_remaining = self
+            .env
+            .state()
+            .interface()
+            .wasm_point_allowance()
+            .map(|allowance| allowance.saturating_sub(consumed));
+        let points_before = match paid_allowance_remaining {
+            Some(remaining) => per_call_cap.min(budget_remaining).min(remaining),
+            None => per_call_cap.min(budget_remaining),
+        };
+        // Whether the paid-fee allowance — not the per-transaction hard cap — is what bounds this
+        // call. Used to report an out-of-gas trap here as insufficient fees rather than a hit cap.
+        let fee_allowance_is_binding =
+            paid_allowance_remaining.is_some_and(|remaining| remaining < budget_remaining && remaining <= per_call_cap);
         set_remaining_points(store, &self.instance, points_before);
 
         // Call the contract entrypoint
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
 
-        let points_consumed = match get_remaining_points(store, &self.instance) {
+        let remaining_after_call = get_remaining_points(store, &self.instance);
+        let exhausted = matches!(remaining_after_call, MeteringPoints::Exhausted);
+        let points_consumed = match remaining_after_call {
             MeteringPoints::Remaining(n) => points_before.saturating_sub(n),
             // Out-of-gas trap: the meter says zero remaining. Charge for the entire pre-call
             // budget — the host will report a runtime error and the partial work was already done.
@@ -405,6 +423,11 @@ impl Invokable<Store> for WasmProcess {
                     return Err(WasmExecutionError::Panic {
                         message,
                         runtime_error: err,
+                    });
+                }
+                if exhausted && fee_allowance_is_binding {
+                    return Err(WasmExecutionError::InsufficientFeesForCompute {
+                        consumed_points: consumed.saturating_add(points_consumed),
                     });
                 }
                 error!(target: LOG_TARGET, "Error calling function: {}", err);

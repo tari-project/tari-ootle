@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tari_engine::{
     executables::Executable,
-    fees::{FeeModule, FeeTable},
+    fees::{FeeModule, FeeTable, WasmMeteringRate},
     runtime::{AuthParams, RuntimeModule},
     state_store::{StateReader, StateStoreError},
     template::LoadedTemplate,
@@ -87,6 +87,7 @@ pub struct TariTransactionProcessor<TStore, TTemplateProvider> {
     template_provider: Arc<TTemplateProvider>,
     modules: ModulesCollection<TStore>,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    wasm_metering_rate: WasmMeteringRate,
 }
 
 impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<TStore, TTemplateProvider> {
@@ -96,11 +97,13 @@ impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<
         dry_run: bool,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
+        let wasm_metering_rate = WasmMeteringRate::from_fee_table(&fee_table);
         let modules = vec![Box::new(FeeModule::new(0, fee_table, dry_run)) as Box<dyn RuntimeModule<TStore>>];
         Self {
             template_provider: Arc::new(template_provider),
             modules: Arc::from(modules),
             claim_burn_proof_verifier,
+            wasm_metering_rate,
         }
     }
 }
@@ -134,6 +137,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             virtual_substates,
             self.modules.clone(),
             self.claim_burn_proof_verifier.clone(),
+            self.wasm_metering_rate,
         );
         let result = processor.execute(transaction.clone())?;
 

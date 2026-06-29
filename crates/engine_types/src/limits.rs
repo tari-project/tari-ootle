@@ -33,6 +33,21 @@ pub const MAX_WASM_POINTS_PER_CALL: u64 = 100_000_000;
 /// all its calls. The aggregate across a *block* still needs a separate per-block budget.
 pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
 
+/// Wasmer metering points a transaction may consume *before* its fee payments cover them. A
+/// transaction sources its fee in the fee intent (withdraw, claim-burn, AMM swap to TARI, stealth
+/// transfer, …) and only then calls `pay_fee`, so it must be allowed to run some compute on credit;
+/// this bounds that credit. Beyond it, each WASM call's metering allowance is capped to the points
+/// the fees paid so far can cover (`WasmProcess::invoke`), so a transaction that does not pay traps
+/// out-of-gas here rather than consuming the full [`MAX_WASM_POINTS_PER_TRANSACTION`] for free. This
+/// is the bound on free compute a non-paying transaction can extract from a validator. Payments
+/// raise the allowance above this value proportionally to the WASM fee rate.
+///
+/// Sized with generous margin over the most expensive legitimate fee-sourcing flow: acquiring TARI
+/// by swapping another resource through an AMM pool inside the fee intent costs ~143k points (see
+/// `tari_engine`'s `complex_fee_payment` test, which guards that this stays comfortably above it),
+/// so this is ~14x that worst case while staying far below the per-transaction cap.
+pub const FREE_COMPUTE_GRACE_POINTS: u64 = 2_000_000;
+
 pub struct EngineLimits {
     pub max_substate_outputs: usize,
     pub max_substate_size: usize,

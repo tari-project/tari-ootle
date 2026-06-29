@@ -147,6 +147,9 @@ fn parse_blobs(items: &[String]) -> anyhow::Result<HashMap<String, Blob>> {
                 .ok_or_else(|| anyhow!("Invalid --blob mapping '{}' (expected <name>=<file_path>)", s))?;
             let name = name.trim();
             let path = path.trim();
+            if name.is_empty() || path.is_empty() {
+                anyhow::bail!("Invalid --blob mapping '{}' (expected <name>=<file_path>)", s);
+            }
             let bytes =
                 fs::read(path).map_err(|e| anyhow!("Failed to read blob '{}' from file '{}': {}", name, path, e))?;
             Ok((name.to_string(), Blob::from(bytes)))

@@ -118,13 +118,37 @@ where
     D: serde::Deserializer<'de>,
     T: From<Box<[u8]>>,
 {
-    use serde::de::{Deserialize, Error};
+    use serde::de::{Error, SeqAccess, Visitor};
 
-    use crate::hex::bytes_from_hex;
     if d.is_human_readable() {
-        let hex = Box::<str>::deserialize(d)?;
-        let bytes = bytes_from_hex(&hex).map_err(Error::custom)?;
-        Ok(bytes.into_boxed_slice().into())
+        struct HumanReadableBytesVisitor;
+
+        impl<'de> Visitor<'de> for HumanReadableBytesVisitor {
+            type Value = Box<[u8]>;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("a hex string or an array of bytes")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where E: Error {
+                crate::hex::bytes_from_hex(v)
+                    .map(|b| b.into_boxed_slice())
+                    .map_err(Error::custom)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where A: SeqAccess<'de> {
+                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(byte) = seq.next_element::<u8>()? {
+                    bytes.push(byte);
+                }
+                Ok(bytes.into_boxed_slice())
+            }
+        }
+
+        let bytes = d.deserialize_any(HumanReadableBytesVisitor)?;
+        Ok(bytes.into())
     } else {
         let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
         Ok(bytes.into_owned().into())

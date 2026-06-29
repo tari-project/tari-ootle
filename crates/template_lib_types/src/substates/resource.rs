@@ -116,30 +116,33 @@ impl Tagged for ResourceAddress {
 mod tests {
     use super::*;
 
-    mod hex_deser {
-        use super::*;
+    #[test]
+    #[cfg(feature = "serde")]
+    fn serde_json_encoding() {
+        let resx_str = "resource_0000000000000000000000000000000000000000000000000000000000000000";
+        let resource = ResourceAddress::from_str(resx_str).unwrap();
+        let json = serde_json::to_string_pretty(&resource).unwrap();
+        assert_eq!(json.trim_matches('"'), resx_str);
 
-        #[test]
-        fn string_serialization_and_deserialization() {
-            let resx_str = "resource_0000000000000000000000000000000000000000000000000000000000000000";
-            let resource = ResourceAddress::from_str(resx_str).unwrap();
-            let json = serde_json::to_string_pretty(&resource).unwrap();
-            assert_eq!(json.trim_matches('"'), resx_str);
+        // Deserialize from JSON
+        let r = serde_json::from_str::<ResourceAddress>(&json).unwrap();
+        assert_eq!(r, resource);
+    }
 
-            // Deserialize from JSON
-            let r = serde_json::from_str::<ResourceAddress>(&json).unwrap();
-            assert_eq!(r, resource);
+    #[test]
+    fn cbor_encoding() {
+        let resx_str = "resource_0000000000000000000000000000000000000000000000000000000000000000";
+        let resource = ResourceAddress::from_str(resx_str).unwrap();
 
-            // Check that CBOR does not include the string
-            let cbor = tari_bor::encode(&resource).unwrap();
-            assert!(
-                !cbor.windows(resx_str.len()).any(|window| window == resx_str.as_bytes()),
-                "CBOR is serializing a string"
-            );
+        // Check that CBOR does not include the string
+        let cbor = tari_bor::encode(&resource).unwrap();
+        assert!(
+            !cbor.windows(resx_str.len()).any(|window| window == resx_str.as_bytes()),
+            "CBOR is serializing a string"
+        );
 
-            // Deserialize from CBOR
-            let r = tari_bor::decode::<ResourceAddress>(&cbor).unwrap();
-            assert_eq!(r, resource);
-        }
+        // Deserialize from CBOR
+        let r = tari_bor::decode::<ResourceAddress>(&cbor).unwrap();
+        assert_eq!(r, resource);
     }
 }

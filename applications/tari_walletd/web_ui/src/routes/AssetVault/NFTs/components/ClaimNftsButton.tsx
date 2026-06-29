@@ -53,7 +53,7 @@ function ClaimNftsButton() {
         mutableData: {
           image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
         },
-        maxFee: 2000,
+        maxFee: 3000,
       },
       {
         onSuccess: (resp: any) => {

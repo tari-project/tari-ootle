@@ -9,7 +9,7 @@ use tari_template_lib::types::{
     ResourceAddress,
     UtxoAddress,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
-    stealth::SpendCondition,
+    stealth::SpendAuthorization,
 };
 
 use crate::models::{KeyId, OutputStatus, WalletLockId};
@@ -29,7 +29,8 @@ pub struct StealthOutputModel {
     pub encrypted_data: EncryptedData,
     pub tag_byte: UtxoTag,
     pub memo: Option<Memo>,
-    pub spend_condition: SpendCondition,
+    /// How this UTXO is authorised at spend time (key path, condition tree, or both).
+    pub auth: SpendAuthorization,
     pub minimum_value_promise: u64,
     pub status: OutputStatus,
     pub is_burnt: bool,

@@ -3,7 +3,7 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.35.0",
-    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "git_rev": "0634fac32d77faefa1a196071423ddbc3c4abbe5",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
@@ -18,14 +18,14 @@
           "Utxo": {
             "is_frozen": false,
             "output": {
+              "auth": {
+                "Script": "aa5779a908eb9e0f4a1f1f83634c0917594bd67e408f1aca6f32d352d1974fa1"
+              },
               "output": {
-                "encrypted_data": "ffd35ef0d7a891570a164b5df43a4e70359b96a93d4eaed0969ac26b439969ff3df40e006fe6744a9ef39d11f3d357f64fbcb72438dd71512eab898d9e23c6b0719a22676d2276a90364feb341dc162d",
+                "encrypted_data": "4a570beacf475a2e9aeefa60249eabcaa46f1d5b51961b59729c9f956a2c80b840318bb6c4ee6c1b594f092ea29c53ac931d709f0dbc3124b9200231a5b73cd9c9434f091d7fa24c74d280b05a556e68",
                 "minimum_value_promise": 0,
                 "public_nonce": "f2cce6415ff090eea8d0f041e356f28f3be3aa53ccc69867288e7432028fca23",
                 "viewable_balance": null
-              },
-              "spend_condition": {
-                "AccessRule": "AllowAll"
               },
               "tag": 0
             }
@@ -114,7 +114,8 @@
                     "inputs_statement": {
                       "inputs": [
                         {
-                          "commitment": "52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60"
+                          "commitment": "52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
+                          "witness": "KeyPath"
                         }
                       ],
                       "revealed_amount": "0"
@@ -123,15 +124,15 @@
                       "agg_range_proof": null,
                       "outputs": [
                         {
+                          "auth": {
+                            "Key": "e461b029fa778a1fabfcfd1f4945bb1ee7543c14bb679d58c16ae6056c0af376"
+                          },
                           "output": {
                             "commitment": "a422410dd4430276a8b3ac9e2352b2787db57548187895157914eb621dbe4c59",
                             "encrypted_data": "aeb21295a10115b9e3206aa572f15280d0a3bc4592a8a0a13710ad11b9948edf380a2c7505e5b023d762a20fa6c4626981dbde9ec00c03de2e6086ef7969522b8206211954836af820d9b479f2af6fdd",
                             "minimum_value_promise": 0,
                             "sender_public_nonce": "4ad5eb613bdf083afe27c5ee18648e788d439be4b825d0ac63ca75ff42268e36",
                             "viewable_balance_proof": null
-                          },
-                          "spend_condition": {
-                            "Signed": "e461b029fa778a1fabfcfd1f4945bb1ee7543c14bb679d58c16ae6056c0af376"
                           },
                           "tag": 1321982421
                         }

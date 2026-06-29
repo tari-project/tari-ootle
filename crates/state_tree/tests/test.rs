@@ -317,3 +317,37 @@ fn two_level_substate_exclusion_proof() {
         .verify_inclusion(&group_root, &make_value(4), &hash_value_from_seed(50))
         .unwrap_err();
 }
+
+#[test]
+fn two_level_substate_inclusion_proof_for_genesis_version_zero() {
+    use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};
+
+    // Genesis substates are committed to the shard JMT at version 0 (mirrors `commit_genesis_substates`).
+    let mut store = MemoryTreeStore::<StateTreePayload>::new();
+    SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(None, 0, vec![change(1, Some(30)), change(2, Some(40))])
+        .unwrap();
+    // Consensus then builds version 1 on top; an untouched (read-only) genesis leaf must remain provable.
+    let shard_root = SpreadPrefixStateTree::new(&mut store)
+        .put_substate_changes(Some(0), 1, vec![change(3, Some(50))])
+        .unwrap();
+
+    // Level 1: leaf proof for the genesis substate make_value(1) against the latest shard root.
+    let (_key, proof_value, leaf_proof) = SpreadPrefixStateTree::new(&mut store)
+        .get_proof(1, &make_value(1))
+        .unwrap();
+    let value_hash = proof_value.unwrap().0;
+
+    // Level 2: shard root within the shard-group root.
+    let (group_root, shard_root_proof) = shard_group_root_and_proof(shard_root);
+    let proof = SubstateValueProof::new(shard_root, shard_root_proof, leaf_proof);
+
+    // The genesis substate committed at version 0 is provably included under the trusted group root.
+    proof
+        .verify_inclusion(&group_root, &make_value(1), &value_hash)
+        .unwrap();
+    // A tampered value hash is still rejected.
+    proof
+        .verify_inclusion(&group_root, &make_value(1), &hash_value_from_seed(200))
+        .unwrap_err();
+}

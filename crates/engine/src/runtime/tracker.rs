@@ -50,6 +50,7 @@ use tari_template_lib::{
 };
 
 use crate::{
+    fees::WasmMeteringRate,
     runtime::{
         RuntimeError,
         locking::LockedSubstate,
@@ -67,6 +68,7 @@ pub struct StateTracker<TStore> {
     working_state: Option<WorkingState<TStore>>,
     fee_checkpoint: Option<WorkingState<TStore>>,
     transaction_weight: TransactionWeight,
+    wasm_metering_rate: WasmMeteringRate,
 }
 
 impl<TStore: StateReader> StateTracker<TStore> {
@@ -76,6 +78,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         initial_call_scope: CallScope,
         transaction_hash: Hash32,
         transaction_weight: TransactionWeight,
+        wasm_metering_rate: WasmMeteringRate,
     ) -> Self {
         Self {
             working_state: Some(WorkingState::new(
@@ -86,11 +89,32 @@ impl<TStore: StateReader> StateTracker<TStore> {
             )),
             fee_checkpoint: None,
             transaction_weight,
+            wasm_metering_rate,
         }
     }
 
     pub fn get_transaction_weight(&self) -> TransactionWeight {
         self.transaction_weight
+    }
+
+    /// The maximum WASM metering points this transaction may consume given the fees it has paid so
+    /// far, used by `WasmProcess::invoke` to cap each call's metering allowance. Returns `None` when
+    /// no payment-funded bound applies (WASM execution is not priced, or this is a dry run) — only
+    /// the per-transaction hard cap then constrains compute.
+    ///
+    /// The allowance is the points the fees paid can cover plus [`limits::FREE_COMPUTE_GRACE_POINTS`]
+    /// of credit, so a transaction can run its fee-sourcing instructions before it pays while a
+    /// transaction that never pays cannot consume more than the grace.
+    pub fn wasm_point_allowance(&self) -> Option<u64> {
+        let rate = self.wasm_metering_rate;
+        self.read_with(|state| {
+            let fee_state = state.fee_state();
+            if fee_state.is_dry_run() {
+                return None;
+            }
+            let funded = rate.points_funded_by(fee_state.total_payments())?;
+            Some(funded.saturating_add(limits::FREE_COMPUTE_GRACE_POINTS))
+        })
     }
 
     pub fn get_current_epoch(&self) -> Result<Epoch, RuntimeError> {

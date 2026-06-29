@@ -253,14 +253,18 @@ CREATE TABLE stealth_outputs
     encrypted_data         BLOB     NOT NULL DEFAULT '',
     tag_byte               INTEGER  NOT NULL,
     memo_json              TEXT     NULL,
-    spend_condition        TEXT     NOT NULL,
+    -- Spend authorisation (TIP-0006): at least one of spend_key / condition_root is set.
+    spend_key              TEXT     NULL,
+    condition_root         TEXT     NULL,
     minimum_value_promise  BIGINT   NOT NULL,
     is_burnt               BOOLEAN  NOT NULL DEFAULT 0,
     is_frozen              BOOLEAN  NOT NULL DEFAULT 0,
     is_on_chain            BOOLEAN  NOT NULL,
     is_condition_spendable BOOLEAN  NOT NULL,
     created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Mirror the SpendAuthorization enum: an output must be spendable by at least one path.
+    CHECK (spend_key IS NOT NULL OR condition_root IS NOT NULL)
 );
 
 CREATE UNIQUE INDEX stealth_outputs_uniq_resource_addr_commitment ON stealth_outputs (resource_address, commitment);

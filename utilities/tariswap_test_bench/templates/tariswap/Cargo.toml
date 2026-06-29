@@ -18,5 +18,12 @@ tari_template_lib = { path = "../../../../crates/template_lib" }
 [lib]
 crate-type = ["cdylib"]
 
+[profile.release]
+opt-level = 's'     # Optimize for size.
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic.
+strip = true# Strip debug info.
+
 [build-dependencies]
 tari_ootle_template_build = "0.7"

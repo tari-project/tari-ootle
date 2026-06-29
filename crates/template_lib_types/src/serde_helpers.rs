@@ -5,7 +5,7 @@ use ::serde::{
     Deserialize,
     Deserializer,
     Serializer,
-    de::{Error, Visitor},
+    de::{Error, SeqAccess, Visitor},
 };
 use tari_template_abi::rust::{any, fmt, format, marker::PhantomData, prelude::*};
 
@@ -90,6 +90,17 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where E: Error {
         Ok(BytesCow::Owned(v.to_vec().into_boxed_slice()))
+    }
+
+    /// A self-describing human-readable format (e.g. JSON) has no native byte type, so `serialize_bytes` is rendered
+    /// as a sequence of integers and arrives here.
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: SeqAccess<'a> {
+        let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        while let Some(byte) = seq.next_element::<u8>()? {
+            bytes.push(byte);
+        }
+        Ok(BytesCow::Owned(bytes.into_boxed_slice()))
     }
 }
 

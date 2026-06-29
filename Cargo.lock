@@ -11447,6 +11447,7 @@ dependencies = [
  "rand 0.10.1",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tari_bor",
  "tari_crypto",
  "tari_hashing",
@@ -11642,7 +11643,6 @@ dependencies = [
  "tari_epoch_manager",
  "tari_ootle_common_types",
  "tari_ootle_storage",
- "tari_template_lib_types",
  "tari_validator_node_rpc",
  "thiserror 2.0.18",
 ]

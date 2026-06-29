@@ -36,6 +36,9 @@ pub struct ManifestInstructionGenerator {
     templates: HashMap<String, TemplateAddress>,
     /// Caller-supplied blob payloads keyed by name. Used to resolve `blob!(name)` references.
     blob_inputs: HashMap<String, Blob>,
+    /// Variables bound to a blob with `let x = blob!("name")`, mapping the variable name to the
+    /// blob name it references. Lets `publish_template!(x)` resolve `x` back to its blob.
+    blob_vars: HashMap<String, String>,
     /// Output blob list — populated lazily as `blob!(name)` is encountered. The order matches
     /// the order of first reference, so emitted `BlobIndex`es match the returned `Blobs`.
     blob_indices: HashMap<String, BlobIndex>,
@@ -58,6 +61,7 @@ impl ManifestInstructionGenerator {
             workspace_ids: HashMap::new(),
             templates,
             blob_inputs,
+            blob_vars: HashMap::new(),
             blob_indices: HashMap::new(),
             output_blobs: Blobs::empty(),
             functions: HashMap::new(),
@@ -227,6 +231,11 @@ impl ManifestInstructionGenerator {
                 );
                 Ok(vec![])
             },
+            ManifestIntent::AssignBlob(assign) => {
+                self.blob_vars
+                    .insert(assign.variable_name.to_string(), assign.blob_name.to_string());
+                Ok(vec![])
+            },
             ManifestIntent::Log(log) => Ok(vec![Instruction::EmitLog {
                 level: log.level,
                 message: log.message.try_into().map_err(|e| ManifestError::InvalidInstruction {
@@ -247,10 +256,13 @@ impl ManifestInstructionGenerator {
                 Ok(vec![Instruction::PutIntoBucket { src, dest }])
             },
             ManifestIntent::PublishTemplate(pt) => {
-                // Reuse the same blob-resolution path as `blob!(name)` — the binary is
-                // registered in the output Blobs on first reference and assigned the next
-                // BlobIndex.
-                let arg = self.resolve_blob_arg(&pt.blob_name.to_string())?;
+                // `pt.blob_name` is either a blob variable bound with `let x = blob!("name")` or a
+                // blob name directly; resolve a variable to its blob name, then reuse the same
+                // blob-resolution path as `blob!(name)` — the binary is registered in the output
+                // Blobs on first reference and assigned the next BlobIndex.
+                let ident = pt.blob_name.to_string();
+                let blob_name = self.blob_vars.get(&ident).cloned().unwrap_or(ident);
+                let arg = self.resolve_blob_arg(&blob_name)?;
                 let binary = arg.as_blob_index().ok_or_else(|| ManifestError::InvalidInstruction {
                     reason: "publish_template! resolved to a non-Blob arg".to_string(),
                 })?;

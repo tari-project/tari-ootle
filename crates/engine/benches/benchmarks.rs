@@ -8,6 +8,7 @@ use std::{hint::black_box, iter, sync::Arc};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use tari_engine::{
     executables::{Executable, Instructions, WeightedExecutable},
+    fees::WasmMeteringRate,
     runtime::AuthParams,
     state_store::memory::ReadOnlyMemoryStateStore,
     transaction::TransactionProcessor,
@@ -90,6 +91,7 @@ fn setup(shared: &SharedState) -> BenchTxProcessor {
         shared.virtual_substates.clone(),
         modules,
         shared.claim_burn_proof_verifier.clone(),
+        WasmMeteringRate::unmetered(),
     )
 }
 

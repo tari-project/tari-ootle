@@ -17,7 +17,7 @@ use tari_ootle_wallet_crypto::{
     confidential,
     stealth::create_transfer_statement,
 };
-use tari_template_lib_types::{Amount, EncryptedData, crypto::UtxoTag};
+use tari_template_lib_types::{Amount, EncryptedData, crypto::UtxoTag, stealth::SpendAuthorization};
 
 #[test]
 fn it_create_a_valid_revealed_only_proof() {
@@ -36,7 +36,6 @@ fn it_create_a_valid_revealed_only_proof() {
 
 mod stealth_tests {
     use ootle_byte_type::ToByteType;
-    use tari_template_lib_types::stealth::SpendCondition;
 
     use super::*;
 
@@ -143,7 +142,7 @@ mod stealth_tests {
 
                 StealthOutputWitness {
                     witness: statement,
-                    spend_condition: SpendCondition::Signed(output_owner_public_key.to_byte_type()),
+                    auth: SpendAuthorization::Key(output_owner_public_key.to_byte_type()),
                     tag: UtxoTag::new(0),
                 }
             })

@@ -13,7 +13,7 @@ export type StealthTransferStatement = {
    */
   balance_proof: SchnorrSignatureBytes | null;
   /**
-   * Covenant sub-balance proofs (TIP-0006), one per input partition whose `SpendCondition::Script` predicate
+   * Covenant sub-balance proofs (TIP-0006), one per input partition (keyed by `condition_root`) whose predicate
    * requires value conservation. Empty when no spent input gates on a covenant.
    */
   covenant_claims: Array<CovenantBalanceClaim>;

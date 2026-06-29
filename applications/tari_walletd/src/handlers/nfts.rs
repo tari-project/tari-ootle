@@ -116,7 +116,7 @@ pub async fn handle_mint_faucet(
         .substate_api()
         .locate_dependent_substates(slice::from_ref(&account.component_address.into()), true)
         .await?;
-    let fee = req.max_fee.unwrap_or(1500);
+    let fee = req.max_fee.unwrap_or(3000);
     let transaction = context
         .transaction_builder()
         .pay_fee_from_component(account.component_address, fee)

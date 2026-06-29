@@ -672,6 +672,34 @@ fn publish_template_macro_resolves_to_publish_template_instruction() {
 }
 
 #[test]
+fn publish_template_resolves_blob_let_binding() {
+    let manifest = r#"
+        fn main() {
+            let template = blob!("wasm");
+            publish_template!(template);
+        }
+    "#;
+
+    let mut blob_inputs = HashMap::new();
+    blob_inputs.insert(
+        "wasm".to_string(),
+        tari_ootle_transaction::Blob::from(vec![1u8, 2, 3, 4]),
+    );
+
+    let ManifestInstructions {
+        instructions, blobs, ..
+    } = parse_manifest(manifest, HashMap::new(), Default::default(), blob_inputs).unwrap();
+
+    assert_eq!(blobs.len(), 1);
+    assert_eq!(blobs.get(0).unwrap().as_bytes(), &[1u8, 2, 3, 4]);
+    assert_eq!(instructions.len(), 1);
+    assert_eq!(instructions[0], Instruction::PublishTemplate {
+        binary: 0,
+        metadata_hash: None,
+    });
+}
+
+#[test]
 fn publish_template_macro_unknown_blob_errors() {
     let manifest = r#"
         fn main() {

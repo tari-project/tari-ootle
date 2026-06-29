@@ -1,16 +1,15 @@
 //    Copyright 2026 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-//! Merklized script tree (MAST) for stealth spend-time scripts (TIP-0006).
+//! Merklized condition tree (MAST) for stealth spend-time conditions (TIP-0006).
 //!
-//! A stealth output commits to a set of alternative spend conditions via a single 32-byte
-//! `script_root`. At spend time the spender reveals one leaf plus an inclusion proof; the engine
-//! recomputes the root and checks it against the committed value. Hashing is native-only — a
-//! template never builds or verifies a tree.
+//! A stealth output commits to a set of alternative spend conditions via a single 32-byte `condition_root`. At spend
+//! time the spender reveals one leaf plus an inclusion proof; the engine recomputes the root and checks it against the
+//! committed value. Hashing is native-only — a template never builds or verifies a tree.
 //!
 //! Consensus-critical invariants:
-//! - **Domain separation.** Leaves and branches hash under distinct domains ([`EngineHashDomainLabel::SpendScriptLeaf`]
-//!   / [`EngineHashDomainLabel::SpendScriptBranch`]), so an internal node can never be reinterpreted as a leaf.
+//! - **Domain separation.** Leaves and branches hash under distinct domains ([`EngineHashDomainLabel::ConditionLeaf`] /
+//!   [`EngineHashDomainLabel::ConditionBranch`]), so an internal node can never be reinterpreted as a leaf.
 //! - **Lexicographic pair ordering.** A branch hashes its two children in byte order, so an inclusion proof is a bare
 //!   list of sibling hashes with no left/right direction bits.
 //! - **Canonical set commitment.** Leaf hashes are sorted and must be unique, so the root is a function of the *set* of
@@ -19,44 +18,52 @@
 //!   a repeated node collide with a smaller tree's root (CVE-2012-2459).
 
 use borsh::BorshSerialize;
-use minicbor::{CborLen, Decode, Encode};
-use serde::{Deserialize, Serialize};
-use tari_template_lib::types::Hash32;
+pub use tari_template_lib::types::stealth::MerkleProof;
+use tari_template_lib::types::{Hash32, stealth::SpendCondition};
 
 use crate::hashing::{EngineHashDomainLabel, hasher32};
 
+/// The leaf type/version discriminant for a [`SpendCondition`] committed as a condition-tree leaf (v0). The fixed-width
+/// id is chained ahead of the leaf body, so it selects how the body is interpreted and a future leaf version cannot
+/// collide with this one.
+pub const SPEND_CONDITION_LEAF_ID: u32 = 0;
+
 /// Hashes a single leaf `(id, payload)` into the leaf domain.
 ///
-/// `id` is the leaf type/version discriminant; `payload` is the leaf body, committed via its
-/// canonical Borsh encoding. The fixed-width `id` is chained first, so `(id, payload)` is
-/// unambiguous and `id` selects how `payload` is interpreted.
+/// `id` is the leaf type/version discriminant; `payload` is the leaf body, committed via its canonical Borsh encoding.
+/// The fixed-width `id` is chained first, so `(id, payload)` is unambiguous and `id` selects how `payload` is
+/// interpreted.
 pub fn leaf_hash<P: BorshSerialize + ?Sized>(id: u32, payload: &P) -> Hash32 {
-    hasher32(EngineHashDomainLabel::SpendScriptLeaf)
+    hasher32(EngineHashDomainLabel::ConditionLeaf)
         .chain(&id)
         .chain(payload)
         .result()
 }
 
-/// Hashes two child nodes into a branch, ordering them lexicographically so a proof needs no
-/// direction bits.
-fn branch_hash(a: Hash32, b: Hash32) -> Hash32 {
+/// Hashes a [`SpendCondition`] into its canonical condition-tree leaf hash (v0).
+pub fn condition_leaf_hash(condition: &SpendCondition) -> Hash32 {
+    leaf_hash(SPEND_CONDITION_LEAF_ID, condition)
+}
+
+/// Hashes two child nodes into a branch, ordering them lexicographically so a proof needs no direction bits.
+fn branch_hash(a: &Hash32, b: &Hash32) -> Hash32 {
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-    hasher32(EngineHashDomainLabel::SpendScriptBranch)
-        .chain(&lo)
-        .chain(&hi)
+    hasher32(EngineHashDomainLabel::ConditionBranch)
+        .chain(lo)
+        .chain(hi)
         .result()
 }
 
-/// Folds one level into the next in place, halving `buf` and truncating to the new length: adjacent
-/// pairs become branches, a trailing unpaired node is promoted unchanged.
+/// Folds one level into the next in place, halving `buf` and truncating to the new length: adjacent pairs become
+/// branches, a trailing unpaired node is promoted unchanged.
 ///
-/// Each parent is written at an index at or below the pair it hashes (`write <= read`), so the
-/// overwrite never clobbers a node still to be read.
+/// Each parent is written at an index at or below the pair it hashes (`write <= read`), so the overwrite never clobbers
+/// a node still to be read.
 fn fold_level(buf: &mut Vec<Hash32>) {
     let len = buf.len();
     let (mut read, mut write) = (0, 0);
     while read + 1 < len {
-        buf[write] = branch_hash(buf[read], buf[read + 1]);
+        buf[write] = branch_hash(&buf[read], &buf[read + 1]);
         read += 2;
         write += 1;
     }
@@ -69,13 +76,13 @@ fn fold_level(buf: &mut Vec<Hash32>) {
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum MerkleTreeError {
-    #[error("script tree must contain at least one leaf")]
+    #[error("condition tree must contain at least one leaf")]
     Empty,
-    #[error("script tree contains duplicate leaves")]
+    #[error("condition tree contains duplicate leaves")]
     DuplicateLeaf,
 }
 
-/// A canonical Merklized script tree over a set of distinct leaf hashes.
+/// A canonical Merklized condition tree over a set of distinct leaf hashes.
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
     /// Sorted, unique leaf hashes.
@@ -83,8 +90,8 @@ pub struct MerkleTree {
 }
 
 impl MerkleTree {
-    /// Builds a tree from leaf hashes, sorting into canonical order. Rejects an empty set or one
-    /// containing duplicate leaves.
+    /// Builds a tree from leaf hashes, sorting into canonical order. Rejects an empty set or one containing duplicate
+    /// leaves.
     pub fn new(leaf_hashes: impl IntoIterator<Item = Hash32>) -> Result<Self, MerkleTreeError> {
         let mut leaves: Vec<Hash32> = leaf_hashes.into_iter().collect();
         if leaves.is_empty() {
@@ -95,6 +102,13 @@ impl MerkleTree {
             return Err(MerkleTreeError::DuplicateLeaf);
         }
         Ok(Self { leaves })
+    }
+
+    /// Builds a condition tree from a set of [`SpendCondition`] leaves, hashing each into its canonical leaf hash.
+    pub fn from_conditions<'a, I: IntoIterator<Item = &'a SpendCondition>>(
+        conditions: I,
+    ) -> Result<Self, MerkleTreeError> {
+        Self::new(conditions.into_iter().map(condition_leaf_hash))
     }
 
     /// The committed root. For a single leaf this is the leaf hash itself.
@@ -120,32 +134,25 @@ impl MerkleTree {
         }
         Some(MerkleProof { siblings })
     }
-}
 
-/// An inclusion proof: the sibling hashes from a leaf up to the root, bottom-first.
-///
-/// Carries no direction bits — [`branch_hash`] re-sorts each pair on the way up. The type is pure
-/// data (no hashing), so it can move to `tari_template_lib_types` beside the spend witness while the
-/// hashing stays here in native code.
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, CborLen, Serialize, Deserialize)]
-pub struct MerkleProof {
-    #[n(0)]
-    pub siblings: Vec<Hash32>,
-}
-
-impl MerkleProof {
-    /// Recomputes the root that `leaf` and this proof attest to. The caller compares the result
-    /// against the committed `script_root`.
-    pub fn compute_root(&self, leaf: Hash32) -> Hash32 {
-        self.siblings
-            .iter()
-            .fold(leaf, |acc, &sibling| branch_hash(acc, sibling))
+    /// Produces an inclusion proof for a [`SpendCondition`] leaf, or `None` if it is not in the tree.
+    pub fn proof_for_condition(&self, condition: &SpendCondition) -> Option<MerkleProof> {
+        self.proof_for(condition_leaf_hash(condition))
     }
+}
+
+/// Recomputes the root that `leaf` and `proof` attest to. The caller compares the result against the committed
+/// `condition_root`. The proof carries no direction bits — [`branch_hash`] re-sorts each pair on the way up.
+pub fn compute_root(proof: &MerkleProof, leaf: Hash32) -> Hash32 {
+    proof
+        .siblings
+        .iter()
+        .fold(leaf, |acc, sibling| branch_hash(&acc, sibling))
 }
 
 /// Verifies that `leaf` is committed in `root` under `proof`.
 pub fn verify_inclusion(leaf: Hash32, proof: &MerkleProof, root: Hash32) -> bool {
-    proof.compute_root(leaf) == root
+    compute_root(proof, leaf) == root
 }
 
 #[cfg(test)]

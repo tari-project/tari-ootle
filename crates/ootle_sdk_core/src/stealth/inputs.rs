@@ -224,14 +224,12 @@ pub(crate) fn resolve_one_stealth_utxo(
         // Already a required signer — nothing to record.
     }
 
-    // Record the recovered witness.
-    witnesses.push(StealthInputWitness {
-        mask_and_value: MaskAndValue {
-            value: decrypted.value(),
-            mask: decrypted.mask().clone(),
-        },
-        spend_condition: None,
-    });
+    // Record the recovered witness. The SDK spends stealth inputs via the key path (the spending account
+    // authorizes); script-path spends are not produced here.
+    witnesses.push(StealthInputWitness::new(MaskAndValue {
+        value: decrypted.value(),
+        mask: decrypted.mask().clone(),
+    }));
 
     // Add the UTXO substate as a transaction input.
     let req = SubstateRequirement::unversioned(utxo_substate_id);
@@ -272,13 +270,13 @@ mod tests {
         crypto::{OutputBody, commit_u64_amount},
         substate::SubstateValue,
     };
-    use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
+    use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
     use tari_template_lib_types::{
         ObjectKey,
         ResourceAddress,
         access_rules::AccessRule,
         crypto::UtxoTag,
-        stealth::SpendCondition,
+        stealth::{SpendAuthorization, SpendCondition},
     };
 
     use super::*;
@@ -332,7 +330,9 @@ mod tests {
         };
         let utxo = Utxo::new(UtxoOutput {
             output: output_body,
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 

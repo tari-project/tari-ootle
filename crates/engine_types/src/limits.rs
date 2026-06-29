@@ -33,6 +33,21 @@ pub const MAX_WASM_POINTS_PER_CALL: u64 = 100_000_000;
 /// all its calls. The aggregate across a *block* still needs a separate per-block budget.
 pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
 
+/// Wasmer metering points a transaction may consume *before* its fee payments cover them. A
+/// transaction sources its fee in the fee intent (withdraw, claim-burn, AMM swap to TARI, stealth
+/// transfer, …) and only then calls `pay_fee`, so it must be allowed to run some compute on credit;
+/// this bounds that credit. Beyond it, each WASM call's metering allowance is capped to the points
+/// the fees paid so far can cover (`WasmProcess::invoke`), so a transaction that does not pay traps
+/// out-of-gas here rather than consuming the full [`MAX_WASM_POINTS_PER_TRANSACTION`] for free. This
+/// is the bound on free compute a non-paying transaction can extract from a validator. Payments
+/// raise the allowance above this value proportionally to the WASM fee rate.
+///
+/// Sized with generous margin over the most expensive legitimate fee-sourcing flow: acquiring TARI
+/// by swapping another resource through an AMM pool inside the fee intent costs ~143k points (see
+/// `tari_engine`'s `complex_fee_payment` test, which guards that this stays comfortably above it),
+/// so this is ~14x that worst case while staying far below the per-transaction cap.
+pub const FREE_COMPUTE_GRACE_POINTS: u64 = 2_000_000;
+
 pub struct EngineLimits {
     pub max_substate_outputs: usize,
     pub max_substate_size: usize,
@@ -82,6 +97,23 @@ pub struct StealthLimits {
     pub max_inputs: usize,
     /// Maximum stealth outputs in a single transfer statement.
     pub max_outputs: usize,
+    /// Maximum number of conditions in a single `SpendCondition` conjunction (TIP-0006). A revealed leaf is
+    /// evaluated in full at spend time, and a builtin predicate (e.g. a covenant balance proof or a hashlock) runs
+    /// native, unmetered work — so an unbounded conjunction would be a denial-of-service amplifier. This caps the
+    /// worst-case work of evaluating one leaf. The condition tree itself supplies breadth (a spender reveals only one
+    /// leaf plus a logarithmic inclusion proof), so the tree's size is not a spend-time cost and is not bounded here.
+    pub max_conditions_per_conjunction: usize,
+    /// Maximum size, in bytes, of the witness `data` blob a script-path spend may supply (`SpendWitness::ScriptPath`).
+    /// The blob is processed natively by the revealed leaf's predicates, so it is bounded to cap that work. A hashlock
+    /// preimage or a signature is far smaller; this leaves room for a small CBOR structure a `TemplateFunction`
+    /// decodes.
+    pub max_witness_data_len: usize,
+    /// Maximum number of sibling hashes in a script-path inclusion proof (`MerkleProof`). The proof is
+    /// spender-supplied and each sibling costs one native hash in `verify_inclusion`, so its length is bounded to
+    /// keep that work constant. A proof of length `n` corresponds to a condition tree of up to `2^n` leaves, so
+    /// this ceiling is far beyond any real tree (whose breadth is otherwise unbounded — see
+    /// `max_conditions_per_conjunction`).
+    pub max_inclusion_proof_len: usize,
     /// Maximum number of stealth transfers across a whole transaction.
     pub max_transfers_per_transaction: usize,
     /// Maximum total stealth inputs across a whole transaction.
@@ -98,6 +130,9 @@ pub struct StealthLimits {
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
     max_outputs: 8,
+    max_conditions_per_conjunction: 16,
+    max_witness_data_len: 4096,
+    max_inclusion_proof_len: 32,
     max_transfers_per_transaction: 64,
     max_total_inputs_per_transaction: 1024,
     max_total_outputs_per_transaction: 256,

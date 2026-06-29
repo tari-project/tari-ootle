@@ -569,8 +569,6 @@ impl Sum for Amount {
 mod tests {
     use std::vec;
 
-    use serde_json::json;
-
     use super::*;
 
     #[test]
@@ -670,7 +668,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "serde")]
     fn can_serialize() {
+        use serde_json::json;
         let a = Amount::from_u64(4);
         let b = serde_json::to_value(a).unwrap();
         assert_eq!(b, json!("4"));

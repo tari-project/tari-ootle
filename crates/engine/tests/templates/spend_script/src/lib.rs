@@ -66,6 +66,12 @@ mod spend_scripts {
             assert!(signature.verify(&public_key, SIG_MESSAGE), "invalid spend signature");
         }
 
+        /// Witness-data lock: authorises only if the spend-supplied witness `data` equals the committed `expected`
+        /// bytes. Exercises reading uncommitted witness data (alongside a committed argument) inside a spend script.
+        pub fn require_witness_data(expected: Vec<u8>, ctx: SpendContext) {
+            assert!(ctx.data() == expected, "witness data does not match the expected value");
+        }
+
         /// Attempts to mutate ledger state by creating a component. The read-only spend-script sandbox refuses the
         /// underlying `new_substate`/write-lock, so this always aborts the spend.
         pub fn try_write(_ctx: SpendContext) {

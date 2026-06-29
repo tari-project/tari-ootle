@@ -103,7 +103,13 @@ impl AsRef<[u8]> for Bytes {
 /// Serialize using the optimal byte format. i.e. `Bytes` in ciborium instead of `Array(Integer(u8), ....])`
 #[cfg(feature = "serde")]
 pub fn serialize<S: serde::Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_bytes(v.as_ref())
+    use crate::hex::bytes_to_hex;
+    if s.is_human_readable() {
+        let st = bytes_to_hex(v.as_ref());
+        s.serialize_str(&st)
+    } else {
+        s.serialize_bytes(v.as_ref())
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -112,8 +118,41 @@ where
     D: serde::Deserializer<'de>,
     T: From<Box<[u8]>>,
 {
-    let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
-    Ok(bytes.into_owned().into())
+    use serde::de::{Error, SeqAccess, Visitor};
+
+    if d.is_human_readable() {
+        struct HumanReadableBytesVisitor;
+
+        impl<'de> Visitor<'de> for HumanReadableBytesVisitor {
+            type Value = Box<[u8]>;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("a hex string or an array of bytes")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where E: Error {
+                crate::hex::bytes_from_hex(v)
+                    .map(|b| b.into_boxed_slice())
+                    .map_err(Error::custom)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where A: SeqAccess<'de> {
+                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(byte) = seq.next_element::<u8>()? {
+                    bytes.push(byte);
+                }
+                Ok(bytes.into_boxed_slice())
+            }
+        }
+
+        let bytes = d.deserialize_any(HumanReadableBytesVisitor)?;
+        Ok(bytes.into())
+    } else {
+        let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
+        Ok(bytes.into_owned().into())
+    }
 }
 
 #[cfg(test)]
@@ -130,5 +169,50 @@ mod tests {
         let deserialized: Bytes = tari_bor::from_value(&val).unwrap();
         assert_eq!(original, deserialized);
         assert_eq!(arr, original.as_slice());
+
+        // The CBOR wire form must be a byte string (major type 2 = `0x40..=0x5f`), never an array of integers
+        // (major type 4). The top 3 bits of the head byte are the major type.
+        let raw = tari_bor::encode(&original).unwrap();
+        assert_eq!(
+            raw[0] >> 5,
+            2,
+            "Bytes must CBOR-encode as a byte string, got head byte 0x{:02x}",
+            raw[0]
+        );
+    }
+
+    // Regression: a self-describing format (JSON) has no native byte type, so `serialize_bytes` is rendered as an array
+    // of integers. The deserializer must read that array back, or any `Bytes`-bearing value (e.g. a stored transaction
+    // with a script-path witness) fails to decode.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn json_round_trips() {
+        let original = Bytes::from_vec(vec![0, 1, 2, 250, 255]);
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: Bytes = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+
+        // json as an array
+        let json = serde_json::to_string(original.as_slice()).unwrap();
+        let deserialized: Bytes = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    // A value decoded from JSON (an integer array) must re-encode to CBOR as the canonical byte string — identical to
+    // the original's CBOR — so a JSON -> CBOR round-trip (e.g. an indexer recomputing a transaction hash) cannot turn a
+    // byte string into `Array(int, int, ...)` and change the bytes.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn json_then_cbor_is_the_canonical_byte_string() {
+        let original = Bytes::from_vec(vec![1, 2, 3, 4, 5]);
+        let from_json: Bytes = serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
+
+        let cbor_from_json = tari_bor::encode(&from_json).unwrap();
+        assert_eq!(cbor_from_json, tari_bor::encode(&original).unwrap());
+        assert_eq!(
+            cbor_from_json[0] >> 5,
+            2,
+            "JSON -> CBOR must yield a byte string, not an array"
+        );
     }
 }

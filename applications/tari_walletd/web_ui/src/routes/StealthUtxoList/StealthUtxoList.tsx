@@ -116,7 +116,7 @@ function StealthUtxoList({ account }: { account: Account }) {
                         {bigintToDecimalString(utxo.value, divisibility)} {currencySymbol}
                       </DataTableCell>
                       <DataTableCell>
-                        <StatusChip status={utxo.status} tooltip={JSON.stringify(utxo.spend_condition)} />
+                        <StatusChip status={utxo.status} tooltip={JSON.stringify(utxo.auth)} />
                       </DataTableCell>
                       <DataTableCell>
                         {utxo.sender_address ? (

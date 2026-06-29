@@ -1706,7 +1706,7 @@ pub struct GetBalanceChangesRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct BalanceChangeEntry {
-    pub vault_address: String,
+    pub vault_address: Option<String>,
     pub resource_address: String,
     pub before_revealed_balance: String,
     pub after_revealed_balance: String,

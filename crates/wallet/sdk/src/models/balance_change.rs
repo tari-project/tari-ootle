@@ -8,7 +8,7 @@ use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BalanceChange {
-    pub vault_address: VaultId,
+    pub vault_address: Option<VaultId>,
     pub resource_address: String,
     pub before_revealed_balance: String,
     pub after_revealed_balance: String,
@@ -79,7 +79,7 @@ impl BalanceChange {
     }
 
     pub fn new(
-        vault_address: VaultId,
+        vault_address: Option<VaultId>,
         resource_address: ResourceAddress,
         before_revealed_balance: Amount,
         after_revealed_balance: Amount,

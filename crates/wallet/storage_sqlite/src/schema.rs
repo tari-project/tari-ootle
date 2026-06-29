@@ -20,7 +20,7 @@ diesel::table! {
 diesel::table! {
     account_balance_changes (id) {
         id -> Integer,
-        vault_id -> Integer,
+        vault_id -> Nullable<Integer>,
         account_id -> Integer,
         resource_address -> Text,
         before_revealed_balance -> Text,

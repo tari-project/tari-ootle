@@ -12,7 +12,7 @@ use crate::schema::account_balance_changes;
 #[diesel(table_name = account_balance_changes)]
 pub struct BalanceChangeRow {
     pub id: i32,
-    pub vault_id: i32,
+    pub vault_id: Option<i32>,
     pub account_id: i32,
     pub resource_address: String,
     pub before_revealed_balance: String,
@@ -29,7 +29,7 @@ pub struct BalanceChangeRow {
 impl BalanceChangeRow {
     pub fn try_into_balance_change(
         self,
-        vault_address: VaultId,
+        vault_address: Option<VaultId>,
     ) -> Result<tari_ootle_wallet_sdk::models::BalanceChange, WalletStorageError> {
         let source = parse_balance_change_source(&self.source, self.transaction_id.as_deref())?;
         Ok(tari_ootle_wallet_sdk::models::BalanceChange {

@@ -752,9 +752,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
         }
 
         let mut rows = account_balance_changes::table
-            .inner_join(vaults::table)
+            .left_join(vaults::table)
             .filter(account_balance_changes::account_id.eq(account_id))
-            .select((account_balance_changes::all_columns, vaults::address))
+            .select((account_balance_changes::all_columns, vaults::address.nullable()))
             .order((
                 account_balance_changes::created_at.desc(),
                 account_balance_changes::id.desc(),
@@ -802,18 +802,21 @@ impl WalletStoreReader for ReadTransaction<'_> {
         let results = rows
             .offset(offset as i64)
             .limit(limit as i64)
-            .load::<(models::BalanceChangeRow, String)>(self.connection())
+            .load::<(models::BalanceChangeRow, Option<String>)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         results
             .into_iter()
             .map(|(row, vault_address_str)| {
-                let vault_address =
-                    VaultId::from_str(&vault_address_str).map_err(|e| WalletStorageError::DecodingError {
-                        operation: OPERATION,
-                        item: "vault address",
-                        details: e.to_string(),
-                    })?;
+                let vault_address = vault_address_str
+                    .map(|addr| {
+                        VaultId::from_str(&addr).map_err(|e| WalletStorageError::DecodingError {
+                            operation: OPERATION,
+                            item: "vault address",
+                            details: e.to_string(),
+                        })
+                    })
+                    .transpose()?;
                 row.try_into_balance_change(vault_address)
             })
             .collect()

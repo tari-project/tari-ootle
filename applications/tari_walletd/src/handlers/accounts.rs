@@ -1475,7 +1475,7 @@ pub async fn handle_associate_stealth_resource(
 
 fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
     BalanceChangeEntry {
-        vault_address: change.vault_address.to_string(),
+        vault_address: change.vault_address.map(|a| a.to_string()),
         resource_address: change.resource_address,
         before_revealed_balance: change.before_revealed_balance,
         after_revealed_balance: change.after_revealed_balance,
@@ -1542,6 +1542,7 @@ mod balance_change_handler_tests {
         storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
     };
     use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+    use tari_ootle_walletd_client::types::WalletBalanceChangeSource;
     use tari_template_lib_types::{
         Amount,
         ComponentAddress,
@@ -1610,7 +1611,7 @@ mod balance_change_handler_tests {
         let resource = "resource_0000000000000000000000000000000000000000000000000000000000000001";
 
         let tx = BalanceChange {
-            vault_address: vault_id,
+            vault_address: Some(vault_id),
             resource_address: resource.to_string(),
             before_revealed_balance: "100".to_string(),
             after_revealed_balance: "200".to_string(),
@@ -1629,7 +1630,7 @@ mod balance_change_handler_tests {
         assert!(entry.transaction_id.is_some());
 
         let scan = BalanceChange {
-            vault_address: vault_id,
+            vault_address: Some(vault_id),
             resource_address: resource.to_string(),
             before_revealed_balance: "0".to_string(),
             after_revealed_balance: "500".to_string(),
@@ -1646,7 +1647,7 @@ mod balance_change_handler_tests {
         assert!(entry.transaction_id.is_none());
 
         let recovery = BalanceChange {
-            vault_address: vault_id,
+            vault_address: Some(vault_id),
             resource_address: resource.to_string(),
             before_revealed_balance: "200".to_string(),
             after_revealed_balance: "300".to_string(),
@@ -1672,7 +1673,8 @@ mod balance_change_handler_tests {
 
         // Insert tx-driven change
         tx.balance_changes_insert(
-            &vault_id,
+            &account_address,
+            Some(&vault_id),
             &resource_address,
             &Amount::from(0u64),
             &Amount::from(1000u64),

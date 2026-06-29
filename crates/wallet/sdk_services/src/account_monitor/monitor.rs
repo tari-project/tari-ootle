@@ -254,13 +254,11 @@ where
         let resource_address = *event.address.resource_address();
         let accounts_api = self.wallet_sdk.accounts_api();
 
-        let vault = match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
-            Ok(vault) => vault,
-            Err(_) => {
-                // No vault for this resource — nothing to record (stealth-only resource without a vault)
-                return Ok(());
-            },
-        };
+        let (vault_address, revealed_balance) =
+            match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
+                Ok(vault) => (Some(vault.id), vault.revealed_balance),
+                Err(_) => (None, Amount::zero()),
+            };
 
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
         let current_stealth_balance = stealth_outputs_api.get_unspent_balance(&resource_address)?.balance;
@@ -268,10 +266,11 @@ where
         let before_stealth = (current_stealth_balance - utxo_amount).max(Amount::zero());
 
         accounts_api.balance_changes_insert(
-            &vault.id,
+            &event.account_address,
+            vault_address.as_ref(),
             &resource_address,
-            &vault.revealed_balance,
-            &vault.revealed_balance,
+            &revealed_balance,
+            &revealed_balance,
             &before_stealth,
             &current_stealth_balance,
             &BalanceChangeSource::Scan,
@@ -284,12 +283,11 @@ where
         let resource_address = *event.address.resource_address();
         let accounts_api = self.wallet_sdk.accounts_api();
 
-        let vault = match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
-            Ok(vault) => vault,
-            Err(_) => {
-                return Ok(());
-            },
-        };
+        let (vault_address, revealed_balance) =
+            match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
+                Ok(vault) => (Some(vault.id), vault.revealed_balance),
+                Err(_) => (None, Amount::zero()),
+            };
 
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
         let current_stealth_balance = stealth_outputs_api.get_unspent_balance(&resource_address)?.balance;
@@ -297,10 +295,11 @@ where
         let before_stealth = current_stealth_balance + utxo_amount;
 
         accounts_api.balance_changes_insert(
-            &vault.id,
+            &event.account_address,
+            vault_address.as_ref(),
             &resource_address,
-            &vault.revealed_balance,
-            &vault.revealed_balance,
+            &revealed_balance,
+            &revealed_balance,
             &before_stealth,
             &current_stealth_balance,
             &BalanceChangeSource::Scan,

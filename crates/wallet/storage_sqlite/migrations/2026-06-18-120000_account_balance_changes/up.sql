@@ -1,6 +1,6 @@
 CREATE TABLE account_balance_changes (
     id                          INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    vault_id                    INTEGER NOT NULL REFERENCES vaults (id) ON DELETE CASCADE,
+    vault_id                    INTEGER REFERENCES vaults (id) ON DELETE CASCADE,
     account_id                  INTEGER NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     resource_address            TEXT    NOT NULL,
     before_revealed_balance     TEXT    NOT NULL,

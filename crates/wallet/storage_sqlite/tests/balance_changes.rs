@@ -71,7 +71,8 @@ fn tx_driven_change() {
     let tx_id = make_tx_id(42);
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(0u64),
         &Amount::from(1000u64),
@@ -88,7 +89,7 @@ fn tx_driven_change() {
     assert_eq!(changes.len(), 1);
 
     let change = &changes[0];
-    assert_eq!(change.vault_address, vault_id);
+    assert_eq!(change.vault_address, Some(vault_id));
     assert_eq!(change.resource_address, resource_address.to_string());
     assert_eq!(change.before_revealed_balance, "0");
     assert_eq!(change.after_revealed_balance, "1000");
@@ -134,7 +135,8 @@ fn multi_vault_transaction() {
     let tx_id = make_tx_id(99);
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
-        &vault_id_1,
+        &account_address,
+        Some(&vault_id_1),
         &resource_address_1,
         &Amount::from(0u64),
         &Amount::from(500u64),
@@ -144,7 +146,8 @@ fn multi_vault_transaction() {
     )
     .unwrap();
     tx.balance_changes_insert(
-        &vault_id_2,
+        &account_address,
+        Some(&vault_id_2),
         &resource_address_2,
         &Amount::from(100u64),
         &Amount::from(200u64),
@@ -188,7 +191,8 @@ fn non_transaction_recovery_change() {
 
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(0u64),
         &Amount::from(500u64),
@@ -222,7 +226,8 @@ fn idempotent_rescan() {
 
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(0u64),
         &Amount::from(100u64),
@@ -232,7 +237,8 @@ fn idempotent_rescan() {
     )
     .unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(0u64),
         &Amount::from(100u64),
@@ -258,7 +264,8 @@ fn pagination() {
     let mut tx = db.create_write_tx().unwrap();
     for i in 1..=5u64 {
         tx.balance_changes_insert(
-            &vault_id,
+            &account_address,
+            Some(&vault_id),
             &resource_address,
             &Amount::from((i - 1) * 100),
             &Amount::from(i * 100),
@@ -302,7 +309,8 @@ fn zero_balance_change_is_logged() {
     let tx_id = make_tx_id(1);
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(100u64),
         &Amount::from(100u64),
@@ -330,7 +338,8 @@ fn source_type_filter() {
     let tx_id = make_tx_id(1);
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(0u64),
         &Amount::from(100u64),
@@ -340,7 +349,8 @@ fn source_type_filter() {
     )
     .unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(100u64),
         &Amount::from(200u64),
@@ -350,7 +360,8 @@ fn source_type_filter() {
     )
     .unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(200u64),
         &Amount::from(300u64),
@@ -419,7 +430,8 @@ fn time_range_filter() {
     let tx_id_2 = make_tx_id(2);
     let mut tx = db.create_write_tx().unwrap();
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(0u64),
         &Amount::from(100u64),
@@ -433,7 +445,8 @@ fn time_range_filter() {
     // Small delay to ensure different created_at timestamps
     std::thread::sleep(std::time::Duration::from_millis(10));
     tx.balance_changes_insert(
-        &vault_id,
+        &account_address,
+        Some(&vault_id),
         &resource_address,
         &Amount::from(100u64),
         &Amount::from(200u64),
@@ -476,7 +489,8 @@ fn promote_scan_to_transaction() {
     {
         let mut tx = db.create_write_tx().unwrap();
         tx.balance_changes_insert(
-            &vault_id,
+            &account_address,
+            Some(&vault_id),
             &resource_address,
             &Amount::from(100u64),
             &Amount::from(500u64),

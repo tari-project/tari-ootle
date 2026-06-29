@@ -791,7 +791,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     fn balance_changes_insert(
         &mut self,
-        vault_address: &VaultId,
+        account_address: &ComponentAddress,
+        vault_address: Option<&VaultId>,
         resource_address: &ResourceAddress,
         before_revealed_balance: &Amount,
         after_revealed_balance: &Amount,
@@ -800,19 +801,37 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         source: &BalanceChangeSource,
     ) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "balance_changes_insert";
-        use crate::schema::{account_balance_changes, vaults};
+        use crate::schema::{account_balance_changes, accounts, vaults};
 
-        let (vault_db_id, account_id) = vaults::table
-            .select((vaults::id, vaults::account_id))
-            .filter(vaults::address.eq(vault_address.to_string()))
-            .first::<(i32, i32)>(self.connection())
+        let account_id = accounts::table
+            .select(accounts::id)
+            .filter(accounts::address.eq(account_address.to_string()))
+            .first::<i32>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: OPERATION,
-                entity: "vault".to_string(),
-                key: vault_address.to_string(),
+                entity: "account".to_string(),
+                key: account_address.to_string(),
             })?;
+
+        let vault_db_id = match vault_address {
+            Some(vault_addr) => {
+                let vid = vaults::table
+                    .select(vaults::id)
+                    .filter(vaults::address.eq(vault_addr.to_string()))
+                    .first::<i32>(self.connection())
+                    .optional()
+                    .map_err(|e| WalletStorageError::general(OPERATION, e))?
+                    .ok_or_else(|| WalletStorageError::NotFound {
+                        operation: OPERATION,
+                        entity: "vault".to_string(),
+                        key: vault_addr.to_string(),
+                    })?;
+                Some(vid)
+            },
+            None => None,
+        };
 
         let source_str = models::balance_change_source_to_string(source);
         let transaction_id = match source {

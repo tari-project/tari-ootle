@@ -131,7 +131,8 @@ pub trait WalletStoreWriter: CommittableStore {
     // Balance Changes
     fn balance_changes_insert(
         &mut self,
-        vault_address: &VaultId,
+        account_address: &ComponentAddress,
+        vault_address: Option<&VaultId>,
         resource_address: &ResourceAddress,
         before_revealed_balance: &Amount,
         after_revealed_balance: &Amount,

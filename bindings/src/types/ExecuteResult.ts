@@ -19,7 +19,8 @@ export type ExecuteResult = {
   /**
    * Total WASM metering points consumed by the transaction across all calls, including failed/aborted execution.
    * Metering is deterministic, so every validator computes the identical value for the same transaction and
-   * pledged state. Used to enforce the per-block WASM points budget.
+   * pledged state. Used to enforce the per-block WASM points budget. Defaults to 0 when decoding executions
+   * persisted before this field existed.
    */
   wasm_execution_points: bigint;
 };

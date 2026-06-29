@@ -500,16 +500,14 @@ fn mint_with_view_key() {
     let (view_key_secret, ref view_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let (confidential_proof, _mask, _change) = generate_confidential_proof_with_view_key(123, None, view_key);
     let (mut test, faucet, _faucet_resx) = setup(confidential_proof, Some(view_key));
-    let faucet_entity_id = faucet.entity_id();
 
     let (confidential_proof, mask, _change) = generate_confidential_proof_with_view_key(100, None, view_key);
     test.call_method::<()>(faucet, "mint_more", args![confidential_proof], vec![]);
 
     let (user_account, user_proof, user_key) = test.create_empty_account();
-    let user_account_entity_id = user_account.entity_id();
 
     let withdraw_proof = generate_withdraw_proof_with_view_key(&mask, 100, 55, Some(100 - 55), 0u64, view_key);
-    let result = test.execute_expect_success(
+    test.execute_expect_success(
         Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
@@ -518,11 +516,12 @@ fn mint_with_view_key() {
         vec![user_proof],
     );
 
-    let diff = result.finalize.result.any_accept().unwrap();
-    let faucet_vault = diff
-        .up_iter()
-        .find(|(addr, _)| addr.is_vault() && addr.as_vault_id().unwrap().entity_id() == faucet_entity_id)
-        .map(|(_, vault)| vault.substate_value().as_vault().unwrap())
+    let (_, faucet_vault) = test
+        .read_only_state_store()
+        .get_vaults_for_component(faucet)
+        .unwrap()
+        .into_iter()
+        .next()
         .unwrap();
 
     let total_balance = try_brute_force_confidential_balance(
@@ -534,10 +533,12 @@ fn mint_with_view_key() {
     .unwrap();
     assert_eq!(total_balance, Some(223 - 55));
 
-    let user_vault = diff
-        .up_iter()
-        .find(|(addr, _)| addr.is_vault() && addr.as_vault_id().unwrap().entity_id() == user_account_entity_id)
-        .map(|(_, vault)| vault.substate_value().as_vault().unwrap())
+    let (_, user_vault) = test
+        .read_only_state_store()
+        .get_vaults_for_component(user_account)
+        .unwrap()
+        .into_iter()
+        .next()
         .unwrap();
 
     let total_balance = try_brute_force_confidential_balance(

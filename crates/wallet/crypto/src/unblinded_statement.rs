@@ -3,7 +3,12 @@
 
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment};
 use tari_engine_types::crypto::commit_u64_amount;
-use tari_template_lib_types::{EncryptedData, crypto::UtxoTag, stealth::SpendCondition};
+use tari_template_lib_types::{
+    EncryptedData,
+    Hash32,
+    crypto::UtxoTag,
+    stealth::{SpendAuthorization, SpendWitness},
+};
 
 use crate::memo::Memo;
 
@@ -26,7 +31,7 @@ impl OutputWitness {
 #[derive(Debug, Clone)]
 pub struct StealthOutputWitness {
     pub witness: OutputWitness,
-    pub spend_condition: SpendCondition,
+    pub auth: SpendAuthorization,
     pub tag: UtxoTag,
 }
 
@@ -77,23 +82,29 @@ impl DecryptedData {
 #[derive(Debug, Clone)]
 pub struct StealthInputWitness {
     pub mask_and_value: MaskAndValue,
-    /// The spend condition of the UTXO being spent. Required to partition inputs by covenant when generating
-    /// covenant balance proofs (TIP-0006); `None` for inputs that do not participate in a covenant.
-    pub spend_condition: Option<SpendCondition>,
+    /// Selects which authorisation path the spender is exercising for this input (TIP-0006).
+    pub witness: SpendWitness,
+    /// The committed `condition_root` of the UTXO being spent, for script-path inputs. Required to partition inputs by
+    /// covenant when generating covenant balance proofs; `None` for key-path inputs (which never join a covenant).
+    pub condition_root: Option<Hash32>,
 }
 
 impl StealthInputWitness {
+    /// A key-path spend of `mask_and_value`.
     pub fn new(mask_and_value: MaskAndValue) -> Self {
         Self {
             mask_and_value,
-            spend_condition: None,
+            witness: SpendWitness::KeyPath,
+            condition_root: None,
         }
     }
 
-    pub fn with_spend_condition(mask_and_value: MaskAndValue, spend_condition: SpendCondition) -> Self {
+    /// A script-path spend of `mask_and_value` revealing `witness` against the UTXO's committed `condition_root`.
+    pub fn with_script_path(mask_and_value: MaskAndValue, witness: SpendWitness, condition_root: Hash32) -> Self {
         Self {
             mask_and_value,
-            spend_condition: Some(spend_condition),
+            witness,
+            condition_root: Some(condition_root),
         }
     }
 }

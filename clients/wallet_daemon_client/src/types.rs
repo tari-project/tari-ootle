@@ -75,7 +75,7 @@ use tari_template_lib_types::{
     VaultId,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
-    stealth::{SpendCondition, StealthTransferStatement},
+    stealth::{SpendAuthorization, StealthTransferStatement},
 };
 use time::PrimitiveDateTime;
 use url::Url;
@@ -1462,7 +1462,8 @@ pub struct UtxoInfo {
     /// The sender's Ootle address, resolved from the memo when it is a `SenderAddress` variant, using the
     /// wallet's configured network. `None` for all other memo types.
     pub sender_address: Option<OotleAddress>,
-    pub spend_condition: SpendCondition,
+    /// How this UTXO is authorised at spend time (key path, condition tree, or both).
+    pub auth: SpendAuthorization,
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,

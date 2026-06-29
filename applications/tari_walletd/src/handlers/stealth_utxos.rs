@@ -54,7 +54,7 @@ pub async fn handle_list(
                 status: o.status,
                 sender_address: resolve_sender_address(o.memo.as_ref(), network),
                 memo: o.memo,
-                spend_condition: o.spend_condition,
+                auth: o.auth,
                 is_burnt: o.is_burnt,
                 is_frozen: o.is_frozen,
                 is_on_chain: o.is_on_chain,

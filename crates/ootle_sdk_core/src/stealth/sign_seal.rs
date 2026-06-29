@@ -442,13 +442,13 @@ mod tests {
         substate::SubstateValue,
     };
     use tari_ootle_transaction::TransactionEnvelope;
-    use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs};
+    use tari_ootle_wallet_crypto::{encrypted_data::encrypt_data, kdfs, stealth::condition_root};
     use tari_template_lib_types::{
         ComponentAddress,
         ObjectKey,
         access_rules::AccessRule,
         crypto::UtxoTag,
-        stealth::SpendCondition,
+        stealth::{SpendAuthorization, SpendCondition},
     };
 
     use super::*;
@@ -593,7 +593,9 @@ mod tests {
                 minimum_value_promise: 0,
                 viewable_balance: None,
             },
-            spend_condition: SpendCondition::AccessRule(AccessRule::AllowAll),
+            auth: SpendAuthorization::Script(
+                condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap(),
+            ),
             tag: UtxoTag::new(0),
         });
 

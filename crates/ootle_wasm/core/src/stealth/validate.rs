@@ -40,7 +40,7 @@ mod tests {
         StealthOutputWitness,
         stealth::create_transfer_statement,
     };
-    use tari_template_lib_types::{Amount, EncryptedData, crypto::UtxoTag, stealth::SpendCondition};
+    use tari_template_lib_types::{Amount, EncryptedData, crypto::UtxoTag, stealth::SpendAuthorization};
 
     use super::*;
 
@@ -61,7 +61,7 @@ mod tests {
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 resource_view_key: None,
             },
-            spend_condition: SpendCondition::Signed(owner_pk.to_byte_type()),
+            auth: SpendAuthorization::Key(owner_pk.to_byte_type()),
             tag: UtxoTag::new(0),
         }];
         let transfer = create_transfer_statement(inputs, Amount::zero(), outputs.iter(), Amount::zero()).unwrap();

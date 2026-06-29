@@ -4,7 +4,7 @@
 use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::{prelude::*, vec};
 
-use super::StealthUnspentOutput;
+use super::{SpendWitness, StealthUnspentOutput};
 use crate::{
     Amount,
     UtxoAddress,
@@ -50,11 +50,25 @@ pub struct StealthInput {
     /// The commitment of the unspent output being spent
     #[n(0)]
     pub commitment: PedersenCommitmentBytes,
+    /// Selects which authorisation path the spender is exercising for this input (TIP-0006). Defaults to the key path.
+    #[n(1)]
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[cbor(default)]
+    pub witness: SpendWitness,
 }
 
 impl StealthInput {
+    /// A key-path spend of the output at `commitment`.
     pub fn new(commitment: PedersenCommitmentBytes) -> Self {
-        Self { commitment }
+        Self {
+            commitment,
+            witness: SpendWitness::KeyPath,
+        }
+    }
+
+    /// A spend of the output at `commitment` exercising `witness`.
+    pub fn with_witness(commitment: PedersenCommitmentBytes, witness: SpendWitness) -> Self {
+        Self { commitment, witness }
     }
 }
 
@@ -66,7 +80,7 @@ impl From<&UtxoAddress> for StealthInput {
 
 impl From<PedersenCommitmentBytes> for StealthInput {
     fn from(commitment: PedersenCommitmentBytes) -> Self {
-        Self { commitment }
+        Self::new(commitment)
     }
 }
 impl From<&PedersenCommitmentBytes> for StealthInput {
@@ -109,11 +123,11 @@ impl StealthInputsStatement {
 }
 
 /// A covenant sub-balance proof (TIP-0006 `AssertCovenantBalanced`) covering one partition of the transfer: the inputs
-/// and outputs that share a `SpendCondition::Script`. It proves the partition's committed value is conserved into
-/// outputs carrying that condition save for an exact cleartext `revealed_amount`, without exposing confidential values.
+/// and outputs that share a `condition_root`. It proves the partition's committed value is conserved into outputs
+/// carrying that root save for an exact cleartext `revealed_amount`, without exposing confidential values.
 ///
-/// A claim is keyed by `partition_input_index` rather than by restating its (potentially large) spend condition; the
-/// engine matches it to its partition by that index. The condition is bound into `signature`, so a claim cannot be
+/// A claim is keyed by `partition_input_index` rather than by restating its condition root; the engine matches it to
+/// its partition by that index. The partition's `condition_root` is bound into `signature`, so a claim cannot be
 /// validated against the wrong partition.
 #[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -145,7 +159,7 @@ pub struct StealthTransferStatement {
     /// is valid). This may be None, if and only if, the transfer is revealed-only (i.e. no stealth inputs or outputs).
     #[n(2)]
     pub balance_proof: Option<BalanceProofSignature>,
-    /// Covenant sub-balance proofs (TIP-0006), one per input partition whose `SpendCondition::Script` predicate
+    /// Covenant sub-balance proofs (TIP-0006), one per input partition (keyed by `condition_root`) whose predicate
     /// requires value conservation. Empty when no spent input gates on a covenant.
     #[n(3)]
     #[cfg_attr(feature = "serde", serde(default))]

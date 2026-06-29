@@ -28,7 +28,7 @@ use tari_ootle_walletd_client::{
 use tari_template_lib_types::{
     ValidatorFeePoolAddress,
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},
-    stealth::{SpendCondition, StealthTransferStatement},
+    stealth::{SpendAuthorization, StealthTransferStatement},
 };
 
 use crate::{
@@ -357,7 +357,7 @@ async fn build_self_stealth_statement(
             encrypted_data,
             resource_view_key: None,
         },
-        spend_condition: SpendCondition::Signed(stealth_owner_public_key.to_byte_type()),
+        auth: SpendAuthorization::Key(stealth_owner_public_key.to_byte_type()),
         tag,
     };
 

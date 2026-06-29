@@ -220,7 +220,7 @@ pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, JsError>
 ///     "encrypted_data": <hex variable-length>,
 ///     "resource_view_key": <hex 32 bytes | null>
 ///   },
-///   "spend_condition": <SpendCondition>,
+///   "auth": <SpendAuthorization>,
 ///   "tag": <u32>
 /// }
 /// ```
@@ -258,7 +258,7 @@ pub fn generate_stealth_outputs_statement(
 ///     "encrypted_data": <hex variable-length>,
 ///     "resource_view_key": <hex 32 bytes | null>
 ///   },
-///   "spend_condition": <SpendCondition>,
+///   "auth": <SpendAuthorization>,
 ///   "tag": <u32>
 /// }
 /// ```
@@ -339,7 +339,7 @@ pub fn aggregate_input_masks(masks_concat: &[u8]) -> Result<Vec<u8>, JsError> {
 /// power of two internally.
 ///
 /// `witnesses_json` is a JSON array of "flat" output witnesses (the `witness` field shape from
-/// [`generate_stealth_outputs_statement`] — without the surrounding `spend_condition` / `tag`).
+/// [`generate_stealth_outputs_statement`] — without the surrounding `auth` / `tag`).
 ///
 /// Returns the raw range proof bytes (may be empty if the input array is empty).
 #[wasm_bindgen(js_name = "generateExtendedBulletProof")]

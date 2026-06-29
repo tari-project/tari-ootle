@@ -8,7 +8,7 @@
 //! stable JSON shape for the WASM ABI and convert into the internal types via [`Into`].
 //!
 //! All 32-byte values (masks, public keys) are hex-encoded strings; `encrypted_data` follows the standard
-//! `EncryptedData` hex encoding; `spend_condition` and `tag` are the same shapes used by the wallet daemon
+//! `EncryptedData` hex encoding; `auth` and `tag` are the same shapes used by the wallet daemon
 //! RPC layer.
 
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness};
-use tari_template_lib_types::{EncryptedData, crypto::UtxoTag, stealth::SpendCondition};
+use tari_template_lib_types::{EncryptedData, crypto::UtxoTag, stealth::SpendAuthorization};
 
 use crate::{
     error::OotleWasmError,
@@ -83,11 +83,11 @@ impl From<&OutputWitness> for OutputWitnessJson {
     }
 }
 
-/// A full stealth output witness: the unblinded data plus the spend condition and UTXO tag attached to it.
+/// A full stealth output witness: the unblinded data plus the output's [`SpendAuthorization`] and UTXO tag.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StealthOutputWitnessJson {
     pub witness: OutputWitnessJson,
-    pub spend_condition: SpendCondition,
+    pub auth: SpendAuthorization,
     pub tag: UtxoTag,
 }
 
@@ -95,7 +95,7 @@ impl From<&StealthOutputWitness> for StealthOutputWitnessJson {
     fn from(witness: &StealthOutputWitness) -> Self {
         Self {
             witness: OutputWitnessJson::from(&witness.witness),
-            spend_condition: witness.spend_condition.clone(),
+            auth: witness.auth.clone(),
             tag: witness.tag,
         }
     }
@@ -107,7 +107,7 @@ impl TryFrom<StealthOutputWitnessJson> for StealthOutputWitness {
     fn try_from(value: StealthOutputWitnessJson) -> Result<Self, Self::Error> {
         Ok(StealthOutputWitness {
             witness: value.witness.try_into_witness()?,
-            spend_condition: value.spend_condition,
+            auth: value.auth,
             tag: value.tag,
         })
     }

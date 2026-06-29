@@ -173,8 +173,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             return Ok(None);
         }
 
-        // We start at 1 because bootstrapped state is at 0
-        let start_state_version = maybe_persisted_state_version.unwrap_or(1);
+        // Bootstrapped genesis state is committed at version 0; consensus/sync state changes begin at
+        // version 1. A freshly bootstrapped node persists version 0, so clamp the sync start to 1 (the
+        // peer rejects start_state_version 0, and genesis is never synced - every node bootstraps it).
+        let start_state_version = maybe_persisted_state_version.map_or(1, |v| v.max(1));
         let mut last_state_version = start_state_version;
         info!(
             target: LOG_TARGET,

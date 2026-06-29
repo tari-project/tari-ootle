@@ -951,12 +951,11 @@ pub enum SpendContextAction {
     /// The stealth outputs being created (commitment, minimum value promise, spend condition, tag).
     #[n(1)]
     Outputs,
-    /// The index + commitment of the input whose condition is executing.
+    /// The index, commitment and committed `condition_root` of the input whose condition is executing.
     #[n(2)]
     CurrentInput,
-    /// The `SpendCondition::Script(..)` that invoked this predicate (enables recursive covenants).
-    #[n(3)]
-    InvokingCondition,
+    // `#[n(3)]` was `InvokingCondition`; the invoking condition tree is now exposed via `CurrentInput`'s
+    // `condition_root`. The index is left unused rather than renumbered.
     /// The total revealed amount being spent by the transfer.
     #[n(4)]
     RevealedInputAmount,
@@ -970,6 +969,9 @@ pub enum SpendContextAction {
         #[n(0)]
         max_revealed: u64,
     },
+    /// The raw spender-supplied witness `data` blob for the invoking input (empty if none was provided).
+    #[n(7)]
+    WitnessData,
 }
 
 /// A spend-context introspection operation argument.

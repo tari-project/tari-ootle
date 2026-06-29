@@ -6,7 +6,11 @@ use std::{num::NonZeroU64, ops::Not};
 use indexmap::IndexSet;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
-use tari_template_lib_types::{ResourceAddress, crypto::UtxoTag, stealth::SpendScript};
+use tari_template_lib_types::{
+    ResourceAddress,
+    crypto::UtxoTag,
+    stealth::{SpendCondition, TemplateFunction},
+};
 
 use crate::Address;
 
@@ -152,10 +156,20 @@ impl Output {
         self
     }
 
-    /// Gate this output's spend on a stateless WASM predicate (a `SpendCondition::Script`). The value is still
-    /// encrypted to `destination` so the recipient can discover and decrypt it; spending requires satisfying `script`.
-    pub fn with_spend_script(self, script: SpendScript) -> Self {
-        self.with_pay_to(PayTo::Script(script))
+    /// Gate this output's spend on a stateless WASM predicate (a single-leaf `TemplateFunction` condition tree). The
+    /// value is still encrypted to `destination` so the recipient can discover and decrypt it; spending requires
+    /// revealing and satisfying `template_function`.
+    pub fn with_spend_script(self, template_function: TemplateFunction) -> Self {
+        self.with_pay_to(PayTo::TemplateFunction(template_function))
+    }
+
+    /// Gate this output's spend on a condition tree (MAST) of alternative spend conditions. The output commits the
+    /// Merkle root over `conditions`; a spender later reveals exactly ONE leaf plus an inclusion proof. Each leaf may
+    /// be a native access rule, a WASM predicate ([`TemplateFunction`]), a native
+    /// [`BuiltinPredicate`](tari_template_lib_types::stealth::BuiltinPredicate) (timelock, hashlock) or covenant — and
+    /// a leaf is a conjunction (logical AND) of one or more such atoms.
+    pub fn with_spend_conditions(self, conditions: Vec<SpendCondition>) -> Self {
+        self.with_pay_to(PayTo::Conditions(conditions))
     }
 
     pub fn with_utxo_tag(mut self, utxo_tag: UtxoTag) -> Self {

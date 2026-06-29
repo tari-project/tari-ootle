@@ -17,10 +17,13 @@ use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     types::{PublishTemplateRequest, TransactionWaitResultRequest},
 };
-use tari_template_lib_types::TemplateAddress;
+use tari_template_lib_types::{TemplateAddress, constants::TARI_TOKEN};
 use tari_template_test_tooling::compile::compile_template;
 
-use crate::{TariWorld, wallet_daemon_client::get_auth_wallet_daemon_client};
+use crate::{
+    TariWorld,
+    wallet_daemon_client::{get_auth_wallet_daemon_client, get_balance},
+};
 
 #[derive(Debug, Clone)]
 pub struct RegisteredTemplate {
@@ -36,15 +39,36 @@ pub async fn publish_template(
 ) -> anyhow::Result<TemplateAddress> {
     // compile and load wasm
     let module = compile_wasm_template(template_name.clone())?;
-    let wasm_binary = module.into_code();
+    let wasm_binary = module.into_code().into_vec();
 
-    // send publish template request
+    // The publish fee scales with template size (storage + size premium), so it is not known up
+    // front. Dry-run with the account's full balance as the cap to learn the required fee, then
+    // submit with a little headroom. This keeps the test independent of the exact fee schedule.
+    let balance = get_balance(world, &account_name, &wallet_daemon_name, TARI_TOKEN).await;
+    let balance = u64::try_from(balance.to_u128()).unwrap_or(u64::MAX);
+
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
+    let dry_run = client
+        .publish_template(PublishTemplateRequest {
+            binary: wasm_binary.clone(),
+            fee_account: Some(ComponentAddressOrName::Name(account_name.clone())),
+            max_fee: balance,
+            detect_inputs: true,
+            dry_run: true,
+            metadata: None,
+        })
+        .await?;
+    let required_fee = dry_run
+        .dry_run_fee
+        .ok_or_else(|| anyhow!("publish_template dry run did not return a fee"))?;
+    // ~10% headroom over the estimate, capped at the account balance.
+    let max_fee = required_fee.saturating_add(required_fee / 10).min(balance);
+
     let response = client
         .publish_template(PublishTemplateRequest {
-            binary: wasm_binary.into_vec(),
+            binary: wasm_binary,
             fee_account: Some(ComponentAddressOrName::Name(account_name)),
-            max_fee: 1_000_000,
+            max_fee,
             detect_inputs: true,
             dry_run: false,
             metadata: None,

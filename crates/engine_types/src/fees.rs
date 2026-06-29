@@ -141,6 +141,7 @@ impl Default for FeeReceipt {
     }
 }
 
+#[repr(u8)]
 #[derive(
     Debug,
     Clone,
@@ -157,29 +158,32 @@ impl Default for FeeReceipt {
     Ord,
     borsh::BorshSerialize,
 )]
+#[borsh(use_discriminant = true)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum FeeSource {
     #[n(0)]
-    Initial,
+    Initial = 0,
     #[n(1)]
-    RuntimeCall,
+    RuntimeCall = 1,
     #[n(2)]
-    Storage,
+    Storage = 2,
     #[n(3)]
-    Events,
+    TransactionWeight = 3,
     #[n(4)]
-    Logs,
+    SignatureVerification = 4,
     #[n(5)]
-    TransactionWeight,
+    TemplateLoad = 5,
     #[n(6)]
-    SignatureVerification,
-    #[n(7)]
-    TemplateLoad,
-    #[n(8)]
-    SubstateCreate,
+    SubstateCreate = 6,
     /// WASM execution metering, charged in proportion to consumed Wasmer metering points.
-    #[n(9)]
-    WasmExecution,
+    #[n(7)]
+    WasmExecution = 7,
+    /// Cost of publishing a template's binary, replacing the flat per-byte `Storage` charge for
+    /// that binary: the first `template_size_premium_free_bytes` are priced at the per-byte storage
+    /// rate, and every whole unit beyond that is charged quadratically to discourage oversized
+    /// templates.
+    #[n(8)]
+    TemplatePublish = 8,
 }
 
 #[derive(

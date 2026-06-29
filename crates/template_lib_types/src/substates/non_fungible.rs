@@ -478,6 +478,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "serde")]
     mod serde_deser {
         use super::*;
 

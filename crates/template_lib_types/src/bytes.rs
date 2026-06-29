@@ -103,7 +103,13 @@ impl AsRef<[u8]> for Bytes {
 /// Serialize using the optimal byte format. i.e. `Bytes` in ciborium instead of `Array(Integer(u8), ....])`
 #[cfg(feature = "serde")]
 pub fn serialize<S: serde::Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_bytes(v.as_ref())
+    use crate::hex::bytes_to_hex;
+    if s.is_human_readable() {
+        let st = bytes_to_hex(v.as_ref());
+        s.serialize_str(&st)
+    } else {
+        s.serialize_bytes(v.as_ref())
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -112,8 +118,41 @@ where
     D: serde::Deserializer<'de>,
     T: From<Box<[u8]>>,
 {
-    let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
-    Ok(bytes.into_owned().into())
+    use serde::de::{Error, SeqAccess, Visitor};
+
+    if d.is_human_readable() {
+        struct HumanReadableBytesVisitor;
+
+        impl<'de> Visitor<'de> for HumanReadableBytesVisitor {
+            type Value = Box<[u8]>;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("a hex string or an array of bytes")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where E: Error {
+                crate::hex::bytes_from_hex(v)
+                    .map(|b| b.into_boxed_slice())
+                    .map_err(Error::custom)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where A: SeqAccess<'de> {
+                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(byte) = seq.next_element::<u8>()? {
+                    bytes.push(byte);
+                }
+                Ok(bytes.into_boxed_slice())
+            }
+        }
+
+        let bytes = d.deserialize_any(HumanReadableBytesVisitor)?;
+        Ok(bytes.into())
+    } else {
+        let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
+        Ok(bytes.into_owned().into())
+    }
 }
 
 #[cfg(test)]
@@ -150,7 +189,11 @@ mod tests {
     fn json_round_trips() {
         let original = Bytes::from_vec(vec![0, 1, 2, 250, 255]);
         let json = serde_json::to_string(&original).unwrap();
-        assert!(json.starts_with('['), "expected a JSON array, got {json}");
+        let deserialized: Bytes = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+
+        // json as an array
+        let json = serde_json::to_string(original.as_slice()).unwrap();
         let deserialized: Bytes = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
     }

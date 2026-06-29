@@ -50,6 +50,19 @@ pub struct WriteArgs {
     pub inputs: Vec<String>,
     #[clap(long, alias = "args-file")]
     pub manifest_args_file: Option<PathBuf>,
+    /// Load a file as a named manifest blob, e.g. `--blob template=path/to/template.wasm`. The name
+    /// is resolved by `blob!(name)` / `publish_template!(name)` in the manifest and the file's bytes
+    /// become the blob payload. May be repeated.
+    #[clap(long = "blob", alias = "blobs")]
+    pub blobs: Vec<String>,
+    /// Seal each generated transaction with a fresh random keypair instead of with `--signer`, and
+    /// add `--signer` as an additional signer (so its badge still authorises e.g. fee payment from
+    /// its account). Requires `--signer`. Primarily useful for publishing the same template binary
+    /// repeatedly: the random seal key becomes the template's author, so each publish yields a unique
+    /// template address (H(author_public_key, binary_hash)) instead of colliding on a duplicate
+    /// substate.
+    #[clap(long, alias = "random-author")]
+    pub random_signer: bool,
     #[clap(long, short = 'k', alias = "signer")]
     pub signer_secret_key: Option<String>,
     #[clap(long, short = 't')]

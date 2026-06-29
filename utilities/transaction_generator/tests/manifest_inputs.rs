@@ -34,6 +34,8 @@ fn declares_account_arg_and_explicit_input_as_transaction_inputs() {
         globals,
         templates,
         extra_inputs,
+        HashMap::new(),
+        false,
     )
     .unwrap();
 

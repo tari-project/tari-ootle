@@ -51,6 +51,7 @@ pub enum ManifestIntent {
     InvokeTemplate(InvokeIntent),
     InvokeComponent(InvokeIntent),
     AssignInput(AssignInputStmt),
+    AssignBlob(AssignBlobStmt),
     AllocateAddress(AllocateAddressStmt),
     CreateAccount(CreateAccountIntent),
     Log(LogIntent),
@@ -66,13 +67,23 @@ pub struct PutIntoBucketIntent {
     pub dest: Ident,
 }
 
-/// `publish_template!(blob!(name))` — publishes the WASM binary referenced by the named blob.
+/// `publish_template!(name)` — publishes the WASM binary referenced by `name`, which is either a
+/// blob variable bound with `let name = blob!("...")` or a blob name supplied via `blob_inputs`.
 #[derive(Debug, Clone)]
 pub struct PublishTemplateIntent {
-    /// Name of the blob containing the WASM binary. Must have been provided via `blob_inputs`.
+    /// A blob variable (from `let x = blob!(...)`) or a blob name. Either way it resolves to a blob
+    /// provided via `blob_inputs`.
     pub blob_name: Ident,
     /// Optional off-chain CBOR metadata multihash (hex-encoded literal).
     pub metadata_hash_hex: Option<String>,
+}
+
+/// `let x = blob!("name")` — binds the variable `x` to the blob named `name` (supplied via
+/// `blob_inputs`) so it can be referenced by name later, e.g. `publish_template!(x)`.
+#[derive(Debug, Clone)]
+pub struct AssignBlobStmt {
+    pub variable_name: Ident,
+    pub blob_name: Ident,
 }
 
 #[derive(Debug, Clone)]
@@ -437,6 +448,20 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
             variable_name: var_name,
             global_variable_name: parse2(tokens)?,
         })),
+        "blob" => {
+            // Accept `blob!("name")` or `blob!(name)`, mirroring the argument-position `blob!`.
+            let blob_name = if let Ok(lit_str) = parse2::<LitStr>(tokens.clone()) {
+                Ident::new(&lit_str.value(), lit_str.span())
+            } else {
+                parse2::<Ident>(tokens).map_err(|e| {
+                    syn::Error::new_spanned(mac, format!("Expected identifier or string literal in blob!: {}", e))
+                })?
+            };
+            Ok(ManifestIntent::AssignBlob(AssignBlobStmt {
+                variable_name: var_name,
+                blob_name,
+            }))
+        },
         "new_component_addr" => Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
             output_variable: var_name,
             allocatable_type: AllocatableAddressType::Component,

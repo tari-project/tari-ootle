@@ -222,6 +222,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "serde")]
     mod serde_impl {
         use tari_bor::Value;
 

@@ -485,10 +485,12 @@ impl ProcessManager {
                 // A restarted validator comes up with an empty in-memory peer store and no seed
                 // peers, so it cannot rediscover its committee on its own (mDNS is unreliable on
                 // some hosts). Re-run manual peer wiring so the committee reconnects.
-                if result.is_ok() && is_validator && self.enable_manual_connect {
-                    if let Err(err) = self.connect_all_validators().await {
-                        log::error!("Failed to reconnect validators after restarting instance {instance_id}: {err}");
-                    }
+                if result.is_ok() &&
+                    is_validator &&
+                    self.enable_manual_connect &&
+                    let Err(err) = self.connect_all_validators().await
+                {
+                    log::error!("Failed to reconnect validators after restarting instance {instance_id}: {err}");
                 }
 
                 if reply.send(result).is_err() {

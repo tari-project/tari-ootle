@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -57,7 +57,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: install
         run: |
@@ -73,7 +73,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -157,7 +157,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -187,7 +187,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: install ripgrep
         # https://github.com/BurntSushi/ripgrep/releases
@@ -211,7 +211,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -287,7 +287,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -37,7 +37,7 @@ const publishedAt = release?.published_at ? new Date(release.published_at).toLoc
   </div>
 ) : release ? (
   <div class="not-content">
-    <p><strong>Latest Release: </strong><a href={release.html_url} target="_blank">{tagName}</a> ({publishedAt})</p>
+    <p><strong>Release Notes: </strong><a href={release.html_url} target="_blank">{tagName}</a> ({publishedAt})</p>
     <table>
       <thead>
         <tr>

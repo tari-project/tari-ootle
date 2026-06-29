@@ -114,6 +114,11 @@ pub trait WalletStoreReader {
         transaction_id: Option<&TransactionId>,
         source_type: Option<BalanceChangeSourceType>,
     ) -> Result<BalanceChangePage, WalletStorageError>;
+    fn balance_changes_get_latest_by_account_resource(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<Option<crate::models::BalanceChange>, WalletStorageError>;
 
     // Resources
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;

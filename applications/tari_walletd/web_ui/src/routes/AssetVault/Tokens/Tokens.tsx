@@ -146,13 +146,11 @@ function BalanceRow({
       </FluidTableCell>
       <FluidTableCell align="right">
         <Stack direction="row" gap={1} justifyContent="flex-end">
-          {vault_address && (
-            <BalanceChangeHistoryAction
-              accountAddress={accountAddress}
-              resourceAddress={resource_address}
-              resourceLabel={token_symbol}
-            />
-          )}
+          <BalanceChangeHistoryAction
+            accountAddress={accountAddress}
+            resourceAddress={resource_address}
+            resourceLabel={token_symbol}
+          />
           <Button size="small" variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
             Send
           </Button>

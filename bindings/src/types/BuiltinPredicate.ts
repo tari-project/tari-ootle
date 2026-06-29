@@ -3,7 +3,7 @@ import type { Hash32 } from "./Hash32";
 import type { HashAlg } from "./HashAlg";
 
 /**
- * A native, consensus-fixed local spend predicate committed as a [`SpendCondition::Builtin`] leaf (TIP-0006): a
+ * A native, consensus-fixed local spend predicate committed as an [`AtomicCondition::Builtin`] leaf (TIP-0006): a
  * timelock or hashlock that gates *this input* on a local fact. Constraints on the spending transaction's outputs are
  * a [`Covenant`] instead.
  *

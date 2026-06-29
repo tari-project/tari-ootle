@@ -20,7 +20,7 @@ use tari_template_lib::types::{
     VaultId,
     constants::TARI_TOKEN,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
-    stealth::SpendCondition,
+    stealth::SpendAuthorization,
 };
 
 use crate::support::Test;
@@ -48,7 +48,7 @@ fn stealth_output(account: ComponentAddress, value: u64, seed: u8) -> StealthOut
         encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
         tag_byte: UtxoTag::new(u32::from(seed)),
         memo: None,
-        spend_condition: SpendCondition::Signed(RistrettoPublicKeyBytes::default()),
+        auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
         minimum_value_promise: 0,
         status: OutputStatus::Unspent,
         is_burnt: false,
@@ -292,6 +292,57 @@ fn stealth_balance_helper_is_account_and_resource_scoped() {
             .unwrap(),
         Amount::from(99u64)
     );
+}
+
+#[test]
+fn resource_balance_history_does_not_require_a_vault() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let second_account =
+        ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8cccccccc")
+            .unwrap();
+    accounts
+        .add_account(
+            Some("second"),
+            &second_account,
+            KeyId::derived(KeyBranch::ViewOnlyKey, 1),
+            KeyId::derived(KeyBranch::Account, 1),
+            Epoch::zero(),
+            true,
+            false,
+        )
+        .unwrap();
+
+    assert!(
+        accounts
+            .record_resource_balance_change(
+                second_account,
+                TARI_TOKEN,
+                Amount::zero(),
+                Amount::from(25u64),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap()
+    );
+    assert!(
+        accounts
+            .record_resource_balance_change(
+                second_account,
+                TARI_TOKEN,
+                Amount::zero(),
+                Amount::from(40u64),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap()
+    );
+
+    let page = accounts
+        .get_balance_changes(&second_account, 0, 10, Some(&TARI_TOKEN), None, None)
+        .unwrap();
+    assert_eq!(page.total, 2);
+    assert_eq!(page.changes[0].vault_address, None);
+    assert_eq!(page.changes[0].confidential_delta, "15");
+    assert_eq!(page.changes[1].confidential_delta, "25");
 }
 
 #[test]

@@ -20,9 +20,11 @@ diesel::table! {
 diesel::table! {
     account_balance_changes (id) {
         id -> Integer,
+        account_id -> Integer,
+        resource_id -> Integer,
         account_address -> Text,
-        vault_address -> Text,
-        vault_version -> BigInt,
+        vault_address -> Nullable<Text>,
+        vault_version -> Nullable<BigInt>,
         resource_address -> Text,
         token_symbol -> Nullable<Text>,
         divisibility -> Integer,

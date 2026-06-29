@@ -2,13 +2,12 @@
 import type { Amount } from "../Amount";
 import type { ComponentAddress } from "../ComponentAddress";
 import type { ResourceAddress } from "../ResourceAddress";
-import type { VaultId } from "../VaultId";
 import type { BalanceChangeSource } from "./BalanceChangeSource";
 
 export type BalanceChange = {
   id: number;
   account_address: ComponentAddress;
-  vault_address: VaultId;
+  vault_address: string | null;
   resource_address: ResourceAddress;
   token_symbol: string | null;
   divisibility: number;

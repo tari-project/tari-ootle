@@ -34,6 +34,7 @@ use crate::{
         AccountUpdate,
         AccountWithAddress,
         BalanceChangePage,
+        BalanceChangeSnapshot,
         BalanceChangeSource,
         BalanceChangeSourceType,
         EpochBirthday,
@@ -224,10 +225,18 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
                 return Ok(false);
             }
             let recorded = tx.balance_changes_insert(
-                &current_vault,
-                vault_version,
-                revealed_balance,
-                confidential_balance,
+                BalanceChangeSnapshot {
+                    account_address: current_vault.account_address,
+                    vault_address: Some(current_vault.id),
+                    vault_version: Some(vault_version),
+                    resource_address: current_vault.resource_address,
+                    token_symbol: current_vault.token_symbol,
+                    divisibility: current_vault.divisibility,
+                    revealed_before: current_vault.revealed_balance,
+                    revealed_after: revealed_balance,
+                    confidential_before: current_vault.confidential_balance,
+                    confidential_after: confidential_balance,
+                },
                 source,
             )?;
             if !recorded && source.transaction_id().is_some() {
@@ -235,6 +244,65 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             }
             tx.vaults_update(vault_address, vault_version, revealed_balance, confidential_balance)?;
             Ok(true)
+        })?)
+    }
+
+    pub fn record_resource_balance_change(
+        &self,
+        account_address: ComponentAddress,
+        resource_address: ResourceAddress,
+        revealed_balance: Amount,
+        confidential_balance: Amount,
+        source: BalanceChangeSource,
+    ) -> Result<bool, AccountsApiError> {
+        Ok(self.store.with_write_tx(|tx| -> Result<_, WalletStorageError> {
+            let maybe_vault = tx
+                .vaults_get_by_resource(&account_address, &resource_address)
+                .optional()?;
+            let (vault_to_update, token_symbol, divisibility, revealed_before, confidential_before) =
+                if let Some(vault) = maybe_vault {
+                    (
+                        Some((vault.id, vault.vault_version)),
+                        vault.token_symbol,
+                        vault.divisibility,
+                        vault.revealed_balance,
+                        vault.confidential_balance,
+                    )
+                } else {
+                    let resource = tx.resources_get(&resource_address)?;
+                    let latest =
+                        tx.balance_changes_get_latest_by_account_resource(&account_address, &resource_address)?;
+                    (
+                        None,
+                        resource.resource.token_symbol().map(ToOwned::to_owned),
+                        resource.resource.divisibility(),
+                        latest.as_ref().map(|change| change.revealed_after).unwrap_or_default(),
+                        latest
+                            .as_ref()
+                            .map(|change| change.confidential_after)
+                            .unwrap_or_default(),
+                    )
+                };
+
+            let recorded = tx.balance_changes_insert(
+                BalanceChangeSnapshot {
+                    account_address,
+                    vault_address: None,
+                    vault_version: None,
+                    resource_address,
+                    token_symbol,
+                    divisibility,
+                    revealed_before,
+                    revealed_after: revealed_balance,
+                    confidential_before,
+                    confidential_after: confidential_balance,
+                },
+                source,
+            )?;
+            if recorded && let Some((vault_address, vault_version)) = vault_to_update {
+                tx.vaults_update(vault_address, vault_version, revealed_balance, confidential_balance)?;
+            }
+            Ok(recorded)
         })?)
     }
 

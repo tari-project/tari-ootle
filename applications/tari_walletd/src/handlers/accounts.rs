@@ -1512,6 +1512,7 @@ mod balance_change_handler_tests {
 
     use axum_extra::headers::{Authorization, authorization::Bearer};
     use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
+    use tari_engine_types::resource::Resource;
     use tari_ootle_address::Network;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_wallet_sdk::{
@@ -1529,7 +1530,15 @@ mod balance_change_handler_tests {
     use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
     use tari_ootle_walletd_client::permissions::Permissions;
     use tari_shutdown::Shutdown;
-    use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId};
+    use tari_template_lib_types::{
+        ComponentAddress,
+        Metadata,
+        ResourceAddress,
+        SubstateOwnerRule,
+        VaultId,
+        access_rules::ResourceAccessRules,
+        constants::TOKEN_SYMBOL,
+    };
     use tari_utilities::SafePassword;
 
     use super::*;
@@ -1591,6 +1600,21 @@ mod balance_change_handler_tests {
             (first_vault, first_resource, "ONE"),
             (second_vault, second_resource, "TWO"),
         ] {
+            sdk.resources_api()
+                .upsert_resource(
+                    &resource,
+                    &Resource::new(
+                        ResourceType::Fungible,
+                        SubstateOwnerRule::None,
+                        ResourceAccessRules::new(),
+                        Metadata::from([(TOKEN_SYMBOL, symbol)]),
+                        None,
+                        None,
+                        2,
+                        false,
+                    ),
+                )
+                .unwrap();
             accounts
                 .add_vault(
                     account,

@@ -67,13 +67,11 @@ function BalanceRow({ balance, accountAddress }: { balance: BalanceEntry; accoun
       <DataTableCell>{formatCurrency(balance.balance, currency)}</DataTableCell>
       <DataTableCell>{formatCurrency(balance.confidential_balance, currency)}</DataTableCell>
       <DataTableCell>
-        {balance.vault_address && (
-          <BalanceChangeHistoryAction
-            accountAddress={accountAddress}
-            resourceAddress={balance.resource_address}
-            resourceLabel={balance.token_symbol}
-          />
-        )}
+        <BalanceChangeHistoryAction
+          accountAddress={accountAddress}
+          resourceAddress={balance.resource_address}
+          resourceLabel={balance.token_symbol}
+        />
       </DataTableCell>
     </TableRow>
   );

@@ -1,6 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::str::FromStr;
+
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, VaultId};
 use time::PrimitiveDateTime;
@@ -39,6 +41,19 @@ impl BalanceChangeSourceType {
     }
 }
 
+impl FromStr for BalanceChangeSourceType {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "transaction" => Ok(Self::Transaction),
+            "scan" => Ok(Self::Scan),
+            "recovery" => Ok(Self::Recovery),
+            _ => Err("unknown balance change source type"),
+        }
+    }
+}
+
 impl BalanceChangeSource {
     pub fn as_key_str(self) -> &'static str {
         BalanceChangeSourceType::from(self).as_key_str()
@@ -67,7 +82,8 @@ impl From<BalanceChangeSource> for BalanceChangeSourceType {
 pub struct BalanceChange {
     pub id: i32,
     pub account_address: ComponentAddress,
-    pub vault_address: VaultId,
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub vault_address: Option<VaultId>,
     pub resource_address: ResourceAddress,
     pub token_symbol: Option<String>,
     pub divisibility: u8,
@@ -82,6 +98,20 @@ pub struct BalanceChange {
     pub transaction_id: Option<TransactionId>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_at: PrimitiveDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BalanceChangeSnapshot {
+    pub account_address: ComponentAddress,
+    pub vault_address: Option<VaultId>,
+    pub vault_version: Option<u32>,
+    pub resource_address: ResourceAddress,
+    pub token_symbol: Option<String>,
+    pub divisibility: u8,
+    pub revealed_before: Amount,
+    pub revealed_after: Amount,
+    pub confidential_before: Amount,
+    pub confidential_after: Amount,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

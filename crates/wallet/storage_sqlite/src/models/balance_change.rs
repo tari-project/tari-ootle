@@ -6,7 +6,7 @@ use std::str::FromStr;
 use diesel::{Identifiable, Queryable};
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
-    models::{BalanceChange, BalanceChangeSource},
+    models::{BalanceChange, BalanceChangeSource, BalanceChangeSourceType},
     storage::WalletStorageError,
 };
 use time::PrimitiveDateTime;
@@ -17,9 +17,11 @@ use crate::{schema::account_balance_changes, serialization::deserialize_hex_try_
 #[diesel(table_name = account_balance_changes)]
 pub struct BalanceChangeRecord {
     pub id: i32,
+    pub account_id: i32,
+    pub resource_id: i32,
     pub account_address: String,
-    pub vault_address: String,
-    pub vault_version: i64,
+    pub vault_address: Option<String>,
+    pub vault_version: Option<i64>,
     pub resource_address: String,
     pub token_symbol: Option<String>,
     pub divisibility: i32,
@@ -40,22 +42,21 @@ impl BalanceChangeRecord {
             .as_deref()
             .map(deserialize_hex_try_from::<TransactionId, _>)
             .transpose()?;
-        let source = match self.source_type.as_str() {
-            "transaction" => BalanceChangeSource::Transaction {
+        let source_type =
+            BalanceChangeSourceType::from_str(&self.source_type).map_err(|e| WalletStorageError::DecodingError {
+                operation: OPERATION,
+                item: "source_type",
+                details: e.to_string(),
+            })?;
+        let source = match source_type {
+            BalanceChangeSourceType::Transaction => BalanceChangeSource::Transaction {
                 transaction_id: transaction_id.ok_or_else(|| WalletStorageError::DataInconsistent {
                     operation: OPERATION,
                     details: "transaction source has no transaction id".to_string(),
                 })?,
             },
-            "scan" => BalanceChangeSource::Scan,
-            "recovery" => BalanceChangeSource::Recovery,
-            value => {
-                return Err(WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "source_type",
-                    details: format!("unknown balance change source '{value}'"),
-                });
-            },
+            BalanceChangeSourceType::Scan => BalanceChangeSource::Scan,
+            BalanceChangeSourceType::Recovery => BalanceChangeSource::Recovery,
         };
 
         let revealed_before = parse_value(OPERATION, "revealed_before", &self.revealed_before)?;
@@ -66,7 +67,11 @@ impl BalanceChangeRecord {
         Ok(BalanceChange {
             id: self.id,
             account_address: parse_value(OPERATION, "account_address", &self.account_address)?,
-            vault_address: parse_value(OPERATION, "vault_address", &self.vault_address)?,
+            vault_address: self
+                .vault_address
+                .as_deref()
+                .map(|value| parse_value(OPERATION, "vault_address", value))
+                .transpose()?,
             resource_address: parse_value(OPERATION, "resource_address", &self.resource_address)?,
             token_symbol: self.token_symbol,
             divisibility: u8::try_from(self.divisibility).map_err(|e| WalletStorageError::DecodingError {

@@ -320,23 +320,25 @@ where TSpec: WalletSdkSpec
         resource_address: ResourceAddress,
     ) -> Result<bool, AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
-        let Some(vault) = accounts_api
+        let maybe_vault = accounts_api
             .get_vault_by_resource(&account_address, &resource_address)
-            .optional()?
-        else {
-            debug!(target: LOG_TARGET, "No vault found for stealth resource {} in account {}; skipping balance-change recording", resource_address, account_address);
-            return Ok(false);
-        };
-        if !vault.resource_type.is_stealth() {
+            .optional()?;
+        if let Some(vault) = maybe_vault.as_ref() &&
+            !vault.resource_type.is_stealth()
+        {
             debug!(target: LOG_TARGET, "Vault {} for resource {} is not stealth; skipping UTXO balance-change recording", vault.id, resource_address);
             return Ok(false);
         }
 
         let new_stealth_balance = self.stealth_balance_for_account_resource(&account_address, &resource_address)?;
-        Ok(accounts_api.update_vault_balance_and_record_change(
-            vault.id,
-            vault.vault_version,
-            vault.revealed_balance,
+        let revealed_balance = maybe_vault
+            .as_ref()
+            .map(|vault| vault.revealed_balance)
+            .unwrap_or_default();
+        Ok(accounts_api.record_resource_balance_change(
+            account_address,
+            resource_address,
+            revealed_balance,
             new_stealth_balance,
             BalanceChangeSource::Scan,
         )?)
@@ -542,6 +544,17 @@ where TSpec: WalletSdkSpec
             .map(|(a, s)| (a.as_vault_id().unwrap(), s))
             .collect::<HashMap<_, _>>();
 
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo()).map(|(id, s)| {
+            let utxo = s
+                .substate_value()
+                .as_utxo()
+                .unwrap_or_else(|| panic!("Expected {} to be a UTXO.", id));
+            (id.as_utxo_address().expect("is_utxo checked"), utxo)
+        });
+
+        let touched_stealth_balances = stealth_outputs_api.verify_and_update_outputs(utxos)?;
+
         let accounts =
             diff.up_iter()
                 .filter(|(_, s)| is_account(s))
@@ -698,18 +711,29 @@ where TSpec: WalletSdkSpec
             updated_accounts.insert((account_addr, account_version));
         }
 
-        // Update UTXOs
-        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
-        let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo()).map(|(id, s)| {
-            let utxo = s
-                .substate_value()
-                .as_utxo()
-                .unwrap_or_else(|| panic!("Expected {} to be a UTXO.", id));
-            (id.as_utxo_address().expect("is_utxo checked"), utxo)
-        });
-
-        // TODO: if we submitted this transaction, we could let this part of the code know which outputs are ours
-        stealth_outputs_api.verify_and_update_outputs(utxos)?;
+        for (account_address, resource_address) in touched_stealth_balances {
+            let revealed_balance = accounts_api
+                .get_vault_by_resource(&account_address, &resource_address)
+                .optional()?
+                .map(|vault| vault.revealed_balance)
+                .unwrap_or_default();
+            let confidential_balance =
+                self.stealth_balance_for_account_resource(&account_address, &resource_address)?;
+            if accounts_api.record_resource_balance_change(
+                account_address,
+                resource_address,
+                revealed_balance,
+                confidential_balance,
+                BalanceChangeSource::Transaction { transaction_id: tx_id },
+            )? {
+                let account_version = substate_api
+                    .get_substate(&account_address.into())
+                    .optional()?
+                    .map(|s| s.substate_id.version())
+                    .unwrap_or(0);
+                updated_accounts.insert((account_address, account_version));
+            }
+        }
 
         if let Some(account) = new_account {
             debug!(

@@ -14,14 +14,25 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
+use tari_engine_types::resource::Resource;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_sdk::{
-    models::{BalanceChangeSource, BalanceChangeSourceType, KeyBranch, KeyId, VaultModel},
+    models::{BalanceChangeSnapshot, BalanceChangeSource, BalanceChangeSourceType, KeyBranch, KeyId, VaultModel},
     storage::{CommittableStore, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, ResourceType, VaultId};
+use tari_template_lib_types::{
+    Amount,
+    ComponentAddress,
+    Metadata,
+    ResourceAddress,
+    ResourceType,
+    SubstateOwnerRule,
+    VaultId,
+    access_rules::ResourceAccessRules,
+    constants::TOKEN_SYMBOL,
+};
 
 fn build_transaction(seed: u64) -> Transaction {
     Transaction::builder_localnet()
@@ -86,6 +97,20 @@ fn setup_store_at(path: impl AsRef<Path>) -> (SqliteWalletStore, VaultId, VaultI
             0,
         ),
     ] {
+        tx.resources_upsert(
+            &resource_address,
+            &Resource::new(
+                resource_type,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::from([(TOKEN_SYMBOL, token_symbol.clone().unwrap_or_default())]),
+                None,
+                None,
+                divisibility,
+                false,
+            ),
+        )
+        .unwrap();
         tx.vaults_insert(VaultModel {
             account_address,
             id,
@@ -104,6 +129,26 @@ fn setup_store_at(path: impl AsRef<Path>) -> (SqliteWalletStore, VaultId, VaultI
     drop(tx);
 
     (store, first_vault, second_vault, first_resource, second_resource)
+}
+
+fn balance_change_snapshot(
+    current: &VaultModel,
+    vault_version: u32,
+    revealed_after: Amount,
+    confidential_after: Amount,
+) -> BalanceChangeSnapshot {
+    BalanceChangeSnapshot {
+        account_address: current.account_address,
+        vault_address: Some(current.id),
+        vault_version: Some(vault_version),
+        resource_address: current.resource_address,
+        token_symbol: current.token_symbol.clone(),
+        divisibility: current.divisibility,
+        revealed_before: current.revealed_balance,
+        revealed_after,
+        confidential_before: current.confidential_balance,
+        confidential_after,
+    }
 }
 
 fn temporary_database_path() -> std::path::PathBuf {
@@ -125,8 +170,11 @@ fn record_change(
     let mut tx = store.create_write_tx().unwrap();
     let current = tx.vaults_get(&vault_address).unwrap();
     assert!(
-        tx.balance_changes_insert(&current, vault_version, revealed_after, confidential_after, source)
-            .unwrap()
+        tx.balance_changes_insert(
+            balance_change_snapshot(&current, vault_version, revealed_after, confidential_after),
+            source,
+        )
+        .unwrap()
     );
     tx.vaults_update(vault_address, vault_version, revealed_after, confidential_after)
         .unwrap();
@@ -180,7 +228,7 @@ fn records_signed_deltas_metadata_and_filters() {
 
     let nft_change = changes
         .iter()
-        .find(|change| change.vault_address == second_vault)
+        .find(|change| change.vault_address == Some(second_vault))
         .unwrap();
     assert_eq!(nft_change.resource_address, second_resource);
     assert_eq!(nft_change.token_symbol.as_deref(), Some("NFT"));
@@ -190,7 +238,7 @@ fn records_signed_deltas_metadata_and_filters() {
 
     let decrease = changes
         .iter()
-        .find(|change| change.vault_address == first_vault && change.source == BalanceChangeSource::Scan)
+        .find(|change| change.vault_address == Some(first_vault) && change.source == BalanceChangeSource::Scan)
         .unwrap();
     assert_eq!(decrease.revealed_delta, "-60");
     assert_eq!(decrease.confidential_delta, "-5");
@@ -224,14 +272,11 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
     let mut tx = store.create_write_tx().unwrap();
     let current = tx.vaults_get(&first_vault).unwrap();
     assert!(
-        tx.balance_changes_insert(
-            &current,
-            1,
-            current.revealed_balance,
-            current.confidential_balance,
+        !tx.balance_changes_insert(
+            balance_change_snapshot(&current, 1, current.revealed_balance, current.confidential_balance,),
             BalanceChangeSource::Scan,
         )
-        .is_err()
+        .unwrap()
     );
     tx.rollback().unwrap();
     drop(tx);
@@ -248,10 +293,7 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
     let current = tx.vaults_get(&first_vault).unwrap();
     assert!(
         !tx.balance_changes_insert(
-            &current,
-            2,
-            Amount::from(11u64),
-            Amount::zero(),
+            balance_change_snapshot(&current, 2, Amount::from(11u64), Amount::zero()),
             BalanceChangeSource::Transaction { transaction_id },
         )
         .unwrap()
@@ -301,6 +343,56 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
     assert_eq!(second_page.changes.len(), 1);
     assert!(first_page.changes[0].id > first_page.changes[1].id);
     assert!(first_page.changes[1].id > second_page.changes[0].id);
+}
+
+#[test]
+fn records_account_resource_change_without_vault() {
+    let (store, _, _, _, _) = setup_store();
+    let stealth_resource = resource_address(3);
+    let mut tx = store.create_write_tx().unwrap();
+    tx.resources_upsert(
+        &stealth_resource,
+        &Resource::new(
+            ResourceType::Stealth,
+            SubstateOwnerRule::None,
+            ResourceAccessRules::new(),
+            Metadata::from([(TOKEN_SYMBOL, "STEALTH".to_string())]),
+            None,
+            None,
+            6,
+            false,
+        ),
+    )
+    .unwrap();
+    assert!(
+        tx.balance_changes_insert(
+            BalanceChangeSnapshot {
+                account_address: account_address(),
+                vault_address: None,
+                vault_version: None,
+                resource_address: stealth_resource,
+                token_symbol: Some("STEALTH".to_string()),
+                divisibility: 6,
+                revealed_before: Amount::zero(),
+                revealed_after: Amount::zero(),
+                confidential_before: Amount::zero(),
+                confidential_after: Amount::from(33u64),
+            },
+            BalanceChangeSource::Scan,
+        )
+        .unwrap()
+    );
+    tx.commit().unwrap();
+    drop(tx);
+
+    let mut tx = store.create_read_tx().unwrap();
+    let page = tx
+        .balance_changes_get_page_by_account(&account_address(), 0, 10, Some(&stealth_resource), None, None)
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].vault_address, None);
+    assert_eq!(page.changes[0].confidential_delta, "33");
+    assert_eq!(page.changes[0].token_symbol.as_deref(), Some("STEALTH"));
 }
 
 #[test]
@@ -395,10 +487,7 @@ fn same_version_scan_updates_after_balance_and_deletes_net_zero_row() {
     let current = tx.vaults_get(&first_vault).unwrap();
     assert!(
         tx.balance_changes_insert(
-            &current,
-            1,
-            Amount::zero(),
-            Amount::from(15u64),
+            balance_change_snapshot(&current, 1, Amount::zero(), Amount::from(15u64)),
             BalanceChangeSource::Scan,
         )
         .unwrap()
@@ -424,8 +513,11 @@ fn same_version_scan_updates_after_balance_and_deletes_net_zero_row() {
     let mut tx = store.create_write_tx().unwrap();
     let current = tx.vaults_get(&first_vault).unwrap();
     assert!(
-        tx.balance_changes_insert(&current, 1, Amount::zero(), Amount::zero(), BalanceChangeSource::Scan,)
-            .unwrap()
+        tx.balance_changes_insert(
+            balance_change_snapshot(&current, 1, Amount::zero(), Amount::zero()),
+            BalanceChangeSource::Scan,
+        )
+        .unwrap()
     );
     tx.vaults_update(first_vault, 1, Amount::zero(), Amount::zero())
         .unwrap();
@@ -465,10 +557,7 @@ fn same_version_scan_does_not_clobber_transaction_row() {
     let current = tx.vaults_get(&first_vault).unwrap();
     assert!(
         !tx.balance_changes_insert(
-            &current,
-            1,
-            Amount::from(20u64),
-            Amount::zero(),
+            balance_change_snapshot(&current, 1, Amount::from(20u64), Amount::zero()),
             BalanceChangeSource::Scan,
         )
         .unwrap()
@@ -533,7 +622,7 @@ fn history_keeps_snapshot_metadata_after_live_rows_are_changed_or_deleted() {
         .balance_changes_get_page_by_account(&account_address(), 0, 10, None, None, None)
         .unwrap();
     assert_eq!(page.total, 1);
-    assert_eq!(page.changes[0].vault_address, first_vault);
+    assert_eq!(page.changes[0].vault_address, Some(first_vault));
     drop(tx);
     drop(store);
     std::fs::remove_file(path).unwrap();

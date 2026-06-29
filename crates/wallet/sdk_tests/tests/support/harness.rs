@@ -8,6 +8,7 @@ use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::{
     Utxo,
     crypto::commit_amount,
+    resource::Resource,
     substate::{Substate, SubstateId},
 };
 use tari_indexer_client::types::WatchedSubstateItem;
@@ -44,12 +45,15 @@ use tari_template_lib::types::{
     Amount,
     ComponentAddress,
     EncryptedData,
+    Metadata,
     ResourceAddress,
     ResourceType,
+    SubstateOwnerRule,
     TemplateAddress,
     UtxoId,
     VaultId,
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    access_rules::ResourceAccessRules,
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL},
     crypto::PedersenCommitmentBytes,
 };
 
@@ -86,6 +90,21 @@ impl Test {
         sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
             .unwrap();
         let accounts_api = sdk.accounts_api();
+        sdk.resources_api()
+            .upsert_resource(
+                &STEALTH_TARI_RESOURCE_ADDRESS,
+                &Resource::new(
+                    ResourceType::Stealth,
+                    SubstateOwnerRule::None,
+                    ResourceAccessRules::new(),
+                    Metadata::from([(TOKEN_SYMBOL, "TEST".to_string())]),
+                    None,
+                    None,
+                    6,
+                    false,
+                ),
+            )
+            .unwrap();
         accounts_api
             .add_account(
                 Some("test"),

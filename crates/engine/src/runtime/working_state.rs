@@ -1133,7 +1133,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(frame.current_template())
     }
 
-    /// Returns template address
+    /// Returns template name
     pub fn current_template_name(&self) -> Result<&str, RuntimeError> {
         let frame = self.current_call_frame()?;
         Ok(frame.current_template_name())

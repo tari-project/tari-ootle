@@ -9,7 +9,7 @@ Feature: Indexer node
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 2 XTR
+    When I create an account ACC via the wallet daemon WALLET_D with 10 XTR
 
     # Publish some templates
     When wallet daemon WALLET_D publishes the template "counter" using account ACC
@@ -126,7 +126,7 @@ Feature: Indexer node
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create account and publish two templates
-    When I create an account ACC via the wallet daemon WALLET_D with 2 XTR
+    When I create an account ACC via the wallet daemon WALLET_D with 10 XTR
     When wallet daemon WALLET_D publishes the template "counter" using account ACC
     When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 

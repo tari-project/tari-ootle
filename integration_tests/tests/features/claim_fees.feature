@@ -70,4 +70,4 @@ Feature: Claim Fees
 
     # Claim fees again, will succeed due to the fee from the previous claim but will only be a relatively small amount (so not 1_000_000)
     When I claim fees for validator VN into account VN_FEES using the wallet daemon WALLET_D
-    When I check the balance of VN_FEES on wallet daemon WALLET_D the amount is at most 700000
+    When I check the balance of VN_FEES on wallet daemon WALLET_D the amount is at most 900000

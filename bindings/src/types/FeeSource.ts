@@ -4,10 +4,9 @@ export type FeeSource =
   | "Initial"
   | "RuntimeCall"
   | "Storage"
-  | "Events"
-  | "Logs"
   | "TransactionWeight"
   | "SignatureVerification"
   | "TemplateLoad"
   | "SubstateCreate"
-  | "WasmExecution";
+  | "WasmExecution"
+  | "TemplatePublish";

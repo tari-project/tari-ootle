@@ -127,14 +127,23 @@ where
                 // indefinitely. Committed transactions are surfaced via their synced receipt, so
                 // only aborts need recording here.
                 if finalized.final_decision.is_abort() {
-                    let details = finalized
-                        .abort_details
-                        .clone()
-                        .or_else(|| finalized.final_decision.abort_reason().map(|r| r.to_string()))
-                        .unwrap_or_else(|| "Transaction aborted".to_string());
-                    self.store
-                        .with_write_tx(move |tx| tx.set_transaction_rejected(transaction_id, &details))
-                        .await?;
+                    // Record the abort only once. Re-recording it on every read would needlessly
+                    // take SQLite's single write lock and contend with other writers under load.
+                    let already_recorded = self
+                        .store
+                        .with_read_tx(move |tx| tx.get_transaction_rejection(transaction_id))
+                        .await?
+                        .is_some();
+                    if !already_recorded {
+                        let details = finalized
+                            .abort_details
+                            .clone()
+                            .or_else(|| finalized.final_decision.abort_reason().map(|r| r.to_string()))
+                            .unwrap_or_else(|| "Transaction aborted".to_string());
+                        self.store
+                            .with_write_tx(move |tx| tx.set_transaction_rejected(transaction_id, &details))
+                            .await?;
+                    }
                 }
 
                 Ok(IndexerTransactionFinalizedResult::Finalized {

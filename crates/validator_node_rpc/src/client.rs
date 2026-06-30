@@ -215,7 +215,7 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
                     final_decision,
                     execution_time,
                     finalized_time: PrimitiveDateTime::new(finalized_time.date(), finalized_time.time()),
-                    abort_details: Some(response.abort_details).filter(|s| s.is_empty()),
+                    abort_details: Some(response.abort_details).filter(|s| !s.is_empty()),
                 })))
             },
             Err(_) => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(

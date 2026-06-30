@@ -108,41 +108,81 @@ where
         &self,
         transaction_id: TransactionId,
     ) -> Result<IndexerTransactionFinalizedResult, TransactionManagerError> {
-        // A transaction rejected by mempool validation is never sequenced, so the network would
-        // report it as pending forever. Report the locally recorded rejection instead.
-        let rejection = self
-            .store
-            .with_read_tx(move |tx| tx.get_transaction_rejection(transaction_id))
-            .await?;
-        if let Some((details, rejected_at)) = rejection {
-            return Ok(IndexerTransactionFinalizedResult::Rejected {
-                details,
-                rejected_time: rejected_at,
-            });
-        }
-
+        // The committee is authoritative for any sequenced transaction. This includes aborts, which
+        // commit no substate — and therefore no receipt for the indexer to sync — only a finalized
+        // decision. Query it first so the full result (including abort decision and execution
+        // details) is returned to callers.
         let transaction_substate_address = transaction_id.to_substate_address();
-        let result = self
+        let network_result = self
             .network_client
             .try_single_with_committee(transaction_substate_address, |mut client| async move {
                 client.get_finalized_transaction_result(transaction_id).await.optional()
             })
-            .await?
-            .ok_or_else(|| TransactionManagerError::NotFound {
-                entity: "Transaction result",
-                key: transaction_id.to_string(),
-            })?;
+            .await;
 
-        Ok(match result {
-            TransactionResultStatus::Pending => IndexerTransactionFinalizedResult::Pending,
-            TransactionResultStatus::Finalized(finalized) => IndexerTransactionFinalizedResult::Finalized {
-                final_decision: finalized.final_decision,
-                execution_result: finalized.execute_result.map(Box::new),
-                execution_time: finalized.execution_time,
-                finalized_time: finalized.finalized_time,
-                abort_details: finalized.abort_details,
+        match network_result {
+            Ok(Some(TransactionResultStatus::Finalized(finalized))) => {
+                // Record a terminal abort locally so the recent-transactions listing — which reads
+                // only local state — reflects it instead of showing the transaction as pending
+                // indefinitely. Committed transactions are surfaced via their synced receipt, so
+                // only aborts need recording here.
+                if finalized.final_decision.is_abort() {
+                    // Record the abort only once. Re-recording it on every read would needlessly
+                    // take SQLite's single write lock and contend with other writers under load.
+                    let already_recorded = self
+                        .store
+                        .with_read_tx(move |tx| tx.get_transaction_rejection(transaction_id))
+                        .await?
+                        .is_some();
+                    if !already_recorded {
+                        let details = finalized
+                            .abort_details
+                            .clone()
+                            .or_else(|| finalized.final_decision.abort_reason().map(|r| r.to_string()))
+                            .unwrap_or_else(|| "Transaction aborted".to_string());
+                        self.store
+                            .with_write_tx(move |tx| tx.set_transaction_rejected(transaction_id, &details))
+                            .await?;
+                    }
+                }
+
+                Ok(IndexerTransactionFinalizedResult::Finalized {
+                    final_decision: finalized.final_decision,
+                    execution_result: finalized.execute_result.map(Box::new),
+                    execution_time: finalized.execution_time,
+                    finalized_time: finalized.finalized_time,
+                    abort_details: finalized.abort_details,
+                })
             },
-        })
+            // The committee has no finalized result: the transaction is genuinely pending, the
+            // committee is unreachable, or it was rejected by mempool validation and never sequenced
+            // (in which case the committee reports it as pending forever). Prefer a locally recorded
+            // rejection over those outcomes.
+            other => {
+                let rejection = self
+                    .store
+                    .with_read_tx(move |tx| tx.get_transaction_rejection(transaction_id))
+                    .await?;
+                if let Some((details, rejected_at)) = rejection {
+                    return Ok(IndexerTransactionFinalizedResult::Rejected {
+                        details,
+                        rejected_time: rejected_at,
+                    });
+                }
+
+                match other {
+                    Ok(Some(TransactionResultStatus::Pending)) => Ok(IndexerTransactionFinalizedResult::Pending),
+                    Ok(None) => Err(TransactionManagerError::NotFound {
+                        entity: "Transaction result",
+                        key: transaction_id.to_string(),
+                    }),
+                    Err(e) => Err(e.into()),
+                    Ok(Some(TransactionResultStatus::Finalized(_))) => {
+                        unreachable!("Finalized result is handled above")
+                    },
+                }
+            },
+        }
     }
 
     pub async fn list_recent_transactions(

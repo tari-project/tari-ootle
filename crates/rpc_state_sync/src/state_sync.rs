@@ -362,6 +362,24 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         )))
     }
 
+    /// True if this node's committed state already matches `checkpoint` for every shard it is responsible for (its
+    /// local shard group plus the global shard). Distinguishes a rolled-back node (complete state, checkpoint
+    /// retained) from one whose first-time state sync was interrupted after the checkpoint was persisted but before
+    /// the state finished streaming (checkpoint present, state incomplete).
+    async fn local_state_matches_checkpoint(&self, checkpoint: &EpochCheckpoint) -> Result<bool, RpcStateSyncError> {
+        let local_info = self.epoch_manager.get_local_committee_info(checkpoint.epoch()).await?;
+        self.state_store.with_read_tx(|tx| {
+            for shard in local_info.shard_group().shard_iter_with_global() {
+                let version = tx.state_tree_versions_get_latest(shard)?;
+                let local_root = self.calculate_state_root_for_shard(tx, shard, version)?;
+                if local_root != checkpoint.get_shard_root(shard) {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })
+    }
+
     fn calculate_state_root_for_shard(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
@@ -884,18 +902,27 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         // the oracle has moved past it there is prior committed state to sync; at or before it there is
         // nothing, so we join consensus directly.
         let Some(leaf) = leaf_block else {
-            // A leaf-less node that still holds an `EpochCheckpoint` for the epoch immediately before the oracle's
-            // current epoch was rolled back: the offline rollback tool clears the consensus pointers (leaf, locked,
-            // high QC) but keeps the committed state and its checkpoint. It already holds the prior epoch's state, so
-            // there is nothing to state-sync — consensus recreates the current epoch's genesis from local state on
-            // entering `Running` (see `HotstuffWorker::get_starting_epoch`/`create_genesis_block_if_required`).
-            // Reporting `Behind` here instead would route it to `Syncing`, which fails because every committee member
-            // rolled back together holds the same (absent) state, wedging consensus in `Sleeping`.
-            let last_checkpoint_epoch = self
+            // A leaf-less node that still holds an `EpochCheckpoint` covering the epoch immediately before the
+            // oracle's current epoch — and whose committed state already matches that checkpoint — was rolled back:
+            // the offline rollback tool clears the consensus pointers (leaf, locked, high QC) but keeps the committed
+            // state and its checkpoint. There is nothing to state-sync; consensus recreates the current epoch's
+            // genesis from local state on entering `Running` (see
+            // `HotstuffWorker::get_starting_epoch`/`create_genesis_block_if_required`). Reporting `Behind` here would
+            // route it to `Syncing`, which fails because every committee member rolled back together holds the same
+            // (absent) state, wedging consensus in `Sleeping`.
+            //
+            // The state-root match is required, not merely the checkpoint's presence: state sync persists the
+            // checkpoint before streaming state (`get_or_fetch_valid_epoch_checkpoint`), so a first-time sync
+            // interrupted mid-stream also leaves a leaf-less node holding a checkpoint — but with incomplete state.
+            // Its roots will not match, so it correctly falls through here and resumes the sync.
+            let maybe_checkpoint = self
                 .state_store
-                .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx).optional())?
-                .map(|cp| cp.epoch());
-            if last_checkpoint_epoch.is_some_and(|epoch| epoch + Epoch(1) >= oracle_epoch) {
+                .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
+                .optional()?;
+            if let Some(checkpoint) = maybe_checkpoint &&
+                checkpoint.epoch() + Epoch(1) >= oracle_epoch &&
+                self.local_state_matches_checkpoint(&checkpoint).await?
+            {
                 return Ok(SyncStatus::UpToDate);
             }
 

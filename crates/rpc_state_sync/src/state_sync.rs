@@ -884,6 +884,21 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         // the oracle has moved past it there is prior committed state to sync; at or before it there is
         // nothing, so we join consensus directly.
         let Some(leaf) = leaf_block else {
+            // A leaf-less node that still holds an `EpochCheckpoint` for the epoch immediately before the oracle's
+            // current epoch was rolled back: the offline rollback tool clears the consensus pointers (leaf, locked,
+            // high QC) but keeps the committed state and its checkpoint. It already holds the prior epoch's state, so
+            // there is nothing to state-sync — consensus recreates the current epoch's genesis from local state on
+            // entering `Running` (see `HotstuffWorker::get_starting_epoch`/`create_genesis_block_if_required`).
+            // Reporting `Behind` here instead would route it to `Syncing`, which fails because every committee member
+            // rolled back together holds the same (absent) state, wedging consensus in `Sleeping`.
+            let last_checkpoint_epoch = self
+                .state_store
+                .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx).optional())?
+                .map(|cp| cp.epoch());
+            if last_checkpoint_epoch.is_some_and(|epoch| epoch + Epoch(1) >= oracle_epoch) {
+                return Ok(SyncStatus::UpToDate);
+            }
+
             let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
                 return Err(RpcStateSyncError::InvariantError {
                     details: "Check sync called before the birthday epoch was determined".to_string(),

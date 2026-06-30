@@ -343,8 +343,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         payload: Metadata,
         state_mut: &mut WorkingState<TStore>,
     ) -> Result<(), RuntimeError> {
-        let (&template_address, _) = state_mut.current_template()?;
-        let event = Event::std(Some(substate_id.into()), template_address, object_name, action, payload);
+        let template_address = state_mut.current_template()?;
+        let event = Event::std(
+            Some(substate_id.into()),
+            *template_address,
+            object_name,
+            action,
+            payload,
+        );
         debug!(target: LOG_TARGET, "Emitted event {}", event);
         state_mut.push_event(event)?;
         Ok(())
@@ -3316,7 +3322,7 @@ where
                         })
                         .transpose()?;
 
-                    let (template, _) = state.current_template()?;
+                    let template = state.current_template()?;
                     let id_provider = state.id_provider()?;
                     let address = public_key
                         .as_ref()

@@ -270,15 +270,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
         self.validate_component_state(Some(&before), &after)?;
 
         // add event to indicate that there is a change in component
-        let (template_address, module_name) = self.current_template().map(|(addr, name)| (*addr, name.to_string()))?;
+        let template_address = *self.current_template()?;
         self.push_event(Event::std(
             Some(locked.substate_id().clone()),
             template_address,
             "component",
             "updated",
-            metadata!(
-                "module_name" => module_name,
-            ),
+            metadata!(),
         ))?;
 
         Ok(())
@@ -744,7 +742,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let vault_mut = self.get_vault_mut(vault_lock)?;
         vault_mut.set_freeze(flags);
 
-        let template_address = self.current_template().map(|(addr, _)| *addr)?;
+        let template_address = *self.current_template()?;
         let event = if flags.is_empty() {
             Event::std(
                 Some(vault_lock.substate_id().clone()),
@@ -897,7 +895,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     ) -> Result<AddressAllocationId, RuntimeError> {
         let id = self.address_allocation_id;
         self.address_allocation_id += 1;
-        let current_template = self.current_template().ok().map(|(template_addr, _)| *template_addr);
+        let current_template = self.current_template().ok().copied();
         self.address_allocations
             .insert(id, AllocatedAddress::new(address.into(), current_template));
         Ok(id)
@@ -1129,10 +1127,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
         self.call_frames.len()
     }
 
-    /// Returns template address and module name
-    pub fn current_template(&self) -> Result<(&TemplateAddress, &str), RuntimeError> {
+    /// Returns template address
+    pub fn current_template(&self) -> Result<&TemplateAddress, RuntimeError> {
         let frame = self.current_call_frame()?;
         Ok(frame.current_template())
+    }
+
+    /// Returns template address
+    pub fn current_template_name(&self) -> Result<&str, RuntimeError> {
+        let frame = self.current_call_frame()?;
+        Ok(frame.current_template_name())
     }
 
     pub fn id_provider(&self) -> Result<IdProvider<'_>, RuntimeError> {
@@ -1161,7 +1165,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn get_auth_caller(&self) -> Result<AuthHookCaller, RuntimeError> {
         let frame = self.call_frames.last().ok_or(RuntimeError::NoActiveCallFrame)?;
-        let (template, _) = frame.current_template();
+        let template = frame.current_template();
         let component = frame
             .scope()
             .get_current_component_lock()

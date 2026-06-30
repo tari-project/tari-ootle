@@ -260,7 +260,7 @@ fn check_requirement<TStore: StateReader>(
         },
         RuleRequirement::ScopedToComponent(address) => Ok(state.current_component()? == Some(*address)),
         RuleRequirement::ScopedToTemplate(address) => {
-            let (current, _) = state.current_template()?;
+            let current = state.current_template()?;
             Ok(current == address)
         },
     }

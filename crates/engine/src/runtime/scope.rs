@@ -280,7 +280,7 @@ impl Display for CallScope {
 pub struct CallFrame {
     scope: CallScope,
     current_template: TemplateAddress,
-    current_module: String,
+    current_template_name: String,
     entity_id: EntityId,
     allow_cross_template_calls: bool,
     allow_migration_calls: bool,
@@ -295,7 +295,7 @@ impl CallFrame {
         Self {
             scope: CallScope::new(),
             current_template,
-            current_module,
+            current_template_name: current_module,
             entity_id,
             allow_cross_template_calls: true,
             allow_migration_calls: false,
@@ -312,7 +312,7 @@ impl CallFrame {
         Self {
             scope: CallScope::for_component(component_lock),
             current_template,
-            current_module,
+            current_template_name: current_module,
             entity_id,
             allow_cross_template_calls: true,
             allow_migration_calls: false,
@@ -329,7 +329,7 @@ impl CallFrame {
         Self {
             scope: CallScope::for_component(component_lock),
             current_template,
-            current_module,
+            current_template_name: current_module,
             entity_id,
             allow_cross_template_calls: false,
             allow_migration_calls: true,
@@ -357,8 +357,12 @@ impl CallFrame {
         self.entity_id = entity_id;
     }
 
-    pub fn current_template(&self) -> (&TemplateAddress, &str) {
-        (&self.current_template, &self.current_module)
+    pub fn current_template(&self) -> &TemplateAddress {
+        &self.current_template
+    }
+
+    pub fn current_template_name(&self) -> &str {
+        &self.current_template_name
     }
 
     pub fn is_cross_template_calls_allowed(&self) -> bool {

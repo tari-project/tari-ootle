@@ -75,6 +75,7 @@ impl Runner {
         self.sdk.accounts_api().add_vault(
             account,
             vault,
+            0,
             TARI_TOKEN,
             ResourceType::Stealth,
             Some("tTARI".to_string()),
@@ -164,6 +165,7 @@ impl Runner {
             self.sdk.accounts_api().add_vault(
                 account_addr,
                 vault_id,
+                0,
                 TARI_TOKEN,
                 ResourceType::Stealth,
                 Some("tTARI".to_string()),
@@ -246,6 +248,7 @@ impl Runner {
                     self.sdk.accounts_api().add_vault(
                         account,
                         *vault_id,
+                        0,
                         *vault.resource_address(),
                         vault.resource_type(),
                         None,

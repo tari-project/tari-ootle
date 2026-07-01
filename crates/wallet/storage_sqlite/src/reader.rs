@@ -31,6 +31,9 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChange,
+        BalanceChangePage,
+        BalanceChangeSourceType,
         ConfidentialOutputModel,
         Config,
         KeyType,
@@ -719,6 +722,92 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 })
             })
             .collect()
+    }
+
+    // -------------------------------- Balance changes -------------------------------- //
+    fn balance_changes_get_page_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+        offset: usize,
+        limit: usize,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<&TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+    ) -> Result<BalanceChangePage, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_get_page_by_account";
+        use crate::schema::account_balance_changes;
+
+        let mut query = account_balance_changes::table
+            .filter(account_balance_changes::account_address.eq(account_addr.to_string()))
+            .into_boxed();
+        if let Some(resource_address) = resource_address {
+            query = query.filter(account_balance_changes::resource_address.eq(resource_address.to_string()));
+        }
+        if let Some(transaction_id) = transaction_id {
+            query = query.filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()));
+        }
+        if let Some(source_type) = source_type {
+            query = query.filter(account_balance_changes::source_type.eq(source_type.as_key_str()));
+        }
+
+        let changes = query
+            .order((
+                account_balance_changes::created_at.desc(),
+                account_balance_changes::id.desc(),
+            ))
+            .offset(offset as i64)
+            .limit(limit as i64)
+            .load::<models::BalanceChangeRecord>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .into_iter()
+            .map(models::BalanceChangeRecord::try_into_balance_change)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut count_query = account_balance_changes::table
+            .filter(account_balance_changes::account_address.eq(account_addr.to_string()))
+            .into_boxed();
+        if let Some(resource_address) = resource_address {
+            count_query =
+                count_query.filter(account_balance_changes::resource_address.eq(resource_address.to_string()));
+        }
+        if let Some(transaction_id) = transaction_id {
+            count_query = count_query.filter(account_balance_changes::transaction_id.eq(transaction_id.to_string()));
+        }
+        if let Some(source_type) = source_type {
+            count_query = count_query.filter(account_balance_changes::source_type.eq(source_type.as_key_str()));
+        }
+
+        let total = count_query
+            .count()
+            .get_result::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(BalanceChangePage {
+            changes,
+            total: total as u64,
+        })
+    }
+
+    fn balance_changes_get_latest_by_account_resource(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<Option<BalanceChange>, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_get_latest_by_account_resource";
+        use crate::schema::account_balance_changes;
+
+        account_balance_changes::table
+            .filter(account_balance_changes::account_address.eq(account_addr.to_string()))
+            .filter(account_balance_changes::resource_address.eq(resource_address.to_string()))
+            .filter(account_balance_changes::vault_address.is_null())
+            .order((
+                account_balance_changes::created_at.desc(),
+                account_balance_changes::id.desc(),
+            ))
+            .first::<models::BalanceChangeRecord>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .map(models::BalanceChangeRecord::try_into_balance_change)
+            .transpose()
     }
 
     // -------------------------------- Resources -------------------------------- //

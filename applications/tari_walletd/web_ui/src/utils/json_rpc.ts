@@ -33,6 +33,8 @@ import type {
   AccountsCreateResponse,
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
+  AccountsGetBalanceChangesRequest,
+  AccountsGetBalanceChangesResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
@@ -262,6 +264,9 @@ export const accountsList = (request: AccountsListRequest): Promise<AccountsList
   client().then((c) => c.accountsList(request));
 export const accountsGetBalances = (request: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> =>
   client().then((c) => c.accountsGetBalances(request));
+export const accountsGetBalanceChanges = (
+  request: AccountsGetBalanceChangesRequest,
+): Promise<AccountsGetBalanceChangesResponse> => client().then((c) => c.accountsGetBalanceChanges(request));
 export const accountsGet = (request: AccountGetRequest): Promise<AccountGetResponse> =>
   client().then((c) => c.accountsGet(request));
 

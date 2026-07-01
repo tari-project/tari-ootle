@@ -11,6 +11,7 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
     Amount,
@@ -32,6 +33,10 @@ use crate::{
         Account,
         AccountUpdate,
         AccountWithAddress,
+        BalanceChangePage,
+        BalanceChangeSnapshot,
+        BalanceChangeSource,
+        BalanceChangeSourceType,
         EpochBirthday,
         KeyId,
         KeyIdOrPublicKey,
@@ -49,6 +54,8 @@ use crate::{
         WriteableWalletStore,
     },
 };
+
+const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::accounts";
 
 pub struct AccountsApi<'a, TSpec: WalletSdkSpec> {
     network: Network,
@@ -204,15 +211,143 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         })
     }
 
-    pub fn update_vault_balance(
+    pub fn update_vault_balance_and_record_change(
         &self,
         vault_address: VaultId,
+        vault_version: u32,
         revealed_balance: Amount,
         confidential_balance: Amount,
-    ) -> Result<(), AccountsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.vaults_update(vault_address, revealed_balance, confidential_balance))?;
-        Ok(())
+        source: BalanceChangeSource,
+    ) -> Result<bool, AccountsApiError> {
+        Ok(self.store.with_write_tx(|tx| -> Result<_, WalletStorageError> {
+            let current_vault = tx.vaults_get(&vault_address)?;
+            if current_vault.revealed_balance == revealed_balance &&
+                current_vault.confidential_balance == confidential_balance
+            {
+                return Ok(false);
+            }
+            let recorded = tx.balance_changes_insert(
+                BalanceChangeSnapshot {
+                    account_address: current_vault.account_address,
+                    vault_address: Some(current_vault.id),
+                    vault_version: Some(vault_version),
+                    resource_address: current_vault.resource_address,
+                    token_symbol: current_vault.token_symbol,
+                    divisibility: current_vault.divisibility,
+                    revealed_before: current_vault.revealed_balance,
+                    revealed_after: revealed_balance,
+                    confidential_before: current_vault.confidential_balance,
+                    confidential_after: confidential_balance,
+                },
+                source,
+            )?;
+            if !recorded && source.transaction_id().is_some() {
+                return Ok(false);
+            }
+            tx.vaults_update(vault_address, vault_version, revealed_balance, confidential_balance)?;
+            Ok(true)
+        })?)
+    }
+
+    pub fn record_resource_balance_change(
+        &self,
+        account_address: ComponentAddress,
+        resource_address: ResourceAddress,
+        revealed_balance: Amount,
+        confidential_balance: Amount,
+        source: BalanceChangeSource,
+    ) -> Result<bool, AccountsApiError> {
+        Ok(self.store.with_write_tx(|tx| -> Result<_, WalletStorageError> {
+            let maybe_vault = tx
+                .vaults_get_by_resource(&account_address, &resource_address)
+                .optional()?;
+            let (vault_to_update, token_symbol, divisibility, revealed_before, confidential_before) =
+                if let Some(vault) = maybe_vault {
+                    (
+                        Some((vault.id, vault.vault_version)),
+                        vault.token_symbol,
+                        vault.divisibility,
+                        vault.revealed_balance,
+                        vault.confidential_balance,
+                    )
+                } else {
+                    let Some(resource) = tx.resources_get(&resource_address).optional()? else {
+                        log::warn!(
+                            target: LOG_TARGET,
+                            "Skipping balance-change record for account {} resource {} because resource metadata is not cached",
+                            account_address,
+                            resource_address
+                        );
+                        return Ok(false);
+                    };
+                    let latest =
+                        tx.balance_changes_get_latest_by_account_resource(&account_address, &resource_address)?;
+                    (
+                        None,
+                        resource.resource.token_symbol().map(ToOwned::to_owned),
+                        resource.resource.divisibility(),
+                        latest.as_ref().map(|change| change.revealed_after).unwrap_or_default(),
+                        latest
+                            .as_ref()
+                            .map(|change| change.confidential_after)
+                            .unwrap_or_default(),
+                    )
+                };
+
+            let recorded = tx.balance_changes_insert(
+                BalanceChangeSnapshot {
+                    account_address,
+                    vault_address: None,
+                    vault_version: None,
+                    resource_address,
+                    token_symbol,
+                    divisibility,
+                    revealed_before,
+                    revealed_after: revealed_balance,
+                    confidential_before,
+                    confidential_after: confidential_balance,
+                },
+                source,
+            )?;
+            if recorded && let Some((vault_address, vault_version)) = vault_to_update {
+                tx.vaults_update(vault_address, vault_version, revealed_balance, confidential_balance)?;
+            }
+            Ok(recorded)
+        })?)
+    }
+
+    pub fn get_balance_changes(
+        &self,
+        account_address: &ComponentAddress,
+        offset: usize,
+        limit: usize,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<&TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+    ) -> Result<BalanceChangePage, AccountsApiError> {
+        let page = self.store.with_read_tx(|tx| {
+            tx.balance_changes_get_page_by_account(
+                account_address,
+                offset,
+                limit,
+                resource_address,
+                transaction_id,
+                source_type,
+            )
+        })?;
+        Ok(page)
+    }
+
+    pub fn attribute_balance_change_to_transaction(
+        &self,
+        vault_id: &VaultId,
+        vault_version: u32,
+        transaction_id: TransactionId,
+    ) -> Result<bool, AccountsApiError> {
+        let attributed = self
+            .store
+            .with_write_tx(|tx| tx.balance_changes_attribute_transaction(vault_id, vault_version, transaction_id))?;
+        Ok(attributed)
     }
 
     pub fn get_vault_balance(&self, vault_address: &VaultId) -> Result<VaultBalance, AccountsApiError> {
@@ -362,6 +497,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         &self,
         account_address: ComponentAddress,
         vault_address: VaultId,
+        vault_version: u32,
         resource_address: ResourceAddress,
         resource_type: ResourceType,
         token_symbol: Option<String>,
@@ -371,6 +507,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         tx.vaults_insert(VaultModel {
             account_address,
             id: vault_address,
+            vault_version,
             resource_address,
             resource_type,
             revealed_balance: Amount::zero(),

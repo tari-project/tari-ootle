@@ -22,10 +22,11 @@
 
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import {
   AccountOrKeyId,
   BadgeUsage,
+  BalanceChangeSourceType,
   ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
@@ -36,6 +37,7 @@ import {
   ResourceAddress,
   ResourceType,
   TARI_TOKEN,
+  TransactionId,
   UtxoInputSelection,
 } from "@tari-project/ootle-ts-bindings";
 import {
@@ -44,6 +46,7 @@ import {
   accountsCreate,
   accountsCreateFreeTestCoins,
   accountsGet,
+  accountsGetBalanceChanges,
   accountsGetBalances,
   accountsGetDefault,
   accountsList,
@@ -54,6 +57,9 @@ import {
   stealthUtxosList,
   validatorsGetFees,
 } from "@utils/json_rpc";
+import { useEffect, useRef } from "react";
+
+const ACCOUNT_BALANCE_CHANGES_QUERY_KEY = "account_balance_changes";
 
 //   Fees are passed as strings because Amount is tagged
 export const useAccountsClaimBurn = () => {
@@ -291,7 +297,7 @@ export const useAccountsList = (offset: number, limit: number, enabled: boolean 
 };
 
 export const useAccountsGetBalances = (account?: ComponentAddress, refresh: boolean = false) => {
-  return useQuery({
+  const query = useQuery({
     enabled: !!account,
     queryKey: [`accounts_balances_${account}`],
     queryFn: () => accountsGetBalances({ account: { ComponentAddress: account! }, refresh }),
@@ -303,6 +309,40 @@ export const useAccountsGetBalances = (account?: ComponentAddress, refresh: bool
       }
       return newData;
     },
+  });
+  const previous = useRef<{ account?: ComponentAddress; data: typeof query.data }>({ account, data: query.data });
+
+  useEffect(() => {
+    if (previous.current.account === account && previous.current.data && query.data !== previous.current.data) {
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_CHANGES_QUERY_KEY, account] });
+    }
+    previous.current = { account, data: query.data };
+  }, [account, query.data]);
+
+  return query;
+};
+
+export const useAccountsGetBalanceChanges = (
+  account: ComponentAddress | undefined,
+  offset: number,
+  limit: number,
+  resourceAddress?: ResourceAddress,
+  sourceType?: BalanceChangeSourceType,
+  transactionId?: TransactionId,
+) => {
+  return useQuery({
+    enabled: !!account,
+    queryKey: [ACCOUNT_BALANCE_CHANGES_QUERY_KEY, account, resourceAddress, sourceType, transactionId, offset, limit],
+    queryFn: () =>
+      accountsGetBalanceChanges({
+        account: { ComponentAddress: account! },
+        offset,
+        limit,
+        resource_address: resourceAddress ?? null,
+        transaction_id: transactionId ?? null,
+        source_type: sourceType ?? null,
+      }),
+    placeholderData: keepPreviousData,
   });
 };
 

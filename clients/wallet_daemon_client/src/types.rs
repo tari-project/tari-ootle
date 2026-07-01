@@ -49,6 +49,8 @@ use tari_ootle_wallet_sdk::{
         Account,
         AddressBookEntry,
         AuthoredTemplateModel,
+        BalanceChange,
+        BalanceChangeSourceType,
         DerivedKeyIndex,
         KeyBranch,
         KeyId,
@@ -455,6 +457,25 @@ pub struct AccountsGetBalancesRequest {
 pub struct AccountsGetBalancesResponse {
     pub address: ComponentAddress,
     pub balances: Vec<BalanceEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AccountsGetBalanceChangesRequest {
+    #[serde(deserialize_with = "string_or_struct")]
+    pub account: ComponentAddressOrName,
+    pub offset: u32,
+    pub limit: u32,
+    pub resource_address: Option<ResourceAddress>,
+    pub transaction_id: Option<TransactionId>,
+    pub source_type: Option<BalanceChangeSourceType>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AccountsGetBalanceChangesResponse {
+    pub changes: Vec<BalanceChange>,
+    pub total: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1638,3 +1659,51 @@ pub struct AddressBookDeleteRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AddressBookDeleteResponse {}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_wallet_sdk::models::{BalanceChangeSource, BalanceChangeSourceType};
+
+    use super::*;
+
+    #[test]
+    fn balance_change_request_accepts_string_account_and_optional_filters() {
+        let transaction_id = TransactionId::default();
+        let request: AccountsGetBalanceChangesRequest = serde_json::from_value(serde_json::json!({
+            "account": "savings",
+            "offset": 20,
+            "limit": 10,
+            "resource_address": null,
+            "transaction_id": transaction_id.to_string(),
+            "source_type": "Transaction",
+        }))
+        .unwrap();
+
+        assert_eq!(request.account.name(), Some("savings"));
+        assert_eq!(request.offset, 20);
+        assert_eq!(request.limit, 10);
+        assert_eq!(request.resource_address, None);
+        assert_eq!(request.transaction_id, Some(transaction_id));
+        assert_eq!(request.source_type, Some(BalanceChangeSourceType::Transaction));
+    }
+
+    #[test]
+    fn balance_change_source_serializes_as_an_internally_tagged_union() {
+        let transaction_id = TransactionId::default();
+        assert_eq!(
+            serde_json::to_value(BalanceChangeSource::Transaction { transaction_id }).unwrap(),
+            serde_json::json!({
+                "type": "Transaction",
+                "transaction_id": transaction_id.to_string(),
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(BalanceChangeSource::Scan).unwrap(),
+            serde_json::json!({ "type": "Scan" })
+        );
+        assert_eq!(
+            serde_json::to_value(BalanceChangeSource::Recovery).unwrap(),
+            serde_json::json!({ "type": "Recovery" })
+        );
+    }
+}

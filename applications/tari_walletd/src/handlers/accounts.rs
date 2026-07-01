@@ -27,6 +27,7 @@ use tari_ootle_wallet_sdk::{
     },
     models::{
         AccountWithAddress,
+        BalanceChange,
         KeyBranch,
         NewAccountData,
         StealthUtxoSpendKeyId,
@@ -65,6 +66,7 @@ use tari_ootle_walletd_client::{
         AccountsRenameResponse,
         AccountsTransferRequest,
         AccountsTransferResponse,
+        BalanceChangeEntry,
         BalanceEntry,
         ClaimBurnProof,
         ClaimBurnProofContents,
@@ -72,6 +74,8 @@ use tari_ootle_walletd_client::{
         ClaimBurnResponse,
         ConfidentialTransferRequest,
         ConfidentialTransferResponse,
+        GetBalanceChangesRequest,
+        GetBalanceChangesResponse,
         StealthTransferRequest,
         StealthTransferResponse,
     },
@@ -1467,4 +1471,255 @@ pub async fn handle_associate_stealth_resource(
         .await?;
 
     Ok(AccountsAssociateStealthResourceResponse {})
+}
+
+fn balance_change_to_entry(change: BalanceChange) -> BalanceChangeEntry {
+    BalanceChangeEntry {
+        vault_address: change.vault_address.map(|a| a.to_string()),
+        resource_address: change.resource_address,
+        before_revealed_balance: change.before_revealed_balance,
+        after_revealed_balance: change.after_revealed_balance,
+        before_confidential_balance: change.before_confidential_balance,
+        after_confidential_balance: change.after_confidential_balance,
+        revealed_delta: change.revealed_delta,
+        confidential_delta: change.confidential_delta,
+        source: change.source.into(),
+        transaction_id: change.transaction_id,
+        created_at: change
+            .created_at
+            .assume_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| change.created_at.to_string()),
+    }
+}
+
+pub async fn handle_get_balance_changes(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: GetBalanceChangesRequest,
+) -> Result<GetBalanceChangesResponse, anyhow::Error> {
+    let granted = context.check_auth(token)?;
+    let sdk = context.wallet_sdk();
+    let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
+    enforce_scopes(&granted, &[Permission::Accounts(
+        Crud::Read,
+        Some(*account.component_address()),
+    )])?;
+
+    let tx_id = req
+        .transaction_id
+        .as_ref()
+        .map(|s| {
+            tari_ootle_transaction::TransactionId::from_hex(s)
+                .map_err(|e| invalid_params("transaction_id", Some(&e.to_string())))
+        })
+        .transpose()?;
+
+    let (changes, total) = sdk.accounts_api().balance_changes_get_with_count(
+        account.component_address(),
+        req.offset.unwrap_or(0),
+        req.limit.unwrap_or(100),
+        req.resource_address.as_ref(),
+        tx_id,
+        req.source_type.map(Into::into),
+        req.start_time.as_deref(),
+        req.end_time.as_deref(),
+    )?;
+
+    let changes = changes.into_iter().map(balance_change_to_entry).collect();
+
+    Ok(GetBalanceChangesResponse { changes, total })
+}
+
+#[cfg(test)]
+mod balance_change_handler_tests {
+    use std::str::FromStr;
+
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::TransactionId;
+    use tari_ootle_wallet_sdk::{
+        models::{BalanceChangeSource, KeyBranch, KeyId, VaultModel},
+        storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    };
+    use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+    use tari_ootle_walletd_client::types::WalletBalanceChangeSource;
+    use tari_template_lib_types::{
+        Amount,
+        ComponentAddress,
+        ResourceAddress,
+        ResourceType,
+        VaultId,
+        crypto::RistrettoPublicKeyBytes,
+    };
+
+    use super::*;
+
+    fn make_tx_id(val: u8) -> TransactionId {
+        let mut bytes = [0u8; 32];
+        bytes[31] = val;
+        TransactionId::new(bytes)
+    }
+
+    fn setup_test_store() -> (SqliteWalletStore, ComponentAddress, VaultId, ResourceAddress) {
+        let db = SqliteWalletStore::try_open(":memory:").unwrap();
+        db.run_migrations().unwrap();
+
+        let account_address =
+            ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8ffffffff")
+                .unwrap();
+        let vault_id =
+            VaultId::from_str("vault_0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let resource_address =
+            ResourceAddress::from_str("resource_0000000000000000000000000000000000000000000000000000000000000001")
+                .unwrap();
+
+        {
+            let mut tx = db.create_write_tx().unwrap();
+            tx.accounts_insert(
+                Some("test"),
+                &account_address,
+                KeyId::derived(KeyBranch::Account, 0),
+                Some(KeyId::derived(KeyBranch::Account, 0)),
+                &RistrettoPublicKeyBytes::default(),
+                &Default::default(),
+                Epoch::zero(),
+                false,
+                false,
+            )
+            .unwrap();
+            tx.vaults_insert(VaultModel {
+                account_address,
+                id: vault_id,
+                resource_address,
+                resource_type: ResourceType::Fungible,
+                confidential_balance: Amount::zero(),
+                revealed_balance: Amount::zero(),
+                locked_revealed_balance: Amount::zero(),
+                token_symbol: Some("TARI".to_string()),
+                divisibility: 6,
+            })
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        (db, account_address, vault_id, resource_address)
+    }
+
+    #[test]
+    fn balance_change_to_entry_converts_all_sources() {
+        let vault_id =
+            VaultId::from_str("vault_0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let resource = "resource_0000000000000000000000000000000000000000000000000000000000000001";
+
+        let tx = BalanceChange {
+            vault_address: Some(vault_id),
+            resource_address: resource.to_string(),
+            before_revealed_balance: "100".to_string(),
+            after_revealed_balance: "200".to_string(),
+            before_confidential_balance: "50".to_string(),
+            after_confidential_balance: "75".to_string(),
+            revealed_delta: "100".to_string(),
+            confidential_delta: "25".to_string(),
+            source: BalanceChangeSource::Transaction {
+                transaction_id: make_tx_id(1),
+            },
+            transaction_id: Some(make_tx_id(1).to_string()),
+            created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
+        };
+        let entry = balance_change_to_entry(tx);
+        assert!(matches!(entry.source, WalletBalanceChangeSource::Transaction { .. }));
+        assert!(entry.transaction_id.is_some());
+
+        let scan = BalanceChange {
+            vault_address: Some(vault_id),
+            resource_address: resource.to_string(),
+            before_revealed_balance: "0".to_string(),
+            after_revealed_balance: "500".to_string(),
+            before_confidential_balance: "0".to_string(),
+            after_confidential_balance: "0".to_string(),
+            revealed_delta: "500".to_string(),
+            confidential_delta: "0".to_string(),
+            source: BalanceChangeSource::Scan,
+            transaction_id: None,
+            created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
+        };
+        let entry = balance_change_to_entry(scan);
+        assert_eq!(entry.source, WalletBalanceChangeSource::Scan);
+        assert!(entry.transaction_id.is_none());
+
+        let recovery = BalanceChange {
+            vault_address: Some(vault_id),
+            resource_address: resource.to_string(),
+            before_revealed_balance: "200".to_string(),
+            after_revealed_balance: "300".to_string(),
+            before_confidential_balance: "0".to_string(),
+            after_confidential_balance: "0".to_string(),
+            revealed_delta: "100".to_string(),
+            confidential_delta: "0".to_string(),
+            source: BalanceChangeSource::Recovery,
+            transaction_id: None,
+            created_at: time::PrimitiveDateTime::new(time::Date::MIN, time::Time::MIDNIGHT),
+        };
+        let entry = balance_change_to_entry(recovery);
+        assert_eq!(entry.source, WalletBalanceChangeSource::Recovery);
+        assert!(entry.transaction_id.is_none());
+    }
+
+    #[test]
+    fn handler_data_path_integrates_storage_correctly() {
+        let (db, account_address, vault_id, resource_address) = setup_test_store();
+
+        let tx_id = make_tx_id(42);
+        let mut tx = db.create_write_tx().unwrap();
+
+        // Insert tx-driven change
+        tx.balance_changes_insert(
+            &account_address,
+            Some(&vault_id),
+            &resource_address,
+            &Amount::from(0u64),
+            &Amount::from(1000u64),
+            &Amount::from(0u64),
+            &Amount::from(500u64),
+            &BalanceChangeSource::Transaction { transaction_id: tx_id },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        // Simulate what handle_get_balance_changes does: query with pagination and filters
+        let changes = tx
+            .balance_changes_get_by_account(&account_address, 0, 10, None, None, None, None, None)
+            .unwrap();
+        assert_eq!(changes.len(), 1);
+
+        let entry = balance_change_to_entry(changes.into_iter().next().unwrap());
+        assert_eq!(entry.before_revealed_balance, "0");
+        assert_eq!(entry.after_revealed_balance, "1000");
+        assert_eq!(entry.revealed_delta, "1000");
+        assert_eq!(entry.confidential_delta, "500");
+        assert!(matches!(entry.source, WalletBalanceChangeSource::Transaction { .. }));
+
+        // Test filter by transaction_id
+        let changes = tx
+            .balance_changes_get_by_account(&account_address, 0, 10, None, Some(tx_id), None, None, None)
+            .unwrap();
+        assert_eq!(changes.len(), 1);
+
+        // Test filter by resource_address
+        let changes = tx
+            .balance_changes_get_by_account(&account_address, 0, 10, Some(&resource_address), None, None, None, None)
+            .unwrap();
+        assert_eq!(changes.len(), 1);
+
+        // Test count
+        let total = tx
+            .balance_changes_count_by_account(&account_address, None, None, None, None, None)
+            .unwrap();
+        assert_eq!(total, 1);
+
+        // Test pagination: empty page beyond data
+        let changes = tx
+            .balance_changes_get_by_account(&account_address, 10, 10, None, None, None, None, None)
+            .unwrap();
+        assert!(changes.is_empty());
+    }
 }

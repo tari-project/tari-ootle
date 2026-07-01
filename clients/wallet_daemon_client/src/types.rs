@@ -1638,3 +1638,91 @@ pub struct AddressBookDeleteRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AddressBookDeleteResponse {}
+
+/// Local type with unconditional ts_rs derive for TypeScript binding generation.
+/// Mirrors the SDK's `BalanceChangeSource` for TS compatibility.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum WalletBalanceChangeSourceType {
+    Transaction,
+    Scan,
+    Recovery,
+}
+
+impl From<WalletBalanceChangeSourceType> for tari_ootle_wallet_sdk::models::BalanceChangeSourceType {
+    fn from(s: WalletBalanceChangeSourceType) -> Self {
+        match s {
+            WalletBalanceChangeSourceType::Transaction => Self::Transaction,
+            WalletBalanceChangeSourceType::Scan => Self::Scan,
+            WalletBalanceChangeSourceType::Recovery => Self::Recovery,
+        }
+    }
+}
+
+/// Local type with unconditional ts_rs derive for TypeScript binding generation.
+/// Mirrors the SDK's `BalanceChangeSource` for TS compatibility, using String
+/// for transaction_id to avoid requiring ts_rs on TransactionId.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+#[serde(tag = "type")]
+pub enum WalletBalanceChangeSource {
+    Transaction { transaction_id: String },
+    Scan,
+    Recovery,
+}
+
+impl From<tari_ootle_wallet_sdk::models::BalanceChangeSource> for WalletBalanceChangeSource {
+    fn from(s: tari_ootle_wallet_sdk::models::BalanceChangeSource) -> Self {
+        match s {
+            tari_ootle_wallet_sdk::models::BalanceChangeSource::Transaction { transaction_id } => Self::Transaction {
+                transaction_id: transaction_id.to_string(),
+            },
+            tari_ootle_wallet_sdk::models::BalanceChangeSource::Scan => Self::Scan,
+            tari_ootle_wallet_sdk::models::BalanceChangeSource::Recovery => Self::Recovery,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct GetBalanceChangesRequest {
+    #[serde(deserialize_with = "opt_string_or_struct")]
+    pub account: Option<ComponentAddressOrName>,
+    #[serde(default)]
+    pub offset: Option<u64>,
+    #[serde(default)]
+    pub limit: Option<u64>,
+    #[serde(default)]
+    pub resource_address: Option<ResourceAddress>,
+    #[serde(default)]
+    pub transaction_id: Option<String>,
+    #[serde(default)]
+    pub source_type: Option<WalletBalanceChangeSourceType>,
+    #[serde(default)]
+    pub start_time: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct BalanceChangeEntry {
+    pub vault_address: Option<String>,
+    pub resource_address: String,
+    pub before_revealed_balance: String,
+    pub after_revealed_balance: String,
+    pub before_confidential_balance: String,
+    pub after_confidential_balance: String,
+    pub revealed_delta: String,
+    pub confidential_delta: String,
+    pub source: WalletBalanceChangeSource,
+    pub transaction_id: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct GetBalanceChangesResponse {
+    pub changes: Vec<BalanceChangeEntry>,
+    pub total: u64,
+}

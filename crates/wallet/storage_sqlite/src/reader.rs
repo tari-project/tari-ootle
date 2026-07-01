@@ -31,6 +31,8 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChange,
+        BalanceChangeSourceType,
         ConfidentialOutputModel,
         Config,
         KeyType,
@@ -719,6 +721,176 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 })
             })
             .collect()
+    }
+
+    // -------------------------------- Balance Changes -------------------------------- //
+    fn balance_changes_get_by_account(
+        &mut self,
+        account: &ComponentAddress,
+        offset: u64,
+        limit: u64,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+    ) -> Result<Vec<BalanceChange>, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_get_by_account";
+        use crate::schema::{account_balance_changes, accounts, vaults};
+
+        let account_id = accounts::table
+            .select(accounts::id)
+            .filter(accounts::address.eq(account.to_string()))
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            // Unknown account -> empty result set (friendlier than NotFound for SDK callers)
+            .unwrap_or(-1);
+
+        if account_id == -1 {
+            return Ok(Vec::new());
+        }
+
+        let mut rows = account_balance_changes::table
+            .left_join(vaults::table)
+            .filter(account_balance_changes::account_id.eq(account_id))
+            .select((account_balance_changes::all_columns, vaults::address.nullable()))
+            .order((
+                account_balance_changes::created_at.desc(),
+                account_balance_changes::id.desc(),
+            ))
+            .into_boxed();
+
+        if let Some(resource_addr) = resource_address {
+            rows = rows.filter(account_balance_changes::resource_address.eq(resource_addr.to_string()));
+        }
+
+        if let Some(tx_id) = transaction_id {
+            rows = rows.filter(account_balance_changes::transaction_id.eq(tx_id.to_string()));
+        }
+
+        if let Some(st) = source_type {
+            rows = rows.filter(account_balance_changes::source.eq(st.as_key_str()));
+        }
+
+        if let Some(start) = start_time {
+            let start =
+                time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "start_time",
+                        details: e.to_string(),
+                    }
+                })?;
+            let start = time::PrimitiveDateTime::new(start.date(), start.time());
+            rows = rows.filter(account_balance_changes::created_at.ge(start));
+        }
+
+        if let Some(end) = end_time {
+            let end =
+                time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "end_time",
+                        details: e.to_string(),
+                    }
+                })?;
+            let end = time::PrimitiveDateTime::new(end.date(), end.time());
+            rows = rows.filter(account_balance_changes::created_at.le(end));
+        }
+
+        let results = rows
+            .offset(offset as i64)
+            .limit(limit as i64)
+            .load::<(models::BalanceChangeRow, Option<String>)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        results
+            .into_iter()
+            .map(|(row, vault_address_str)| {
+                let vault_address = vault_address_str
+                    .map(|addr| {
+                        VaultId::from_str(&addr).map_err(|e| WalletStorageError::DecodingError {
+                            operation: OPERATION,
+                            item: "vault address",
+                            details: e.to_string(),
+                        })
+                    })
+                    .transpose()?;
+                row.try_into_balance_change(vault_address)
+            })
+            .collect()
+    }
+
+    fn balance_changes_count_by_account(
+        &mut self,
+        account: &ComponentAddress,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+    ) -> Result<u64, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_count_by_account";
+        use crate::schema::{account_balance_changes, accounts};
+
+        let account_id = accounts::table
+            .select(accounts::id)
+            .filter(accounts::address.eq(account.to_string()))
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            // Unknown account -> zero count (friendlier than NotFound for SDK callers)
+            .unwrap_or(-1);
+
+        if account_id == -1 {
+            return Ok(0);
+        }
+
+        let mut query = account_balance_changes::table
+            .filter(account_balance_changes::account_id.eq(account_id))
+            .into_boxed();
+
+        if let Some(resource_addr) = resource_address {
+            query = query.filter(account_balance_changes::resource_address.eq(resource_addr.to_string()));
+        }
+        if let Some(tx_id) = transaction_id {
+            query = query.filter(account_balance_changes::transaction_id.eq(tx_id.to_string()));
+        }
+        if let Some(st) = source_type {
+            query = query.filter(account_balance_changes::source.eq(st.as_key_str()));
+        }
+        if let Some(start) = start_time {
+            let start =
+                time::OffsetDateTime::parse(start, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "start_time",
+                        details: e.to_string(),
+                    }
+                })?;
+            let start = time::PrimitiveDateTime::new(start.date(), start.time());
+            query = query.filter(account_balance_changes::created_at.ge(start));
+        }
+        if let Some(end) = end_time {
+            let end =
+                time::OffsetDateTime::parse(end, &time::format_description::well_known::Rfc3339).map_err(|e| {
+                    WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "end_time",
+                        details: e.to_string(),
+                    }
+                })?;
+            let end = time::PrimitiveDateTime::new(end.date(), end.time());
+            query = query.filter(account_balance_changes::created_at.le(end));
+        }
+
+        let count = query
+            .count()
+            .get_result::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(count as u64)
     }
 
     // -------------------------------- Resources -------------------------------- //

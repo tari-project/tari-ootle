@@ -41,9 +41,10 @@ import useAccountStore from "@store/accountStore";
 import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
 import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
-import { IoWalletOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
+import { IoDocumentTextOutline, IoWalletOutline } from "react-icons/io5";
 import ClaimCoinsButton from "./components/ClaimCoinsButton";
+import BalanceChangeDialog from "./BalanceChangeDialog";
 import { SendMoneyDialog } from "./components/SendMoney";
 
 interface BalanceRowProps {
@@ -54,6 +55,7 @@ interface BalanceRowProps {
   balance: Amount;
   confidential_balance: Amount;
   divisibility: number;
+  accountAddress?: string;
   onSendClicked?: (resource_address: ResourceAddress, resource_type: ResourceType) => void;
 }
 
@@ -83,12 +85,14 @@ function BalanceRow({
   confidential_balance,
   vault_address,
   divisibility,
+  accountAddress,
   onSendClicked,
 }: BalanceRowProps) {
   const theme = useTheme();
-  const navigate = useNavigate();
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
   const showBalance = useAccountStore((state) => state.showBalance);
+  const [showChanges, setShowChanges] = useState(false);
+  const navigate = useNavigate();
 
   const stealthUXTOs = resource_type === "Stealth" && (
     <Tooltip title="View Stealth UTXOs">
@@ -101,6 +105,30 @@ function BalanceRow({
         View
       </Button>
     </Tooltip>
+  );
+
+  const balanceChangesButton = accountAddress && vault_address && (
+    <>
+      <Tooltip title="View balance changes for this resource">
+        <Button
+          variant="outlined"
+          size="small"
+          endIcon={<IoDocumentTextOutline />}
+          onClick={() => setShowChanges(true)}
+        >
+          Changes
+        </Button>
+      </Tooltip>
+      {showChanges && (
+        <BalanceChangeDialog
+          open={showChanges}
+          onClose={() => setShowChanges(false)}
+          account={accountAddress}
+          resourceAddress={resource_address}
+          resourceLabel={token_symbol}
+        />
+      )}
+    </>
   );
 
   return (
@@ -138,6 +166,7 @@ function BalanceRow({
           <Button size="small" variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
             Send
           </Button>
+          {balanceChangesButton}
           {stealthUXTOs}
         </Stack>
       </FluidTableCell>
@@ -263,6 +292,7 @@ function Tokens({ account }: { account: Account }) {
                           confidential_balance={confidential_balance}
                           vault_address={vault_address ?? undefined} // convert null to undefined
                           divisibility={divisibility}
+                          accountAddress={substateIdToString(account.component_address)}
                           onSendClicked={handleSendResourceClicked}
                         />
                       ),

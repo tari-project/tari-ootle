@@ -11,6 +11,7 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
 };
+use tari_ootle_transaction::TransactionId;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
     Amount,
@@ -32,6 +33,9 @@ use crate::{
         Account,
         AccountUpdate,
         AccountWithAddress,
+        BalanceChange,
+        BalanceChangeSource,
+        BalanceChangeSourceType,
         EpochBirthday,
         KeyId,
         KeyIdOrPublicKey,
@@ -212,6 +216,130 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
     ) -> Result<(), AccountsApiError> {
         self.store
             .with_write_tx(|tx| tx.vaults_update(vault_address, revealed_balance, confidential_balance))?;
+        Ok(())
+    }
+
+    pub fn balance_changes_insert(
+        &self,
+        account_address: &ComponentAddress,
+        vault_address: Option<&VaultId>,
+        resource_address: &ResourceAddress,
+        before_revealed_balance: &Amount,
+        after_revealed_balance: &Amount,
+        before_confidential_balance: &Amount,
+        after_confidential_balance: &Amount,
+        source: &BalanceChangeSource,
+    ) -> Result<(), AccountsApiError> {
+        self.store.with_write_tx(|tx| {
+            tx.balance_changes_insert(
+                account_address,
+                vault_address,
+                resource_address,
+                before_revealed_balance,
+                after_revealed_balance,
+                before_confidential_balance,
+                after_confidential_balance,
+                source,
+            )
+        })?;
+        Ok(())
+    }
+
+    pub fn balance_changes_get_by_account(
+        &self,
+        account: &ComponentAddress,
+        offset: u64,
+        limit: u64,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+    ) -> Result<Vec<BalanceChange>, AccountsApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let changes = tx.balance_changes_get_by_account(
+            account,
+            offset,
+            limit,
+            resource_address,
+            transaction_id,
+            source_type,
+            start_time,
+            end_time,
+        )?;
+        Ok(changes)
+    }
+
+    pub fn balance_changes_count_by_account(
+        &self,
+        account: &ComponentAddress,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+    ) -> Result<u64, AccountsApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let count = tx.balance_changes_count_by_account(
+            account,
+            resource_address,
+            transaction_id,
+            source_type,
+            start_time,
+            end_time,
+        )?;
+        Ok(count)
+    }
+
+    pub fn balance_changes_get_with_count(
+        &self,
+        account: &ComponentAddress,
+        offset: u64,
+        limit: u64,
+        resource_address: Option<&ResourceAddress>,
+        transaction_id: Option<TransactionId>,
+        source_type: Option<BalanceChangeSourceType>,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+    ) -> Result<(Vec<BalanceChange>, u64), AccountsApiError> {
+        self.store.with_read_tx(|tx| {
+            let changes = tx.balance_changes_get_by_account(
+                account,
+                offset,
+                limit,
+                resource_address,
+                transaction_id,
+                source_type,
+                start_time,
+                end_time,
+            )?;
+            let total = tx.balance_changes_count_by_account(
+                account,
+                resource_address,
+                transaction_id,
+                source_type,
+                start_time,
+                end_time,
+            )?;
+            Ok((changes, total))
+        })
+    }
+
+    pub fn balance_changes_promote_scan_to_transaction(
+        &self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+        after_revealed_balance: &Amount,
+        after_confidential_balance: &Amount,
+    ) -> Result<(), AccountsApiError> {
+        self.store.with_write_tx(|tx| {
+            tx.balance_changes_promote_scan_to_transaction(
+                vault_id,
+                transaction_id,
+                after_revealed_balance,
+                after_confidential_balance,
+            )
+        })?;
         Ok(())
     }
 

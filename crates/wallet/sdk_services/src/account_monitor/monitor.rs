@@ -19,10 +19,10 @@ use tari_ootle_wallet_sdk::{
         substate::SubstateApiError,
         transaction::TransactionApiError,
     },
-    models::{NewAccountData, WalletEvent},
+    models::{BalanceChangeSource, NewAccountData, UtxoRecoveredEvent, UtxoSpentEvent, WalletEvent},
 };
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib_types::{ComponentAddress, ResourceAddress};
+use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress};
 use tokio::{
     sync::{broadcast, mpsc},
     time,
@@ -127,9 +127,10 @@ where
             AccountMonitorRequest::RefreshAccount {
                 account,
                 scan_for_utxos,
+                source,
                 reply,
             } => {
-                let _ignore = reply.send(self.refresh_account(account, scan_for_utxos).await);
+                let _ignore = reply.send(self.refresh_account(account, scan_for_utxos, source).await);
             },
             AccountMonitorRequest::AssociateResource {
                 account,
@@ -178,7 +179,10 @@ where
                 break;
             }
             for account in &accounts {
-                let is_updated = self.scanner.refresh_account(*account.component_address()).await?;
+                let is_updated = self
+                    .scanner
+                    .refresh_account(*account.component_address(), BalanceChangeSource::Scan)
+                    .await?;
                 if self.enable_periodic_scanning_of_utxos {
                     self.refresh_stealth_utxos(*account.component_address()).await?;
                 }
@@ -208,8 +212,9 @@ where
         &self,
         account_address: ComponentAddress,
         scan_for_utxos: bool,
+        source: BalanceChangeSource,
     ) -> Result<bool, AccountMonitorError> {
-        let is_updated = self.scanner.refresh_account(account_address).await?;
+        let is_updated = self.scanner.refresh_account(account_address, source).await?;
         if scan_for_utxos {
             self.refresh_stealth_utxos(account_address).await?;
         }
@@ -245,6 +250,64 @@ where
         Ok(())
     }
 
+    async fn handle_utxo_recovered(&self, event: UtxoRecoveredEvent) -> Result<(), AccountMonitorError> {
+        let resource_address = *event.address.resource_address();
+        let accounts_api = self.wallet_sdk.accounts_api();
+
+        let (vault_address, revealed_balance) =
+            match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
+                Ok(vault) => (Some(vault.id), vault.revealed_balance),
+                Err(_) => (None, Amount::zero()),
+            };
+
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let current_stealth_balance = stealth_outputs_api.get_unspent_balance(&resource_address)?.balance;
+        let utxo_amount = Amount::from(stealth_outputs_api.get_utxo_value(&event.address)?);
+        let before_stealth = (current_stealth_balance - utxo_amount).max(Amount::zero());
+
+        accounts_api.balance_changes_insert(
+            &event.account_address,
+            vault_address.as_ref(),
+            &resource_address,
+            &revealed_balance,
+            &revealed_balance,
+            &before_stealth,
+            &current_stealth_balance,
+            &BalanceChangeSource::Scan,
+        )?;
+
+        Ok(())
+    }
+
+    async fn handle_utxo_spent(&self, event: UtxoSpentEvent) -> Result<(), AccountMonitorError> {
+        let resource_address = *event.address.resource_address();
+        let accounts_api = self.wallet_sdk.accounts_api();
+
+        let (vault_address, revealed_balance) =
+            match accounts_api.get_vault_by_resource(&event.account_address, &resource_address) {
+                Ok(vault) => (Some(vault.id), vault.revealed_balance),
+                Err(_) => (None, Amount::zero()),
+            };
+
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let current_stealth_balance = stealth_outputs_api.get_unspent_balance(&resource_address)?.balance;
+        let utxo_amount = Amount::from(stealth_outputs_api.get_utxo_value(&event.address)?);
+        let before_stealth = current_stealth_balance + utxo_amount;
+
+        accounts_api.balance_changes_insert(
+            &event.account_address,
+            vault_address.as_ref(),
+            &resource_address,
+            &revealed_balance,
+            &revealed_balance,
+            &before_stealth,
+            &current_stealth_balance,
+            &BalanceChangeSource::Scan,
+        )?;
+
+        Ok(())
+    }
+
     async fn on_event(&mut self, event: WalletEvent) -> Result<(), AccountMonitorError> {
         debug!(target: LOG_TARGET, "🏦 Account monitor received event: {}", event);
         if let Err(err) = self.wallet_sdk.event_api().log_event(&event) {
@@ -263,6 +326,13 @@ where
                         .process_result(event.transaction_id, diff, new_account)
                         .await?;
                 }
+                if self.enable_periodic_scanning_of_utxos {
+                    if let Ok(accounts) = self.wallet_sdk.accounts_api().get_many(0, usize::MAX) {
+                        for account in &accounts {
+                            self.refresh_stealth_utxos(*account.component_address()).await?;
+                        }
+                    }
+                }
             },
             WalletEvent::TransactionInvalid(event) => {
                 self.pending_accounts.remove(&event.transaction_id);
@@ -271,9 +341,13 @@ where
             WalletEvent::AccountChangedOnChain(_) |
             WalletEvent::AuthLoginRequest(_) |
             WalletEvent::UtxoRecoveryStarted(_) |
-            WalletEvent::UtxoRecovered(_) |
-            WalletEvent::UtxoRecoveryCompleted(_) |
-            WalletEvent::UtxoSpent(_) => {},
+            WalletEvent::UtxoRecoveryCompleted(_) => {},
+            WalletEvent::UtxoRecovered(event) => {
+                self.handle_utxo_recovered(event).await?;
+            },
+            WalletEvent::UtxoSpent(event) => {
+                self.handle_utxo_spent(event).await?;
+            },
         }
         Ok(())
     }

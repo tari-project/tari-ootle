@@ -28,6 +28,18 @@ pub struct FeeTable {
     /// (`per_wasm_point_cost × (points_consumed / wasm_points_cost_divisor)`). Lower values make
     /// metering more aggressive. Must be non-zero; a zero divisor is treated as `1`.
     pub wasm_points_cost_divisor: u64,
+    /// Free allowance, in bytes, of a published template's binary. The first this-many bytes are
+    /// priced at `per_byte_storage_cost` (matching ordinary storage); only bytes beyond it incur
+    /// the quadratic publish premium.
+    pub template_size_premium_free_bytes: u64,
+    /// Size, in bytes, of one template-publish premium unit. Excess bytes above
+    /// `template_size_premium_free_bytes` are divided by this to get the unit count that is then
+    /// squared. Must be non-zero; a zero value is treated as `1`.
+    pub template_size_premium_unit_bytes: u64,
+    /// Cost, in microtari, charged per squared premium unit when publishing a template
+    /// (`per_template_size_premium_unit_cost × units²`, `units = excess_bytes /
+    /// template_size_premium_unit_bytes`). Set to 0 to disable the publish premium.
+    pub per_template_size_premium_unit_cost: u64,
 }
 
 impl FeeTable {
@@ -43,6 +55,9 @@ impl FeeTable {
             storage_cost_divisor: 1,
             template_load_bytes_cost_divisor: 1,
             wasm_points_cost_divisor: 1,
+            template_size_premium_free_bytes: 0,
+            template_size_premium_unit_bytes: 1,
+            per_template_size_premium_unit_cost: 0,
         }
     }
 
@@ -85,10 +100,22 @@ impl FeeTable {
     pub fn wasm_points_cost_divisor(&self) -> u64 {
         non_zero(self.wasm_points_cost_divisor)
     }
+
+    pub fn template_size_premium_free_bytes(&self) -> u64 {
+        self.template_size_premium_free_bytes
+    }
+
+    pub fn template_size_premium_unit_bytes(&self) -> u64 {
+        non_zero(self.template_size_premium_unit_bytes)
+    }
+
+    pub fn per_template_size_premium_unit_cost(&self) -> u64 {
+        self.per_template_size_premium_unit_cost
+    }
 }
 
 fn non_zero(divisor: u64) -> u64 {
-    if divisor == 0 { 1 } else { divisor }
+    divisor.max(1)
 }
 
 /// The WASM-execution fee rate extracted from a [`FeeTable`], plus the conversion from fees paid

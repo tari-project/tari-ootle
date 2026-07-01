@@ -81,6 +81,14 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     template_load_bytes_cost_divisor: 3000,
     // 1 µT per 1000 Wasmer points. Lower values make metering more aggressive.
     wasm_points_cost_divisor: 1000,
+    // First 30 KiB of a template binary are priced at the per-byte storage rate; beyond that the
+    // quadratic publish premium applies. Keeps small/typical templates as cheap as before.
+    template_size_premium_free_bytes: 30 * 1024,
+    // 1 KiB per premium unit.
+    template_size_premium_unit_bytes: 1024,
+    // 100 µT per unit². e.g. a 64 KiB template (34 units over the free allowance) pays
+    // 34² × 100 ≈ 0.12 tTARI premium; a 512 KiB template pays ≈ 23.2 tTARI.
+    per_template_size_premium_unit_cost: 100,
 };
 
 /// MainNet fee table - production values.
@@ -107,6 +115,9 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     storage_cost_divisor: 1,
     template_load_bytes_cost_divisor: 3000,
     wasm_points_cost_divisor: 1000,
+    template_size_premium_free_bytes: 30 * 1024,
+    template_size_premium_unit_bytes: 1024,
+    per_template_size_premium_unit_cost: 100,
 };
 
 /// Returns the appropriate fee table for the specified network.

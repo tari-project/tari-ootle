@@ -4,7 +4,8 @@
 use std::ops::Not;
 
 use async_trait::async_trait;
-use tari_ootle_transaction::{Transaction, UnsealedTransaction, UnsignedTransaction};
+use tari_ootle_transaction::{Transaction, TransactionSignature, UnsealedTransaction, UnsignedTransaction};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     Address,
@@ -29,21 +30,33 @@ impl<'a, W: ?Sized> WalletStealthAuthorizer<'a, W> {
 }
 
 impl WalletStealthAuthorizer<'_, OotleWallet> {
+    /// The public key that will seal the transaction: the wallet's default account key when an account-key seal is
+    /// required, otherwise the designated stealth seal signer. `None` when there is nothing to seal for (no inputs).
+    pub fn seal_signer(&self) -> Option<&RistrettoPublicKeyBytes> {
+        if self.required_signatures.must_sign_with_account_key() {
+            Some(self.wallet.default_address().account_public_key())
+        } else {
+            self.required_signatures
+                .seal_signer()
+                .map(|s| s.signer().account_public_key())
+        }
+    }
+
+    /// The exact message every authorization signature for this transaction must sign. An external co-signer (or an
+    /// adaptor pre-signer) produces its signature over these bytes; the resulting [`TransactionAuthorization`] is
+    /// attached via [`crate::TransactionRequest::add_authorization`]. Returns `None` when there is no seal signer to
+    /// bind the authorization to (no inputs to spend).
+    pub fn authorization_message(&self, unsigned: &UnsignedTransaction) -> Option<[u8; 64]> {
+        let seal_signer = self.seal_signer()?;
+        let UnsignedTransaction::V1(unsigned_v1) = unsigned;
+        Some(TransactionSignature::create_message_v1(seal_signer, unsigned_v1))
+    }
+
     pub async fn create_authorizations(
         &self,
         unsigned: &UnsignedTransaction,
     ) -> signer::Result<Vec<TransactionAuthorization>> {
-        let seal_signer = if self.required_signatures.must_sign_with_account_key() {
-            // We'll seal with the wallet's default key (seal_signer() is None)
-            Some(self.wallet.default_address().account_public_key())
-        } else {
-            // We'll seal with the seal signer
-            self.required_signatures
-                .seal_signer()
-                .map(|s| s.signer().account_public_key())
-        };
-
-        let Some(seal_signer) = seal_signer else {
+        let Some(seal_signer) = self.seal_signer() else {
             // There are no inputs to sign for
             return Ok(vec![]);
         };

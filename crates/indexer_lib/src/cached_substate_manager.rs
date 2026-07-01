@@ -40,6 +40,7 @@ use tari_ootle_common_types::{
     SubstateRequirementRef,
     ToSubstateAddress,
     VotePower,
+    committee::Committee,
     displayable::Displayable,
 };
 use tari_ootle_storage::{
@@ -251,28 +252,27 @@ where
         Ok(results)
     }
 
-    async fn build_vn_client_map<'a>(
+    async fn build_vn_committee_map<'a>(
         &self,
         substate_ids: &'a [SubstateId],
         epoch: Epoch,
         num_committees: u32,
-    ) -> Result<HashMap<ShardGroup, (TVnClient::Client, Vec<&'a SubstateId>)>, IndexerError> {
-        let mut client_map = HashMap::<_, (_, Vec<&'a SubstateId>)>::with_capacity(substate_ids.len());
+    ) -> Result<HashMap<ShardGroup, (Arc<Committee<TAddr>>, Vec<&'a SubstateId>)>, IndexerError> {
+        let mut map = HashMap::<_, (_, Vec<&'a SubstateId>)>::with_capacity(substate_ids.len());
         for substate_id in substate_ids {
             let shard_group = SubstateAddress::from_substate_id(substate_id, 0)
                 .to_shard_group(NumPreshards::current(), num_committees);
-            if let Some((_, substates_mut)) = client_map.get_mut(&shard_group) {
+            if let Some((_, substates_mut)) = map.get_mut(&shard_group) {
                 substates_mut.push(substate_id);
                 continue;
             }
-            let member = self
+            let committee = self
                 .committee_provider
-                .get_random_committee_member(epoch, Some(shard_group), Default::default())
+                .get_committee_by_shard_group(epoch, shard_group)
                 .await?;
-            let client = self.validator_node_client_factory.create_client(&member.address);
-            client_map.insert(shard_group, (client, vec![substate_id]));
+            map.insert(shard_group, (committee, vec![substate_id]));
         }
-        Ok(client_map)
+        Ok(map)
     }
 
     pub async fn fetch_and_cache_substates(
@@ -281,32 +281,50 @@ where
     ) -> Result<HashMap<SubstateId, Substate>, IndexerError> {
         let epoch = self.committee_provider.current_epoch().await?;
         let num_committees = self.committee_provider.get_num_committees(epoch).await?;
-        let client_map = self.build_vn_client_map(substate_ids, epoch, num_committees).await?;
+        let committee_map = self.build_vn_committee_map(substate_ids, epoch, num_committees).await?;
 
         let mut results = HashMap::with_capacity(substate_ids.len());
-        for (shard_group, (mut client, substate_ids)) in client_map {
+        for (shard_group, (committee, substate_ids)) in committee_map {
             debug!(target: LOG_TARGET, "Fetching {} substates from shard group {}", substate_ids.len(), shard_group);
-            for batch in substate_ids.chunks(50) {
-                let resp = client.get_substates_batch(batch).await.map_err(|e| {
-                    IndexerError::ValidatorNodeClientError(format!(
-                        "Failed to get substate batch for shard group {}: {}",
-                        shard_group, e
-                    ))
-                })?;
-                for (substate_id, substate) in &resp {
-                    let substate_result = SubstateResult::Up {
-                        substate: Box::new(substate.clone()),
-                    };
-                    // The batch RPC does not carry proofs, so these entries are always unverified.
-                    let entry = SubstateCacheEntryRef {
-                        version: substate.version(),
-                        substate_result: &substate_result,
-                        cached_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
-                        verified: false,
-                    };
-                    self.substate_cache.write(substate_id, entry).await?;
+            let num_batches = substate_ids.len().div_ceil(50);
+            let mut batch_count = 0;
+            for member in committee.shuffled().take(5) {
+                if batch_count >= num_batches {
+                    break;
                 }
-                results.extend(resp);
+                let mut client = self.validator_node_client_factory.create_client(&member.address);
+                let batches = substate_ids.chunks(50).skip(batch_count);
+                for batch in batches {
+                    let resp = match client.get_substates_batch(batch).await {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            warn!(target: LOG_TARGET, "⚠️Failed to get substate batch for shard group {}: {}", shard_group, e);
+                            break;
+                        },
+                    };
+                    batch_count += 1;
+
+                    for (substate_id, substate) in &resp {
+                        let substate_result = SubstateResult::Up {
+                            substate: Box::new(substate.clone()),
+                        };
+                        // The batch RPC does not carry proofs, so these entries are always unverified.
+                        let entry = SubstateCacheEntryRef {
+                            version: substate.version(),
+                            substate_result: &substate_result,
+                            cached_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
+                            verified: false,
+                        };
+                        self.substate_cache.write(substate_id, entry).await?;
+                    }
+                    results.extend(resp);
+                }
+            }
+            if batch_count < num_batches {
+                return Err(IndexerError::ValidatorNodeClientError(format!(
+                    "Failed to get all substate batches for shard group {}. {}/{}",
+                    shard_group, batch_count, num_batches
+                )));
             }
         }
         Ok(results)

@@ -158,11 +158,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
     }
 
     pub fn get_template_address(&self) -> Result<TemplateAddress, RuntimeError> {
-        self.read_with(|state| state.current_template().map(|(a, _)| *a))
+        self.read_with(|state| state.current_template().copied())
     }
 
     pub fn get_template_module_name(&self) -> Result<String, RuntimeError> {
-        self.read_with(|state| state.current_template().map(|(_, name)| name.to_string()))
+        self.read_with(|state| state.current_template_name().map(ToOwned::to_owned))
     }
 
     pub fn new_component(
@@ -173,7 +173,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         address_allocation: Option<ComponentAddressAllocation>,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
-            let template_address = state.current_template().map(|(addr, _)| *addr)?;
+            let template_address = *state.current_template()?;
 
             let component_address = match address_allocation {
                 Some(address_allocation) => {

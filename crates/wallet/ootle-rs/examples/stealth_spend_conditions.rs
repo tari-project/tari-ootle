@@ -16,7 +16,8 @@
 //!      time-locked contract (HTLC)** condition tree:
 //!        - **claim**  — `All([HashLock(secret), BeforeEpoch(deadline)])`: spendable by revealing the preimage before
 //!          the deadline,
-//!        - **refund** — `AfterEpoch(deadline)`: spendable once the deadline passes;
+//!        - **refund** — `All([AfterEpoch(deadline), RequireKey(funder)])`: spendable by the funder once the deadline
+//!          passes;
 //!   2. **claim** — spends that HTLC output via the **script path**, revealing the claim leaf, its inclusion proof, and
 //!      the preimage as witness `data`.
 //!
@@ -38,6 +39,7 @@ use ootle_rs::{
         UtxoAddress,
         bytes::Bytes,
         constants::TARI_TOKEN,
+        rule,
         stealth::{AtomicCondition, BuiltinPredicate, HashAlg, SpendCondition, StealthInput},
     },
     transaction::TransactionSigner,
@@ -77,7 +79,7 @@ async fn main() {
     let hash = hashlock_digest(HashAlg::Sha256, preimage);
 
     // The claim window closes `deadline` epochs from now; after it, the refund path opens.
-    let deadline = current_epoch + 50;
+    let deadline = current_epoch + 10;
 
     let claim = SpendCondition::all([
         AtomicCondition::Builtin(BuiltinPredicate::HashLock {
@@ -86,17 +88,23 @@ async fn main() {
         }),
         AtomicCondition::Builtin(BuiltinPredicate::BeforeEpoch(deadline)),
     ]);
-    let refund = SpendCondition::builtin(BuiltinPredicate::AfterEpoch(deadline));
+    // The refund leaf binds the timelock to the funder's account key. The engine evaluates an `AccessRule` atom against
+    // the spending transaction's signer badges (`NonFungibleAddress::from_public_key`), so once the deadline passes
+    // only a transaction the funder signs can take the refund.
+    let refund = SpendCondition::all([
+        AtomicCondition::Builtin(BuiltinPredicate::AfterEpoch(deadline)),
+        AtomicCondition::AccessRule(rule!(public_key(*my_address.account_public_key()))),
+    ]);
     let conditions = vec![claim, refund];
 
     println!("\nHTLC condition tree ({} leaves):", conditions.len());
     println!("  preimage (the secret): {:?}", std::str::from_utf8(preimage).unwrap());
     println!("  SHA-256 hashlock      : {hash}");
     println!("  claim   : All([HashLock(secret), BeforeEpoch({deadline})])");
-    println!("  refund  : AfterEpoch({deadline})");
-    // NOTE: these leaves are not bound to a key, so anyone who learns the preimage (or waits for the refund epoch) can
-    // spend. For a real HTLC, AND each path with an `AccessRule` requiring the claimant's / refunder's key by adding it
-    // to the leaf's conjunction.
+    println!("  refund  : All([AfterEpoch({deadline}), RequireKey(funder)])");
+    // Only the refund leaf is key-bound here; the claim leaf stays keyless, so anyone who learns the preimage can
+    // claim. A production HTLC also binds the claim to the claimant's key by ANDing an `AccessRule` atom into its
+    // conjunction, exactly as the refund leaf does above.
 
     let tari_token = TARI_TOKEN;
 

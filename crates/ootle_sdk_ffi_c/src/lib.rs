@@ -63,7 +63,6 @@ pub use c_abi::{
     ootle_add_signature,
     ootle_apply_fetched_substates,
     ootle_build_and_encode_public_transfer,
-    ootle_build_and_encode_public_transfer_with_seed,
     ootle_build_faucet_claim,
     ootle_build_unsigned,
     ootle_build_unsigned_instructions,
@@ -79,8 +78,6 @@ pub use c_abi::{
     ootle_result_free,
     ootle_seal_and_encode,
     ootle_seal_and_encode_with_auth,
-    ootle_seal_and_encode_with_auth_with_seed,
-    ootle_seal_and_encode_with_seed,
     ootle_string_free,
     ootle_unsigned_record_for_cosign,
 };
@@ -96,7 +93,6 @@ pub use stealth_abi::{
     ootle_scan_stealth_output,
     ootle_scan_stealth_substate,
     ootle_seal_and_encode_stealth,
-    ootle_seal_and_encode_stealth_with_seed,
     ootle_stealth_partial_transaction_free,
     ootle_validate_stealth_transfer,
 };

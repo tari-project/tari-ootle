@@ -5,9 +5,10 @@
 //! host would, and assert:
 //!
 //! - **one-shot round-trip** — `ootle_build_and_encode_public_transfer` over a committed `public_transfer/*` vector
-//!   reproduces its `encoded_transaction` + `transaction_id` byte-for-byte.
+//!   returns a well-formed encoded transfer (the seal uses a random Schnorr nonce, so the bytes are not
+//!   byte-reproducible across calls — the check is structural: non-empty hex + a 64-hex-char transaction id).
 //! - **two-phase handle flow** — `ootle_build_unsigned` → `ootle_apply_fetched_substates` → `ootle_seal_and_encode`
-//!   reproduces a `resolve_public_transfer/*` vector's bytes.
+//!   seals a valid transaction from a `resolve_public_transfer/*` vector.
 //! - **parse** — `ootle_parse_finalized_result` over a committed parse vector matches its expected parsed JSON
 //!   structurally.
 //! - **error envelope** — malformed intent / bad key map to the right stable `error_code`, not a crash.
@@ -33,7 +34,6 @@ use ootle_sdk_ffi_c::{
     ootle_apply_fetched_substates,
     ootle_apply_fetched_substates_stealth,
     ootle_build_and_encode_public_transfer,
-    ootle_build_and_encode_public_transfer_with_seed,
     ootle_build_and_encode_stealth_transfer,
     ootle_build_and_encode_stealth_transfer_with_seed,
     ootle_build_faucet_claim,
@@ -58,9 +58,7 @@ use ootle_sdk_ffi_c::{
     ootle_scan_stealth_substate,
     ootle_seal_and_encode,
     ootle_seal_and_encode_stealth,
-    ootle_seal_and_encode_stealth_with_seed,
     ootle_seal_and_encode_with_auth,
-    ootle_seal_and_encode_with_seed,
     ootle_stealth_partial_transaction_free,
     ootle_unsigned_record_for_cosign,
     ootle_validate_stealth_transfer,
@@ -158,32 +156,6 @@ fn data_json(r: &OotleResult) -> serde_json::Value {
 
 // --- (1) one-shot round-trip --------------------------------------------------------------------
 
-#[test]
-fn one_shot_build_and_encode_reproduces_vector_bytes() {
-    let fx = load_fixture("public_transfer/single_key_basic.json");
-    let input = &fx["input"];
-    let network = network_byte(&input["network"]);
-    let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
-    let keys = CArg::new(&serde_json::to_string(&input["keys"]).unwrap());
-
-    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
-    assert!(ok(&result), "expected success, got code {}", error_code(&result));
-    assert_eq!(error_code(&result), "", "success envelope has an empty error_code");
-    assert!(result.handle.is_null(), "one-shot op returns no handle");
-
-    let out = data_json(&result);
-    assert_eq!(
-        out["encoded_transaction"], fx["expected"]["encoded_transaction"],
-        "encoded_transaction must match the committed vector byte-for-byte"
-    );
-    assert_eq!(
-        out["transaction_id"], fx["expected"]["transaction_id"],
-        "transaction_id must match the committed vector byte-for-byte"
-    );
-
-    unsafe { ootle_result_free(result) };
-}
-
 /// The random-nonce default `ootle_build_and_encode_public_transfer` (account-secret-only keys) is
 /// **structural-only**: it returns a well-formed encoded transfer, and two calls differ (fresh seed
 /// each call). No byte-equality against a committed vector (the seal nonces are non-deterministic).
@@ -222,13 +194,15 @@ fn one_shot_random_default_is_structural_and_non_reproducible() {
 // --- (2) two-phase handle flow ------------------------------------------------------------------
 
 #[test]
-fn two_phase_handle_flow_reproduces_resolved_vector_bytes() {
+fn two_phase_handle_flow_seals_valid_transaction() {
     let fx = load_fixture("resolve_public_transfer/single_key_basic.json");
     let input = &fx["input"];
     let network = network_byte(&input["network"]);
     let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
     let fetched = CArg::new(&serde_json::to_string(&input["fetched"]).unwrap());
-    let keys = CArg::new(&serde_json::to_string(&input["keys"]).unwrap());
+    let keys = CArg::new(
+        &serde_json::to_string(&serde_json::json!({ "account_secret": input["keys"]["account_secret"] })).unwrap(),
+    );
 
     // 1) build_unsigned → handle + want list.
     let built = unsafe { ootle_build_unsigned(network, intent.ptr()) };
@@ -254,19 +228,12 @@ fn two_phase_handle_flow_reproduces_resolved_vector_bytes() {
     let resolved = applied.handle;
     unsafe { ootle_result_free(applied) };
 
-    // 3) seal_and_encode → consumes handle, returns encoded bytes.
-    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
+    // 3) seal_and_encode → consumes handle, returns encoded bytes. The random-nonce seal is not
+    // byte-reproducible, so the resolved path is asserted structurally (a valid encoded transfer).
+    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
     assert!(sealed.handle.is_null(), "seal returns no handle");
-    let out = data_json(&sealed);
-    assert_eq!(
-        out["encoded_transaction"], fx["expected"]["encoded_transaction"],
-        "resolved-path encoded_transaction must match the committed vector"
-    );
-    assert_eq!(
-        out["transaction_id"], fx["expected"]["transaction_id"],
-        "resolved-path transaction_id must match the committed vector"
-    );
+    assert_well_formed_encoded(&data_json(&sealed));
     unsafe { ootle_result_free(sealed) };
 }
 
@@ -282,7 +249,9 @@ fn two_phase_multi_round_converges_via_discovered_fetch_ids() {
     let input = &fx["input"];
     let network = network_byte(&input["network"]);
     let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
-    let keys = CArg::new(&serde_json::to_string(&input["keys"]).unwrap());
+    let keys = CArg::new(
+        &serde_json::to_string(&serde_json::json!({ "account_secret": input["keys"]["account_secret"] })).unwrap(),
+    );
 
     // Split the committed fetched batch into the component (round 1) and the vault (round 2) — a real
     // host cannot supply the vault in round 1 because it does not yet know the vault id.
@@ -339,15 +308,11 @@ fn two_phase_multi_round_converges_via_discovered_fetch_ids() {
     let resolved = applied2.handle;
     unsafe { ootle_result_free(applied2) };
 
-    // Seal → identical bytes to the single-batch vector (the fetch order does not affect the seal).
-    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
+    // Seal → a well-formed encoded transfer (the random-nonce seal is not byte-reproducible; the
+    // fetch order does not affect that the resolved handle seals a valid transaction).
+    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
-    let out = data_json(&sealed);
-    assert_eq!(
-        out["encoded_transaction"], fx["expected"]["encoded_transaction"],
-        "multi-round resolved bytes must match the committed vector"
-    );
-    assert_eq!(out["transaction_id"], fx["expected"]["transaction_id"]);
+    assert_well_formed_encoded(&data_json(&sealed));
     unsafe { ootle_result_free(sealed) };
 }
 
@@ -379,13 +344,15 @@ fn abandoned_handle_is_freed_cleanly() {
 /// committed `build_and_encode_instructions` vector byte-for-byte (the explicit-input single-round
 /// path: the intent carries its inputs, so an empty fetched batch resolves immediately).
 #[test]
-fn generic_build_instructions_flow_reproduces_vector_bytes() {
+fn generic_build_instructions_flow_seals_valid_transaction() {
     let fx = load_fixture("generic_build/call_method_transfer.json");
     let input = &fx["input"];
     let network = network_byte(&input["network"]);
     let intent = CArg::new(&serde_json::to_string(&input["generic_intent"]).unwrap());
     let fetched = CArg::new(&serde_json::to_string(&input["fetched"]).unwrap());
-    let keys = CArg::new(&serde_json::to_string(&input["keys"]).unwrap());
+    let keys = CArg::new(
+        &serde_json::to_string(&serde_json::json!({ "account_secret": input["keys"]["account_secret"] })).unwrap(),
+    );
 
     // 1) build_unsigned_instructions → handle + want list (the SAME envelope shape as build_unsigned).
     let built = unsafe { ootle_build_unsigned_instructions(network, intent.ptr()) };
@@ -410,15 +377,11 @@ fn generic_build_instructions_flow_reproduces_vector_bytes() {
     let resolved = applied.handle;
     unsafe { ootle_result_free(applied) };
 
-    // 3) The existing public seal consumes it → byte-identical to the committed vector.
-    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
+    // 3) The existing public seal consumes it → a well-formed encoded transfer (random-nonce seal is
+    // not byte-reproducible; the generic-built handle is interchangeable with the public seal surface).
+    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
-    let out = data_json(&sealed);
-    assert_eq!(
-        out["encoded_transaction"], fx["expected"]["encoded_transaction"],
-        "the generic-built tx must match the committed vector byte-for-byte"
-    );
-    assert_eq!(out["transaction_id"], fx["expected"]["transaction_id"]);
+    assert_well_formed_encoded(&data_json(&sealed));
     unsafe { ootle_result_free(sealed) };
 }
 
@@ -467,13 +430,15 @@ fn generic_build_null_intent_is_invalid_not_ub() {
 /// The faucet claim builds, resolves from the committed fetched batch (faucet component + vault), and
 /// seals byte-for-byte to the `build_and_encode_faucet_claim` vector.
 #[test]
-fn faucet_claim_flow_reproduces_vector_bytes() {
+fn faucet_claim_flow_seals_valid_transaction() {
     let fx = load_fixture("generic_build/faucet_claim.json");
     let input = &fx["input"];
     let network = network_byte(&input["network"]);
     let intent = CArg::new(&serde_json::to_string(&input["faucet_intent"]).unwrap());
     let fetched = CArg::new(&serde_json::to_string(&input["fetched"]).unwrap());
-    let keys = CArg::new(&serde_json::to_string(&input["keys"]).unwrap());
+    let keys = CArg::new(
+        &serde_json::to_string(&serde_json::json!({ "account_secret": input["keys"]["account_secret"] })).unwrap(),
+    );
 
     // 1) build_faucet_claim → handle + want list.
     let built = unsafe { ootle_build_faucet_claim(network, intent.ptr()) };
@@ -497,15 +462,10 @@ fn faucet_claim_flow_reproduces_vector_bytes() {
     let resolved = applied.handle;
     unsafe { ootle_result_free(applied) };
 
-    // 3) Seal → byte-identical to the committed vector.
-    let sealed = unsafe { ootle_seal_and_encode_with_seed(resolved, keys.ptr()) };
+    // 3) Seal → a well-formed encoded transfer (the random-nonce seal is not byte-reproducible).
+    let sealed = unsafe { ootle_seal_and_encode(resolved, keys.ptr()) };
     assert!(ok(&sealed), "seal failed: {}", error_code(&sealed));
-    let out = data_json(&sealed);
-    assert_eq!(
-        out["encoded_transaction"], fx["expected"]["encoded_transaction"],
-        "the faucet-built tx must match the committed vector byte-for-byte"
-    );
-    assert_eq!(out["transaction_id"], fx["expected"]["transaction_id"]);
+    assert_well_formed_encoded(&data_json(&sealed));
     unsafe { ootle_result_free(sealed) };
 }
 
@@ -587,11 +547,9 @@ fn canonicalize(value: serde_json::Value) -> serde_json::Value {
 fn malformed_intent_json_is_a_parse_error() {
     let network = network_byte(&serde_json::json!("esmeralda"));
     let intent = CArg::new("{ this is not valid json");
-    let keys = CArg::new(
-        r#"{"account_secret":"6500000000000000000000000000000000000000000000000000000000000000","seed":"6600000000000000000000000000000000000000000000000000000000000000"}"#,
-    );
+    let keys = CArg::new(r#"{"account_secret":"6500000000000000000000000000000000000000000000000000000000000000"}"#);
 
-    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
+    let result = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
     assert!(!ok(&result), "malformed JSON must not succeed");
     assert_eq!(error_code(&result), "PARSE");
     assert!(result.data_json.is_null(), "error envelope carries no data_json");
@@ -607,11 +565,9 @@ fn malformed_secret_key_is_a_key_error() {
     let network = network_byte(&input["network"]);
     let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
     // 0xff..ff is a valid-width but non-canonical Ristretto scalar → KEY error from the core.
-    let keys = CArg::new(
-        r#"{"account_secret":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","seed":"6600000000000000000000000000000000000000000000000000000000000000"}"#,
-    );
+    let keys = CArg::new(r#"{"account_secret":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}"#);
 
-    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
+    let result = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
     assert!(!ok(&result));
     assert_eq!(error_code(&result), "KEY");
     unsafe { ootle_result_free(result) };
@@ -624,11 +580,9 @@ fn bad_key_width_is_a_parse_error() {
     let input = &fx["input"];
     let network = network_byte(&input["network"]);
     let intent = CArg::new(&serde_json::to_string(&input["intent"]).unwrap());
-    let keys = CArg::new(
-        r#"{"account_secret":"6500","seed":"6600000000000000000000000000000000000000000000000000000000000000"}"#,
-    );
+    let keys = CArg::new(r#"{"account_secret":"6500"}"#);
 
-    let result = unsafe { ootle_build_and_encode_public_transfer_with_seed(network, intent.ptr(), keys.ptr()) };
+    let result = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
     assert!(!ok(&result));
     assert_eq!(error_code(&result), "PARSE");
     unsafe { ootle_result_free(result) };
@@ -788,8 +742,8 @@ fn public_handle_to_stealth_apply_is_invalid_not_ub() {
     unsafe { ootle_partial_transaction_free(handle) };
 }
 
-/// Routing a PUBLIC handle to the stealth `ootle_seal_and_encode_stealth[_production]` → `INVALID`,
-/// handle intact, then freed correctly.
+/// Routing a PUBLIC handle to the stealth `ootle_seal_and_encode_stealth` → `INVALID`, handle intact
+/// (the guard rejects before consuming), then freed correctly with the public free fn.
 #[test]
 fn public_handle_to_stealth_seal_is_invalid_not_ub() {
     let handle = build_public_handle();
@@ -797,26 +751,13 @@ fn public_handle_to_stealth_seal_is_invalid_not_ub() {
     let net = network_byte(&serde_json::json!("esmeralda"));
     let keys = CArg::new("{}");
 
-    let r = unsafe { ootle_seal_and_encode_stealth_with_seed(stealth, net, keys.ptr()) };
-    assert!(!ok(&r));
-    assert_eq!(error_code(&r), "INVALID");
-    assert!(r.handle.is_null());
-    unsafe { ootle_result_free(r) };
-
-    // The first rejected call must have left the handle intact (the guard does not consume on
-    // mismatch); free it with its CORRECT fn here so the second misroute below operates on a freshly
-    // built handle — proving each rejected consume independently leaves ownership with the caller, not
-    // relying on the first call's intactness to also cover the second.
-    unsafe { ootle_partial_transaction_free(handle) };
-
-    let handle = build_public_handle();
-    let stealth = handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     let r = unsafe { ootle_seal_and_encode_stealth(stealth, net, keys.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     assert!(r.handle.is_null());
     unsafe { ootle_result_free(r) };
 
+    // The rejected consume leaves ownership with the caller — free it with its CORRECT (public) fn.
     unsafe { ootle_partial_transaction_free(handle) };
 }
 
@@ -1244,9 +1185,9 @@ fn abi_version_is_the_stable_tag() {
     assert!(!p.is_null());
     let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
     assert_eq!(
-        s, "ootle-sdk-ffi-c/15",
-        "the ABI tag the Go SDK asserts against (bumped for the seed-based host contract + the inverted \
-         random/_with_seed naming)"
+        s, "ootle-sdk-ffi-c/16",
+        "the ABI tag the Go SDK asserts against (bumped when the seed-pinned signature exports were removed — signing \
+         now always uses a random nonce)"
     );
     // Static pointer — explicitly NOT freed (freeing it would be UB).
 }
@@ -1397,8 +1338,9 @@ fn stealth_two_phase_handle_flow() {
     let resolved = applied.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(applied) };
 
-    // 2b) seal → consumes the handle, returns encoded bytes, no handle.
-    let sealed = unsafe { ootle_seal_and_encode_stealth_with_seed(resolved, a.network, a.keys.ptr()) };
+    // 2b) seal → consumes the handle, returns encoded bytes, no handle. The random-nonce stealth seal
+    // takes account-secret-only keys.
+    let sealed = unsafe { ootle_seal_and_encode_stealth(resolved, a.network, a.account_only_keys.ptr()) };
     assert!(ok(&sealed), "stealth seal failed: {}", error_code(&sealed));
     assert!(sealed.handle.is_null(), "stealth seal returns no handle");
     assert_well_formed_encoded(&data_json(&sealed));
@@ -1466,8 +1408,9 @@ fn stealth_two_phase_multi_round_converges() {
     let resolved = applied2.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
     unsafe { ootle_result_free(applied2) };
 
-    // Seal → a well-formed encoded transfer (semantic compare for stealth send).
-    let sealed = unsafe { ootle_seal_and_encode_stealth_with_seed(resolved, a.network, a.keys.ptr()) };
+    // Seal → a well-formed encoded transfer (semantic compare for stealth send; the random-nonce seal
+    // takes account-secret-only keys).
+    let sealed = unsafe { ootle_seal_and_encode_stealth(resolved, a.network, a.account_only_keys.ptr()) };
     assert!(ok(&sealed), "stealth seal failed: {}", error_code(&sealed));
     assert_well_formed_encoded(&data_json(&sealed));
     unsafe { ootle_result_free(sealed) };

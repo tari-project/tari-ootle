@@ -67,8 +67,8 @@ extern "C" {
  *
  * `intent_json` is a `PublicTransferIntent`; `keys_json` is `{account_secret}` (lowercase hex). On
  * success `data_json` is the `EncodedPublicTransfer` (`{encoded_transaction, transaction_id}`,
- * lowercase hex). The bytes/id are **not** reproducible — the safe default for real submission. Use
- * [`ootle_build_and_encode_public_transfer_with_seed`] for reproducible bytes.
+ * lowercase hex). The bytes/id are **not** reproducible (random-nonce seal) — the safe default for
+ * real submission.
  *
  * # Safety
  * `intent_json` and `keys_json` must be valid NUL-terminated UTF-8 C strings. The returned envelope
@@ -77,18 +77,6 @@ extern "C" {
 OotleResult ootle_build_and_encode_public_transfer(uint8_t network,
                                                    const char *intent_json,
                                                    const char *keys_json);
-
-/**
- * Seed-reproducible counterpart of [`ootle_build_and_encode_public_transfer`]. `keys_json` is
- * `{account_secret, seed [, seal_secret]}` (all lowercase hex). Reproducible byte-for-byte from the
- * seed + intent.
- *
- * # Safety
- * As [`ootle_build_and_encode_public_transfer`].
- */
-OotleResult ootle_build_and_encode_public_transfer_with_seed(uint8_t network,
-                                                             const char *intent_json,
-                                                             const char *keys_json);
 
 /**
  * Mints a fresh **account** keypair from `OsRng` (production). On success `data_json` is
@@ -229,8 +217,7 @@ OotleResult ootle_build_unsigned(uint8_t network,
  *
  * Lowers a generic instruction list + typed-arg DSL ([`GenericTransactionIntent`]) into an unsigned
  * transaction. Returns the same opaque handle + want-list envelope as [`ootle_build_unsigned`]; finish
- * it with [`ootle_apply_fetched_substates`] then [`ootle_seal_and_encode`] /
- * [`ootle_seal_and_encode_with_seed`].
+ * it with [`ootle_apply_fetched_substates`] then [`ootle_seal_and_encode`].
  *
  * On success the envelope carries the opaque handle (in `handle`) and the want list in `data_json`
  * (`{"want_list":[…]}`). Bad intent JSON ⇒ `"PARSE"`; an out-of-range blob index / unbound workspace
@@ -290,8 +277,7 @@ OotleResult ootle_apply_fetched_substates(OotlePartialTransaction *handle,
  *
  * **Consumes** `handle`. `keys_json` is `{account_secret}` (lowercase hex). On success `data_json` is
  * the `EncodedPublicTransfer`. A still-unresolved partial ⇒ a `RESOLUTION` error (the handle is still
- * consumed). No handle is returned. The bytes/id are not reproducible — use
- * [`ootle_seal_and_encode_with_seed`] for reproducible bytes.
+ * consumed). No handle is returned. The bytes/id are not reproducible (random-nonce seal).
  *
  * # Safety
  * `handle` must be a non-null, not-yet-consumed pointer from the two-phase ops. `keys_json` must be a
@@ -300,16 +286,6 @@ OotleResult ootle_apply_fetched_substates(OotlePartialTransaction *handle,
  */
 OotleResult ootle_seal_and_encode(OotlePartialTransaction *handle,
                                   const char *keys_json);
-
-/**
- * Seed-reproducible counterpart of [`ootle_seal_and_encode`]. **Consumes** `handle`. `keys_json` is
- * `{account_secret, seed [, seal_secret]}` (lowercase hex). Reproducible byte-for-byte from the seed.
- *
- * # Safety
- * As [`ootle_seal_and_encode`].
- */
-OotleResult ootle_seal_and_encode_with_seed(OotlePartialTransaction *handle,
-                                            const char *keys_json);
 
 /**
  * Derives the serializable [`UnsignedTransactionRecord`] party A ships to party B, from a resolved
@@ -358,7 +334,7 @@ OotleResult ootle_add_signature(uint8_t network,
  * `keys_json` is `{account_secret}` (lowercase hex). `authorizations_json` is a JSON array
  * `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`. An empty array behaves like the plain
  * single-key seal. On success `data_json` is the `EncodedPublicTransfer`. The bytes/id are not
- * reproducible — use [`ootle_seal_and_encode_with_auth_with_seed`] for reproducible bytes.
+ * reproducible (random-nonce seal).
  *
  * # Safety
  * `handle` must be a non-null, not-yet-consumed public handle. `keys_json` and `authorizations_json`
@@ -368,22 +344,6 @@ OotleResult ootle_add_signature(uint8_t network,
 OotleResult ootle_seal_and_encode_with_auth(OotlePartialTransaction *handle,
                                             const char *keys_json,
                                             const char *authorizations_json);
-
-/**
- * Seed-reproducible counterpart of [`ootle_seal_and_encode_with_auth`]. **Consumes** `handle`.
- *
- * `keys_json` reuses the `DeterministicKeysJson` mirror (`{account_secret, seed [, seal_secret]}`);
- * only the seal nonce expanded from `seed` is consumed (the authorizations are supplied, not produced
- * here). `authorizations_json` is a JSON array `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`.
- * An empty array behaves like the plain single-key seal. On success `data_json` is the
- * `EncodedPublicTransfer`. Reproducible byte-for-byte from the seed.
- *
- * # Safety
- * As [`ootle_seal_and_encode_with_auth`].
- */
-OotleResult ootle_seal_and_encode_with_auth_with_seed(OotlePartialTransaction *handle,
-                                                      const char *keys_json,
-                                                      const char *authorizations_json);
 
 /**
  * Parses a raw indexer finalized-result JSON string into the typed `FinalizedResult`.
@@ -562,8 +522,7 @@ OotleResult ootle_apply_fetched_substates_stealth(OotleStealthPartialTransaction
  * error). `network` must be the transfer's network (the partial does not carry it; different networks
  * yield different stealth keys). `keys_json` is `{account_secret}`; the seal nonces are expanded from
  * a fresh OS-RNG seed. On success `data_json` is the `EncodedPublicTransfer`. No handle is returned.
- * The bytes/id are not reproducible — use [`ootle_seal_and_encode_stealth_with_seed`] for the
- * reproducible path.
+ * The bytes/id are not reproducible (random-nonce seal).
  *
  * On a processing error the input handle is still consumed and freed; the returned envelope carries no
  * handle. (Passing a *null* handle is a precondition violation that yields an `"INVALID"` envelope and
@@ -578,19 +537,6 @@ OotleResult ootle_apply_fetched_substates_stealth(OotleStealthPartialTransaction
 OotleResult ootle_seal_and_encode_stealth(OotleStealthPartialTransaction *handle,
                                           uint8_t network,
                                           const char *keys_json);
-
-/**
- * Seed-reproducible counterpart of [`ootle_seal_and_encode_stealth`]. **Consumes** `handle`. The
- * single build seed in `keys_json` (`{account_secret, seed}`) expands into **both** the account-key
- * seal/auth nonces and the stealth/ephemeral seal nonces, so the seal-side signatures are reproducible
- * from the seed. On success `data_json` is the `EncodedPublicTransfer`.
- *
- * # Safety
- * As [`ootle_seal_and_encode_stealth`].
- */
-OotleResult ootle_seal_and_encode_stealth_with_seed(OotleStealthPartialTransaction *handle,
-                                                    uint8_t network,
-                                                    const char *keys_json);
 
 /**
  * Scans an inbound stealth UTXO with a view secret and decides whether it is addressed to the scanner.
@@ -726,9 +672,8 @@ OotleResult ootle_build_stealth_outputs_statement_with_seed(uint8_t network,
 
 /**
  * Frees an opaque [`OotleStealthPartialTransaction`] handle. Null-safe; call **exactly once**, and
- * **only** for a handle that was never consumed by [`ootle_seal_and_encode_stealth`] /
- * [`ootle_seal_and_encode_stealth_with_seed`] (those take the handle by value). Freeing a consumed
- * handle is a use-after-free.
+ * **only** for a handle that was never consumed by [`ootle_seal_and_encode_stealth`] (which takes the
+ * handle by value). Freeing a consumed handle is a use-after-free.
  *
  * **Kind-guarded:** if the handle is actually a public-path `OotlePartialTransaction` (misrouted), it
  * is **not** freed — the call is a deterministic no-op that leaves the handle intact for the correct

@@ -57,6 +57,15 @@ impl SignatureRequirements {
         }
     }
 
+    /// A requirement where the wallet's account key seals the transaction and no stealth signers are derived. The
+    /// account key is the seal signer only (`is_seal_signer_authorized` stays false when authorizations are attached),
+    /// so its badge is not added to the auth scope. Use this when every authorization is supplied externally — e.g. a
+    /// script-path `AccessRule` leaf whose keys the wallet does not own (adaptor-signature co-signers) — so the seal
+    /// signer, and hence the authorization message, is fixed and known before the authorizations are produced.
+    pub fn account_key_seal() -> Self {
+        Self::new_must_sign_with_account_key(IndexSet::new())
+    }
+
     /// Creates a new `SignatureSpec` with the provided required signers and an optional seal signer.
     /// The account key is not required to sign the transaction. If there are no required signers, an ephemeral key
     /// will be used to seal the transaction.

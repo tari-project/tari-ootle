@@ -29,6 +29,14 @@ pub fn stealth_owner_hasher64(network: Network) -> OotleWalletHasher64<OotleWall
     wallet_hasher64(network, "stealth_owner")
 }
 
+/// Domain for per-party one-time spend-authorization keys committed inside a script-path AccessRule
+/// leaf. Distinct from [`stealth_owner_hasher64`] so a spend-authorization key can never collide with
+/// the value-owner key. The co-signer index is mixed into the hash state by the caller (see
+/// `spend_auth_dh_secret`), not into this domain label.
+pub fn stealth_spend_auth_hasher64(network: Network) -> OotleWalletHasher64<OotleWalletHashDomain> {
+    wallet_hasher64(network, "stealth_spend_auth")
+}
+
 pub fn stealth_output_tag_hasher64(network: Network) -> OotleWalletHasher64<OotleWalletHashDomain> {
     wallet_hasher64(network, "output_tag")
 }

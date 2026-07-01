@@ -664,7 +664,7 @@ where TSpec: WalletSdkSpec
         // Snapshot current stealth balances before processing UTXOs
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
         let all_accounts = accounts_api.get_many(0, usize::MAX)?;
-        let mut stealth_balances_before: HashMap<(ComponentAddress, ResourceAddress), u64> = HashMap::new();
+        let mut stealth_balances_before: HashMap<(ComponentAddress, ResourceAddress), Amount> = HashMap::new();
         for account in &all_accounts {
             let addr = *account.component_address();
             let resources = accounts_api.get_associated_stealth_resources(&addr)?;
@@ -689,7 +689,10 @@ where TSpec: WalletSdkSpec
             let addr = *account.component_address();
             let resources = accounts_api.get_associated_stealth_resources(&addr)?;
             for resource in &resources {
-                let before = stealth_balances_before.get(&(addr, *resource)).copied().unwrap_or(0);
+                let before = stealth_balances_before
+                    .get(&(addr, *resource))
+                    .copied()
+                    .unwrap_or(Amount::zero());
                 let after = stealth_outputs_api.get_unspent_balance(resource)?.balance;
                 if before != after {
                     let vault = accounts_api.get_vault_by_resource(&addr, resource).ok();
@@ -702,8 +705,8 @@ where TSpec: WalletSdkSpec
                         resource,
                         &revealed_balance,
                         &revealed_balance,
-                        &Amount::from(before),
-                        &Amount::from(after),
+                        &before,
+                        &after,
                         &source,
                     )?;
                 }

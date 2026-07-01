@@ -14,7 +14,7 @@ use tari_utilities::{Hidden, hidden_type, safe_array::SafeArray};
 use zeroize::Zeroize;
 
 use crate::{
-    hashers::{KdfHasher, stealth_output_tag_hasher64, stealth_owner_hasher64},
+    hashers::{KdfHasher, stealth_output_tag_hasher64, stealth_owner_hasher64, stealth_spend_auth_hasher64},
     safe_key::SafeAeadKey,
 };
 
@@ -110,6 +110,53 @@ pub fn owner_stealth_dh_stealth_address(
     c_g + public_key
 }
 
+fn stealth_spend_auth_dh(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+    index: u32,
+) -> RistrettoSecretKey {
+    let mut hasher = stealth_spend_auth_hasher64(network);
+    hasher.update_consensus_encode(&index);
+    dh_kdf_aead(hasher, secret_nonce, public_key)
+}
+
+/// Derives the recovering party's one-time spend-authorization secret `p = H(s·R) + s` for co-signer
+/// `index`, from the party's `account_secret` and the output's `public_nonce` (`R`). The matching
+/// public key ([`spend_auth_dh_public_key`]) is what a funder commits inside a script-path
+/// `AccessRule` leaf; only the holder of `account_secret` can recover `p` and authorize the spend.
+/// `index` domain-separates co-signers so several independent keys hang off one output nonce (e.g. a
+/// 2-of-2 swap). Distinct from [`owner_stealth_dh_secret`] so a spend-authorization key can never
+/// collide with the value-owner key.
+pub fn spend_auth_dh_secret(
+    network: Network,
+    account_secret: &RistrettoSecretKey,
+    public_nonce: &RistrettoPublicKey,
+    index: u32,
+) -> RistrettoSecretKey {
+    // c = H(s·R)
+    let c = stealth_spend_auth_dh(network, public_nonce, account_secret, index);
+    // p = c + s
+    c + account_secret
+}
+
+/// Derives the one-time spend-authorization public key `P = H(r·S)·G + S` for co-signer `index`,
+/// which a funder computes from the party's account public key `S` (`public_key`) and the output's
+/// secret nonce `r` (`R = r·G`), then commits inside a script-path `AccessRule` leaf. The party later
+/// recovers the matching secret with [`spend_auth_dh_secret`].
+pub fn spend_auth_dh_public_key(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+    index: u32,
+) -> RistrettoPublicKey {
+    // c = H(r·S)
+    let c = stealth_spend_auth_dh(network, public_key, secret_nonce, index);
+    // P = c.G + S
+    let c_g = RistrettoPublicKey::from_secret_key(&c);
+    c_g + public_key
+}
+
 pub fn utxo_tag_stealth_dh(
     network: Network,
     public_key: &RistrettoPublicKey,
@@ -158,5 +205,40 @@ mod tests {
         // c + k.G != c + r.G
         // Just makes this fact clear if it isn't obvious
         assert_ne!(stealth_address1, stealth_address2);
+    }
+
+    #[test]
+    fn spend_auth_public_matches_the_recovered_secret() {
+        let network = Network::LocalNet;
+        // `S` is the party's account key; `R = r.G` is the output nonce a funder chooses.
+        let (account_secret, account_public) = create_key_pair();
+        let (secret_nonce, public_nonce) = create_key_pair();
+
+        // Funder commits P; party recovers p; they must agree that P == p.G.
+        let public = spend_auth_dh_public_key(network, &account_public, &secret_nonce, 0);
+        let secret = spend_auth_dh_secret(network, &account_secret, &public_nonce, 0);
+        assert_eq!(public, RistrettoPublicKey::from_secret_key(&secret));
+    }
+
+    #[test]
+    fn spend_auth_keys_are_independent_per_index() {
+        let network = Network::LocalNet;
+        let (account_secret, _) = create_key_pair();
+        let (_, public_nonce) = create_key_pair();
+
+        let signer_0 = spend_auth_dh_secret(network, &account_secret, &public_nonce, 0);
+        let signer_1 = spend_auth_dh_secret(network, &account_secret, &public_nonce, 1);
+        assert_ne!(signer_0, signer_1);
+    }
+
+    #[test]
+    fn spend_auth_is_a_distinct_domain_from_the_owner_key() {
+        let network = Network::LocalNet;
+        let (account_secret, _) = create_key_pair();
+        let (_, public_nonce) = create_key_pair();
+
+        let owner = owner_stealth_dh_secret(network, &account_secret, &public_nonce);
+        let spend_auth = spend_auth_dh_secret(network, &account_secret, &public_nonce, 0);
+        assert_ne!(owner, spend_auth);
     }
 }

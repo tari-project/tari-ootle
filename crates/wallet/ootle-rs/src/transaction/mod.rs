@@ -9,6 +9,7 @@
 //! - [`TransactionSealSigner`] — applies the final seal signature to a transaction.
 //! - [`TransactionStealthKeySigner`] — signs using derived stealth keys for confidential transactions.
 
+pub mod adaptor;
 pub mod ephemeral_signer;
 mod signer;
 

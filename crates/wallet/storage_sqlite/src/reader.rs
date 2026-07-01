@@ -953,6 +953,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .select(stealth_outputs::value)
             .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
             .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
+            // Burnt outputs keep status = Unspent but their value is destroyed on-chain.
+            .filter(stealth_outputs::is_burnt.eq(false))
             .load::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -1011,6 +1013,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     .assume_not_null()),
             )
             .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
+            // Burnt outputs keep status = Unspent but their value is destroyed on-chain.
+            .filter(stealth_outputs::is_burnt.eq(false))
             .into_boxed();
 
         if let Some(resource_address) = resource_address {

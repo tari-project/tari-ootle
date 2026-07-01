@@ -661,8 +661,19 @@ where TSpec: WalletSdkSpec
             updated_accounts.insert((account_addr, account_version));
         }
 
-        // Update UTXOs
+        // Snapshot current stealth balances before processing UTXOs
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let all_accounts = accounts_api.get_many(0, usize::MAX)?;
+        let mut stealth_balances_before: HashMap<(ComponentAddress, ResourceAddress), u64> = HashMap::new();
+        for account in &all_accounts {
+            let addr = *account.component_address();
+            let resources = accounts_api.get_associated_stealth_resources(&addr)?;
+            for resource in &resources {
+                let balance = stealth_outputs_api.get_unspent_balance(resource)?.balance;
+                stealth_balances_before.insert((addr, *resource), balance);
+            }
+        }
+
         let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo()).map(|(id, s)| {
             let utxo = s
                 .substate_value()
@@ -671,8 +682,33 @@ where TSpec: WalletSdkSpec
             (id.as_utxo_address().expect("is_utxo checked"), utxo)
         });
 
-        // TODO: if we submitted this transaction, we could let this part of the code know which outputs are ours
         stealth_outputs_api.verify_and_update_outputs(utxos)?;
+
+        // Record balance changes for any stealth UTXOs newly recovered in this transaction
+        for account in &all_accounts {
+            let addr = *account.component_address();
+            let resources = accounts_api.get_associated_stealth_resources(&addr)?;
+            for resource in &resources {
+                let before = stealth_balances_before.get(&(addr, *resource)).copied().unwrap_or(0);
+                let after = stealth_outputs_api.get_unspent_balance(resource)?.balance;
+                if before != after {
+                    let vault = accounts_api.get_vault_by_resource(&addr, resource).ok();
+                    let vault_address = vault.as_ref().map(|v| v.id);
+                    let revealed_balance = vault.map(|v| v.revealed_balance).unwrap_or(Amount::zero());
+                    let source = BalanceChangeSource::Transaction { transaction_id: tx_id };
+                    accounts_api.balance_changes_insert(
+                        &addr,
+                        vault_address.as_ref(),
+                        resource,
+                        &revealed_balance,
+                        &revealed_balance,
+                        &Amount::from(before),
+                        &Amount::from(after),
+                        &source,
+                    )?;
+                }
+            }
+        }
 
         if let Some(account) = new_account {
             debug!(

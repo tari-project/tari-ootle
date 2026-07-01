@@ -326,6 +326,13 @@ where
                         .process_result(event.transaction_id, diff, new_account)
                         .await?;
                 }
+                if self.enable_periodic_scanning_of_utxos {
+                    if let Ok(accounts) = self.wallet_sdk.accounts_api().get_many(0, usize::MAX) {
+                        for account in &accounts {
+                            self.refresh_stealth_utxos(*account.component_address()).await?;
+                        }
+                    }
+                }
             },
             WalletEvent::TransactionInvalid(event) => {
                 self.pending_accounts.remove(&event.transaction_id);

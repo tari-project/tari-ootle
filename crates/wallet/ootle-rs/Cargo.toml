@@ -1,6 +1,6 @@
 [package]
 name = "ootle-rs"
-version = "0.13.0"
+version = "0.13.1"
 description = "A Rust library for interacting with the Tari Ootle network."
 edition.workspace = true
 authors.workspace = true

@@ -103,7 +103,7 @@ tari_engine = { path = "crates/engine", version = "0.35" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
-tari_ootle_wallet_crypto = { path = "crates/wallet/crypto", version = "0.35" }
+tari_ootle_wallet_crypto = { path = "crates/wallet/crypto", version = "0.35.1" }
 tari_ootle_wallet_sdk = { path = "crates/wallet/sdk", version = "0.34" }
 tari_ootle_wallet_sdk_services = { path = "crates/wallet/sdk_services" }
 tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite", version = "0.34" }

@@ -798,6 +798,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         account_balance_changes::table
             .filter(account_balance_changes::account_address.eq(account_addr.to_string()))
             .filter(account_balance_changes::resource_address.eq(resource_address.to_string()))
+            .filter(account_balance_changes::vault_address.is_null())
             .order((
                 account_balance_changes::created_at.desc(),
                 account_balance_changes::id.desc(),

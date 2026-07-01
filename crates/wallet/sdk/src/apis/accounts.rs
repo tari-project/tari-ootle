@@ -55,6 +55,8 @@ use crate::{
     },
 };
 
+const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::accounts";
+
 pub struct AccountsApi<'a, TSpec: WalletSdkSpec> {
     network: Network,
     store: &'a TSpec::Store,
@@ -269,7 +271,15 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
                         vault.confidential_balance,
                     )
                 } else {
-                    let resource = tx.resources_get(&resource_address)?;
+                    let Some(resource) = tx.resources_get(&resource_address).optional()? else {
+                        log::warn!(
+                            target: LOG_TARGET,
+                            "Skipping balance-change record for account {} resource {} because resource metadata is not cached",
+                            account_address,
+                            resource_address
+                        );
+                        return Ok(false);
+                    };
                     let latest =
                         tx.balance_changes_get_latest_by_account_resource(&account_address, &resource_address)?;
                     (

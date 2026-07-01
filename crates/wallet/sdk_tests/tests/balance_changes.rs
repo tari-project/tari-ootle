@@ -16,6 +16,7 @@ use tari_template_lib::types::{
     Amount,
     ComponentAddress,
     EncryptedData,
+    ResourceAddress,
     ResourceType,
     VaultId,
     constants::TARI_TOKEN,
@@ -57,6 +58,10 @@ fn stealth_output(account: ComponentAddress, value: u64, seed: u8) -> StealthOut
         is_condition_spendable: true,
         lock_id: None,
     }
+}
+
+fn resource_address(seed: u8) -> ResourceAddress {
+    format!("resource_{seed:064x}").parse().unwrap()
 }
 
 #[test]
@@ -343,6 +348,38 @@ fn resource_balance_history_does_not_require_a_vault() {
     assert_eq!(page.changes[0].vault_address, None);
     assert_eq!(page.changes[0].confidential_delta, "15");
     assert_eq!(page.changes[1].confidential_delta, "25");
+}
+
+#[test]
+fn uncached_vaultless_resource_balance_change_is_skipped() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let uncached_resource = resource_address(0xaa);
+
+    assert!(
+        !accounts
+            .record_resource_balance_change(
+                Test::test_account_address(),
+                uncached_resource,
+                Amount::zero(),
+                Amount::from(25u64),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap()
+    );
+
+    let page = accounts
+        .get_balance_changes(
+            &Test::test_account_address(),
+            0,
+            10,
+            Some(&uncached_resource),
+            None,
+            None,
+        )
+        .unwrap();
+    assert_eq!(page.total, 0);
+    assert!(page.changes.is_empty());
 }
 
 #[test]

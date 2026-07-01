@@ -8,7 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query};
+use diesel::{Connection, QueryableByName, RunQueryDsl, SqliteConnection, sql_query, sql_types::Text};
 use ootle_byte_type::ToByteType;
 use tari_crypto::{
     keys::PublicKey,
@@ -52,6 +52,12 @@ fn vault_address(seed: u8) -> VaultId {
 
 fn resource_address(seed: u8) -> ResourceAddress {
     format!("resource_{seed:064x}").parse().unwrap()
+}
+
+#[derive(QueryableByName)]
+struct SqlText {
+    #[diesel(sql_type = Text)]
+    sql: String,
 }
 
 fn setup_store() -> (SqliteWalletStore, VaultId, VaultId, ResourceAddress, ResourceAddress) {
@@ -393,6 +399,74 @@ fn records_account_resource_change_without_vault() {
     assert_eq!(page.changes[0].vault_address, None);
     assert_eq!(page.changes[0].confidential_delta, "33");
     assert_eq!(page.changes[0].token_symbol.as_deref(), Some("STEALTH"));
+}
+
+#[test]
+fn latest_account_resource_history_ignores_vault_backed_rows() {
+    let (store, first_vault, _, first_resource, _) = setup_store();
+    let mut tx = store.create_write_tx().unwrap();
+    assert!(
+        tx.balance_changes_insert(
+            BalanceChangeSnapshot {
+                account_address: account_address(),
+                vault_address: None,
+                vault_version: None,
+                resource_address: first_resource,
+                token_symbol: Some("COIN".to_string()),
+                divisibility: 6,
+                revealed_before: Amount::zero(),
+                revealed_after: Amount::zero(),
+                confidential_before: Amount::zero(),
+                confidential_after: Amount::from(33u64),
+            },
+            BalanceChangeSource::Scan,
+        )
+        .unwrap()
+    );
+    tx.commit().unwrap();
+    drop(tx);
+
+    record_change(
+        &store,
+        first_vault,
+        1,
+        Amount::from(100u64),
+        Amount::zero(),
+        BalanceChangeSource::Scan,
+    );
+
+    let mut tx = store.create_read_tx().unwrap();
+    let latest = tx
+        .balance_changes_get_latest_by_account_resource(&account_address(), &first_resource)
+        .unwrap()
+        .unwrap();
+    assert_eq!(latest.vault_address, None);
+    assert_eq!(latest.confidential_after, Amount::from(33u64));
+}
+
+#[test]
+fn read_indexes_match_address_scoped_history_queries() {
+    let path = temporary_database_path();
+    let (store, _, _, _, _) = setup_store_at(&path);
+    drop(store);
+
+    let mut connection = SqliteConnection::establish(path.to_str().unwrap()).unwrap();
+    let indexes = sql_query(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name IN ( \
+         'account_balance_changes_account_created_idx', 'account_balance_changes_account_resource_created_idx' ) \
+         ORDER BY name",
+    )
+    .load::<SqlText>(&mut connection)
+    .unwrap();
+    assert_eq!(indexes.len(), 2);
+    assert!(indexes[0].sql.contains("(account_address, created_at DESC, id DESC)"));
+    assert!(
+        indexes[1]
+            .sql
+            .contains("(account_address, resource_address, created_at DESC, id DESC)")
+    );
+    drop(connection);
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]

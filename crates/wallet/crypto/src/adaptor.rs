@@ -21,6 +21,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
+use tari_utilities::ByteArray;
 
 /// A Schnorr adaptor pre-signature encrypted under an adaptor point `T = t·G`.
 ///
@@ -52,6 +53,12 @@ fn challenge(public_nonce: &RistrettoPublicKey, public_key: &RistrettoPublicKey,
     let hash =
         RistrettoSchnorr::construct_domain_separated_challenge::<_, Blake2b<U64>>(public_nonce, public_key, message);
     RistrettoSecretKey::from_uniform_bytes(hash.as_ref()).expect("Blake2b<U64> yields 64 uniform bytes")
+}
+
+/// True if `point` is the Ristretto identity, whose canonical encoding is 32 zero bytes. Uses a plain
+/// byte comparison rather than the constant-time point `==`, since these are public values.
+fn is_identity(point: &RistrettoPublicKey) -> bool {
+    point.as_bytes().iter().all(|&b| b == 0)
 }
 
 /// Produces an adaptor pre-signature `ŝ = r + e·x` with `e = H((R + T) ‖ P ‖ message)`, where
@@ -87,14 +94,17 @@ pub fn verify(
     adaptor_point: &RistrettoPublicKey,
     message: &[u8],
 ) -> bool {
-    if public_key == &RistrettoPublicKey::default() {
+    // Reject identity points: a zero public key, nonce, or adaptor point yields a degenerate or
+    // malformed signature. These are public values, so compare the encoding, not the constant-time
+    // point equality.
+    if is_identity(public_key) || is_identity(&pre.public_nonce) || is_identity(adaptor_point) {
         return false;
     }
     let e = challenge(&pre.public_nonce, public_key, message);
     let s_hat_g = RistrettoPublicKey::from_secret_key(&pre.signature);
     let lhs = &s_hat_g + adaptor_point;
     let rhs = &pre.public_nonce + &e * public_key;
-    lhs == rhs
+    lhs.as_bytes() == rhs.as_bytes()
 }
 
 /// Completes the pre-signature with the adaptor secret `t` (`T = t·G`), yielding an ordinary
@@ -169,5 +179,16 @@ mod tests {
         let pre = sign(&x, &big_t, MESSAGE);
         assert!(!verify(&pre, &p, &big_t, b"different message"));
         assert!(!verify(&pre, &other_p, &big_t, MESSAGE));
+    }
+
+    #[test]
+    fn verify_rejects_identity_points() {
+        let (x, p) = keypair();
+        let (_t, big_t) = keypair();
+        let identity = RistrettoPublicKey::default();
+
+        let pre = sign(&x, &big_t, MESSAGE);
+        assert!(!verify(&pre, &identity, &big_t, MESSAGE), "identity public key");
+        assert!(!verify(&pre, &p, &identity, MESSAGE), "identity adaptor point");
     }
 }

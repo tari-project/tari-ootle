@@ -78,8 +78,9 @@ where
 /// Truncate the state tree for `shard` back to `target_version`.
 ///
 /// After this call:
-/// - `state_tree_versions_get_latest(shard)` returns `target_version` (or `None` if the shard had no state at or below
-///   `target_version`).
+/// - `state_tree_versions_get_latest(shard)` returns the highest committed version at or below `target_version` (or
+///   `None` if the shard has no state at or below `target_version`). Version 0 counts as committed state: bootstrapped
+///   genesis substates are written to the tree at version 0.
 /// - All nodes at versions > `target_version` are deleted from the tree store.
 /// - All stale-node records at versions > `target_version` are deleted.
 pub fn state_tree_truncate_to_version<'a, TAddr>(
@@ -127,15 +128,23 @@ where
         stale_cf.delete(key, OPERATION)?;
     }
 
-    // 3. Reset the latest-version pointer. State versions start at 1, so an entry with value 0 is never valid: a shard
-    //    with no committed state has *no entry*, and downstream readers (JMT root lookup, state-sync's
-    //    `calculate_state_root_for_shard`) distinguish None (empty tree → placeholder hash) from Some(v) (load root at
-    //    v). If we wrote 0 here, those readers would try to load a v0 root node that never existed and error with JMT
-    //    NotFound.
-    if target_version == 0 {
-        versions_cf.delete(&shard, OPERATION)?;
-    } else {
-        versions_cf.put(&shard, &target_version, OPERATION)?;
+    // 3. Reset the latest-version pointer to the highest version with surviving tree nodes. The pointer must reference
+    //    a version at which a JMT root node exists — downstream readers (JMT root lookup, state-sync's
+    //    `calculate_state_root_for_shard`) load the root at Some(v) and treat a missing entry as the empty tree
+    //    (placeholder hash). Version 0 is a valid committed version: genesis substates are bootstrapped into the tree
+    //    at version 0, so a shard whose only state is genesis must keep a pointer at 0 or it reads as empty and no
+    //    longer matches the checkpoint being rolled back to.
+    let latest_surviving_version = version_query
+        .query_range_key_iterator(
+            Ordering::Descending,
+            (shard, 0)..(shard, target_version.saturating_add(1)),
+        )
+        .next()
+        .transpose()?
+        .map(|(_, node_key)| node_key.version());
+    match latest_surviving_version {
+        Some(version) => versions_cf.put(&shard, &version, OPERATION)?,
+        None => versions_cf.delete(&shard, OPERATION)?,
     }
 
     debug!(

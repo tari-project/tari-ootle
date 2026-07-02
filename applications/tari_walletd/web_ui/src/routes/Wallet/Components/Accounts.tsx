@@ -20,14 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsCreate, useAccountsList } from "@api/hooks/useAccounts";
+import { useAccountsCreate, useAccountsList, useAccountsSetDefault } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
 import CopyAddress from "@components/CopyAddress";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
 import { ChevronRight } from "@mui/icons-material";
 import AddIcon from "@mui/icons-material/Add";
+import StarIcon from "@mui/icons-material/Star";
+import StarBorderIcon from "@mui/icons-material/StarBorder";
+import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
 import Fade from "@mui/material/Fade";
 import IconButton from "@mui/material/IconButton";
 import Table from "@mui/material/Table";
@@ -37,15 +42,31 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import { AccountInfo, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { Form, Link } from "react-router-dom";
 
-function Account({ account }: { account: AccountInfo }) {
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function Account({
+  account,
+  isSettingDefault,
+  isSetDefaultDisabled,
+  onSetDefault,
+}: {
+  account: AccountInfo;
+  isSettingDefault: boolean;
+  isSetDefaultDisabled: boolean;
+  onSetDefault: (account: AccountInfo) => void;
+}) {
   const {
     account: { name, component_address },
     address,
   } = account;
+  const accountLabel = name || shortenSubstateId(component_address);
   return (
     <TableRow>
       <DataTableCell>
@@ -56,7 +77,7 @@ function Account({ account }: { account: AccountInfo }) {
             color: "inherit",
           }}
         >
-          {name || shortenSubstateId(component_address)}
+          {accountLabel}
         </Link>
       </DataTableCell>
       <DataTableCell>
@@ -69,6 +90,24 @@ function Account({ account }: { account: AccountInfo }) {
       </DataTableCell>
       <DataTableCell>
         <CopyAddress address={address} />
+      </DataTableCell>
+      <DataTableCell>
+        {account.account.is_default ? (
+          <Chip icon={<StarIcon />} label="Default" color="primary" variant="outlined" size="small" />
+        ) : (
+          <Tooltip title={`Make ${accountLabel} the default account`}>
+            <span>
+              <IconButton
+                aria-label={`Make ${accountLabel} the default account`}
+                onClick={() => onSetDefault(account)}
+                disabled={isSetDefaultDisabled}
+                size="small"
+              >
+                {isSettingDefault ? <CircularProgress size={20} /> : <StarBorderIcon />}
+              </IconButton>
+            </span>
+          </Tooltip>
+        )}
       </DataTableCell>
       <DataTableCell>
         <IconButton component={Link} to={`/accounts/${substateIdToString(component_address)}`}>
@@ -86,6 +125,7 @@ function Accounts() {
     signingKeyIndex: "",
     fee: "",
   });
+  const [pendingDefaultAccount, setPendingDefaultAccount] = useState<string | null>(null);
   const {
     data: dataAccountsList,
     isLoading: isLoadingAccountsList,
@@ -94,6 +134,12 @@ function Accounts() {
   } = useAccountsList(0, 10);
 
   const { mutateAsync: mutateAddAccount } = useAccountsCreate();
+  const {
+    mutate: mutateSetDefault,
+    isPending: isSettingDefault,
+    isError: isSetDefaultError,
+    error: setDefaultError,
+  } = useAccountsSetDefault();
 
   const showAddAccountDialog = (setElseToggle: boolean = !showAccountDialog) => {
     setShowAddAccountDialog(setElseToggle);
@@ -129,6 +175,21 @@ function Accounts() {
       ...accountFormState,
       [e.target.name]: e.target.value,
     });
+  };
+
+  const onSetDefaultAccount = (account: AccountInfo) => {
+    const accountAddress = account.account.component_address;
+    setPendingDefaultAccount(substateIdToString(accountAddress));
+    mutateSetDefault(
+      {
+        account: accountAddress,
+      },
+      {
+        onSettled: () => {
+          setPendingDefaultAccount(null);
+        },
+      },
+    );
   };
 
   return (
@@ -169,6 +230,11 @@ function Accounts() {
           </Fade>
         )}
       </BoxHeading2>
+      {isSetDefaultError && (
+        <Alert severity="error" style={{ marginBottom: 16 }}>
+          {getErrorMessage(setDefaultError, "Error setting default account")}
+        </Alert>
+      )}
       <FetchStatusCheck
         isLoading={isLoadingAccountsList}
         isError={isErrorAccountsList}
@@ -183,13 +249,23 @@ function Accounts() {
                   <TableCell>Component</TableCell>
                   <TableCell>Key index</TableCell>
                   <TableCell>Address</TableCell>
+                  <TableCell>Default</TableCell>
                   <TableCell>Details</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {dataAccountsList &&
                   dataAccountsList.accounts.map((account: AccountInfo, index) => (
-                    <Account account={account} key={index} />
+                    <Account
+                      account={account}
+                      isSettingDefault={
+                        isSettingDefault &&
+                        pendingDefaultAccount === substateIdToString(account.account.component_address)
+                      }
+                      isSetDefaultDisabled={isSettingDefault}
+                      key={index}
+                      onSetDefault={onSetDefaultAccount}
+                    />
                   ))}
               </TableBody>
             </Table>

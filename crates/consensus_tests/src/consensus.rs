@@ -288,7 +288,7 @@ async fn multi_shard_single_transaction() {
         .start()
         .await;
 
-    let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 100, 2, 2).await;
+    let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 105, 2, 2).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -315,10 +315,11 @@ async fn multi_shard_single_transaction() {
     test.assert_all_validators_committed(tx.id());
 
     // Each involved shard group accumulates only its portion of the transaction's exhaust burn, so the network-wide
-    // sum counts the burn exactly once. Fee 100 with divisor 20 and 2 involved shard groups pays each leader 48 and
-    // burns 4 (see calculate_leader_fee), split 2 per shard group.
+    // sum counts the burn exactly once. Fee 105 with divisor 20 and 2 involved shard groups pays each leader 50 and
+    // burns 5 (see calculate_leader_fee); the indivisible burn splits 3/2, with the extra unit going to the first
+    // shard group in ShardGroup order.
     let mut network_total_burn = 0u128;
-    for vn in ["1", "2"] {
+    for (vn, expected_burn) in [("1", 3u128), ("2", 2)] {
         let accumulated_burn = test
             .get_validator(&TestAddress::new(vn))
             .state_store
@@ -328,10 +329,10 @@ async fn multi_shard_single_transaction() {
                 Ok::<_, HotStuffError>(block.header().total_accumulated_exhaust_burn())
             })
             .unwrap();
-        assert_eq!(accumulated_burn, 2, "unexpected accumulated burn for validator {vn}");
+        assert_eq!(accumulated_burn, expected_burn, "unexpected accumulated burn for validator {vn}");
         network_total_burn += accumulated_burn;
     }
-    assert_eq!(network_total_burn, 4);
+    assert_eq!(network_total_burn, 5);
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     test.assert_clean_shutdown().await;

@@ -314,6 +314,25 @@ async fn multi_shard_single_transaction() {
         .await;
     test.assert_all_validators_committed(tx.id());
 
+    // Each involved shard group accumulates only its portion of the transaction's exhaust burn, so the network-wide
+    // sum counts the burn exactly once. Fee 100 with divisor 20 and 2 involved shard groups pays each leader 48 and
+    // burns 4 (see calculate_leader_fee), split 2 per shard group.
+    let mut network_total_burn = 0u128;
+    for vn in ["1", "2"] {
+        let accumulated_burn = test
+            .get_validator(&TestAddress::new(vn))
+            .state_store
+            .with_read_tx(|tx| {
+                let leaf = tx.leaf_block_get(Epoch(1))?;
+                let block = Block::get(tx, &leaf.block_id)?;
+                Ok::<_, HotStuffError>(block.header().total_accumulated_exhaust_burn())
+            })
+            .unwrap();
+        assert_eq!(accumulated_burn, 2, "unexpected accumulated burn for validator {vn}");
+        network_total_burn += accumulated_burn;
+    }
+    assert_eq!(network_total_burn, 4);
+
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     test.assert_clean_shutdown().await;
 }

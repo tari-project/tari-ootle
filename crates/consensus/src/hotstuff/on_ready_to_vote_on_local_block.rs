@@ -1408,7 +1408,19 @@ where TConsensusSpec: ConsensusSpec
         })?;
 
         *total_leader_fee += leader_fee.fee();
-        *total_exhaust_burn += u128::from(leader_fee.exhaust_burn());
+        // Compute the portion from the local record's evidence: its key order is locally maintained (sorted), whereas
+        // the atom's wire-decoded key order is not consensus-checked (evidence equality is order-independent).
+        let exhaust_burn_portion = tx_rec
+            .evidence()
+            .exhaust_burn_portion(leader_fee.exhaust_burn(), local_committee_info.shard_group())
+            .ok_or_else(|| {
+                HotStuffError::InvariantError(format!(
+                    "evaluate_all_accept_command: local shard group {} is not in the evidence for transaction {}",
+                    local_committee_info.shard_group(),
+                    atom.id(),
+                ))
+            })?;
+        *total_exhaust_burn += u128::from(exhaust_burn_portion);
 
         substate_store.put_diff(&filter_diff_for_committee(local_committee_info, diff))?;
 

@@ -285,6 +285,26 @@ impl Evidence {
         self.evidence.len()
     }
 
+    /// Returns the portion of a transaction's exhaust burn attributed to `shard_group`, or `None` if the shard group
+    /// is not part of this evidence.
+    ///
+    /// The whole-transaction burn is divided evenly among the involved shard groups, with one extra unit going to each
+    /// of the first `exhaust_burn % num_shard_groups` groups in `ShardGroup` order, so the portions sum to exactly
+    /// `exhaust_burn`. Each shard group accumulates only its portion into its block header burn total, so summing the
+    /// accumulated burn across all shard groups counts each transaction's burn exactly once.
+    ///
+    /// CONSENSUS RULE: every involved shard group must attribute portions identically. Groups are ranked by
+    /// `ShardGroup` order, relying on the sorted-key invariant maintained by all local constructors
+    /// (`insert_sorted`/`sort_keys`). Wire-decoded evidence preserves the sender's key order and passes
+    /// order-independent equality checks, so callers must pass locally-constructed evidence (e.g. the local pool
+    /// record's), never evidence decoded from a received proposal.
+    pub fn exhaust_burn_portion(&self, exhaust_burn: u64, shard_group: ShardGroup) -> Option<u64> {
+        debug_assert!(self.evidence.keys().is_sorted(), "evidence keys must be sorted");
+        let index = self.evidence.keys().position(|sg| *sg == shard_group)? as u64;
+        let num_groups = self.evidence.keys().len() as u64;
+        Some(exhaust_burn / num_groups + u64::from(index < exhaust_burn % num_groups))
+    }
+
     /// Add or update shard groups, substates and locks into Evidence. Existing prepare/accept QC IDs are not changed.
     pub fn merge(&mut self, other: &Evidence) -> &mut Self {
         for (sg, evidence) in other.iter() {
@@ -650,6 +670,82 @@ mod tests {
 
     fn seed_lock_intent(seed: u8, ty: SubstateLockType) -> SubstateRequirementLockIntent {
         SubstateRequirementLockIntent::new(seed_substate_id(seed), 0, ty)
+    }
+
+    mod exhaust_burn_portion {
+        use super::*;
+
+        fn evidence_with_groups(groups: &[ShardGroup]) -> Evidence {
+            let mut evidence = Evidence::empty();
+            for (i, sg) in groups.iter().enumerate() {
+                evidence
+                    .add_shard_group(*sg)
+                    .insert_from_lock_intent(seed_lock_intent(i as u8 + 1, SubstateLockType::Write));
+            }
+            evidence
+        }
+
+        #[test]
+        fn it_assigns_the_remainder_to_the_first_groups_in_shard_group_order() {
+            let groups = [ShardGroup::new(0, 1), ShardGroup::new(2, 3), ShardGroup::new(4, 5)];
+            let evidence = evidence_with_groups(&groups);
+
+            assert_eq!(evidence.exhaust_burn_portion(19, groups[0]), Some(7));
+            assert_eq!(evidence.exhaust_burn_portion(19, groups[1]), Some(6));
+            assert_eq!(evidence.exhaust_burn_portion(19, groups[2]), Some(6));
+
+            // Burn smaller than the number of groups
+            assert_eq!(evidence.exhaust_burn_portion(2, groups[0]), Some(1));
+            assert_eq!(evidence.exhaust_burn_portion(2, groups[1]), Some(1));
+            assert_eq!(evidence.exhaust_burn_portion(2, groups[2]), Some(0));
+
+            assert_eq!(evidence.exhaust_burn_portion(0, groups[0]), Some(0));
+        }
+
+        #[test]
+        fn it_sums_to_exactly_the_whole_burn() {
+            let groups = [
+                ShardGroup::new(0, 1),
+                ShardGroup::new(2, 3),
+                ShardGroup::new(4, 5),
+                ShardGroup::new(6, 7),
+            ];
+            for num_groups in 1..=groups.len() {
+                let evidence = evidence_with_groups(&groups[..num_groups]);
+                for burn in [0u64, 1, 3, 5, 19, 20, 100, 1_000_003] {
+                    let total = groups[..num_groups]
+                        .iter()
+                        .map(|sg| evidence.exhaust_burn_portion(burn, *sg).unwrap())
+                        .sum::<u64>();
+                    assert_eq!(
+                        total, burn,
+                        "burn {burn} was created or lost across {num_groups} group(s)"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn it_returns_none_for_an_uninvolved_shard_group() {
+            let evidence = evidence_with_groups(&[ShardGroup::new(0, 1)]);
+            assert_eq!(evidence.exhaust_burn_portion(10, ShardGroup::new(2, 3)), None);
+        }
+
+        #[test]
+        fn it_does_not_depend_on_insertion_order() {
+            let sg1 = ShardGroup::new(0, 1);
+            let sg2 = ShardGroup::new(2, 3);
+            let sg3 = ShardGroup::new(4, 5);
+
+            let mut evidence = Evidence::empty();
+            evidence.add_shard_group(sg3);
+            evidence.add_shard_group(sg1);
+            evidence.add_shard_group(sg2);
+
+            assert_eq!(evidence.exhaust_burn_portion(19, sg1), Some(7));
+            assert_eq!(evidence.exhaust_burn_portion(19, sg2), Some(6));
+            assert_eq!(evidence.exhaust_burn_portion(19, sg3), Some(6));
+        }
     }
 
     #[test]

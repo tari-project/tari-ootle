@@ -443,7 +443,7 @@ pub struct PerOutputEntropy {
     pub zk_nonces: Option<[SecretKeyBytes; 3]>,
 }
 
-/// The full pinned-randomness bundle a stealth build consumes.
+/// The pinned per-output **construction** randomness a stealth build consumes.
 ///
 /// Every field is a 32-byte secret; the bundle is **positional** — [`StealthEntropy::per_output`]
 /// has exactly one [`PerOutputEntropy`] per output in
@@ -454,21 +454,12 @@ pub struct PerOutputEntropy {
 /// The deterministic build entry points take `&StealthEntropy` and **never** call an RNG; the
 /// production entry points fill one from the OS RNG via [`StealthEntropy::from_os_rng`] and then
 /// call the deterministic path. That `from_os_rng` constructor is the **only** place RNG enters the
-/// stealth surface.
+/// stealth *build* surface. Signatures (auth/seal) are signed later with fresh random nonces (see
+/// [`crate::stealth::sign_seal`]) — no signing nonce is derived from a seed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StealthEntropy {
     /// One slice per output, in the same order as `StealthTransferIntent.outputs`.
     pub per_output: Vec<PerOutputEntropy>,
-    /// Schnorr nonce secret for the balance-proof signature.
-    pub balance_proof_nonce: SecretKeyBytes,
-    /// Seed for the aggregated bulletproof (32 bytes), used to derive the proof deterministically.
-    pub bulletproof_seed: SecretKeyBytes,
-    /// Ephemeral seal *key* secret (used only when the seal can be signed with an ephemeral key).
-    pub ephemeral_seal_nonce: SecretKeyBytes,
-    /// Schnorr nonce for the ephemeral **auth** signature.
-    pub ephemeral_auth_nonce: SecretKeyBytes,
-    /// Schnorr nonce for the ephemeral **sign** (signing) signature.
-    pub ephemeral_sign_nonce: SecretKeyBytes,
 }
 
 impl StealthEntropy {
@@ -510,14 +501,7 @@ impl StealthEntropy {
                 }
             })
             .collect();
-        let entropy = Self {
-            per_output,
-            balance_proof_nonce: seed::derive_balance_proof_nonce(seed),
-            bulletproof_seed: seed::derive_bulletproof_seed(seed),
-            ephemeral_seal_nonce: seed::derive_ephemeral_seal_nonce(seed),
-            ephemeral_auth_nonce: seed::derive_ephemeral_auth_nonce(seed),
-            ephemeral_sign_nonce: seed::derive_ephemeral_sign_nonce(seed),
-        };
+        let entropy = Self { per_output };
         entropy
             .validate()
             .expect("KDF-derived entropy is non-zero and pairwise-distinct by construction");
@@ -560,17 +544,6 @@ impl StealthEntropy {
                 }
             }
         }
-        let bundle: [(&str, &SecretKeyBytes); 5] = [
-            ("balance_proof_nonce", &self.balance_proof_nonce),
-            ("bulletproof_seed", &self.bulletproof_seed),
-            ("ephemeral_seal_nonce", &self.ephemeral_seal_nonce),
-            ("ephemeral_auth_nonce", &self.ephemeral_auth_nonce),
-            ("ephemeral_sign_nonce", &self.ephemeral_sign_nonce),
-        ];
-        for (label, v) in bundle {
-            scalars.push((label.to_string(), v.as_bytes(), v.as_bytes()));
-        }
-
         for (label, _, consumed) in &scalars {
             if consumed.iter().all(|&b| b == 0) {
                 return Err(OotleSdkError::Validation(format!(
@@ -626,11 +599,6 @@ mod tests {
                     SecretKeyBytes::from_array([7; 32]),
                 ]),
             }],
-            balance_proof_nonce: SecretKeyBytes::from_array([8; 32]),
-            bulletproof_seed: SecretKeyBytes::from_array([9; 32]),
-            ephemeral_seal_nonce: SecretKeyBytes::from_array([10; 32]),
-            ephemeral_auth_nonce: SecretKeyBytes::from_array([11; 32]),
-            ephemeral_sign_nonce: SecretKeyBytes::from_array([12; 32]),
         }
     }
 
@@ -644,11 +612,9 @@ mod tests {
         // Structural format check: snake_case field names present.
         for field in [
             "per_output",
-            "balance_proof_nonce",
-            "bulletproof_seed",
-            "ephemeral_seal_nonce",
-            "ephemeral_auth_nonce",
-            "ephemeral_sign_nonce",
+            "mask",
+            "sender_nonce",
+            "aead_nonce",
             "elgamal_nonce",
             "zk_nonces",
         ] {
@@ -842,10 +808,11 @@ mod tests {
     #[test]
     fn entropy_secret_fields_are_not_copy() {
         let e = sample_entropy();
-        let moved = e.balance_proof_nonce;
-        assert_eq!(moved, SecretKeyBytes::from_array([8; 32]));
-        // `e.balance_proof_nonce` is moved-from here — it would not compile if `SecretKeyBytes`
-        // were `Copy`, which is the secrecy guarantee we want.
+        let moved = e.per_output[0].mask.clone();
+        let moved_again = moved;
+        assert_eq!(moved_again, SecretKeyBytes::from_array([1; 32]));
+        // `moved` is moved-from here — it would not compile if `SecretKeyBytes` were `Copy`, which is
+        // the secrecy guarantee we want.
     }
 
     // (h) from_os_rng is random across two calls.
@@ -909,7 +876,7 @@ mod tests {
     #[test]
     fn validate_rejects_duplicate_scalar() {
         let mut e = sample_entropy();
-        e.balance_proof_nonce = e.bulletproof_seed.clone();
+        e.per_output[0].sender_nonce = e.per_output[0].mask.clone();
         let err = e.validate().unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
@@ -918,7 +885,7 @@ mod tests {
     #[test]
     fn validate_rejects_zero_scalar() {
         let mut e = sample_entropy();
-        e.balance_proof_nonce = SecretKeyBytes::from_array([0; 32]);
+        e.per_output[0].mask = SecretKeyBytes::from_array([0; 32]);
         let err = e.validate().unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }

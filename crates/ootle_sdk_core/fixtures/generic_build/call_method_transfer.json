@@ -3,15 +3,15 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.35.0",
-    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "git_rev": "184979ea3d66d6e0a1bcde32fdae049582dbb8b8",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_instructions",
+  "compare": "semantic",
   "input": {
     "network": "esmeralda",
     "keys": {
-      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
-      "seed": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b"
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000"
     },
     "fetched": [],
     "generic_intent": {
@@ -64,7 +64,81 @@
     }
   },
   "expected": {
-    "encoded_transaction": "820081828289182681820283820081d88058207171717171717171717171717171717171717171717171717171717171717171677061795f6665658182018145821909c40083820283820081d88058207171717171717171717171717171717171717171717171717171717171717171687769746864726177828201815824d8835820727272727272727272727272727272727272727272727272727272727272727282018147821a000f424000820381008200815820fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af0138182820081d8805820717171717171717171717171717171717171717171717171717171717171717100010af5f4818081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820886705465665776ed4dd4d43b4fc4dbbb43b957f6e507426c9064f84939c706458204ed52948473b7e408b9b83ac5e2fe6e7d80ff8367b0bdf19efd6635eca793d0b825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820b6758cd02e922e84a5d6a5cff72cd1a963140b1634f2ef54b2ab8cd0fd1b29125820ca5e1189ac8b4b5d0e3a23a611f5aaaa1ece6fa038cb1d767f6bd8b0d17a0a0b",
-    "transaction_id": "2cbe09b891f46986b2748ba20ed131d4e5accfa71d66dfeb119ecf921a01a0f7"
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [
+            {
+              "public_key": "f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017",
+              "signature": null
+            }
+          ],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821909c400"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_7171717171717171717171717171717171717171717171717171717171717171"
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [
+              {
+                "substate_id": "component_7171717171717171717171717171717171717171717171717171717171717171",
+                "version": 0
+              }
+            ],
+            "instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "d88358207272727272727272727272727272727272727272727272727272727272727272"
+                    },
+                    {
+                      "Literal": "821a000f424000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_7171717171717171717171717171717171717171717171717171717171717171"
+                  },
+                  "method": "withdraw"
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 0
+                }
+              },
+              {
+                "CreateAccount": {
+                  "access_rules": null,
+                  "bucket_workspace_id": null,
+                  "owner_public_key": "fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af013",
+                  "owner_rule": null
+                }
+              }
+            ],
+            "is_seal_signer_authorized": true,
+            "max_epoch": 10,
+            "min_epoch": 1,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017",
+          "signature": null
+        }
+      }
+    }
   }
 }

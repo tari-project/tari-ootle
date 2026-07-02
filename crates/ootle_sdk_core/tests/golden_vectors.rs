@@ -33,7 +33,6 @@ use harness::{
     OP_BUILD_AND_ENCODE_PUBLIC_TRANSFER,
     OP_BUILD_AND_ENCODE_STEALTH_TRANSFER,
     OP_BUILD_STEALTH_OUTPUTS_STATEMENT,
-    OP_COSIGN_ADD_SIGNATURE,
     OP_COSIGN_SEAL_WITH_AUTH,
     OP_DECODE_STEALTH_UTXO,
     OP_DECODE_SUBSTATE,
@@ -176,8 +175,6 @@ fn sample_input() -> VectorInput {
 
     let keys = VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(11)),
-        seed: BuildSeed::from_array([22u8; 32]),
-        seal_secret: None,
     };
 
     VectorInput {
@@ -195,7 +192,7 @@ fn sample_fixture_seed() -> Fixture {
     Fixture {
         name: "sample/public_transfer_single_key_basic".to_string(),
         schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
+        compare: "semantic".to_string(),
         provenance: current_provenance(),
         operation: OP_BUILD_AND_ENCODE_PUBLIC_TRANSFER.to_string(),
         input: sample_input(),
@@ -230,8 +227,6 @@ fn single_key_basic_input() -> VectorInput {
 
     let keys = VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(101)),
-        seed: BuildSeed::from_array([102u8; 32]),
-        seal_secret: None,
     };
 
     VectorInput {
@@ -248,7 +243,7 @@ fn single_key_basic_fixture_seed() -> Fixture {
     Fixture {
         name: "public_transfer/single_key_basic".to_string(),
         schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
+        compare: "semantic".to_string(),
         provenance: current_provenance(),
         operation: OP_BUILD_AND_ENCODE_PUBLIC_TRANSFER.to_string(),
         input: single_key_basic_input(),
@@ -270,7 +265,7 @@ fn large_amount_fixture_seed() -> Fixture {
     Fixture {
         name: "public_transfer/large_amount".to_string(),
         schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
+        compare: "semantic".to_string(),
         provenance: current_provenance(),
         operation: OP_BUILD_AND_ENCODE_PUBLIC_TRANSFER.to_string(),
         input: large_amount_input(),
@@ -368,8 +363,6 @@ fn resolve_single_key_basic_input() -> VectorInput {
 
     let keys = VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(111)),
-        seed: BuildSeed::from_array([112u8; 32]),
-        seal_secret: None,
     };
 
     VectorInput {
@@ -386,7 +379,7 @@ fn resolve_single_key_basic_fixture_seed() -> Fixture {
     Fixture {
         name: "resolve_public_transfer/single_key_basic".to_string(),
         schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
+        compare: "semantic".to_string(),
         provenance: current_provenance(),
         operation: OP_RESOLVE_AND_ENCODE_PUBLIC_TRANSFER.to_string(),
         input: resolve_single_key_basic_input(),
@@ -407,7 +400,7 @@ fn resolve_large_amount_fixture_seed() -> Fixture {
     Fixture {
         name: "resolve_public_transfer/large_amount".to_string(),
         schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
+        compare: "semantic".to_string(),
         provenance: current_provenance(),
         operation: OP_RESOLVE_AND_ENCODE_PUBLIC_TRANSFER.to_string(),
         input: resolve_large_amount_input(),
@@ -1889,8 +1882,6 @@ fn generic_recipient_pk() -> PublicKeyBytes {
 fn generic_keys() -> VectorKeys {
     VectorKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(74)),
-        seed: BuildSeed::from_array([75u8; 32]),
-        seal_secret: None,
     }
 }
 
@@ -1905,7 +1896,7 @@ fn generic_build_fixture(name: &str, intent: GenericTransactionIntent) -> Fixtur
     Fixture {
         name: name.to_string(),
         schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
+        compare: "semantic".to_string(),
         provenance: provenance_with_rev(GENERIC_BUILD_GIT_REV),
         operation: OP_BUILD_AND_ENCODE_INSTRUCTIONS.to_string(),
         input: VectorInput {
@@ -2126,7 +2117,7 @@ fn faucet_claim_seed() -> Fixture {
     Fixture {
         name: "generic_build/faucet_claim".to_string(),
         schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
+        compare: "semantic".to_string(),
         provenance: provenance_with_rev(GENERIC_BUILD_GIT_REV),
         operation: OP_BUILD_AND_ENCODE_FAUCET_CLAIM.to_string(),
         input: VectorInput {
@@ -2144,25 +2135,30 @@ fn faucet_claim_seed() -> Fixture {
 /// bytes/id as the equivalent instruction sequence hand-built on the builder's own methods + sealed
 /// through the same leaves. This anchors the generic front-end to the bespoke flow's output.
 #[test]
-fn generic_seals_byte_identically_to_hand_built() {
+fn generic_seals_identically_to_hand_built() {
     use ootle_sdk_core::{
         PartialTransaction,
         Resolution,
         apply_fetched_substates,
-        resolve_and_encode_instructions_with_seed,
-        seal_and_encode_public_transfer_with_seed,
+        build_unsigned_instructions_with_wants,
+        decode_and_canonicalize_sealed_transfer,
+        seal_and_encode_public_transfer,
     };
     use tari_ootle_transaction::{TransactionBuilder, args};
 
     let intent = generic_transfer_intent();
     let keys = generic_keys().to_core();
 
-    // Generic front-end path.
-    let generic = resolve_and_encode_instructions_with_seed(Network::Esmeralda, &intent, &[], &keys).unwrap();
+    // Generic front-end path → resolve → seal.
+    let (gpartial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();
+    let generic = match apply_fetched_substates(gpartial, &[]).unwrap() {
+        Resolution::Resolved(p) => seal_and_encode_public_transfer(p, &keys).unwrap(),
+        Resolution::NeedMore { .. } => panic!("expected Resolved"),
+    };
 
     // Hand-built path: the identical instruction sequence + the same seal/encode leaves. Inputs are
     // carried ONLY by `new_with_explicit_inputs` (the generic path also never calls `with_inputs`),
-    // so the byte-equivalence comparison is like-for-like.
+    // so the comparison is like-for-like.
     let explicit_input = generic_explicit_inputs()[0].to_internal().unwrap();
     let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte())
         .pay_fee_from_component(generic_from_component(), Amount::new(2500))
@@ -2177,15 +2173,20 @@ fn generic_seals_byte_identically_to_hand_built() {
         .build_unsigned();
     let partial = PartialTransaction::new_with_explicit_inputs(unsigned, vec![explicit_input]);
     let hand = match apply_fetched_substates(partial, &[]).unwrap() {
-        Resolution::Resolved(p) => seal_and_encode_public_transfer_with_seed(p, &keys).unwrap(),
+        Resolution::Resolved(p) => seal_and_encode_public_transfer(p, &keys).unwrap(),
         Resolution::NeedMore { .. } => panic!("expected Resolved"),
     };
 
+    // The signatures are random, so compare the SEMANTIC decoded transactions (the byte-unstable
+    // Schnorr scalars nulled, signer public keys retained): the instruction/input encoding must be
+    // byte-identical between the generic front-end and the hand-built builder.
+    let g = decode_and_canonicalize_sealed_transfer(Network::Esmeralda, &generic.encoded_transaction.to_hex()).unwrap();
+    let h = decode_and_canonicalize_sealed_transfer(Network::Esmeralda, &hand.encoded_transaction.to_hex()).unwrap();
     assert_eq!(
-        generic.encoded_transaction, hand.encoded_transaction,
-        "generic vector must seal byte-identically to the hand-built builder"
+        g, h,
+        "generic vector must lower + seal to the identical transaction as the hand-built builder (modulo random \
+         signatures)"
     );
-    assert_eq!(generic.transaction_id, hand.transaction_id, "and the transaction id");
 }
 
 /// Cross-check: the seed-derived VIEW public key the identity vectors hard-code must equal what the
@@ -2241,20 +2242,16 @@ fn address_assert_matches_builder_recipient_derivation() {
 
 // --- Co-sign vectors ------------------------------------------------------------------
 //
-// Two vectors over a single resolved public transfer (reusing the `resolve_*` material): A builds and
-// ships the unsigned record; B authorizes it (committing to A's seal pk). The `cosign_add_signature`
-// vector locks B's deterministic (pinned-nonce) authorization byte-for-byte; the `cosign_seal_with_auth`
-// vector seals with that authorization attached and locks the deterministic decoded fields
-// semantically (any sealed-tx vector that carries attached signatures uses "semantic", matching the
-// stealth send).
+// One vector over a single resolved public transfer (reusing the `resolve_*` material): A builds and
+// ships the unsigned record; B authorizes it (committing to A's seal pk) with a random nonce; A seals
+// with that authorization attached. The `cosign_seal_with_auth` vector locks the deterministic decoded
+// fields semantically (any sealed-tx vector that carries attached signatures uses "semantic", matching
+// the stealth send), and its decode re-verifies B's authorization.
 
 /// Pinned git rev for the co-sign fixtures so committing them does not churn `git_rev`.
 const COSIGN_GIT_REV: &str = "78a836162980f2ddc1e18fd537f4542fc851f6a4";
 
-const COSIGN_VECTORS: &[VectorCase] = &[
-    ("cosign/add_signature.json", cosign_add_signature_seed),
-    ("cosign/seal_with_auth.json", cosign_seal_with_auth_seed),
-];
+const COSIGN_VECTORS: &[VectorCase] = &[("cosign/seal_with_auth.json", cosign_seal_with_auth_seed)];
 
 /// Party A's account secret (the seal signer) for the co-sign vectors.
 fn cosign_a_account_secret() -> SecretKeyBytes {
@@ -2272,8 +2269,6 @@ fn cosign_a_seal_pk_hex() -> String {
 fn cosign_a_keys() -> VectorKeys {
     VectorKeys {
         account_secret: cosign_a_account_secret(),
-        seed: BuildSeed::from_array([122u8; 32]),
-        seal_secret: None,
     }
 }
 
@@ -2297,23 +2292,9 @@ fn cosign_input() -> VectorInput {
         keys: Some(cosign_a_keys()),
         fetched: Some(resolve_fetched_batch()),
         cosign_seal_pk: Some(cosign_a_seal_pk_hex()),
-        // Party B's co-signer key (distinct from A) + pinned authorization nonce.
+        // Party B's co-signer key (distinct from A); B authorizes with a random nonce.
         cosign_signer_secret: Some(SecretKeyBytes::from_array(fixed_scalar_bytes(123))),
-        cosign_signer_seed: Some(BuildSeed::from_array([124u8; 32])),
         ..Default::default()
-    }
-}
-
-/// The `cosign/add_signature` fixture shell (generator fills `expected.cosign_authorization`).
-fn cosign_add_signature_seed() -> Fixture {
-    Fixture {
-        name: "cosign/add_signature".to_string(),
-        schema_version: SCHEMA_VERSION,
-        compare: harness::default_compare(),
-        provenance: provenance_with_rev(COSIGN_GIT_REV),
-        operation: OP_COSIGN_ADD_SIGNATURE.to_string(),
-        input: cosign_input(),
-        expected: harness::ExpectedOutput::default(),
     }
 }
 
@@ -2556,67 +2537,42 @@ fn run_golden_vectors() {
             continue;
         }
 
-        if fixture.operation == OP_COSIGN_ADD_SIGNATURE {
-            // BYTES compare on a structured value: the deterministic (pinned-nonce) authorization is
-            // RNG-free, so B's `Authorization` is byte-stable. Compare the produced JSON object.
-            assert_eq!(
-                fixture.compare, "bytes",
-                "cosign add_signature fixture `{}` must use the default \"bytes\" compare",
-                fixture.name
-            );
-            let expected = fixture.expected.cosign_authorization.clone().unwrap_or_else(|| {
-                panic!(
-                    "cosign add_signature fixture `{}` missing expected.cosign_authorization",
-                    fixture.name
-                )
-            });
-            let actual_auth = actual.cosign_authorization.clone().unwrap_or_else(|| {
-                panic!(
-                    "cosign add_signature op produced no authorization for `{}`",
-                    fixture.name
-                )
-            });
-            assert_eq!(
-                actual_auth,
-                expected,
-                "\n*** golden-vector MISMATCH: cosign_authorization ***\n fixture: {}\n    file: {}\nexpected: {}\n  \
-                 actual: {}\n",
-                fixture.name,
-                path.display(),
-                serde_json::to_string_pretty(&expected).unwrap(),
-                serde_json::to_string_pretty(&actual_auth).unwrap(),
-            );
-            continue;
-        }
-
-        if fixture.operation == OP_COSIGN_SEAL_WITH_AUTH {
-            // SEMANTIC compare: the cosigned sealed tx carries a Schnorr seal scalar; matching the
-            // stealth-send precedent for any sealed-tx-with-signatures vector, the runner validates
-            // every signature (via the shared canonicalizer in `run_operation` →
-            // `decode_and_canonicalize_sealed_transfer`, which errors on a verify failure) and then
-            // compares the deterministic decoded fields (signer public keys + `is_seal_signer_authorized`
-            // survive; the byte-unstable scalars are nulled).
+        // Public-transfer / resolve / generic-instruction / faucet / cosign-seal all produce a sealed
+        // transaction signed with random nonces, so they compare SEMANTICALLY like the stealth send:
+        // `run_operation` decodes + re-verifies every signature (via
+        // `decode_and_canonicalize_sealed_transfer`, which errors on a verify failure) and nulls the
+        // byte-unstable Schnorr scalars, then the runner compares the deterministic decoded fields
+        // (instructions, inputs, signer public keys, `is_seal_signer_authorized` — everything except the
+        // nulled scalars).
+        const SEALED_SEMANTIC_OPS: &[&str] = &[
+            OP_BUILD_AND_ENCODE_PUBLIC_TRANSFER,
+            OP_RESOLVE_AND_ENCODE_PUBLIC_TRANSFER,
+            OP_BUILD_AND_ENCODE_INSTRUCTIONS,
+            OP_BUILD_AND_ENCODE_FAUCET_CLAIM,
+            OP_COSIGN_SEAL_WITH_AUTH,
+        ];
+        if SEALED_SEMANTIC_OPS.contains(&fixture.operation.as_str()) {
             assert_eq!(
                 fixture.compare, "semantic",
-                "cosign seal fixture `{}` must declare \"compare\": \"semantic\"",
+                "sealed-tx fixture `{}` must declare \"compare\": \"semantic\"",
                 fixture.name
             );
             let expected =
                 harness::canonicalize_json(fixture.expected.sealed_transaction_semantic.clone().unwrap_or_else(|| {
                     panic!(
-                        "cosign seal fixture `{}` missing expected.sealed_transaction_semantic",
+                        "sealed-tx fixture `{}` missing expected.sealed_transaction_semantic",
                         fixture.name
                     )
                 }));
             let actual_tx = actual
                 .sealed_transaction_semantic
                 .clone()
-                .unwrap_or_else(|| panic!("cosign seal op produced no decoded tx for `{}`", fixture.name));
+                .unwrap_or_else(|| panic!("sealed-tx op produced no decoded tx for `{}`", fixture.name));
             assert_eq!(
                 actual_tx,
                 expected,
-                "\n*** golden-vector MISMATCH: cosign sealed_transaction (deterministic fields) ***\n fixture: {}\n  \
-                 file: {}\nexpected: {}\n  actual: {}\n",
+                "\n*** golden-vector MISMATCH: sealed_transaction (deterministic fields) ***\n fixture: {}\n  file: \
+                 {}\nexpected: {}\n  actual: {}\n",
                 fixture.name,
                 path.display(),
                 serde_json::to_string_pretty(&expected).unwrap(),
@@ -2920,27 +2876,13 @@ fn run_golden_vectors() {
             continue;
         }
 
-        // BYTE-FOR-BYTE on the raw hex strings — never on parsed structures (that would hide CBOR
-        // drift, which is the entire reason this harness exists).
-        assert_eq!(
-            actual.encoded_transaction,
-            fixture.expected.encoded_transaction,
-            "\n*** golden-vector MISMATCH: encoded_transaction ***\n fixture: {}\n    file: {}\nexpected: {}\n  \
-             actual: {}\n",
+        // Every operation is handled by one of the arms above (each `continue`s). A fixture whose
+        // operation matches none of them is a bug in the fixture or a missing runner arm.
+        panic!(
+            "fixture `{}` ({}): operation `{}` has no runner arm",
             fixture.name,
             path.display(),
-            fixture.expected.encoded_transaction,
-            actual.encoded_transaction,
-        );
-        assert_eq!(
-            actual.transaction_id,
-            fixture.expected.transaction_id,
-            "\n*** golden-vector MISMATCH: transaction_id ***\n fixture: {}\n    file: {}\nexpected: {}\n  actual: \
-             {}\n",
-            fixture.name,
-            path.display(),
-            fixture.expected.transaction_id,
-            actual.transaction_id,
+            fixture.operation,
         );
     }
 }
@@ -2988,31 +2930,20 @@ fn generate_then_run_round_trip() {
     let (generated, json) = regenerate(sample_fixture_seed());
     fs::write(&path, &json).expect("write temp fixture");
 
-    // Run: reload from disk and re-run the operation; assert byte-exact against the written expected.
+    // Run: reload from disk and re-run the operation; assert the semantic sealed transaction (the
+    // sample is a public-transfer op, which seals with a random nonce and compares semantically —
+    // the byte-unstable Schnorr scalars are nulled, so the decoded record is stable across runs).
     let raw = fs::read_to_string(&path).expect("read temp fixture");
     let loaded: Fixture = serde_json::from_str(&raw).expect("parse temp fixture");
     let actual = run_operation(&loaded);
 
-    assert_eq!(
-        actual.encoded_transaction, generated.expected.encoded_transaction,
-        "round-trip encoded_transaction must match"
-    );
-    assert_eq!(
-        actual.transaction_id, generated.expected.transaction_id,
-        "round-trip transaction_id must match"
-    );
     assert!(
-        !actual.encoded_transaction.is_empty() &&
-            actual
-                .encoded_transaction
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
-        "encoded_transaction must be non-empty lowercase hex"
+        actual.sealed_transaction_semantic.is_some(),
+        "the sample op must produce a decoded semantic transaction"
     );
     assert_eq!(
-        actual.transaction_id.len(),
-        64,
-        "transaction id is a 32-byte (64 hex char) hash"
+        actual.sealed_transaction_semantic, generated.expected.sealed_transaction_semantic,
+        "round-trip semantic sealed transaction must match"
     );
 
     fs::remove_dir_all(&tmp).ok();

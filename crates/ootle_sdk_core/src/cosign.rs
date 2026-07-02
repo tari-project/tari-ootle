@@ -9,11 +9,9 @@
 //!    [`UnsignedTransactionRecord`] and ships it to B. `PartialTransaction` is deliberately not serializable, so the
 //!    [`UnsignedTransaction`] inside it is what crosses the wire.
 //! 2. **Party B** re-derives the identical authorization signing message from that record plus A's seal public key,
-//!    signs it with B's secret, and returns an [`Authorization`] (B's public key + the Schnorr signature). Signing uses
-//!    either a fresh random nonce (the default [`add_signature`]) or a seed-expanded nonce
-//!    ([`add_signature_with_seed`], reproducible).
-//! 3. **Party A** attaches the collected authorizations and seals via [`seal_and_encode_with_auth`] (random) /
-//!    [`seal_and_encode_with_auth_with_seed`] (seed-reproducible).
+//!    signs it with B's secret (a fresh random Schnorr nonce), and returns an [`Authorization`] (B's public key + the
+//!    Schnorr signature).
+//! 3. **Party A** attaches the collected authorizations and seals via [`seal_and_encode_with_auth`].
 //!
 //! ## Why A and B compute the same message
 //!
@@ -41,30 +39,12 @@ use tari_ootle_transaction::{TransactionSignature, UnsignedTransaction};
 
 use crate::{
     PartialTransaction,
-    keys::{
-        DeterministicTransferKeys,
-        PublicTransferKeys,
-        parse_nonce_secret,
-        parse_secret_key,
-        public_key_bytes_from_secret,
-    },
+    keys::{PublicTransferKeys, parse_secret_key, public_key_bytes_from_secret},
     public_transfer::EncodedPublicTransfer,
     resolved_transfer::{canonicalize_inputs, resolved_unsigned},
-    tx::{
-        bor_encode,
-        cosign_auth_message,
-        seal_public_transfer_with_auth,
-        seal_public_transfer_with_auth_deterministic,
-    },
+    tx::{bor_encode, cosign_auth_message, seal_public_transfer_with_auth},
     types::{
-        bytes::{
-            BuildSeed,
-            EncodedTransactionBytes,
-            PublicKeyBytes,
-            SecretKeyBytes,
-            SignatureBytes,
-            TransactionIdBytes,
-        },
+        bytes::{EncodedTransactionBytes, PublicKeyBytes, SecretKeyBytes, SignatureBytes, TransactionIdBytes},
         error::OotleSdkError,
     },
 };
@@ -157,8 +137,8 @@ pub fn unsigned_record_for_cosign(partial: &PartialTransaction) -> Result<Unsign
     ))
 }
 
-/// **Party B — random-nonce default.** Authorizes A's unsigned transaction with a fresh random
-/// Schnorr nonce, committing to A's `seal_public_key`. Returns B's [`Authorization`].
+/// **Party B.** Authorizes A's unsigned transaction with a fresh random Schnorr nonce, committing to
+/// A's `seal_public_key`. Returns B's [`Authorization`].
 ///
 /// This is the only RNG site on the co-sign path. Bad key hex ⇒ [`OotleSdkError::Key`].
 pub fn add_signature(
@@ -170,28 +150,6 @@ pub fn add_signature(
     let message = cosign_auth_message(&seal_public_key.to_internal(), &unsigned.unsigned);
     let sig = RistrettoSchnorr::sign(&secret, message, &mut rand::rng())
         .map_err(|e| OotleSdkError::Key(format!("co-sign signing failed: {e}")))?;
-    Ok(authorization_from_parts(&secret, sig))
-}
-
-/// **Party B — seed-reproducible path.** Authorizes A's unsigned transaction with the cosign nonce
-/// expanded from `seed` (no RNG), committing to A's `seal_public_key`.
-///
-/// With the same seed + inputs this produces a byte-identical [`Authorization`]. The nonce's own
-/// derivation label keeps it distinct from a transfer's auth/seal nonces, so reusing a seed across a
-/// transfer and a cosign never reuses a Schnorr nonce. A zero seed ⇒ [`OotleSdkError::Validation`];
-/// bad key hex ⇒ [`OotleSdkError::Key`].
-pub fn add_signature_with_seed(
-    unsigned: &UnsignedTransactionRecord,
-    seal_public_key: &PublicKeyBytes,
-    signer_secret: &SecretKeyBytes,
-    seed: &BuildSeed,
-) -> Result<Authorization, OotleSdkError> {
-    seed.validate_nonzero()?;
-    let secret = parse_secret_key(signer_secret)?;
-    let nonce = parse_nonce_secret(&crate::seed::derive_cosign_nonce(seed))?;
-    let message = cosign_auth_message(&seal_public_key.to_internal(), &unsigned.unsigned);
-    let sig = RistrettoSchnorr::sign_with_nonce_and_message(&secret, nonce, message)
-        .map_err(|e| OotleSdkError::Key(format!("seeded co-sign signing failed: {e}")))?;
     Ok(authorization_from_parts(&secret, sig))
 }
 
@@ -208,25 +166,11 @@ fn authorization_from_parts(secret: &RistrettoSecretKey, sig: RistrettoSchnorr) 
     }
 }
 
-/// **Party A — seed-reproducible path.** Attaches the supplied `authorizations` to a resolved partial
-/// and seals it with the seal nonce expanded from the bundle's build seed (byte-for-byte reproducible).
+/// **Party A.** Attaches the supplied `authorizations` to a resolved partial and seals it (random
+/// nonce). The bytes/id are **not** reproducible — the safe default for real submission.
 ///
 /// `is_seal_signer_authorized` stays `false` with authorizations present; an empty slice behaves like
 /// the plain single-key seal. An unresolved partial ⇒ [`OotleSdkError::Resolution`].
-pub fn seal_and_encode_with_auth_with_seed(
-    partial: PartialTransaction,
-    keys: &DeterministicTransferKeys,
-    authorizations: &[Authorization],
-) -> Result<EncodedPublicTransfer, OotleSdkError> {
-    let unsigned = resolved_unsigned(partial)?;
-    let auth_signatures = internal_signatures(authorizations)?;
-    let (transaction, id) = seal_public_transfer_with_auth_deterministic(unsigned, keys, auth_signatures)?;
-    encode(transaction, id)
-}
-
-/// **Party A — random-nonce default.** Random-nonce counterpart of
-/// [`seal_and_encode_with_auth_with_seed`]. The bytes/id are **not** reproducible — the safe default
-/// for real submission.
 pub fn seal_and_encode_with_auth(
     partial: PartialTransaction,
     keys: &PublicTransferKeys,
@@ -316,12 +260,8 @@ mod tests {
         SecretKeyBytes::from_bytes(fixed_scalar(99).as_bytes()).unwrap()
     }
 
-    fn b_seed() -> BuildSeed {
-        BuildSeed::from_array([0x77; 32])
-    }
-
-    fn a_keys() -> DeterministicTransferKeys {
-        DeterministicTransferKeys::single_key(a_secret_bytes(), BuildSeed::from_array([0x42; 32]))
+    fn a_keys() -> PublicTransferKeys {
+        PublicTransferKeys::new(a_secret_bytes())
     }
 
     fn from_component() -> ComponentAddress {
@@ -418,7 +358,7 @@ mod tests {
         use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
         let record = unsigned_record_for_cosign(&resolved_partial()).unwrap();
-        let auth = add_signature_with_seed(&record, &a_seal_pk(), &b_secret_bytes(), &b_seed()).unwrap();
+        let auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
 
         let message = cosign_auth_message(&a_seal_pk().to_internal(), record.unsigned());
         let pk = auth.public_key.to_internal().try_from_byte_type().unwrap();
@@ -437,9 +377,8 @@ mod tests {
     #[test]
     fn cosigned_seal_validates_and_flips_authorized_flag() {
         let record = unsigned_record_for_cosign(&resolved_partial()).unwrap();
-        let auth = add_signature_with_seed(&record, &a_seal_pk(), &b_secret_bytes(), &b_seed()).unwrap();
-        let out =
-            seal_and_encode_with_auth_with_seed(resolved_partial(), &a_keys(), std::slice::from_ref(&auth)).unwrap();
+        let auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
+        let out = seal_and_encode_with_auth(resolved_partial(), &a_keys(), std::slice::from_ref(&auth)).unwrap();
 
         // Decode + verify-all-signatures via the canonicalizer (errors if any sig fails).
         let value =
@@ -458,8 +397,8 @@ mod tests {
     /// `is_seal_signer_authorized` to `true`.
     #[test]
     fn empty_authorizations_behave_like_plain_seal() {
-        let out = seal_and_encode_with_auth_with_seed(resolved_partial(), &a_keys(), &[]).unwrap();
-        let plain = crate::seal_and_encode_public_transfer_with_seed(resolved_partial(), &a_keys()).unwrap();
+        let out = seal_and_encode_with_auth(resolved_partial(), &a_keys(), &[]).unwrap();
+        let plain = crate::seal_and_encode_public_transfer(resolved_partial(), &a_keys()).unwrap();
         // Plain seal also produces one auth signature (A's own); the no-auth cosign seal produces
         // zero. They are NOT byte-equal, but the no-auth cosign seal must still validate and set the
         // authorized flag true.
@@ -474,13 +413,13 @@ mod tests {
     #[test]
     fn tampered_authorization_is_rejected() {
         let record = unsigned_record_for_cosign(&resolved_partial()).unwrap();
-        let mut auth = add_signature_with_seed(&record, &a_seal_pk(), &b_secret_bytes(), &b_seed()).unwrap();
+        let mut auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
         // Flip a byte in the signature scalar (still decodes as a Schnorr sig shape, but won't verify).
         let mut sig = auth.signature.as_bytes().to_vec();
         sig[10] ^= 0xff;
         auth.signature = SignatureBytes::from_bytes(&sig);
 
-        match seal_and_encode_with_auth_with_seed(resolved_partial(), &a_keys(), std::slice::from_ref(&auth)) {
+        match seal_and_encode_with_auth(resolved_partial(), &a_keys(), std::slice::from_ref(&auth)) {
             // Either attaching rejects the non-canonical signature (KEY), or the seal succeeds but the
             // verification step rejects it (VALIDATION). Both are correct "tampered ⇒ rejected".
             Err(e) => assert!(matches!(e.code(), "KEY" | "VALIDATION")),
@@ -499,33 +438,12 @@ mod tests {
         }
     }
 
-    /// The deterministic co-sign + seal path is byte-for-byte reproducible across two runs.
-    #[test]
-    fn deterministic_cosign_is_reproducible() {
-        let record = unsigned_record_for_cosign(&resolved_partial()).unwrap();
-        let auth_a = add_signature_with_seed(&record, &a_seal_pk(), &b_secret_bytes(), &b_seed()).unwrap();
-        let auth_b = add_signature_with_seed(&record, &a_seal_pk(), &b_secret_bytes(), &b_seed()).unwrap();
-        assert_eq!(
-            auth_a, auth_b,
-            "deterministic authorization must be identical across runs"
-        );
-
-        let seal_a =
-            seal_and_encode_with_auth_with_seed(resolved_partial(), &a_keys(), std::slice::from_ref(&auth_a)).unwrap();
-        let seal_b =
-            seal_and_encode_with_auth_with_seed(resolved_partial(), &a_keys(), std::slice::from_ref(&auth_b)).unwrap();
-        assert_eq!(
-            seal_a, seal_b,
-            "deterministic cosigned seal must be byte-identical across runs"
-        );
-    }
-
     /// Bad signer secret hex ⇒ `KEY`.
     #[test]
     fn bad_signer_secret_is_a_key_error() {
         let record = unsigned_record_for_cosign(&resolved_partial()).unwrap();
         let bad = SecretKeyBytes::from_array([0xff; 32]); // not a canonical Ristretto scalar
-        let err = add_signature_with_seed(&record, &a_seal_pk(), &bad, &b_seed()).unwrap_err();
+        let err = add_signature(&record, &a_seal_pk(), &bad).unwrap_err();
         assert_eq!(err.code(), "KEY");
     }
 
@@ -533,7 +451,7 @@ mod tests {
     #[test]
     fn unresolved_partial_is_a_resolution_error() {
         let (partial, _wants) = build_public_transfer_unsigned_with_wants(Network::Esmeralda, &intent()).unwrap();
-        let err = seal_and_encode_with_auth_with_seed(partial, &a_keys(), &[]).unwrap_err();
+        let err = seal_and_encode_with_auth(partial, &a_keys(), &[]).unwrap_err();
         assert_eq!(err.code(), "RESOLUTION");
     }
 

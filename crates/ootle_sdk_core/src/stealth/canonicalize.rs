@@ -99,12 +99,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        build_and_encode_public_transfer_with_seed,
-        keys::DeterministicTransferKeys,
+        build_and_encode_public_transfer,
+        keys::PublicTransferKeys,
         public_transfer::EncodedPublicTransfer,
         types::{
             address::{ComponentAddressStr, ResourceAddressStr},
-            bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
+            bytes::{PublicKeyBytes, SecretKeyBytes},
             intent::{InputRef, PublicTransferIntent, TransferRecipient},
             numeric::BoundaryAmount,
         },
@@ -118,8 +118,8 @@ mod tests {
         s.as_bytes().try_into().expect("32-byte scalar")
     }
 
-    /// Seals a deterministic public transfer and returns it (a convenient, RNG-free source of a real
-    /// sealed transaction whose signatures verify, for the canonicalizer tests).
+    /// Seals a public transfer and returns it (a source of a real sealed transaction whose signatures
+    /// verify, for the canonicalizer tests).
     fn sealed_public() -> EncodedPublicTransfer {
         let component = ComponentAddress::new(ObjectKey::from_array([0xaa; ObjectKey::LENGTH])).to_string();
         let resource = ResourceAddress::new(ObjectKey::from_array([0xbb; ObjectKey::LENGTH])).to_string();
@@ -134,11 +134,8 @@ mod tests {
             max_epoch: None,
             dry_run: false,
         };
-        let keys = DeterministicTransferKeys::single_key(
-            SecretKeyBytes::from_array(scalar_bytes(11)),
-            BuildSeed::from_array([0x42; 32]),
-        );
-        build_and_encode_public_transfer_with_seed(Network::Esmeralda, &intent, &keys).unwrap()
+        let keys = PublicTransferKeys::new(SecretKeyBytes::from_array(scalar_bytes(11)));
+        build_and_encode_public_transfer(Network::Esmeralda, &intent, &keys).unwrap()
     }
 
     #[test]

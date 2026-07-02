@@ -301,8 +301,12 @@ impl Evidence {
     pub fn exhaust_burn_portion(&self, exhaust_burn: u64, shard_group: ShardGroup) -> Option<u64> {
         debug_assert!(self.evidence.keys().is_sorted(), "evidence keys must be sorted");
         let index = self.evidence.keys().position(|sg| *sg == shard_group)? as u64;
-        let num_groups = self.evidence.keys().len() as u64;
-        Some(exhaust_burn / num_groups + u64::from(index < exhaust_burn % num_groups))
+        let num_groups = self.evidence.len() as u64;
+        let base_portion = exhaust_burn / num_groups;
+        let remainder = exhaust_burn % num_groups;
+        // The first `remainder` groups in ShardGroup order each take one extra unit of the burn
+        let extra = if index < remainder { 1 } else { 0 };
+        Some(base_portion + extra)
     }
 
     /// Add or update shard groups, substates and locks into Evidence. Existing prepare/accept QC IDs are not changed.

@@ -800,6 +800,16 @@ where TConsensusSpec: ConsensusSpec
                     );
 
                     if pool_tx.current_decision().is_commit() {
+                        // STRICT INVARIANT: a LocalOnly transaction involves exactly the local shard group, so its
+                        // leader fee is calculated with one involved shard group and it accounts for the entire
+                        // exhaust burn.
+                        if pool_tx.evidence().num_shard_groups() != 1 {
+                            return Err(HotStuffError::InvariantError(format!(
+                                "PROPOSE: LocalOnly transaction {} has evidence for {} shard groups",
+                                pool_tx.id(),
+                                pool_tx.evidence().num_shard_groups(),
+                            )));
+                        }
                         let involved = NonZeroU64::new(1).expect("1 > 0");
                         let leader_fee = calculate_leader_fee(
                             pool_tx.transaction_fee(),

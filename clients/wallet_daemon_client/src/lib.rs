@@ -90,6 +90,8 @@ use crate::{
         AccountsCreateResponse,
         AccountsCreateStealthTransferStatementRequest,
         AccountsCreateStealthTransferStatementResponse,
+        AccountsGetBalanceChangesRequest,
+        AccountsGetBalanceChangesResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
         AccountsListRequest,
@@ -358,6 +360,15 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<AccountsGetBalancesResponse, WalletDaemonClientError> {
         self.send_request("accounts.get_balances", request.borrow()).await
+    }
+
+    /// Returns paginated balance changes for an account, optionally filtered by resource or transaction.
+    pub async fn get_account_balance_changes<T: Borrow<AccountsGetBalanceChangesRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<AccountsGetBalanceChangesResponse, WalletDaemonClientError> {
+        self.send_request("accounts.get_balance_changes", request.borrow())
+            .await
     }
 
     /// Returns unclaimed validator fees for the given shard range.

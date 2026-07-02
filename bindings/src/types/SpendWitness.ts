@@ -6,9 +6,8 @@ import type { SpendCondition } from "./SpendCondition";
 /**
  * Selects, per spent stealth input, which authorisation path the spender is exercising (TIP-0006).
  *
- * The spend is witness-driven: the committed output only gates which witnesses are *admissible*
- * ([`StealthUnspentOutput::spend_key`](super::StealthUnspentOutput::spend_key) for the key path,
- * [`StealthUnspentOutput::condition_root`](super::StealthUnspentOutput::condition_root) for the script path); the
+ * The spend is witness-driven: the committed output's [`SpendAuthorization`](super::SpendAuthorization) only gates
+ * which witnesses are *admissible* (its `spend_key` for the key path, its `condition_root` for the script path); the
  * engine never assumes which path the spender picks. This type is pure data — no hashing — so it is safe to compile
  * into a template; the engine recomputes the Merkle root natively.
  */

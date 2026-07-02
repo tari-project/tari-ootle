@@ -2,8 +2,12 @@
 import type { AtomicCondition } from "./AtomicCondition";
 
 /**
- * A spend-condition leaf (v0) committed in a [`StealthUnspentOutput::condition_root`] tree: a flat, non-empty
+ * A spend-condition leaf (v0) committed in a stealth output's [`SpendAuthorization`] condition tree: a flat, non-empty
  * conjunction (logical AND) of [`AtomicCondition`]s. A script-path spend reveals one leaf and an inclusion proof; the
  * engine recomputes the root and, on a match, requires every atom in the conjunction to hold.
+ *
+ * Disjunction (OR) is the condition tree itself — each committed leaf is an alternative spend path — so a leaf needs
+ * no OR combinator, only this AND. Atoms are not self-referential, so a leaf cannot nest another leaf: there is no
+ * recursion to bound at decode and no nesting to reject at spend time.
  */
 export type SpendCondition = Array<AtomicCondition>;

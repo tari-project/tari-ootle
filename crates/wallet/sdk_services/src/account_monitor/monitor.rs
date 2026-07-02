@@ -19,7 +19,7 @@ use tari_ootle_wallet_sdk::{
         substate::SubstateApiError,
         transaction::TransactionApiError,
     },
-    models::{NewAccountData, WalletEvent},
+    models::{BalanceChangeSource, NewAccountData, WalletEvent},
 };
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::{ComponentAddress, ResourceAddress};
@@ -127,9 +127,10 @@ where
             AccountMonitorRequest::RefreshAccount {
                 account,
                 scan_for_utxos,
+                source,
                 reply,
             } => {
-                let _ignore = reply.send(self.refresh_account(account, scan_for_utxos).await);
+                let _ignore = reply.send(self.refresh_account(account, scan_for_utxos, source).await);
             },
             AccountMonitorRequest::AssociateResource {
                 account,
@@ -208,8 +209,12 @@ where
         &self,
         account_address: ComponentAddress,
         scan_for_utxos: bool,
+        source: BalanceChangeSource,
     ) -> Result<bool, AccountMonitorError> {
-        let is_updated = self.scanner.refresh_account(account_address).await?;
+        let is_updated = self
+            .scanner
+            .refresh_account_with_source(account_address, source)
+            .await?;
         if scan_for_utxos {
             self.refresh_stealth_utxos(account_address).await?;
         }
@@ -267,13 +272,19 @@ where
             WalletEvent::TransactionInvalid(event) => {
                 self.pending_accounts.remove(&event.transaction_id);
             },
+            WalletEvent::UtxoRecovered(event) => {
+                self.scanner
+                    .record_stealth_balance_change(event.account_address, *event.address.resource_address())?;
+            },
+            WalletEvent::UtxoSpent(event) => {
+                self.scanner
+                    .record_stealth_balance_change(event.account_address, *event.address.resource_address())?;
+            },
             WalletEvent::AccountCreatedOnChain(_) |
             WalletEvent::AccountChangedOnChain(_) |
             WalletEvent::AuthLoginRequest(_) |
             WalletEvent::UtxoRecoveryStarted(_) |
-            WalletEvent::UtxoRecovered(_) |
-            WalletEvent::UtxoRecoveryCompleted(_) |
-            WalletEvent::UtxoSpent(_) => {},
+            WalletEvent::UtxoRecoveryCompleted(_) => {},
         }
         Ok(())
     }

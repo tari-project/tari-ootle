@@ -207,6 +207,7 @@ impl Runner {
             self.sdk.accounts_api().add_vault(
                 account,
                 lp_vault,
+                0,
                 tariswaps[0].lp_resource_address,
                 ResourceType::NonFungible,
                 Some("LP".to_string()),

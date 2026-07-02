@@ -35,10 +35,19 @@ import { FluidTableCell } from "@components/StyledComponents";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
+import { BalanceChangeHistoryAction } from "@routes/AccountDetails/BalanceChangeHistory";
 import TypeChip from "@routes/AssetVault/Components/ResourceTypeChip";
 import { TransferNftDialog } from "@routes/AssetVault/NFTs/components/SendNft";
 import useAccountStore from "@store/accountStore";
-import { Account, Amount, BalanceEntry, ResourceAddress, ResourceType, VaultId } from "@tari-project/ootle-ts-bindings";
+import {
+  Account,
+  Amount,
+  BalanceEntry,
+  ComponentAddress,
+  ResourceAddress,
+  ResourceType,
+  VaultId,
+} from "@tari-project/ootle-ts-bindings";
 import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoWalletOutline } from "react-icons/io5";
@@ -54,6 +63,7 @@ interface BalanceRowProps {
   balance: Amount;
   confidential_balance: Amount;
   divisibility: number;
+  accountAddress: ComponentAddress;
   onSendClicked?: (resource_address: ResourceAddress, resource_type: ResourceType) => void;
 }
 
@@ -83,6 +93,7 @@ function BalanceRow({
   confidential_balance,
   vault_address,
   divisibility,
+  accountAddress,
   onSendClicked,
 }: BalanceRowProps) {
   const theme = useTheme();
@@ -135,6 +146,11 @@ function BalanceRow({
       </FluidTableCell>
       <FluidTableCell align="right">
         <Stack direction="row" gap={1} justifyContent="flex-end">
+          <BalanceChangeHistoryAction
+            accountAddress={accountAddress}
+            resourceAddress={resource_address}
+            resourceLabel={token_symbol}
+          />
           <Button size="small" variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
             Send
           </Button>
@@ -263,6 +279,7 @@ function Tokens({ account }: { account: Account }) {
                           confidential_balance={confidential_balance}
                           vault_address={vault_address ?? undefined} // convert null to undefined
                           divisibility={divisibility}
+                          accountAddress={substateIdToString(account.component_address) as ComponentAddress}
                           onSendClicked={handleSendResourceClicked}
                         />
                       ),

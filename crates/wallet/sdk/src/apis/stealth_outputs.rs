@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
@@ -318,6 +318,17 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(balance)
     }
 
+    pub fn get_unspent_balance_for_account_resource(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<Amount, StealthOutputsApiError> {
+        let outputs = self.store.with_read_tx(|tx| {
+            tx.stealth_outputs_get_unspent_by_account(account_address, Some(resource_address), false)
+        })?;
+        Ok(outputs.into_iter().map(|o| Amount::from(o.value)).sum::<Amount>())
+    }
+
     pub fn get_unspent_balance(
         &self,
         resource_address: &ResourceAddress,
@@ -401,7 +412,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     pub fn verify_and_update_outputs<'i, I: IntoIterator<Item = (UtxoAddress, &'i Utxo)>>(
         &self,
         outputs: I,
-    ) -> Result<(), StealthOutputsApiError> {
+    ) -> Result<HashSet<(ComponentAddress, ResourceAddress)>, StealthOutputsApiError> {
         let all_used_view_only_keys = self
             .key_manager_api
             .get_all_derived_keys(KeyBranch::ViewOnlyKey)?
@@ -424,6 +435,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
 
         let mut found_utxos_count = 0usize;
         let mut num_outputs = 0usize;
+        let mut touched_balances = HashSet::new();
         for (addr, utxo) in outputs {
             num_outputs += 1;
             let commitment = addr.id().into_commitment_bytes();
@@ -485,6 +497,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     ) {
                         Ok(Some(output)) => {
                             found_utxos_count += 1;
+                            touched_balances.insert((output.owner_account, output.resource_address));
                             tx.stealth_outputs_insert(&output)?;
                         },
                         Ok(None) => {
@@ -517,7 +530,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             );
         }
 
-        Ok(())
+        Ok(touched_balances)
     }
 
     #[allow(clippy::too_many_lines)]

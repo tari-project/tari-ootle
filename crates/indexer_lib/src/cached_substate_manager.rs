@@ -423,6 +423,16 @@ where
             });
         }
 
+        // Reaching here means no member returned the substate, so more than f DoesNotExist
+        // responses is f+1 agreement that it does not exist. This answer takes precedence over
+        // errors from unreachable members.
+        if num_nexist_substate_results > f {
+            return Ok(SubstateLookupResult {
+                result: SubstateResult::DoesNotExist,
+                verified: false,
+            });
+        }
+
         warn!(
             target: LOG_TARGET,
             "Could not get substate for shard {} from any of the validator nodes", substate_req,

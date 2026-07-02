@@ -244,14 +244,14 @@ impl Command {
     /// Returns `local_shard_group`'s portion of the transaction's exhaust burn for accumulation into the block
     /// header's burn total. Returns 0 if this command does not commit a transaction or carries no leader fee.
     ///
-    /// A LocalOnly transaction is processed by a single shard group, which therefore accounts for the entire burn
-    /// (its leader fee is calculated with one involved shard group). An AllAccept transaction is processed by every
-    /// involved shard group, so the burn is split between them — see [Evidence::exhaust_burn_portion].
+    /// The burn is split between the shard groups in the atom's evidence — see [Evidence::exhaust_burn_portion].
+    /// A LocalOnly transaction's evidence contains exactly the local shard group (a strict invariant enforced where
+    /// LocalOnly commands are proposed and voted on), so its portion is the entire burn.
     ///
     /// Must only be called on locally-constructed commands (e.g. while proposing): the split relies on the locally
     /// maintained evidence key order, which wire-decoded commands do not guarantee.
     ///
-    /// Returns `None` if this is a committing AllAccept command whose evidence does not include `local_shard_group`.
+    /// Returns `None` if this is a committing command whose evidence does not include `local_shard_group`.
     pub fn exhaust_burn_portion(&self, local_shard_group: ShardGroup) -> Option<u64> {
         let Some(atom) = self.committing() else {
             return Some(0);
@@ -259,9 +259,6 @@ impl Command {
         let Some(leader_fee) = atom.leader_fee.as_ref() else {
             return Some(0);
         };
-        if self.local_only().is_some() {
-            return Some(leader_fee.exhaust_burn());
-        }
         atom.evidence
             .exhaust_burn_portion(leader_fee.exhaust_burn(), local_shard_group)
     }

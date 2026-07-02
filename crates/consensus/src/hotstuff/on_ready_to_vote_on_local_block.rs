@@ -707,7 +707,36 @@ where TConsensusSpec: ConsensusSpec
                             }
 
                             *total_leader_fee += calculated_leader_fee.fee();
-                            *total_exhaust_burn += u128::from(calculated_leader_fee.exhaust_burn());
+                            // A LocalOnly transaction's evidence must contain exactly the local shard group, so its
+                            // portion of the exhaust burn is the entire burn.
+                            if pool_tx.evidence().num_shard_groups() != 1 {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "❌ NO VOTE: LocalOnly transaction {} in block {} has evidence for {} shard groups",
+                                    pool_tx.id(),
+                                    block,
+                                    pool_tx.evidence().num_shard_groups(),
+                                );
+                                return Ok(Some(NoVoteReason::LocalOnlyProposedForMultiShard));
+                            }
+                            let Some(exhaust_burn_portion) = pool_tx.evidence().exhaust_burn_portion(
+                                calculated_leader_fee.exhaust_burn(),
+                                local_committee_info.shard_group(),
+                            ) else {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "❌ NO VOTE: local shard group {} is not in the evidence for LocalOnly transaction {} in block {}",
+                                    local_committee_info.shard_group(),
+                                    pool_tx.id(),
+                                    block,
+                                );
+                                return Ok(Some(NoVoteReason::InvalidEvidence {
+                                    reason: InvalidEvidenceReason::MissingInvolvedShardGroup {
+                                        shard_group: local_committee_info.shard_group(),
+                                    },
+                                }));
+                            };
+                            *total_exhaust_burn += u128::from(exhaust_burn_portion);
                         }
 
                         proposed_block_change_set.add_transaction_execution(*pool_tx.id(), execution)?;
@@ -1410,16 +1439,23 @@ where TConsensusSpec: ConsensusSpec
         *total_leader_fee += leader_fee.fee();
         // Compute the portion from the local record's evidence: its key order is locally maintained (sorted), whereas
         // the atom's wire-decoded key order is not consensus-checked (evidence equality is order-independent).
-        let exhaust_burn_portion = tx_rec
+        let Some(exhaust_burn_portion) = tx_rec
             .evidence()
             .exhaust_burn_portion(leader_fee.exhaust_burn(), local_committee_info.shard_group())
-            .ok_or_else(|| {
-                HotStuffError::InvariantError(format!(
-                    "evaluate_all_accept_command: local shard group {} is not in the evidence for transaction {}",
-                    local_committee_info.shard_group(),
-                    atom.id(),
-                ))
-            })?;
+        else {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: local shard group {} is not in the evidence for transaction {} in block {}",
+                local_committee_info.shard_group(),
+                atom.id(),
+                block,
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MissingInvolvedShardGroup {
+                    shard_group: local_committee_info.shard_group(),
+                },
+            }));
+        };
         *total_exhaust_burn += u128::from(exhaust_burn_portion);
 
         substate_store.put_diff(&filter_diff_for_committee(local_committee_info, diff))?;

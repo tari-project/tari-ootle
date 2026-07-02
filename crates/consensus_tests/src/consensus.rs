@@ -329,7 +329,10 @@ async fn multi_shard_single_transaction() {
                 Ok::<_, HotStuffError>(block.header().total_accumulated_exhaust_burn())
             })
             .unwrap();
-        assert_eq!(accumulated_burn, expected_burn, "unexpected accumulated burn for validator {vn}");
+        assert_eq!(
+            accumulated_burn, expected_burn,
+            "unexpected accumulated burn for validator {vn}"
+        );
         network_total_burn += accumulated_burn;
     }
     assert_eq!(network_total_burn, 5);

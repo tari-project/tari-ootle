@@ -375,11 +375,6 @@ mod tests {
     fn entropy_for(specs: &[(u8, bool)]) -> StealthEntropy {
         StealthEntropy {
             per_output: specs.iter().map(|(b, v)| per_entropy(*b, *v)).collect(),
-            balance_proof_nonce: secret(200),
-            bulletproof_seed: secret(201),
-            ephemeral_seal_nonce: secret(202),
-            ephemeral_auth_nonce: secret(203),
-            ephemeral_sign_nonce: secret(204),
         }
     }
 

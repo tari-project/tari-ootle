@@ -3,15 +3,15 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.35.0",
-    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "git_rev": "184979ea3d66d6e0a1bcde32fdae049582dbb8b8",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_instructions",
+  "compare": "semantic",
   "input": {
     "network": "esmeralda",
     "keys": {
-      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000",
-      "seed": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b"
+      "account_secret": "4a00000000000000000000000000000000000000000000000000000000000000"
     },
     "fetched": [],
     "generic_intent": {
@@ -63,7 +63,80 @@
     }
   },
   "expected": {
-    "encoded_transaction": "8200818282891826848200815820fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af01382038100820283820081d880582079797979797979797979797979797979797979797979797979797979797979796474616b6581820081810082028382018100677061795f6665658182018145821907d000808182820081d8805820717171717171717171717171717171717171717171717171717171717171717100f6f6f5f4818081825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820886705465665776ed4dd4d43b4fc4dbbb43b957f6e507426c9064f84939c70645820651d96fe3d08a305006b8b7ddbd6c25bface0db2a1bcdaed55f5a6630d13ae0f825820f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017825820b6758cd02e922e84a5d6a5cff72cd1a963140b1634f2ef54b2ab8cd0fd1b291258205cf2c0b18c8b75e503be4ba79eb87a05fb0d3b822e775829184d9811810dcb04",
-    "transaction_id": "1471b18504752082c8a5381b94f06e0206e90a248bae72dc9de2dda5fcc5b45a"
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [
+            {
+              "public_key": "f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017",
+              "signature": null
+            }
+          ],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CreateAccount": {
+                  "access_rules": null,
+                  "bucket_workspace_id": null,
+                  "owner_public_key": "fea009ee8681783f3e9ed6152d3b7fc204a7ba78cde9808cdedae3dd221af013",
+                  "owner_rule": null
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 0
+                }
+              },
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Workspace": {
+                        "id": 0,
+                        "offset": null
+                      }
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_7979797979797979797979797979797979797979797979797979797979797979"
+                  },
+                  "method": "take"
+                }
+              },
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821907d000"
+                    }
+                  ],
+                  "call": {
+                    "Workspace": 0
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [
+              {
+                "substate_id": "component_7171717171717171717171717171717171717171717171717171717171717171",
+                "version": 0
+              }
+            ],
+            "instructions": [],
+            "is_seal_signer_authorized": true,
+            "max_epoch": null,
+            "min_epoch": null,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "f4ee399d01d7dc49c19b9ca94e7a948c43428257d5a7c4c9c810fa489ebf6017",
+          "signature": null
+        }
+      }
+    }
   }
 }

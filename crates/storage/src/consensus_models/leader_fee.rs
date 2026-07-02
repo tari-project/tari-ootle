@@ -13,8 +13,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct LeaderFee {
+    /// The fee payable to the leader of each involved shard group.
     #[n(0)]
     pub fee: u64,
+    /// The amount burned for the whole transaction across all involved shard groups
+    /// (`fee * num_involved_shard_groups + exhaust_burn == transaction_fee`). Each shard group accumulates only its
+    /// portion of this into its block header burn total — see `Evidence::exhaust_burn_portion`.
     #[n(1)]
     pub exhaust_burn: u64,
 }

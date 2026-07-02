@@ -55,7 +55,6 @@ use ootle_sdk_core::{
     scan_stealth_output,
     scan_stealth_substate,
     seal_and_encode_stealth_transfer,
-    seal_and_encode_stealth_transfer_with_seed,
     stealth::build_stealth_outputs_statement_with_seed,
     types::{
         bytes::{BuildSeed, SecretKeyBytes},
@@ -87,8 +86,7 @@ use crate::c_abi::{
 ///   ([`PartialTransaction`](ootle_sdk_core::PartialTransaction)) returned by [`ootle_build_stealth_unsigned`] and
 ///   threaded across [`ootle_apply_fetched_substates_stealth`] rounds (`NeedMore`); and
 /// - [`Ready`](StealthHandleState::Ready) — the assembled, input-resolved [`StealthPartialTransaction`] the final apply
-///   produces (`Resolved`), which [`ootle_seal_and_encode_stealth`] / [`ootle_seal_and_encode_stealth_with_seed`]
-///   consume.
+///   produces (`Resolved`), which [`ootle_seal_and_encode_stealth`] consumes.
 ///
 /// Keeping both under the same opaque type means the kind tag only has to distinguish
 /// stealth-vs-public, not resolver-vs-ready. The handle is freed once with
@@ -127,10 +125,9 @@ pub(crate) enum StealthHandleState {
 // --- Facade-local JSON mirrors --------------------------------------------------------------------
 
 /// Wire mirror of the core's [`StealthKeys`] (which carries secret newtypes and does **not** derive
-/// `Deserialize`). All fields lowercase hex. `seed` expands into the account-key authorization + seal
-/// nonces, consumed only by the account-key seal case (a revealed-input transfer); a pure
-/// stealth/ephemeral transfer never reads those derived nonces, but the seed is still required so the
-/// bundle keeps one shape (mirrors the core's `StealthKeys` docs).
+/// `Deserialize`). All fields lowercase hex. `seed` is the **construction** seed (per-output
+/// commitments/AEAD/proof entropy) the seed-reproducible build path consumes — the signatures are
+/// signed later with fresh random nonces, so a seed never feeds a Schnorr nonce.
 #[derive(Debug, Deserialize)]
 struct StealthKeysJson {
     account_secret: SecretKeyBytes,
@@ -138,20 +135,18 @@ struct StealthKeysJson {
 }
 
 impl StealthKeysJson {
-    /// The build seed the keys carry (also reused as the proof + seal-side entropy seed by the
-    /// seed-reproducible stealth ops).
+    /// The construction seed the keys carry (per-output commitment/AEAD/proof entropy).
     fn seed(&self) -> BuildSeed {
         self.seed
     }
 
     fn into_core(self) -> StealthKeys {
-        StealthKeys::new(self.account_secret, self.seed)
+        StealthKeys::new(self.account_secret)
     }
 }
 
-/// Random-path keys mirror: only `account_secret` is needed — the seal nonces are expanded from a
-/// fresh OS-RNG seed (see [`seal_and_encode_stealth_transfer`]), so the caller need not supply a seed.
-/// The placeholder seed handed to the core is never read on the random path.
+/// Random-path keys mirror: only `account_secret` is needed — the construction entropy is drawn from a
+/// fresh OS-RNG seed (see [`seal_and_encode_stealth_transfer`]).
 #[derive(Debug, Deserialize)]
 struct StealthProductionKeysJson {
     account_secret: SecretKeyBytes,
@@ -159,8 +154,7 @@ struct StealthProductionKeysJson {
 
 impl StealthProductionKeysJson {
     fn into_core(self) -> StealthKeys {
-        // A non-zero placeholder seed: the random seal path never reads it (it draws fresh entropy).
-        StealthKeys::new(self.account_secret, BuildSeed::from_array([1u8; 32]))
+        StealthKeys::new(self.account_secret)
     }
 }
 
@@ -472,8 +466,7 @@ pub unsafe extern "C" fn ootle_apply_fetched_substates_stealth(
 /// error). `network` must be the transfer's network (the partial does not carry it; different networks
 /// yield different stealth keys). `keys_json` is `{account_secret}`; the seal nonces are expanded from
 /// a fresh OS-RNG seed. On success `data_json` is the `EncodedPublicTransfer`. No handle is returned.
-/// The bytes/id are not reproducible — use [`ootle_seal_and_encode_stealth_with_seed`] for the
-/// reproducible path.
+/// The bytes/id are not reproducible (random-nonce seal).
 ///
 /// On a processing error the input handle is still consumed and freed; the returned envelope carries no
 /// handle. (Passing a *null* handle is a precondition violation that yields an `"INVALID"` envelope and
@@ -506,48 +499,6 @@ pub unsafe extern "C" fn ootle_seal_and_encode_stealth(
 
             let partial = ready_or_err(state)?;
             match seal_and_encode_stealth_transfer(network, partial, &keys.into_core()) {
-                Ok(encoded) => Ok(OotleResult::ok_json(&output_json(
-                    &encoded,
-                    "encoded stealth transfer",
-                )?)),
-                Err(e) => Ok(OotleResult::from_core_err(&e)),
-            }
-        })())
-    })
-}
-
-/// Seed-reproducible counterpart of [`ootle_seal_and_encode_stealth`]. **Consumes** `handle`. The
-/// single build seed in `keys_json` (`{account_secret, seed}`) expands into **both** the account-key
-/// seal/auth nonces and the stealth/ephemeral seal nonces, so the seal-side signatures are reproducible
-/// from the seed. On success `data_json` is the `EncodedPublicTransfer`.
-///
-/// # Safety
-/// As [`ootle_seal_and_encode_stealth`].
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn ootle_seal_and_encode_stealth_with_seed(
-    handle: *mut OotleStealthPartialTransaction,
-    network: u8,
-    keys_json: *const c_char,
-) -> OotleResult {
-    guarded(|| {
-        if handle.is_null() {
-            return OotleResult::err("INVALID", "argument `handle` must not be null");
-        }
-        if let Err(e) = unsafe { require_kind(handle, HandleKind::Stealth) } {
-            return e;
-        }
-        // Consume the handle up front: it is taken on every path (success or error), matching the
-        // core seal fn's by-value signature. The host must not free it again.
-        let state = unsafe { Box::from_raw(handle) }.inner;
-
-        flatten((|| {
-            let network = network_from_byte(network)?;
-            let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
-            let keys: StealthKeysJson = parse_json(keys_json, "keys")?;
-            let seed = keys.seed();
-
-            let partial = ready_or_err(state)?;
-            match seal_and_encode_stealth_transfer_with_seed(network, partial, &keys.into_core(), &seed) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(
                     &encoded,
                     "encoded stealth transfer",
@@ -820,9 +771,8 @@ pub unsafe extern "C" fn ootle_build_stealth_outputs_statement_with_seed(
 // --- Free fn --------------------------------------------------------------------------------------
 
 /// Frees an opaque [`OotleStealthPartialTransaction`] handle. Null-safe; call **exactly once**, and
-/// **only** for a handle that was never consumed by [`ootle_seal_and_encode_stealth`] /
-/// [`ootle_seal_and_encode_stealth_with_seed`] (those take the handle by value). Freeing a consumed
-/// handle is a use-after-free.
+/// **only** for a handle that was never consumed by [`ootle_seal_and_encode_stealth`] (which takes the
+/// handle by value). Freeing a consumed handle is a use-after-free.
 ///
 /// **Kind-guarded:** if the handle is actually a public-path `OotlePartialTransaction` (misrouted), it
 /// is **not** freed — the call is a deterministic no-op that leaves the handle intact for the correct

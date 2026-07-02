@@ -541,11 +541,15 @@ where TConsensusSpec: ConsensusSpec
                     .ok_or_else(|| {
                         HotStuffError::InvariantError("Leader fee overflow when summing for block".to_string())
                     })?;
-                accumulated_data.total_exhaust_burn += command
-                    .committing()
-                    .and_then(|tx| tx.leader_fee.as_ref())
-                    .map(|f| u128::from(f.exhaust_burn()))
-                    .unwrap_or(0);
+                let exhaust_burn_portion = command
+                    .exhaust_burn_portion(local_committee_info.shard_group())
+                    .ok_or_else(|| {
+                        HotStuffError::InvariantError(format!(
+                            "Local shard group {} is not in the evidence of committing command {command}",
+                            local_committee_info.shard_group(),
+                        ))
+                    })?;
+                accumulated_data.total_exhaust_burn += u128::from(exhaust_burn_portion);
                 // TODO: a BTreeSet changes the order from the original batch. Uncertain if this is a problem since the
                 // proposer also processes transactions in the completed block order, however on_propose does perform
                 // some operations (e.g. prepare, execute) in batch order. To ensure correctness, we should process

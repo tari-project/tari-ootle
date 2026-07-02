@@ -3,10 +3,11 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.35.0",
-    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "git_rev": "184979ea3d66d6e0a1bcde32fdae049582dbb8b8",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "resolve_and_encode_public_transfer",
+  "compare": "semantic",
   "input": {
     "network": "esmeralda",
     "intent": {
@@ -23,8 +24,7 @@
       "dry_run": false
     },
     "keys": {
-      "account_secret": "6f00000000000000000000000000000000000000000000000000000000000000",
-      "seed": "7070707070707070707070707070707070707070707070707070707070707070"
+      "account_secret": "6f00000000000000000000000000000000000000000000000000000000000000"
     },
     "fetched": [
       {
@@ -75,7 +75,92 @@
     ]
   },
   "expected": {
-    "encoded_transaction": "820081828289182681820283820081d88058203131313131313131313131313131313131313131313131313131313131313131677061795f6665658182018145821909c40083820283820081d88058203131313131313131313131313131313131313131313131313131313131313131687769746864726177828201815824d8835820323232323232323232323232323232323232323232323232323232323232323282018147821a000f424000820381008200845820a2a0c7d2940748baa58d9b65f7df99876acbabf456357973be10482b6928782af6f681008381820081d8805820313131313131313131313131313131313131313131313131313131313131313181820181d8835820323232323232323232323232323232323232323232323232323232323232323281820281d88458203333333333333333333333333333333333333333333333333333333333333333010af5f4818081825820a016f6650b36cded7e2909c403dd847abcae14473eec1c3377524ba5c5c2884a8258200afd2219e32aba2d07b0e2295945ff3b9579b42df161b68f88db1c8a944c88685820571e1e9b2ab9075ae7e8f434b181d6f857f803c75f9a03c23de1dc4c5e50460d825820a016f6650b36cded7e2909c403dd847abcae14473eec1c3377524ba5c5c2884a825820967c6704caac5c67cb48764adb7b2e75e8a0dce686594253ed834422c4d83c3258200ba4db5e8a63a369344952eb638439eec7cd06462ded4ad43f32cfa60797150f",
-    "transaction_id": "366308798edcb99fbc4cbe060098dc856b4f4bd8b47e670ca4d901ede2b54ee1"
+    "sealed_transaction_semantic": {
+      "V1": {
+        "body": {
+          "signatures": [
+            {
+              "public_key": "a016f6650b36cded7e2909c403dd847abcae14473eec1c3377524ba5c5c2884a",
+              "signature": null
+            }
+          ],
+          "transaction": {
+            "blobs": [],
+            "dry_run": false,
+            "fee_instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "821909c400"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_3131313131313131313131313131313131313131313131313131313131313131"
+                  },
+                  "method": "pay_fee"
+                }
+              }
+            ],
+            "inputs": [
+              {
+                "substate_id": "component_3131313131313131313131313131313131313131313131313131313131313131",
+                "version": null
+              },
+              {
+                "substate_id": "resource_3232323232323232323232323232323232323232323232323232323232323232",
+                "version": null
+              },
+              {
+                "substate_id": "vault_3333333333333333333333333333333333333333333333333333333333333333",
+                "version": null
+              }
+            ],
+            "instructions": [
+              {
+                "CallMethod": {
+                  "args": [
+                    {
+                      "Literal": "d88358203232323232323232323232323232323232323232323232323232323232323232"
+                    },
+                    {
+                      "Literal": "821a000f424000"
+                    }
+                  ],
+                  "call": {
+                    "Address": "component_3131313131313131313131313131313131313131313131313131313131313131"
+                  },
+                  "method": "withdraw"
+                }
+              },
+              {
+                "PutLastInstructionOutputOnWorkspace": {
+                  "key": 0
+                }
+              },
+              {
+                "CreateAccount": {
+                  "access_rules": null,
+                  "bucket_workspace_id": {
+                    "id": 0,
+                    "offset": null
+                  },
+                  "owner_public_key": "a2a0c7d2940748baa58d9b65f7df99876acbabf456357973be10482b6928782a",
+                  "owner_rule": null
+                }
+              }
+            ],
+            "is_seal_signer_authorized": true,
+            "max_epoch": 10,
+            "min_epoch": 1,
+            "network": 38
+          }
+        },
+        "seal_signature": {
+          "public_key": "a016f6650b36cded7e2909c403dd847abcae14473eec1c3377524ba5c5c2884a",
+          "signature": null
+        }
+      }
+    }
   }
 }

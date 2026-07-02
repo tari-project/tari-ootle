@@ -38,10 +38,13 @@ use ootle_sdk_core::{
     Resolution,
     StealthKeys,
     account_balances,
+    add_signature,
     apply_fetched_substates,
-    build_and_encode_public_transfer_with_seed,
+    build_and_encode_public_transfer,
     build_and_encode_stealth_transfer_with_seed,
     build_faucet_claim_with_wants,
+    build_public_transfer_unsigned_with_wants,
+    build_unsigned_instructions_with_wants,
     decode_stealth_utxo,
     decode_substate,
     derive_account_address,
@@ -49,12 +52,11 @@ use ootle_sdk_core::{
     derive_view_keypair_from_seed,
     encode_arg,
     format_identity_address,
-    keys::DeterministicTransferKeys,
+    keys::PublicTransferKeys,
     parse_address,
     parse_finalized_result,
-    resolve_and_encode_instructions_with_seed,
-    resolve_and_encode_public_transfer_with_seed,
-    seal_and_encode_public_transfer_with_seed,
+    seal_and_encode_public_transfer,
+    seal_and_encode_with_auth,
     types::{
         bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
         intent::PublicTransferIntent,
@@ -198,16 +200,6 @@ pub const OP_ACCOUNT_BALANCES: &str = "account_balances";
 /// literal encoder and gets a single byte wrong fails this vector — the lost-funds drift class this
 /// fixture group exists to prevent.
 pub const OP_ENCODE_ARG: &str = "encode_arg";
-
-/// The canonical operation id for the **co-sign authorization** (party B): build party A's resolved
-/// unsigned record from `network`/`intent`/`fetched`, then have B authorize it (commit to A's seal
-/// public key) with a **pinned** nonce. Its `input` carries `network`/`intent`/`fetched` (A's tx) +
-/// `cosign_seal_pk` (A's seal public key, hex) + `cosign_signer_secret` + `cosign_signer_nonce`
-/// (B's pinned key+nonce); `expected.cosign_authorization` carries the `{public_key, signature}`.
-///
-/// **Default `"bytes"` comparison mode.** The deterministic (pinned-nonce) authorization calls **no**
-/// RNG, so the produced [`ootle_sdk_core::Authorization`] is byte-stable and compared as a JSON object.
-pub const OP_COSIGN_ADD_SIGNATURE: &str = "cosign_add_signature";
 
 /// The canonical operation id for the **co-sign seal** (party A): build the resolved partial from
 /// `network`/`intent`/`fetched`, attach the supplied authorizations, and seal deterministically with
@@ -409,45 +401,37 @@ pub struct StealthScanInput {
 }
 
 /// A serde-friendly mirror of [`StealthKeys`] (the core type carries secret material and does not
-/// derive `Serialize`). [`VectorStealthKeys::to_core`] reconstitutes the core bundle.
+/// derive `Serialize`). [`VectorStealthKeys::to_core`] reconstitutes the core bundle. The `seed` here
+/// is the **construction** seed (masks/AEAD/proof entropy) the stealth build consumes — the signatures
+/// are random.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorStealthKeys {
     /// The account secret key.
     pub account_secret: SecretKeyBytes,
-    /// The build seed expanded into the account-key authorization + seal nonces.
+    /// The build seed expanded into the per-output construction entropy (commitments/AEAD/proofs).
     pub seed: BuildSeed,
 }
 
 impl VectorStealthKeys {
     /// Reconstitutes the core stealth seal-key bundle.
     pub fn to_core(&self) -> StealthKeys {
-        StealthKeys::new(self.account_secret.clone(), self.seed)
+        StealthKeys::new(self.account_secret.clone())
     }
 }
 
-/// A serde-friendly mirror of [`DeterministicTransferKeys`] (the core type intentionally does **not**
-/// derive `Serialize`, since it carries secret material). The harness owns the language-neutral wire
-/// shape; [`VectorKeys::to_core`] reconstitutes the core type the operation consumes.
+/// A serde-friendly mirror of [`PublicTransferKeys`] (the core type intentionally does **not** derive
+/// `Serialize`, since it carries secret material). The harness owns the language-neutral wire shape;
+/// [`VectorKeys::to_core`] reconstitutes the core type the operation consumes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorKeys {
     /// The account secret key (authorization signer + seal signer for the single-key path).
     pub account_secret: SecretKeyBytes,
-    /// The build seed the seal expands into the pinned authorization + seal nonces.
-    pub seed: BuildSeed,
-    /// `None` ⇒ single-key (account key seals); `Some` ⇒ a distinct seal signer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seal_secret: Option<SecretKeyBytes>,
 }
 
 impl VectorKeys {
     /// Reconstitutes the core key bundle the operation consumes.
-    pub fn to_core(&self) -> DeterministicTransferKeys {
-        match &self.seal_secret {
-            None => DeterministicTransferKeys::single_key(self.account_secret.clone(), self.seed),
-            Some(seal_secret) => {
-                DeterministicTransferKeys::separate_signer(self.account_secret.clone(), seal_secret.clone(), self.seed)
-            },
-        }
+    pub fn to_core(&self) -> PublicTransferKeys {
+        PublicTransferKeys::new(self.account_secret.clone())
     }
 }
 
@@ -575,11 +559,10 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 .keys
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: encode op requires `input.keys`", fixture.name));
-            let out = build_and_encode_public_transfer_with_seed(network, intent, &keys.to_core())
+            let out = build_and_encode_public_transfer(network, intent, &keys.to_core())
                 .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
             ExpectedOutput {
-                encoded_transaction: out.encoded_transaction.to_hex(),
-                transaction_id: out.transaction_id.to_hex(),
+                sealed_transaction_semantic: Some(decoded_semantic_transaction(&fixture.name, &out)),
                 ..Default::default()
             }
         },
@@ -602,11 +585,20 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                     fixture.name
                 )
             });
-            let out = resolve_and_encode_public_transfer_with_seed(network, intent, fetched, &keys.to_core())
-                .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
+            let (partial, _wants) = build_public_transfer_unsigned_with_wants(network, intent)
+                .unwrap_or_else(|e| panic!("fixture `{}`: build-with-wants failed: {e}", fixture.name));
+            let resolved = match apply_fetched_substates(partial, fetched)
+                .unwrap_or_else(|e| panic!("fixture `{}`: apply failed: {e}", fixture.name))
+            {
+                Resolution::Resolved(p) => p,
+                Resolution::NeedMore { .. } => {
+                    panic!("fixture `{}`: did not resolve from the fetched batch", fixture.name)
+                },
+            };
+            let out = seal_and_encode_public_transfer(resolved, &keys.to_core())
+                .unwrap_or_else(|e| panic!("fixture `{}`: seal failed: {e}", fixture.name));
             ExpectedOutput {
-                encoded_transaction: out.encoded_transaction.to_hex(),
-                transaction_id: out.transaction_id.to_hex(),
+                sealed_transaction_semantic: Some(decoded_semantic_transaction(&fixture.name, &out)),
                 ..Default::default()
             }
         },
@@ -626,11 +618,20 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: encode op requires `input.keys`", fixture.name));
             let fetched = input.fetched.as_deref().unwrap_or(&[]);
-            let out = resolve_and_encode_instructions_with_seed(network, intent, fetched, &keys.to_core())
-                .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
+            let (partial, _wants) = build_unsigned_instructions_with_wants(network, intent)
+                .unwrap_or_else(|e| panic!("fixture `{}`: build-with-wants failed: {e}", fixture.name));
+            let resolved = match apply_fetched_substates(partial, fetched)
+                .unwrap_or_else(|e| panic!("fixture `{}`: apply failed: {e}", fixture.name))
+            {
+                Resolution::Resolved(p) => p,
+                Resolution::NeedMore { .. } => {
+                    panic!("fixture `{}`: did not resolve from the fetched batch", fixture.name)
+                },
+            };
+            let out = seal_and_encode_public_transfer(resolved, &keys.to_core())
+                .unwrap_or_else(|e| panic!("fixture `{}`: seal failed: {e}", fixture.name));
             ExpectedOutput {
-                encoded_transaction: out.encoded_transaction.to_hex(),
-                transaction_id: out.transaction_id.to_hex(),
+                sealed_transaction_semantic: Some(decoded_semantic_transaction(&fixture.name, &out)),
                 ..Default::default()
             }
         },
@@ -662,11 +663,10 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                     fixture.name
                 ),
             };
-            let out = seal_and_encode_public_transfer_with_seed(resolved, &keys.to_core())
+            let out = seal_and_encode_public_transfer(resolved, &keys.to_core())
                 .unwrap_or_else(|e| panic!("fixture `{}`: seal failed: {e}", fixture.name));
             ExpectedOutput {
-                encoded_transaction: out.encoded_transaction.to_hex(),
-                transaction_id: out.transaction_id.to_hex(),
+                sealed_transaction_semantic: Some(decoded_semantic_transaction(&fixture.name, &out)),
                 ..Default::default()
             }
         },
@@ -940,26 +940,16 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 ..Default::default()
             }
         },
-        OP_COSIGN_ADD_SIGNATURE => {
-            let (record, seal_pk, signer_secret, seed) = cosign_authorize_inputs(fixture);
-            let auth = ootle_sdk_core::add_signature_with_seed(&record, &seal_pk, &signer_secret, &seed)
-                .unwrap_or_else(|e| panic!("fixture `{}`: cosign add_signature failed: {e}", fixture.name));
-            let value = serde_json::to_value(&auth).expect("Authorization serializes");
-            ExpectedOutput {
-                cosign_authorization: Some(canonicalize_json(value)),
-                ..Default::default()
-            }
-        },
         OP_COSIGN_SEAL_WITH_AUTH => {
-            let (record, seal_pk, signer_secret, seed) = cosign_authorize_inputs(fixture);
-            let auth = ootle_sdk_core::add_signature_with_seed(&record, &seal_pk, &signer_secret, &seed)
+            let (record, seal_pk, signer_secret) = cosign_authorize_inputs(fixture);
+            let auth = add_signature(&record, &seal_pk, &signer_secret)
                 .unwrap_or_else(|e| panic!("fixture `{}`: cosign add_signature failed: {e}", fixture.name));
             let keys = fixture
                 .input
                 .keys
                 .as_ref()
                 .unwrap_or_else(|| panic!("fixture `{}`: cosign seal requires `input.keys`", fixture.name));
-            let out = ootle_sdk_core::seal_and_encode_with_auth_with_seed(
+            let out = seal_and_encode_with_auth(
                 cosign_resolved_partial(fixture),
                 &keys.to_core(),
                 std::slice::from_ref(&auth),
@@ -1009,14 +999,13 @@ fn cosign_resolved_partial(fixture: &Fixture) -> ootle_sdk_core::PartialTransact
 }
 
 /// Gathers the co-sign authorize inputs: A's resolved unsigned record + A's seal public key + B's
-/// pinned key/nonce. Shared by both co-sign ops so they derive the identical authorization.
+/// co-signer secret. B authorizes with a random nonce.
 fn cosign_authorize_inputs(
     fixture: &Fixture,
 ) -> (
     ootle_sdk_core::UnsignedTransactionRecord,
     PublicKeyBytes,
     SecretKeyBytes,
-    BuildSeed,
 ) {
     let record = ootle_sdk_core::unsigned_record_for_cosign(&cosign_resolved_partial(fixture))
         .unwrap_or_else(|e| panic!("fixture `{}`: unsigned_record_for_cosign failed: {e}", fixture.name));
@@ -1033,13 +1022,7 @@ fn cosign_authorize_inputs(
             fixture.name
         )
     });
-    let seed = fixture.input.cosign_signer_seed.unwrap_or_else(|| {
-        panic!(
-            "fixture `{}`: cosign op requires `input.cosign_signer_seed`",
-            fixture.name
-        )
-    });
-    (record, seal_pk, signer_secret, seed)
+    (record, seal_pk, signer_secret)
 }
 
 /// Decodes a keygen fixture's lowercase-hex `input.seed` into a fixed 32-byte seed (panics with a clear

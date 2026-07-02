@@ -76,7 +76,6 @@ pub use sign_seal::{
     build_and_encode_stealth_transfer,
     build_and_encode_stealth_transfer_with_seed,
     seal_and_encode_stealth_transfer,
-    seal_and_encode_stealth_transfer_with_seed,
 };
 
 /// Stealth **receive / scan**: the pure, RNG-free `scan_stealth_output` that decrypts an inbound

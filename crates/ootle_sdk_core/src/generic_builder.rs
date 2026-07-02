@@ -38,15 +38,9 @@ use tari_ootle_transaction::{
 use tari_template_lib_types::{OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
-    FetchedSubstate,
     PartialTransaction,
-    Resolution,
     WantItem,
     WantList,
-    apply_fetched_substates,
-    keys::DeterministicTransferKeys,
-    public_transfer::EncodedPublicTransfer,
-    resolved_transfer::seal_and_encode_public_transfer_with_seed,
     types::{
         error::OotleSdkError,
         generic_intent::{
@@ -116,29 +110,6 @@ pub(crate) fn build_unsigned_instructions_with_extra_wants(
     let wants = WantList(dedup_wants(wants.0));
     let partial = PartialTransaction::new_for_wants_with_extra_inputs(unsigned, wants.clone(), extra_inputs);
     Ok((partial, wants))
-}
-
-/// One-shot convenience for the single-round case: build with wants → apply exactly one fetched
-/// batch → seal/encode (seed-reproducible).
-///
-/// If applying `fetched` does not fully resolve the partial this returns
-/// [`OotleSdkError::Resolution`]; it does not loop. Drive multi-round resolution via
-/// [`apply_fetched_substates`].
-pub fn resolve_and_encode_instructions_with_seed(
-    network: Network,
-    intent: &GenericTransactionIntent,
-    fetched: &[FetchedSubstate],
-    keys: &DeterministicTransferKeys,
-) -> Result<EncodedPublicTransfer, OotleSdkError> {
-    let (partial, _wants) = build_unsigned_instructions_with_wants(network, intent)?;
-    match apply_fetched_substates(partial, fetched)? {
-        Resolution::Resolved(resolved) => seal_and_encode_public_transfer_with_seed(resolved, keys),
-        Resolution::NeedMore { want_list, .. } => Err(OotleSdkError::Resolution(format!(
-            "single-round resolution incomplete: {} want(s) still outstanding after the fetched batch — fetch the \
-             remaining substates and drive the multi-round loop via apply_fetched_substates",
-            want_list.0.len(),
-        ))),
-    }
 }
 
 /// Builds a [`TransactionBuilder`] for `network`: lowers the fee phase (fee instructions + the fee
@@ -530,10 +501,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        keys::DeterministicTransferKeys,
+        FetchedSubstate,
+        Resolution,
+        apply_fetched_substates,
+        resolved_transfer::resolved_unsigned,
         types::{
             address::{ComponentAddressStr, ResourceAddressStr},
-            bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
+            bytes::PublicKeyBytes,
             intent::InputRef,
             numeric::BoundaryAmount,
         },
@@ -545,13 +519,6 @@ mod tests {
         let mut b = [0u8; 32];
         b[0] = seed;
         tari_crypto::ristretto::RistrettoSecretKey::from_canonical_bytes(&b).expect("low scalar is canonical")
-    }
-
-    fn det_keys() -> DeterministicTransferKeys {
-        DeterministicTransferKeys::single_key(
-            SecretKeyBytes::from_bytes(fixed_scalar(11).as_bytes()).unwrap(),
-            BuildSeed::from_array([0x42; 32]),
-        )
     }
 
     fn from_component() -> ComponentAddress {
@@ -861,19 +828,22 @@ mod tests {
 
     // --- Superset proof: the generic front-end equals the builder's native lowering --------------
 
-    /// A generic intent lowered through `build_unsigned_instructions_with_wants` seals to
-    /// byte-identical output as the same instruction sequence hand-built on the builder's own methods
-    /// and sealed through the same leaves — the generic front-end produces the same transaction as the
-    /// hand-built flow.
+    /// A generic intent lowered through `build_unsigned_instructions_with_wants` lowers to the
+    /// identical canonical unsigned transaction as the same instruction sequence hand-built on the
+    /// builder's own methods — the generic front-end produces the same transaction as the hand-built
+    /// flow (the signatures, added at seal time, are random and so compared elsewhere).
     #[test]
-    fn generic_seals_byte_identically_to_hand_built_builder() {
+    fn generic_lowers_identically_to_hand_built_builder() {
         let intent = transfer_intent(vec![InputRef::versioned(from_component().to_string(), 0)]);
 
-        // Generic path: lower → resolve (empty batch, explicit inputs) → seal/encode deterministically.
-        let generic = resolve_and_encode_instructions_with_seed(Network::Esmeralda, &intent, &[], &det_keys()).unwrap();
+        // Generic path: lower → resolve (empty batch, explicit inputs) → canonical unsigned.
+        let (partial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();
+        let generic = match apply_fetched_substates(partial, &[]).unwrap() {
+            Resolution::Resolved(p) => resolved_unsigned(p).unwrap(),
+            Resolution::NeedMore { .. } => panic!("expected Resolved"),
+        };
 
-        // Hand-built path: the IDENTICAL instruction sequence via the builder's own methods, then the
-        // SAME seal/encode leaves the generic path reuses.
+        // Hand-built path: the IDENTICAL instruction sequence via the builder's own methods.
         let hand = {
             use tari_ootle_transaction::args;
             // Mirror the generic path exactly: inputs are carried ONLY by `new_with_explicit_inputs`
@@ -890,24 +860,24 @@ mod tests {
                     .to_internal()
                     .unwrap(),
             ]);
-            let resolved = match apply_fetched_substates(partial, &[]).unwrap() {
-                Resolution::Resolved(p) => p,
+            match apply_fetched_substates(partial, &[]).unwrap() {
+                Resolution::Resolved(p) => resolved_unsigned(p).unwrap(),
                 Resolution::NeedMore { .. } => panic!("expected Resolved"),
-            };
-            seal_and_encode_public_transfer_with_seed(resolved, &det_keys()).unwrap()
+            }
         };
 
         assert_eq!(
-            generic.encoded_transaction, hand.encoded_transaction,
-            "generic front-end must seal to byte-identical bytes as the hand-built builder"
+            serde_json::to_value(&generic).unwrap(),
+            serde_json::to_value(&hand).unwrap(),
+            "generic front-end must lower to the identical canonical unsigned tx as the hand-built builder"
         );
-        assert_eq!(generic.transaction_id, hand.transaction_id, "and the transaction id");
     }
 
-    /// Multi-round resolution still seals byte-identically (the `canonicalize_inputs` sort holds): a
-    /// resolved (want-list) intent resolved in two rounds equals the single-round resolution.
+    /// Multi-round resolution stays canonical (the `canonicalize_inputs` sort holds): a resolved
+    /// (want-list) intent resolved in two rounds yields the identical unsigned tx as the single-round
+    /// resolution.
     #[test]
-    fn multi_round_resolution_stays_byte_stable() {
+    fn multi_round_resolution_stays_canonical() {
         let intent = transfer_intent(vec![]);
 
         // Single-round: fee-vault component + its vault in one batch.
@@ -921,7 +891,7 @@ mod tests {
                 fetched(SubstateId::Vault(from_vault_id()), vault_substate_json(TARI_TOKEN)),
             ];
             match apply_fetched_substates(partial, &batch).unwrap() {
-                Resolution::Resolved(p) => seal_and_encode_public_transfer_with_seed(p, &det_keys()).unwrap(),
+                Resolution::Resolved(p) => resolved_unsigned(p).unwrap(),
                 Resolution::NeedMore { .. } => panic!("expected Resolved"),
             }
         };
@@ -942,14 +912,15 @@ mod tests {
                 vault_substate_json(TARI_TOKEN),
             )];
             match apply_fetched_substates(partial, &r2).unwrap() {
-                Resolution::Resolved(p) => seal_and_encode_public_transfer_with_seed(p, &det_keys()).unwrap(),
+                Resolution::Resolved(p) => resolved_unsigned(p).unwrap(),
                 Resolution::NeedMore { .. } => panic!("expected Resolved"),
             }
         };
 
         assert_eq!(
-            single, two_round,
-            "single-round and multi-round resolution must seal identically (canonical sort)"
+            serde_json::to_value(&single).unwrap(),
+            serde_json::to_value(&two_round).unwrap(),
+            "single-round and multi-round resolution must produce the identical canonical unsigned tx"
         );
     }
 

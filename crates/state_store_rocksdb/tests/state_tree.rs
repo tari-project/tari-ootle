@@ -187,11 +187,75 @@ fn truncate_to_version_is_shard_scoped() {
             assert!(tx.state_tree_nodes_get(shard_b, key).optional().unwrap().is_some());
         }
         assert_eq!(tx.state_tree_versions_get_latest(shard_b).unwrap(), Some(3));
-        // shard_a truncated.
+        // shard_a truncated. No nodes survive at or below the target version, so the version
+        // pointer is removed and the shard reads as an empty tree.
         for (key, _) in &nodes_v3 {
             assert!(tx.state_tree_nodes_get(shard_a, key).optional().unwrap().is_none());
         }
-        assert_eq!(tx.state_tree_versions_get_latest(shard_a).unwrap(), Some(1));
+        assert_eq!(tx.state_tree_versions_get_latest(shard_a).unwrap(), None);
+        Ok::<_, StorageError>(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn truncate_to_version_zero_keeps_genesis_v0_pointer() {
+    // Genesis substates are bootstrapped into the tree at version 0, so a shard rolled back to a
+    // checkpoint that recorded state_version 0 must keep its v0 nodes and a version pointer of 0.
+    let (db, _tmp) = create_rocksdb_with_opts(DatabaseOptions::default().with_state_history_length(0));
+    let genesis_shard = Shard::first();
+    let empty_shard = Shard::from_u32(42);
+
+    let nodes_v0 = gen_nodes(0, 5).collect::<Vec<_>>();
+    let nodes_v1 = gen_nodes(1, 5).collect::<Vec<_>>();
+    let nodes_v2 = gen_nodes(2, 5).collect::<Vec<_>>();
+
+    db.with_write_tx(|tx| {
+        // genesis_shard: bootstrapped at v0, then two consensus commits.
+        tx.state_tree_nodes_batch_insert(genesis_shard, nodes_v0.clone())
+            .unwrap();
+        tx.state_tree_nodes_batch_insert(genesis_shard, nodes_v1.clone())
+            .unwrap();
+        tx.state_tree_nodes_batch_insert(genesis_shard, nodes_v2.clone())
+            .unwrap();
+        tx.state_tree_shard_versions_set(genesis_shard, 2).unwrap();
+        // empty_shard: first state committed at v1 (no genesis substates).
+        tx.state_tree_nodes_batch_insert(empty_shard, nodes_v1.clone()).unwrap();
+        tx.state_tree_shard_versions_set(empty_shard, 1).unwrap();
+        Ok::<_, StorageError>(())
+    })
+    .unwrap();
+
+    db.with_write_tx(|tx| state_tree_truncate_to_version(tx, genesis_shard, 0))
+        .unwrap();
+    db.with_write_tx(|tx| state_tree_truncate_to_version(tx, empty_shard, 0))
+        .unwrap();
+
+    db.with_read_tx(|tx| {
+        // genesis_shard: v0 nodes survive and the pointer stays at 0.
+        for (key, _) in &nodes_v0 {
+            assert!(
+                tx.state_tree_nodes_get(genesis_shard, key)
+                    .optional()
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        for (key, _) in nodes_v1.iter().chain(&nodes_v2) {
+            assert!(
+                tx.state_tree_nodes_get(genesis_shard, key)
+                    .optional()
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert_eq!(tx.state_tree_versions_get_latest(genesis_shard).unwrap(), Some(0));
+
+        // empty_shard: nothing survives at or below v0, so the pointer is removed.
+        for (key, _) in &nodes_v1 {
+            assert!(tx.state_tree_nodes_get(empty_shard, key).optional().unwrap().is_none());
+        }
+        assert_eq!(tx.state_tree_versions_get_latest(empty_shard).unwrap(), None);
         Ok::<_, StorageError>(())
     })
     .unwrap();

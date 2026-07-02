@@ -28,6 +28,7 @@ use crate::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChangeSource,
         ConfidentialOutputModel,
         ImportedKeyId,
         KeyId,
@@ -127,6 +128,31 @@ pub trait WalletStoreWriter: CommittableStore {
         revealed_balance: Amount,
         confidential_balance: Amount,
     ) -> Result<(), WalletStorageError>;
+    // Balance Changes
+    fn balance_changes_insert(
+        &mut self,
+        account_address: &ComponentAddress,
+        vault_address: Option<&VaultId>,
+        resource_address: &ResourceAddress,
+        before_revealed_balance: &Amount,
+        after_revealed_balance: &Amount,
+        before_confidential_balance: &Amount,
+        after_confidential_balance: &Amount,
+        source: &BalanceChangeSource,
+    ) -> Result<(), WalletStorageError>;
+
+    /// Promote a scan entry to a transaction entry. Called when a transaction finalizes and the
+    /// vault balance was already updated by a prior scan. Finds the matching scan entry for the
+    /// same vault with the same final balances and updates its source to Transaction with the
+    /// given transaction_id.
+    fn balance_changes_promote_scan_to_transaction(
+        &mut self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+        after_revealed_balance: &Amount,
+        after_confidential_balance: &Amount,
+    ) -> Result<(), WalletStorageError>;
+
     fn vaults_lock_revealed_funds(
         &mut self,
         lock_id: WalletLockId,

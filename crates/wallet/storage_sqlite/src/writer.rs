@@ -41,6 +41,8 @@ use tari_ootle_wallet_sdk::{
         AddressBookEntry,
         ApiKey,
         AuthoredTemplateModel,
+        BalanceChange,
+        BalanceChangeSource,
         ConfidentialOutputModel,
         ImportedKeyId,
         KeyId,
@@ -782,6 +784,132 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 entity: "vault".to_string(),
                 key: vault_id.to_string(),
             });
+        }
+
+        Ok(())
+    }
+
+    fn balance_changes_insert(
+        &mut self,
+        account_address: &ComponentAddress,
+        vault_address: Option<&VaultId>,
+        resource_address: &ResourceAddress,
+        before_revealed_balance: &Amount,
+        after_revealed_balance: &Amount,
+        before_confidential_balance: &Amount,
+        after_confidential_balance: &Amount,
+        source: &BalanceChangeSource,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "balance_changes_insert";
+        use crate::schema::{account_balance_changes, accounts, vaults};
+
+        let account_id = accounts::table
+            .select(accounts::id)
+            .filter(accounts::address.eq(account_address.to_string()))
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "account".to_string(),
+                key: account_address.to_string(),
+            })?;
+
+        let vault_db_id = match vault_address {
+            Some(vault_addr) => {
+                let vid = vaults::table
+                    .select(vaults::id)
+                    .filter(vaults::address.eq(vault_addr.to_string()))
+                    .first::<i32>(self.connection())
+                    .optional()
+                    .map_err(|e| WalletStorageError::general(OPERATION, e))?
+                    .ok_or_else(|| WalletStorageError::NotFound {
+                        operation: OPERATION,
+                        entity: "vault".to_string(),
+                        key: vault_addr.to_string(),
+                    })?;
+                Some(vid)
+            },
+            None => None,
+        };
+
+        let source_str = models::balance_change_source_to_string(source);
+        let transaction_id = match source {
+            BalanceChangeSource::Transaction { transaction_id } => Some(transaction_id.to_string()),
+            _ => None,
+        };
+
+        let values = (
+            account_balance_changes::vault_id.eq(vault_db_id),
+            account_balance_changes::account_id.eq(account_id),
+            account_balance_changes::resource_address.eq(resource_address.to_string()),
+            account_balance_changes::before_revealed_balance.eq(before_revealed_balance.to_string()),
+            account_balance_changes::after_revealed_balance.eq(after_revealed_balance.to_string()),
+            account_balance_changes::before_confidential_balance.eq(before_confidential_balance.to_string()),
+            account_balance_changes::after_confidential_balance.eq(after_confidential_balance.to_string()),
+            account_balance_changes::revealed_delta.eq(BalanceChange::compute_delta(
+                *before_revealed_balance,
+                *after_revealed_balance,
+            )),
+            account_balance_changes::confidential_delta.eq(BalanceChange::compute_delta(
+                *before_confidential_balance,
+                *after_confidential_balance,
+            )),
+            account_balance_changes::source.eq(source_str),
+            account_balance_changes::transaction_id.eq(transaction_id),
+        );
+
+        diesel::insert_into(account_balance_changes::table)
+            .values(values)
+            .on_conflict_do_nothing()
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn balance_changes_promote_scan_to_transaction(
+        &mut self,
+        vault_id: &VaultId,
+        transaction_id: &TransactionId,
+        after_revealed_balance: &Amount,
+        after_confidential_balance: &Amount,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "balance_changes_promote_scan_to_transaction";
+        use crate::schema::{account_balance_changes, vaults};
+
+        let vault_db_id = vaults::table
+            .select(vaults::id)
+            .filter(vaults::address.eq(vault_id.to_string()))
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "vault".to_string(),
+                key: vault_id.to_string(),
+            })?;
+
+        let scan_id = account_balance_changes::table
+            .select(account_balance_changes::id)
+            .filter(account_balance_changes::vault_id.eq(vault_db_id))
+            .filter(account_balance_changes::source.eq("Scan"))
+            .filter(account_balance_changes::transaction_id.is_null())
+            .filter(account_balance_changes::after_revealed_balance.eq(after_revealed_balance.to_string()))
+            .filter(account_balance_changes::after_confidential_balance.eq(after_confidential_balance.to_string()))
+            .order(account_balance_changes::created_at.desc())
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if let Some(id) = scan_id {
+            diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
+                .set((
+                    account_balance_changes::source.eq("Transaction"),
+                    account_balance_changes::transaction_id.eq(Some(transaction_id.to_string())),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         }
 
         Ok(())

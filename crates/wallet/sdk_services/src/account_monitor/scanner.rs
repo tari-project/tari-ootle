@@ -17,10 +17,19 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
     apis::substate::ValidatorScanResult,
-    models::{AccountChangedEvent, AccountCreatedEvent, AccountUpdate, NewAccountData, NonFungibleToken, WalletEvent},
+    models::{
+        AccountChangedEvent,
+        AccountCreatedEvent,
+        AccountUpdate,
+        BalanceChangeSource,
+        NewAccountData,
+        NonFungibleToken,
+        WalletEvent,
+    },
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
+    Amount,
     ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
@@ -46,7 +55,11 @@ where TSpec: WalletSdkSpec
         Self { notify, wallet_sdk }
     }
 
-    pub async fn refresh_account(&self, account_address: ComponentAddress) -> Result<bool, AccountMonitorError> {
+    pub async fn refresh_account(
+        &self,
+        account_address: ComponentAddress,
+        source: BalanceChangeSource,
+    ) -> Result<bool, AccountMonitorError> {
         info!(
             target: LOG_TARGET,
             "🏦 Refreshing account {}", account_address
@@ -140,8 +153,14 @@ where TSpec: WalletSdkSpec
             if let Some(account_addr) = account_substate_id.substate_id().as_component_address() {
                 self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
                     .await?;
-                self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default())
-                    .await?;
+                self.refresh_vault(
+                    account_addr,
+                    *vault_id,
+                    &latest_vault,
+                    Default::default(),
+                    source.clone(),
+                )
+                .await?;
             }
 
             self.notify.notify(AccountChangedEvent {
@@ -160,6 +179,7 @@ where TSpec: WalletSdkSpec
         vault_id: VaultId,
         latest_vault: &Vault,
         updated_nft_data: HashMap<NonFungibleId, NonFungibleContainer>,
+        source: BalanceChangeSource,
     ) -> Result<bool, AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
 
@@ -250,6 +270,7 @@ where TSpec: WalletSdkSpec
         let new_confidential_balance = outputs_api.get_unspent_balance(&vault_id)?;
 
         if maybe_current_vault
+            .as_ref()
             .is_none_or(|v| v.confidential_balance != new_confidential_balance || v.revealed_balance != new_balance)
         {
             info!(
@@ -261,7 +282,43 @@ where TSpec: WalletSdkSpec
                 new_confidential_balance
             );
             accounts_api.update_vault_balance(vault_id, new_balance, new_confidential_balance)?;
+
+            let before_revealed = maybe_current_vault
+                .as_ref()
+                .map(|v| v.revealed_balance)
+                .unwrap_or(Amount::zero());
+            let before_confidential = maybe_current_vault
+                .as_ref()
+                .map(|v| v.confidential_balance)
+                .unwrap_or(Amount::zero());
+
+            accounts_api.balance_changes_insert(
+                &account_address,
+                Some(&vault_id),
+                latest_vault.resource_address(),
+                &before_revealed,
+                &new_balance,
+                &before_confidential,
+                &new_confidential_balance,
+                &source,
+            )?;
             has_changed = true;
+        } else if let BalanceChangeSource::Transaction { transaction_id } = &source &&
+            let Err(e) = accounts_api.balance_changes_promote_scan_to_transaction(
+                &vault_id,
+                transaction_id,
+                &new_balance,
+                &new_confidential_balance,
+            )
+        {
+            warn!(
+                target: LOG_TARGET,
+                "Failed to promote scan entry for vault {}: {}",
+                vault_id,
+                e
+            );
+        } else {
+            // Source is Scan or Recovery with no balance change — nothing to promote.
         }
 
         Ok(has_changed)
@@ -513,7 +570,13 @@ where TSpec: WalletSdkSpec
                         .collect();
 
                     has_changed |= self
-                        .refresh_vault(account_address, *vault_id, vault, updated_nfts)
+                        .refresh_vault(
+                            account_address,
+                            *vault_id,
+                            vault,
+                            updated_nfts,
+                            BalanceChangeSource::Transaction { transaction_id: tx_id },
+                        )
                         .await?;
                 }
             }
@@ -587,12 +650,30 @@ where TSpec: WalletSdkSpec
                 .collect();
 
             // Update the vault balance / confidential outputs
-            self.refresh_vault(account_addr, vault_id, vault, updated_nfts).await?;
+            self.refresh_vault(
+                account_addr,
+                vault_id,
+                vault,
+                updated_nfts,
+                BalanceChangeSource::Transaction { transaction_id: tx_id },
+            )
+            .await?;
             updated_accounts.insert((account_addr, account_version));
         }
 
-        // Update UTXOs
+        // Snapshot current stealth balances before processing UTXOs
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let all_accounts = accounts_api.get_many(0, usize::MAX)?;
+        let mut stealth_balances_before: HashMap<(ComponentAddress, ResourceAddress), Amount> = HashMap::new();
+        for account in &all_accounts {
+            let addr = *account.component_address();
+            let resources = accounts_api.get_associated_stealth_resources(&addr)?;
+            for resource in &resources {
+                let balance = stealth_outputs_api.get_unspent_balance(resource)?.balance;
+                stealth_balances_before.insert((addr, *resource), balance);
+            }
+        }
+
         let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo()).map(|(id, s)| {
             let utxo = s
                 .substate_value()
@@ -601,8 +682,36 @@ where TSpec: WalletSdkSpec
             (id.as_utxo_address().expect("is_utxo checked"), utxo)
         });
 
-        // TODO: if we submitted this transaction, we could let this part of the code know which outputs are ours
         stealth_outputs_api.verify_and_update_outputs(utxos)?;
+
+        // Record balance changes for any stealth UTXOs newly recovered in this transaction
+        for account in &all_accounts {
+            let addr = *account.component_address();
+            let resources = accounts_api.get_associated_stealth_resources(&addr)?;
+            for resource in &resources {
+                let before = stealth_balances_before
+                    .get(&(addr, *resource))
+                    .copied()
+                    .unwrap_or(Amount::zero());
+                let after = stealth_outputs_api.get_unspent_balance(resource)?.balance;
+                if before != after {
+                    let vault = accounts_api.get_vault_by_resource(&addr, resource).ok();
+                    let vault_address = vault.as_ref().map(|v| v.id);
+                    let revealed_balance = vault.map(|v| v.revealed_balance).unwrap_or(Amount::zero());
+                    let source = BalanceChangeSource::Transaction { transaction_id: tx_id };
+                    accounts_api.balance_changes_insert(
+                        &addr,
+                        vault_address.as_ref(),
+                        resource,
+                        &revealed_balance,
+                        &revealed_balance,
+                        &before,
+                        &after,
+                        &source,
+                    )?;
+                }
+            }
+        }
 
         if let Some(account) = new_account {
             debug!(

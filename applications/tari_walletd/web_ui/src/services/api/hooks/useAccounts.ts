@@ -48,6 +48,7 @@ import {
   accountsGetDefault,
   accountsList,
   accountsRename,
+  accountsSetDefault,
   accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
@@ -111,6 +112,24 @@ export const useAccountsRename = () => {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
       queryClient.invalidateQueries({ queryKey: [`accounts_get_${variables.account}`] });
+      queryClient.refetchQueries({ queryKey: ["accounts"] });
+    },
+  });
+};
+
+export type AccountsSetDefaultMutate = {
+  account: ComponentAddress;
+};
+
+export const useAccountsSetDefault = () => {
+  return useMutation({
+    mutationFn: async (req: AccountsSetDefaultMutate) => {
+      return await accountsSetDefault({
+        account: { ComponentAddress: req.account },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
       queryClient.refetchQueries({ queryKey: ["accounts"] });
     },
   });

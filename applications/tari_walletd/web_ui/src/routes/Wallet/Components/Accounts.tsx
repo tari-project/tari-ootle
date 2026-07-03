@@ -20,16 +20,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsCreate, useAccountsList } from "@api/hooks/useAccounts";
+import { useAccountsCreate, useAccountsList, useAccountsSetDefault } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
 import CopyAddress from "@components/CopyAddress";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
-import { ChevronRight } from "@mui/icons-material";
+import { ChevronRight, Star, StarBorder } from "@mui/icons-material";
 import AddIcon from "@mui/icons-material/Add";
 import Button from "@mui/material/Button";
 import Fade from "@mui/material/Fade";
 import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -40,10 +41,19 @@ import TextField from "@mui/material/TextField";
 import { AccountInfo, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { Form, Link } from "react-router-dom";
+import { useErrorNotification } from "../../../contexts/ErrorNotificationContext";
 
-function Account({ account }: { account: AccountInfo }) {
+function Account({
+  account,
+  onSetDefault,
+  isSettingDefault,
+}: {
+  account: AccountInfo;
+  onSetDefault: (account: AccountInfo) => void;
+  isSettingDefault: boolean;
+}) {
   const {
-    account: { name, component_address },
+    account: { name, component_address, is_default },
     address,
   } = account;
   return (
@@ -71,6 +81,26 @@ function Account({ account }: { account: AccountInfo }) {
         <CopyAddress address={address} />
       </DataTableCell>
       <DataTableCell>
+        {is_default ? (
+          <Tooltip title="Default account">
+            <Star color="primary" fontSize="small" data-testid="default-account-indicator" />
+          </Tooltip>
+        ) : (
+          <Tooltip title="Set as default">
+            <span>
+              <IconButton
+                aria-label="Set as default account"
+                size="small"
+                disabled={isSettingDefault}
+                onClick={() => onSetDefault(account)}
+              >
+                <StarBorder fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        )}
+      </DataTableCell>
+      <DataTableCell>
         <IconButton component={Link} to={`/accounts/${substateIdToString(component_address)}`}>
           <ChevronRight />
         </IconButton>
@@ -94,6 +124,19 @@ function Accounts() {
   } = useAccountsList(0, 10);
 
   const { mutateAsync: mutateAddAccount } = useAccountsCreate();
+  const { showError, showSuccess } = useErrorNotification();
+  const { mutate: setDefaultAccount, isPending: isSettingDefault } = useAccountsSetDefault();
+
+  const onSetDefault = (account: AccountInfo) => {
+    setDefaultAccount(
+      { account: account.account.component_address },
+      {
+        onSuccess: () => showSuccess("Default account updated"),
+        onError: (error: unknown) =>
+          showError(error instanceof Error ? error.message : "Failed to set default account"),
+      },
+    );
+  };
 
   const showAddAccountDialog = (setElseToggle: boolean = !showAccountDialog) => {
     setShowAddAccountDialog(setElseToggle);
@@ -183,13 +226,19 @@ function Accounts() {
                   <TableCell>Component</TableCell>
                   <TableCell>Key index</TableCell>
                   <TableCell>Address</TableCell>
+                  <TableCell>Default</TableCell>
                   <TableCell>Details</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {dataAccountsList &&
                   dataAccountsList.accounts.map((account: AccountInfo, index) => (
-                    <Account account={account} key={index} />
+                    <Account
+                      account={account}
+                      key={index}
+                      onSetDefault={onSetDefault}
+                      isSettingDefault={isSettingDefault}
+                    />
                   ))}
               </TableBody>
             </Table>

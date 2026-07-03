@@ -4,6 +4,7 @@
 import CopyAddress from "@components/CopyAddress";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
+import { useTimeAgo } from "@hooks/useTimeAgo";
 import {
   Button,
   Dialog,
@@ -94,6 +95,14 @@ function NewBalance({ change, showBalance }: { change: BalanceChange; showBalanc
       )}
     </Stack>
   );
+}
+
+function ChangeTimestamp({ timestamp }: { timestamp: string | null | undefined }) {
+  const timeAgo = useTimeAgo(timestamp);
+  if (!timeAgo) {
+    return <>Unknown</>;
+  }
+  return <span title={formatTimestamp(timestamp) || undefined}>{timeAgo}</span>;
 }
 
 function Source({ change }: { change: BalanceChange }) {
@@ -213,7 +222,7 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
           <TableHead>
             <TableRow>
               <TableCell>Timestamp</TableCell>
-              <TableCell>Resource</TableCell>
+              {!resourceAddress && <TableCell>Resource</TableCell>}
               <TableCell>Change</TableCell>
               <TableCell>New Balance</TableCell>
               <TableCell>Source</TableCell>
@@ -222,10 +231,14 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
           <TableBody>
             {data?.changes.map((change) => (
               <TableRow key={change.id}>
-                <DataTableCell>{formatTimestamp(change.created_at) || "Unknown"}</DataTableCell>
                 <DataTableCell>
-                  <CopyAddress address={change.resource_address} display={change.token_symbol || undefined} />
+                  <ChangeTimestamp timestamp={change.created_at} />
                 </DataTableCell>
+                {!resourceAddress && (
+                  <DataTableCell>
+                    <CopyAddress address={change.resource_address} display={change.token_symbol || undefined} />
+                  </DataTableCell>
+                )}
                 <DataTableCell>
                   <ChangeValues change={change} showBalance={showBalance} />
                 </DataTableCell>
@@ -239,7 +252,7 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
             ))}
             {data?.changes.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} align="center">
+                <TableCell colSpan={resourceAddress ? 4 : 5} align="center">
                   No balance changes recorded yet.
                 </TableCell>
               </TableRow>

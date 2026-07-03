@@ -810,6 +810,28 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .transpose()
     }
 
+    fn balance_changes_get_latest_recorded(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<Option<BalanceChange>, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_get_latest_recorded";
+        use crate::schema::account_balance_changes;
+
+        account_balance_changes::table
+            .filter(account_balance_changes::account_address.eq(account_addr.to_string()))
+            .filter(account_balance_changes::resource_address.eq(resource_address.to_string()))
+            .order((
+                account_balance_changes::created_at.desc(),
+                account_balance_changes::id.desc(),
+            ))
+            .first::<models::BalanceChangeRecord>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .map(models::BalanceChangeRecord::try_into_balance_change)
+            .transpose()
+    }
+
     // -------------------------------- Resources -------------------------------- //
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError> {
         const OPERATION: &str = "resources_get";

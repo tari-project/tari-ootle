@@ -504,6 +504,16 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         divisibility: u8,
     ) -> Result<(), AccountsApiError> {
         let mut tx = self.store.create_write_tx()?;
+        // A stealth resource's confidential balance is the account's UTXO sum, which may already have a
+        // recorded history before the vault exists. Seed the vault with the last recorded balance so the
+        // vault refresh states only what the current transaction changed, not the whole prior balance.
+        let confidential_balance = if resource_type.is_stealth() {
+            tx.balance_changes_get_latest_recorded(&account_address, &resource_address)?
+                .map(|change| change.confidential_after)
+                .unwrap_or_default()
+        } else {
+            Amount::zero()
+        };
         tx.vaults_insert(VaultModel {
             account_address,
             id: vault_address,
@@ -511,7 +521,7 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             resource_address,
             resource_type,
             revealed_balance: Amount::zero(),
-            confidential_balance: Amount::zero(),
+            confidential_balance,
             locked_revealed_balance: Amount::zero(),
             token_symbol,
             divisibility,

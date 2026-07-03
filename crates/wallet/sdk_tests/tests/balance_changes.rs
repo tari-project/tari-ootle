@@ -350,6 +350,57 @@ fn resource_balance_history_does_not_require_a_vault() {
     assert_eq!(page.changes[1].confidential_delta, "25");
 }
 
+// A stealth vault created for an account with prior confidential history starts from the last recorded
+// balance, so the first vault refresh states only what its transaction changed.
+#[test]
+fn adding_a_stealth_vault_seeds_confidential_balance_from_history() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let second_account =
+        ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8dddddddd")
+            .unwrap();
+    let second_vault =
+        VaultId::from_str("vault_00000000000000000000000000000000000000000000000000000000000000dd").unwrap();
+    accounts
+        .add_account(
+            Some("second"),
+            &second_account,
+            KeyId::derived(KeyBranch::ViewOnlyKey, 1),
+            KeyId::derived(KeyBranch::Account, 1),
+            Epoch::zero(),
+            true,
+            false,
+        )
+        .unwrap();
+    assert!(
+        accounts
+            .record_resource_balance_change(
+                second_account,
+                TARI_TOKEN,
+                Amount::zero(),
+                Amount::from(1_000u64),
+                BalanceChangeSource::Scan,
+            )
+            .unwrap()
+    );
+
+    accounts
+        .add_vault(
+            second_account,
+            second_vault,
+            0,
+            TARI_TOKEN,
+            ResourceType::Stealth,
+            Some("TEST".to_string()),
+            6,
+        )
+        .unwrap();
+
+    let vault = accounts.get_vault_by_resource(&second_account, &TARI_TOKEN).unwrap();
+    assert_eq!(vault.confidential_balance, Amount::from(1_000u64));
+    assert_eq!(vault.revealed_balance, Amount::zero());
+}
+
 #[test]
 fn uncached_vaultless_resource_balance_change_is_skipped() {
     let test = Test::new();

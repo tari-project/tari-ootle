@@ -429,13 +429,14 @@ where
                                 )?;
                             }
                         } else {
-                            tx.substates_upsert_root(
+                            // A vault created by this transaction is not in the wallet's vault table yet,
+                            // but it is referenced by this component, so record the parent linkage.
+                            tx.substates_upsert_child(
+                                &parent,
                                 VersionedSubstateIdRef::new(&owned_id, child.version()),
                                 [(*child.substate_value().vault().unwrap().resource_address()).into()]
                                     .into_iter()
                                     .collect(),
-                                None,
-                                None,
                             )?;
                         }
                         continue;

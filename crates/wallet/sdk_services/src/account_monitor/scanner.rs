@@ -231,17 +231,12 @@ where TSpec: WalletSdkSpec
             },
         }
 
-        if let Some(transaction_id) = source.transaction_id() &&
-            accounts_api.attribute_balance_change_to_transaction(&vault_id, vault_version, transaction_id)?
-        {
-            info!(
-                target: LOG_TARGET,
-                "🔒️ transaction {} already attributed to vault {} version {}; skipping replayed vault update",
-                transaction_id,
-                vault_id,
-                vault_version,
-            );
-            return Ok(false);
+        if let Some(transaction_id) = source.transaction_id() {
+            // Claim a scan-recorded change at this vault version for the transaction. A record already
+            // existing for this transaction (e.g. its finalize record) must not skip the update below: the
+            // balance-change insert merges the dimension this update adds and rejects replayed
+            // re-statements, and the vault snapshot comparison makes a full replay a no-op.
+            accounts_api.attribute_balance_change_to_transaction(&vault_id, vault_version, transaction_id)?;
         }
 
         info!(

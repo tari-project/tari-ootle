@@ -42,6 +42,7 @@ export * from "./types/tari-indexer-client/ListRecentTransactionsRequest";
 export * from "./types/tari-indexer-client/GetTransactionReceiptResponse";
 export * from "./types/tari-indexer-client/GetUtxosRequest";
 export * from "./types/tari-indexer-client/GetResourceResponse";
+export * from "./types/tari-indexer-client/GetNetworkEconomicsResponse";
 export * from "./types/tari-indexer-client/ListEpochCheckpointsResponse";
 export * from "./types/tari-indexer-client/IndexerGetTransactionResultResponse";
 export * from "./types/tari-indexer-client/TransactionEntry";

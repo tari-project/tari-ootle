@@ -197,6 +197,9 @@ pub async fn spawn_services(
     let transaction_event_notifier = Notify::new(1024);
     let validator_status = ValidatorStatusMonitor::new(epoch_manager.clone());
 
+    #[cfg(feature = "metrics")]
+    let network_state_metrics = network_state_sync::NetworkStateMetrics::register(metrics_registry);
+
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
         networking.clone(),
@@ -209,6 +212,10 @@ pub async fn spawn_services(
         event_notifier.clone(),
         transaction_event_notifier.clone(),
         validator_status.clone(),
+        #[cfg(feature = "metrics")]
+        network_state_metrics,
+        #[cfg(feature = "metrics")]
+        consensus_constants.clone(),
     )
     .spawn(shutdown.clone());
 

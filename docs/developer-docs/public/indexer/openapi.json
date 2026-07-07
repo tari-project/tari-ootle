@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.33.5"
+    "version": "0.35.1"
   },
   "paths": {
     "/epoch-checkpoints": {
@@ -205,6 +205,37 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GetConnectionsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/network/economics": {
+      "get": {
+        "tags": [
+          "handlers::network"
+        ],
+        "description": "Get network-wide XTR economic totals (claimed, burned, fee volume, supply, target rate)",
+        "operationId": "get_economics",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNetworkEconomicsResponse"
                 }
               }
             }
@@ -1409,6 +1440,58 @@
         "properties": {
           "checkpoint": {
             "type": "object"
+          }
+        }
+      },
+      "GetNetworkEconomicsResponse": {
+        "type": "object",
+        "required": [
+          "current_epoch",
+          "total_claimed",
+          "total_exhaust_burned",
+          "fee_volume",
+          "receipt_exhaust_burned",
+          "total_supply",
+          "transaction_receipt_count",
+          "target_burn_rate_bps"
+        ],
+        "properties": {
+          "current_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fee_volume": {
+            "type": "string",
+            "description": "Total pre-burn execution fees `F`, summed from transaction receipts."
+          },
+          "receipt_exhaust_burned": {
+            "type": "string",
+            "description": "Total exhaust burned summed from the same receipts as `fee_volume`; `receipt_exhaust_burned /\nfee_volume` is the exact realized burn rate. May trail `total_exhaust_burned` when the indexer has\nnot observed every receipt (pruned/lagging)."
+          },
+          "target_burn_rate_bps": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The target exhaust burn rate in basis points in effect at `current_epoch`.",
+            "minimum": 0
+          },
+          "total_claimed": {
+            "type": "string",
+            "description": "Total XTR claimed (peg-in)."
+          },
+          "total_exhaust_burned": {
+            "type": "string",
+            "description": "Total exhaust burned, sourced from checkpoint headers (authoritative, complete since genesis)."
+          },
+          "total_supply": {
+            "type": "string",
+            "description": "Circulating L2 supply: `total_claimed - total_exhaust_burned`."
+          },
+          "transaction_receipt_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of transaction receipts the indexer has stored.",
+            "minimum": 0
           }
         }
       },

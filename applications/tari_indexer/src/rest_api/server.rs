@@ -46,6 +46,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::misc::wait_until_ready,
     handlers::misc::get_epoch_manager_stats,
     handlers::network::get,
+    handlers::network::get_economics,
     handlers::network::get_network_sync_stats,
     handlers::network::get_connections,
     handlers::substates::get_substate,
@@ -150,6 +151,7 @@ impl Server {
             .route("/wait-until-ready", get(handlers::misc::wait_until_ready))
             .route("/epoch-manager/stats", get(handlers::misc::get_epoch_manager_stats))
             .route("/network", get(handlers::network::get))
+            .route("/network/economics", get(handlers::network::get_economics))
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
             .route("/network/connections", get(handlers::network::get_connections))
             .route("/validators", get(handlers::validators::list_validators))

@@ -7,6 +7,7 @@ import "./serialize";
 import type {
   Event,
   GetEpochManagerStatsResponse,
+  GetNetworkEconomicsResponse,
   GetNetworkSyncStateResponse,
   GetNonFungiblesRequest,
   GetNonFungiblesResponse,
@@ -176,6 +177,10 @@ export class IndexerClient {
 
   public resourceGetTari(): Promise<GetResourceResponse> {
     return this.transport.sendGet(`resources/tari`, {});
+  }
+
+  public getNetworkEconomics(): Promise<GetNetworkEconomicsResponse> {
+    return this.transport.sendGet(`network/economics`, {});
   }
 
   public listWatchedTemplates(): Promise<ListWatchedTemplatesResponse> {

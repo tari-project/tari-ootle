@@ -31,6 +31,8 @@ import { PiPuzzlePiece } from "react-icons/pi";
 import {
   IoBarChart,
   IoBarChartOutline,
+  IoCash,
+  IoCashOutline,
   IoEye,
   IoEyeOutline,
   IoGitNetwork,
@@ -111,6 +113,12 @@ const mainItems = [
     icon: <IoGitNetworkOutline style={iconStyle} />,
     activeIcon: <IoGitNetwork style={activeIconStyle} />,
     link: "connections",
+  },
+  {
+    title: "Economics",
+    icon: <IoCashOutline style={iconStyle} />,
+    activeIcon: <IoCash style={activeIconStyle} />,
+    link: "economics",
   },
 ];
 

@@ -18,6 +18,7 @@ use crate::{
         GetConnectionsResponse,
         GetEpochManagerStatsResponse,
         GetLatestEpochCheckpointResponse,
+        GetNetworkEconomicsResponse,
         GetNetworkInfoResponse,
         GetNetworkSyncStateResponse,
         GetNonFungiblesRequest,
@@ -99,6 +100,10 @@ impl IndexerRestApiClient {
 
     pub async fn get_connections(&self) -> Result<GetConnectionsResponse, IndexerRestClientError> {
         self.send_get("network/connections", ()).await
+    }
+
+    pub async fn get_network_economics(&self) -> Result<GetNetworkEconomicsResponse, IndexerRestClientError> {
+        self.send_get("network/economics", ()).await
     }
 
     pub async fn get_substate(

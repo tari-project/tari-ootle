@@ -8,6 +8,8 @@ use std::{
 
 use futures::StreamExt;
 use log::*;
+#[cfg(feature = "metrics")]
+use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine_types::{
     published_template::PublishedTemplateMetadata,
     substate::{SubstateId, SubstateValue},
@@ -42,6 +44,8 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::{Amount, TemplateAddress, TransactionReceiptAddress};
 use tokio::{sync::broadcast, time};
 
+#[cfg(feature = "metrics")]
+use crate::{network_state_sync::NetworkStateMetrics, store::ReadOnlyStore};
 use crate::{
     network_state_sync::{
         committee_client::{ValidatorCommitteeRpcPool, ValidatorRpcSession},
@@ -79,6 +83,10 @@ pub struct NetworkWideStateSync {
     notify: Notify<IndexerEvent>,
     transaction_event_notify: Notify<TransactionEvent>,
     validator_status: ValidatorStatusMonitor,
+    #[cfg(feature = "metrics")]
+    metrics: NetworkStateMetrics,
+    #[cfg(feature = "metrics")]
+    consensus_constants: ConsensusConstants,
 }
 
 impl NetworkWideStateSync {
@@ -90,6 +98,8 @@ impl NetworkWideStateSync {
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
         validator_status: ValidatorStatusMonitor,
+        #[cfg(feature = "metrics")] metrics: NetworkStateMetrics,
+        #[cfg(feature = "metrics")] consensus_constants: ConsensusConstants,
     ) -> Self {
         Self {
             epoch_manager,
@@ -100,6 +110,10 @@ impl NetworkWideStateSync {
             notify,
             transaction_event_notify,
             validator_status,
+            #[cfg(feature = "metrics")]
+            metrics,
+            #[cfg(feature = "metrics")]
+            consensus_constants,
         }
     }
 
@@ -134,6 +148,11 @@ impl NetworkWideStateSync {
     ) -> Result<(), NetworkStateSyncError> {
         self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
 
+        // Publish last-known totals immediately so a freshly restarted indexer reports them before its
+        // first sync round completes.
+        #[cfg(feature = "metrics")]
+        self.update_metrics().await;
+
         let mut interval = time::interval(self.config.work_interval);
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
@@ -160,7 +179,25 @@ impl NetworkWideStateSync {
         self.start_sync(sync_plan).await?;
         self.stats.log_stats();
         self.stats.reset();
+        #[cfg(feature = "metrics")]
+        self.update_metrics().await;
         Ok(())
+    }
+
+    /// Reads the persisted economic totals and publishes them to the Prometheus gauges. Metrics are
+    /// observability only, so a read failure is logged rather than propagated into the sync loop.
+    #[cfg(feature = "metrics")]
+    async fn update_metrics(&self) {
+        match ReadOnlyStore::new(self.store.clone()).get_xtr_economics().await {
+            Ok(economics) => {
+                let current_epoch = self.epoch_manager.get_current_epoch();
+                let target_burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch);
+                self.metrics.update(&economics, target_burn_rate_bps);
+            },
+            Err(err) => {
+                warn!(target: LOG_TARGET, "⚠️ Failed to update network economics metrics: {err}");
+            },
+        }
     }
 
     async fn handle_epoch_event(&mut self, event: EpochManagerEvent) -> Result<(), NetworkStateSyncError> {
@@ -494,6 +531,8 @@ impl NetworkWideStateSync {
 
         let mut is_first_iter = true;
         let mut xtr_claimed = Amount::zero();
+        let mut xtr_fees = Amount::zero();
+        let mut xtr_receipt_burn = Amount::zero();
         let mut last_version = StateVersion::new(from_version);
         let mut last_epoch = None;
         while let Some(result) = stream.next().await {
@@ -571,6 +610,8 @@ impl NetworkWideStateSync {
                     validator_fee_pools_buf,
                     template_catalogue_buf,
                     &mut xtr_claimed,
+                    &mut xtr_fees,
+                    &mut xtr_receipt_burn,
                 )?;
             }
             if batch.has_more {
@@ -601,6 +642,8 @@ impl NetworkWideStateSync {
             let event_filters = self.config.event_filters.clone();
             let watched_templates = self.config.watched_templates.clone();
             let xtr_claimed_snapshot = xtr_claimed;
+            let xtr_fees_snapshot = xtr_fees;
+            let xtr_receipt_burn_snapshot = xtr_receipt_burn;
 
             let inserted_events = self
                 .store
@@ -631,9 +674,21 @@ impl NetworkWideStateSync {
                     let claimed = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
                     let new_claimed = claimed.unwrap_or_else(Amount::zero) + xtr_claimed_snapshot;
                     tx.key_value_set(Key::XtrAccumulatedClaimed, new_claimed)?;
+                    let fees = tx.key_value_get_value(Key::XtrAccumulatedFees).optional()?;
+                    let new_fees = fees.unwrap_or_else(Amount::zero) + xtr_fees_snapshot;
+                    tx.key_value_set(Key::XtrAccumulatedFees, new_fees)?;
+                    let receipt_burn = tx.key_value_get_value(Key::XtrAccumulatedReceiptExhaustBurn).optional()?;
+                    let new_receipt_burn = receipt_burn.unwrap_or_else(Amount::zero) + xtr_receipt_burn_snapshot;
+                    tx.key_value_set(Key::XtrAccumulatedReceiptExhaustBurn, new_receipt_burn)?;
                     Ok(inserted)
                 })
                 .await?;
+
+            // The stream flushes (has_more == false) once per state version, so each commit must fold only
+            // that version's delta. Reset the running totals here, mirroring the buffer drains above.
+            xtr_claimed = Amount::zero();
+            xtr_fees = Amount::zero();
+            xtr_receipt_burn = Amount::zero();
 
             for inserted in inserted_events {
                 self.transaction_event_notify.notify(TransactionEvent {
@@ -719,6 +774,8 @@ fn extend_bufs_from_substate_update(
     validator_fee_pools_buf: &mut Vec<SubstateData>,
     template_catalogue_buf: &mut Vec<(TemplateAddress, PublishedTemplateMetadata)>,
     xtr_claimed_mut: &mut Amount,
+    xtr_fees_mut: &mut Amount,
+    xtr_receipt_burn_mut: &mut Amount,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
         SubstateUpdateProof::Create(create) => {
@@ -751,6 +808,14 @@ fn extend_bufs_from_substate_update(
                 },
                 Some(SubstateValue::TransactionReceipt(receipt)) => {
                     if let Some(address) = update.substate_id().as_transaction_receipt_address() {
+                        // Accumulate the realized-rate pair from the same receipt: `burn` is the exhaust
+                        // surcharge and `F` (fees minus burn) is the base it was charged on, so
+                        // `burn / F` recovers the rate independent of the header-sourced burn total.
+                        let fee_receipt = receipt.fee_receipt();
+                        let burn = fee_receipt.exhaust_burn_charged();
+                        *xtr_receipt_burn_mut += Amount::from(burn);
+                        *xtr_fees_mut += Amount::from(fee_receipt.total_fees_charged().saturating_sub(burn));
+
                         notify.notify(TransactionFinalizedEvent {
                             transaction_id: TransactionId::from_receipt_address(address),
                             outcome: receipt.outcome,

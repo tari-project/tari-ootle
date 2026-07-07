@@ -40,12 +40,24 @@ pub enum Key {
     /// A summary of the sync progress. Used to resume sync after restarts.
     /// type: SyncProgress
     SyncProgress,
-    /// The total accumulated amount of XTR that has been burned as exhaust.
+    /// The total accumulated amount of XTR that has been burned as exhaust, sourced from checkpoint
+    /// headers. This is the authoritative, complete-since-genesis burn total used for supply.
     /// type: Amount
     XtrAccumulatedExhaustBurn,
     /// The total accumulated amount of XTR that has been claimed.
     /// type: Amount
     XtrAccumulatedClaimed,
+    /// The total accumulated pre-burn execution fees (`F`), summed from transaction receipts as
+    /// `total_fees_charged - exhaust_burn_charged`. Paired with `XtrAccumulatedReceiptExhaustBurn` (same
+    /// receipt source) it yields the realized burn rate `burn / F`.
+    /// type: Amount
+    XtrAccumulatedFees,
+    /// The total accumulated exhaust burn summed from transaction receipts (`exhaust_burn_charged`). Unlike
+    /// `XtrAccumulatedExhaustBurn` (header-sourced, authoritative for supply) this shares the receipt source
+    /// with `XtrAccumulatedFees`, so their ratio is the exact realized rate; comparing the two burn totals
+    /// reveals receipts the indexer has not observed (pruned/lagging).
+    /// type: Amount
+    XtrAccumulatedReceiptExhaustBurn,
 }
 
 impl Key {
@@ -55,6 +67,8 @@ impl Key {
             Self::SyncProgress => "sync_progress",
             Self::XtrAccumulatedClaimed => "xtr_accumulated_claimed",
             Self::XtrAccumulatedExhaustBurn => "xtr_accumulated_exhaust_burn",
+            Self::XtrAccumulatedFees => "xtr_accumulated_fees",
+            Self::XtrAccumulatedReceiptExhaustBurn => "xtr_accumulated_receipt_exhaust_burn",
         }
     }
 }

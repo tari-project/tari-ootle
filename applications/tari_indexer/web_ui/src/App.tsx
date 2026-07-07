@@ -23,6 +23,7 @@
 import { Routes, Route } from "react-router-dom";
 import ValidatorNode from "./routes/VN/ValidatorNode";
 import Connections from "./routes/Connections/Connections";
+import Economics from "./routes/Economics/Economics";
 import RecentTransactions from "./routes/RecentTransactions/RecentTransactionsLayout";
 import Resources from "./routes/Resources/Resources";
 import Events from "./routes/Events/Events";
@@ -45,6 +46,11 @@ export const breadcrumbRoutes = [
   {
     label: "Connections",
     path: "/connections",
+    dynamic: false,
+  },
+  {
+    label: "Economics",
+    path: "/economics",
     dynamic: false,
   },
   {
@@ -110,6 +116,7 @@ export default function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<ValidatorNode />} />
           <Route path="connections" element={<Connections />} />
+          <Route path="economics" element={<Economics />} />
           <Route path=":resourceAddress" element={<Resources />} />
           <Route path="transactions" element={<RecentTransactions />} />
           <Route path="transactions/:transaction_id" element={<TransactionDetails />} />

@@ -641,6 +641,19 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         deserialize_json(&receipt_entry)
     }
 
+    fn count_transaction_receipts(&mut self) -> Result<u64, StorageError> {
+        const OPERATION: &str = "count_transaction_receipts";
+        use crate::storage_sqlite::schema::transaction_receipts;
+
+        let count = transaction_receipts::table
+            .count()
+            .get_result::<i64>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+        Ok(count.max(0) as u64)
+    }
+
     // -------------------------------- KeyValues -------------------------------- //
     fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError> {
         let key_value = self.key_value_get_raw(key)?;

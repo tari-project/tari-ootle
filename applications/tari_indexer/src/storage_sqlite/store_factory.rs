@@ -186,6 +186,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn xtr_economics_round_trips() {
+        use tari_template_lib_types::Amount;
+
+        use crate::{
+            storage_sqlite::models::Key,
+            store::{IndexerStoreWriteTransaction, ReadOnlyStore},
+        };
+
+        let (_dir, store) = temp_store().await;
+        store
+            .with_write_tx(|tx| {
+                tx.key_value_set(Key::XtrAccumulatedClaimed, Amount::from(1_000u64))?;
+                tx.key_value_set(Key::XtrAccumulatedExhaustBurn, Amount::from(50u64))?;
+                tx.key_value_set(Key::XtrAccumulatedFees, Amount::from(800u64))?;
+                tx.key_value_set(Key::XtrAccumulatedReceiptExhaustBurn, Amount::from(40u64))
+            })
+            .await
+            .unwrap();
+
+        let econ = ReadOnlyStore::new(store.clone()).get_xtr_economics().await.unwrap();
+        assert_eq!(econ.total_claimed, Amount::from(1_000u64));
+        assert_eq!(econ.total_exhaust_burned, Amount::from(50u64));
+        assert_eq!(econ.fee_volume, Amount::from(800u64));
+        assert_eq!(econ.receipt_exhaust_burned, Amount::from(40u64));
+    }
+
+    #[tokio::test]
+    async fn xtr_economics_defaults_to_zero_when_unset() {
+        use tari_template_lib_types::Amount;
+
+        use crate::store::ReadOnlyStore;
+
+        let (_dir, store) = temp_store().await;
+        let econ = ReadOnlyStore::new(store.clone()).get_xtr_economics().await.unwrap();
+        assert_eq!(econ.total_claimed, Amount::zero());
+        assert_eq!(econ.fee_volume, Amount::zero());
+        assert_eq!(econ.receipt_exhaust_burned, Amount::zero());
+    }
+
+    #[tokio::test]
     async fn verified_state_roots_ring_prunes_to_sixteen() {
         let (_dir, store) = temp_store().await;
 

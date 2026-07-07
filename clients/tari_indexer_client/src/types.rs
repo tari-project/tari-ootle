@@ -834,6 +834,35 @@ pub struct GetResourceResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetNetworkEconomicsResponse {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub current_epoch: Epoch,
+    /// Total XTR claimed (peg-in).
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub total_claimed: Amount,
+    /// Total exhaust burned, sourced from checkpoint headers (authoritative, complete since genesis).
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub total_exhaust_burned: Amount,
+    /// Total pre-burn execution fees `F`, summed from transaction receipts.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub fee_volume: Amount,
+    /// Total exhaust burned summed from the same receipts as `fee_volume`; `receipt_exhaust_burned /
+    /// fee_volume` is the exact realized burn rate. May trail `total_exhaust_burned` when the indexer has
+    /// not observed every receipt (pruned/lagging).
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub receipt_exhaust_burned: Amount,
+    /// Circulating L2 supply: `total_claimed - total_exhaust_burned`.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub total_supply: Amount,
+    /// Number of transaction receipts the indexer has stored.
+    pub transaction_receipt_count: u64,
+    /// The target exhaust burn rate in basis points in effect at `current_epoch`.
+    pub target_burn_rate_bps: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListEpochCheckpointsRequest {
     /// The epoch to start listing from (inclusive). Defaults to 0.
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]

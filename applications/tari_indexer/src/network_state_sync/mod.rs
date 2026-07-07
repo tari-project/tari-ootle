@@ -5,6 +5,8 @@ mod committee_client;
 mod config;
 mod error;
 mod event_filter;
+#[cfg(feature = "metrics")]
+mod metrics;
 mod stats;
 mod sync_plan;
 mod sync_progress;
@@ -13,6 +15,8 @@ mod worker;
 
 pub use config::*;
 pub use event_filter::*;
+#[cfg(feature = "metrics")]
+pub use metrics::NetworkStateMetrics;
 pub use sync_progress::*;
 pub use validator_status::ValidatorStatusMonitor;
 pub use worker::*;

@@ -4,12 +4,13 @@
 use std::{ops::Deref, time::UNIX_EPOCH};
 
 use axum::{Extension, Json, response::Response};
-use tari_consensus::hotstuff::ConsensusCurrentState;
+use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::ConsensusCurrentState};
 use tari_indexer_client::{
     types,
     types::{
         ConnectionDirection,
         GetConnectionsResponse,
+        GetNetworkEconomicsResponse,
         GetNetworkInfoResponse,
         GetNetworkSyncStateResponse,
         NetworkDescription,
@@ -19,6 +20,7 @@ use tari_indexer_client::{
     },
 };
 use tari_ootle_common_types::optional::Optional;
+use tari_template_lib_types::Amount;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -33,6 +35,43 @@ pub async fn get(Extension(context): Extension<HandlerContext>) -> HandlerResult
         network,
     };
     Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/network/economics",
+    description = "Get network-wide XTR economic totals (claimed, burned, fee volume, supply, target rate)",
+    responses(
+        (status = 200, body = GetNetworkEconomicsResponse),
+        (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
+    ),
+)]
+pub async fn get_economics(
+    Extension(context): Extension<HandlerContext>,
+) -> HandlerResult<Json<GetNetworkEconomicsResponse>> {
+    let current_epoch = context.epoch_manager().get_current_epoch();
+    let econ = context
+        .read_only_store()
+        .get_xtr_economics()
+        .await
+        .map_err(ErrorResponse::anyhow)?;
+
+    let target_burn_rate_bps = ConsensusConstants::from(context.network()).exhaust_burn_rate(current_epoch);
+    let total_supply = econ
+        .total_claimed
+        .checked_sub(econ.total_exhaust_burned)
+        .unwrap_or_else(Amount::zero);
+
+    Ok(Json(GetNetworkEconomicsResponse {
+        current_epoch,
+        total_claimed: econ.total_claimed,
+        total_exhaust_burned: econ.total_exhaust_burned,
+        fee_volume: econ.fee_volume,
+        receipt_exhaust_burned: econ.receipt_exhaust_burned,
+        total_supply,
+        transaction_receipt_count: econ.transaction_receipt_count,
+        target_burn_rate_bps,
+    }))
 }
 
 #[utoipa::path(get, path = "/network/stats", description = "Get network sync stats",

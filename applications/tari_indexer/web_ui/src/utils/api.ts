@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import type {
+  GetNetworkEconomicsResponse,
   GetNetworkSyncStateResponse,
   IndexerGetConnectionsResponse,
   IndexerGetIdentityResponse,
@@ -92,6 +93,9 @@ export const getIdentity = (): Promise<IndexerGetIdentityResponse> => client().t
 export const getConnections = (): Promise<IndexerGetConnectionsResponse> => client().then((c) => c.getConnections());
 
 export const getNetworkStats = (): Promise<GetNetworkSyncStateResponse> => client().then((c) => c.networkStats());
+
+export const getNetworkEconomics = (): Promise<GetNetworkEconomicsResponse> =>
+  client().then((c) => c.getNetworkEconomics());
 
 export const listValidators = (params: Partial<ListValidatorsRequest> = {}): Promise<ListValidatorsResponse> =>
   client().then((c) => c.listValidators(params));

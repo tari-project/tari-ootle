@@ -57,9 +57,11 @@ pub async fn get_economics(
         .map_err(ErrorResponse::anyhow)?;
 
     let target_burn_rate_bps = ConsensusConstants::from(context.network()).exhaust_burn_rate(current_epoch);
+    // Supply nets the receipt-sourced burn against claimed (both advance on the state-sync frontier), matching
+    // `get_xtr_total_supply`; `total_exhaust_burned` (header) is reported alongside as a cross-check.
     let total_supply = econ
         .total_claimed
-        .checked_sub(econ.total_exhaust_burned)
+        .checked_sub(econ.receipt_exhaust_burned)
         .unwrap_or_else(Amount::zero);
 
     Ok(Json(GetNetworkEconomicsResponse {

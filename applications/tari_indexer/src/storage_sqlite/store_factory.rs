@@ -226,6 +226,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn xtr_total_supply_nets_receipt_burn_not_header() {
+        use tari_template_lib_types::Amount;
+
+        use crate::{
+            storage_sqlite::models::Key,
+            store::{IndexerStoreWriteTransaction, ReadOnlyStore},
+        };
+
+        let (_dir, store) = temp_store().await;
+        store
+            .with_write_tx(|tx| {
+                tx.key_value_set(Key::XtrAccumulatedClaimed, Amount::from(1_000u64))?;
+                // Deliberately different from the receipt burn to prove supply ignores the header total.
+                tx.key_value_set(Key::XtrAccumulatedExhaustBurn, Amount::from(999u64))?;
+                tx.key_value_set(Key::XtrAccumulatedReceiptExhaustBurn, Amount::from(40u64))
+            })
+            .await
+            .unwrap();
+
+        let supply = ReadOnlyStore::new(store.clone()).get_xtr_total_supply().await.unwrap();
+        assert_eq!(supply, Amount::from(960u64));
+    }
+
+    #[tokio::test]
     async fn verified_state_roots_ring_prunes_to_sixteen() {
         let (_dir, store) = temp_store().await;
 

@@ -358,8 +358,11 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
                     .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
                     .optional()?
                     .unwrap_or_default();
+                // Both `claimed` and the receipt-sourced burn advance on the state-sync frontier, so the
+                // difference is internally consistent; the header-sourced total tracks a separate
+                // (checkpoint) frontier and is kept only as a cross-check.
                 let burnt = tx
-                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedReceiptExhaustBurn)
                     .optional()?
                     .unwrap_or_default();
 

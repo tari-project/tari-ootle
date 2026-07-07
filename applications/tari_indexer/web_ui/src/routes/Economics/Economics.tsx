@@ -74,32 +74,25 @@ function EconomicsContent({ data }: { data: NonNullable<ReturnType<typeof useNet
         </StyledPaper>
       </Grid>
 
-      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 4 }}>
         <StatCard label="Total Claimed" value={toTari(data.total_claimed)} />
       </Grid>
-      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-        <StatCard label="Total Burnt" value={toTari(data.total_exhaust_burned)} />
-      </Grid>
-      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+      <Grid size={{ xs: 12, sm: 6, md: 4 }}>
         <StatCard label="Fee Volume" value={toTari(data.fee_volume)} />
       </Grid>
-      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-        <StatCard label="Transaction Receipts" value={data.transaction_receipt_count.toLocaleString()} />
+      <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+        <StatCard label="Transaction Count" value={data.transaction_receipt_count.toLocaleString()} />
       </Grid>
 
       <Grid size={12}>
         <StyledPaper>
           <Typography variant="body2" color="textSecondary" gutterBottom>
-            Burn rate — achieved vs target
+            Exhaust Burn
           </Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
-            <Typography variant="h5">
-              achieved {achievedPct === null ? "—" : `${achievedPct.toFixed(2)}%`}
-            </Typography>
-            <Typography variant="h5" color="textSecondary">
-              target {targetPct.toFixed(2)}%
-            </Typography>
-          </Box>
+          <Typography variant="h4">{toTari(data.receipt_exhaust_burned)} burnt</Typography>
+          <Typography variant="body1" color="textSecondary" sx={{ mt: 1 }}>
+            achieved {achievedPct === null ? "—" : `${achievedPct.toFixed(2)}%`} · target {targetPct.toFixed(2)}%
+          </Typography>
         </StyledPaper>
       </Grid>
     </>

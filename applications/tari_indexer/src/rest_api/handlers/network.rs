@@ -46,9 +46,7 @@ pub async fn get(Extension(context): Extension<HandlerContext>) -> HandlerResult
         (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
     ),
 )]
-pub async fn get_economics(
-    Extension(context): Extension<HandlerContext>,
-) -> HandlerResult<Json<GetNetworkEconomicsResponse>> {
+pub async fn get_economics(Extension(context): Extension<HandlerContext>) -> HandlerResult<Response> {
     let current_epoch = context.epoch_manager().get_current_epoch();
     let econ = context
         .read_only_store()
@@ -64,16 +62,19 @@ pub async fn get_economics(
         .checked_sub(econ.receipt_exhaust_burned)
         .unwrap_or_else(Amount::zero);
 
-    Ok(Json(GetNetworkEconomicsResponse {
-        current_epoch,
-        total_claimed: econ.total_claimed,
-        total_exhaust_burned: econ.total_exhaust_burned,
-        fee_volume: econ.fee_volume,
-        receipt_exhaust_burned: econ.receipt_exhaust_burned,
-        total_supply,
-        transaction_receipt_count: econ.transaction_receipt_count,
-        target_burn_rate_bps,
-    }))
+    Ok(context.apply_cache_control(
+        Json(GetNetworkEconomicsResponse {
+            current_epoch,
+            total_claimed: econ.total_claimed,
+            total_exhaust_burned: econ.total_exhaust_burned,
+            fee_volume: econ.fee_volume,
+            receipt_exhaust_burned: econ.receipt_exhaust_burned,
+            total_supply,
+            transaction_receipt_count: econ.transaction_receipt_count,
+            target_burn_rate_bps,
+        }),
+        60,
+    ))
 }
 
 #[utoipa::path(get, path = "/network/stats", description = "Get network sync stats",

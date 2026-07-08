@@ -40,7 +40,7 @@ pub async fn get(Extension(context): Extension<HandlerContext>) -> HandlerResult
 #[utoipa::path(
     get,
     path = "/network/economics",
-    description = "Get network-wide XTR economic totals (claimed, burned, fee volume, supply, target rate)",
+    description = "Get network-wide TARI economic totals (claimed, burned, fee volume, supply, target rate)",
     responses(
         (status = 200, body = GetNetworkEconomicsResponse),
         (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
@@ -50,7 +50,7 @@ pub async fn get_economics(Extension(context): Extension<HandlerContext>) -> Han
     let current_epoch = context.epoch_manager().get_current_epoch();
     let econ = context
         .read_only_store()
-        .get_xtr_economics()
+        .get_tari_economics()
         .await
         .map_err(ErrorResponse::anyhow)?;
 

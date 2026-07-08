@@ -651,7 +651,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {}", e),
             })?;
-        Ok(count.max(0) as u64)
+        u64::try_from(count).map_err(|_| StorageError::DataInconsistency {
+            details: format!("{OPERATION}: negative receipt count {count}"),
+        })
     }
 
     // -------------------------------- KeyValues -------------------------------- //

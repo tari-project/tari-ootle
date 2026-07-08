@@ -188,7 +188,7 @@ impl NetworkWideStateSync {
     /// observability only, so a read failure is logged rather than propagated into the sync loop.
     #[cfg(feature = "metrics")]
     async fn update_metrics(&self) {
-        match ReadOnlyStore::new(self.store.clone()).get_xtr_economics().await {
+        match ReadOnlyStore::new(self.store.clone()).get_tari_economics().await {
             Ok(economics) => {
                 let current_epoch = self.epoch_manager.get_current_epoch();
                 let target_burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch);
@@ -371,11 +371,11 @@ impl NetworkWideStateSync {
                             tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
 
                             let exhausted = tx
-                                .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                                .key_value_get_value::<_, Amount>(Key::TariAccumulatedExhaustBurn)
                                 .optional()?;
 
                             let new_exhausted = exhausted.unwrap_or_else(Amount::zero) + xtr_exhausted;
-                            tx.key_value_set(Key::XtrAccumulatedExhaustBurn, new_exhausted)?;
+                            tx.key_value_set(Key::TariAccumulatedExhaustBurn, new_exhausted)?;
                         }
                         tx.key_value_set(Key::SyncProgress, sync_progress_snapshot)
                     })
@@ -671,15 +671,15 @@ impl NetworkWideStateSync {
                     }
 
                     tx.key_value_set(Key::SyncProgress, sync_progress_snapshot)?;
-                    let claimed = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+                    let claimed = tx.key_value_get_value(Key::TariAccumulatedClaimed).optional()?;
                     let new_claimed = claimed.unwrap_or_else(Amount::zero) + xtr_claimed_snapshot;
-                    tx.key_value_set(Key::XtrAccumulatedClaimed, new_claimed)?;
-                    let fees = tx.key_value_get_value(Key::XtrAccumulatedFees).optional()?;
+                    tx.key_value_set(Key::TariAccumulatedClaimed, new_claimed)?;
+                    let fees = tx.key_value_get_value(Key::TariAccumulatedFees).optional()?;
                     let new_fees = fees.unwrap_or_else(Amount::zero) + xtr_fees_snapshot;
-                    tx.key_value_set(Key::XtrAccumulatedFees, new_fees)?;
-                    let receipt_burn = tx.key_value_get_value(Key::XtrAccumulatedReceiptExhaustBurn).optional()?;
+                    tx.key_value_set(Key::TariAccumulatedFees, new_fees)?;
+                    let receipt_burn = tx.key_value_get_value(Key::TariAccumulatedReceiptExhaustBurn).optional()?;
                     let new_receipt_burn = receipt_burn.unwrap_or_else(Amount::zero) + xtr_receipt_burn_snapshot;
-                    tx.key_value_set(Key::XtrAccumulatedReceiptExhaustBurn, new_receipt_burn)?;
+                    tx.key_value_set(Key::TariAccumulatedReceiptExhaustBurn, new_receipt_burn)?;
                     Ok(inserted)
                 })
                 .await?;

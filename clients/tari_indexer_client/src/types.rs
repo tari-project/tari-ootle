@@ -840,18 +840,20 @@ pub struct GetNetworkEconomicsResponse {
     /// Total XTR claimed (peg-in).
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub total_claimed: Amount,
-    /// Total exhaust burned, sourced from checkpoint headers (authoritative, complete since genesis).
+    /// Total exhaust burned, sourced from checkpoint headers (consensus-backed, complete since genesis).
+    /// Kept as a cross-check against `receipt_exhaust_burned`.
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub total_exhaust_burned: Amount,
     /// Total pre-burn execution fees `F`, summed from transaction receipts.
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub fee_volume: Amount,
     /// Total exhaust burned summed from the same receipts as `fee_volume`; `receipt_exhaust_burned /
-    /// fee_volume` is the exact realized burn rate. May trail `total_exhaust_burned` when the indexer has
-    /// not observed every receipt (pruned/lagging).
+    /// fee_volume` is the exact realized burn rate, and this is the burn netted from `total_supply`. May
+    /// transiently trail `total_exhaust_burned` while the receipt sync frontier catches up to the checkpoint
+    /// frontier.
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub receipt_exhaust_burned: Amount,
-    /// Circulating L2 supply: `total_claimed - total_exhaust_burned`.
+    /// Circulating L2 supply: `total_claimed - receipt_exhaust_burned`.
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub total_supply: Amount,
     /// Number of transaction receipts the indexer has stored.

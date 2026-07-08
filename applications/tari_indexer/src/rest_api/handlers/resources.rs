@@ -62,7 +62,7 @@ pub async fn get_resource(
         // XTR total supply is handled differently.
         let amount = context
             .read_only_store()
-            .get_xtr_total_supply()
+            .get_tari_total_supply()
             .await
             .map_err(ErrorResponse::anyhow)?;
         Some(amount)

@@ -351,18 +351,18 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             .await
     }
 
-    pub async fn get_xtr_total_supply(&self) -> Result<Amount, StorageError> {
+    pub async fn get_tari_total_supply(&self) -> Result<Amount, StorageError> {
         self.inner
             .with_read_tx(|tx| {
                 let claimed = tx
-                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
+                    .key_value_get_value::<_, Amount>(Key::TariAccumulatedClaimed)
                     .optional()?
                     .unwrap_or_default();
                 // Both `claimed` and the receipt-sourced burn advance on the state-sync frontier, so the
                 // difference is internally consistent; the header-sourced total tracks a separate
                 // (checkpoint) frontier and is kept only as a cross-check.
                 let burnt = tx
-                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedReceiptExhaustBurn)
+                    .key_value_get_value::<_, Amount>(Key::TariAccumulatedReceiptExhaustBurn)
                     .optional()?
                     .unwrap_or_default();
 
@@ -378,23 +378,23 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             .await
     }
 
-    pub async fn get_xtr_economics(&self) -> Result<XtrEconomics, StorageError> {
+    pub async fn get_tari_economics(&self) -> Result<XtrEconomics, StorageError> {
         self.inner
             .with_read_tx(|tx| {
                 let total_claimed = tx
-                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
+                    .key_value_get_value::<_, Amount>(Key::TariAccumulatedClaimed)
                     .optional()?
                     .unwrap_or_default();
                 let total_exhaust_burned = tx
-                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                    .key_value_get_value::<_, Amount>(Key::TariAccumulatedExhaustBurn)
                     .optional()?
                     .unwrap_or_default();
                 let fee_volume = tx
-                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedFees)
+                    .key_value_get_value::<_, Amount>(Key::TariAccumulatedFees)
                     .optional()?
                     .unwrap_or_default();
                 let receipt_exhaust_burned = tx
-                    .key_value_get_value::<_, Amount>(Key::XtrAccumulatedReceiptExhaustBurn)
+                    .key_value_get_value::<_, Amount>(Key::TariAccumulatedReceiptExhaustBurn)
                     .optional()?
                     .unwrap_or_default();
                 let transaction_receipt_count = tx.count_transaction_receipts()?;

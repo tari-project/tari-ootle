@@ -471,12 +471,12 @@ async fn hack_xtr_initial_supply<TStore: IndexerStore>(store: &TStore) -> anyhow
     store
         .with_write_tx(|tx| {
             // Check if the initial supply is already set
-            let existing_supply: Option<Amount> = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+            let existing_supply: Option<Amount> = tx.key_value_get_value(Key::TariAccumulatedClaimed).optional()?;
             if existing_supply.is_some() {
                 return Ok(());
             }
 
-            tx.key_value_set(Key::XtrAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
+            tx.key_value_set(Key::TariAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
                 .map_err(|e| anyhow!("Failed to set XTR initial supply in the store: {}", e))
         })
         .await

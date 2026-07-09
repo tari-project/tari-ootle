@@ -30,6 +30,10 @@ impl MetricsHandler {
     pub fn new(registry: Registry) -> Self {
         Self(Arc::new(registry))
     }
+
+    pub fn from_arc(registry: Arc<Registry>) -> Self {
+        Self(registry)
+    }
 }
 
 impl<S> axum::handler::Handler<(), S> for MetricsHandler {
@@ -84,6 +88,11 @@ pub fn register(registry: &mut Registry) -> RequestMetrics {
         ),
         response_body_size_histogram: Histogram::new(
             exponential_buckets(100.0, 2.0, 15), // buckets from 100B, doubling, 15 buckets
+        )
+        .register_at(
+            "http_response_body_size_bytes",
+            "HTTP response body size in bytes",
+            registry,
         ),
     }
 }

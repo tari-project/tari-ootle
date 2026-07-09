@@ -47,6 +47,10 @@ Main indexer application settings.
 # API server listening address (default: "127.0.0.1:18300")
 #api_listen_address = "127.0.0.1:18300"
 
+# Prometheus metrics (`GET /_metrics`) listen address (default: "127.0.0.1:18302").
+# Separate from api_listen_address so scrape traffic can stay private.
+#metrics_listen_address = "127.0.0.1:18302"
+
 # GraphQL server address (default: "127.0.0.1:18301")
 #graphql_address = "127.0.0.1:18301"
 

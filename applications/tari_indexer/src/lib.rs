@@ -128,13 +128,14 @@ where
         ));
     }
 
-    // Run the REST API
+    // Run the REST API (and optional dedicated metrics listener)
     let listen_addr = config.indexer.api_listen_address;
     if let Some(listen_addr) = listen_addr {
         #[cfg(not(feature = "metrics"))]
         let server = rest_api::Server::new();
         #[cfg(feature = "metrics")]
         let server = rest_api::Server::new(registry);
+        #[cfg(not(feature = "metrics"))]
         let listen_address = server
             .spawn(
                 listen_addr,
@@ -144,6 +145,29 @@ where
             )
             .await
             .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+        #[cfg(feature = "metrics")]
+        let (listen_address, metrics_registry) = server
+            .spawn(
+                listen_addr,
+                &services,
+                &config.indexer.rate_limits,
+                shutdown_signal.clone(),
+            )
+            .await
+            .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+        #[cfg(feature = "metrics")]
+        if let Some(metrics_addr) = config.indexer.metrics_listen_address {
+            let metrics_listen = rest_api::Server::spawn_metrics_server(
+                metrics_registry,
+                metrics_addr,
+                shutdown_signal.clone(),
+            )
+            .await
+            .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+            info!(target: LOG_TARGET, "📈 Metrics endpoint on {metrics_listen} (not on REST API)");
+        } else {
+            info!(target: LOG_TARGET, "📈 metrics_listen_address not set; /_metrics not served");
+        }
         debug!(target: LOG_TARGET, "API address {}", listen_address);
         // Run the web ui
         #[cfg(feature = "web_ui")]

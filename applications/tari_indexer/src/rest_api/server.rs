@@ -2,6 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::net::SocketAddr;
+#[cfg(feature = "metrics")]
+use std::sync::Arc;
 
 use axum::{
     Extension,
@@ -18,6 +20,8 @@ use utoipa_swagger_ui::SwaggerUi;
 
 #[cfg(feature = "metrics")]
 use crate::rest_api::metrics;
+#[cfg(feature = "metrics")]
+
 use crate::{
     bootstrap::Services,
     config::IndexerRateLimitsConfig,
@@ -93,13 +97,43 @@ impl Server {
     }
 
     #[expect(clippy::too_many_lines)]
+    #[cfg(not(feature = "metrics"))]
+    pub async fn spawn(
+        self,
+        preferred_addr: SocketAddr,
+        services: &Services,
+        rate_limits: &IndexerRateLimitsConfig,
+        shutdown: ShutdownSignal,
+    ) -> anyhow::Result<SocketAddr> {
+        self.spawn_inner(preferred_addr, services, rate_limits, shutdown)
+            .await
+            .map(|(addr, _)| addr)
+    }
+
+    /// Spawns the REST API. When the `metrics` feature is enabled, also returns the
+    /// shared Prometheus registry so `/_metrics` can be bound separately.
+    #[expect(clippy::too_many_lines)]
+    #[cfg(feature = "metrics")]
     pub async fn spawn(
         #[allow(unused_mut)] mut self,
         preferred_addr: SocketAddr,
         services: &Services,
         rate_limits: &IndexerRateLimitsConfig,
         shutdown: ShutdownSignal,
-    ) -> anyhow::Result<SocketAddr> {
+    ) -> anyhow::Result<(SocketAddr, Arc<prometheus_client::registry::Registry>)> {
+        self.spawn_inner(preferred_addr, services, rate_limits, shutdown)
+            .await
+            .map(|(addr, reg)| (addr, reg.expect("metrics registry")))
+    }
+
+    #[expect(clippy::too_many_lines)]
+    async fn spawn_inner(
+        #[allow(unused_mut)] mut self,
+        preferred_addr: SocketAddr,
+        services: &Services,
+        rate_limits: &IndexerRateLimitsConfig,
+        shutdown: ShutdownSignal,
+    ) -> anyhow::Result<(SocketAddr, Option<Arc<prometheus_client::registry::Registry>>)> {
         let context = HandlerContext::from_services(services);
 
         // Per-IP rate limiters for specific endpoint groups.
@@ -254,31 +288,56 @@ impl Server {
             .layer(Extension(context))
             .layer(TraceLayer::new_for_http());
 
+        // Request metrics middleware stays on the REST API; `/_metrics` is served on a
+        // dedicated listener (see `spawn_metrics_server`) so scrape traffic can be bound
+        // separately from the public REST surface.
         #[cfg(feature = "metrics")]
-        let router = router
-            .layer(axum::middleware::from_fn_with_state(
-                metrics::register(&mut self.registry),
-                metrics::layer,
-            ))
-            .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+        let (router, metrics_registry) = {
+            let request_metrics = metrics::register(&mut self.registry);
+            let router = router.layer(axum::middleware::from_fn_with_state(request_metrics, metrics::layer));
+            (router, Arc::new(self.registry))
+        };
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 
         // spawn server
         let listen_addr = listener.local_addr()?;
         info!(target: LOG_TARGET, "🌐 Indexer REST API server listening on {listen_addr}");
+        let rest_shutdown = shutdown;
         tokio::spawn(async move {
             // `into_make_service_with_connect_info` populates `ConnectInfo<SocketAddr>`
             // for each connection, which the per-IP rate limiter middleware uses to
             // identify the remote peer when no proxy headers are present.
             if let Err(error) = axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
-                .with_graceful_shutdown(shutdown)
+                .with_graceful_shutdown(rest_shutdown)
                 .await
             {
                 error!(target: LOG_TARGET, "Wallet query HTTP server error: {error}");
             }
         });
 
+        #[cfg(feature = "metrics")]
+        return Ok((listen_addr, Some(metrics_registry)));
+        #[cfg(not(feature = "metrics"))]
+        Ok((listen_addr, None))
+    }
+
+    /// Serve Prometheus `/_metrics` on a dedicated bind address (not the REST router).
+    #[cfg(feature = "metrics")]
+    pub async fn spawn_metrics_server(
+        registry: Arc<prometheus_client::registry::Registry>,
+        preferred_addr: SocketAddr,
+        shutdown: ShutdownSignal,
+    ) -> anyhow::Result<SocketAddr> {
+        let router = Router::new().route("/_metrics", get(metrics::MetricsHandler::from_arc(registry)));
+        let listener = try_bind_with_fallback(preferred_addr).await?;
+        let listen_addr = listener.local_addr()?;
+        info!(target: LOG_TARGET, "📈 Indexer metrics server listening on {listen_addr}");
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(listener, router).with_graceful_shutdown(shutdown).await {
+                error!(target: LOG_TARGET, "Indexer metrics HTTP server error: {error}");
+            }
+        });
         Ok(listen_addr)
     }
 }

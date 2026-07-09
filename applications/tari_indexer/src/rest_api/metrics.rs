@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{future, sync::Arc, time::Instant};
+use std::{future, net::SocketAddr, sync::Arc, time::Instant};
 
 use axum::{
     body::{Body, HttpBody},
@@ -9,7 +9,10 @@ use axum::{
     http::{Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
+    routing::get,
+    Router,
 };
+use log::*;
 use prometheus_client::{
     encoding::text::encode,
     metrics::{
@@ -19,9 +22,12 @@ use prometheus_client::{
     },
     registry::Registry,
 };
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
+use tari_shutdown::ShutdownSignal;
 
 use crate::metrics::CollectorRegister;
 
+const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::metrics";
 const METRICS_CONTENT_TYPE: &str = "application/openmetrics-text;charset=utf-8;version=1.0.0";
 #[derive(Debug, Clone)]
 pub struct MetricsHandler(Arc<Registry>);
@@ -54,6 +60,25 @@ impl<S> axum::handler::Handler<(), S> for MetricsHandler {
                 .into_response(),
         )
     }
+}
+
+pub async fn spawn_server(
+    preferred_addr: SocketAddr,
+    registry: Registry,
+    shutdown: ShutdownSignal,
+) -> anyhow::Result<SocketAddr> {
+    let listener = try_bind_with_fallback(preferred_addr).await?;
+    let listen_addr = listener.local_addr()?;
+    let router = Router::new().route("/_metrics", get(MetricsHandler::new(registry)));
+
+    info!(target: LOG_TARGET, "Indexer metrics server listening on {listen_addr}");
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, router).with_graceful_shutdown(shutdown).await {
+            error!(target: LOG_TARGET, "Indexer metrics HTTP server error: {error}");
+        }
+    });
+
+    Ok(listen_addr)
 }
 
 #[derive(Clone)]

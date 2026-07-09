@@ -51,6 +51,9 @@ pub struct Cli {
     /// Bind address for API server
     #[clap(long, short = 'r', alias = "api-address")]
     pub api_listen_address: Option<SocketAddr>,
+    /// Bind address for Prometheus metrics server
+    #[clap(long, alias = "metrics-address")]
+    pub metrics_listen_address: Option<SocketAddr>,
     #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_INDEXER_MINOTARI_NODE_GRPC_URL")]
     pub epoch_oracle_minotari_node_grpc_url: Option<Url>,
     #[clap(long, alias = "oracle-config")]
@@ -95,6 +98,9 @@ impl ConfigOverrideProvider for Cli {
 
         if let Some(ref addr) = self.api_listen_address {
             overrides.push(("indexer.api_listen_address".to_string(), addr.to_string()));
+        }
+        if let Some(ref addr) = self.metrics_listen_address {
+            overrides.push(("indexer.metrics_listen_address".to_string(), addr.to_string()));
         }
 
         if !self.peer_seeds.is_empty() {

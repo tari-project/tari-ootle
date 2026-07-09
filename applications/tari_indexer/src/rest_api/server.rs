@@ -96,6 +96,7 @@ impl Server {
     pub async fn spawn(
         #[allow(unused_mut)] mut self,
         preferred_addr: SocketAddr,
+        #[cfg(feature = "metrics")] metrics_preferred_addr: Option<SocketAddr>,
         services: &Services,
         rate_limits: &IndexerRateLimitsConfig,
         shutdown: ShutdownSignal,
@@ -255,12 +256,18 @@ impl Server {
             .layer(TraceLayer::new_for_http());
 
         #[cfg(feature = "metrics")]
-        let router = router
-            .layer(axum::middleware::from_fn_with_state(
+        let router = if let Some(metrics_preferred_addr) = metrics_preferred_addr {
+            let router = router.layer(axum::middleware::from_fn_with_state(
                 metrics::register(&mut self.registry),
                 metrics::layer,
-            ))
-            .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+            ));
+            let metrics_listen_addr =
+                metrics::spawn_server(metrics_preferred_addr, self.registry, shutdown.clone()).await?;
+            debug!(target: LOG_TARGET, "Metrics address {}", metrics_listen_addr);
+            router
+        } else {
+            router
+        };
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 

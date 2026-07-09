@@ -80,6 +80,7 @@ The following options are available (use `tari_indexer --help` for the most up-t
 
 #### API Server
 - `-r, --api-listen-address <API_LISTEN_ADDRESS>`: Bind address for REST API server
+- `--metrics-listen-address <METRICS_LISTEN_ADDRESS>`: Bind address for Prometheus metrics server
 - `--web-ui-public-api-url <WEB_UI_PUBLIC_API_URL>`: Public API URL for web UI [env: `TARI_INDEXER_WEB_UI_PUBLIC_API_URL`]
 - `--web-ui-public-graphql-url <WEB_UI_PUBLIC_GRAPHQL_URL>`: Public GraphQL URL for web UI [env: `TARI_INDEXER_WEB_UI_PUBLIC_GRAPHQL_URL`]
 

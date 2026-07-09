@@ -128,13 +128,16 @@ where
         ));
     }
 
+    #[cfg(feature = "metrics")]
+    let request_metrics = rest_api::metrics::register(&mut registry);
+
     // Run the REST API
     let listen_addr = config.indexer.api_listen_address;
     if let Some(listen_addr) = listen_addr {
         #[cfg(not(feature = "metrics"))]
         let server = rest_api::Server::new();
         #[cfg(feature = "metrics")]
-        let server = rest_api::Server::new(registry);
+        let server = rest_api::Server::new(request_metrics);
         let listen_address = server
             .spawn(
                 listen_addr,
@@ -180,6 +183,20 @@ where
     }
     #[cfg(not(feature = "web_ui"))]
     info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Compile with --features web_ui to enable it.");
+
+    #[cfg(feature = "metrics")]
+    if let Some(metrics_addr) = config.indexer.metrics_address {
+        let metrics_router = axum::Router::new()
+            .route("/metrics", axum::routing::get(rest_api::metrics::MetricsHandler::new(registry)));
+            
+        let listener = tari_ootle_app_utilities::tcp::try_bind_with_fallback(metrics_addr).await?;
+        info!(target: LOG_TARGET, "🌐 Metrics server listening on {}", listener.local_addr()?);
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(listener, metrics_router.into_make_service()).await {
+                error!(target: LOG_TARGET, "Metrics server error: {error}");
+            }
+        });
+    }
 
     // Create pid to allow watchers to know that the process has started
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())

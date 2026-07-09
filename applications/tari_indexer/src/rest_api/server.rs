@@ -78,7 +78,7 @@ pub struct ApiDoc;
 
 pub struct Server {
     #[cfg(feature = "metrics")]
-    registry: prometheus_client::registry::Registry,
+    request_metrics: crate::rest_api::metrics::RequestMetrics,
 }
 
 impl Server {
@@ -88,8 +88,8 @@ impl Server {
     }
 
     #[cfg(feature = "metrics")]
-    pub fn new(registry: prometheus_client::registry::Registry) -> Self {
-        Self { registry }
+    pub fn new(request_metrics: crate::rest_api::metrics::RequestMetrics) -> Self {
+        Self { request_metrics }
     }
 
     #[expect(clippy::too_many_lines)]
@@ -257,10 +257,9 @@ impl Server {
         #[cfg(feature = "metrics")]
         let router = router
             .layer(axum::middleware::from_fn_with_state(
-                metrics::register(&mut self.registry),
+                self.request_metrics,
                 metrics::layer,
-            ))
-            .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+            ));
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 

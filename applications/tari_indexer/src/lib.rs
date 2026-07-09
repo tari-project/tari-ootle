@@ -131,15 +131,14 @@ where
     // Run the REST API
     let listen_addr = config.indexer.api_listen_address;
     if let Some(listen_addr) = listen_addr {
-        #[cfg(not(feature = "metrics"))]
         let server = rest_api::Server::new();
-        #[cfg(feature = "metrics")]
-        let server = rest_api::Server::new(registry);
         let listen_address = server
             .spawn(
                 listen_addr,
                 &services,
                 &config.indexer.rate_limits,
+                #[cfg(feature = "metrics")]
+                &mut registry,
                 shutdown_signal.clone(),
             )
             .await
@@ -180,6 +179,15 @@ where
     }
     #[cfg(not(feature = "web_ui"))]
     info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Compile with --features web_ui to enable it.");
+
+    // Serve Prometheus metrics on a dedicated listener, separate from the public REST API
+    #[cfg(feature = "metrics")]
+    if let Some(metrics_addr) = config.indexer.metrics_listen_address {
+        let metrics_address = rest_api::spawn_metrics_server(metrics_addr, registry, shutdown_signal.clone())
+            .await
+            .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+        debug!(target: LOG_TARGET, "Metrics address {}", metrics_address);
+    }
 
     // Create pid to allow watchers to know that the process has started
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())

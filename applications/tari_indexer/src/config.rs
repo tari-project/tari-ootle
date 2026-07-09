@@ -99,6 +99,10 @@ pub struct IndexerConfig {
     pub p2p: P2pConfig,
     /// Listening address for the indexer API server
     pub api_listen_address: Option<SocketAddr>,
+    /// Listening address for the Prometheus metrics endpoint (`/_metrics`). This is served on a dedicated listener,
+    /// separate from the API server, so that metrics can be bound to a private interface while the API is public.
+    /// Only used when the `metrics` feature is enabled (default = "127.0.0.1:18302"); `None` disables the listener.
+    pub metrics_listen_address: Option<SocketAddr>,
     /// GraphQL port of the indexer application
     pub graphql_address: Option<SocketAddr>,
     /// The address of the Web UI
@@ -153,6 +157,7 @@ impl Default for IndexerConfig {
             data_dir: PathBuf::from("data/indexer"),
             p2p: P2pConfig::default(),
             api_listen_address: Some("127.0.0.1:18300".parse().unwrap()),
+            metrics_listen_address: Some("127.0.0.1:18302".parse().unwrap()),
             graphql_address: Some("127.0.0.1:18301".parse().unwrap()),
             web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
             web_ui_public_api_url: None,

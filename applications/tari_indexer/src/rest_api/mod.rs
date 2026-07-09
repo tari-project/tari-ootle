@@ -12,5 +12,7 @@ mod rate_limit;
 mod server;
 mod streaming;
 
+#[cfg(feature = "metrics")]
+pub use metrics::spawn_metrics_server;
 pub use rate_limit::RefillRate;
 pub use server::*;

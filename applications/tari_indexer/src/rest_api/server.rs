@@ -76,28 +76,21 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
 ))]
 pub struct ApiDoc;
 
-pub struct Server {
-    #[cfg(feature = "metrics")]
-    registry: prometheus_client::registry::Registry,
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Server;
 
 impl Server {
-    #[cfg(not(feature = "metrics"))]
     pub fn new() -> Self {
-        Self {}
-    }
-
-    #[cfg(feature = "metrics")]
-    pub fn new(registry: prometheus_client::registry::Registry) -> Self {
-        Self { registry }
+        Self
     }
 
     #[expect(clippy::too_many_lines)]
     pub async fn spawn(
-        #[allow(unused_mut)] mut self,
+        self,
         preferred_addr: SocketAddr,
         services: &Services,
         rate_limits: &IndexerRateLimitsConfig,
+        #[cfg(feature = "metrics")] registry: &mut prometheus_client::registry::Registry,
         shutdown: ShutdownSignal,
     ) -> anyhow::Result<SocketAddr> {
         let context = HandlerContext::from_services(services);
@@ -254,13 +247,14 @@ impl Server {
             .layer(Extension(context))
             .layer(TraceLayer::new_for_http());
 
+        // Note: `/_metrics` is deliberately not served here — it runs on its own listener bound to
+        // `metrics_listen_address` (see `metrics::spawn_metrics_server`), so internal operational
+        // metrics are not exposed on the public REST API.
         #[cfg(feature = "metrics")]
-        let router = router
-            .layer(axum::middleware::from_fn_with_state(
-                metrics::register(&mut self.registry),
-                metrics::layer,
-            ))
-            .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+        let router = router.layer(axum::middleware::from_fn_with_state(
+            metrics::register(registry),
+            metrics::layer,
+        ));
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 

@@ -1,15 +1,18 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{future, sync::Arc, time::Instant};
+use std::{future, net::SocketAddr, sync::Arc, time::Instant};
 
 use axum::{
+    Router,
     body::{Body, HttpBody},
     extract::State,
     http::{Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
+    routing::get,
 };
+use log::*;
 use prometheus_client::{
     encoding::text::encode,
     metrics::{
@@ -19,8 +22,12 @@ use prometheus_client::{
     },
     registry::Registry,
 };
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
+use tari_shutdown::ShutdownSignal;
 
 use crate::metrics::CollectorRegister;
+
+const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::metrics";
 
 const METRICS_CONTENT_TYPE: &str = "application/openmetrics-text;charset=utf-8;version=1.0.0";
 #[derive(Debug, Clone)]
@@ -88,6 +95,30 @@ pub fn register(registry: &mut Registry) -> RequestMetrics {
     }
 }
 
+/// Serves `GET /_metrics` on its own listener, separate from the REST API, so that metrics can be bound to a
+/// private interface (e.g. localhost-only for a Prometheus sidecar) while the REST API remains public.
+pub async fn spawn_metrics_server(
+    preferred_addr: SocketAddr,
+    registry: Registry,
+    shutdown: ShutdownSignal,
+) -> anyhow::Result<SocketAddr> {
+    let router = Router::new().route("/_metrics", get(MetricsHandler::new(registry)));
+
+    let listener = try_bind_with_fallback(preferred_addr).await?;
+    let listen_addr = listener.local_addr()?;
+    info!(target: LOG_TARGET, "📊 Indexer metrics server listening on {listen_addr}");
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, router.into_make_service())
+            .with_graceful_shutdown(shutdown)
+            .await
+        {
+            error!(target: LOG_TARGET, "Metrics HTTP server error: {error}");
+        }
+    });
+
+    Ok(listen_addr)
+}
+
 pub async fn layer(State(metrics): State<RequestMetrics>, req: Request<Body>, next: Next) -> Response {
     metrics.request_counter.inc();
     metrics.requests_pending.inc();
@@ -102,4 +133,62 @@ pub async fn layer(State(metrics): State<RequestMetrics>, req: Request<Body>, ne
     metrics.requests_pending.dec();
 
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_shutdown::Shutdown;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    async fn http_get(addr: SocketAddr, path: &str) -> String {
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        stream
+            .write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[tokio::test]
+    async fn it_serves_metrics_on_a_dedicated_listener() {
+        let shutdown = Shutdown::new();
+        let listen_addr = spawn_metrics_server(
+            "127.0.0.1:0".parse().unwrap(),
+            Registry::default(),
+            shutdown.to_signal(),
+        )
+        .await
+        .unwrap();
+
+        let response = http_get(listen_addr, "/_metrics").await;
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "unexpected response: {response}"
+        );
+        assert!(
+            response.contains(METRICS_CONTENT_TYPE),
+            "unexpected response: {response}"
+        );
+        // The OpenMetrics text exposition always ends with an EOF marker
+        assert!(response.contains("# EOF"), "unexpected response: {response}");
+    }
+
+    #[tokio::test]
+    async fn it_serves_nothing_but_metrics() {
+        let shutdown = Shutdown::new();
+        let listen_addr = spawn_metrics_server(
+            "127.0.0.1:0".parse().unwrap(),
+            Registry::default(),
+            shutdown.to_signal(),
+        )
+        .await
+        .unwrap();
+
+        let response = http_get(listen_addr, "/transactions").await;
+        assert!(response.starts_with("HTTP/1.1 404"), "unexpected response: {response}");
+    }
 }

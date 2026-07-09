@@ -643,13 +643,12 @@ impl TrafficSim {
             .and_then(|r| r.token_symbol().map(|s| s.to_string()))
             .unwrap_or_default();
 
+        let mut wallet = self.connect_exchange_wallet().await?;
+
         // An externally-supplied view key is imported into the exchange wallet so the daemon can decrypt with it;
         // otherwise the wallet's own derived ElGamal view key is used.
         let view_key_id = match view_key {
-            Some(secret) => {
-                let mut wallet = self.connect_exchange_wallet().await?;
-                wallet.client.import_key(secret, KeyType::ViewOnly).await?.key_id
-            },
+            Some(secret) => wallet.client.import_key(secret, KeyType::ViewOnly).await?.key_id,
             None => KeyId::Derived {
                 key_branch: KeyBranch::ElgamalEncryptionViewKey,
                 index: 0,
@@ -657,7 +656,6 @@ impl TrafficSim {
         };
 
         if let Some(specific_id) = specific_id {
-            let mut wallet = self.connect_exchange_wallet().await?;
             let resp = wallet
                 .client
                 .stealth_utxos_decrypt_value(StealthUtxosDecryptValueRequest {
@@ -704,7 +702,6 @@ impl TrafficSim {
             .copied()
             .collect::<Vec<_>>();
 
-        let mut wallet = self.connect_exchange_wallet().await?;
         let mut csv = csv_out.map(csv::Writer::from_path).transpose()?;
         csv.as_mut()
             .map(|c| c.write_record(["utxo_id", "decrypted_value"]))

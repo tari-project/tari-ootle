@@ -638,7 +638,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         const OPERATION: &str = "key_manager_insert_imported_key";
         use crate::schema::key_manager_imported_keys;
 
-        // The public key is the key's identity: re-importing the same secret updates the (mutable) label and
+        // The public key is the key's identity: re-importing the same secret overwrites the (mutable) record and
         // returns the existing id, making imports idempotent.
         diesel::insert_into(key_manager_imported_keys::table)
             .values((
@@ -649,7 +649,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             ))
             .on_conflict(key_manager_imported_keys::public_key)
             .do_update()
-            .set(key_manager_imported_keys::label.eq(label))
+            .set((
+                key_manager_imported_keys::label.eq(label),
+                key_manager_imported_keys::encrypted_secret.eq(encrypted_key),
+                key_manager_imported_keys::key_type.eq(key_type.to_string()),
+            ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -659,7 +663,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .first(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        Ok(ImportedKeyId::from(id as u32))
+        let id = u64::try_from(id).map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(id)
     }
 
     // -------------------------------- Config -------------------------------- //

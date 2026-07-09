@@ -42,12 +42,16 @@ fn import_key_is_idempotent_on_public_key() {
         .key_manager_insert_imported_key("first-label", &public_key, &[1, 2, 3], KeyType::ViewOnly)
         .unwrap();
 
-    // Re-importing the same key (same public key, different label) returns the same id instead of hitting the
-    // unique index, and updates the label.
+    // Re-importing the same key (same public key) returns the same id instead of hitting the unique index, and
+    // overwrites the mutable columns (label, encrypted secret, key type).
     let id2 = tx
-        .key_manager_insert_imported_key("second-label", &public_key, &[1, 2, 3], KeyType::ViewOnly)
+        .key_manager_insert_imported_key("second-label", &public_key, &[4, 5, 6], KeyType::GeneralPurpose)
         .unwrap();
     assert_eq!(id1, id2);
+
+    let (key_type, encrypted_secret) = tx.key_manager_get_raw_imported_key(id1).unwrap();
+    assert_eq!(key_type, KeyType::GeneralPurpose);
+    assert_eq!(&*encrypted_secret, &[4, 5, 6]);
 
     // A distinct public key gets a distinct id.
     let other_public_key = "bb".repeat(32);

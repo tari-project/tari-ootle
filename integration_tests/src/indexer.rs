@@ -196,6 +196,8 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
 
         config.indexer.p2p.enable_mdns = false;
         config.indexer.api_listen_address = Some(format!("127.0.0.1:{}", api_port).parse().unwrap());
+        // OS-assigned port to avoid contention between concurrently running indexers
+        config.indexer.metrics_listen_address = Some("127.0.0.1:0".parse().unwrap());
         config.indexer.web_ui_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
         config.indexer.graphql_address = Some(format!("127.0.0.1:{}", graphql_port).parse().unwrap());
 

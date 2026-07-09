@@ -96,6 +96,7 @@ impl Server {
     pub async fn spawn(
         #[allow(unused_mut)] mut self,
         preferred_addr: SocketAddr,
+        metrics_listen_address: Option<SocketAddr>,
         services: &Services,
         rate_limits: &IndexerRateLimitsConfig,
         shutdown: ShutdownSignal,
@@ -259,8 +260,30 @@ impl Server {
             .layer(axum::middleware::from_fn_with_state(
                 metrics::register(&mut self.registry),
                 metrics::layer,
-            ))
-            .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+            ));
+
+        #[cfg(feature = "metrics")]
+        if let Some(metrics_addr) = metrics_listen_address {
+            let metrics_router = Router::new()
+                .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+            let metrics_listener = try_bind_with_fallback(metrics_addr).await?;
+            let metrics_listen_addr = metrics_listener.local_addr()?;
+            info!(target: LOG_TARGET, "🌐 Indexer Metrics server listening on {metrics_listen_addr}");
+            let metrics_shutdown = shutdown.clone();
+            tokio::spawn(async move {
+                if let Err(error) = axum::serve(metrics_listener, metrics_router.into_make_service())
+                    .with_graceful_shutdown(metrics_shutdown)
+                    .await
+                {
+                    error!(target: LOG_TARGET, "Metrics HTTP server error: {error}");
+                }
+            });
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        if metrics_listen_address.is_some() {
+            warn!(target: LOG_TARGET, "Metrics listen address is configured, but the 'metrics' feature is disabled. Metrics will not be served.");
+        }
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 
@@ -280,5 +303,57 @@ impl Server {
         });
 
         Ok(listen_addr)
+    }
+}
+
+#[cfg(all(test, feature = "metrics"))]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use prometheus_client::registry::Registry;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_metrics_handler() {
+        let registry = Registry::default();
+        let handler = metrics::MetricsHandler::new(registry);
+        let router = Router::new().route("/_metrics", get(handler));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/_metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let headers = response.headers();
+        assert!(headers
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("application/openmetrics-text"));
+
+        let response = Router::new()
+            .route("/_metrics", get(metrics::MetricsHandler::new(Registry::default())))
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/_metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
 }

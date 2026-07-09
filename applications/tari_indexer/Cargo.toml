@@ -104,6 +104,7 @@ utoipa-swagger-ui = { workspace = true, features = ["axum"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tower = { workspace = true, features = ["util"] }
 
 [package.metadata.cargo-machete]
 ignored = [

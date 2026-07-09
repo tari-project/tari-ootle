@@ -63,6 +63,7 @@ pub struct IndexerProcess {
     pub port: u16,
     pub api_port: u16,
     pub graphql_port: u16,
+    pub metrics_port: u16,
     pub base_node_grpc_port: u16,
     pub web_ui_port: u16,
     pub handle: task::JoinHandle<anyhow::Result<()>>,
@@ -156,6 +157,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
     // each spawned indexer will use different ports
     let (port, api_port) = get_os_assigned_ports();
     let (graphql_port, web_ui_port) = get_os_assigned_ports();
+    let (metrics_port, _) = get_os_assigned_ports();
     let base_node_grpc_port = world.base_nodes.get(&base_node_name).unwrap().grpc_port;
     let name = indexer_name.clone();
 
@@ -196,6 +198,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
 
         config.indexer.p2p.enable_mdns = false;
         config.indexer.api_listen_address = Some(format!("127.0.0.1:{}", api_port).parse().unwrap());
+        config.indexer.metrics_listen_address = Some(format!("127.0.0.1:{}", metrics_port).parse().unwrap());
         config.indexer.web_ui_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
         config.indexer.graphql_address = Some(format!("127.0.0.1:{}", graphql_port).parse().unwrap());
 
@@ -223,6 +226,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         handle,
         api_port,
         graphql_port,
+        metrics_port,
         ipc_sender,
         temp_dir_path: base_dir_path,
         shutdown,

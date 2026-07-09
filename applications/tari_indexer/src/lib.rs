@@ -138,6 +138,7 @@ where
         let listen_address = server
             .spawn(
                 listen_addr,
+                config.indexer.metrics_listen_address,
                 &services,
                 &config.indexer.rate_limits,
                 shutdown_signal.clone(),

@@ -24,6 +24,7 @@ use std::{collections::HashMap, fmt::Display, str::FromStr};
 
 use hex::FromHexError;
 use serde::{Deserialize, Serialize};
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     confidential::MinotariBurnClaimProof,
@@ -54,6 +55,7 @@ use tari_ootle_wallet_sdk::{
         DerivedKeyIndex,
         KeyBranch,
         KeyId,
+        KeyType,
         NonFungibleToken,
         OutputStatus,
         StealthUtxoSpendKeyId,
@@ -386,6 +388,19 @@ pub struct KeysCreateRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct KeysCreateResponse {
     pub id: u64,
+    pub public_key: RistrettoPublicKeyBytes,
+}
+
+/// Imports an externally-generated secret key into the wallet's keystore. The `secret_key` is transmitted as hex.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KeysImportRequest {
+    pub secret_key: RistrettoSecretKey,
+    pub key_type: KeyType,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KeysImportResponse {
+    pub key_id: KeyId,
     pub public_key: RistrettoPublicKeyBytes,
 }
 

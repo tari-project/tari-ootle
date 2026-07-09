@@ -7,7 +7,7 @@ use tari_common_types::seeds::cipher_seed;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
-    tari_utilities::ByteArray,
+    tari_utilities::{ByteArray, hex::Hex},
 };
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
@@ -133,9 +133,10 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
                 details: format!("Failed to encrypt imported key: {}", e),
             })
         })?;
+        let public_key = RistrettoPublicKey::from_secret_key(secret_key).to_hex();
         let id = self
             .store
-            .with_write_tx(|tx| tx.key_manager_insert_imported_key(label, &encrypted_key, key_type))?;
+            .with_write_tx(|tx| tx.key_manager_insert_imported_key(label, &public_key, &encrypted_key, key_type))?;
         Ok(KeyId::imported(id))
     }
 

@@ -56,6 +56,7 @@ pub trait WalletStoreWriter: CommittableStore {
     fn key_manager_insert_imported_key(
         &mut self,
         label: &str,
+        public_key: &str,
         encrypted_key: &[u8],
         key_type: KeyType,
     ) -> Result<ImportedKeyId, WalletStorageError>;

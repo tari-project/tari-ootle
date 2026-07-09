@@ -7,9 +7,14 @@ use std::{
     time::Duration,
 };
 
+use ootle_byte_type::ToByteType;
 use rand::RngExt;
 use reqwest::Client;
 use serde_json::json;
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_indexer_client::types::{GetSubstateRequest, ListUtxosRequest};
 use tari_ootle_common_types::{
     displayable::Displayable,
@@ -23,7 +28,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{TransferFeeParams, TransferOutput},
     },
     crypto::{memo::Memo, pay_to::PayTo},
-    models::{AccountWithAddress, KeyBranch, KeyId},
+    models::{AccountWithAddress, KeyBranch, KeyId, KeyType},
 };
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
@@ -261,6 +266,7 @@ impl TrafficSim {
         &mut self,
         stablecoin_template: PublishedTemplateAddress,
         output_path: P,
+        view_key: Option<RistrettoSecretKey>,
     ) -> anyhow::Result<()> {
         let mut exchange_wallet = self.connect_exchange_wallet().await?;
         let stablecoin_template = stablecoin_template.as_template_address();
@@ -287,10 +293,16 @@ impl TrafficSim {
             },
         };
 
-        let view_key = exchange_wallet
-            .client
-            .create_specific_key(KeyBranch::ElgamalEncryptionViewKey, 0)
-            .await?;
+        let view_public_key = match view_key {
+            Some(secret) => RistrettoPublicKey::from_secret_key(&secret).to_byte_type(),
+            None => {
+                exchange_wallet
+                    .client
+                    .create_specific_key(KeyBranch::ElgamalEncryptionViewKey, 0)
+                    .await?
+                    .public_key
+            },
+        };
 
         let transaction = Transaction::builder(exchange_wallet.network.as_byte())
             .pay_fee_from_component(*account.component_address(), 3000u64)
@@ -305,7 +317,7 @@ impl TrafficSim {
                     "url" => "https://doesntexist.com",
                 ),
                 8,
-                view_key.public_key,
+                view_public_key,
                 None::<()>
             ])
             .put_last_instruction_output_on_workspace("admin_badge")
@@ -603,6 +615,7 @@ impl TrafficSim {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn decrypt_utxos<P: AsRef<Path>>(
         &mut self,
         min_value: u64,
@@ -611,6 +624,7 @@ impl TrafficSim {
         last_id: Option<UtxoId>,
         specific_id: Option<UtxoId>,
         csv_out: Option<P>,
+        view_key: Option<RistrettoSecretKey>,
     ) -> anyhow::Result<()> {
         let indexer = self.connect_indexer_client().await?;
 
@@ -629,6 +643,19 @@ impl TrafficSim {
             .and_then(|r| r.token_symbol().map(|s| s.to_string()))
             .unwrap_or_default();
 
+        // An externally-supplied view key is imported into the exchange wallet so the daemon can decrypt with it;
+        // otherwise the wallet's own derived ElGamal view key is used.
+        let view_key_id = match view_key {
+            Some(secret) => {
+                let mut wallet = self.connect_exchange_wallet().await?;
+                wallet.client.import_key(secret, KeyType::ViewOnly).await?.key_id
+            },
+            None => KeyId::Derived {
+                key_branch: KeyBranch::ElgamalEncryptionViewKey,
+                index: 0,
+            },
+        };
+
         if let Some(specific_id) = specific_id {
             let mut wallet = self.connect_exchange_wallet().await?;
             let resp = wallet
@@ -636,10 +663,7 @@ impl TrafficSim {
                 .stealth_utxos_decrypt_value(StealthUtxosDecryptValueRequest {
                     resource_address,
                     ids: vec![specific_id],
-                    view_key_id: KeyId::Derived {
-                        key_branch: KeyBranch::ElgamalEncryptionViewKey,
-                        index: 0,
-                    },
+                    view_key_id,
                     minimum_expected_value: Some(min_value),
                     maximum_expected_value: Some(max_value),
                 })
@@ -692,10 +716,7 @@ impl TrafficSim {
                 .stealth_utxos_decrypt_value(StealthUtxosDecryptValueRequest {
                     resource_address,
                     ids: ids.to_vec(),
-                    view_key_id: KeyId::Derived {
-                        key_branch: KeyBranch::ElgamalEncryptionViewKey,
-                        index: 0,
-                    },
+                    view_key_id,
                     minimum_expected_value: Some(min_value),
                     maximum_expected_value: Some(max_value),
                 })

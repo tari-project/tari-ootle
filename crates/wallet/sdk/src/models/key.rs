@@ -247,7 +247,7 @@ impl DerivedKeyPair {
 pub type DerivedKeyIndex = u64;
 pub type ImportedKeyId = u64;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum KeyType {
     /// View only key
     ViewOnly,

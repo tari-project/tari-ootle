@@ -631,25 +631,35 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn key_manager_insert_imported_key(
         &mut self,
         label: &str,
+        public_key: &str,
         encrypted_key: &[u8],
         key_type: KeyType,
     ) -> Result<ImportedKeyId, WalletStorageError> {
         const OPERATION: &str = "key_manager_insert_imported_key";
         use crate::schema::key_manager_imported_keys;
 
+        // The public key is the key's identity: re-importing the same secret updates the (mutable) label and
+        // returns the existing id, making imports idempotent.
         diesel::insert_into(key_manager_imported_keys::table)
             .values((
                 key_manager_imported_keys::label.eq(label),
+                key_manager_imported_keys::public_key.eq(public_key),
                 key_manager_imported_keys::encrypted_secret.eq(encrypted_key),
                 key_manager_imported_keys::key_type.eq(key_type.to_string()),
             ))
+            .on_conflict(key_manager_imported_keys::public_key)
+            .do_update()
+            .set(key_manager_imported_keys::label.eq(label))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        let last_inserted_id: i32 = diesel::select(dsl::sql::<diesel::sql_types::Integer>("last_insert_rowid()"))
-            .get_result(self.connection())
+
+        let id: i32 = key_manager_imported_keys::table
+            .select(key_manager_imported_keys::id)
+            .filter(key_manager_imported_keys::public_key.eq(public_key))
+            .first(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        Ok(ImportedKeyId::from(last_inserted_id as u32))
+        Ok(ImportedKeyId::from(id as u32))
     }
 
     // -------------------------------- Config -------------------------------- //

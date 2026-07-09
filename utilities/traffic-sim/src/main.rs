@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
+use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
 use tari_ootle_common_types::engine_types::published_template::PublishedTemplateAddress;
 use tari_template_lib_types::{ResourceAddress, UtxoId};
 
@@ -60,6 +61,13 @@ enum Commands {
 
         #[arg(short = 'o', long, help = "Coin file output path")]
         coin_file: PathBuf,
+
+        #[arg(
+            long,
+            value_parser = parse_secret_view_key,
+            help = "Optional secret view key (hex) that overrides the wallet-generated view key"
+        )]
+        view_key: Option<RistrettoSecretKey>,
     },
     Setup {
         #[arg(short = 'c', long, help = "Path to coin file")]
@@ -83,6 +91,13 @@ enum Commands {
 
         #[arg(long, alias = "csv", help = "Path to output CSV file with results")]
         csv_output: Option<PathBuf>,
+
+        #[arg(
+            long,
+            value_parser = parse_secret_view_key,
+            help = "Secret view key (hex) to decrypt with, if the stablecoin was initialised with an external view key"
+        )]
+        view_key: Option<RistrettoSecretKey>,
     },
     #[command(alias = "swarm-config")]
     GenerateConfigFromSwarm {
@@ -137,20 +152,31 @@ async fn main() -> Result<()> {
         Commands::Init {
             template_address,
             coin_file,
+            view_key,
         } => {
             let config = read_json_file::<Config, _>(cli.config)?;
             let mut sim = TrafficSim::new(config);
-            sim.setup_stablecoin(template_address, coin_file).await?;
+            sim.setup_stablecoin(template_address, &coin_file, view_key).await?;
+
+            println!();
+            println!("Stablecoin initialised. Next, fund the simulation wallets:");
+            println!("    traffic-sim setup --coin-file {}", coin_file.display());
         },
         Commands::Setup { coin_file } => {
             let config = read_json_file::<Config, _>(cli.config)?;
-            let coin = read_json_file::<Coin, _>(coin_file)?;
+            let coin = read_json_file::<Coin, _>(&coin_file)?;
+            let resource_address = coin.resource_address;
 
             let mut sim = TrafficSim::new(config);
             sim.connect_to_wallets().await?;
             sim.setup_accounts().await?;
             sim.setup_wallet_funds(coin.component_address, coin.resource_address, coin.admin_badge)
                 .await?;
+
+            println!();
+            println!("Wallets funded. Start generating traffic with either:");
+            println!("    traffic-sim run --coin-file {}", coin_file.display());
+            println!("    traffic-sim run --resource-address {resource_address}");
         },
         Commands::ListWallets => {
             let config = read_json_file::<Config, _>(cli.config)?;
@@ -173,6 +199,7 @@ async fn main() -> Result<()> {
             last_id,
             specific_id,
             csv_output,
+            view_key,
         } => {
             let config = read_json_file::<Config, _>(cli.config)?;
             let mut sim = TrafficSim::new(config);
@@ -189,6 +216,7 @@ async fn main() -> Result<()> {
                     .map(|id| UtxoId::from_hex(id).context("Invalid specific_id"))
                     .transpose()?,
                 csv_output,
+                view_key,
             )
             .await?;
         },
@@ -222,4 +250,8 @@ fn read_json_file<T: serde::de::DeserializeOwned, P: AsRef<Path>>(path: P) -> Re
     let file = std::fs::File::open(path).context("Failed to open JSON file")?;
     let data = serde_json::from_reader(file).context("Failed to parse json file")?;
     Ok(data)
+}
+
+fn parse_secret_view_key(s: &str) -> Result<RistrettoSecretKey, String> {
+    RistrettoSecretKey::from_hex(s).map_err(|e| format!("Invalid secret view key: {e}"))
 }

@@ -103,6 +103,7 @@ diesel::table! {
         encrypted_secret -> Binary,
         key_type -> Text,
         created_at -> Timestamp,
+        public_key -> Text,
     }
 }
 

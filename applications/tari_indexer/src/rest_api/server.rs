@@ -1,7 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
+#[cfg(feature = "metrics")]
+use std::sync::Arc;
 
 use axum::{
     Extension,

@@ -30,6 +30,11 @@ impl MetricsHandler {
     pub fn new(registry: Registry) -> Self {
         Self(Arc::new(registry))
     }
+
+    /// Share a registry already wrapped in `Arc` (e.g. REST metrics middleware + dedicated listener).
+    pub fn from_arc(registry: Arc<Registry>) -> Self {
+        Self(registry)
+    }
 }
 
 impl<S> axum::handler::Handler<(), S> for MetricsHandler {

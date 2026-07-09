@@ -128,16 +128,23 @@ where
         ));
     }
 
-    // Run the REST API
+    // Run the REST API (and, when metrics are enabled, a separate Prometheus listener)
     let listen_addr = config.indexer.api_listen_address;
     if let Some(listen_addr) = listen_addr {
         #[cfg(not(feature = "metrics"))]
         let server = rest_api::Server::new();
         #[cfg(feature = "metrics")]
         let server = rest_api::Server::new(registry);
+        #[cfg(feature = "metrics")]
+        let metrics_listen_addr = config
+            .indexer
+            .metrics_listen_address
+            .unwrap_or_else(|| "127.0.0.1:18302".parse().expect("valid default metrics address"));
         let listen_address = server
             .spawn(
                 listen_addr,
+                #[cfg(feature = "metrics")]
+                metrics_listen_addr,
                 &services,
                 &config.indexer.rate_limits,
                 shutdown_signal.clone(),

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     Extension,
@@ -96,6 +96,7 @@ impl Server {
     pub async fn spawn(
         #[allow(unused_mut)] mut self,
         preferred_addr: SocketAddr,
+        #[cfg(feature = "metrics")] metrics_preferred_addr: SocketAddr,
         services: &Services,
         rate_limits: &IndexerRateLimitsConfig,
         shutdown: ShutdownSignal,
@@ -255,12 +256,32 @@ impl Server {
             .layer(TraceLayer::new_for_http());
 
         #[cfg(feature = "metrics")]
-        let router = router
-            .layer(axum::middleware::from_fn_with_state(
-                metrics::register(&mut self.registry),
-                metrics::layer,
-            ))
-            .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+        let router = {
+            // Register HTTP request metrics on the REST path, then share the full
+            // registry with a dedicated metrics listener (not exposed on the REST API).
+            let request_metrics = metrics::register(&mut self.registry);
+            let registry = Arc::new(self.registry);
+            let metrics_shutdown = shutdown.clone();
+            let metrics_listener = try_bind_with_fallback(metrics_preferred_addr).await?;
+            let metrics_listen_addr = metrics_listener.local_addr()?;
+            info!(
+                target: LOG_TARGET,
+                "📊 Indexer Prometheus metrics listening on {metrics_listen_addr} (separate from REST API)"
+            );
+            let metrics_router = Router::new().route(
+                "/_metrics",
+                get(metrics::MetricsHandler::from_arc(registry)),
+            );
+            tokio::spawn(async move {
+                if let Err(error) = axum::serve(metrics_listener, metrics_router)
+                    .with_graceful_shutdown(metrics_shutdown)
+                    .await
+                {
+                    error!(target: LOG_TARGET, "Indexer metrics HTTP server error: {error}");
+                }
+            });
+            router.layer(axum::middleware::from_fn_with_state(request_metrics, metrics::layer))
+        };
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 

@@ -27,10 +27,6 @@ const METRICS_CONTENT_TYPE: &str = "application/openmetrics-text;charset=utf-8;v
 pub struct MetricsHandler(Arc<Registry>);
 
 impl MetricsHandler {
-    pub fn new(registry: Registry) -> Self {
-        Self(Arc::new(registry))
-    }
-
     pub fn from_arc(registry: Arc<Registry>) -> Self {
         Self(registry)
     }

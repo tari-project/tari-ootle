@@ -157,13 +157,10 @@ where
             .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
         #[cfg(feature = "metrics")]
         if let Some(metrics_addr) = config.indexer.metrics_listen_address {
-            let metrics_listen = rest_api::Server::spawn_metrics_server(
-                metrics_registry,
-                metrics_addr,
-                shutdown_signal.clone(),
-            )
-            .await
-            .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+            let metrics_listen =
+                rest_api::Server::spawn_metrics_server(metrics_registry, metrics_addr, shutdown_signal.clone())
+                    .await
+                    .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
             info!(target: LOG_TARGET, "📈 Metrics endpoint on {metrics_listen} (not on REST API)");
         } else {
             info!(target: LOG_TARGET, "📈 metrics_listen_address not set; /_metrics not served");

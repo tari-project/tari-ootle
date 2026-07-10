@@ -95,7 +95,6 @@ impl Server {
     }
 
     /// Spawns the REST API server (no metrics feature).
-    #[expect(clippy::too_many_lines)]
     #[cfg(not(feature = "metrics"))]
     pub async fn spawn(
         self,
@@ -110,7 +109,6 @@ impl Server {
 
     /// Spawns the REST API. Also returns the shared Prometheus registry so
     /// `/_metrics` can be bound on a separate listener via `spawn_metrics_server`.
-    #[expect(clippy::too_many_lines)]
     #[cfg(feature = "metrics")]
     pub async fn spawn(
         mut self,

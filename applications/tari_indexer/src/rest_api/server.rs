@@ -20,8 +20,6 @@ use utoipa_swagger_ui::SwaggerUi;
 
 #[cfg(feature = "metrics")]
 use crate::rest_api::metrics;
-#[cfg(feature = "metrics")]
-
 use crate::{
     bootstrap::Services,
     config::IndexerRateLimitsConfig,
@@ -96,6 +94,7 @@ impl Server {
         Self { registry }
     }
 
+    /// Spawns the REST API server (no metrics feature).
     #[expect(clippy::too_many_lines)]
     #[cfg(not(feature = "metrics"))]
     pub async fn spawn(
@@ -105,37 +104,87 @@ impl Server {
         rate_limits: &IndexerRateLimitsConfig,
         shutdown: ShutdownSignal,
     ) -> anyhow::Result<SocketAddr> {
-        self.spawn_inner(preferred_addr, services, rate_limits, shutdown)
+        self.spawn_rest(preferred_addr, services, rate_limits, shutdown)
             .await
-            .map(|(addr, _)| addr)
     }
 
-    /// Spawns the REST API. When the `metrics` feature is enabled, also returns the
-    /// shared Prometheus registry so `/_metrics` can be bound separately.
+    /// Spawns the REST API. Also returns the shared Prometheus registry so
+    /// `/_metrics` can be bound on a separate listener via `spawn_metrics_server`.
     #[expect(clippy::too_many_lines)]
     #[cfg(feature = "metrics")]
     pub async fn spawn(
-        #[allow(unused_mut)] mut self,
+        mut self,
         preferred_addr: SocketAddr,
         services: &Services,
         rate_limits: &IndexerRateLimitsConfig,
         shutdown: ShutdownSignal,
     ) -> anyhow::Result<(SocketAddr, Arc<prometheus_client::registry::Registry>)> {
-        self.spawn_inner(preferred_addr, services, rate_limits, shutdown)
-            .await
-            .map(|(addr, reg)| (addr, reg.expect("metrics registry")))
+        let context = HandlerContext::from_services(services);
+        let router = Self::build_router(rate_limits, context);
+        // Request metrics middleware stays on REST; `/_metrics` is a separate listener.
+        let request_metrics = metrics::register(&mut self.registry);
+        let router = router.layer(axum::middleware::from_fn_with_state(request_metrics, metrics::layer));
+        let metrics_registry = Arc::new(self.registry);
+        let listen_addr = Self::serve_router(router, preferred_addr, shutdown).await?;
+        Ok((listen_addr, metrics_registry))
     }
 
-    #[expect(clippy::too_many_lines)]
-    async fn spawn_inner(
-        #[allow(unused_mut)] mut self,
+    #[cfg(not(feature = "metrics"))]
+    async fn spawn_rest(
+        self,
         preferred_addr: SocketAddr,
         services: &Services,
         rate_limits: &IndexerRateLimitsConfig,
         shutdown: ShutdownSignal,
-    ) -> anyhow::Result<(SocketAddr, Option<Arc<prometheus_client::registry::Registry>>)> {
+    ) -> anyhow::Result<SocketAddr> {
         let context = HandlerContext::from_services(services);
+        let router = Self::build_router(rate_limits, context);
+        Self::serve_router(router, preferred_addr, shutdown).await
+    }
 
+    /// Serve Prometheus `/_metrics` on a dedicated bind address (not the REST router).
+    #[cfg(feature = "metrics")]
+    pub async fn spawn_metrics_server(
+        registry: Arc<prometheus_client::registry::Registry>,
+        preferred_addr: SocketAddr,
+        shutdown: ShutdownSignal,
+    ) -> anyhow::Result<SocketAddr> {
+        let router = Router::new().route("/_metrics", get(metrics::MetricsHandler::from_arc(registry)));
+        let listener = try_bind_with_fallback(preferred_addr).await?;
+        let listen_addr = listener.local_addr()?;
+        info!(target: LOG_TARGET, "📈 Indexer metrics server listening on {listen_addr}");
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(listener, router).with_graceful_shutdown(shutdown).await {
+                error!(target: LOG_TARGET, "Indexer metrics HTTP server error: {error}");
+            }
+        });
+        Ok(listen_addr)
+    }
+
+    async fn serve_router(
+        router: Router,
+        preferred_addr: SocketAddr,
+        shutdown: ShutdownSignal,
+    ) -> anyhow::Result<SocketAddr> {
+        let listener = try_bind_with_fallback(preferred_addr).await?;
+        let listen_addr = listener.local_addr()?;
+        info!(target: LOG_TARGET, "🌐 Indexer REST API server listening on {listen_addr}");
+        tokio::spawn(async move {
+            // `into_make_service_with_connect_info` populates `ConnectInfo<SocketAddr>`
+            // for each connection, which the per-IP rate limiter middleware uses to
+            // identify the remote peer when no proxy headers are present.
+            if let Err(error) = axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
+                .with_graceful_shutdown(shutdown)
+                .await
+            {
+                error!(target: LOG_TARGET, "Wallet query HTTP server error: {error}");
+            }
+        });
+        Ok(listen_addr)
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn build_router(rate_limits: &IndexerRateLimitsConfig, context: HandlerContext) -> Router {
         // Per-IP rate limiters for specific endpoint groups.
         // `trust_proxy_headers` mirrors the value from config – enable only when
         // the indexer is behind a trusted reverse proxy.
@@ -192,152 +241,179 @@ impl Server {
             // ----------------------------------------------------------------
             // /substates/* – per-IP rate limit (rate_limits.substates_rate)
             // ----------------------------------------------------------------
-            .nest("/substates", Router::new()
-                .route("/fetch", post(handlers::substates::fetch_substates)
-                    .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))
-                .route("/watched", get(handlers::watched::list_watched_substates)
-                    .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))
-                .route("/{substate_id}", get(handlers::substates::get_substate)
-                .route_layer(middleware::from_fn_with_state(substates_fetch_limiter, rate_limit_middleware)))
+            .nest(
+                "/substates",
+                Router::new()
+                    .route(
+                        "/fetch",
+                        post(handlers::substates::fetch_substates).route_layer(middleware::from_fn_with_state(
+                            substates_fetch_limiter.clone(),
+                            rate_limit_middleware,
+                        )),
+                    )
+                    .route(
+                        "/watched",
+                        get(handlers::watched::list_watched_substates).route_layer(middleware::from_fn_with_state(
+                            substates_fetch_limiter.clone(),
+                            rate_limit_middleware,
+                        )),
+                    )
+                    .route(
+                        "/{substate_id}",
+                        get(handlers::substates::get_substate).route_layer(middleware::from_fn_with_state(
+                            substates_fetch_limiter,
+                            rate_limit_middleware,
+                        )),
+                    ),
             )
             // ----------------------------------------------------------------
             // Transactions
             // ----------------------------------------------------------------
-            .nest("/transactions", Router::new()
-                // POST /transactions – per-IP rate limit (rate_limits.transactions_submit_rate)
-                .route("/", post(handlers::transactions::submit_transaction)
-                    .route_layer(middleware::from_fn_with_state(tx_submit_limiter, rate_limit_middleware)))
-                // POST /transactions/dry-run – per-IP rate limit on a separate limiter instance so a
-                // burst of dry-runs doesn't starve the submit budget for the same IP
-                .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
-                    .route_layer(middleware::from_fn_with_state(tx_dry_run_limiter, rate_limit_middleware))
-                )
-                // GET /transactions/recent – per-IP rate limit (rate_limits.transactions_rate)
-                .route(
-                    "/recent",
-                    get(handlers::transactions::list_recent_transactions)
-                    .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
-                )
-                .route(
-                    "/{transaction_id}/result",
-                    get(handlers::transactions::get_transaction_result)
-                    .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
-                )
-                .route(
-                    "/{transaction_id}",
-                    get(handlers::transactions::get_transaction)
-                    .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
-                )
-                .route("/events", get(handlers::transactions::query_transaction_events))
-                // SSE stream – per-IP concurrent connection limit
-                .route("/events/stream", get(handlers::transaction_events::sse_transaction_events)
-                    .route_layer(middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware)))
+            .nest(
+                "/transactions",
+                Router::new()
+                    // POST /transactions – per-IP rate limit (rate_limits.transactions_submit_rate)
+                    .route(
+                        "/",
+                        post(handlers::transactions::submit_transaction).route_layer(
+                            middleware::from_fn_with_state(tx_submit_limiter, rate_limit_middleware),
+                        ),
+                    )
+                    // POST /transactions/dry-run – per-IP rate limit on a separate limiter instance so a
+                    // burst of dry-runs doesn't starve the submit budget for the same IP
+                    .route(
+                        "/dry-run",
+                        post(handlers::transactions::submit_transaction_dry_run).route_layer(
+                            middleware::from_fn_with_state(tx_dry_run_limiter, rate_limit_middleware),
+                        ),
+                    )
+                    // GET /transactions/recent – per-IP rate limit (rate_limits.transactions_rate)
+                    .route(
+                        "/recent",
+                        get(handlers::transactions::list_recent_transactions).route_layer(
+                            middleware::from_fn_with_state(
+                                transactions_fetch_limiter.clone(),
+                                rate_limit_middleware,
+                            ),
+                        ),
+                    )
+                    .route(
+                        "/{transaction_id}/result",
+                        get(handlers::transactions::get_transaction_result).route_layer(
+                            middleware::from_fn_with_state(
+                                transactions_fetch_limiter.clone(),
+                                rate_limit_middleware,
+                            ),
+                        ),
+                    )
+                    .route(
+                        "/{transaction_id}",
+                        get(handlers::transactions::get_transaction).route_layer(middleware::from_fn_with_state(
+                            transactions_fetch_limiter.clone(),
+                            rate_limit_middleware,
+                        )),
+                    )
+                    .route("/events", get(handlers::transactions::query_transaction_events))
+                    // SSE stream – per-IP concurrent connection limit
+                    .route(
+                        "/events/stream",
+                        get(handlers::transaction_events::sse_transaction_events).route_layer(
+                            middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware),
+                        ),
+                    ),
             )
-            .nest("/templates", Router::new()
-                .route("/cached", get(handlers::templates::list_cached_templates))
-                .route("/watched", get(handlers::watched::list_watched_templates))
-                .route("/catalogue", get(handlers::templates::list_template_catalogue))
-                .route(
-                    "/catalogue/{template_address}",
-                    get(handlers::templates::get_template_catalogue_entry),
-                )
-                .route(
-                    "/{template_address}",
-                    get(handlers::templates::get_template_definition),
-                )
+            .nest(
+                "/templates",
+                Router::new()
+                    .route("/cached", get(handlers::templates::list_cached_templates))
+                    .route("/watched", get(handlers::watched::list_watched_templates))
+                    .route("/catalogue", get(handlers::templates::list_template_catalogue))
+                    .route(
+                        "/catalogue/{template_address}",
+                        get(handlers::templates::get_template_catalogue_entry),
+                    )
+                    .route(
+                        "/{template_address}",
+                        get(handlers::templates::get_template_definition),
+                    ),
             )
             // GET /non-fungibles – per-IP rate limit (rate_limits.non_fungibles_rate)
-            .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)
-                .route_layer(middleware::from_fn_with_state(non_fungibles_limiter, rate_limit_middleware)))
-            .nest("/utxos", Router::new()
-                // GET /utxos – per-IP rate limit (rate_limits.utxos_fetch_rate)
-                .route("/", get(handlers::utxos::list_utxos)
-                .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter.clone(), rate_limit_middleware)))
-                // POST /utxos/fetch – per-IP rate limit (rate_limits.utxos_fetch_rate)
-                .route("/fetch", post(handlers::utxos::fetch_utxos)
-                    .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter, rate_limit_middleware)))
-                // POST /utxos/stream (SSE-like streaming) – per-IP concurrent connection limit
-                .route("/stream", post(handlers::utxos::stream_utxo_updates)
-                    .route_layer(middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware)))
+            .route(
+                "/non-fungibles",
+                get(handlers::nfts::get_non_fungibles)
+                    .route_layer(middleware::from_fn_with_state(non_fungibles_limiter, rate_limit_middleware)),
+            )
+            .nest(
+                "/utxos",
+                Router::new()
+                    // GET /utxos – per-IP rate limit (rate_limits.utxos_fetch_rate)
+                    .route(
+                        "/",
+                        get(handlers::utxos::list_utxos).route_layer(middleware::from_fn_with_state(
+                            utxos_fetch_limiter.clone(),
+                            rate_limit_middleware,
+                        )),
+                    )
+                    // POST /utxos/fetch – per-IP rate limit (rate_limits.utxos_fetch_rate)
+                    .route(
+                        "/fetch",
+                        post(handlers::utxos::fetch_utxos)
+                            .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter, rate_limit_middleware)),
+                    )
+                    // POST /utxos/stream (SSE-like streaming) – per-IP concurrent connection limit
+                    .route(
+                        "/stream",
+                        post(handlers::utxos::stream_utxo_updates).route_layer(middleware::from_fn_with_state(
+                            sse_limiter.clone(),
+                            sse_limit_middleware,
+                        )),
+                    ),
             )
             .nest(
                 "/transaction-receipts",
                 Router::new()
-                    .route("/", get(handlers::transaction_receipts::list_transaction_receipts)
-                        .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware)))
+                    .route(
+                        "/",
+                        get(handlers::transaction_receipts::list_transaction_receipts).route_layer(
+                            middleware::from_fn_with_state(
+                                transactions_fetch_limiter.clone(),
+                                rate_limit_middleware,
+                            ),
+                        ),
+                    )
                     .route(
                         "/{address}",
-                        get(handlers::transaction_receipts::get_transaction_receipt)
-                           .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter, rate_limit_middleware)))
+                        get(handlers::transaction_receipts::get_transaction_receipt).route_layer(
+                            middleware::from_fn_with_state(transactions_fetch_limiter, rate_limit_middleware),
+                        ),
+                    ),
             )
-            .nest("/resources/", Router::new()
-                // Convenience Shortcut
-                .route("/xtr" , get(handlers::resources::get_tari))
-                .route("/tari" , get(handlers::resources::get_tari))
-                .route("/{resource_address}" , get(handlers::resources::get_resource)))
+            .nest(
+                "/resources/",
+                Router::new()
+                    // Convenience Shortcut
+                    .route("/xtr", get(handlers::resources::get_tari))
+                    .route("/tari", get(handlers::resources::get_tari))
+                    .route("/{resource_address}", get(handlers::resources::get_resource)),
+            )
             // SSE /events – per-IP concurrent connection limit
-            .nest("/epoch-checkpoints", Router::new()
-                .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
-                .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint))
+            .nest(
+                "/epoch-checkpoints",
+                Router::new()
+                    .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
+                    .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint)),
             )
-            .route("/events", get(handlers::indexer_events::sse_events)
-                .route_layer(middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware)))
+            .route(
+                "/events",
+                get(handlers::indexer_events::sse_events)
+                    .route_layer(middleware::from_fn_with_state(sse_limiter.clone(), sse_limit_middleware)),
+            )
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))
             .layer(Extension(context))
             .layer(TraceLayer::new_for_http());
 
-        // Request metrics middleware stays on the REST API; `/_metrics` is served on a
-        // dedicated listener (see `spawn_metrics_server`) so scrape traffic can be bound
-        // separately from the public REST surface.
-        #[cfg(feature = "metrics")]
-        let (router, metrics_registry) = {
-            let request_metrics = metrics::register(&mut self.registry);
-            let router = router.layer(axum::middleware::from_fn_with_state(request_metrics, metrics::layer));
-            (router, Arc::new(self.registry))
-        };
-
-        let listener = try_bind_with_fallback(preferred_addr).await?;
-
-        // spawn server
-        let listen_addr = listener.local_addr()?;
-        info!(target: LOG_TARGET, "🌐 Indexer REST API server listening on {listen_addr}");
-        let rest_shutdown = shutdown;
-        tokio::spawn(async move {
-            // `into_make_service_with_connect_info` populates `ConnectInfo<SocketAddr>`
-            // for each connection, which the per-IP rate limiter middleware uses to
-            // identify the remote peer when no proxy headers are present.
-            if let Err(error) = axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
-                .with_graceful_shutdown(rest_shutdown)
-                .await
-            {
-                error!(target: LOG_TARGET, "Wallet query HTTP server error: {error}");
-            }
-        });
-
-        #[cfg(feature = "metrics")]
-        return Ok((listen_addr, Some(metrics_registry)));
-        #[cfg(not(feature = "metrics"))]
-        Ok((listen_addr, None))
-    }
-
-    /// Serve Prometheus `/_metrics` on a dedicated bind address (not the REST router).
-    #[cfg(feature = "metrics")]
-    pub async fn spawn_metrics_server(
-        registry: Arc<prometheus_client::registry::Registry>,
-        preferred_addr: SocketAddr,
-        shutdown: ShutdownSignal,
-    ) -> anyhow::Result<SocketAddr> {
-        let router = Router::new().route("/_metrics", get(metrics::MetricsHandler::from_arc(registry)));
-        let listener = try_bind_with_fallback(preferred_addr).await?;
-        let listen_addr = listener.local_addr()?;
-        info!(target: LOG_TARGET, "📈 Indexer metrics server listening on {listen_addr}");
-        tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, router).with_graceful_shutdown(shutdown).await {
-                error!(target: LOG_TARGET, "Indexer metrics HTTP server error: {error}");
-            }
-        });
-        Ok(listen_addr)
+        router
     }
 }

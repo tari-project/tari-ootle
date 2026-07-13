@@ -23,6 +23,7 @@ use tari_template_lib::types::{
     ResourceAddress,
     UtxoAddress,
     UtxoId,
+    access_rules::ResourceAuthAction,
     crypto::PedersenCommitmentBytes,
     rule,
     stealth::SpendCondition,
@@ -632,6 +633,84 @@ fn burn_then_attempt_spend() {
             .unwrap();
         assert!(utxo.is_burnt());
     }
+}
+
+/// The resource-level `withdrawable` rule gates stealth transfers: spending a stealth UTXO of a
+/// resource whose withdraw rule requires the issuer's badge is denied unless the issuer authorises
+/// the transaction. The minted UTXO's own spend condition is `AllowAll`, so the resource withdraw
+/// rule is the only gate under test — distinguishing it from the per-UTXO `SpendAuthorization` path
+/// exercised by the `transfer_restricted_by_access_rules_*` tests.
+#[test]
+fn transfer_denied_by_resource_withdraw_rule() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    test.enable_auto_add_proofs_from_signers();
+
+    let outputs = vec![(100u64, SpendCondition::access_rule(AccessRule::AllowAll))];
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
+
+    // Create the resource with a withdraw rule requiring the creating signer (the issuer). The
+    // in-`new` mint is itself a stealth transfer, so it only succeeds because this construction is
+    // sealed by that same issuer key.
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    let initial_supply = mint.statement.inputs_statement.revealed_amount;
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_function(template_addr, "new_withdraw_gated_by_signer", args![
+                initial_supply,
+                mint.statement.clone()
+            ])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let faucet_resx = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+
+    // Spend the minted (AllowAll) UTXO back into a single confidential output.
+    let transfer = stealth::generate_transfer_data(
+        [(
+            MaskAndValue {
+                mask: mint.output_masks[0].clone(),
+                value: 100,
+            },
+            SpendCondition::access_rule(AccessRule::AllowAll),
+        )],
+        0u64,
+        [100u64],
+        0,
+    );
+
+    // A non-issuer signer cannot authorise the transfer: the resource withdraw rule denies it.
+    let (_attacker, _attacker_proof, attacker_sk) = test.create_empty_account();
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .stealth_transfer(faucet_resx, transfer.statement.clone())
+            .finish()
+            .seal(&attacker_sk),
+        vec![],
+    );
+    assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
+
+    // The issuer (the withdraw authority) can: the same transfer now succeeds.
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .stealth_transfer(faucet_resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.any_accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(id, substate)| {
+            let addr = id.as_utxo_address()?;
+            let output = substate.substate_value().as_utxo().and_then(|u| u.output())?;
+            Some((addr, output))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(utxos.len(), 1);
 }
 
 #[test]

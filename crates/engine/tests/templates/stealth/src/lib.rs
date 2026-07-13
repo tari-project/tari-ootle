@@ -20,15 +20,38 @@ mod template {
             mint: StealthTransferStatement,
             view_key: Option<RistrettoPublicKeyBytes>,
         ) -> Component<Self> {
-            let signer = NonFungibleAddress::from_public_key(CallerContext::transaction_signer_public_key());
+            let signer = CallerContext::transaction_signer_public_key();
             let bucket = ResourceBuilder::stealth()
                 .mintable(rule!(allow_all), OWNER)
-                .freezable(rule!(non_fungible(signer)), OWNER)
+                .freezable(rule!(public_key(signer)), OWNER)
                 .with_view_key_opt(view_key)
                 .initial_supply(initial_supply);
 
             let resource_address = bucket.resource_address();
             // Convert the minted funds to UTXOs as per the stealth transfer.
+            let revealed_output_bucket = bucket.stealth_transfer(mint);
+            let supply_vault = Vault::from_bucket(revealed_output_bucket);
+
+            Component::new(Self {
+                manager: resource_address.into(),
+                supply_vault,
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
+        /// Like [`new`], but the resource's withdraw rule requires the creating signer's badge. Every
+        /// stealth transfer of the resource must then be authorised by that key, exercising the
+        /// resource-level withdraw gate on the stealth-transfer path. The in-`new` mint is itself a
+        /// stealth transfer, so it only succeeds because this construction is signed by that same key.
+        pub fn new_withdraw_gated_by_signer(initial_supply: Amount, mint: StealthTransferStatement) -> Component<Self> {
+            let signer = CallerContext::transaction_signer_public_key();
+            let bucket = ResourceBuilder::stealth()
+                .mintable(rule!(allow_all), OWNER)
+                .withdrawable(rule!(public_key(signer)), OWNER)
+                .initial_supply(initial_supply);
+
+            let resource_address = bucket.resource_address();
             let revealed_output_bucket = bucket.stealth_transfer(mint);
             let supply_vault = Vault::from_bucket(revealed_output_bucket);
 

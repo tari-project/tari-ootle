@@ -340,6 +340,7 @@ fn encode_address(s: &str) -> Result<InstructionArg, OotleSdkError> {
         SubstateId::Template(a) => from_type(&a),
         SubstateId::ValidatorFeePool(a) => from_type(&a),
         SubstateId::Utxo(a) => from_type(&a),
+        SubstateId::ConfidentialOutput(a) => from_type(&a),
         SubstateId::ClaimedOutputTombstone(a) => from_type(&a),
     }
 }
@@ -359,6 +360,7 @@ fn address_to_value(s: &str) -> Result<tari_bor::Value, OotleSdkError> {
         SubstateId::Template(a) => to_value(&a),
         SubstateId::ValidatorFeePool(a) => to_value(&a),
         SubstateId::Utxo(a) => to_value(&a),
+        SubstateId::ConfidentialOutput(a) => to_value(&a),
         SubstateId::ClaimedOutputTombstone(a) => to_value(&a),
     }
 }

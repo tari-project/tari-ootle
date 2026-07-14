@@ -31,6 +31,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
     Amount,
     ComponentAddress,
+    ConfidentialOutputAddress,
     NonFungibleAddress,
     NonFungibleId,
     ResourceAddress,
@@ -254,13 +255,25 @@ where TSpec: WalletSdkSpec
                 account_address,
                 commitments.len()
             );
+            // Confidential OutputBodies live in separate ConfidentialOutput substates; fetch each by its
+            // commitment-derived address to obtain the OutputBody before updating the wallet's confidential outputs.
             let account = self
                 .wallet_sdk
                 .accounts_api()
                 .get_account_by_address(&account_address)?;
+            let resource_address = *latest_vault.resource_address();
+            let mut outputs = Vec::with_capacity(commitments.len());
+            for commitment in commitments {
+                let address = ConfidentialOutputAddress::new(resource_address, *commitment);
+                let substate = self.fetch_substate(&SubstateId::ConfidentialOutput(address)).await?;
+                let output = substate.into_substate_value().into_confidential_output().ok_or_else(|| {
+                    AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a confidential output", commitment))
+                })?;
+                outputs.push((*commitment, output.into_output()));
+            }
             self.wallet_sdk
                 .confidential_outputs_api()
-                .verify_and_update_confidential_outputs(account.account(), vault_id, commitments)?;
+                .verify_and_update_confidential_outputs(account.account(), vault_id, outputs.iter().map(|(c, o)| (c, o)))?;
             has_changed = true;
         }
 

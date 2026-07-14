@@ -17,6 +17,7 @@ use tari_engine_types::{
     ValidatorFeeWithdrawal,
     bucket::Bucket,
     component::Component,
+    confidential_output::ConfidentialOutput,
     events::Event,
     fees::{FeeReceipt, FeeSource},
     id_provider::{IdProvider, ObjectIds},
@@ -27,7 +28,7 @@ use tari_engine_types::{
     non_fungible::NonFungibleContainer,
     proof::{ContainerRef, LockedResource, Proof},
     resource::Resource,
-    resource_container::{ResourceContainer, ResourceError},
+    resource_container::{ConfidentialOutputEffects, ResourceContainer, ResourceError},
     stealth,
     stealth::ValidatedStealthTransfer,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
@@ -44,6 +45,7 @@ use tari_template_lib::{
         Amount,
         AuthHookCaller,
         ComponentAddress,
+        ConfidentialOutputAddress,
         EntityId,
         Hash32,
         NonFungibleAddress,
@@ -54,7 +56,9 @@ use tari_template_lib::{
         ValidatorFeePoolAddress,
         VaultId,
         access_rules::ResourceAuthAction,
+        confidential::ConfidentialWithdrawProof,
         constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
+        crypto::PedersenCommitmentBytes,
         metadata,
         stealth::{SpendAuthorization, StealthInput, StealthTransferStatement},
     },
@@ -76,7 +80,12 @@ use crate::{
         scope::{CallFrame, CallScope},
         state_store::WorkingStateStore,
         tracker_auth::Authorization,
-        validation::{StealthTransactionTotals, check_stealth_transfer_limits},
+        validation::{
+            ConfidentialTransactionTotals,
+            StealthTransactionTotals,
+            check_confidential_withdraw_limits,
+            check_stealth_transfer_limits,
+        },
     },
     state_store::StateReader,
 };
@@ -115,6 +124,7 @@ pub(super) struct WorkingState<TStore> {
     /// Running tally of stealth-transfer work across this transaction, bounding the aggregate native verification cost
     /// any one transaction can incur (see `limits::STEALTH_LIMITS`).
     stealth_totals: StealthTransactionTotals,
+    confidential_totals: ConfidentialTransactionTotals,
 }
 
 impl<TStore: StateReader> WorkingState<TStore> {
@@ -152,6 +162,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             loaded_template_charges: HashSet::new(),
             object_ids: ObjectIds::new(limits::ENGINE_LIMITS.max_substate_outputs),
             stealth_totals: StealthTransactionTotals::default(),
+            confidential_totals: ConfidentialTransactionTotals::default(),
         }
     }
 
@@ -564,11 +575,60 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(bucket)
     }
 
+    /// Downs the confidential output substates named by `commitments` (a spend or a burn), checking each is not frozen.
+    /// A commitment created earlier in this same transaction is collapsed (never materialised) rather than downed.
+    pub fn spend_confidential_outputs<I: IntoIterator<Item = PedersenCommitmentBytes>>(
+        &mut self,
+        resource_address: ResourceAddress,
+        commitments: I,
+    ) -> Result<(), RuntimeError> {
+        for commitment in commitments {
+            let address = ConfidentialOutputAddress::new(resource_address, commitment);
+            let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Write)?;
+            let output = self.store.down_confidential_output(lock_id)?;
+            self.store.try_unlock(lock_id)?;
+            if output.is_frozen() {
+                return Err(ResourceError::InvalidSpend {
+                    details: format!("Confidential output {} is frozen", address),
+                }
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Applies the substate-level effects of a confidential mint/withdraw: downs the spent input substates and
+    /// materialises the newly-created change/output commitments as [`ConfidentialOutput`] substates (up@v0).
+    pub fn materialize_confidential_outputs(
+        &mut self,
+        resource_address: ResourceAddress,
+        effects: ConfidentialOutputEffects,
+    ) -> Result<(), RuntimeError> {
+        self.spend_confidential_outputs(resource_address, effects.spent_commitments)?;
+        for (commitment, body) in effects.created_outputs {
+            let address = ConfidentialOutputAddress::new(resource_address, commitment);
+            self.new_substate(SubstateId::ConfidentialOutput(address), ConfidentialOutput::new(body))?;
+        }
+        Ok(())
+    }
+
+    /// Enforces the confidential-withdraw limits and accounts this withdraw against the per-transaction totals. Must be
+    /// called before the withdraw's proof crypto runs, so an over-limit transaction is rejected before the unmetered
+    /// verification and substate-access work is done.
+    pub fn account_confidential_withdraw(&mut self, proof: &ConfidentialWithdrawProof) -> Result<(), RuntimeError> {
+        check_confidential_withdraw_limits(&limits::CONFIDENTIAL_LIMITS, proof)?;
+        self.confidential_totals
+            .account_withdraw(&limits::CONFIDENTIAL_LIMITS, proof)?;
+        Ok(())
+    }
+
     pub fn burn_bucket(&mut self, bucket: Bucket) -> Result<(), RuntimeError> {
-        if bucket.unlocked_amount().is_zero() {
+        if bucket.is_empty() {
             return Ok(());
         }
         let resource_address = *bucket.resource_address();
+        // Confidential outputs are held by id in the bucket; downing them destroys the value.
+        let confidential_commitments = bucket.get_confidential_commitments().cloned();
         // Burn Non-fungibles (if resource is nf). Fungibles are burnt by removing the bucket from the tracker state
         // and not depositing it.
         for token_id in bucket.into_non_fungible_ids().into_iter().flatten() {
@@ -585,6 +645,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
             }
             nft.burn();
             self.unlock_substate(locked_nft)?;
+        }
+
+        if let Some(commitments) = confidential_commitments {
+            self.spend_confidential_outputs(resource_address, commitments)?;
         }
 
         Ok(())
@@ -702,7 +766,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
                         function: "MintArg::Confidential",
                         details: format!("Resource contained a malformed view key: {e}. This should never happen!",),
                     })?;
-                ResourceContainer::mint_confidential(resource_address, *statement, maybe_view_key.as_ref())?
+                let (container, created_outputs) =
+                    ResourceContainer::mint_confidential(resource_address, *statement, maybe_view_key.as_ref())?;
+                for (commitment, body) in created_outputs {
+                    let address = ConfidentialOutputAddress::new(resource_address, commitment);
+                    self.new_substate(SubstateId::ConfidentialOutput(address), ConfidentialOutput::new(body))?;
+                }
+                container
             },
             MintArg::Stealth { amount } => {
                 if amount.is_negative() {
@@ -1046,6 +1116,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn take_downed_utxos(&mut self) -> IndexSet<UtxoAddress> {
         self.store.take_downed_utxos()
+    }
+
+    pub fn take_downed_confidential_outputs(&mut self) -> IndexSet<ConfidentialOutputAddress> {
+        self.store.take_downed_confidential_outputs()
     }
 
     pub fn mutated_substates(&mut self) -> &IndexMap<SubstateId, SubstateValue> {
@@ -1611,6 +1685,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &self,
         substates_to_persist: IndexMap<SubstateId, SubstateValue>,
         downed_utxos: IndexSet<UtxoAddress>,
+        downed_confidential_outputs: IndexSet<ConfidentialOutputAddress>,
         fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
     ) -> Result<SubstateDiff, RuntimeError> {
         let mut substate_diff = SubstateDiff::new();
@@ -1635,6 +1710,11 @@ impl<TStore: StateReader> WorkingState<TStore> {
         for downed_utxo in downed_utxos {
             let spent_utxo = self.store.get_unmodified_substate(&downed_utxo.clone().into())?;
             substate_diff.down(SubstateId::Utxo(downed_utxo), spent_utxo.version());
+        }
+
+        for downed_output in downed_confidential_outputs {
+            let spent_output = self.store.get_unmodified_substate(&downed_output.clone().into())?;
+            substate_diff.down(SubstateId::ConfidentialOutput(downed_output), spent_output.version());
         }
 
         Ok(substate_diff)

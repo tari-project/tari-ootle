@@ -38,7 +38,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
     let commitment = confidential_vault
         .get_confidential_commitments()
         .unwrap()
-        .keys()
+        .iter()
         .next()
         .copied()
         .unwrap();

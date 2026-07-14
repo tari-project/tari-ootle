@@ -326,10 +326,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
             let fee_receipt = checkpoint_state.finalize_fees_and_refunds(&mut substates_to_persist)?;
 
             let downed_utxos = checkpoint_state.take_downed_utxos();
+            let downed_confidential_outputs = checkpoint_state.take_downed_confidential_outputs();
             let fee_withdrawals = checkpoint_state.take_validator_fee_withdrawals();
 
-            let mut diff =
-                checkpoint_state.generate_substate_diff(substates_to_persist, downed_utxos, fee_withdrawals)?;
+            let mut diff = checkpoint_state.generate_substate_diff(
+                substates_to_persist,
+                downed_utxos,
+                downed_confidential_outputs,
+                fee_withdrawals,
+            )?;
             let transaction_receipt = checkpoint_state.finalize_transaction_receipt(
                 FinalizeOutcome::FeeIntentCommit,
                 &diff,
@@ -355,8 +360,14 @@ impl<TStore: StateReader> StateTracker<TStore> {
         let mut substates_to_persist = state.take_mutated_substates();
         let fee_receipt = state.finalize_fees_and_refunds(&mut substates_to_persist)?;
         let downed_utxos = state.take_downed_utxos();
+        let downed_confidential_outputs = state.take_downed_confidential_outputs();
         let fee_withdrawals = state.take_validator_fee_withdrawals();
-        let mut diff = state.generate_substate_diff(substates_to_persist, downed_utxos, fee_withdrawals)?;
+        let mut diff = state.generate_substate_diff(
+            substates_to_persist,
+            downed_utxos,
+            downed_confidential_outputs,
+            fee_withdrawals,
+        )?;
         let transaction_receipt =
             state.finalize_transaction_receipt(FinalizeOutcome::Commit, &diff, fee_receipt.clone())?;
         diff.up(

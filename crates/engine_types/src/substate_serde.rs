@@ -63,6 +63,9 @@ impl serde::Serialize for SubstateId {
             SubstateId::Utxo(ref addr) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 8u32, "Utxo", addr)
             },
+            SubstateId::ConfidentialOutput(ref addr) => {
+                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 9u32, "ConfidentialOutput", addr)
+            },
         }
     }
 }
@@ -83,6 +86,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             __field6,
             __field7,
             __field8,
+            __field9,
         }
         #[doc(hidden)]
         struct __FieldVisitor;
@@ -105,9 +109,10 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     6u64 => Ok(Field::__field6),
                     7u64 => Ok(Field::__field7),
                     8u64 => Ok(Field::__field8),
+                    9u64 => Ok(Field::__field9),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(__value),
-                        &"variant index 0 <= i < 9",
+                        &"variant index 0 <= i < 10",
                     )),
                 }
             }
@@ -124,6 +129,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     "Template" => Ok(Field::__field6),
                     "ValidatorFeePool" => Ok(Field::__field7),
                     "Utxo" => Ok(Field::__field8),
+                    "ConfidentialOutput" => Ok(Field::__field9),
                     _ => Err(serde::de::Error::unknown_variant(__value, VARIANTS)),
                 }
             }
@@ -140,6 +146,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     b"Template" => Ok(Field::__field6),
                     b"ValidatorFeePool" => Ok(Field::__field7),
                     b"Utxo" => Ok(Field::__field8),
+                    b"ConfidentialOutput" => Ok(Field::__field9),
                     _ => {
                         let value = String::from_utf8_lossy(__value);
                         Err(serde::de::Error::unknown_variant(&value, VARIANTS))
@@ -204,6 +211,10 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     (Field::__field8, variant) => {
                         Result::map(serde::de::VariantAccess::newtype_variant(variant), SubstateId::Utxo)
                     },
+                    (Field::__field9, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant(variant),
+                        SubstateId::ConfidentialOutput,
+                    ),
                 }
             }
         }
@@ -218,6 +229,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             "Template",
             "ValidatorFeePool",
             "Utxo",
+            "ConfidentialOutput",
         ];
         if deserializer.is_human_readable() {
             let s = Cow::<str>::deserialize(deserializer)?;

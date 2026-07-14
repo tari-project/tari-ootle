@@ -203,6 +203,19 @@ where
                             self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
                                 .await?;
                         },
+                        SubstateValue::ConfidentialOutput(_) => {
+                            let addr =
+                                substate_id.substate_id().as_confidential_output_address().ok_or_else(|| {
+                                    SubstateApiError::InvalidValidatorNodeResponse(format!(
+                                        "ConfidentialOutput substate does not have a valid address {}",
+                                        substate_id
+                                    ))
+                                })?;
+
+                            let resx_addr = SubstateId::Resource(*addr.resource_address());
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
+                        },
                     }
 
                     debug!(

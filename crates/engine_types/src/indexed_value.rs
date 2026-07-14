@@ -11,6 +11,8 @@ use tari_template_lib::{
         BinaryTag,
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
+        ConfidentialOutputAddress,
+        ConfidentialOutputAddressContents,
         Hash32,
         Metadata,
         NonFungibleAddress,
@@ -173,6 +175,10 @@ pub struct IndexedWellKnownTypes {
     #[cfg_attr(feature = "ts", ts(type = "number[]"))]
     #[n(13)]
     resource_address_allocations: Vec<ResourceAddressAllocation>,
+    #[serde(default)]
+    #[cbor(default)]
+    #[n(14)]
+    confidential_outputs: Vec<ConfidentialOutputAddress>,
 }
 
 impl IndexedWellKnownTypes {
@@ -192,6 +198,7 @@ impl IndexedWellKnownTypes {
             utxos: vec![],
             component_address_allocations: vec![],
             resource_address_allocations: vec![],
+            confidential_outputs: vec![],
         }
     }
 
@@ -218,6 +225,7 @@ impl IndexedWellKnownTypes {
             utxos: visitor.utxos,
             component_address_allocations: visitor.component_address_allocations,
             resource_address_allocations: visitor.resource_address_allocations,
+            confidential_outputs: visitor.confidential_outputs,
         })
     }
 
@@ -255,6 +263,9 @@ impl IndexedWellKnownTypes {
                     WellKnownTariValue::Utxo(addr) => {
                         found = *id == addr;
                     },
+                    WellKnownTariValue::ConfidentialOutput(addr) => {
+                        found = *id == addr;
+                    },
                     WellKnownTariValue::BucketId(_) |
                     WellKnownTariValue::Metadata(_) |
                     WellKnownTariValue::ComponentAddressAllocation(_) |
@@ -283,6 +294,7 @@ impl IndexedWellKnownTypes {
             .chain(self.vault_ids.iter().map(|a| (*a).into()))
             .chain(self.unclaimed_confidential_output_address.iter().map(|a| (*a).into()))
             .chain(self.utxos.iter().map(|a| a.clone().into()))
+            .chain(self.confidential_outputs.iter().map(|a| a.clone().into()))
             .chain(self.published_template_addresses.iter().map(|a| (*a).into()))
             .chain(self.validator_node_fee_pools.iter().map(|a| (*a).into()))
     }
@@ -297,6 +309,7 @@ impl IndexedWellKnownTypes {
             .chain(self.vault_ids.into_iter().map(Into::into))
             .chain(self.unclaimed_confidential_output_address.into_iter().map(Into::into))
             .chain(self.utxos.into_iter().map(Into::into))
+            .chain(self.confidential_outputs.into_iter().map(Into::into))
             .chain(self.published_template_addresses.into_iter().map(Into::into))
             .chain(self.validator_node_fee_pools.into_iter().map(Into::into))
     }
@@ -360,6 +373,7 @@ impl IndexedWellKnownTypes {
             ),
             validator_node_fee_pools: diff_vec(&self.validator_node_fee_pools, &other.validator_node_fee_pools),
             utxos: diff_vec(&self.utxos, &other.utxos),
+            confidential_outputs: diff_vec(&self.confidential_outputs, &other.confidential_outputs),
             component_address_allocations: diff_vec(
                 &self.component_address_allocations,
                 &other.component_address_allocations,
@@ -413,6 +427,7 @@ pub enum WellKnownTariValue {
     ComponentAddressAllocation(ComponentAddressAllocation),
     ResourceAddressAllocation(ResourceAddressAllocation),
     Utxo(UtxoAddress),
+    ConfidentialOutput(ConfidentialOutputAddress),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -478,6 +493,10 @@ impl FromTagAndValue for WellKnownTariValue {
                 let value: UtxoAddressContents = value.decoded()?;
                 Ok(Self::Utxo(value.into()))
             },
+            BinaryTag::ConfidentialOutput => {
+                let value: ConfidentialOutputAddressContents = value.decoded()?;
+                Ok(Self::ConfidentialOutput(value.into()))
+            },
         }
     }
 }
@@ -496,6 +515,7 @@ pub struct IndexedValueVisitor {
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
     utxos: Vec<UtxoAddress>,
+    confidential_outputs: Vec<ConfidentialOutputAddress>,
     component_address_allocations: Vec<ComponentAddressAllocation>,
     resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
@@ -515,6 +535,7 @@ impl IndexedValueVisitor {
             published_templates: vec![],
             validator_node_fee_pools: vec![],
             utxos: vec![],
+            confidential_outputs: vec![],
             component_address_allocations: vec![],
             resource_address_allocations: vec![],
         }
@@ -567,6 +588,9 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             },
             WellKnownTariValue::Utxo(utxo) => {
                 self.utxos.push(utxo);
+            },
+            WellKnownTariValue::ConfidentialOutput(output) => {
+                self.confidential_outputs.push(output);
             },
         }
         Ok(ControlFlow::Continue(()))

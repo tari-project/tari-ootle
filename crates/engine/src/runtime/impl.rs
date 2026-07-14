@@ -2219,23 +2219,35 @@ where
                                 ),
                             })?;
 
+                    // Enforce confidential limits before the withdraw's proof crypto runs.
+                    if let VaultWithdrawArg::Confidential { proof } = &arg {
+                        state.account_confidential_withdraw(proof)?;
+                    }
+
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
-                    let (resource_container, public_amount) = match arg {
+                    let (resource_container, public_amount, confidential_effects) = match arg {
                         VaultWithdrawArg::Fungible { amount } | VaultWithdrawArg::Stealth { amount } => {
                             let container = vault_mut.withdraw(amount)?;
-                            (container, amount)
+                            (container, amount, None)
                         },
                         VaultWithdrawArg::NonFungible { ids } => {
                             let container = vault_mut.withdraw_non_fungibles(&ids)?;
                             let amount = ids.len() as u128;
-                            (container, amount.into())
+                            (container, amount.into(), None)
                         },
                         VaultWithdrawArg::Confidential { proof } => {
                             let amount = proof.revealed_input_amount();
-                            let container = vault_mut.withdraw_confidential(*proof, maybe_view_key.as_ref())?;
-                            (container, amount)
+                            let (container, effects) =
+                                vault_mut.withdraw_confidential(*proof, maybe_view_key.as_ref())?;
+                            (container, amount, Some(effects))
                         },
                     };
+
+                    // Down the spent input substates and materialise the new change/output commitments.
+                    if let Some(effects) = confidential_effects {
+                        let resource_address = *resource_container.resource_address();
+                        state.materialize_confidential_outputs(resource_address, effects)?;
+                    }
 
                     // Emit a builtin event for the withdraw
                     let payload = Metadata::from_iter([
@@ -2699,8 +2711,11 @@ where
                                 e
                             ),
                         })?;
+                    state.account_confidential_withdraw(&proof)?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
-                    let resource = bucket_mut.take_confidential(proof, view_key.as_ref())?;
+                    let (resource, effects) = bucket_mut.take_confidential(proof, view_key.as_ref())?;
+                    let resource_address = *resource.resource_address();
+                    state.materialize_confidential_outputs(resource_address, effects)?;
                     let bucket_id = state.id_provider()?.new_bucket_id();
                     state.new_bucket(bucket_id, resource)?;
                     state.unlock_substate(resource_lock)?;

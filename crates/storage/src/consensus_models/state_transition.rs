@@ -65,6 +65,7 @@ bitflags! {
         const VALIDATOR_FEE_POOL = 0x0000_0040;
         const UTXO = 0x0000_0080;
         const CLAIMED_OUTPUT_TOMBSTONE = 0x0000_0100;
+        const CONFIDENTIAL_OUTPUT = 0x0000_0400;
         /// Populate `SubstateData.template_metadata` for template substates.
         /// On its own (without `TEMPLATE`), the response omits the WASM binary and carries
         /// `SubstateValueOrHash::Hash` for templates. When combined with `TEMPLATE`, the full
@@ -86,7 +87,8 @@ impl SubstateValueFilterFlags {
             Self::TEMPLATE |
             Self::VALIDATOR_FEE_POOL |
             Self::UTXO |
-            Self::CLAIMED_OUTPUT_TOMBSTONE
+            Self::CLAIMED_OUTPUT_TOMBSTONE |
+            Self::CONFIDENTIAL_OUTPUT
     }
 
     pub fn include_filtered_hashes(&self) -> bool {
@@ -107,6 +109,7 @@ impl SubstateValueFilterFlags {
             SubstateId::Template(_) => self.contains(Self::TEMPLATE) || self.contains(Self::TEMPLATE_METADATA),
             SubstateId::ValidatorFeePool(_) => self.contains(Self::VALIDATOR_FEE_POOL),
             SubstateId::Utxo(_) => self.contains(Self::UTXO),
+            SubstateId::ConfidentialOutput(_) => self.contains(Self::CONFIDENTIAL_OUTPUT),
             SubstateId::ClaimedOutputTombstone(_) => self.contains(Self::CLAIMED_OUTPUT_TOMBSTONE),
         }
     }

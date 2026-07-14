@@ -9,7 +9,7 @@ use log::*;
 use ootle_byte_type::ToByteType;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_engine_types::crypto::get_commitment_factory;
+use tari_engine_types::{crypto::get_commitment_factory, substate::SubstateId};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::OutputWitness;
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
@@ -28,7 +28,7 @@ use tari_ootle_walletd_client::{
         ProofsGenerateResponse,
     },
 };
-use tari_template_lib_types::Amount;
+use tari_template_lib_types::{Amount, ConfidentialOutputAddress};
 use tokio::{task::block_in_place, time::Instant};
 
 use crate::handlers::{
@@ -319,14 +319,30 @@ pub async fn handle_view_vault_balance(
     let commitments = vault
         .get_confidential_commitments()
         .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
+    let resource_address = *vault.resource_address();
 
     // Get view secret key
     let view_key = sdk.key_manager_api().get_elgamal_encrypted_view_key(req.view_key_id)?;
 
-    let elgamal_proofs = commitments
-        .values()
-        .filter_map(|o| o.viewable_balance.clone())
-        .collect::<Vec<_>>();
+    // Confidential OutputBodies live in separate ConfidentialOutput substates; fetch each by its commitment-derived
+    // address to obtain its viewable-balance proof.
+    let mut viewable = Vec::new();
+    for commitment in commitments {
+        let address = ConfidentialOutputAddress::new(resource_address, *commitment);
+        let substate = sdk
+            .substate_api()
+            .fetch_substate_from_network(&SubstateId::ConfidentialOutput(address.clone()), None)
+            .await?
+            .substate;
+        let output = substate.as_confidential_output().ok_or_else(|| {
+            anyhow::anyhow!("Indexer returned a non-confidential-output substate for {}", address)
+        })?;
+        if let Some(proof) = output.output().viewable_balance.clone() {
+            viewable.push((*commitment, proof));
+        }
+    }
+
+    let elgamal_proofs = viewable.iter().map(|(_, proof)| proof.clone()).collect::<Vec<_>>();
 
     let timer = Instant::now();
     let balances = block_in_place(|| {
@@ -343,10 +359,6 @@ pub async fn handle_view_vault_balance(
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(ConfidentialViewVaultBalanceResponse {
-        balances: commitments
-            .iter()
-            .filter_map(|(id, o)| o.viewable_balance.as_ref().map(|_| *id))
-            .zip(balances)
-            .collect(),
+        balances: viewable.iter().map(|(commitment, _)| *commitment).zip(balances).collect(),
     })
 }

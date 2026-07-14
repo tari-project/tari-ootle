@@ -353,6 +353,7 @@ impl ManifestInstructionGenerator {
                         SubstateId::Template(addr) => Ok(call_arg!(addr)),
                         SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(addr)),
                         SubstateId::Utxo(addr) => Ok(call_arg!(addr)),
+                        SubstateId::ConfidentialOutput(addr) => Ok(call_arg!(addr)),
                     },
                 },
             })

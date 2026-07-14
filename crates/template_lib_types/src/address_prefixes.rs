@@ -10,3 +10,4 @@ pub const TRANSACTION_RECEIPT: &str = "txreceipt";
 pub const TEMPLATE: &str = "template";
 pub const VALIDATOR_FEE_POOL: &str = "vnfp";
 pub const UTXO: &str = "utxo";
+pub const CONFIDENTIAL_OUTPUT: &str = "coutput";

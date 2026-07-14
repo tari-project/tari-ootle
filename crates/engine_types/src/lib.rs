@@ -5,6 +5,7 @@ pub mod bucket;
 pub mod commit_result;
 pub mod component;
 pub mod confidential;
+pub mod confidential_output;
 pub mod crypto;
 pub mod events;
 pub mod fees;

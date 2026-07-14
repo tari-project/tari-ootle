@@ -1,8 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::BTreeMap;
-
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -16,12 +14,7 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     models::Account,
-    types::{
-        Amount,
-        ComponentAddress,
-        confidential::ConfidentialOutputStatement,
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    },
+    types::{Amount, ComponentAddress, confidential::ConfidentialOutputStatement, crypto::RistrettoPublicKeyBytes},
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -141,8 +134,10 @@ fn transfer_confidential_amounts_between_accounts() {
     // Faucet is not changed, only the faucet vault.
     assert_eq!(diff.up_iter().filter(|(addr, _)| *addr == faucet).count(), 0);
     assert_eq!(diff.down_iter().filter(|(addr, _)| *addr == faucet).count(), 0);
-    assert_eq!(diff.up_iter().count(), 4);
-    assert_eq!(diff.down_iter().count(), 2);
+    // Up: faucet vault, account1 vault, account1 component, transaction receipt, plus the change and output
+    // ConfidentialOutput substates. Down: the two mutated substates plus the spent input ConfidentialOutput.
+    assert_eq!(diff.up_iter().count(), 6);
+    assert_eq!(diff.down_iter().count(), 3);
 
     let withdraw_proof = generate_withdraw_proof(&proof.output_mask, 100, Some(900), 0u64);
     let split_proof = generate_withdraw_proof(&withdraw_proof.output_mask, 20, Some(80), 0u64);
@@ -182,8 +177,12 @@ fn transfer_confidential_amounts_between_accounts() {
     assert_eq!(diff.down_iter().filter(|(addr, _)| *addr == account1).count(), 0);
     assert_eq!(diff.up_iter().filter(|(addr, _)| *addr == account2).count(), 1);
     assert_eq!(diff.down_iter().filter(|(addr, _)| *addr == account2).count(), 1);
-    assert_eq!(diff.up_iter().count(), 4);
-    assert_eq!(diff.down_iter().count(), 2);
+    // Up: account1 vault, account2 vault, account2 component, transaction receipt, plus three materialised
+    // ConfidentialOutput substates (withdraw change, split change and split output). The intermediate coins1 output is
+    // created and immediately spent by the in-transaction split, so it collapses and never appears in the diff. Down:
+    // account1 vault, account2 component and the single spent input ConfidentialOutput.
+    assert_eq!(diff.up_iter().count(), 7);
+    assert_eq!(diff.down_iter().count(), 3);
 }
 
 #[test]
@@ -470,16 +469,16 @@ fn mint_revealed_with_invalid_proof() {
 }
 
 pub fn try_brute_force_confidential_balance<L>(
-    utxos: &BTreeMap<PedersenCommitmentBytes, OutputBody>,
+    outputs: &[OutputBody],
     secret_view_key: &RistrettoSecretKey,
     value_lookup: &L,
 ) -> Result<Option<u64>, L::Error>
 where
     L: ValueLookup,
 {
-    let decompressed_viewable_balances = utxos
-        .values()
-        .filter_map(|utxo| utxo.viewable_balance.as_ref().map(|vb| vb.try_into().unwrap()))
+    let decompressed_viewable_balances = outputs
+        .iter()
+        .filter_map(|output| output.viewable_balance.as_ref().map(|vb| vb.try_into().unwrap()))
         .collect::<Vec<_>>();
 
     let balances =
@@ -518,12 +517,13 @@ fn mint_with_view_key() {
         .next()
         .unwrap();
 
-    let total_balance = try_brute_force_confidential_balance(
-        faucet_vault.get_confidential_commitments().unwrap(),
-        &view_key_secret,
-        &GenerateValueLookup::new(0..=200),
-    )
-    .unwrap();
+    let faucet_outputs = test
+        .read_only_state_store()
+        .get_confidential_output_bodies(&faucet_vault)
+        .unwrap();
+    let total_balance =
+        try_brute_force_confidential_balance(&faucet_outputs, &view_key_secret, &GenerateValueLookup::new(0..=200))
+            .unwrap();
     assert_eq!(total_balance, Some(223 - 55));
 
     let (_, user_vault) = test
@@ -534,11 +534,12 @@ fn mint_with_view_key() {
         .next()
         .unwrap();
 
-    let total_balance = try_brute_force_confidential_balance(
-        user_vault.get_confidential_commitments().unwrap(),
-        &view_key_secret,
-        &GenerateValueLookup::new(0..=200),
-    )
-    .unwrap();
+    let user_outputs = test
+        .read_only_state_store()
+        .get_confidential_output_bodies(&user_vault)
+        .unwrap();
+    let total_balance =
+        try_brute_force_confidential_balance(&user_outputs, &view_key_secret, &GenerateValueLookup::new(0..=200))
+            .unwrap();
     assert_eq!(total_balance, Some(55));
 }

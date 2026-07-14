@@ -38,6 +38,7 @@ pub enum BinaryTag {
     AllocatedComponentAddress = 139,
     AllocatedResourceAddress = 140,
     Utxo = 141,
+    ConfidentialOutput = 142,
 }
 
 impl BinaryTag {
@@ -57,6 +58,7 @@ impl BinaryTag {
             139 => Some(Self::AllocatedComponentAddress),
             140 => Some(Self::AllocatedResourceAddress),
             141 => Some(Self::Utxo),
+            142 => Some(Self::ConfidentialOutput),
             _ => None,
         }
     }
@@ -87,6 +89,7 @@ mod tests {
             BinaryTag::AllocatedComponentAddress,
             BinaryTag::AllocatedResourceAddress,
             BinaryTag::Utxo,
+            BinaryTag::ConfidentialOutput,
         ];
 
         for case in cases {

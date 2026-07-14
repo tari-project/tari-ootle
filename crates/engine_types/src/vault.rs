@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -39,9 +39,8 @@ use tari_template_lib::{
 
 use crate::{
     bucket::Bucket,
-    crypto::OutputBody,
     proof::{ContainerRef, LockedResource, Proof},
-    resource_container::{ResourceContainer, ResourceError},
+    resource_container::{ConfidentialOutputEffects, ResourceContainer, ResourceError},
 };
 
 #[derive(
@@ -85,7 +84,7 @@ impl Vault {
         &mut self,
         proof: ConfidentialWithdrawProof,
         view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<ResourceContainer, ResourceError> {
+    ) -> Result<(ResourceContainer, ConfidentialOutputEffects), ResourceError> {
         self.resource_container.withdraw_confidential(proof, view_key)
     }
 
@@ -126,7 +125,7 @@ impl Vault {
         self.resource_container.get_commitment_count()
     }
 
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, OutputBody>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeSet<PedersenCommitmentBytes>> {
         self.resource_container.get_confidential_commitments()
     }
 

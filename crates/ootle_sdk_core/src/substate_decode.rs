@@ -236,6 +236,7 @@ fn substate_variant_name(value: &SubstateValue) -> &'static str {
         SubstateValue::Template(_) => "template",
         SubstateValue::ValidatorFeePool(_) => "validator_fee_pool",
         SubstateValue::Utxo(_) => "utxo",
+        SubstateValue::ConfidentialOutput(_) => "confidential_output",
     }
 }
 

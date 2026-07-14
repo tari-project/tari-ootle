@@ -596,6 +596,12 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
                 println!("        ▶ Resource: {}", utxo_address.resource_address());
                 println!("        ▶ id: {}", utxo_address.id());
             },
+            SubstateValue::ConfidentialOutput(_) => {
+                println!("      ▶ Confidential output:");
+                let output_address = id.as_confidential_output_address().unwrap();
+                println!("        ▶ Resource: {}", output_address.resource_address());
+                println!("        ▶ commitment: {}", output_address.commitment());
+            },
         }
         println!();
     }
@@ -932,6 +938,7 @@ impl CliArg {
                 SubstateId::Template(v) => call_arg!(v),
                 SubstateId::ValidatorFeePool(v) => call_arg!(v),
                 SubstateId::Utxo(v) => call_arg!(v),
+                SubstateId::ConfidentialOutput(v) => call_arg!(v),
             },
             CliArg::TemplateAddress(v) => call_arg!(v),
             CliArg::NonFungibleId(v) => call_arg!(v),

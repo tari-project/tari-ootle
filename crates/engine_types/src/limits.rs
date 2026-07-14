@@ -137,3 +137,23 @@ pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_total_inputs_per_transaction: 1024,
     max_total_outputs_per_transaction: 256,
 };
+
+pub struct ConfidentialLimits {
+    /// Maximum input commitments spent by a single confidential withdraw proof.
+    pub max_inputs: usize,
+    /// Maximum confidential withdraws in a single transaction.
+    pub max_withdraws_per_transaction: usize,
+    /// Maximum input commitments spent across all confidential withdraws in a single transaction.
+    pub max_total_inputs_per_transaction: usize,
+}
+
+/// Spending confidential outputs is native, unmetered work: each input commitment is a separate substate that must be
+/// locked and read plus folded into the balance-proof point aggregation, and each withdraw verifies a bulletproof range
+/// proof over its (at most two) outputs. The per-withdraw limit bounds one proof; the per-transaction limits bound the
+/// aggregate so a single transaction cannot stack enough native verification and substate access to stall the proposing
+/// leader. These are consensus-relevant execution rules enforced uniformly during execution, not mempool heuristics.
+pub const CONFIDENTIAL_LIMITS: ConfidentialLimits = ConfidentialLimits {
+    max_inputs: 1000,
+    max_withdraws_per_transaction: 64,
+    max_total_inputs_per_transaction: 1024,
+};

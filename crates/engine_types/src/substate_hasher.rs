@@ -8,6 +8,7 @@ use crate::{
     ProtocolVersion,
     component::Component,
     confidential::ClaimedOutputTombstone,
+    confidential_output::ConfidentialOutput,
     hashing::{EngineHashDomainLabel, hasher32},
     non_fungible::NonFungibleContainer,
     published_template::PublishedTemplate,
@@ -43,6 +44,7 @@ pub enum SubstateValueHashMessageV0<'a> {
     Template(PublishedTemplateHashMessage<'a>),
     ValidatorFeePool(ValidatorFeePoolHashMessage<'a>),
     Utxo(UtxoHashMessage<'a>),
+    ConfidentialOutput(ConfidentialOutputHashMessage<'a>),
 }
 
 impl<'a> From<&'a SubstateValue> for SubstateValueHashMessageV0<'a> {
@@ -57,6 +59,7 @@ impl<'a> From<&'a SubstateValue> for SubstateValueHashMessageV0<'a> {
             SubstateValue::Template(template) => Self::Template(template.into()),
             SubstateValue::ValidatorFeePool(pool) => Self::ValidatorFeePool(pool.into()),
             SubstateValue::Utxo(utxo) => Self::Utxo(utxo.into()),
+            SubstateValue::ConfidentialOutput(output) => Self::ConfidentialOutput(output.into()),
         }
     }
 }
@@ -182,6 +185,15 @@ pub struct UtxoHashMessage<'a>(&'a Utxo);
 impl<'a> From<&'a Utxo> for UtxoHashMessage<'a> {
     fn from(utxo: &'a Utxo) -> Self {
         Self(utxo)
+    }
+}
+
+#[derive(Debug, Clone, Copy, borsh::BorshSerialize)]
+pub struct ConfidentialOutputHashMessage<'a>(&'a ConfidentialOutput);
+
+impl<'a> From<&'a ConfidentialOutput> for ConfidentialOutputHashMessage<'a> {
+    fn from(output: &'a ConfidentialOutput) -> Self {
+        Self(output)
     }
 }
 

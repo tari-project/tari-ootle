@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeMap, mem};
+use std::mem;
 
 use ootle_byte_type::ToByteType;
 use serde::{Deserialize, Serialize};
@@ -55,11 +55,11 @@ pub enum ResourceContainer {
         #[n(0)]
         address: ResourceAddress,
         #[n(1)]
-        commitments: BTreeMap<PedersenCommitmentBytes, OutputBody>,
+        commitments: BTreeSet<PedersenCommitmentBytes>,
         #[n(2)]
         revealed_amount: Amount,
         #[n(3)]
-        locked_commitments: BTreeMap<PedersenCommitmentBytes, OutputBody>,
+        locked_commitments: BTreeSet<PedersenCommitmentBytes>,
         #[n(4)]
         locked_revealed_amount: Amount,
     },
@@ -72,6 +72,15 @@ pub enum ResourceContainer {
         #[n(2)]
         locked_amount: Amount,
     },
+}
+
+/// Substate-level side effects of a confidential mint/withdraw that the engine runtime must apply: `created_outputs`
+/// become new [`crate::confidential_output::ConfidentialOutput`] substates (up@v0), and `spent_commitments` name the
+/// input substates to down.
+#[derive(Debug, Clone, Default)]
+pub struct ConfidentialOutputEffects {
+    pub created_outputs: Vec<(PedersenCommitmentBytes, OutputBody)>,
+    pub spent_commitments: Vec<PedersenCommitmentBytes>,
 }
 
 impl ResourceContainer {
@@ -92,16 +101,16 @@ impl ResourceContainer {
         }
     }
 
-    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, OutputBody)>>(
+    pub fn confidential<I: IntoIterator<Item = PedersenCommitmentBytes>>(
         address: ResourceAddress,
-        commitment: I,
+        commitments: I,
         revealed_amount: Amount,
     ) -> Self {
         Self::Confidential {
             address,
-            commitments: commitment.into_iter().collect(),
+            commitments: commitments.into_iter().collect(),
             revealed_amount,
-            locked_commitments: BTreeMap::new(),
+            locked_commitments: BTreeSet::new(),
             locked_revealed_amount: Amount::zero(),
         }
     }
@@ -126,11 +135,14 @@ impl ResourceContainer {
         }
     }
 
+    /// Mints new confidential commitments. Returns the container (holding only the commitment ids) together with the
+    /// `OutputBody`s the engine must materialise as separate [`crate::confidential_output::ConfidentialOutput`]
+    /// substates.
     pub fn mint_confidential(
         address: ResourceAddress,
         proof: ConfidentialOutputStatement,
         view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<Self, ResourceError> {
+    ) -> Result<(Self, Vec<(PedersenCommitmentBytes, OutputBody)>), ResourceError> {
         if proof.change_statement.is_some() {
             return Err(ResourceError::InvalidConfidentialMintWithChange);
         }
@@ -144,17 +156,19 @@ impl ResourceContainer {
             validated_proof.change_output.is_none(),
             "invariant failed: validate_confidential_proof returned change with no change in input proof"
         );
-        Ok(Self::Confidential {
+        let created_outputs = validated_proof
+            .output
+            .into_iter()
+            .map(|o| (o.commitment.to_byte_type(), o.into_output_body()))
+            .collect::<Vec<_>>();
+        let container = Self::Confidential {
             address,
-            commitments: validated_proof
-                .output
-                .into_iter()
-                .map(|o| (o.commitment.to_byte_type(), o.into_output_body()))
-                .collect(),
+            commitments: created_outputs.iter().map(|(c, _)| *c).collect(),
             revealed_amount: validated_proof.output_revealed_amount,
-            locked_commitments: BTreeMap::new(),
+            locked_commitments: BTreeSet::new(),
             locked_revealed_amount: Amount::zero(),
-        })
+        };
+        Ok((container, created_outputs))
     }
 
     pub fn unlocked_amount(&self) -> Amount {
@@ -282,8 +296,8 @@ impl ResourceContainer {
                     ..
                 },
             ) => {
-                for (commit, output) in other_commitments {
-                    if commitments.insert(commit, output).is_some() {
+                for commit in other_commitments {
+                    if !commitments.insert(commit) {
                         return Err(ResourceError::InvariantError(
                             "Confidential deposit contained duplicate commitment".to_string(),
                         ));
@@ -417,11 +431,17 @@ impl ResourceContainer {
         }
     }
 
+    /// Spends the confidential inputs named in `proof` and produces the withdrawn output container.
+    ///
+    /// Only the commitment ids are held in the container; the `OutputBody`s for the newly-created change and output
+    /// commitments (and the commitments spent) are returned in [`ConfidentialOutputEffects`] so the engine can
+    /// materialise/down the corresponding [`crate::confidential_output::ConfidentialOutput`] substates. Membership of
+    /// each input commitment in `self`'s commitment set is the spend authorization.
     pub fn withdraw_confidential(
         &mut self,
         proof: ConfidentialWithdrawProof,
         view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<Self, ResourceError> {
+    ) -> Result<(Self, ConfidentialOutputEffects), ResourceError> {
         match self {
             Self::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
                 "Cannot withdraw confidential assets from a fungible resource (use withdraw)".to_string(),
@@ -434,30 +454,33 @@ impl ResourceContainer {
                 "Cannot withdraw confidential assets from a stealth resource (use withdraw)".to_string(),
             )),
             Self::Confidential {
+                address,
                 commitments,
                 revealed_amount,
                 ..
             } => {
-                let inputs = proof
-                    .inputs
-                    .iter()
-                    .map(|input| {
-                        let commitment = PedersenCommitment::from_canonical_bytes(input.as_bytes()).map_err(|_| {
-                            ResourceError::InvalidConfidentialProof {
-                                details: "Malformed input commitment".to_string(),
-                            }
-                        })?;
-                        match commitments.remove(input) {
-                            Some(_) => Ok(commitment),
-                            None => Err(ResourceError::InvalidConfidentialProof {
-                                details: format!(
-                                    "withdraw_confidential: input commitment {} not found in resource",
-                                    commitment.as_public_key()
-                                ),
-                            }),
+                let address = *address;
+                let mut inputs = Vec::with_capacity(proof.inputs.len());
+                let mut spent_commitments = Vec::with_capacity(proof.inputs.len());
+                for input in &proof.inputs {
+                    let commitment = PedersenCommitment::from_canonical_bytes(input.as_bytes()).map_err(|_| {
+                        ResourceError::InvalidConfidentialProof {
+                            details: "Malformed input commitment".to_string(),
                         }
-                    })
-                    .collect::<Result<Vec<_>, ResourceError>>()?;
+                    })?;
+                    // Set membership is the spend authorization: only commitments the vault owns can be spent.
+                    if commitments.remove(input) {
+                        inputs.push(commitment);
+                        spent_commitments.push(*input);
+                    } else {
+                        return Err(ResourceError::InvalidConfidentialProof {
+                            details: format!(
+                                "withdraw_confidential: input commitment {} not found in resource",
+                                commitment.as_public_key()
+                            ),
+                        });
+                    }
+                }
 
                 let validated_proof = confidential::validate_confidential_withdraw(&inputs, view_key, proof)?;
 
@@ -473,11 +496,11 @@ impl ResourceContainer {
                 }
                 *revealed_amount -= validated_proof.input_revealed_amount;
 
+                let mut created_outputs = Vec::new();
+
                 if let Some(change) = validated_proof.change_output {
-                    if commitments
-                        .insert(change.commitment.to_byte_type(), change.into_output_body())
-                        .is_some()
-                    {
+                    let change_commitment = change.commitment.to_byte_type();
+                    if !commitments.insert(change_commitment) {
                         return Err(ResourceError::InvariantError(
                             "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
                         ));
@@ -494,15 +517,21 @@ impl ResourceContainer {
                     }
 
                     *revealed_amount += validated_proof.change_revealed_amount;
+                    created_outputs.push((change_commitment, change.into_output_body()));
                 }
 
-                Ok(Self::confidential(
-                    *self.resource_address(),
-                    validated_proof
-                        .output
-                        .map(|o| (o.commitment.to_byte_type(), o.into_output_body())),
-                    validated_proof.output_revealed_amount,
-                ))
+                let output_commitment = validated_proof.output.map(|output| {
+                    let commitment = output.commitment.to_byte_type();
+                    created_outputs.push((commitment, output.into_output_body()));
+                    commitment
+                });
+
+                let output_container =
+                    Self::confidential(address, output_commitment, validated_proof.output_revealed_amount);
+                Ok((output_container, ConfidentialOutputEffects {
+                    created_outputs,
+                    spent_commitments,
+                }))
             },
         }
     }
@@ -542,15 +571,18 @@ impl ResourceContainer {
                 let recalled = commitments
                     .iter()
                     .map(|commitment| {
-                        let output = existing_commitments.remove(commitment).ok_or_else(|| {
-                            ResourceError::InvalidConfidentialProof {
+                        // The recalled commitment moves to the returned container; its ConfidentialOutput substate is
+                        // not downed (recall is a move, not a spend).
+                        if existing_commitments.remove(commitment) {
+                            Ok(*commitment)
+                        } else {
+                            Err(ResourceError::InvalidConfidentialProof {
                                 details: format!(
                                     "recall_confidential_commitments: input commitment {} not found in resource",
                                     commitment,
                                 ),
-                            }
-                        })?;
-                        Ok((*commitment, output))
+                            })
+                        }
                     })
                     .collect::<Result<Vec<_>, ResourceError>>()?;
 
@@ -559,15 +591,16 @@ impl ResourceContainer {
         }
     }
 
-    /// Returns all confidential commitments. If the resource is not confidential, None is returned.
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, OutputBody>> {
+    /// Returns the ids of all confidential commitments held. If the resource is not confidential, None is returned.
+    /// The commitment `OutputBody`s live in separate [`crate::confidential_output::ConfidentialOutput`] substates.
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeSet<PedersenCommitmentBytes>> {
         match self {
             Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => None,
             Self::Confidential { commitments, .. } => Some(commitments),
         }
     }
 
-    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, OutputBody>> {
+    pub fn into_confidential_commitments(self) -> Option<BTreeSet<PedersenCommitmentBytes>> {
         match self {
             Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => None,
             Self::Confidential { commitments, .. } => Some(commitments),
@@ -619,7 +652,7 @@ impl ResourceContainer {
                 }
                 let newly_locked_commitments = mem::take(commitments);
                 let newly_locked_revealed_amount = *revealed_amount;
-                locked_commitments.extend(newly_locked_commitments.iter().map(|(c, o)| (*c, o.clone())));
+                locked_commitments.extend(newly_locked_commitments.iter().copied());
                 *locked_revealed_amount += newly_locked_revealed_amount;
 
                 Ok(Self::confidential(
@@ -731,13 +764,13 @@ impl ResourceContainer {
                     )));
                 }
 
-                for (commitment, _) in container.get_confidential_commitments().into_iter().flatten() {
-                    let (commitment, output) = locked_commitments.remove_entry(commitment).ok_or_else(|| {
-                        ResourceError::InvariantError(
+                for commitment in container.get_confidential_commitments().into_iter().flatten() {
+                    if !locked_commitments.remove(commitment) {
+                        return Err(ResourceError::InvariantError(
                             "unlock: tried to unlock commitment that was not locked".to_string(),
-                        )
-                    })?;
-                    if commitments.insert(commitment, output).is_some() {
+                        ));
+                    }
+                    if !commitments.insert(*commitment) {
                         return Err(ResourceError::InvariantError(
                             "unlock: container contained duplicate commitment".to_string(),
                         ));

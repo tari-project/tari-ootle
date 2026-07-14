@@ -4,6 +4,7 @@
 mod binary_tag;
 mod claimed_output_tombstone;
 mod component;
+mod confidential_output;
 #[macro_use]
 mod metadata;
 mod non_fungible;
@@ -17,6 +18,7 @@ mod vn_fee_pool;
 pub use binary_tag::*;
 pub use claimed_output_tombstone::*;
 pub use component::*;
+pub use confidential_output::*;
 pub use metadata::*;
 pub use non_fungible::*;
 pub use resource::*;

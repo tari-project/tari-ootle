@@ -7,12 +7,13 @@ use indexmap::{IndexMap, IndexSet};
 use tari_engine_types::{
     Utxo,
     component::Component,
+    confidential_output::ConfidentialOutput,
     lock::{LockFlag, LockId},
     substate::{Substate, SubstateId, SubstateValue},
     vault::Vault,
 };
 use tari_ootle_common_types::optional::Optional;
-use tari_template_lib::types::{ComponentAddress, UtxoAddress, VaultId};
+use tari_template_lib::types::{ComponentAddress, ConfidentialOutputAddress, UtxoAddress, VaultId};
 
 use crate::{
     runtime::{
@@ -34,6 +35,7 @@ pub struct WorkingStateStore<TStore> {
     locked_substates: LockedSubstates,
 
     downed_utxos: IndexSet<UtxoAddress>,
+    downed_confidential_outputs: IndexSet<ConfidentialOutputAddress>,
     /// The underlying state store that is used to load substates that are not in the working state maps.
     state_store: TStore,
 }
@@ -45,6 +47,7 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
             loaded_substates: HashMap::new(),
             locked_substates: LockedSubstates::default(),
             downed_utxos: IndexSet::default(),
+            downed_confidential_outputs: IndexSet::default(),
             state_store,
         }
     }
@@ -181,6 +184,10 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         mem::take(&mut self.downed_utxos)
     }
 
+    pub fn take_downed_confidential_outputs(&mut self) -> IndexSet<ConfidentialOutputAddress> {
+        mem::take(&mut self.downed_confidential_outputs)
+    }
+
     pub fn mutated_substates(&self) -> &IndexMap<SubstateId, SubstateValue> {
         &self.new_substates
     }
@@ -202,6 +209,32 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         if let Some(substate) = self.loaded_substates.remove(substate_id) {
             self.downed_utxos.insert(address);
             return Ok(substate.into_substate_value().into_utxo().expect(EXPECT));
+        }
+
+        Err(RuntimeError::SubstateNotFound {
+            id: substate_id.clone(),
+        })
+    }
+
+    pub fn down_confidential_output(&mut self, lock_id: LockId) -> Result<ConfidentialOutput, RuntimeError> {
+        let lock = self.locked_substates.get(lock_id, LockFlag::Write)?;
+        let substate_id = lock.substate_id();
+        let address =
+            substate_id
+                .as_confidential_output_address()
+                .cloned()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "down_confidential_output",
+                    details: format!("Substate at address {} is not a confidential output", substate_id),
+                })?;
+        const EXPECT: &str = "invariant: substate found at confidential output address is not a confidential output";
+        if let Some(value) = self.new_substates.shift_remove(substate_id) {
+            // Created and spent in the same transaction: collapse by not creating it (no down recorded).
+            return Ok(value.into_confidential_output().expect(EXPECT));
+        }
+        if let Some(substate) = self.loaded_substates.remove(substate_id) {
+            self.downed_confidential_outputs.insert(address);
+            return Ok(substate.into_substate_value().into_confidential_output().expect(EXPECT));
         }
 
         Err(RuntimeError::SubstateNotFound {

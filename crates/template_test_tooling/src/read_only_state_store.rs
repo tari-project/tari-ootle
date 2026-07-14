@@ -7,6 +7,8 @@ use tari_engine::state_store::{StateReader, StateStoreError, memory::MemoryState
 use tari_engine_types::{
     Utxo,
     component::Component,
+    confidential_output::ConfidentialOutput,
+    crypto::OutputBody,
     indexed_value::IndexedValue,
     resource::Resource,
     substate::{Substate, SubstateId},
@@ -16,7 +18,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::Account,
     prelude::RistrettoPublicKeyBytes,
-    types::{ComponentAddress, ResourceAddress, TemplateAddress, UtxoAddress, VaultId},
+    types::{ComponentAddress, ConfidentialOutputAddress, ResourceAddress, TemplateAddress, UtxoAddress, VaultId},
 };
 
 pub struct ReadOnlyStateStore<'a> {
@@ -146,6 +148,26 @@ impl<'a> ReadOnlyStateStore<'a> {
             }
         })?;
         Ok(utxos)
+    }
+
+    pub fn get_confidential_output(
+        &self,
+        addr: ConfidentialOutputAddress,
+    ) -> Result<ConfidentialOutput, StateStoreError> {
+        let substate = self.get_substate(&SubstateId::ConfidentialOutput(addr))?;
+        Ok(substate.into_substate_value().into_confidential_output().unwrap())
+    }
+
+    /// Resolves the `OutputBody`s of all confidential commitments held by `vault` by fetching their separate
+    /// [`ConfidentialOutput`] substates.
+    pub fn get_confidential_output_bodies(&self, vault: &Vault) -> Result<Vec<OutputBody>, StateStoreError> {
+        let resource_address = *vault.resource_address();
+        let mut bodies = Vec::new();
+        for commitment in vault.get_confidential_commitments().into_iter().flatten() {
+            let addr = ConfidentialOutputAddress::new(resource_address, *commitment);
+            bodies.push(self.get_confidential_output(addr)?.into_output());
+        }
+        Ok(bodies)
     }
 
     pub fn inspect_component(&self, component_address: ComponentAddress) -> Result<IndexedValue, StateStoreError> {

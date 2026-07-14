@@ -1,8 +1,11 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::limits::StealthLimits;
-use tari_template_lib::types::stealth::{StealthOutputsStatement, StealthTransferStatement};
+use tari_engine_types::limits::{ConfidentialLimits, StealthLimits};
+use tari_template_lib::types::{
+    confidential::ConfidentialWithdrawProof,
+    stealth::{StealthOutputsStatement, StealthTransferStatement},
+};
 
 use crate::runtime::error::ArgumentValidationError;
 
@@ -75,6 +78,56 @@ impl StealthTransactionTotals {
         self.transfers = transfers;
         self.inputs = inputs;
         self.outputs = outputs;
+        Ok(())
+    }
+}
+
+pub(crate) fn check_confidential_withdraw_limits(
+    limits: &ConfidentialLimits,
+    proof: &ConfidentialWithdrawProof,
+) -> Result<(), ArgumentValidationError> {
+    if proof.inputs.len() > limits.max_inputs {
+        return Err(ArgumentValidationError::MaxConfidentialInputsExceeded {
+            max_inputs: limits.max_inputs,
+            actual_inputs: proof.inputs.len(),
+        });
+    }
+    Ok(())
+}
+
+/// Running per-transaction tally of confidential-withdraw work. Bounds the aggregate native verification and
+/// substate-access cost a single transaction can incur across all its confidential withdraws, so one transaction
+/// cannot stall the proposing leader. See [`ConfidentialLimits`] and [`tari_engine_types::limits::CONFIDENTIAL_LIMITS`].
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ConfidentialTransactionTotals {
+    withdraws: usize,
+    inputs: usize,
+}
+
+impl ConfidentialTransactionTotals {
+    /// Accounts one more confidential withdraw against the per-transaction caps. Returns an error — which aborts the
+    /// transaction before the withdraw's (expensive) crypto runs — if any cap would be exceeded. Totals only advance
+    /// when the withdraw is admitted, so the work actually performed never exceeds the caps.
+    pub fn account_withdraw(
+        &mut self,
+        limits: &ConfidentialLimits,
+        proof: &ConfidentialWithdrawProof,
+    ) -> Result<(), ArgumentValidationError> {
+        let withdraws = self.withdraws + 1;
+        if withdraws > limits.max_withdraws_per_transaction {
+            return Err(ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded {
+                max_withdraws: limits.max_withdraws_per_transaction,
+            });
+        }
+        let inputs = self.inputs + proof.inputs.len();
+        if inputs > limits.max_total_inputs_per_transaction {
+            return Err(ArgumentValidationError::MaxConfidentialInputsPerTransactionExceeded {
+                max_inputs: limits.max_total_inputs_per_transaction,
+                actual_inputs: inputs,
+            });
+        }
+        self.withdraws = withdraws;
+        self.inputs = inputs;
         Ok(())
     }
 }
@@ -164,5 +217,54 @@ mod tests {
         totals.account_transfer(&LIMITS, &statement(2, 0)).unwrap_err();
         // A 1-input transfer still fits (2 + 1 = 3).
         totals.account_transfer(&LIMITS, &statement(1, 0)).unwrap();
+    }
+
+    const CONF_LIMITS: ConfidentialLimits = ConfidentialLimits {
+        max_inputs: 2,
+        max_withdraws_per_transaction: 2,
+        max_total_inputs_per_transaction: 3,
+    };
+
+    /// A confidential withdraw proof with the given input count; only the count matters to the limits.
+    fn withdraw_proof(n_inputs: usize) -> ConfidentialWithdrawProof {
+        let mut proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        proof.inputs = (0..n_inputs).map(|_| dummy_commitment()).collect();
+        proof
+    }
+
+    #[test]
+    fn rejects_a_withdraw_over_the_per_proof_input_cap() {
+        let err = check_confidential_withdraw_limits(&CONF_LIMITS, &withdraw_proof(3)).unwrap_err();
+        assert!(matches!(
+            err,
+            ArgumentValidationError::MaxConfidentialInputsExceeded { max_inputs: 2, actual_inputs: 3 }
+        ));
+        check_confidential_withdraw_limits(&CONF_LIMITS, &withdraw_proof(2)).unwrap();
+    }
+
+    #[test]
+    fn rejects_the_withdraw_that_exceeds_the_withdraw_cap() {
+        let mut totals = ConfidentialTransactionTotals::default();
+        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(0)).unwrap();
+        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(0)).unwrap();
+        let err = totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(0)).unwrap_err();
+        assert!(matches!(
+            err,
+            ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { max_withdraws: 2 }
+        ));
+    }
+
+    #[test]
+    fn sums_inputs_across_withdraws_and_a_rejected_withdraw_keeps_its_budget() {
+        let mut totals = ConfidentialTransactionTotals::default();
+        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(2)).unwrap();
+        // Rejected: 2 + 2 = 4 > 3 inputs. Must not advance the running totals.
+        let err = totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(2)).unwrap_err();
+        assert!(matches!(
+            err,
+            ArgumentValidationError::MaxConfidentialInputsPerTransactionExceeded { max_inputs: 3, .. }
+        ));
+        // A 1-input withdraw still fits (2 + 1 = 3).
+        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(1)).unwrap();
     }
 }

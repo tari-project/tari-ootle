@@ -33,6 +33,7 @@ use tari_bor::{BorError, decode, decode_exact, encode};
 use tari_template_lib::types::{
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
+    ConfidentialOutputAddress,
     Hash32,
     NonFungibleAddress,
     ObjectKey,
@@ -53,6 +54,7 @@ use crate::{
     ValidatorFeeWithdrawal,
     component::Component,
     confidential::ClaimedOutputTombstone,
+    confidential_output::ConfidentialOutput,
     hashing::{EngineHashDomainLabel, hasher32, substate_value_hasher32},
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
@@ -163,6 +165,8 @@ pub enum SubstateId {
     ValidatorFeePool(#[n(0)] ValidatorFeePoolAddress),
     #[n(8)]
     Utxo(#[n(0)] UtxoAddress),
+    #[n(9)]
+    ConfidentialOutput(#[n(0)] ConfidentialOutputAddress),
 }
 
 impl SubstateId {
@@ -222,6 +226,13 @@ impl SubstateId {
         }
     }
 
+    pub fn as_confidential_output_address(&self) -> Option<&ConfidentialOutputAddress> {
+        match self {
+            Self::ConfidentialOutput(address) => Some(address),
+            _ => None,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self).unwrap()
     }
@@ -260,6 +271,15 @@ impl SubstateId {
 
                 ObjectKey::from_array(key)
             },
+            SubstateId::ConfidentialOutput(addr) => {
+                let key = hasher32(EngineHashDomainLabel::ConfidentialOutputAddress)
+                    .chain(addr.resource_address())
+                    .chain(addr.commitment())
+                    .result()
+                    .into_array();
+
+                ObjectKey::from_array(key)
+            },
         }
     }
 
@@ -287,7 +307,7 @@ impl SubstateId {
         // well-defined right now, this is simply used to prevent components being detected as dangling.
         matches!(
             self,
-            Self::Component(_) | Self::Utxo(_) | Self::ClaimedOutputTombstone(_)
+            Self::Component(_) | Self::Utxo(_) | Self::ConfidentialOutput(_) | Self::ClaimedOutputTombstone(_)
         )
     }
 
@@ -325,6 +345,10 @@ impl SubstateId {
 
     pub const fn is_utxo(&self) -> bool {
         matches!(self, Self::Utxo(_))
+    }
+
+    pub const fn is_confidential_output(&self) -> bool {
+        matches!(self, Self::ConfidentialOutput(_))
     }
 
     pub const fn is_global(&self) -> bool {
@@ -393,6 +417,12 @@ impl From<ValidatorFeePoolAddress> for SubstateId {
 impl From<UtxoAddress> for SubstateId {
     fn from(address: UtxoAddress) -> Self {
         Self::Utxo(address)
+    }
+}
+
+impl From<ConfidentialOutputAddress> for SubstateId {
+    fn from(address: ConfidentialOutputAddress) -> Self {
+        Self::ConfidentialOutput(address)
     }
 }
 
@@ -518,6 +548,7 @@ impl Display for SubstateId {
             SubstateId::Template(addr) => Display::fmt(addr, f),
             SubstateId::ValidatorFeePool(addr) => Display::fmt(addr, f),
             SubstateId::Utxo(addr) => Display::fmt(addr, f),
+            SubstateId::ConfidentialOutput(addr) => Display::fmt(addr, f),
         }
     }
 }
@@ -572,6 +603,11 @@ impl FromStr for SubstateId {
                 let addr = UtxoAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::Utxo(addr))
             },
+            Some((address_prefixes::CONFIDENTIAL_OUTPUT, addr)) => {
+                let addr =
+                    ConfidentialOutputAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                Ok(SubstateId::ConfidentialOutput(addr))
+            },
             Some(_) | None => Err(InvalidSubstateIdFormat(s.to_string())),
         }
     }
@@ -599,6 +635,7 @@ impl_partial_eq!(ResourceAddress, Resource);
 impl_partial_eq!(VaultId, Vault);
 impl_partial_eq!(ClaimedOutputTombstoneAddress, ClaimedOutputTombstone);
 impl_partial_eq!(NonFungibleAddress, NonFungible);
+impl_partial_eq!(ConfidentialOutputAddress, ConfidentialOutput);
 impl_partial_eq!(TransactionReceiptAddress, TransactionReceipt);
 impl_partial_eq!(PublishedTemplateAddress, Template);
 impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
@@ -627,6 +664,8 @@ pub enum SubstateValue {
     ValidatorFeePool(#[n(0)] ValidatorFeePool),
     #[n(8)]
     Utxo(#[n(0)] Utxo),
+    #[n(9)]
+    ConfidentialOutput(#[n(0)] ConfidentialOutput),
 }
 
 impl SubstateValue {
@@ -826,6 +865,27 @@ impl SubstateValue {
         }
     }
 
+    pub fn as_confidential_output(&self) -> Option<&ConfidentialOutput> {
+        match self {
+            SubstateValue::ConfidentialOutput(output) => Some(output),
+            _ => None,
+        }
+    }
+
+    pub fn as_confidential_output_mut(&mut self) -> Option<&mut ConfidentialOutput> {
+        match self {
+            SubstateValue::ConfidentialOutput(output) => Some(output),
+            _ => None,
+        }
+    }
+
+    pub fn into_confidential_output(self) -> Option<ConfidentialOutput> {
+        match self {
+            SubstateValue::ConfidentialOutput(output) => Some(output),
+            _ => None,
+        }
+    }
+
     pub fn component_template_address(&self) -> Option<&TemplateAddress> {
         self.as_component().map(|c| c.template_address())
     }
@@ -894,6 +954,12 @@ impl From<ValidatorFeePool> for SubstateValue {
 impl From<Utxo> for SubstateValue {
     fn from(utxo: Utxo) -> Self {
         Self::Utxo(utxo)
+    }
+}
+
+impl From<ConfidentialOutput> for SubstateValue {
+    fn from(output: ConfidentialOutput) -> Self {
+        Self::ConfidentialOutput(output)
     }
 }
 

@@ -44,6 +44,7 @@ impl ManifestValue {
                 SubstateId::Template(addr) => Ok(call_arg!(*addr)),
                 SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
                 SubstateId::Utxo(addr) => Ok(call_arg!(*addr)),
+                SubstateId::ConfidentialOutput(addr) => Ok(call_arg!(addr)),
             },
             ManifestValue::Literal(lit) => lit_to_arg(lit),
             ManifestValue::NonFungibleId(id) => Ok(call_arg!(id.clone())),

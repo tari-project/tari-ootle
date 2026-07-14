@@ -8,7 +8,10 @@ use ootle_byte_type::{FromByteType, ToByteType};
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_address::OotleAddress;
-use tari_ootle_common_types::{SubstateRequirement, optional::IsNotFoundError};
+use tari_ootle_common_types::{
+    SubstateRequirement,
+    optional::{IsNotFoundError, Optional},
+};
 use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, memo::Memo};
 use tari_template_lib::types::{
@@ -17,6 +20,7 @@ use tari_template_lib::types::{
     ConfidentialOutputAddress,
     ResourceAddress,
     VaultId,
+    constants::TARI_TOKEN,
     crypto::PedersenCommitmentBytes,
 };
 
@@ -248,18 +252,32 @@ where TSpec: WalletSdkSpec
         let dest_account_exists = to_account.exists_on_chain;
         if dest_account_exists {
             inputs.push(SubstateRequirement::unversioned(to_account.address));
-            inputs.extend(to_account.vaults.into_iter().map(SubstateRequirement::unversioned))
+            // Only the destination's vault for this resource is touched by the deposit (if it has none, the
+            // deposit creates one). For an account we do not own, we only know its vault ids, so all of them
+            // are declared.
+            match self
+                .accounts_api
+                .get_vault_by_resource(&to_account.address, &params.resource_address)
+                .optional()?
+            {
+                Some(vault) => inputs.push(SubstateRequirement::unversioned(vault.id)),
+                None => inputs.extend(to_account.vaults.iter().copied().map(SubstateRequirement::unversioned)),
+            }
         }
 
         let account = self.accounts_api.get_account_by_address(&params.from_account)?;
         let account_substate = self.substate_api.get_substate(&params.from_account.into())?;
         inputs.push(account_substate.substate_id.into_unversioned_requirement());
 
-        // Add all versioned account child addresses as inputs
-        let child_addresses = self
-            .substate_api
-            .load_dependent_substates(&[&account.account.component_address.into()])?;
-        inputs.extend(child_addresses.into_iter().map(|a| a.into_unversioned()));
+        // Fees are paid out of this account's TARI vault, so that vault and its resource are mutated too.
+        if let Some(vault) = self
+            .accounts_api
+            .get_vault_by_resource(account.component_address(), &TARI_TOKEN)
+            .optional()?
+        {
+            inputs.push(SubstateRequirement::unversioned(vault.id));
+            inputs.push(SubstateRequirement::unversioned(vault.resource_address));
+        }
 
         let src_vault = self
             .accounts_api
@@ -282,8 +300,16 @@ where TSpec: WalletSdkSpec
         // We need to fetch the resource substate to check if there is a view key present.
         let resource = self.substate_api.fetch_resource(params.resource_address).await?;
 
-        if let Some(ref resource_address) = params.proof_from_resource {
-            inputs.push(SubstateRequirement::unversioned(*resource_address));
+        // The badge proof is created from the badge's vault in this account, so both are inputs.
+        if let Some(ref badge_resource_address) = params.proof_from_resource {
+            inputs.push(SubstateRequirement::unversioned(*badge_resource_address));
+            if let Some(badge_vault) = self
+                .accounts_api
+                .get_vault_by_resource(account.component_address(), badge_resource_address)
+                .optional()?
+            {
+                inputs.push(SubstateRequirement::unversioned(badge_vault.id));
+            }
         }
 
         // Reserve and lock input funds for fees

@@ -9,4 +9,5 @@ export type SubstateType =
   | "TransactionReceipt"
   | "ValidatorFeePool"
   | "Template"
-  | "Utxo";
+  | "Utxo"
+  | "ConfidentialOutput";

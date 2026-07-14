@@ -24,6 +24,7 @@ import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import {
+  ConfidentialTransferRequest,
   AccountOrKeyId,
   BadgeUsage,
   BalanceChangeSourceType,
@@ -167,7 +168,7 @@ export const useAccountsTransfer = () => {
       const max_fee = BigInt(params.max_fee || 1);
       const parsedAddress = decodeOotleAddress(params.destination_address);
       if (params.resourceType === "Confidential") {
-        let transferRequest = {
+        const transferRequest: ConfidentialTransferRequest = {
           account,
           amount: params.amount,
           resource_address: params.resource_address,

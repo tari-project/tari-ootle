@@ -613,7 +613,7 @@ pub struct ProofsGenerateRequest {
     pub resource_address: ResourceAddress,
     pub destination_address: OotleAddress,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memo: Option<Memo>,
+    pub output_memo: Option<Memo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -667,7 +667,7 @@ pub struct ConfidentialTransferRequest {
     pub output_to_revealed: bool,
     pub proof_from_badge_resource: Option<ResourceAddress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memo: Option<Memo>,
+    pub output_memo: Option<Memo>,
     pub dry_run: bool,
 }
 

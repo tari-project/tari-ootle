@@ -1118,7 +1118,7 @@ pub async fn handle_confidential_transfer(
                 max_fee: req.max_fee.max(1),
                 output_to_revealed: req.output_to_revealed,
                 proof_from_resource: req.proof_from_badge_resource,
-                memo: req.memo,
+                memo: req.output_memo,
                 is_dry_run: req.dry_run,
             })
             .await?;

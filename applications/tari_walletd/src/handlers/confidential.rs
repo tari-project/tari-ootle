@@ -115,7 +115,7 @@ pub async fn handle_create_transfer_proof(
         &output_mask.key,
         &destination_view_key,
         &nonce_secret,
-        req.memo.as_ref(),
+        req.output_memo.as_ref(),
     )?;
 
     let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;

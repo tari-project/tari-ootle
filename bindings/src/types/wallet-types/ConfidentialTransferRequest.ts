@@ -15,6 +15,6 @@ export type ConfidentialTransferRequest = {
   max_fee: bigint;
   output_to_revealed: boolean;
   proof_from_badge_resource: ResourceAddress | null;
-  memo?: Memo | null;
+  output_memo?: Memo | null;
   dry_run: boolean;
 };

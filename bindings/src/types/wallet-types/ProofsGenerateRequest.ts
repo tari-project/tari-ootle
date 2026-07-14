@@ -11,5 +11,5 @@ export type ProofsGenerateRequest = {
   account: ComponentAddressOrName | null;
   resource_address: ResourceAddress;
   destination_address: OotleAddress;
-  memo?: Memo | null;
+  output_memo?: Memo | null;
 };

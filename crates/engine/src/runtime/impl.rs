@@ -91,6 +91,7 @@ use tari_template_lib::{
         ResourceGetNonFungibleArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        SetFreezeConfidentialOutputsArg,
         SetFreezeStealthUtxosArg,
         SpendContextAction,
         StealthTransferResourceArg,
@@ -111,6 +112,7 @@ use tari_template_lib::{
         AuthHookCaller,
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
+        ConfidentialOutputAddress,
         EntityId,
         Hash32,
         LogLevel,
@@ -1930,6 +1932,73 @@ where
                             utxo_mut.freeze();
                         } else {
                             utxo_mut.unfreeze();
+                        }
+                        state_mut.unlock_substate(locked)?;
+                    }
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::SetConfidentialOutputsFreeze => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "SetConfidentialOutputsFreeze resource action requires a resource address"
+                                .to_string(),
+                        })?;
+                let arg: SetFreezeConfidentialOutputsArg = args.assert_one_arg()?;
+
+                if arg.commitments.is_empty() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "SetFreezeConfidentialOutputsArg",
+                        reason: "Commitments list cannot be empty".to_string(),
+                    });
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    if !resource.resource_type().is_confidential() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "SetConfidentialOutputsFreeze can only be called on confidential resources"
+                                .to_string(),
+                        });
+                    }
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Freeze,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    for commitment in arg.commitments {
+                        let id = SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(
+                            resource_address,
+                            commitment,
+                        ));
+                        let locked = state_mut.write_lock_substate(id.clone())?;
+
+                        let output_mut = state_mut
+                            .get_locked_substate_mut(&locked)?
+                            .as_confidential_output_mut()
+                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                                lock_id: locked.lock_id(),
+                                expected_type: "ConfidentialOutput",
+                                id,
+                            })?;
+
+                        // Freeze is idempotent.
+                        if arg.freeze {
+                            output_mut.freeze();
+                        } else {
+                            output_mut.unfreeze();
                         }
                         state_mut.unlock_substate(locked)?;
                     }

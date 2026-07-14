@@ -77,6 +77,7 @@ use crate::{
         ResourceInvokeArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        SetFreezeConfidentialOutputsArg,
         SetFreezeStealthUtxosArg,
         StealthTransferResourceArg,
         UpdateAccessRuleArg,
@@ -1009,6 +1010,26 @@ impl ResourceManager {
         });
 
         resp.decode().expect("SetFreeze failed")
+    }
+
+    /// Freezes the specified confidential outputs, preventing them from being spent/transferred.
+    pub fn freeze_confidential_outputs(&self, commitments: Vec<PedersenCommitmentBytes>) {
+        self.set_freeze_confidential_outputs(commitments, true);
+    }
+
+    /// Unfreezes the specified confidential outputs, allowing them to be spent/transferred again.
+    pub fn unfreeze_confidential_outputs(&self, commitments: Vec<PedersenCommitmentBytes>) {
+        self.set_freeze_confidential_outputs(commitments, false);
+    }
+
+    fn set_freeze_confidential_outputs(&self, commitments: Vec<PedersenCommitmentBytes>, freeze: bool) {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.resource_address.into(),
+            action: ResourceAction::SetConfidentialOutputsFreeze,
+            args: invoke_args![SetFreezeConfidentialOutputsArg { commitments, freeze }],
+        });
+
+        resp.decode().expect("SetConfidentialOutputsFreeze failed")
     }
 
     /// Burns the stealth UTXO, permanently removing them from circulation.

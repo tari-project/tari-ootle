@@ -97,7 +97,8 @@ pub(crate) fn check_confidential_withdraw_limits(
 
 /// Running per-transaction tally of confidential-withdraw work. Bounds the aggregate native verification and
 /// substate-access cost a single transaction can incur across all its confidential withdraws, so one transaction
-/// cannot stall the proposing leader. See [`ConfidentialLimits`] and [`tari_engine_types::limits::CONFIDENTIAL_LIMITS`].
+/// cannot stall the proposing leader. See [`ConfidentialLimits`] and
+/// [`tari_engine_types::limits::CONFIDENTIAL_LIMITS`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConfidentialTransactionTotals {
     withdraws: usize,
@@ -115,9 +116,11 @@ impl ConfidentialTransactionTotals {
     ) -> Result<(), ArgumentValidationError> {
         let withdraws = self.withdraws + 1;
         if withdraws > limits.max_withdraws_per_transaction {
-            return Err(ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded {
-                max_withdraws: limits.max_withdraws_per_transaction,
-            });
+            return Err(
+                ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded {
+                    max_withdraws: limits.max_withdraws_per_transaction,
+                },
+            );
         }
         let inputs = self.inputs + proof.inputs.len();
         if inputs > limits.max_total_inputs_per_transaction {
@@ -235,10 +238,10 @@ mod tests {
     #[test]
     fn rejects_a_withdraw_over_the_per_proof_input_cap() {
         let err = check_confidential_withdraw_limits(&CONF_LIMITS, &withdraw_proof(3)).unwrap_err();
-        assert!(matches!(
-            err,
-            ArgumentValidationError::MaxConfidentialInputsExceeded { max_inputs: 2, actual_inputs: 3 }
-        ));
+        assert!(matches!(err, ArgumentValidationError::MaxConfidentialInputsExceeded {
+            max_inputs: 2,
+            actual_inputs: 3
+        }));
         check_confidential_withdraw_limits(&CONF_LIMITS, &withdraw_proof(2)).unwrap();
     }
 

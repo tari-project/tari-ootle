@@ -245,6 +245,9 @@ pub enum ResourceAction {
     /// Update the metadata of a resource (token symbol remains immutable once set).
     #[n(12)]
     UpdateMetadata,
+    /// Un/freezes one or more confidential outputs of a resource
+    #[n(13)]
+    SetConfidentialOutputsFreeze,
 }
 
 /// All the possible minting operation types
@@ -924,6 +927,15 @@ pub enum BuiltinTemplateAction {
 pub struct SetFreezeStealthUtxosArg {
     #[n(0)]
     pub utxos: Vec<UtxoId>,
+    #[n(1)]
+    pub freeze: bool,
+}
+
+#[derive(Clone, Debug, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SetFreezeConfidentialOutputsArg {
+    #[n(0)]
+    pub commitments: Vec<PedersenCommitmentBytes>,
     #[n(1)]
     pub freeze: bool,
 }

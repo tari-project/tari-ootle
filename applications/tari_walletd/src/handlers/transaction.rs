@@ -84,6 +84,7 @@ pub async fn handle_submit_instruction(
         .pay_fee_from_component(*fee_account.component_address(), req.max_fee.max(1))
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
+        .with_inputs(req.inputs)
         .build_unsigned();
 
     let request = TransactionSubmitRequest {

@@ -204,8 +204,10 @@ where
                                 .await?;
                         },
                         SubstateValue::ConfidentialOutput(_) => {
-                            let addr =
-                                substate_id.substate_id().as_confidential_output_address().ok_or_else(|| {
+                            let addr = substate_id
+                                .substate_id()
+                                .as_confidential_output_address()
+                                .ok_or_else(|| {
                                     SubstateApiError::InvalidValidatorNodeResponse(format!(
                                         "ConfidentialOutput substate does not have a valid address {}",
                                         substate_id

@@ -104,8 +104,11 @@ pub struct CallInstructionRequest {
     #[serde(deserialize_with = "string_or_struct")]
     pub fee_account: ComponentAddressOrName,
     pub max_fee: u64,
+    /// Substates the instructions require as transaction inputs. Needed for any input that cannot be inferred
+    /// from the instructions, e.g. a `ConfidentialOutput` named only by a commitment inside an opaque proof.
     #[serde(default)]
     pub inputs: Vec<SubstateRequirement>,
+    /// If true, inputs inferred from the instructions are added to `inputs`.
     #[serde(default)]
     pub override_inputs: Option<bool>,
     #[serde(default)]

@@ -11,7 +11,14 @@ use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{SubstateRequirement, optional::IsNotFoundError};
 use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, memo::Memo};
-use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, VaultId};
+use tari_template_lib::types::{
+    Amount,
+    ComponentAddress,
+    ConfidentialOutputAddress,
+    ResourceAddress,
+    VaultId,
+    crypto::PedersenCommitmentBytes,
+};
 
 use crate::{
     apis::{
@@ -30,6 +37,12 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_transfers";
+
+/// Only outputs the wallet has confirmed on-chain (`OutputStatus::Unspent`) are ever locked for spending, so
+/// every locked input names a `ConfidentialOutput` substate that exists.
+fn commitments_of(outputs: &[ConfidentialOutputModel]) -> Vec<PedersenCommitmentBytes> {
+    outputs.iter().map(|o| o.commitment).collect()
+}
 
 pub struct ConfidentialTransferApi<'a, TSpec: WalletSdkSpec> {
     key_manager_api: KeyManagerApi<'a, TSpec>,
@@ -87,6 +100,7 @@ where TSpec: WalletSdkSpec
                 let (confidential_inputs, _) =
                     self.confidential_outputs_api
                         .lock_outputs_by_amount(lock_id, &src_vault.id, spend_amount)?;
+                let commitments = commitments_of(&confidential_inputs);
                 let confidential_inputs = self
                     .confidential_outputs_api
                     .resolve_output_masks(confidential_inputs)?;
@@ -101,6 +115,7 @@ where TSpec: WalletSdkSpec
                 Ok(InputsToSpend {
                     confidential: confidential_inputs,
                     revealed: Amount::zero(),
+                    commitments,
                 })
             },
             UtxoInputSelection::RevealedOnly => {
@@ -121,6 +136,7 @@ where TSpec: WalletSdkSpec
                 Ok(InputsToSpend {
                     confidential: vec![],
                     revealed: spend_amount,
+                    commitments: vec![],
                 })
             },
             UtxoInputSelection::PreferRevealed => {
@@ -140,6 +156,7 @@ where TSpec: WalletSdkSpec
                     return Ok(InputsToSpend {
                         confidential: vec![],
                         revealed: revealed_to_spend,
+                        commitments: vec![],
                     });
                 }
 
@@ -148,6 +165,7 @@ where TSpec: WalletSdkSpec
                     &src_vault.id,
                     confidential_to_spend,
                 )?;
+                let commitments = commitments_of(&confidential_inputs);
                 let confidential_inputs = self
                     .confidential_outputs_api
                     .resolve_output_masks(confidential_inputs)?;
@@ -174,6 +192,7 @@ where TSpec: WalletSdkSpec
                 Ok(InputsToSpend {
                     confidential: confidential_inputs,
                     revealed: revealed_to_spend,
+                    commitments,
                 })
             },
             UtxoInputSelection::PreferConfidential => {
@@ -190,6 +209,7 @@ where TSpec: WalletSdkSpec
                 self.locks_api
                     .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
 
+                let commitments = commitments_of(&confidential_inputs);
                 let confidential_inputs = self
                     .confidential_outputs_api
                     .resolve_output_masks(confidential_inputs)?;
@@ -197,6 +217,7 @@ where TSpec: WalletSdkSpec
                 Ok(InputsToSpend {
                     confidential: confidential_inputs,
                     revealed: revealed_to_spend,
+                    commitments,
                 })
             },
         }
@@ -269,7 +290,10 @@ where TSpec: WalletSdkSpec
         let max_fee = params.max_fee;
 
         let account_key = self.key_manager_api.get_key(account_owner_key_id)?;
-        let account_public_key = PublicKey::from_secret_key(&account_key.secret);
+        // Change comes back to this account, so it is encrypted to this account's own view key, for the same
+        // reason destination outputs are.
+        let account_view_key = self.key_manager_api.get_key(from_account.account.view_only_key_id)?;
+        let account_view_public_key = account_view_key.to_public_key();
 
         // Reserve and lock input funds
         let lock = self.locks_api.create_lock()?;
@@ -287,6 +311,17 @@ where TSpec: WalletSdkSpec
             },
         };
 
+        // Each confidential input is a ConfidentialOutput substate that the withdraw downs, so it must be a
+        // transaction input. The commitments are only named inside the opaque withdraw proof, so input
+        // detection cannot infer these: the address must be derived from (resource, commitment).
+        inputs.extend(
+            inputs_to_spend
+                .commitments
+                .iter()
+                .map(|commitment| ConfidentialOutputAddress::new(params.resource_address, *commitment))
+                .map(SubstateRequirement::unversioned),
+        );
+
         // Generate outputs
         let resource_view_key = resource
             .view_key()
@@ -296,13 +331,16 @@ where TSpec: WalletSdkSpec
                 param: "resource_view_key",
                 reason: format!("Invalid resource view key: {e}"),
             })?;
+        // Outputs are encrypted to the recipient's view key: that is the key the receiving wallet scans with
+        // (see `ConfidentialOutputsApi::verify_and_update_confidential_outputs`), so encrypting to any other
+        // key leaves the recipient unable to recover the value and mask.
         let destination_pk = params
             .destination_address
-            .account_public_key()
+            .view_only_key()
             .try_from_byte_type()
             .map_err(|e| ConfidentialTransferApiError::InvalidParameter {
-                param: "destination_public_key",
-                reason: format!("Invalid destination public key: {e}"),
+                param: "destination_view_key",
+                reason: format!("Invalid destination view key: {e}"),
             })?;
 
         let output_statement = if params.confidential_amount().is_zero() {
@@ -326,7 +364,7 @@ where TSpec: WalletSdkSpec
 
         let maybe_change_statement = if change_confidential_amount.is_positive() {
             let statement = self.create_confidential_proof_statement(
-                &account_public_key,
+                &account_view_public_key,
                 change_confidential_amount,
                 resource_view_key,
                 None,
@@ -341,7 +379,7 @@ where TSpec: WalletSdkSpec
                     commitment: statement.to_commitment().to_byte_type(),
                     value: change_value.into(),
                     sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
-                    view_only_key_id: account_key.key_id,
+                    view_only_key_id: account_view_key.key_id,
                     owner_key_id: Some(account_key.key_id),
                     encrypted_data: statement.encrypted_data.clone(),
                     public_asset_tag: None,
@@ -515,6 +553,10 @@ pub enum UtxoInputSelection {
 pub struct InputsToSpend {
     pub confidential: Vec<MaskAndValue>,
     pub revealed: Amount,
+    /// Commitments of the confidential inputs, in the same order as `confidential`. A `MaskAndValue` does not
+    /// carry the commitment, and each spent commitment names a [`ConfidentialOutputAddress`] that must be
+    /// declared as a transaction input.
+    pub commitments: Vec<PedersenCommitmentBytes>,
 }
 
 impl InputsToSpend {

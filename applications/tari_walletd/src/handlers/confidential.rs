@@ -334,9 +334,9 @@ pub async fn handle_view_vault_balance(
             .fetch_substate_from_network(&SubstateId::ConfidentialOutput(address.clone()), None)
             .await?
             .substate;
-        let output = substate.as_confidential_output().ok_or_else(|| {
-            anyhow::anyhow!("Indexer returned a non-confidential-output substate for {}", address)
-        })?;
+        let output = substate
+            .as_confidential_output()
+            .ok_or_else(|| anyhow::anyhow!("Indexer returned a non-confidential-output substate for {}", address))?;
         if let Some(proof) = output.output().viewable_balance.clone() {
             viewable.push((*commitment, proof));
         }
@@ -359,6 +359,10 @@ pub async fn handle_view_vault_balance(
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(ConfidentialViewVaultBalanceResponse {
-        balances: viewable.iter().map(|(commitment, _)| *commitment).zip(balances).collect(),
+        balances: viewable
+            .iter()
+            .map(|(commitment, _)| *commitment)
+            .zip(balances)
+            .collect(),
     })
 }

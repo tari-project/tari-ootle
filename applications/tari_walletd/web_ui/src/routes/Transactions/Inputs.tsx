@@ -35,6 +35,7 @@ function getSubstateType(substateId: string): string {
   if (substateId.startsWith("template_")) return "Template";
   if (substateId.startsWith("utxo_")) return "Utxo";
   if (substateId.startsWith("vnfp_")) return "VnFeePool";
+  if (substateId.startsWith("coutput_")) return "Confidential Output";
   return "Unknown";
 }
 

@@ -266,14 +266,24 @@ where TSpec: WalletSdkSpec
             for commitment in commitments {
                 let address = ConfidentialOutputAddress::new(resource_address, *commitment);
                 let substate = self.fetch_substate(&SubstateId::ConfidentialOutput(address)).await?;
-                let output = substate.into_substate_value().into_confidential_output().ok_or_else(|| {
-                    AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a confidential output", commitment))
-                })?;
+                let output = substate
+                    .into_substate_value()
+                    .into_confidential_output()
+                    .ok_or_else(|| {
+                        AccountMonitorError::UnexpectedSubstate(format!(
+                            "Expected {} to be a confidential output",
+                            commitment
+                        ))
+                    })?;
                 outputs.push((*commitment, output.into_output()));
             }
             self.wallet_sdk
                 .confidential_outputs_api()
-                .verify_and_update_confidential_outputs(account.account(), vault_id, outputs.iter().map(|(c, o)| (c, o)))?;
+                .verify_and_update_confidential_outputs(
+                    account.account(),
+                    vault_id,
+                    outputs.iter().map(|(c, o)| (c, o)),
+                )?;
             has_changed = true;
         }
 

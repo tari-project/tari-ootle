@@ -611,7 +611,7 @@ pub struct ProofsGenerateRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
     pub resource_address: ResourceAddress,
-    pub destination_public_key: RistrettoPublicKeyBytes,
+    pub destination_address: OotleAddress,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
 }

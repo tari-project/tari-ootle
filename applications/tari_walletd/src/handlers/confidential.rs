@@ -6,7 +6,7 @@ use std::time::Duration;
 use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
-use ootle_byte_type::ToByteType;
+use ootle_byte_type::{FromByteType, ToByteType};
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{crypto::get_commitment_factory, substate::SubstateId};
@@ -63,7 +63,7 @@ pub async fn handle_create_transfer_proof(
         Crud::Create,
         Some(*account.component_address()),
     )])?;
-    let account_owner_key_id = account
+    account
         .owner_key_id()
         .ok_or_else(|| invalid_request("Account does not have an owner key"))?;
     let vault = sdk
@@ -93,9 +93,8 @@ pub async fn handle_create_transfer_proof(
     // TODO: Any errors from here need to unlock the outputs, ideally just roll back (refactor required but doable).
 
     // TODO: Wrap up key/encrypted data handling in the wallet SDK
-    let account_key = sdk.key_manager_api().get_key(account_owner_key_id)?;
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
-    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
     let confidential_amount = req.confidential_amount.to_u64_checked().ok_or_else(|| {
         invalid_request(format!(
@@ -104,11 +103,18 @@ pub async fn handle_create_transfer_proof(
         ))
     })?;
 
+    // Outputs must be encrypted to the recipient's view key: that is the key a receiving wallet scans with,
+    // and any other key leaves it unable to recover the value and mask.
+    let destination_view_key: RistrettoPublicKey = req
+        .destination_address
+        .view_only_key()
+        .try_from_byte_type()
+        .map_err(|e| invalid_params("destination_address", Some(format!("Invalid view key: {e}"))))?;
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
         confidential_amount,
         &output_mask.key,
-        &public_nonce,
-        &account_key.secret,
+        &destination_view_key,
+        &nonce_secret,
         req.memo.as_ref(),
     )?;
 
@@ -145,13 +151,16 @@ pub async fn handle_create_transfer_proof(
 
     let maybe_change_statement = if change_amount_u64 > 0 {
         let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
-        let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
 
+        // Change returns to this account, so it is encrypted to this account's own view key, which is the
+        // key the output is recorded against below.
+        let account_view_key = sdk.key_manager_api().get_key(account.view_only_key_id())?;
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
             change_amount_u64,
             &change_mask.key,
-            &public_nonce,
-            &change_mask.key,
+            &account_view_key.to_public_key(),
+            &nonce_secret,
             None,
         )?;
 

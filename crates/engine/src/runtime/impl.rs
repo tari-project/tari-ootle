@@ -2210,7 +2210,7 @@ where
                 self.tracker.write_with(move |state_mut| {
                     let bucket = state_mut.take_bucket(bucket_id)?;
                     // It is invalid to deposit a bucket that has locked funds
-                    if !bucket.locked_amount().is_zero() {
+                    if bucket.has_locked_funds() {
                         return Err(RuntimeError::InvalidOpDepositLockedBucket {
                             bucket_id,
                             locked_amount: bucket.locked_amount(),
@@ -2835,8 +2835,9 @@ where
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
-                    // It is invalid to burn a bucket that has locked funds (e.g. via a proof)
-                    if !bucket.locked_amount().is_zero() {
+                    // It is invalid to burn a bucket that has locked funds (e.g. via a proof). Burning downs only
+                    // the unlocked commitments, so a locked one would be left live with nothing referencing it.
+                    if bucket.has_locked_funds() {
                         return Err(RuntimeError::InvalidOpDepositLockedBucket {
                             bucket_id,
                             locked_amount: bucket.locked_amount(),

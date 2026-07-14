@@ -202,6 +202,20 @@ impl ResourceContainer {
         }
     }
 
+    /// Returns true if any funds in this container are locked, e.g. by a proof.
+    ///
+    /// [`Self::locked_amount`] cannot answer this for a confidential container: a confidential amount is
+    /// hidden, so locked commitments are tracked as a set and only the locked *revealed* amount is reported.
+    pub fn has_locked_funds(&self) -> bool {
+        if !self.locked_amount().is_zero() {
+            return true;
+        }
+        match self {
+            Self::Confidential { locked_commitments, .. } => !locked_commitments.is_empty(),
+            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => false,
+        }
+    }
+
     pub fn get_commitment_count(&self) -> u64 {
         match self {
             Self::Fungible { .. } => 0,

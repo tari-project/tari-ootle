@@ -203,7 +203,13 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
             })?;
         const EXPECT: &str = "invariant: substate found at utxo address is not a UTXO";
         if let Some(value) = self.new_substates.shift_remove(substate_id) {
-            // No need to down it, we simply won't create it by removing it from the new substates
+            // `new_substates` holds mutated substates as well as created ones, so presence here does not mean
+            // the UTXO is new: one mutated earlier in this transaction (unfrozen, say) was moved here from
+            // `loaded_substates`. Only a UTXO that did not exist before this transaction may collapse; a
+            // pre-existing one must still be downed, or it stays live while its value is spent.
+            if self.get_unmodified_substate(substate_id).optional()?.is_some() {
+                self.downed_utxos.insert(address);
+            }
             return Ok(value.into_utxo().expect(EXPECT));
         }
         if let Some(substate) = self.loaded_substates.remove(substate_id) {
@@ -229,7 +235,13 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
                 })?;
         const EXPECT: &str = "invariant: substate found at confidential output address is not a confidential output";
         if let Some(value) = self.new_substates.shift_remove(substate_id) {
-            // Created and spent in the same transaction: collapse by not creating it (no down recorded).
+            // `new_substates` holds mutated substates as well as created ones, so presence here does not mean
+            // the output is new: an output mutated earlier in this transaction (unfrozen, say) was moved here
+            // from `loaded_substates`. Only an output that did not exist before this transaction may collapse;
+            // a pre-existing one must still be downed, or it stays live while its value is spent.
+            if self.get_unmodified_substate(substate_id).optional()?.is_some() {
+                self.downed_confidential_outputs.insert(address);
+            }
             return Ok(value.into_confidential_output().expect(EXPECT));
         }
         if let Some(substate) = self.loaded_substates.remove(substate_id) {

@@ -71,6 +71,10 @@ impl Bucket {
         self.resource_container.locked_amount()
     }
 
+    pub fn has_locked_funds(&self) -> bool {
+        self.resource_container.has_locked_funds()
+    }
+
     pub fn resource_address(&self) -> &ResourceAddress {
         self.resource_container.resource_address()
     }

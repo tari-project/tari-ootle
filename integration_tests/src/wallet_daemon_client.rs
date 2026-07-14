@@ -893,7 +893,7 @@ pub async fn confidential_transfer(
         max_fee: 2_000_000,
         resource_address,
         proof_from_badge_resource: None,
-        memo: None,
+        output_memo: None,
         dry_run: false,
         input_selection,
         output_to_revealed: false,

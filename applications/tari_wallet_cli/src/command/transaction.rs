@@ -456,7 +456,7 @@ pub async fn handle_confidential_transfer(
             max_fee: common.max_fee,
             output_to_revealed: false,
             proof_from_badge_resource: None,
-            memo: memo_message
+            output_memo: memo_message
                 .map(|s| Memo::new_message(s).ok_or_else(|| anyhow!("Invalid memo length")))
                 .transpose()?,
             dry_run: false,

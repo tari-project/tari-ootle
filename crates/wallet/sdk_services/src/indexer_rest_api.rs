@@ -110,19 +110,30 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     }
 
     async fn get_substates(&self, substate_ids: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
-        let client = self.get_client()?;
-        let resp = client
-            .fetch_substates(GetSubstatesRequest {
-                requests: substate_ids.try_into().map_err(|_| {
-                    IndexerRestApiNetworkInterfaceError::IndexerClientError(IndexerRestClientError::RequestInvariant {
-                        details: "Too many substate IDs requested".to_string(),
-                    })
-                })?,
-                cached_only: false,
-            })
-            .await?;
+        // The indexer's substates/fetch endpoint accepts at most this many IDs per request, so larger
+        // requests are split into sequential batches. Substates the indexer cannot find are omitted from
+        // the result, not an error.
+        const MAX_IDS_PER_REQUEST: usize = 20;
 
-        Ok(resp.substates)
+        let client = self.get_client()?;
+        let mut substates = HashMap::with_capacity(substate_ids.len());
+        for chunk in substate_ids.chunks(MAX_IDS_PER_REQUEST) {
+            let resp = client
+                .fetch_substates(GetSubstatesRequest {
+                    requests: chunk.to_vec().try_into().map_err(|_| {
+                        IndexerRestApiNetworkInterfaceError::IndexerClientError(
+                            IndexerRestClientError::RequestInvariant {
+                                details: "Too many substate IDs requested".to_string(),
+                            },
+                        )
+                    })?,
+                    cached_only: false,
+                })
+                .await?;
+            substates.extend(resp.substates);
+        }
+
+        Ok(substates)
     }
 
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {

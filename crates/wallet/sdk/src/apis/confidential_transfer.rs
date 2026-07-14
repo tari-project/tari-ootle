@@ -265,14 +265,13 @@ where TSpec: WalletSdkSpec
             }
         }
 
-        let account = self.accounts_api.get_account_by_address(&params.from_account)?;
         let account_substate = self.substate_api.get_substate(&params.from_account.into())?;
         inputs.push(account_substate.substate_id.into_unversioned_requirement());
 
         // Fees are paid out of this account's TARI vault, so that vault and its resource are mutated too.
         if let Some(vault) = self
             .accounts_api
-            .get_vault_by_resource(account.component_address(), &TARI_TOKEN)
+            .get_vault_by_resource(from_account.component_address(), &TARI_TOKEN)
             .optional()?
         {
             inputs.push(SubstateRequirement::unversioned(vault.id));
@@ -281,7 +280,7 @@ where TSpec: WalletSdkSpec
 
         let src_vault = self
             .accounts_api
-            .get_vault_by_resource(account.component_address(), &params.resource_address)?;
+            .get_vault_by_resource(from_account.component_address(), &params.resource_address)?;
         if !src_vault.resource_type.is_confidential() {
             return Err(ConfidentialTransferApiError::InvalidParameter {
                 param: "resource_address",
@@ -305,7 +304,7 @@ where TSpec: WalletSdkSpec
             inputs.push(SubstateRequirement::unversioned(*badge_resource_address));
             if let Some(badge_vault) = self
                 .accounts_api
-                .get_vault_by_resource(account.component_address(), badge_resource_address)
+                .get_vault_by_resource(from_account.component_address(), badge_resource_address)
                 .optional()?
             {
                 inputs.push(SubstateRequirement::unversioned(badge_vault.id));
@@ -400,7 +399,7 @@ where TSpec: WalletSdkSpec
 
             if change_value > 0 {
                 self.confidential_outputs_api.add_output(ConfidentialOutputModel {
-                    account_address: *account.component_address(),
+                    account_address: *from_account.component_address(),
                     vault_id: src_vault.id,
                     commitment: statement.to_commitment().to_byte_type(),
                     value: change_value.into(),

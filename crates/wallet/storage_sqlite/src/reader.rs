@@ -1281,7 +1281,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 .filter(accounts::address.eq(account_addr.to_string()))
                 .limit(1)
                 .get_result::<i32>(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+                .optional()
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?
+                .ok_or_else(|| WalletStorageError::NotFound {
+                    operation: OPERATION,
+                    entity: "account".to_string(),
+                    key: account_addr.to_string(),
+                })?;
             query = query.filter(confidential_outputs::account_id.eq(account_id));
         }
 
@@ -1322,7 +1328,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 .filter(accounts::address.eq(account_addr.to_string()))
                 .limit(1)
                 .get_result::<i32>(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+                .optional()
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?
+                .ok_or_else(|| WalletStorageError::NotFound {
+                    operation: OPERATION,
+                    entity: "account".to_string(),
+                    key: account_addr.to_string(),
+                })?;
             query = query.filter(stealth_outputs::owner_account_id.eq(account_id));
         }
 

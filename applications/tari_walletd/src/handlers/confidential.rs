@@ -363,20 +363,32 @@ pub async fn handle_view_vault_balance(
     // Get view secret key
     let view_key = sdk.key_manager_api().get_elgamal_encrypted_view_key(req.view_key_id)?;
 
-    // Confidential OutputBodies live in separate ConfidentialOutput substates; fetch each by its commitment-derived
-    // address to obtain its viewable-balance proof.
+    // Confidential OutputBodies live in separate ConfidentialOutput substates, so they are fetched in one batch
+    // by their commitment-derived addresses to obtain the viewable-balance proofs.
+    let addresses = commitments
+        .iter()
+        .map(|commitment| SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(resource_address, *commitment)))
+        .collect::<Vec<_>>();
+    let mut substates = sdk.substate_api().get_substates_from_network(addresses).await?;
+
     let mut viewable = Vec::new();
     for commitment in commitments {
-        let address = ConfidentialOutputAddress::new(resource_address, *commitment);
-        let substate = sdk
-            .substate_api()
-            .fetch_substate_from_network(&SubstateId::ConfidentialOutput(address.clone()), None)
-            .await?
-            .substate;
+        let id = SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(resource_address, *commitment));
+        // An output can be spent between the vault fetch and this fetch; it then no longer exists and no
+        // longer contributes to the balance, so it is skipped rather than failing the whole view.
+        let Some(substate) = substates.remove(&id) else {
+            warn!(
+                target: LOG_TARGET,
+                "Confidential output {} was not returned by the indexer. Skipping.",
+                id
+            );
+            continue;
+        };
         let output = substate
-            .as_confidential_output()
-            .ok_or_else(|| anyhow::anyhow!("Indexer returned a non-confidential-output substate for {}", address))?;
-        if let Some(proof) = output.output().viewable_balance.clone() {
+            .into_substate_value()
+            .into_confidential_output()
+            .ok_or_else(|| anyhow::anyhow!("Indexer returned a non-confidential-output substate for {}", id))?;
+        if let Some(proof) = output.into_output().viewable_balance {
             viewable.push((*commitment, proof));
         }
     }

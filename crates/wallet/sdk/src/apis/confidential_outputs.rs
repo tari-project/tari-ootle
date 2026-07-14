@@ -131,7 +131,9 @@ where TSpec: WalletSdkSpec
     ) -> Result<Vec<MaskAndValue>, ConfidentialOutputsApiError> {
         let mut outputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
-            // Encryption is always done with a DH of the account's public key
+            // Outputs are encrypted to the view key they were recorded against: either via a DH of the
+            // sender's public nonce with that key, or directly with its secret when the wallet encrypted
+            // the output to itself.
             let encryption_key = self.key_manager_api.get_key(output.view_only_key_id)?;
             // Either derive the mask from the sender's public nonce or from the local key manager
             let shared_decrypt_key = match output.sender_public_nonce {

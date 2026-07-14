@@ -257,7 +257,7 @@ function App() {
           />
           <Route
             path="confidential-outputs/:resource_address"
-            element={<GuardedRoute redirect="/confidential-outputs" component={ConfidentialOutputListPage} />}
+            element={<GuardedRoute component={ConfidentialOutputListPage} />}
           />
           <Route path="*" element={<ErrorPage />} />
         </Route>

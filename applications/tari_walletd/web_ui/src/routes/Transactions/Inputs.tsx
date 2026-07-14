@@ -51,6 +51,8 @@ function getTypeColor(type: string): "primary" | "secondary" | "success" | "warn
       return "info";
     case "Commitment":
       return "warning";
+    case "Confidential Output":
+      return "warning";
     case "Transaction Receipt":
       return "error";
     case "Template":

@@ -8,9 +8,17 @@ interface PlaceHolderProps {
   status: "empty" | "fetching";
   utxoStatus?: OutputStatus;
   onManualRefresh?: () => void;
+  shortName?: string;
+  longName?: string;
 }
 
-function PlaceHolder({ status, utxoStatus, onManualRefresh }: PlaceHolderProps) {
+function PlaceHolder({
+  status,
+  utxoStatus,
+  onManualRefresh,
+  shortName = "UTXOs",
+  longName = "Stealth UTXOs",
+}: PlaceHolderProps) {
   const EmptyPlaceHolder = () => {
     const getStatusDisplayName = (status: OutputStatus) => {
       switch (status) {
@@ -23,18 +31,13 @@ function PlaceHolder({ status, utxoStatus, onManualRefresh }: PlaceHolderProps) 
       }
     };
 
-    const getStatusMessage = () => {
-      if (utxoStatus) {
-        return `No UTXOs found`;
-      }
-      return "No UTXOs found";
-    };
+    const getStatusMessage = () => `No ${shortName} found`;
 
     const getStatusDescription = (): string => {
       if (utxoStatus) {
-        return `You don't have any stealth UTXOs with "${getStatusDisplayName(utxoStatus)}" status in this account.`;
+        return `You don't have any ${longName} with "${getStatusDisplayName(utxoStatus)}" status in this account.`;
       }
-      return "You don't have any Stealth UTXOs in this account yet.";
+      return `You don't have any ${longName} in this account yet.`;
     };
 
     return (
@@ -52,10 +55,10 @@ function PlaceHolder({ status, utxoStatus, onManualRefresh }: PlaceHolderProps) 
   const FetchingPlaceHolder = () => (
     <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
       <Typography variant="h6" color="text.secondary" gutterBottom>
-        UTXOs loading...
+        {shortName} loading...
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        Please wait while we fetch your UTXOs from the wallet.
+        Please wait while we fetch your {shortName} from the wallet.
       </Typography>
       {onManualRefresh && (
         <Button variant="outlined" onClick={onManualRefresh} size="small" sx={{ mt: 2 }}>

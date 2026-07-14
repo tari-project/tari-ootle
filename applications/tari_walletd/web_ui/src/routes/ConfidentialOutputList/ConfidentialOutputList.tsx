@@ -123,7 +123,12 @@ function ConfidentialOutputList({ account }: { account: Account }) {
                 !isLoading && (
                   <TableRow>
                     <TableCell colSpan={4}>
-                      <PlaceHolder status="empty" utxoStatus={statusFilter === "all" ? undefined : statusFilter} />
+                      <PlaceHolder
+                        status="empty"
+                        utxoStatus={statusFilter === "all" ? undefined : statusFilter}
+                        shortName="outputs"
+                        longName="confidential outputs"
+                      />
                     </TableCell>
                   </TableRow>
                 )

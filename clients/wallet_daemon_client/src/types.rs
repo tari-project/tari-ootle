@@ -68,6 +68,7 @@ use tari_template_abi::{FunctionDef, TemplateDef, version::WasmAbiVersion};
 use tari_template_lib_types::{
     Amount,
     ComponentAddress,
+    ConfidentialOutputAddress,
     EncryptedData,
     NonFungibleId,
     ResourceAddress,
@@ -1506,6 +1507,33 @@ pub struct UtxoInfo {
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ConfidentialOutputsListRequest {
+    pub resource_address: ResourceAddress,
+    pub account_address: Option<ComponentAddress>,
+    pub filter_by_status: Option<OutputStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ConfidentialOutputsListResponse {
+    pub outputs: Vec<ConfidentialOutputInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ConfidentialOutputInfo {
+    /// Address of the output's own substate. It carries the commitment, which is the output's identity.
+    pub address: ConfidentialOutputAddress,
+    /// The vault holding this output. Membership of a vault's commitment list is what authorises the spend.
+    pub vault_id: VaultId,
+    /// The decrypted value. Zero for an output the wallet could not decrypt (`OutputStatus::Invalid`).
+    pub value: Amount,
+    pub status: OutputStatus,
+    pub memo: Option<Memo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

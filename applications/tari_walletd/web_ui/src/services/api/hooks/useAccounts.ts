@@ -55,6 +55,7 @@ import {
   accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
+  confidentialListOutputs,
   stealthUtxosList,
   validatorsGetFees,
 } from "@utils/json_rpc";
@@ -429,6 +430,31 @@ export const useStealthUtxosList = (
     queryKey: ["stealth_utxos_list", account_address, resource_address, filter_by_status],
     queryFn: () =>
       stealthUtxosList({
+        account_address,
+        resource_address,
+        filter_by_status,
+      }),
+    enabled: !!account_address && !!resource_address,
+    refetchInterval: 5000,
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
+  });
+};
+
+export const useConfidentialOutputsList = (
+  account_address: ComponentAddress,
+  resource_address: ResourceAddress,
+  filter_by_status: OutputStatus | null,
+) => {
+  return useQuery({
+    queryKey: ["confidential_outputs_list", account_address, resource_address, filter_by_status],
+    queryFn: () =>
+      confidentialListOutputs({
         account_address,
         resource_address,
         filter_by_status,

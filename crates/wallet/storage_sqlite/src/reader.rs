@@ -1258,6 +1258,47 @@ impl WalletStoreReader for ReadTransaction<'_> {
         row.try_convert(account_address)
     }
 
+    fn confidential_outputs_get_many(
+        &mut self,
+        resource_address: &ResourceAddress,
+        by_account: Option<&ComponentAddress>,
+        by_status: Option<OutputStatus>,
+    ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError> {
+        const OPERATION: &str = "confidential_outputs_get_many";
+        use crate::schema::{accounts, confidential_outputs, vaults};
+
+        // A confidential output has no resource of its own: it takes it from the vault holding it.
+        let mut query = confidential_outputs::table
+            .inner_join(vaults::table.on(vaults::id.eq(confidential_outputs::vault_id)))
+            .inner_join(accounts::table.on(accounts::id.eq(confidential_outputs::account_id)))
+            .select((confidential_outputs::all_columns, accounts::address, vaults::address))
+            .filter(vaults::resource_address.eq(resource_address.to_string()))
+            .into_boxed();
+
+        if let Some(account_addr) = by_account {
+            let account_id = accounts::table
+                .select(accounts::id)
+                .filter(accounts::address.eq(account_addr.to_string()))
+                .limit(1)
+                .get_result::<i32>(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            query = query.filter(confidential_outputs::account_id.eq(account_id));
+        }
+
+        if let Some(status) = by_status {
+            query = query.filter(confidential_outputs::status.eq(status.as_key_str()));
+        }
+
+        let rows = query
+            .order_by(confidential_outputs::id.desc())
+            .get_results::<(models::ConfidentialOutput, String, String)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter()
+            .map(|(row, account_address, vault_address)| row.try_into_output(&account_address, &vault_address))
+            .collect()
+    }
+
     fn stealth_outputs_get_many(
         &mut self,
         resource_address: &ResourceAddress,

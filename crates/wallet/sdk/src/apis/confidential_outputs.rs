@@ -7,7 +7,7 @@ use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_engine_types::crypto::OutputBody;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{MaskAndValue, kdfs};
-use tari_template_lib::types::{Amount, VaultId, crypto::PedersenCommitmentBytes};
+use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, VaultId, crypto::PedersenCommitmentBytes};
 
 use crate::{
     WalletSdkSpec,
@@ -166,6 +166,18 @@ where TSpec: WalletSdkSpec
             outputs_with_masks.push(decrypted.into_mask_and_value());
         }
         Ok(outputs_with_masks)
+    }
+
+    pub fn outputs_get_many(
+        &self,
+        resource_address: &ResourceAddress,
+        account: Option<&ComponentAddress>,
+        by_status: Option<OutputStatus>,
+    ) -> Result<Vec<ConfidentialOutputModel>, ConfidentialOutputsApiError> {
+        let outputs = self
+            .store
+            .with_read_tx(|tx| tx.confidential_outputs_get_many(resource_address, account, by_status))?;
+        Ok(outputs)
     }
 
     pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<Amount, ConfidentialOutputsApiError> {

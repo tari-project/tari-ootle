@@ -153,6 +153,13 @@ pub trait WalletStoreReader {
         status: OutputStatus,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
 
+    fn confidential_outputs_get_many(
+        &mut self,
+        resource_address: &ResourceAddress,
+        by_account: Option<&ComponentAddress>,
+        by_status: Option<OutputStatus>,
+    ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
+
     // Stealth outputs
     fn stealth_outputs_get_unspent_balance(
         &mut self,

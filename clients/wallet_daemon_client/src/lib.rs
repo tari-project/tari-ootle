@@ -123,6 +123,8 @@ use crate::{
         ClaimValidatorFeesResponse,
         ConfidentialCreateOutputProofRequest,
         ConfidentialCreateOutputProofResponse,
+        ConfidentialOutputsListRequest,
+        ConfidentialOutputsListResponse,
         ConfidentialTransferRequest,
         ConfidentialTransferResponse,
         ConfidentialViewVaultBalanceRequest,
@@ -701,6 +703,13 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<StealthUtxosListResponse, WalletDaemonClientError> {
         self.send_request("stealth_utxos.list", request.borrow()).await
+    }
+
+    pub async fn confidential_list_outputs<T: Borrow<ConfidentialOutputsListRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<ConfidentialOutputsListResponse, WalletDaemonClientError> {
+        self.send_request("confidential.list_outputs", request.borrow()).await
     }
 
     /// Decrypts the value of a stealth UTXO using the provided view key.

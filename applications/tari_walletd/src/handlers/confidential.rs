@@ -18,6 +18,9 @@ use tari_ootle_walletd_client::{
     types::{
         ConfidentialCreateOutputProofRequest,
         ConfidentialCreateOutputProofResponse,
+        ConfidentialOutputInfo,
+        ConfidentialOutputsListRequest,
+        ConfidentialOutputsListResponse,
         ConfidentialViewVaultBalanceRequest,
         ConfidentialViewVaultBalanceResponse,
         ProofsCancelRequest,
@@ -297,6 +300,33 @@ pub async fn handle_create_output_proof(
         .confidential_crypto_api()
         .generate_output_proof(&statement, Amount::zero())?;
     Ok(ConfidentialCreateOutputProofResponse { proof })
+}
+
+pub async fn handle_list_outputs(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: ConfidentialOutputsListRequest,
+) -> Result<ConfidentialOutputsListResponse, anyhow::Error> {
+    context.authorize(token, &[Permission::Confidential(Crud::Read, req.account_address)])?;
+
+    let outputs = context.wallet_sdk().confidential_outputs_api().outputs_get_many(
+        &req.resource_address,
+        req.account_address.as_ref(),
+        req.filter_by_status,
+    )?;
+
+    Ok(ConfidentialOutputsListResponse {
+        outputs: outputs
+            .into_iter()
+            .map(|o| ConfidentialOutputInfo {
+                address: ConfidentialOutputAddress::new(req.resource_address, o.commitment),
+                vault_id: o.vault_id,
+                value: o.value,
+                status: o.status,
+                memo: o.memo,
+            })
+            .collect(),
+    })
 }
 
 pub async fn handle_view_vault_balance(

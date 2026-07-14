@@ -98,6 +98,8 @@ import type {
   StealthUtxosDecryptValueResponse,
   StealthUtxosListRequest,
   StealthUtxosListResponse,
+  ConfidentialOutputsListRequest,
+  ConfidentialOutputsListResponse,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
@@ -334,6 +336,10 @@ export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then
 // utxos
 export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<StealthUtxosListResponse> =>
   client().then((c) => c.stealthUtxosList(request));
+
+export const confidentialListOutputs = (
+  request: ConfidentialOutputsListRequest,
+): Promise<ConfidentialOutputsListResponse> => client().then((c) => c.confidentialListOutputs(request));
 
 // swap pools
 export const swapPoolGetExchangeRate = (

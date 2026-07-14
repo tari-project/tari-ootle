@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import ConfidentialOutputListPage from "@/routes/ConfidentialOutputList/ConfidentialOutputListPage";
 import StealthUtxoListPage from "@/routes/StealthUtxoList/StealthUtxoListPage";
 import { useAuthMethod } from "@api/hooks/useAuth";
 import { AuthDialog } from "@components/auth";
@@ -131,6 +132,11 @@ export const breadcrumbRoutes = [
   {
     label: "Stealth UTXOs",
     path: "/stealth-utxos/:resource_address",
+    dynamic: true,
+  },
+  {
+    label: "Confidential Outputs",
+    path: "/confidential-outputs/:resource_address",
     dynamic: true,
   },
 ];
@@ -248,6 +254,10 @@ function App() {
           <Route
             path="stealth-utxos/:resource_address"
             element={<GuardedRoute redirect="/stealth-utxos" component={StealthUtxoListPage} />}
+          />
+          <Route
+            path="confidential-outputs/:resource_address"
+            element={<GuardedRoute redirect="/confidential-outputs" component={ConfidentialOutputListPage} />}
           />
           <Route path="*" element={<ErrorPage />} />
         </Route>

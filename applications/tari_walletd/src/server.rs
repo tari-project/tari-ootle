@@ -194,6 +194,7 @@ async fn handler(
                 call_handler(context, value, token, confidential::handle_create_output_proof).await
             },
             "view_vault_balance" => call_handler(context, value, token, confidential::handle_view_vault_balance).await,
+            "list_outputs" => call_handler(context, value, token, confidential::handle_list_outputs).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("substates", method)) => match method {

@@ -48,6 +48,8 @@ import type {
   ClaimBurnResponse,
   ClaimValidatorFeesRequest,
   ClaimValidatorFeesResponse,
+  ConfidentialOutputsListRequest,
+  ConfidentialOutputsListResponse,
   ConfidentialTransferRequest,
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
@@ -450,6 +452,10 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public stealthUtxosList(params: StealthUtxosListRequest): Promise<StealthUtxosListResponse> {
     return this.sendRequest("stealth_utxos.list", params);
+  }
+
+  public confidentialListOutputs(params: ConfidentialOutputsListRequest): Promise<ConfidentialOutputsListResponse> {
+    return this.sendRequest("confidential.list_outputs", params);
   }
 
   public stealthUtxosDecryptValue(params: StealthUtxosDecryptValueRequest): Promise<StealthUtxosDecryptValueResponse> {

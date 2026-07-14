@@ -86,6 +86,14 @@ mod faucet_template {
             self.vault.withdraw_confidential(proof)
         }
 
+        pub fn freeze_confidential_outputs(&self, commitments: Vec<PedersenCommitmentBytes>) {
+            ResourceManager::get(self.vault.resource_address()).freeze_confidential_outputs(commitments);
+        }
+
+        pub fn unfreeze_confidential_outputs(&self, commitments: Vec<PedersenCommitmentBytes>) {
+            ResourceManager::get(self.vault.resource_address()).unfreeze_confidential_outputs(commitments);
+        }
+
         pub fn total_supply(&self) -> Option<Amount> {
             ResourceManager::get(self.vault.resource_address()).total_supply_opt()
         }

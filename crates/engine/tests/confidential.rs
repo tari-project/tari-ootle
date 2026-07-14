@@ -1,12 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookup},
+    crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookup, commit_amount},
     resource_container::ResourceError,
     substate::SubstateId,
 };
@@ -14,7 +15,13 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::{
     models::Account,
-    types::{Amount, ComponentAddress, confidential::ConfidentialOutputStatement, crypto::RistrettoPublicKeyBytes},
+    types::{
+        Amount,
+        ComponentAddress,
+        ConfidentialOutputAddress,
+        confidential::ConfidentialOutputStatement,
+        crypto::RistrettoPublicKeyBytes,
+    },
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -542,4 +549,53 @@ fn mint_with_view_key() {
         try_brute_force_confidential_balance(&user_outputs, &view_key_secret, &GenerateValueLookup::new(0..=200))
             .unwrap();
     assert_eq!(total_balance, Some(55));
+}
+
+#[test]
+fn freeze_then_attempt_spend() {
+    let (confidential_proof, mask, _change) = generate_confidential_output_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
+
+    let commitment = commit_amount(&mask, Amount::from(100u64)).unwrap().to_byte_type();
+    let frozen_address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
+
+    let owner = test.owner_proof();
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet, "freeze_confidential_outputs", args![vec![commitment]])
+            .build_and_seal(test.secret_key()),
+        vec![owner.clone()],
+    );
+
+    let (user_account, user_proof, user_key) = test.create_empty_account();
+    let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0u64);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(faucet, "take_free_coins", args![withdraw_proof.proof.clone()])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_method(user_account, "deposit", args![Workspace("coins")])
+            .build_and_seal(&user_key),
+        vec![user_proof.clone()],
+    );
+
+    assert_reject_reason(reason, ResourceError::InvalidSpend {
+        details: format!("Confidential output {frozen_address} is frozen"),
+    });
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet, "unfreeze_confidential_outputs", args![vec![commitment]])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_method(user_account, "deposit", args![Workspace("coins")])
+            .build_and_seal(&user_key),
+        vec![user_proof],
+    );
 }

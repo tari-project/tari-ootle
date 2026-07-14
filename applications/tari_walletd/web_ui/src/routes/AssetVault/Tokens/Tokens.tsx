@@ -114,6 +114,19 @@ function BalanceRow({
     </Tooltip>
   );
 
+  const confidentialOutputs = resource_type === "Confidential" && (
+    <Tooltip title="View Confidential Outputs">
+      <Button
+        variant="outlined"
+        size="small"
+        endIcon={<IoWalletOutline />}
+        onClick={() => navigate(`/confidential-outputs/${resource_address}`)}
+      >
+        View
+      </Button>
+    </Tooltip>
+  );
+
   return (
     <TableRow key={token_symbol || resource_address}>
       <FluidTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</FluidTableCell>
@@ -155,6 +168,7 @@ function BalanceRow({
             Send
           </Button>
           {stealthUXTOs}
+          {confidentialOutputs}
         </Stack>
       </FluidTableCell>
     </TableRow>

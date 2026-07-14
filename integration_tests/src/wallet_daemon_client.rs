@@ -871,6 +871,7 @@ pub async fn transfer(
     add_outputs_from_diff(world, outputs_name, resp.result.as_ref().unwrap().any_accept().unwrap());
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn confidential_transfer(
     world: &mut TariWorld,
     account_name: String,
@@ -879,6 +880,7 @@ pub async fn confidential_transfer(
     wallet_daemon_name: String,
     outputs_name: String,
     resource_address: ResourceAddress,
+    input_selection: UtxoInputSelection,
 ) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -888,12 +890,12 @@ pub async fn confidential_transfer(
         account,
         amount,
         destination_address,
-        max_fee: 5000,
+        max_fee: 2_000_000,
         resource_address,
         proof_from_badge_resource: None,
         memo: None,
         dry_run: false,
-        input_selection: UtxoInputSelection::PreferRevealed,
+        input_selection,
         output_to_revealed: false,
     };
 

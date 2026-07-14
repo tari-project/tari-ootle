@@ -15,6 +15,7 @@ use rand::RngExt;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::args;
+use tari_ootle_wallet_sdk::apis::confidential_transfer::UtxoInputSelection;
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     types::{TransactionSubmitRequest, TransactionWaitResultRequest},
@@ -500,6 +501,58 @@ async fn when_transfer_via_wallet_daemon(
         amount,
         wallet_daemon_name,
         outputs_name,
+    )
+    .await;
+}
+
+#[when(
+    regex = r"I do a confidential transfer of (\d+) from (\S+) to (\S+) for resource (\S+) selecting (\S+) inputs creating output (\S+) via the wallet daemon (\S+)"
+)]
+#[allow(clippy::too_many_arguments)]
+async fn when_i_do_a_confidential_transfer_via_wallet_daemon(
+    world: &mut TariWorld,
+    step: &Step,
+    amount: u64,
+    source_account_name: String,
+    dest_account_name: String,
+    resource_input_name: String,
+    input_selection: String,
+    outputs_name: String,
+    wallet_daemon_name: String,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let resource_address = world
+        .get_output_fq(&resource_input_name)
+        .substate_id
+        .as_resource_address()
+        .expect("output is not a resource");
+
+    let input_selection = match input_selection.to_lowercase().as_str() {
+        "confidential" => UtxoInputSelection::ConfidentialOnly,
+        "revealed" => UtxoInputSelection::RevealedOnly,
+        "prefer-revealed" => UtxoInputSelection::PreferRevealed,
+        "prefer-confidential" => UtxoInputSelection::PreferConfidential,
+        other => panic!("Unknown input selection '{other}'"),
+    };
+
+    let destination_address = {
+        let mut client = wallet_daemon_client::get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
+        client
+            .accounts_get(ComponentAddressOrName::Name(dest_account_name))
+            .await
+            .expect("Failed to resolve destination account by name")
+            .address
+    };
+
+    wallet_daemon_client::confidential_transfer(
+        world,
+        source_account_name,
+        destination_address,
+        amount.into(),
+        wallet_daemon_name,
+        outputs_name,
+        resource_address,
+        input_selection,
     )
     .await;
 }

@@ -687,6 +687,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn mint_resource(
         &mut self,
         locked_resource: &LockedSubstate,

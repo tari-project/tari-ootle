@@ -78,7 +78,7 @@ pub async fn create_component(
 #[expect(clippy::too_many_lines)]
 pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String, diff: &SubstateDiff) {
     let outputs = world.outputs.entry(outputs_name).or_default();
-    let mut counters = [0usize; 10];
+    let mut counters = [0usize; 11];
     for (addr, data) in diff.up_iter() {
         match addr {
             SubstateId::Component(component_addr) => {
@@ -190,6 +190,13 @@ pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String,
                     version: Some(data.version()),
                 });
                 counters[8] += 1;
+            },
+            SubstateId::ConfidentialOutput(_) => {
+                outputs.insert(format!("confidential_outputs/{}", counters[10]), SubstateRequirement {
+                    substate_id: addr.clone(),
+                    version: Some(data.version()),
+                });
+                counters[10] += 1;
             },
         }
     }
@@ -405,6 +412,7 @@ pub fn parse_arg(s: &str) -> Result<tari_ootle_transaction::builder::named_args:
             SubstateId::Template(addr) => arg!(addr),
             SubstateId::ValidatorFeePool(addr) => arg!(addr),
             SubstateId::Utxo(addr) => arg!(addr),
+            SubstateId::ConfidentialOutput(addr) => arg!(addr),
         });
     }
 

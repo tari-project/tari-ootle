@@ -359,12 +359,15 @@ impl Invokable<Store> for WasmProcess {
         // Cap further to the compute the fees paid so far can cover (plus the free-compute grace).
         // This bounds the compute an under-paying transaction can extract: it traps out-of-gas once
         // it exhausts the paid allowance rather than running up to the per-transaction hard cap.
+        // The allowance is shared with native verification (which pre-charges its point cost), so
+        // it is reduced by the combined consumption; the hard cap above bounds WASM work only.
+        let native_consumed = self.env.state().interface().native_points_consumed();
         let paid_allowance_remaining = self
             .env
             .state()
             .interface()
             .wasm_point_allowance()
-            .map(|allowance| allowance.saturating_sub(consumed));
+            .map(|allowance| allowance.saturating_sub(consumed.saturating_add(native_consumed)));
         let points_before = match paid_allowance_remaining {
             Some(remaining) => per_call_cap.min(budget_remaining).min(remaining),
             None => per_call_cap.min(budget_remaining),

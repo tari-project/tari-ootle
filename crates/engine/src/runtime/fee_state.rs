@@ -21,6 +21,12 @@ pub struct FeeState {
     /// against the total — dividing per-call would let small invocations round to zero and let a
     /// caller evade WASM fees by splitting work below the divisor.
     accumulated_wasm_points: u64,
+    /// Native-verification metering points charged across the transaction (stealth transfers,
+    /// confidential withdraws, burn claims), priced in WASM-point equivalents. Kept separate from
+    /// `accumulated_wasm_points` because the per-transaction WASM hard cap bounds WASM work only
+    /// (native work has its own structural caps), while the payment-funded allowance bounds the
+    /// sum of both.
+    accumulated_native_points: u64,
     /// When true, fee charges are still metered but the executor will not abort if payments are insufficient.
     /// Set out-of-band by `FeeModule` during runtime initialization (only ever true for indexer dry-runs).
     dry_run: bool,
@@ -93,6 +99,14 @@ impl FeeState {
 
     pub fn accumulated_wasm_points(&self) -> u64 {
         self.accumulated_wasm_points
+    }
+
+    pub fn accumulate_native_points(&mut self, points: u64) {
+        self.accumulated_native_points = self.accumulated_native_points.saturating_add(points);
+    }
+
+    pub fn accumulated_native_points(&self) -> u64 {
+        self.accumulated_native_points
     }
 
     pub fn take_fee_charges(&mut self) -> FeeBreakdown {

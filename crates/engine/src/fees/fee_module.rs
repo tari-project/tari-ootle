@@ -171,6 +171,14 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating WASM execution cost".to_string()))?;
         track.add_fee_charge(FeeSource::WasmExecution, wasm_cost);
 
+        // Native verification is priced in the same points and charged at the same rate, under its
+        // own source so the breakdown distinguishes crypto verification from template execution.
+        let native_units = track.accumulated_native_points() / self.fee_table.wasm_points_cost_divisor();
+        let native_cost = native_units
+            .checked_mul(self.fee_table.per_wasm_point_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating native execution cost".to_string()))?;
+        track.add_fee_charge(FeeSource::NativeExecution, native_cost);
+
         // Exhaust burn: charged on top of the execution fee accrued so far, so leaders receive the execution fee in
         // full and the burn amount is destroyed separately. The rate is seeded onto the fee state at execution time
         // for the execution epoch.

@@ -24,6 +24,16 @@ pub struct ValidatedConfidentialWithdrawProof {
     pub change_revealed_amount: Amount,
 }
 
+/// The native-execution metering points [`validate_confidential_withdraw`] costs for this proof.
+/// Charged against the payment-funded allowance *before* any verification runs, so a non-paying
+/// transaction cannot extract the crypto work for free. Must stay in lock-step with what
+/// [`validate_confidential_withdraw`] actually verifies.
+pub fn withdraw_native_points(proof: &ConfidentialWithdrawProof) -> u64 {
+    use crate::limits::NativeExecutionPoints as P;
+    super::statement_native_points(&proof.output_proof)
+        .saturating_add(P::PER_INPUT.saturating_mul(proof.inputs.len() as u64))
+}
+
 pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
     inputs: I,
     view_key: Option<&RistrettoPublicKey>,

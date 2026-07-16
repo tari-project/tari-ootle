@@ -1423,6 +1423,13 @@ where
                     self.check_resource_auth_hook(hook)?;
                 }
 
+                // Charge the initial mint's native verification cost against the payment-funded
+                // allowance before its proof crypto runs.
+                if let Some(tari_template_lib::args::MintArg::Confidential { statement }) = arg.mint_arg.as_ref() {
+                    self.tracker
+                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(statement))?;
+                }
+
                 self.tracker.write_with(|state_mut| {
                     let resource = Resource::new(
                         arg.resource_type,
@@ -1542,6 +1549,13 @@ where
 
                 if let Some(auth_hook) = maybe_auth_hook {
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Mint)?;
+                }
+
+                // Charge the mint's native verification cost against the payment-funded allowance
+                // before its proof crypto runs.
+                if let tari_template_lib::args::MintArg::Confidential { statement } = &mint_resource.mint_arg {
+                    self.tracker
+                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(statement))?;
                 }
 
                 self.tracker.write_with(|state_mut| {
@@ -2018,6 +2032,13 @@ where
                         })?;
                 let arg: BurnStealthUtxoArg = args.assert_one_arg()?;
 
+                // Charge the value proof's native verification (a Schnorr/ElGamal check) against
+                // the payment-funded allowance before it runs.
+                if arg.value_proof.is_some() {
+                    self.tracker
+                        .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_VALUE_PROOF)?;
+                }
+
                 self.tracker.write_with(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
@@ -2272,6 +2293,13 @@ where
 
                 if let Some(auth_hook) = maybe_auth_hook {
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
+                }
+
+                // Charge the withdraw's native verification cost against the payment-funded
+                // allowance before any of its proof crypto runs.
+                if let VaultWithdrawArg::Confidential { proof } = &arg {
+                    self.tracker
+                        .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(proof))?;
                 }
 
                 self.tracker.write_with(|state| {
@@ -2766,6 +2794,11 @@ where
                 })?;
                 let proof = args.assert_one_arg()?;
 
+                // Charge the withdraw's native verification cost against the payment-funded
+                // allowance before any of its proof crypto runs.
+                self.tracker
+                    .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(&proof))?;
+
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
@@ -3256,6 +3289,8 @@ where
         output_data: ClaimBurnOutputData,
     ) -> Result<(), RuntimeError> {
         let epoch = self.tracker.get_current_epoch()?;
+        self.tracker
+            .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_CLAIM_BURN)?;
         self.claim_burn_proof_verifier
             .verify_claim_proof(epoch, &self.seal_signer_public_key, &claim)
             .map_err(|e| {
@@ -3700,6 +3735,12 @@ where
         // only creation-time invariant is that an output is spendable by at least one path (`spend_key` or
         // `condition_root` is `Some`), enforced by `validate_stealth_outputs_statement` during execution.
 
+        // The whole statement's native verification cost is charged against the payment-funded
+        // allowance before any of it runs (the authorisation pass below included), so a transaction
+        // that will not pay traps here without extracting the crypto work.
+        self.tracker
+            .charge_native_execution(tari_engine_types::stealth::transfer_native_points(&statement))?;
+
         // (T2) Spend time: authorise every input BEFORE the spend executes, so a rejection leaves the inputs unspent.
         // This is the authoritative, mandatory security gate for all spend paths (key path, AccessRule, and WASM
         // predicate).
@@ -3783,6 +3824,10 @@ where
 
     fn wasm_points_consumed(&self) -> u64 {
         self.tracker.accumulated_wasm_points()
+    }
+
+    fn native_points_consumed(&self) -> u64 {
+        self.tracker.accumulated_native_points()
     }
 
     fn wasm_point_allowance(&self) -> Option<u64> {

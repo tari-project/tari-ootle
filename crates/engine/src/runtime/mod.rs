@@ -259,6 +259,12 @@ pub trait RuntimeInterface {
     /// invocation. Used by `WasmProcess::invoke` to enforce `MAX_WASM_POINTS_PER_TRANSACTION`.
     fn wasm_points_consumed(&self) -> u64;
 
+    /// Total native-verification points (stealth transfers, confidential withdraws, burn claims —
+    /// priced in WASM-point equivalents) charged to the transaction so far. Combined with
+    /// [`Self::wasm_points_consumed`] when capping a call's payment-funded allowance; excluded
+    /// from the WASM-only per-transaction hard cap.
+    fn native_points_consumed(&self) -> u64;
+
     /// The maximum Wasmer metering points the transaction may consume given the fees paid so far,
     /// used by `WasmProcess::invoke` to cap each call's allowance so unpaid compute cannot exceed
     /// the grace. `None` means no payment-funded bound applies (only the per-transaction hard cap).

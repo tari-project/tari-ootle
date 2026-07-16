@@ -297,6 +297,32 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| state.fee_state().accumulated_wasm_points())
     }
 
+    pub fn accumulated_native_points(&self) -> u64 {
+        self.read_with(|state| state.fee_state().accumulated_native_points())
+    }
+
+    /// Charges native verification work (priced in WASM-point equivalents) against the
+    /// payment-funded compute allowance, *before* the work is performed. Errors when the charge
+    /// would exceed the allowance, so a non-paying transaction traps here — having done none of the
+    /// priced crypto — rather than extracting it for free. No allowance applies (dry runs, unpriced
+    /// WASM execution) ⇒ the charge only accumulates, so dry-run fee estimates stay accurate.
+    pub fn charge_native_execution(&mut self, points: u64) -> Result<(), RuntimeError> {
+        if let Some(allowance) = self.wasm_point_allowance() {
+            let consumed = self
+                .accumulated_wasm_points()
+                .saturating_add(self.accumulated_native_points());
+            if consumed.saturating_add(points) > allowance {
+                return Err(RuntimeError::InsufficientFeesForNativeExecution {
+                    required_points: points,
+                    consumed_points: consumed,
+                    allowance,
+                });
+            }
+        }
+        self.write_with(|state| state.fee_state_mut().accumulate_native_points(points));
+        Ok(())
+    }
+
     pub fn finalize(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
         let failure = failure.or_else(|| {
             self.read_with(|state| {

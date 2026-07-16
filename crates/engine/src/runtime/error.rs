@@ -203,6 +203,15 @@ pub enum RuntimeError {
     TemplateNotFound { template_address: TemplateAddress },
     #[error("Insufficient fees paid: required {required_fee}, paid {fees_paid}")]
     InsufficientFeesPaid { required_fee: u64, fees_paid: u64 },
+    #[error(
+        "Insufficient fees to fund native verification requiring {required_points} points: {consumed_points} of \
+         {allowance} allowance points already consumed"
+    )]
+    InsufficientFeesForNativeExecution {
+        required_points: u64,
+        consumed_points: u64,
+        allowance: u64,
+    },
     #[error("No fees paid from stealth transfer: {details}")]
     NoFeesPaid { details: String },
     #[error("No fee checkpoint")]

@@ -144,8 +144,11 @@ fn paying_more_raises_the_compute_allowance() {
     } = setup();
 
     let rounds = ABOVE_GRACE_POINTS / per_round;
+    // Sized from the call's point cost (1 fee unit per point) plus margin for the fixed charges,
+    // so it keeps funding the call as the grace constant moves.
+    let fee_payment = ABOVE_GRACE_POINTS + 10_000_000;
     let tx = Transaction::builder_localnet()
-        .pay_fee_from_component(account, 50_000_000u64)
+        .pay_fee_from_component(account, fee_payment)
         .call_function(bench, "bench_div_u64", args![rounds])
         .build_and_seal(&key);
 

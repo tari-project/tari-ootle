@@ -202,6 +202,11 @@ pub enum FeeSource {
     /// Exhaust burn, charged on top of the execution fee and destroyed rather than paid to leaders.
     #[n(9)]
     ExhaustBurn = 9,
+    /// Native verification metering (stealth transfers, confidential withdraws, burn claims),
+    /// priced in the same points as `WasmExecution` via wall-clock equivalence and charged at the
+    /// same per-point rate.
+    #[n(10)]
+    NativeExecution = 10,
 }
 
 #[derive(

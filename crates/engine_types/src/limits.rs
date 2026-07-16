@@ -33,20 +33,53 @@ pub const MAX_WASM_POINTS_PER_CALL: u64 = 100_000_000;
 /// all its calls. The aggregate across a *block* still needs a separate per-block budget.
 pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
 
-/// Wasmer metering points a transaction may consume *before* its fee payments cover them. A
+/// Execution metering points a transaction may consume *before* its fee payments cover them. A
 /// transaction sources its fee in the fee intent (withdraw, claim-burn, AMM swap to TARI, stealth
 /// transfer, …) and only then calls `pay_fee`, so it must be allowed to run some compute on credit;
 /// this bounds that credit. Beyond it, each WASM call's metering allowance is capped to the points
-/// the fees paid so far can cover (`WasmProcess::invoke`), so a transaction that does not pay traps
-/// out-of-gas here rather than consuming the full [`MAX_WASM_POINTS_PER_TRANSACTION`] for free. This
-/// is the bound on free compute a non-paying transaction can extract from a validator. Payments
-/// raise the allowance above this value proportionally to the WASM fee rate.
+/// the fees paid so far can cover (`WasmProcess::invoke`), and native verification pre-charges its
+/// point cost against the same allowance, so a transaction that does not pay traps out-of-gas here
+/// rather than consuming the full [`MAX_WASM_POINTS_PER_TRANSACTION`] (or unmetered native crypto)
+/// for free. This is the bound on total free compute — WASM and native — a non-paying transaction
+/// can extract from a validator. Payments raise the allowance above this value proportionally to
+/// the WASM fee rate.
 ///
-/// Sized with generous margin over the most expensive legitimate fee-sourcing flow: acquiring TARI
-/// by swapping another resource through an AMM pool inside the fee intent costs ~143k points (see
-/// `tari_engine`'s `complex_fee_payment` test, which guards that this stays comfortably above it),
-/// so this is ~14x that worst case while staying far below the per-transaction cap.
-pub const FREE_COMPUTE_GRACE_POINTS: u64 = 2_000_000;
+/// Sized at ~2.5x the most expensive legitimate fee-sourcing flow: paying a fee from stealth UTXOs
+/// (one transfer: fixed cost + 1 stealth change output + up to 64 dust inputs ≈ 12.8M points at
+/// the calibrated native prices below). The other fee-sourcing flows are far cheaper: a burn claim
+/// is [`NativeExecutionPoints::PER_CLAIM_BURN`] and an AMM swap to TARI is ~143k WASM points
+/// (guarded by `tari_engine`'s `complex_fee_payment` test). Re-derive with
+/// `cargo run -p tari_engine --example native_points_calibrate --release`.
+pub const FREE_COMPUTE_GRACE_POINTS: u64 = 32_000_000;
+
+/// Metering-point prices for native (non-WASM) verification work, charged against the same
+/// payment-funded allowance as WASM execution ([`FREE_COMPUTE_GRACE_POINTS`] of credit, then
+/// payments fund the rest). Native crypto runs outside the Wasmer meter, so these price it by
+/// wall-clock equivalence: measured milliseconds × the measured points-per-millisecond rate of
+/// real metered WASM on the same hardware. Both sides are CPU-bound, so the ratio holds across
+/// validator classes. Values from `cargo run -p tari_engine --example native_points_calibrate
+/// --release` (~8.4M points/ms), rounded up.
+pub struct NativeExecutionPoints;
+
+impl NativeExecutionPoints {
+    /// One Minotari burn-claim proof: a Schnorr ownership proof plus commitment arithmetic (the
+    /// same primitives as [`Self::PER_STATEMENT`]) and a bounded kernel-MMR inclusion proof
+    /// (Blake2b hashes, microseconds). Priced as the statement cost with headroom.
+    pub const PER_CLAIM_BURN: u64 = 3_200_000;
+    /// One stealth/confidential input commitment: decompress + point aggregation (~4.8µs measured).
+    /// Substate access is charged separately by the fee module.
+    pub const PER_INPUT: u64 = 42_000;
+    /// One stealth/confidential output: its share of the aggregated bulletproof range proof plus an
+    /// ElGamal viewable-balance proof (~0.93ms measured with a view key; priced view-key-inclusive
+    /// uniformly since the resource's view key is not known until the resource substate is read).
+    pub const PER_OUTPUT: u64 = 8_000_000;
+    /// Fixed per-statement cost: balance-proof Schnorr verification, bulletproof base cost and
+    /// basic validations (~0.24ms measured).
+    pub const PER_STATEMENT: u64 = 2_100_000;
+    /// One UTXO value proof (supply-tracked burns): a Schnorr verification plus commitment
+    /// arithmetic (~60µs class), priced with headroom.
+    pub const PER_VALUE_PROOF: u64 = 600_000;
+}
 
 pub struct EngineLimits {
     pub max_substate_outputs: usize,

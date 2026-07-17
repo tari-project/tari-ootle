@@ -105,38 +105,43 @@ fn main() {
         ns_slope / 1e6
     );
 
-    let (per_output_ms, per_input_ms, fixed_ms) = measure_stealth_costs();
+    let (per_output_ms, vk_surcharge_ms, per_input_ms, fixed_ms) = measure_stealth_costs();
 
     // ---- Suggested constants ----
 
     let to_points = |ms: f64| -> u64 { (ms * points_per_ms).ceil() as u64 };
     println!();
-    println!("Measured: per-output {per_output_ms:.4} ms, per-input {per_input_ms:.6} ms, fixed {fixed_ms:.4} ms");
+    println!(
+        "Measured: per-output {per_output_ms:.4} ms (+{vk_surcharge_ms:.4} ms with view key), per-input \
+         {per_input_ms:.6} ms, fixed {fixed_ms:.4} ms"
+    );
     println!();
     println!("Suggested constants (round up to taste):");
-    println!("  NATIVE_POINTS_PER_STEALTH_OUTPUT   = {}", to_points(per_output_ms));
-    println!("  NATIVE_POINTS_PER_STEALTH_INPUT    = {}", to_points(per_input_ms));
-    println!("  NATIVE_POINTS_PER_STEALTH_TRANSFER = {}", to_points(fixed_ms));
+    println!("  PER_OUTPUT                    = {}", to_points(per_output_ms));
+    println!("  PER_OUTPUT_VIEWABLE_SURCHARGE = {}", to_points(vk_surcharge_ms));
+    println!("  PER_INPUT                     = {}", to_points(per_input_ms));
+    println!("  PER_STATEMENT                 = {}", to_points(fixed_ms));
     // A burn claim verifies one Schnorr ownership proof plus commitment arithmetic (the same
     // primitives as the fixed per-transfer balance-proof check) and a bounded kernel-MMR inclusion
     // proof (Blake2b hashes, microseconds). Price it as the fixed transfer cost with headroom.
-    println!("  NATIVE_POINTS_PER_CLAIM_BURN       = {}", to_points(fixed_ms * 1.5));
+    println!("  PER_CLAIM_BURN                = {}", to_points(fixed_ms * 1.5));
     println!();
     // The grace must fit the most expensive legitimate fee-sourcing flow. With native metering, a
     // stealth-UTXO-funded fee (1 transfer: fixed cost + 1 stealth change output + up to 64 dust
     // inputs; the fee amount itself is a revealed output, which costs no proof) becomes the worst
-    // case, ahead of the ~143k-point AMM swap.
+    // case, ahead of the ~143k-point AMM swap. Fees are TARI, which never carries a view key, so
+    // the flow prices at the base output rate.
     let stealth_fee_source = to_points(fixed_ms + per_output_ms + 64.0 * per_input_ms);
-    println!("Legit stealth fee-source (1 transfer, 1 output+vk, 64 inputs) = {stealth_fee_source} points");
+    println!("Legit stealth fee-source (1 transfer, 1 output no-vk, 64 inputs) = {stealth_fee_source} points");
     println!(
         "Suggested FREE_COMPUTE_GRACE_POINTS >= {} (2x margin, and >= 2x the 143k AMM-swap flow)",
         stealth_fee_source * 2
     );
 }
 
-/// Times `validate_transfer` directly (no engine) and derives (per-output ms, per-input ms,
-/// fixed-per-transfer ms).
-fn measure_stealth_costs() -> (f64, f64, f64) {
+/// Times `validate_transfer` directly (no engine) and derives (per-output ms without a view key,
+/// view-key surcharge ms per output, per-input ms, fixed-per-transfer ms).
+fn measure_stealth_costs() -> (f64, f64, f64, f64) {
     let view_key = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(7u64));
 
     let time_validate = |stmt: &StealthTransferStatement, vk: Option<&RistrettoPublicKey>| -> f64 {
@@ -150,26 +155,35 @@ fn measure_stealth_costs() -> (f64, f64, f64) {
         best / 1e6 // ms
     };
 
-    // Output scaling with a view key (the pricing case: aggregated bulletproof + one ElGamal
-    // viewable-balance proof per output).
-    let out_ms: Vec<(usize, f64)> = [1usize, 2, 4, 8]
-        .into_iter()
-        .map(|n| {
-            let data = generate_mint_statement(vec![1_000u64; n], 0u64, Some(&view_key));
-            (n, time_validate(&data.statement, Some(&view_key)))
-        })
-        .collect();
-    for (n, ms) in &out_ms {
-        println!("stealth outputs (view key) n={n}: {ms:.3} ms");
-    }
-    // Marginal per-output cost: max pairwise slope, so the constant covers the worst marginal
-    // rather than the amortised average of large aggregations.
-    let per_output_ms = out_ms
-        .windows(2)
-        .map(|w| (w[1].1 - w[0].1) / (w[1].0 - w[0].0) as f64)
-        .fold(f64::MIN, f64::max);
+    // Output scaling, with and without a view key: the base per-output price is the aggregated
+    // bulletproof share; a view key adds one ElGamal viewable-balance proof per output.
+    let marginal = |vk: Option<&RistrettoPublicKey>| -> (f64, f64) {
+        let out_ms: Vec<(usize, f64)> = [1usize, 2, 4, 8]
+            .into_iter()
+            .map(|n| {
+                let data = generate_mint_statement(vec![1_000u64; n], 0u64, vk);
+                (n, time_validate(&data.statement, vk))
+            })
+            .collect();
+        for (n, ms) in &out_ms {
+            println!(
+                "stealth outputs ({}) n={n}: {ms:.3} ms",
+                if vk.is_some() { "view key" } else { "no view key" }
+            );
+        }
+        // Marginal per-output cost: max pairwise slope, so the constant covers the worst marginal
+        // rather than the amortised average of large aggregations.
+        let per_output = out_ms
+            .windows(2)
+            .map(|w| (w[1].1 - w[0].1) / (w[1].0 - w[0].0) as f64)
+            .fold(f64::MIN, f64::max);
+        (per_output, out_ms[0].1)
+    };
+    let (per_output_ms, t1_novk) = marginal(None);
+    let (per_output_vk_ms, _) = marginal(Some(&view_key));
+    let vk_surcharge_ms = (per_output_vk_ms - per_output_ms).max(0.0);
     // Fixed per-transfer cost: balance proof + bulletproof base + basic validations.
-    let fixed_ms = (out_ms[0].1 - per_output_ms).max(0.0);
+    let fixed_ms = (t1_novk - per_output_ms).max(0.0);
 
     // Input scaling: per-input commitment decompress + point add (plus substate work charged by
     // the engine separately).
@@ -187,5 +201,5 @@ fn measure_stealth_costs() -> (f64, f64, f64) {
     let per_input_ms = (t_in_large - t_in_small) / 900.0;
     println!("stealth inputs: 100 -> {t_in_small:.3} ms, 1000 -> {t_in_large:.3} ms");
 
-    (per_output_ms, per_input_ms, fixed_ms)
+    (per_output_ms, vk_surcharge_ms, per_input_ms, fixed_ms)
 }

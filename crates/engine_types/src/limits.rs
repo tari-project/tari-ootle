@@ -44,10 +44,11 @@ pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
 /// can extract from a validator. Payments raise the allowance above this value proportionally to
 /// the WASM fee rate.
 ///
-/// Sized at ~2.5x the most expensive legitimate fee-sourcing flow: paying a fee from stealth UTXOs
-/// (one transfer: fixed cost + 1 stealth change output + up to 64 dust inputs ≈ 12.8M points at
-/// the calibrated native prices below). The other fee-sourcing flows are far cheaper: a burn claim
-/// is [`NativeExecutionPoints::PER_CLAIM_BURN`] and an AMM swap to TARI is ~143k WASM points
+/// Sized at ~3x the most expensive legitimate fee-sourcing flow: paying a fee from stealth UTXOs
+/// (one transfer: fixed cost + 1 stealth change output + up to 64 dust inputs ≈ 10.8M points at
+/// the calibrated native prices below — fees are TARI, which has no view key, so the flow prices
+/// at the base output rate). The other fee-sourcing flows are far cheaper: a burn claim is
+/// [`NativeExecutionPoints::PER_CLAIM_BURN`] and an AMM swap to TARI is ~143k WASM points
 /// (guarded by `tari_engine`'s `complex_fee_payment` test). Re-derive with
 /// `cargo run -p tari_engine --example native_points_calibrate --release`.
 pub const FREE_COMPUTE_GRACE_POINTS: u64 = 32_000_000;
@@ -69,10 +70,14 @@ impl NativeExecutionPoints {
     /// One stealth/confidential input commitment: decompress + point aggregation (~4.8µs measured).
     /// Substate access is charged separately by the fee module.
     pub const PER_INPUT: u64 = 42_000;
-    /// One stealth/confidential output: its share of the aggregated bulletproof range proof plus an
-    /// ElGamal viewable-balance proof (~0.93ms measured with a view key; priced view-key-inclusive
-    /// uniformly since the resource's view key is not known until the resource substate is read).
-    pub const PER_OUTPUT: u64 = 8_000_000;
+    /// One stealth/confidential output: its share of the aggregated bulletproof range proof
+    /// (~0.68ms measured marginal, no view key). Outputs on a resource with a view key add
+    /// [`Self::PER_OUTPUT_VIEWABLE_SURCHARGE`] each.
+    pub const PER_OUTPUT: u64 = 6_000_000;
+    /// Added to [`Self::PER_OUTPUT`] for each output on a resource with a view key: the ElGamal
+    /// viewable-balance proof (~0.26ms measured marginal). Charged only once the resource's view
+    /// key presence is known — a cheap substate read that precedes all proof crypto.
+    pub const PER_OUTPUT_VIEWABLE_SURCHARGE: u64 = 2_000_000;
     /// Fixed per-statement cost: balance-proof Schnorr verification, bulletproof base cost and
     /// basic validations (~0.24ms measured).
     pub const PER_STATEMENT: u64 = 2_100_000;

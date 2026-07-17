@@ -1427,7 +1427,10 @@ where
                 // allowance before its proof crypto runs.
                 if let Some(tari_template_lib::args::MintArg::Confidential { statement }) = arg.mint_arg.as_ref() {
                     self.tracker
-                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(statement))?;
+                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(
+                            statement,
+                            arg.view_key.is_some(),
+                        ))?;
                 }
 
                 self.tracker.write_with(|state_mut| {
@@ -1532,20 +1535,22 @@ where
                         })?;
                 let mint_resource: MintResourceArg = args.assert_one_arg()?;
 
-                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
+                let (resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
+                    self.tracker.write_with(|state_mut| {
+                        let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
 
-                    let resource = state_mut.get_resource(&resource_lock)?;
+                        let resource = state_mut.get_resource(&resource_lock)?;
 
-                    state_mut.authorization().check_resource_access_rules(
-                        ResourceAuthAction::Mint,
-                        resource.as_ownership(),
-                        resource.access_rules(),
-                    )?;
+                        state_mut.authorization().check_resource_access_rules(
+                            ResourceAuthAction::Mint,
+                            resource.as_ownership(),
+                            resource.access_rules(),
+                        )?;
 
-                    let auth_caller = state_mut.get_auth_caller()?;
-                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
-                })?;
+                        let auth_caller = state_mut.get_auth_caller()?;
+                        let has_view_key = resource.view_key().is_some();
+                        Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller, has_view_key))
+                    })?;
 
                 if let Some(auth_hook) = maybe_auth_hook {
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Mint)?;
@@ -1555,7 +1560,10 @@ where
                 // before its proof crypto runs.
                 if let tari_template_lib::args::MintArg::Confidential { statement } = &mint_resource.mint_arg {
                     self.tracker
-                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(statement))?;
+                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(
+                            statement,
+                            has_view_key,
+                        ))?;
                 }
 
                 self.tracker.write_with(|state_mut| {
@@ -2264,7 +2272,7 @@ where
                 })?;
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
+                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
                     self.tracker.write_with(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
@@ -2288,7 +2296,14 @@ where
                         )?;
 
                         let auth_caller = state_mut.get_auth_caller()?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
+                        let has_view_key = resource.view_key().is_some();
+                        Ok::<_, RuntimeError>((
+                            vault_lock,
+                            resource_lock,
+                            resource.auth_hook().cloned(),
+                            auth_caller,
+                            has_view_key,
+                        ))
                     })?;
 
                 if let Some(auth_hook) = maybe_auth_hook {
@@ -2299,7 +2314,10 @@ where
                 // allowance before any of its proof crypto runs.
                 if let VaultWithdrawArg::Confidential { proof } = &arg {
                     self.tracker
-                        .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(proof))?;
+                        .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(
+                            proof,
+                            has_view_key,
+                        ))?;
                 }
 
                 self.tracker.write_with(|state| {
@@ -2795,9 +2813,20 @@ where
                 let proof = args.assert_one_arg()?;
 
                 // Charge the withdraw's native verification cost against the payment-funded
-                // allowance before any of its proof crypto runs.
+                // allowance before any of its proof crypto runs. The resource peek is a cheap
+                // substate read that determines whether the viewable-balance surcharge applies.
+                let has_view_key = self.tracker.write_with(|state| {
+                    let bucket = state.get_bucket(bucket_id)?;
+                    let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
+                    let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
+                    state.unlock_substate(resource_lock)?;
+                    Ok::<_, RuntimeError>(has_view_key)
+                })?;
                 self.tracker
-                    .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(&proof))?;
+                    .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(
+                        &proof,
+                        has_view_key,
+                    ))?;
 
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
@@ -3737,9 +3766,20 @@ where
 
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction
-        // that will not pay traps here without extracting the crypto work.
+        // that will not pay traps here without extracting the crypto work. The resource peek is a
+        // cheap substate read that determines whether the viewable-balance surcharge applies.
+        let has_view_key = self.tracker.write_with(|state| {
+            let address = state.resolve_resource_address_ref(resource_address.clone())?;
+            let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
+            let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
+            state.unlock_substate(resource_lock)?;
+            Ok::<_, RuntimeError>(has_view_key)
+        })?;
         self.tracker
-            .charge_native_execution(tari_engine_types::stealth::transfer_native_points(&statement))?;
+            .charge_native_execution(tari_engine_types::stealth::transfer_native_points(
+                &statement,
+                has_view_key,
+            ))?;
 
         // (T2) Spend time: authorise every input BEFORE the spend executes, so a rejection leaves the inputs unspent.
         // This is the authoritative, mandatory security gate for all spend paths (key path, AccessRule, and WASM

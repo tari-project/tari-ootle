@@ -60,6 +60,7 @@ fn grace_covers_legitimate_fee_sourcing_flows() {
 fn setup_faucet(
     test: &mut TemplateTest,
     transfer_data: &StealthSecretTransferData,
+    view_key: Option<&RistrettoPublicKey>,
 ) -> (ComponentAddress, ResourceAddress) {
     test.enable_auto_add_proofs_from_signers();
     let template_addr = test.get_template_address(TEMPLATE_NAME);
@@ -69,7 +70,7 @@ fn setup_faucet(
         .call_function(template_addr, "new", args![
             initial_supply,
             transfer_data.statement,
-            Option::<tari_template_lib::types::crypto::RistrettoPublicKeyBytes>::None
+            view_key.map(|vk| vk.to_byte_type())
         ])
         .build_and_seal(test.secret_key());
 
@@ -101,10 +102,10 @@ fn enable_point_priced_fees(test: &mut TemplateTest) {
 fn unpaid_native_verification_traps_before_the_crypto_runs() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let mint = stealth::generate_mint_statement([100, 1000], 0u64, None);
-    let (_faucet, faucet_resx) = setup_faucet(&mut test, &mint);
+    let (_faucet, faucet_resx) = setup_faucet(&mut test, &mint, None);
     enable_point_priced_fees(&mut test);
 
-    // 8 outputs price above the 32M grace (fixed + 8 × per-output ≈ 66M points).
+    // 8 outputs price above the 32M grace (fixed + 8 × per-output ≈ 50M points).
     let mut garbage = stealth::generate_mint_statement(vec![100u64; 8], 0u64, None);
     let mut rp = garbage.statement.outputs_statement.agg_range_proof.clone().into_vec();
     rp[100] ^= 0xFF;
@@ -129,17 +130,17 @@ fn revealed_only_statements_price_at_zero() {
 
     let revealed_transfer = stealth::generate_transfer_data(stealth::NO_INPUTS, 100u64, Vec::<u64>::new(), 100u64);
     assert_eq!(
-        tari_engine_types::stealth::transfer_native_points(&revealed_transfer.statement),
+        tari_engine_types::stealth::transfer_native_points(&revealed_transfer.statement, false),
         0
     );
 
     let revealed_withdraw = ConfidentialWithdrawProof::revealed_withdraw(1000u64);
     assert_eq!(
-        tari_engine_types::confidential::withdraw_native_points(&revealed_withdraw),
+        tari_engine_types::confidential::withdraw_native_points(&revealed_withdraw, false),
         0
     );
     assert_eq!(
-        tari_engine_types::confidential::statement_native_points(&revealed_withdraw.output_proof),
+        tari_engine_types::confidential::statement_native_points(&revealed_withdraw.output_proof, false),
         0
     );
 
@@ -148,7 +149,7 @@ fn revealed_only_statements_price_at_zero() {
     let mut with_input = ConfidentialWithdrawProof::revealed_withdraw(1000u64);
     with_input.inputs.push(PedersenCommitmentBytes::zero());
     assert_eq!(
-        tari_engine_types::confidential::withdraw_native_points(&with_input),
+        tari_engine_types::confidential::withdraw_native_points(&with_input, false),
         NativeExecutionPoints::PER_STATEMENT + NativeExecutionPoints::PER_INPUT
     );
 }
@@ -165,7 +166,7 @@ fn in_flight_wasm_counts_toward_the_native_allowance() {
     // Revealed output amount funds the faucet's supply vault, which the programmatic transfer
     // draws its revealed input from.
     let mint = stealth::generate_mint_statement([100, 1000], 200u64, None);
-    let (faucet, _faucet_resx) = setup_faucet(&mut test, &mint);
+    let (faucet, _faucet_resx) = setup_faucet(&mut test, &mint, None);
     let (account, owner, key) = test.create_funded_account();
     enable_point_priced_fees(&mut test);
 
@@ -189,7 +190,7 @@ fn in_flight_wasm_counts_toward_the_native_allowance() {
     // A revealed-funded single-output transfer: ~10.1M native points. Grind enough that the
     // in-flight WASM plus the native price exceeds the grace, while each alone fits within it.
     let transfer = stealth::generate_transfer_data(stealth::NO_INPUTS, 100u64, [50], 50u64);
-    let native_points = tari_engine_types::stealth::transfer_native_points(&transfer.statement);
+    let native_points = tari_engine_types::stealth::transfer_native_points(&transfer.statement, false);
     assert!(native_points < FREE_COMPUTE_GRACE_POINTS);
     let grind_points = FREE_COMPUTE_GRACE_POINTS - native_points / 2;
     let rounds = grind_points / per_round;
@@ -210,7 +211,7 @@ fn in_flight_wasm_counts_toward_the_native_allowance() {
 fn paid_native_verification_is_charged() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let mint = stealth::generate_mint_statement([100, 1000], 0u64, None);
-    let (_faucet, faucet_resx) = setup_faucet(&mut test, &mint);
+    let (_faucet, faucet_resx) = setup_faucet(&mut test, &mint, None);
     let (account, owner, key) = test.create_funded_account();
     enable_point_priced_fees(&mut test);
 
@@ -223,11 +224,67 @@ fn paid_native_verification_is_charged() {
         Some(100),
         0,
     );
-    let expected_points = tari_engine_types::stealth::transfer_native_points(&transfer.statement);
+    let expected_points = tari_engine_types::stealth::transfer_native_points(&transfer.statement, false);
 
     let seal_signer = RistrettoPublicKey::from_secret_key(&key).to_byte_type();
     // Explicit proofs suppress the tooling's auto-added signer badges, so the UTXO spend key's
     // badge must be supplied alongside the fee account's owner badge.
+    let mask_badge =
+        NonFungibleAddress::from_public_key(RistrettoPublicKey::from_secret_key(&mint.output_masks[0]).to_byte_type());
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, 900_000_000u64)
+            .stealth_transfer(faucet_resx, transfer.statement)
+            .finish()
+            .add_signer(&seal_signer, &mint.output_masks[0])
+            .seal(&key),
+        vec![owner, mask_badge],
+    );
+
+    let native_charge = result
+        .finalize
+        .fee_receipt
+        .fee_breakdown()
+        .iter()
+        .find_map(|(s, a)| (*s == FeeSource::NativeExecution).then_some(*a))
+        .expect("NativeExecution charge present");
+    assert_eq!(native_charge, expected_points);
+}
+
+/// A resource with a view key verifies an ElGamal viewable-balance proof per output, so its
+/// transfers are charged the per-output surcharge; TARI never carries a view key, so fee-sourcing
+/// transfers always price at the base rate.
+#[test]
+fn view_key_surcharge_is_charged_per_output() {
+    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let view_key_secret = RistrettoSecretKey::random(&mut rand::rng());
+    let view_key = RistrettoPublicKey::from_secret_key(&view_key_secret);
+    let mint = stealth::generate_mint_statement([100, 1000], 0u64, Some(&view_key));
+    let (_faucet, faucet_resx) = setup_faucet(&mut test, &mint, Some(&view_key));
+    let (account, owner, key) = test.create_funded_account();
+    enable_point_priced_fees(&mut test);
+
+    let transfer = stealth::generate_transfer_data_with_view_key(
+        [MaskAndValue {
+            mask: mint.output_masks[0].clone(),
+            value: 100,
+        }],
+        0u64,
+        Some(100),
+        0u64,
+        &view_key,
+    );
+    let expected_points = tari_engine_types::stealth::transfer_native_points(&transfer.statement, true);
+    assert_eq!(
+        expected_points,
+        tari_engine_types::stealth::transfer_native_points(&transfer.statement, false) +
+            NativeExecutionPoints::PER_OUTPUT_VIEWABLE_SURCHARGE,
+        "one output => exactly one surcharge",
+    );
+
+    let seal_signer = RistrettoPublicKey::from_secret_key(&key).to_byte_type();
     let mask_badge =
         NonFungibleAddress::from_public_key(RistrettoPublicKey::from_secret_key(&mint.output_masks[0]).to_byte_type());
     let result = test.execute_expect_success(

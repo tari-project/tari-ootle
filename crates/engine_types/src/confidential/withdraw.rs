@@ -30,15 +30,20 @@ pub struct ValidatedConfidentialWithdrawProof {
 /// [`validate_confidential_withdraw`] actually verifies: a revealed-only proof (no inputs and no
 /// confidential outputs) short-circuits to a plain balance check with no crypto, so it prices at
 /// zero; any input or output brings the balance-proof verification and the per-item crypto.
-pub fn withdraw_native_points(proof: &ConfidentialWithdrawProof) -> u64 {
+pub fn withdraw_native_points(proof: &ConfidentialWithdrawProof, has_view_key: bool) -> u64 {
     use crate::limits::NativeExecutionPoints as P;
     let num_outputs =
         u64::from(proof.output_proof.output.is_some()) + u64::from(proof.output_proof.change_statement.is_some());
     if proof.inputs.is_empty() && num_outputs == 0 {
         return 0;
     }
+    let per_output = P::PER_OUTPUT.saturating_add(if has_view_key {
+        P::PER_OUTPUT_VIEWABLE_SURCHARGE
+    } else {
+        0
+    });
     P::PER_STATEMENT
-        .saturating_add(P::PER_OUTPUT.saturating_mul(num_outputs))
+        .saturating_add(per_output.saturating_mul(num_outputs))
         .saturating_add(P::PER_INPUT.saturating_mul(proof.inputs.len() as u64))
 }
 

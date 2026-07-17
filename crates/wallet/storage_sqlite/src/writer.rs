@@ -1893,6 +1893,56 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn stealth_outputs_lock_many_for_account(
+        &mut self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        utxos: &[&PedersenCommitmentBytes],
+        lock_id: WalletLockId,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_lock_many_for_account";
+        use crate::schema::{accounts, stealth_outputs};
+
+        self.ensure_lock_exists(lock_id)?;
+
+        let account_id = accounts::table
+            .select(accounts::id)
+            .filter(accounts::address.eq(account_address.to_string()))
+            .first::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        // The `owner_account_id` filter is the account-scoping guard: caller-supplied commitments can only ever match
+        // rows owned by this account, so a commitment belonging to another account is never locked here.
+        let num_rows = diesel::update(stealth_outputs::table)
+            .set((
+                stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()),
+                stealth_outputs::lock_id.eq(lock_id),
+                stealth_outputs::locked_at.eq(dsl::now),
+            ))
+            .filter(stealth_outputs::owner_account_id.eq(account_id))
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(stealth_outputs::commitment.eq_any(utxos.iter().map(|id| serialize_hex(id.as_ref()))))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_rows != utxos.len() {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "stealth_output".to_string(),
+                key: format!(
+                    "{}/{} found: account={}, resource_address={}, utxos={}",
+                    num_rows,
+                    utxos.len(),
+                    account_address,
+                    resource_address,
+                    utxos.display()
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_insert";
         use crate::schema::{accounts, stealth_outputs};

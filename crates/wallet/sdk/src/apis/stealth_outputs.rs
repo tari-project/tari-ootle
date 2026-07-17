@@ -152,6 +152,180 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         })
     }
 
+    /// Atomically resolves, validates, and locks the exact wallet-owned stealth outputs named by `utxo_addresses` for
+    /// spending under `lock_id`. This is the specific-input counterpart to [`Self::lock_outputs_for_at_least_amount`]:
+    /// the caller names precise UTXOs (by [`UtxoAddress`]) rather than an amount plus a selection strategy.
+    ///
+    /// Every requested output must use `resource_address`, belong to `account_address`, be wallet-owned (its one-time
+    /// spend key is held) and currently eligible for the key-path statement flow — the same eligibility rules as
+    /// [`WalletStoreReader::stealth_outputs_get_unspent_for_spending`] (owner key present, not burnt, not frozen,
+    /// condition-spendable / key path), with status and on-chain handled as follows:
+    /// - `Unspent` outputs must be confirmed on-chain.
+    /// - `LockedUnconfirmed` outputs are accepted only when already associated with `lock_id` (they are off-chain by
+    ///   construction, created earlier in this lock's transaction chain).
+    /// - Any other status, a `LockedUnconfirmed` under a different lock, or any other off-chain output is rejected.
+    ///
+    /// Script-path/condition-tree outputs are rejected — spending those requires the separate generic `SpendWitness`
+    /// follow-up.
+    ///
+    /// Resolution/validation and locking run inside a single write transaction, so the result is all-or-nothing: if any
+    /// requested output is missing or ineligible the transaction rolls back and none are newly locked. The returned
+    /// [`InputSpendData`] preserve the caller's requested `utxo_addresses` order.
+    pub fn lock_specific_outputs(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        lock_id: WalletLockId,
+        utxo_addresses: &[UtxoAddress],
+    ) -> Result<Vec<InputSpendData>, StealthOutputsApiError> {
+        if utxo_addresses.is_empty() {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "utxo_addresses",
+                reason: "At least one UTXO address is required".to_string(),
+            });
+        }
+
+        const INPUT_LIMIT: usize = limits::STEALTH_LIMITS.max_inputs;
+        if utxo_addresses.len() > INPUT_LIMIT {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "utxo_addresses",
+                reason: format!(
+                    "Requested {} inputs which exceeds the maximum of {} stealth inputs",
+                    utxo_addresses.len(),
+                    INPUT_LIMIT
+                ),
+            });
+        }
+
+        // Reject wrong-resource / mixed-resource requests and duplicates before touching the database.
+        let mut seen = HashSet::with_capacity(utxo_addresses.len());
+        for address in utxo_addresses {
+            if address.resource_address() != resource_address {
+                return Err(StealthOutputsApiError::InvalidParameter {
+                    param: "utxo_addresses",
+                    reason: format!("UTXO {} does not use resource {}", address, resource_address),
+                });
+            }
+            if !seen.insert(address) {
+                return Err(StealthOutputsApiError::InvalidParameter {
+                    param: "utxo_addresses",
+                    reason: format!("Duplicate UTXO address {}", address),
+                });
+            }
+        }
+
+        self.store.with_write_tx(|tx| {
+            let mut inputs = Vec::with_capacity(utxo_addresses.len());
+            // Resolve and validate every requested UTXO before locking anything.
+            for address in utxo_addresses {
+                let commitment = address.id().into_commitment_bytes();
+                let output = tx
+                    .stealth_outputs_get_by_commitment(resource_address, &commitment)
+                    .optional()?
+                    .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
+                        param: "utxo_addresses",
+                        reason: format!("UTXO {} is not known to this wallet", address),
+                    })?;
+                self.validate_output_for_specific_spend(account_address, lock_id, address, &output)?;
+                inputs.push(output.into_spend_data());
+            }
+
+            // Account-scoped lock (defence in depth): ownership was validated above, but the storage update is also
+            // restricted to this account so a caller-supplied commitment can never lock another account's row.
+            let commitments = inputs.iter().map(|i| &i.commitment).collect::<Vec<_>>();
+            tx.stealth_outputs_lock_many_for_account(account_address, resource_address, &commitments, lock_id)?;
+
+            Ok(inputs)
+        })
+    }
+
+    /// Validates that a resolved stealth output is a wallet-owned, key-path-spendable input for `account_address` that
+    /// is currently eligible to be locked under `lock_id`. Mirrors the eligibility predicate of
+    /// [`WalletStoreReader::stealth_outputs_get_unspent_for_spending`], with an explicit account-ownership check so a
+    /// caller cannot select another account's output. Status and on-chain are evaluated together: an `Unspent` output
+    /// must be on-chain, while a `LockedUnconfirmed` output is accepted only when already bound to `lock_id` (such
+    /// outputs are off-chain by construction).
+    fn validate_output_for_specific_spend(
+        &self,
+        account_address: &ComponentAddress,
+        lock_id: WalletLockId,
+        address: &UtxoAddress,
+        output: &StealthOutputModel,
+    ) -> Result<(), StealthOutputsApiError> {
+        if output.owner_account != *account_address {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "utxo_addresses",
+                reason: format!("UTXO {} does not belong to account {}", address, account_address),
+            });
+        }
+        if output.owner_key_id.is_none() {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "utxo_addresses",
+                reason: format!("UTXO {} is view-only and cannot be spent by this wallet", address),
+            });
+        }
+        if output.is_burnt {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "utxo_addresses",
+                reason: format!("UTXO {} is burnt", address),
+            });
+        }
+        if output.is_frozen {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "utxo_addresses",
+                reason: format!("UTXO {} is frozen", address),
+            });
+        }
+        // Key-path eligibility: a script-path/condition-tree output (no owned spend key) cannot be spent through the
+        // key-path statement flow. Those require the separate generic SpendWitness follow-up.
+        if !output.is_condition_spendable {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "utxo_addresses",
+                reason: format!(
+                    "UTXO {} is a condition-tree output and is not key-path spendable",
+                    address
+                ),
+            });
+        }
+        // Status and on-chain eligibility, evaluated together:
+        // - Unspent outputs must be confirmed on-chain.
+        // - LockedUnconfirmed outputs are accepted only when already bound to this lock (they are off-chain by
+        //   construction, created earlier in this lock's transaction chain).
+        // - Any other status, a LockedUnconfirmed under a different lock, or any other off-chain output is rejected.
+        match output.status {
+            OutputStatus::Unspent => {
+                if !output.is_on_chain {
+                    return Err(StealthOutputsApiError::InvalidParameter {
+                        param: "utxo_addresses",
+                        reason: format!("UTXO {} is Unspent but not yet on-chain", address),
+                    });
+                }
+            },
+            OutputStatus::LockedUnconfirmed => {
+                if output.lock_id != Some(lock_id) {
+                    return Err(StealthOutputsApiError::InvalidParameter {
+                        param: "utxo_addresses",
+                        reason: format!(
+                            "UTXO {} is locked under a different lock (lock {:?}, requested lock {})",
+                            address, output.lock_id, lock_id
+                        ),
+                    });
+                }
+                // LockedUnconfirmed is off-chain by construction; is_on_chain is not required here.
+            },
+            _ => {
+                return Err(StealthOutputsApiError::InvalidParameter {
+                    param: "utxo_addresses",
+                    reason: format!(
+                        "UTXO {} is not available to spend (status {:?}, lock {:?})",
+                        address, output.status, output.lock_id
+                    ),
+                });
+            },
+        }
+        Ok(())
+    }
+
     fn lock_outputs_internal(
         &self,
         tx: &mut <TSpec::Store as WriteableWalletStore>::WriteTransaction<'_>,

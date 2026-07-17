@@ -178,6 +178,24 @@ pub trait WalletStoreWriter: CommittableStore {
         utxos: &[&PedersenCommitmentBytes],
         lock_id: WalletLockId,
     ) -> Result<(), WalletStorageError>;
+
+    /// Account-scoped lock: flips the named outputs to `LockedForSpend` and binds them to `lock_id`, restricted to
+    /// rows owned by `account_address`. The account condition on the update is what makes caller-supplied commitments
+    /// safe to lock: a commitment belonging to another account cannot be locked through this path even if it shares
+    /// the resource. Errors (leaving the write transaction to roll back) unless every requested commitment matched an
+    /// owned row.
+    ///
+    /// This method performs only the account-scoped status/lock flip; it does **not** independently validate
+    /// spend-eligibility (e.g. `Unspent`/same-lock `LockedUnconfirmed` status, `owner_key_id`, `is_burnt`,
+    /// `is_frozen`, `is_condition_spendable`). Callers must validate status and eligibility within the same write
+    /// transaction before invoking this, otherwise ineligible outputs would be silently locked.
+    fn stealth_outputs_lock_many_for_account(
+        &mut self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        utxos: &[&PedersenCommitmentBytes],
+        lock_id: WalletLockId,
+    ) -> Result<(), WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
     fn stealth_outputs_mark_as_spent(
         &mut self,

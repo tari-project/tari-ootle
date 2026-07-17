@@ -167,12 +167,24 @@ use crate::{
         TemplatesGetResponse,
         TemplatesListAuthoredRequest,
         TemplatesListAuthoredResponse,
+        TransactionDetectInputsRequest,
+        TransactionDetectInputsResponse,
         TransactionGetAllRequest,
         TransactionGetAllResponse,
         TransactionGetRequest,
         TransactionGetResponse,
         TransactionGetResultRequest,
         TransactionGetResultResponse,
+        TransactionRequestCreateRequest,
+        TransactionRequestCreateResponse,
+        TransactionRequestDecisionRequest,
+        TransactionRequestDecisionResponse,
+        TransactionRequestGetRequest,
+        TransactionRequestGetResponse,
+        TransactionRequestListRequest,
+        TransactionRequestListResponse,
+        TransactionRequestSubmitRequest,
+        TransactionRequestSubmitResponse,
         TransactionSubmitDryRunRequest,
         TransactionSubmitDryRunResponse,
         TransactionSubmitManifestRequest,
@@ -327,6 +339,61 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<TransactionSubmitDryRunResponse, WalletDaemonClientError> {
         self.send_request("transactions.submit_dry_run", request.borrow()).await
+    }
+
+    /// Resolves a transaction's inputs without submitting it, returning the transaction with the
+    /// detected inputs merged in.
+    pub async fn detect_transaction_inputs<T: Borrow<TransactionDetectInputsRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionDetectInputsResponse, WalletDaemonClientError> {
+        self.send_request("transactions.detect_inputs", request.borrow()).await
+    }
+
+    /// Creates a transaction request for a separately-permissioned principal to approve. The
+    /// transaction is stored verbatim and frozen; what the approver views is what submit seals.
+    pub async fn create_transaction_request<T: Borrow<TransactionRequestCreateRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionRequestCreateResponse, WalletDaemonClientError> {
+        self.send_request("transaction_requests.create", request.borrow()).await
+    }
+
+    pub async fn get_transaction_request<T: Borrow<TransactionRequestGetRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionRequestGetResponse, WalletDaemonClientError> {
+        self.send_request("transaction_requests.get", request.borrow()).await
+    }
+
+    pub async fn list_transaction_requests<T: Borrow<TransactionRequestListRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionRequestListResponse, WalletDaemonClientError> {
+        self.send_request("transaction_requests.list", request.borrow()).await
+    }
+
+    pub async fn approve_transaction_request<T: Borrow<TransactionRequestDecisionRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionRequestDecisionResponse, WalletDaemonClientError> {
+        self.send_request("transaction_requests.approve", request.borrow())
+            .await
+    }
+
+    pub async fn reject_transaction_request<T: Borrow<TransactionRequestDecisionRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionRequestDecisionResponse, WalletDaemonClientError> {
+        self.send_request("transaction_requests.reject", request.borrow()).await
+    }
+
+    /// Seals and submits an approved transaction request.
+    pub async fn submit_transaction_request<T: Borrow<TransactionRequestSubmitRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionRequestSubmitResponse, WalletDaemonClientError> {
+        self.send_request("transaction_requests.submit", request.borrow()).await
     }
 
     /// Submits a single instruction for execution as a transaction.

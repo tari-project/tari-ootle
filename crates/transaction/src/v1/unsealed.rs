@@ -43,12 +43,7 @@ impl UnsealedTransactionV1 {
         1
     }
 
-    pub fn seal(mut self, secret: &RistrettoSecretKey) -> Transaction {
-        if self.signatures.is_empty() {
-            // If there are no other signatures, we assume the seal signer is authorized
-            self.transaction.is_seal_signer_authorized = true;
-        }
-
+    pub fn seal(self, secret: &RistrettoSecretKey) -> Transaction {
         let sig = TransactionSealSignature::sign_v1(secret, &self);
         self.set_seal_signature(sig)
     }

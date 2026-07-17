@@ -333,6 +333,7 @@ impl TrafficSim {
                     .owner_key_id
                     .ok_or_else(|| anyhow::anyhow!("Exchange account has no owner key ID"))?,
                 other_signers: vec![],
+                signatures: vec![],
                 detect_inputs: true,
                 detect_inputs_use_unversioned: true,
                 lock_ids: vec![],
@@ -504,6 +505,7 @@ impl TrafficSim {
                     transaction,
                     seal_signer: exchange_account_key_id,
                     other_signers: transfer_resp.signing_keys,
+                    signatures: vec![],
                     detect_inputs: true,
                     detect_inputs_use_unversioned: true,
                     lock_ids: vec![transfer_resp.lock_id],

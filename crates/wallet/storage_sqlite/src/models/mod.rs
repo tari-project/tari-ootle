@@ -14,6 +14,8 @@ mod substate;
 
 mod transaction;
 
+mod transaction_request;
+
 mod vault;
 
 mod authored_template;
@@ -35,6 +37,7 @@ pub use resource::*;
 pub use stealth_output::*;
 pub use substate::Substate;
 pub use transaction::*;
+pub use transaction_request::*;
 pub use utxo_process_queue::*;
 pub use vault::Vault;
 pub use webauthn_registrations::*;

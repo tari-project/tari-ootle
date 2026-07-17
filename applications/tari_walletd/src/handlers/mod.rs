@@ -17,6 +17,7 @@ pub mod substates;
 pub mod swap_pools;
 pub mod templates;
 pub mod transaction;
+pub mod transaction_requests;
 pub mod validator;
 pub(crate) mod value_lookup;
 pub mod wallet;

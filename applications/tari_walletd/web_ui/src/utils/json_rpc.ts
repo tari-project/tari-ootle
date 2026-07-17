@@ -71,6 +71,8 @@ import type {
   ClaimBurnResponse,
   ClaimValidatorFeesRequest,
   ClaimValidatorFeesResponse,
+  ConfidentialOutputsListRequest,
+  ConfidentialOutputsListResponse,
   ConfidentialTransferRequest,
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
@@ -98,8 +100,6 @@ import type {
   StealthUtxosDecryptValueResponse,
   StealthUtxosListRequest,
   StealthUtxosListResponse,
-  ConfidentialOutputsListRequest,
-  ConfidentialOutputsListResponse,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
@@ -118,6 +118,12 @@ import type {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
+  TransactionRequestDecisionRequest,
+  TransactionRequestDecisionResponse,
+  TransactionRequestListRequest,
+  TransactionRequestListResponse,
+  TransactionRequestSubmitRequest,
+  TransactionRequestSubmitResponse,
   TransactionSubmitDryRunResponse,
   TransactionSubmitManifestRequest,
   TransactionSubmitManifestResponse,
@@ -207,6 +213,22 @@ export const authListApiKeys = (request: AuthListApiKeysRequest): Promise<AuthLi
   client().then((c) => c.authListApiKeys(request));
 export const authRevokeApiKey = (request: AuthRevokeApiKeyRequest): Promise<AuthRevokeApiKeyResponse> =>
   client().then((c) => c.authRevokeApiKey(request));
+
+// Transaction requests (issue #2343). `create` and `approve` are separately
+// permissioned: the requesting tool cannot approve its own request unless it
+// has also been granted `transaction_requests:approve`.
+export const transactionRequestsList = (
+  request: TransactionRequestListRequest,
+): Promise<TransactionRequestListResponse> => client().then((c) => c.transactionRequestsList(request));
+export const transactionRequestsApprove = (
+  request: TransactionRequestDecisionRequest,
+): Promise<TransactionRequestDecisionResponse> => client().then((c) => c.transactionRequestsApprove(request));
+export const transactionRequestsReject = (
+  request: TransactionRequestDecisionRequest,
+): Promise<TransactionRequestDecisionResponse> => client().then((c) => c.transactionRequestsReject(request));
+export const transactionRequestsSubmit = (
+  request: TransactionRequestSubmitRequest,
+): Promise<TransactionRequestSubmitResponse> => client().then((c) => c.transactionRequestsSubmit(request));
 
 // indexer
 export const indexerGetNetworkInfo = (indexerUrl: string) =>

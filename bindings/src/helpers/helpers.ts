@@ -164,6 +164,9 @@ export function permissionToString(permission: Permission): string {
   if ("Validators" in permission) return `validators:${permission.Validators.toLowerCase()}`;
   if ("Settings" in permission) return `settings:${permission.Settings.toLowerCase()}`;
   if ("AddressBook" in permission) return `address_book:${permission.AddressBook.toLowerCase()}`;
+  if ("TransactionRequests" in permission) {
+    return `transaction_requests:${permission.TransactionRequests.toLowerCase()}`;
+  }
 
   // Scoped CRUD resources: { Accounts: ["Read", "component_abc..." | null] }.
   if ("Accounts" in permission) return scoped("accounts", permission.Accounts);

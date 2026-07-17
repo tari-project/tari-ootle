@@ -182,6 +182,7 @@ export * from "./types/TransactionSealSignature";
 export * from "./types/TransactionSignature";
 export * from "./types/TransactionStatus";
 export * from "./types/TransactionV1";
+export * from "./types/TxRequestAction";
 export * from "./types/Type";
 export * from "./types/UnsealedTransaction";
 export * from "./types/UnsealedTransactionV1";

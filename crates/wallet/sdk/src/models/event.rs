@@ -7,7 +7,7 @@ use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::{ComponentAddress, UtxoAddress};
 
-use crate::models::{Account, TransactionContext, TransactionStatus};
+use crate::models::{Account, TransactionContext, TransactionRequestId, TransactionStatus};
 
 #[derive(Debug, Clone)]
 pub enum WalletEvent {
@@ -21,6 +21,7 @@ pub enum WalletEvent {
     UtxoRecovered(UtxoRecoveredEvent),
     UtxoRecoveryCompleted(UtxoRecoveryCompletedEvent),
     UtxoSpent(UtxoSpentEvent),
+    TransactionRequestCreated(TransactionRequestCreatedEvent),
 }
 
 impl WalletEvent {
@@ -155,8 +156,23 @@ pub struct UtxoSpentEvent {
     pub address: UtxoAddress,
 }
 
+/// A transaction request is waiting for a person to approve it.
+///
+/// Carries only the id: an approver must fetch the request to see what it does,
+/// and the payload is broadcast to every subscriber. Submitters poll rather
+/// than wait on this -- the notifier is fire-and-forget and does not survive a
+/// restart.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TransactionRequestCreatedEvent {
+    pub request_id: TransactionRequestId,
+    /// Admin-assigned name of the API key that asked, or `None` for a wallet
+    /// session. Display only.
+    pub requested_by: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum WalletEventType {
+    TransactionRequestCreated,
     TransactionSubmitted,
     TransactionFinalized,
     TransactionInvalid,
@@ -182,6 +198,7 @@ impl Display for WalletEventType {
             WalletEventType::UtxoRecovered => "UtxoRecovered",
             WalletEventType::UtxoRecoveryCompleted => "UtxoRecoveryCompleted",
             WalletEventType::UtxoSpent => "UtxoSpent",
+            WalletEventType::TransactionRequestCreated => "TransactionRequestCreated",
         };
         write!(f, "{}", s)
     }
@@ -200,6 +217,7 @@ impl From<&WalletEvent> for WalletEventType {
             WalletEvent::UtxoRecovered(_) => Self::UtxoRecovered,
             WalletEvent::UtxoRecoveryCompleted(_) => Self::UtxoRecoveryCompleted,
             WalletEvent::UtxoSpent(_) => Self::UtxoSpent,
+            WalletEvent::TransactionRequestCreated(_) => Self::TransactionRequestCreated,
         }
     }
 }

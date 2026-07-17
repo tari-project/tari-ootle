@@ -25,6 +25,7 @@ pub enum Permission {
     Accounts(Crud, Option<ComponentAddress>),
     Keys(Crud),
     Transactions(Crud),
+    TransactionRequests(TxRequestAction),
     Transfer(Crud, Option<ComponentAddress>),
     Templates(Crud),
     Nfts(Crud, Option<ResourceAddress>),
@@ -46,6 +47,18 @@ pub enum Crud {
     Create,
     Update,
     Delete,
+}
+
+/// Actions on a transaction request. Deliberately not [`Crud`]: approving is
+/// not a mutation of the request, it is the act that authorises the value
+/// transfer the request describes. Modelling it as `Update` would let any
+/// grant carrying edit rights approve.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum TxRequestAction {
+    Read,
+    Create,
+    Approve,
 }
 
 /// Marker scope for resources that only support reads. Kept as a one-variant
@@ -76,6 +89,9 @@ impl Permission {
             },
             (Permission::Keys(ga), Permission::Keys(ra)) => crud_satisfies(*ga, *ra),
             (Permission::Transactions(ga), Permission::Transactions(ra)) => crud_satisfies(*ga, *ra),
+            (Permission::TransactionRequests(ga), Permission::TransactionRequests(ra)) => {
+                tx_request_action_satisfies(*ga, *ra)
+            },
             (Permission::Transfer(ga, gs), Permission::Transfer(ra, rs)) => {
                 crud_satisfies(*ga, *ra) && scope_satisfies(gs, rs)
             },
@@ -103,11 +119,43 @@ fn crud_satisfies(granted: Crud, required: Crud) -> bool {
     granted == required || (required == Crud::Read && matches!(granted, Crud::Create | Crud::Update | Crud::Delete))
 }
 
+/// Mirrors [`crud_satisfies`]: actions that do something imply `Read` on the
+/// same resource, and no action implies any other. `Create` must never satisfy
+/// `Approve` — that separation is what stops a tool approving the requests it
+/// creates.
+fn tx_request_action_satisfies(granted: TxRequestAction, required: TxRequestAction) -> bool {
+    granted == required ||
+        (required == TxRequestAction::Read && matches!(granted, TxRequestAction::Create | TxRequestAction::Approve))
+}
+
 fn scope_satisfies<T: PartialEq>(granted: &Option<T>, required: &Option<T>) -> bool {
     match (granted, required) {
         (None, _) => true,
         (Some(_), None) => false,
         (Some(g), Some(r)) => g == r,
+    }
+}
+
+impl Display for TxRequestAction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TxRequestAction::Read => write!(f, "read"),
+            TxRequestAction::Create => write!(f, "create"),
+            TxRequestAction::Approve => write!(f, "approve"),
+        }
+    }
+}
+
+impl FromStr for TxRequestAction {
+    type Err = InvalidPermissionsFormat;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "read" => Ok(TxRequestAction::Read),
+            "create" => Ok(TxRequestAction::Create),
+            "approve" => Ok(TxRequestAction::Approve),
+            _ => Err(InvalidPermissionsFormat(format!("invalid action '{s}'"))),
+        }
     }
 }
 
@@ -144,6 +192,7 @@ impl Display for Permission {
             Permission::Accounts(a, s) => display_scoped(f, "accounts", *a, s),
             Permission::Keys(a) => write!(f, "keys:{a}"),
             Permission::Transactions(a) => write!(f, "transactions:{a}"),
+            Permission::TransactionRequests(a) => write!(f, "transaction_requests:{a}"),
             Permission::Transfer(a, s) => display_scoped(f, "transfer", *a, s),
             Permission::Templates(a) => write!(f, "templates:{a}"),
             Permission::Nfts(a, s) => display_scoped(f, "nfts", *a, s),
@@ -195,6 +244,7 @@ impl FromStr for Permission {
             "accounts" => parse_scoped(action_str, entity_str, Permission::Accounts),
             "keys" => parse_unscoped(action_str, entity_str, Permission::Keys),
             "transactions" => parse_unscoped(action_str, entity_str, Permission::Transactions),
+            "transaction_requests" => parse_unscoped(action_str, entity_str, Permission::TransactionRequests),
             "transfer" => parse_scoped(action_str, entity_str, Permission::Transfer),
             "templates" => parse_unscoped(action_str, entity_str, Permission::Templates),
             "nfts" => parse_scoped(action_str, entity_str, Permission::Nfts),
@@ -211,13 +261,14 @@ impl FromStr for Permission {
     }
 }
 
-fn parse_unscoped<F>(
+fn parse_unscoped<F, A>(
     action_str: &str,
     entity_str: Option<&str>,
     ctor: F,
 ) -> Result<Permission, InvalidPermissionsFormat>
 where
-    F: FnOnce(Crud) -> Permission,
+    F: FnOnce(A) -> Permission,
+    A: FromStr<Err = InvalidPermissionsFormat>,
 {
     if let Some(e) = entity_str {
         return Err(InvalidPermissionsFormat(format!(
@@ -402,6 +453,53 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_transaction_request_actions() {
+        for action in [TxRequestAction::Read, TxRequestAction::Create, TxRequestAction::Approve] {
+            round_trip(Permission::TransactionRequests(action));
+        }
+    }
+
+    #[test]
+    fn transaction_requests_serde_shape_matches_ts_binding() {
+        // `Permission` has two independent serialisations: the string grammar
+        // above (API-key column, CLI) and this serde form, which is what
+        // crosses the JSON-RPC wire in `AuthLoginRequest.permissions` and what
+        // the committed `bindings/src/types/Permission.ts` declares. They can
+        // drift apart silently, so pin the wire form to the binding.
+        let json = serde_json::to_string(&Permission::TransactionRequests(TxRequestAction::Approve)).unwrap();
+        assert_eq!(json, r#"{"TransactionRequests":"Approve"}"#);
+
+        let parsed: Permission = serde_json::from_str(r#"{"TransactionRequests":"Create"}"#).unwrap();
+        assert_eq!(parsed, Permission::TransactionRequests(TxRequestAction::Create));
+    }
+
+    #[test]
+    fn transaction_requests_is_unscoped() {
+        // Unscoped for the same reason as `Transactions`: a request wraps an
+        // arbitrary instruction list, so the wallet cannot statically
+        // determine which accounts it will touch. `Transfer` remains the
+        // scoped narrow path.
+        assert!("transaction_requests:approve".parse::<Permission>().is_ok());
+        let c = component(1);
+        let s = format!("transaction_requests:approve:{c}");
+        assert!(s.parse::<Permission>().is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_transaction_request_action() {
+        assert!("transaction_requests:update".parse::<Permission>().is_err());
+        assert!("transaction_requests:delete".parse::<Permission>().is_err());
+        assert!("transaction_requests:frobnicate".parse::<Permission>().is_err());
+    }
+
+    #[test]
+    fn admin_satisfies_transaction_requests() {
+        for action in [TxRequestAction::Read, TxRequestAction::Create, TxRequestAction::Approve] {
+            assert!(Permission::Admin.satisfies(&Permission::TransactionRequests(action)));
+        }
+    }
+
+    #[test]
     fn round_trip_scoped_component_resources() {
         let c = component(7);
         round_trip(Permission::Accounts(Crud::Read, Some(c)));
@@ -522,6 +620,46 @@ mod tests {
             assert!(
                 Permission::Accounts(write, None).satisfies(&Permission::Accounts(Crud::Read, None)),
                 "{write:?} should imply Read"
+            );
+        }
+    }
+
+    #[test]
+    fn transaction_request_create_does_not_imply_approve() {
+        // The separation this asserts *is* the feature: a tool granted
+        // `transaction_requests:create` must not be able to approve the
+        // requests it creates. Nothing else enforces that — there is no
+        // creator-identity check on the approve path.
+        let create = Permission::TransactionRequests(TxRequestAction::Create);
+        assert!(!create.satisfies(&Permission::TransactionRequests(TxRequestAction::Approve)));
+
+        let approve = Permission::TransactionRequests(TxRequestAction::Approve);
+        assert!(!approve.satisfies(&Permission::TransactionRequests(TxRequestAction::Create)));
+    }
+
+    #[test]
+    fn transactions_and_transaction_requests_are_separate_resources() {
+        // `transactions:create` is unrestricted submit authority. If it
+        // satisfied `transaction_requests:approve`, every principal that can
+        // already submit could also approve, and the request flow would be
+        // decorative.
+        let submit = Permission::Transactions(Crud::Create);
+        assert!(!submit.satisfies(&Permission::TransactionRequests(TxRequestAction::Approve)));
+        assert!(!submit.satisfies(&Permission::TransactionRequests(TxRequestAction::Create)));
+        assert!(!submit.satisfies(&Permission::TransactionRequests(TxRequestAction::Read)));
+
+        let approve = Permission::TransactionRequests(TxRequestAction::Approve);
+        assert!(!approve.satisfies(&Permission::Transactions(Crud::Create)));
+        assert!(!approve.satisfies(&Permission::Transactions(Crud::Read)));
+    }
+
+    #[test]
+    fn transaction_request_create_and_approve_imply_read() {
+        for action in [TxRequestAction::Create, TxRequestAction::Approve] {
+            assert!(
+                Permission::TransactionRequests(action)
+                    .satisfies(&Permission::TransactionRequests(TxRequestAction::Read)),
+                "{action:?} should imply Read"
             );
         }
     }

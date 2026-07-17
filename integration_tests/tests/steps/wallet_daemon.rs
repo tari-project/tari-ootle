@@ -143,6 +143,7 @@ async fn when_i_run_up_fees(
             transaction,
             seal_signer: account.owner_key_id().expect("no owner key id"),
             other_signers: vec![],
+            signatures: vec![],
             detect_inputs: true,
             detect_inputs_use_unversioned: true,
             lock_ids: vec![],

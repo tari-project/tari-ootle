@@ -30,6 +30,7 @@ import AccountDetails from "@routes/AccountDetails/AccountDetails";
 import Accounts from "@routes/Accounts/Accounts";
 import AddressBookPage from "@routes/AddressBook/AddressBookPage";
 import ApiKeysLayout from "@routes/ApiKeys/ApiKeys";
+import TransactionRequests from "@routes/TransactionRequests/TransactionRequests";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
 import ErrorPage from "@routes/ErrorPage";
 import Keys from "@routes/Keys/Keys";
@@ -92,6 +93,11 @@ export const breadcrumbRoutes = [
   {
     label: "Transactions",
     path: "/transactions",
+    dynamic: false,
+  },
+  {
+    label: "Transaction Requests",
+    path: "/transaction-requests",
     dynamic: false,
   },
   {
@@ -241,6 +247,10 @@ function App() {
           />
           <Route path="api-keys" element={<GuardedRoute redirect="/api-keys" component={ApiKeysLayout} />} />
           <Route path="transactions" element={<GuardedRoute redirect="/transactions" component={Transactions} />} />
+          <Route
+            path="transaction-requests"
+            element={<GuardedRoute redirect="/transaction-requests" component={TransactionRequests} />}
+          />
           <Route path="wallet" element={<GuardedRoute redirect="/wallet" component={Wallet} />} />
           <Route
             path="transactions/:id"

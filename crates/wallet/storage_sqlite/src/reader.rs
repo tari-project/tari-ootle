@@ -44,6 +44,8 @@ use tari_ootle_wallet_sdk::{
         StealthOutputInfo,
         StealthOutputModel,
         SubstateModel,
+        TransactionRequestId,
+        TransactionRequestModel,
         TransactionStatus,
         VaultModel,
         WalletLockId,
@@ -69,6 +71,7 @@ use crate::{
     models::{AuthoredTemplate, WebauthnRegistrationPasskey},
     schema::accounts,
     serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
+    writer::transaction_request_from_row,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::storage_sqlite::reader";
@@ -1356,6 +1359,40 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 })?;
                 row.try_convert(address)
             })
+            .collect()
+    }
+
+    fn transaction_request_get(
+        &mut self,
+        id: TransactionRequestId,
+    ) -> Result<TransactionRequestModel, WalletStorageError> {
+        const OPERATION: &str = "transaction_request_get";
+        use crate::schema::transaction_requests;
+
+        let row = transaction_requests::table
+            .filter(transaction_requests::id.eq(id))
+            .first::<models::TransactionRequest>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "transaction_requests".to_string(),
+                key: id.to_string(),
+            })?;
+
+        transaction_request_from_row(OPERATION, row)
+    }
+
+    fn transaction_requests_list(&mut self) -> Result<Vec<TransactionRequestModel>, WalletStorageError> {
+        const OPERATION: &str = "transaction_requests_list";
+        use crate::schema::transaction_requests;
+
+        transaction_requests::table
+            .order_by(transaction_requests::id.desc())
+            .get_results::<models::TransactionRequest>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .into_iter()
+            .map(|row| transaction_request_from_row(OPERATION, row))
             .collect()
     }
 

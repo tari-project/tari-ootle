@@ -60,16 +60,17 @@ import { useState } from "react";
 ///
 /// `admin` is gated by a separate explicit confirmation checkbox below the
 /// list because granting it to a long-lived agent key is high-risk.
+/// Sorted alphabetically by grant string; keep it that way when adding entries.
 const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: string }> = [
-  {
-    value: "accounts:read",
-    label: "accounts:read",
-    description: "Read account metadata and list accounts.",
-  },
   {
     value: "accounts:create",
     label: "accounts:create",
     description: "Create new accounts.",
+  },
+  {
+    value: "accounts:read",
+    label: "accounts:read",
+    description: "Read account metadata and list accounts.",
   },
   {
     value: "accounts:update",
@@ -77,69 +78,14 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
     description: "Rename accounts, set the default, associate stealth resources.",
   },
   {
-    value: "keys:read",
-    label: "keys:read",
-    description: "Enumerate keys held by the key manager.",
+    value: "address_book:create",
+    label: "address_book:create",
+    description: "Add address book entries.",
   },
   {
-    value: "keys:create",
-    label: "keys:create",
-    description: "Mint new keys.",
-  },
-  {
-    value: "transactions:read",
-    label: "transactions:read",
-    description: "Read transaction history and dry-run results.",
-  },
-  {
-    value: "transactions:create",
-    label: "transactions:create",
-    description: "Submit arbitrary transactions, including raw instructions and manifests.",
-  },
-  {
-    value: "transfer:create",
-    label: "transfer:create",
-    description: "Submit transfers (fund, NFT, stealth, confidential, burn-claim) from any account.",
-  },
-  {
-    value: "templates:read",
-    label: "templates:read",
-    description: "Read deployed contract templates.",
-  },
-  {
-    value: "templates:create",
-    label: "templates:create",
-    description: "Publish templates and sign template metadata.",
-  },
-  {
-    value: "nfts:read",
-    label: "nfts:read",
-    description: "Read NFT data the wallet holds.",
-  },
-  {
-    value: "confidential:read",
-    label: "confidential:read",
-    description: "View confidential vault balances.",
-  },
-  {
-    value: "confidential:create",
-    label: "confidential:create",
-    description: "Generate confidential transfer / output proofs.",
-  },
-  {
-    value: "stealth_utxos:read",
-    label: "stealth_utxos:read",
-    description: "List and decrypt stealth UTXOs.",
-  },
-  {
-    value: "validators:read",
-    label: "validators:read",
-    description: "Read validator fee pools.",
-  },
-  {
-    value: "validators:update",
-    label: "validators:update",
-    description: "Claim validator fees.",
+    value: "address_book:delete",
+    label: "address_book:delete",
+    description: "Remove address book entries.",
   },
   {
     value: "address_book:read",
@@ -147,19 +93,39 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
     description: "Read address book entries.",
   },
   {
-    value: "address_book:create",
-    label: "address_book:create",
-    description: "Add address book entries.",
-  },
-  {
     value: "address_book:update",
     label: "address_book:update",
     description: "Edit address book entries.",
   },
   {
-    value: "address_book:delete",
-    label: "address_book:delete",
-    description: "Remove address book entries.",
+    value: "burn_proofs:read",
+    label: "burn_proofs:read",
+    description: "Read burn proofs known to the wallet.",
+  },
+  {
+    value: "confidential:create",
+    label: "confidential:create",
+    description: "Generate confidential transfer / output proofs.",
+  },
+  {
+    value: "confidential:read",
+    label: "confidential:read",
+    description: "View confidential vault balances.",
+  },
+  {
+    value: "keys:create",
+    label: "keys:create",
+    description: "Mint new keys.",
+  },
+  {
+    value: "keys:read",
+    label: "keys:read",
+    description: "Enumerate keys held by the key manager.",
+  },
+  {
+    value: "nfts:read",
+    label: "nfts:read",
+    description: "Read NFT data the wallet holds.",
   },
   {
     value: "settings:read",
@@ -172,19 +138,69 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
     description: "Modify wallet daemon settings.",
   },
   {
+    value: "stealth_utxos:read",
+    label: "stealth_utxos:read",
+    description: "List and decrypt stealth UTXOs.",
+  },
+  {
     value: "substates:read",
     label: "substates:read",
     description: "Read on-chain substate data.",
   },
   {
-    value: "burn_proofs:read",
-    label: "burn_proofs:read",
-    description: "Read burn proofs known to the wallet.",
-  },
-  {
     value: "swap_pools:read",
     label: "swap_pools:read",
     description: "Read swap pool state and exchange rates.",
+  },
+  {
+    value: "templates:create",
+    label: "templates:create",
+    description: "Publish templates and sign template metadata.",
+  },
+  {
+    value: "templates:read",
+    label: "templates:read",
+    description: "Read deployed contract templates.",
+  },
+  {
+    value: "transaction_requests:approve",
+    label: "transaction_requests:approve",
+    description: "Approve or reject pending transaction requests.",
+  },
+  {
+    value: "transaction_requests:create",
+    label: "transaction_requests:create",
+    description: "Create transaction requests and submit them once approved.",
+  },
+  {
+    value: "transaction_requests:read",
+    label: "transaction_requests:read",
+    description: "List and view transaction requests.",
+  },
+  {
+    value: "transactions:create",
+    label: "transactions:create",
+    description: "Submit arbitrary transactions, including raw instructions and manifests.",
+  },
+  {
+    value: "transactions:read",
+    label: "transactions:read",
+    description: "Read transaction history and dry-run results.",
+  },
+  {
+    value: "transfer:create",
+    label: "transfer:create",
+    description: "Submit transfers (fund, NFT, stealth, confidential, burn-claim) from any account.",
+  },
+  {
+    value: "validators:read",
+    label: "validators:read",
+    description: "Read validator fee pools.",
+  },
+  {
+    value: "validators:update",
+    label: "validators:update",
+    description: "Claim validator fees.",
   },
 ];
 

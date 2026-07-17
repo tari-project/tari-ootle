@@ -10,11 +10,11 @@
 //!
 //! ### The `is_seal_signer_authorized` rule
 //!
-//! The stock `seal()` sets `is_seal_signer_authorized = true` iff there are no authorization
-//! signatures, before it computes the seal message, and that field is committed to by the seal
-//! digest. The [`seal_public_transfer_with_auth`] path (which supplies its own authorizations) applies
-//! the same rule explicitly before computing any message — otherwise the bytes would diverge or the
-//! engine would reject.
+//! The field defaults to `true`, is only changed by explicit choice, and is committed to by every
+//! signing message — `seal()` never mutates it. The [`seal_public_transfer_with_auth`] path (which
+//! supplies its own authorizations) settles it explicitly (`true` iff there are zero authorization
+//! signatures) before computing any message, so the flag the co-signers signed over is the one the
+//! seal commits to.
 
 use tari_ootle_transaction::{
     Transaction,
@@ -54,10 +54,10 @@ pub fn seal_public_transfer(
 /// the supplied `auth_signatures` are attached verbatim as the authorization signatures (they were
 /// produced by other parties over the auth message committing to this seal signer).
 ///
-/// `is_seal_signer_authorized` is set to `true` iff there are zero authorization signatures,
-/// mirroring the stock `seal()`, before the seal message is computed. With auth signatures present
-/// the flag stays `false` (the builder default), or the bytes would diverge / the engine would
-/// reject.
+/// `is_seal_signer_authorized` is set to `true` iff there are zero authorization signatures, before
+/// the seal message is computed. With auth signatures present the flag is `false` (the value the
+/// co-sign record shipped, and the one the authorizations signed over), or the bytes would diverge /
+/// the engine would reject.
 pub fn seal_public_transfer_with_auth(
     unsigned: UnsignedTransaction,
     keys: &PublicTransferKeys,
@@ -66,10 +66,10 @@ pub fn seal_public_transfer_with_auth(
     let seal_secret = parse_secret_key(&keys.account_secret)?;
     let UnsignedTransaction::V1(mut unsigned_v1) = unsigned;
 
-    // With authorizations present the seal signer is not implicitly authorized (the flag stays
-    // `false`); with zero authorizations the stock `seal()` rule sets it `true`. Set it explicitly for
-    // both cases so the flag the seal commits to is the same one the supplied authorizations signed
-    // over (the co-sign record disables it before A ships it to B).
+    // With authorizations present the seal signer is not implicitly authorized (the flag is
+    // `false`); with zero authorizations the seal signer is the only authority (`true`). Set it
+    // explicitly for both cases so the flag the seal commits to is the same one the supplied
+    // authorizations signed over (the co-sign record disables it before A ships it to B).
     unsigned_v1.is_seal_signer_authorized = auth_signatures.is_empty();
 
     let unsealed = UnsealedTransactionV1::new(unsigned_v1, auth_signatures);

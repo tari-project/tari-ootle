@@ -503,4 +503,21 @@ mod tests {
             .seal(&secret);
         assert!(subject.verify_all_signatures());
     }
+
+    #[test]
+    fn seal_signer_is_authorized_by_default() {
+        let (k, _) = create_key_pair();
+        let subject = create_transaction().build_and_seal(&k);
+        assert!(subject.is_seal_signer_authorized());
+    }
+
+    #[test]
+    fn seal_preserves_explicitly_unauthorized_seal_signer() {
+        let (k, _) = create_key_pair();
+        let subject = create_transaction()
+            .with_seal_signer_authorized(false)
+            .build_and_seal(&k);
+        assert!(!subject.is_seal_signer_authorized());
+        assert!(subject.verify_all_signatures());
+    }
 }

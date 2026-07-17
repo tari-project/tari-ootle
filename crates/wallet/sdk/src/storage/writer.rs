@@ -8,7 +8,7 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
 };
 use tari_ootle_common_types::{Epoch, StateVersion, VersionedSubstateIdRef, shard::Shard};
-use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId, TransactionSignature, UnsignedTransaction};
 use tari_template_lib::types::{
     Amount,
     ComponentAddress,
@@ -39,6 +39,9 @@ use crate::{
         OutputStatus,
         StealthOutputModel,
         SubstateModel,
+        TransactionRequestId,
+        TransactionRequestModel,
+        TransactionRequestStatus,
         UtxoUnspent,
         VaultModel,
         WalletEvent,
@@ -178,6 +181,24 @@ pub trait WalletStoreWriter: CommittableStore {
         utxos: &[&PedersenCommitmentBytes],
         lock_id: WalletLockId,
     ) -> Result<(), WalletStorageError>;
+
+    /// Account-scoped lock: flips the named outputs to `LockedForSpend` and binds them to `lock_id`, restricted to
+    /// rows owned by `account_address`. The account condition on the update is what makes caller-supplied commitments
+    /// safe to lock: a commitment belonging to another account cannot be locked through this path even if it shares
+    /// the resource. Errors (leaving the write transaction to roll back) unless every requested commitment matched an
+    /// owned row.
+    ///
+    /// This method performs only the account-scoped status/lock flip; it does **not** independently validate
+    /// spend-eligibility (e.g. `Unspent`/same-lock `LockedUnconfirmed` status, `owner_key_id`, `is_burnt`,
+    /// `is_frozen`, `is_condition_spendable`). Callers must validate status and eligibility within the same write
+    /// transaction before invoking this, otherwise ineligible outputs would be silently locked.
+    fn stealth_outputs_lock_many_for_account(
+        &mut self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        utxos: &[&PedersenCommitmentBytes],
+        lock_id: WalletLockId,
+    ) -> Result<(), WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
     fn stealth_outputs_mark_as_spent(
         &mut self,
@@ -192,10 +213,63 @@ pub trait WalletStoreWriter: CommittableStore {
         is_frozen: Option<bool>,
     ) -> Result<(), WalletStorageError>;
 
+    // Transaction requests
+    /// Persist a frozen request. The stored transaction is immutable: the
+    /// approver views it and submit seals exactly it. The request is born
+    /// [`TransactionRequestStatus::Pending`] and expires `ttl` from now.
+    #[allow(clippy::too_many_arguments)]
+    fn transaction_request_insert(
+        &mut self,
+        unsigned_transaction: &UnsignedTransaction,
+        seal_signer: KeyId,
+        other_signers: &[KeyId],
+        signatures: &[TransactionSignature],
+        lock_ids: &[WalletLockId],
+        requested_by: Option<&str>,
+        ttl: Duration,
+    ) -> Result<TransactionRequestModel, WalletStorageError>;
+
+    /// Move a request from any of `from` to `to`, returning the updated
+    /// request.
+    ///
+    /// The `from` check and the write are a single conditional UPDATE, so
+    /// concurrent callers resolve to one winner rather than both believing
+    /// they acted — this is both the approve guard and the `Submitting` claim
+    /// that serializes concurrent submitters. A request not in `from` is left
+    /// untouched and [`WalletStorageError::UnexpectedState`] is returned.
+    fn transaction_request_transition(
+        &mut self,
+        id: TransactionRequestId,
+        from: &[TransactionRequestStatus],
+        to: TransactionRequestStatus,
+    ) -> Result<TransactionRequestModel, WalletStorageError>;
+
+    /// Move a claimed (`Submitting`) request to `Submitted`, recording the
+    /// transaction it became. Guarded on `Submitting` in the same statement as
+    /// the write.
+    ///
+    /// Separate from [`Self::transaction_request_transition`] because
+    /// `Submitted` is the only state that carries data: a submitted request
+    /// without its transaction id is a dead end, since nothing then links the
+    /// approval to the transaction it authorised.
+    fn transaction_request_mark_submitted(
+        &mut self,
+        id: TransactionRequestId,
+        transaction_id: TransactionId,
+    ) -> Result<TransactionRequestModel, WalletStorageError>;
+
     // Locks
     fn locks_create(&mut self, timeout: Option<Duration>) -> Result<WalletLockId, WalletStorageError>;
 
     fn locks_delete(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+
+    /// Set the lock's deadline to `timeout` from now, or `None` to make it
+    /// exempt from [`Self::locks_release_stale`] entirely. Used to hold inputs
+    /// across an approval window that outlives the deadline the
+    /// transfer-selection handler chose.
+    fn locks_set_timeout(&mut self, lock_id: WalletLockId, timeout: Option<Duration>)
+    -> Result<(), WalletStorageError>;
+
     fn locks_link_transaction(
         &mut self,
         lock_id: WalletLockId,

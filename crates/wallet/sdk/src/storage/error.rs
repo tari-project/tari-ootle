@@ -38,6 +38,14 @@ pub enum WalletStorageError {
     DecryptionError { operation: &'static str, details: String },
     #[error("DuplicateName: an entry named {name:?} already exists")]
     DuplicateName { name: String },
+    #[error("[{operation}] {entity} {key} is {actual}, expected {expected}")]
+    UnexpectedState {
+        operation: &'static str,
+        entity: &'static str,
+        key: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 impl IsNotFoundError for WalletStorageError {

@@ -26,11 +26,149 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { Box, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import type { Instruction } from "@tari-project/ootle-ts-bindings";
+import type { Instruction, InstructionArg, WorkspaceOffsetId } from "@tari-project/ootle-ts-bindings";
 import { TariTypeTag } from "@tari-project/ootle-ts-bindings";
 import { toHexString } from "@utils/helpers";
 import { decode } from "cbor2";
 import { useState } from "react";
+
+const literalDecodeTags = () => {
+  const addressMapper = (tag: TariTypeTag, prefix: string): [TariTypeTag, (value: any) => string] => [
+    tag,
+    (value: any) => prefix + "_" + toHexString(value.contents),
+  ];
+  return new Map([
+    addressMapper(TariTypeTag.VaultId, "vault"),
+    addressMapper(TariTypeTag.ResourceAddress, "resource"),
+    addressMapper(TariTypeTag.ComponentAddress, "component"),
+    addressMapper(TariTypeTag.ValidatorNodeFeePool, "vnfp"),
+    addressMapper(TariTypeTag.TransactionReceipt, "txreceipt"),
+  ]);
+};
+
+/// Compact display of an arbitrary decoded CBOR value. JSON.stringify is not
+/// usable here: cbor2 decodes large integers to BigInt, which it rejects.
+function compactValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value instanceof Uint8Array) {
+    return `0x${toHexString(Array.from(value))}`;
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(compactValue).join(", ")}]`;
+  }
+  if (value instanceof Map) {
+    return `{${[...value.entries()].map(([k, v]) => `${compactValue(k)}: ${compactValue(v)}`).join(", ")}}`;
+  }
+  return `{${Object.entries(value)
+    .map(([k, v]) => `${k}: ${compactValue(v)}`)
+    .join(", ")}}`;
+}
+
+function workspaceId(id: WorkspaceOffsetId): string {
+  return id.offset != null ? `$${id.id}.${id.offset}` : `$${id.id}`;
+}
+
+function formatArg(arg: InstructionArg): string {
+  if (typeof arg === "object" && "Literal" in arg) {
+    try {
+      return `Lit(${compactValue(decode(arg.Literal, { encoding: "hex", tags: literalDecodeTags() }))})`;
+    } catch {
+      return `Lit(0x${arg.Literal})`;
+    }
+  }
+  if (typeof arg === "object" && "Workspace" in arg) {
+    return `Workspace(${workspaceId(arg.Workspace)})`;
+  }
+  if (typeof arg === "object" && "Blob" in arg) {
+    return `Blob(#${arg.Blob})`;
+  }
+  return compactValue(arg);
+}
+
+/// One-line call-style rendering of an instruction, e.g.
+/// `Call(component_21f1…, "pay_fee", Lit([956, 0]))`. The expandable JSON
+/// below the row remains the full-fidelity view.
+function summarize(instruction: Instruction): string {
+  if (typeof instruction === "string") {
+    return instruction;
+  }
+  if ("CreateAccount" in instruction) {
+    const { owner_public_key, bucket_workspace_id } = instruction.CreateAccount;
+    const bucket = bucket_workspace_id != null ? `, bucket: ${workspaceId(bucket_workspace_id)}` : "";
+    return `CreateAccount("${owner_public_key}"${bucket})`;
+  }
+  if ("CallFunction" in instruction) {
+    const { address, function: fn, args } = instruction.CallFunction;
+    return `Call(template_${address}, "${fn}"${args.length ? ", " + args.map(formatArg).join(", ") : ""})`;
+  }
+  if ("CallMethod" in instruction) {
+    const { call, method, args } = instruction.CallMethod;
+    const target = "Address" in call ? call.Address : `$${call.Workspace}`;
+    return `Call(${target}, "${method}"${args.length ? ", " + args.map(formatArg).join(", ") : ""})`;
+  }
+  if ("PutLastInstructionOutputOnWorkspace" in instruction) {
+    return `PutLastInstructionOutputOnWorkspace($${instruction.PutLastInstructionOutputOnWorkspace.key})`;
+  }
+  if ("EmitLog" in instruction) {
+    const { level, message } = instruction.EmitLog;
+    return `EmitLog(${level}, ${JSON.stringify(message)})`;
+  }
+  if ("ClaimBurn" in instruction) {
+    return `ClaimBurn(${instruction.ClaimBurn.claim.commitment})`;
+  }
+  if ("ClaimValidatorFees" in instruction) {
+    return `ClaimValidatorFees(${instruction.ClaimValidatorFees.address})`;
+  }
+  if ("Assert" in instruction) {
+    const { key, assertion } = instruction.Assert;
+    const kind = typeof assertion === "string" ? assertion : Object.keys(assertion)[0];
+    return `Assert(${workspaceId(key)}, ${kind})`;
+  }
+  if ("TakeFromBucket" in instruction) {
+    const { input_bucket, amount, output_bucket } = instruction.TakeFromBucket;
+    return `TakeFromBucket(${workspaceId(input_bucket)}, ${amount} -> $${output_bucket})`;
+  }
+  if ("PublishTemplate" in instruction) {
+    return `PublishTemplate(Blob(#${instruction.PublishTemplate.binary}))`;
+  }
+  if ("AllocateAddress" in instruction) {
+    const { allocatable_type, workspace_id } = instruction.AllocateAddress;
+    return `AllocateAddress(${allocatable_type} -> $${workspace_id})`;
+  }
+  if ("StealthTransfer" in instruction) {
+    const { resource_address_ref, statement, revealed_input_bucket } = instruction.StealthTransfer;
+    const resource =
+      "Address" in resource_address_ref ? resource_address_ref.Address : workspaceId(resource_address_ref.Workspace);
+    const inputBucket = revealed_input_bucket != null ? `, input bucket: ${workspaceId(revealed_input_bucket)}` : "";
+    const counts = `${statement.inputs_statement?.inputs?.length ?? 0} in / ${statement.outputs_statement?.outputs?.length ?? 0} out`;
+    return `StealthTransfer(${resource}, ${counts}${inputBucket})`;
+  }
+  if ("PayFeeFromBucket" in instruction) {
+    return `PayFeeFromBucket(${workspaceId(instruction.PayFeeFromBucket.bucket)})`;
+  }
+  if ("UpdateComponentTemplate" in instruction) {
+    const { component, new_template } = instruction.UpdateComponentTemplate;
+    const target = "Address" in component ? component.Address : `$${component.Workspace}`;
+    return `UpdateComponentTemplate(${target} -> template_${new_template})`;
+  }
+  if ("PutIntoBucket" in instruction) {
+    const { src, dest } = instruction.PutIntoBucket;
+    return `PutIntoBucket(${workspaceId(src)} -> ${workspaceId(dest)})`;
+  }
+  return Object.keys(instruction)[0];
+}
+
+function instructionName(instruction: Instruction): string {
+  return typeof instruction === "string" ? instruction : Object.keys(instruction)[0];
+}
 
 interface RowDataProps {
   title: string;
@@ -43,7 +181,18 @@ function RowData({ title, data, index }: RowDataProps) {
   return (
     <>
       <TableRow key={`${index}-1`}>
-        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{title}</DataTableCell>
+        <DataTableCell
+          sx={{
+            borderTop: 1,
+            borderTopColor: "divider",
+            borderBottom: "none",
+            fontFamily: "monospace",
+            fontSize: "0.8rem",
+            wordBreak: "break-all",
+          }}
+        >
+          {title}
+        </DataTableCell>
         <DataTableCell
           width={90}
           sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}
@@ -69,7 +218,7 @@ function RowData({ title, data, index }: RowDataProps) {
           colSpan={2}
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockExpand title={title} content={inspectify(data)} />
+            <CodeBlockExpand title={instructionName(data)} content={inspectify(data)} />
           </Collapse>
         </DataTableCell>
       </TableRow>
@@ -91,19 +240,7 @@ function inspectify(instruction: Instruction) {
     return instruction;
   }
 
-  const addressMapper = (tag: TariTypeTag, prefix: string): [TariTypeTag, (value: any) => string] => [
-    tag,
-    (value: any) => prefix + "_" + toHexString(value.contents),
-  ];
-
-  const tags = new Map([
-    addressMapper(TariTypeTag.VaultId, "vault"),
-    addressMapper(TariTypeTag.ResourceAddress, "resource"),
-    addressMapper(TariTypeTag.ComponentAddress, "component"),
-    addressMapper(TariTypeTag.ValidatorNodeFeePool, "vnfp"),
-    addressMapper(TariTypeTag.TransactionReceipt, "txreceipt"),
-  ]);
-
+  const tags = literalDecodeTags();
   const contents = instruction[method] as any;
   const args = contents.args.map((arg: { Literal: string }) => {
     if ("Literal" in arg) {
@@ -126,7 +263,7 @@ export default function Instructions({ data }: { data: Array<Instruction> }) {
         <TableBody>
           {data?.length ? (
             data.map((item: Instruction, index) => {
-              return <RowData key={index} index={index} title={Object.keys(item)[0]} data={item} />;
+              return <RowData key={index} index={index} title={summarize(item)} data={item} />;
             })
           ) : (
             <Box sx={{ p: 3, textAlign: "center" }}>

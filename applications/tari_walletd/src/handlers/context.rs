@@ -32,6 +32,14 @@ use crate::{
     services::{RefreshTokenStore, WebauthnService},
 };
 
+/// An authenticated caller: what it may do, and (for an API key) what an Admin
+/// named it. The name never affects authorisation.
+#[derive(Debug, Clone)]
+pub struct AuthIdentity {
+    pub permissions: Permissions,
+    pub api_key_name: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct HandlerContext {
     wallet_sdk: WalletSdk,
@@ -135,6 +143,47 @@ impl HandlerContext {
         let granted = self.check_auth(token)?;
         enforce_scopes(&granted, required)?;
         Ok(granted)
+    }
+
+    /// Like [`authorize`], but also reports *which* API key presented the
+    /// credential, so a handler can record it for a human to read later.
+    ///
+    /// The name is the one an Admin chose when minting the key, so a tool
+    /// cannot name itself: a caller-supplied label rendered next to a value
+    /// transfer would be a phishing surface. It is display and audit only --
+    /// nothing authorises on it, and a JWT session simply has no name.
+    pub fn authorize_with_identity(
+        &self,
+        token: Option<&Bearer>,
+        required: &[Permission],
+    ) -> Result<AuthIdentity, AuthError> {
+        let bearer = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
+        let identity = if bearer.token().starts_with(api_keys::API_KEY_PREFIX) {
+            let row = api_keys::find_active_by_raw(self.wallet_sdk.store(), bearer.token())
+                .map_err(AuthError::from)?
+                .ok_or(AuthError::ApiKeyInvalidOrRevoked)?;
+            let granted = api_keys::parse_permissions(&row.permissions).map_err(|e| {
+                log::warn!(
+                    target: "tari::ootle::walletd::auth",
+                    "API key {} has unparseable permissions column: {e}",
+                    row.id,
+                );
+                AuthError::ApiKeyInvalidOrRevoked
+            })?;
+            self.maybe_spawn_last_used_bump(row.id);
+            AuthIdentity {
+                permissions: granted,
+                api_key_name: Some(row.name),
+            }
+        } else {
+            AuthIdentity {
+                permissions: self.jwt_api().check_auth(Some(bearer))?,
+                api_key_name: None,
+            }
+        };
+
+        enforce_scopes(&identity.permissions, required)?;
+        Ok(identity)
     }
 
     /// Like [`check_auth`], but rejects API-key bearers up front. Use for

@@ -75,6 +75,11 @@ pub struct WalletDaemonConfig {
     #[serde(with = "humantime_serde")]
     #[serde(default = "return_default_jwt_expiry")]
     pub jwt_expiry: Duration,
+    /// How long a person has to approve a transaction request. The locks
+    /// holding the request's inputs are extended past this, so it also decides
+    /// how long those funds stay unavailable if nobody ever answers.
+    #[serde(default = "return_default_transaction_request_ttl")]
+    pub transaction_request_ttl: Duration,
     /// If true, the wallet daemon will allow CORS requests from any origin. This is useful for development and
     /// testing, but should be disabled in production.
     pub enable_permissive_cors: bool,
@@ -111,6 +116,10 @@ fn return_default_auto_claim_burns() -> bool {
     true
 }
 
+fn return_default_transaction_request_ttl() -> Duration {
+    Duration::from_secs(30 * 60)
+}
+
 fn return_default_jwt_expiry() -> Duration {
     // Suggested expiry for access tokens is between 5min and 1h
     Duration::from_secs(5 * 60)
@@ -132,6 +141,7 @@ impl Default for WalletDaemonConfig {
                 .parse()
                 .expect("failed to parse default indexer_api_url"),
             jwt_expiry: return_default_jwt_expiry(),
+            transaction_request_ttl: return_default_transaction_request_ttl(),
             enable_permissive_cors: false,
             value_lookup_table_file: None,
             recovery_abandon_count: 10,

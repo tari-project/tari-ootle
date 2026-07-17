@@ -34,7 +34,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
 };
-use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::{Transaction, TransactionId, TransactionSignature, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
@@ -53,6 +53,9 @@ use tari_ootle_wallet_sdk::{
         OutputStatus,
         StealthOutputModel,
         SubstateModel,
+        TransactionRequestId,
+        TransactionRequestModel,
+        TransactionRequestStatus,
         TransactionStatus,
         UtxoUnspent,
         VaultModel,
@@ -75,7 +78,7 @@ use tari_template_lib_types::{
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
 };
 use tari_utilities::hex::Hex;
-use time::PrimitiveDateTime;
+use time::{OffsetDateTime, PrimitiveDateTime};
 use webauthn_rs::prelude::Passkey;
 
 use crate::{
@@ -1893,6 +1896,56 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn stealth_outputs_lock_many_for_account(
+        &mut self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        utxos: &[&PedersenCommitmentBytes],
+        lock_id: WalletLockId,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_lock_many_for_account";
+        use crate::schema::{accounts, stealth_outputs};
+
+        self.ensure_lock_exists(lock_id)?;
+
+        let account_id = accounts::table
+            .select(accounts::id)
+            .filter(accounts::address.eq(account_address.to_string()))
+            .first::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        // The `owner_account_id` filter is the account-scoping guard: caller-supplied commitments can only ever match
+        // rows owned by this account, so a commitment belonging to another account is never locked here.
+        let num_rows = diesel::update(stealth_outputs::table)
+            .set((
+                stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()),
+                stealth_outputs::lock_id.eq(lock_id),
+                stealth_outputs::locked_at.eq(dsl::now),
+            ))
+            .filter(stealth_outputs::owner_account_id.eq(account_id))
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(stealth_outputs::commitment.eq_any(utxos.iter().map(|id| serialize_hex(id.as_ref()))))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_rows != utxos.len() {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "stealth_output".to_string(),
+                key: format!(
+                    "{}/{} found: account={}, resource_address={}, utxos={}",
+                    num_rows,
+                    utxos.len(),
+                    account_address,
+                    resource_address,
+                    utxos.display()
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_insert";
         use crate::schema::{accounts, stealth_outputs};
@@ -2033,6 +2086,220 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn transaction_request_insert(
+        &mut self,
+        unsigned_transaction: &UnsignedTransaction,
+        seal_signer: KeyId,
+        other_signers: &[KeyId],
+        signatures: &[TransactionSignature],
+        lock_ids: &[WalletLockId],
+        requested_by: Option<&str>,
+        ttl: Duration,
+    ) -> Result<TransactionRequestModel, WalletStorageError> {
+        const OPERATION: &str = "transaction_request_insert";
+        use crate::schema::transaction_requests;
+
+        let now = OffsetDateTime::now_utc();
+        let expires_at = time::Duration::try_from(ttl)
+            .ok()
+            .and_then(|ttl| now.checked_add(ttl))
+            .ok_or_else(|| WalletStorageError::OperationError {
+                operation: OPERATION,
+                details: format!("ttl of {} seconds overflows the expiry timestamp", ttl.as_secs()),
+            })?;
+
+        let unsigned_transaction = serialize_json(unsigned_transaction)?;
+
+        diesel::insert_into(transaction_requests::table)
+            .values(models::NewTransactionRequest {
+                unsigned_transaction: unsigned_transaction.as_str(),
+                seal_signer: &serialize_json(&seal_signer)?,
+                other_signers: &serialize_json(&other_signers)?,
+                signatures: &serialize_json(&signatures)?,
+                lock_ids: &serialize_json(&lock_ids)?,
+                requested_by,
+                status: TransactionRequestStatus::Pending.as_key_str(),
+                expires_at: PrimitiveDateTime::new(expires_at.date(), expires_at.time()),
+            })
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        // SQLite has no RETURNING here; the row we just inserted is the
+        // highest id in the table.
+        let row = transaction_requests::table
+            .order_by(transaction_requests::id.desc())
+            .first::<models::TransactionRequest>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        transaction_request_from_row(OPERATION, row)
+    }
+
+    fn transaction_request_transition(
+        &mut self,
+        id: TransactionRequestId,
+        from: &[TransactionRequestStatus],
+        to: TransactionRequestStatus,
+    ) -> Result<TransactionRequestModel, WalletStorageError> {
+        const OPERATION: &str = "transaction_request_transition";
+        use crate::schema::transaction_requests;
+
+        let now = OffsetDateTime::now_utc();
+        let now = PrimitiveDateTime::new(now.date(), now.time());
+        let from_keys = from.iter().map(TransactionRequestStatus::as_key_str);
+
+        // The `status` filter and the write are one statement: two callers
+        // racing cannot both match. `approved_at` is stamped only the first
+        // time a request becomes Approved -- a claim released back to Approved
+        // (Submitting -> Approved after a failed submit) must not rewrite when
+        // the human said yes.
+        let updated = if to == TransactionRequestStatus::Approved {
+            diesel::update(
+                transaction_requests::table
+                    .filter(transaction_requests::id.eq(id))
+                    .filter(transaction_requests::status.eq_any(from_keys)),
+            )
+            .set((
+                transaction_requests::status.eq(to.as_key_str()),
+                transaction_requests::updated_at.eq(now),
+                transaction_requests::approved_at.eq(dsl::sql("COALESCE(approved_at, datetime('now'))")),
+            ))
+            .execute(self.connection())
+        } else {
+            diesel::update(
+                transaction_requests::table
+                    .filter(transaction_requests::id.eq(id))
+                    .filter(transaction_requests::status.eq_any(from_keys)),
+            )
+            .set((
+                transaction_requests::status.eq(to.as_key_str()),
+                transaction_requests::updated_at.eq(now),
+            ))
+            .execute(self.connection())
+        }
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if updated == 0 {
+            // Distinguish "no such request" from "wrong state" so the caller
+            // can tell a bad id from a double-approve.
+            let row = transaction_requests::table
+                .filter(transaction_requests::id.eq(id))
+                .first::<models::TransactionRequest>(self.connection())
+                .optional()
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?
+                .ok_or_else(|| WalletStorageError::NotFound {
+                    operation: OPERATION,
+                    entity: "transaction_requests".to_string(),
+                    key: id.to_string(),
+                })?;
+
+            return Err(WalletStorageError::UnexpectedState {
+                operation: OPERATION,
+                entity: "transaction_request",
+                key: id.to_string(),
+                expected: from
+                    .iter()
+                    .map(TransactionRequestStatus::as_key_str)
+                    .collect::<Vec<_>>()
+                    .join(" or "),
+                actual: row.status,
+            });
+        }
+
+        let row = transaction_requests::table
+            .filter(transaction_requests::id.eq(id))
+            .first::<models::TransactionRequest>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        transaction_request_from_row(OPERATION, row)
+    }
+
+    fn transaction_request_mark_submitted(
+        &mut self,
+        id: TransactionRequestId,
+        transaction_id: TransactionId,
+    ) -> Result<TransactionRequestModel, WalletStorageError> {
+        const OPERATION: &str = "transaction_request_mark_submitted";
+        use crate::schema::transaction_requests;
+
+        let now = OffsetDateTime::now_utc();
+        let now = PrimitiveDateTime::new(now.date(), now.time());
+
+        let updated = diesel::update(
+            transaction_requests::table
+                .filter(transaction_requests::id.eq(id))
+                .filter(transaction_requests::status.eq(TransactionRequestStatus::Submitting.as_key_str())),
+        )
+        .set((
+            transaction_requests::status.eq(TransactionRequestStatus::Submitted.as_key_str()),
+            transaction_requests::transaction_id.eq(serialize_hex(transaction_id)),
+            transaction_requests::updated_at.eq(now),
+        ))
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if updated == 0 {
+            let row = transaction_requests::table
+                .filter(transaction_requests::id.eq(id))
+                .first::<models::TransactionRequest>(self.connection())
+                .optional()
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?
+                .ok_or_else(|| WalletStorageError::NotFound {
+                    operation: OPERATION,
+                    entity: "transaction_requests".to_string(),
+                    key: id.to_string(),
+                })?;
+
+            return Err(WalletStorageError::UnexpectedState {
+                operation: OPERATION,
+                entity: "transaction_request",
+                key: id.to_string(),
+                expected: TransactionRequestStatus::Submitting.as_key_str().to_string(),
+                actual: row.status,
+            });
+        }
+
+        let row = transaction_requests::table
+            .filter(transaction_requests::id.eq(id))
+            .first::<models::TransactionRequest>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        transaction_request_from_row(OPERATION, row)
+    }
+
+    fn locks_set_timeout(
+        &mut self,
+        lock_id: WalletLockId,
+        timeout: Option<Duration>,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "locks_set_timeout";
+        use crate::schema::locks;
+
+        let query = diesel::update(locks::table.filter(locks::id.eq(lock_id)));
+        let rows_affected = match timeout {
+            Some(timeout) => {
+                let timeout_seconds = i32::try_from(timeout.as_secs()).unwrap_or(i32::MAX);
+                query
+                    .set(locks::timeout_at.eq(dsl::sql(&format!("datetime('now', '+{} seconds')", timeout_seconds))))
+                    .execute(self.connection())
+            },
+            None => query
+                .set(locks::timeout_at.eq(None::<PrimitiveDateTime>))
+                .execute(self.connection()),
+        }
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if rows_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "lock".to_string(),
+                key: lock_id.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
     fn locks_link_transaction(
         &mut self,
         lock_id: WalletLockId,
@@ -2042,10 +2309,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::locks;
 
         diesel::update(locks::table.filter(locks::id.eq(lock_id)))
-            .set((
-                locks::transaction_id.eq(serialize_hex(transaction_id)),
-                locks::timeout_at.eq(None::<PrimitiveDateTime>),
-            ))
+            .set(locks::transaction_id.eq(serialize_hex(transaction_id)))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -2058,6 +2322,10 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         let stale_locks = locks::table
             .select(locks::id)
+            // A lock linked to a transaction is released when that transaction
+            // resolves, never by timeout -- reaping it mid-flight would corrupt
+            // the transaction's inputs and change outputs.
+            .filter(locks::transaction_id.is_null())
             .filter(locks::timeout_at.is_not_null())
             .filter(locks::timeout_at.le(dsl::now))
             .get_results::<i32>(self.connection())
@@ -2526,6 +2794,43 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 /// Convert a storage-layer `ApiKey` row into the SDK's `ApiKey` model. Kept
 /// as a free function so it can be shared between the reader and writer
 /// modules without re-implementing the field-by-field map.
+/// Maps a persisted row to the SDK model, decoding the textual status.
+///
+/// An unparseable `status` is a data-integrity bug rather than a missing row,
+/// so it surfaces as a decoding error instead of being silently coerced to
+/// some default — defaulting here could turn a Rejected request back into a
+/// Pending one.
+pub(crate) fn transaction_request_from_row(
+    operation: &'static str,
+    row: models::TransactionRequest,
+) -> Result<TransactionRequestModel, WalletStorageError> {
+    let status = TransactionRequestStatus::from_str(&row.status).map_err(|_| WalletStorageError::DecodingError {
+        operation,
+        item: "transaction_requests.status",
+        details: format!("unknown status '{}'", row.status),
+    })?;
+
+    Ok(TransactionRequestModel {
+        id: row.id,
+        unsigned_transaction: deserialize_json(&row.unsigned_transaction)?,
+        seal_signer: deserialize_json(&row.seal_signer)?,
+        other_signers: deserialize_json(&row.other_signers)?,
+        signatures: deserialize_json(&row.signatures)?,
+        lock_ids: deserialize_json(&row.lock_ids)?,
+        requested_by: row.requested_by,
+        status,
+        transaction_id: row
+            .transaction_id
+            .as_deref()
+            .map(deserialize_hex_try_from)
+            .transpose()?,
+        expires_at: row.expires_at,
+        approved_at: row.approved_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
+}
+
 fn api_key_from_row(row: models::ApiKey) -> ApiKey {
     ApiKey {
         id: row.id,
@@ -2584,6 +2889,7 @@ impl WalletEventStoreWriter for WriteTransaction<'_> {
             WalletEvent::UtxoRecovered(payload) => (Some(payload.account_address), serialize_json(payload)?),
             WalletEvent::UtxoRecoveryCompleted(payload) => (None, serialize_json(payload)?),
             WalletEvent::UtxoSpent(payload) => (Some(payload.account_address), serialize_json(payload)?),
+            WalletEvent::TransactionRequestCreated(payload) => (None, serialize_json(payload)?),
         };
 
         let maybe_account = maybe_account.map(|addr| addr.to_string());

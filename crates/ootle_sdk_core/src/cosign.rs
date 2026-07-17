@@ -116,10 +116,10 @@ impl Authorization {
 ///
 /// A co-sign hand-off always attaches at least one authorization, so the record's
 /// `is_seal_signer_authorized` flag is set to `false` here (the value the seal will commit to once
-/// authorizations are present). B signs over this `false`, and the seal-with-auth path keeps it
-/// `false` — so A and B commit to the identical flag value and the signatures cross-verify. Were the
-/// flag left at the builder default `true`, B would sign over `true` while the seal flips it to
-/// `false`, and B's authorization would no longer verify.
+/// authorizations are present). B signs over this `false`, and [`seal_and_encode_with_auth`] settles
+/// the same `false` before sealing — so A and B commit to the identical flag value and the
+/// signatures cross-verify. Were the flag left at the default `true`, B would sign over `true` while
+/// the seal-with-auth path seals over `false`, and B's authorization would no longer verify.
 pub fn unsigned_record_for_cosign(partial: &PartialTransaction) -> Result<UnsignedTransactionRecord, OotleSdkError> {
     if !partial.outstanding_wants().is_empty() {
         return Err(OotleSdkError::Resolution(format!(
@@ -132,9 +132,8 @@ pub fn unsigned_record_for_cosign(partial: &PartialTransaction) -> Result<Unsign
     // Apply the same canonical input sort the seal path applies, so the shipped record is
     // byte-identical to what the seal will sign over.
     canonicalize_inputs(&mut unsigned);
-    Ok(UnsignedTransactionRecord::new(
-        unsigned.disabled_authorized_sealed_signer(),
-    ))
+    unsigned.set_seal_signer_authorized(false);
+    Ok(UnsignedTransactionRecord::new(unsigned))
 }
 
 /// **Party B.** Authorizes A's unsigned transaction with a fresh random Schnorr nonce, committing to

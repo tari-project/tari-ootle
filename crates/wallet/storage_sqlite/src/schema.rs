@@ -243,6 +243,24 @@ diesel::table! {
 }
 
 diesel::table! {
+    transaction_requests (id) {
+        id -> Integer,
+        unsigned_transaction -> Text,
+        seal_signer -> Text,
+        other_signers -> Text,
+        signatures -> Text,
+        lock_ids -> Text,
+        requested_by -> Nullable<Text>,
+        status -> Text,
+        transaction_id -> Nullable<Text>,
+        expires_at -> Timestamp,
+        approved_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     utxo_process_queue (id) {
         id -> Integer,
         account_id -> Integer,
@@ -351,6 +369,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     stealth_outputs,
     substates,
     transaction_accounts,
+    transaction_requests,
     transactions,
     utxo_process_queue,
     vault_locks,

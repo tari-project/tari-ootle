@@ -6,13 +6,14 @@ use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
+use indexmap::IndexSet;
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::{Epoch, optional::Optional, response_status::ResponseErrorStatus};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::{
     apis::transaction::TransactionApiError,
-    models::{KeyId, TransactionContext, WalletEvent},
+    models::{KeyId, OutputStatus, StealthUtxoSpendKeyId, TransactionContext, WalletEvent, WalletLockId},
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_ootle_walletd_client::{
@@ -21,6 +22,8 @@ use tari_ootle_walletd_client::{
         CallInstructionRequest,
         PublishTemplateRequest,
         PublishTemplateResponse,
+        TransactionDetectInputsRequest,
+        TransactionDetectInputsResponse,
         TransactionGetAllRequest,
         TransactionGetAllResponse,
         TransactionGetRequest,
@@ -91,6 +94,7 @@ pub async fn handle_submit_instruction(
         transaction,
         seal_signer: owner_key_id,
         other_signers: vec![],
+        signatures: vec![],
         detect_inputs: req.override_inputs.unwrap_or_default(),
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],
@@ -110,6 +114,20 @@ pub async fn handle_submit(
     context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
     // Best-effort: tag the transaction with the account that seals (pays for) it, so it can be filtered
     // per account. The seal signer may not map to a known account (e.g. an imported key) — that is fine.
+    let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
+        .map(|address| vec![address])
+        .unwrap_or_default();
+    submit_inner(context, req, linked_accounts).await
+}
+
+/// Seal and submit an approved transaction request.
+///
+/// The request's own handler has already checked the approval and passes
+/// `detect_inputs: false`, so nothing here alters the frozen transaction.
+pub(crate) async fn submit_inner_for_request(
+    context: &HandlerContext,
+    req: TransactionSubmitRequest,
+) -> Result<TransactionSubmitResponse, anyhow::Error> {
     let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
         .map(|address| vec![address])
         .unwrap_or_default();
@@ -163,18 +181,30 @@ async fn submit_inner(
         req.detect_inputs_use_unversioned,
     );
 
+    // Signatures collected out of band are attached first; walletd's own
+    // signatures are added on top and the seal signature commits to all of them.
     let mut transaction = context
         .transaction_builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
-        .finish();
+        .with_signatures(req.signatures);
 
-    if !req.other_signers.is_empty() {
+    // Stealth inputs are spent with a key derived per-UTXO from the sender's
+    // account key and that UTXO's nonce. Derive the set from the locks rather
+    // than accepting it from the caller: the locked outputs are what this
+    // transaction actually spends, so a caller cannot ask the wallet to sign
+    // with a key of its choosing.
+    let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
+
+    if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
         let main_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
         let main_signer_pk = main_signer.public_key.to_byte_type();
         let local_signer = sdk.signer_api().with_context(&main_signer_pk);
         for key in req.other_signers {
             transaction = local_signer.sign(key, transaction)?;
+        }
+        for key in &stealth_signers {
+            transaction = local_signer.sign_with_stealth_key(key, transaction)?;
         }
     }
 
@@ -203,6 +233,52 @@ async fn submit_inner(
         .map_err(map_transaction_submission_error)?;
 
     Ok(TransactionSubmitResponse { transaction_id })
+}
+
+/// The stealth spend keys needed to spend everything the given locks hold.
+///
+/// Derived from the wallet's own record of what each lock locked, never from
+/// the caller. `create_stealth_transfer_statement` returns an equivalent list
+/// to its caller, but a caller that could hand that list back would be naming
+/// the keys the wallet signs with; re-deriving here means the locked outputs
+/// are the only thing that decides.
+///
+/// A lock holding no stealth outputs (a revealed-only transfer, say) yields an
+/// empty set rather than an error.
+fn derive_stealth_signers(
+    sdk: &WalletSdk,
+    lock_ids: &[WalletLockId],
+) -> Result<Vec<StealthUtxoSpendKeyId>, anyhow::Error> {
+    let mut signers = IndexSet::new();
+
+    for lock_id in lock_ids {
+        let Some(outputs) = sdk.stealth_outputs_api().get_locked_by_lock_id(*lock_id).optional()? else {
+            continue;
+        };
+
+        for output in outputs {
+            // Only inputs being spent need a spend signature. The same lock
+            // also holds the change outputs it created (`LockedUnconfirmed`),
+            // which are not being spent by this transaction.
+            if !matches!(output.status, OutputStatus::LockedForSpend) {
+                continue;
+            }
+            // A view-only output has no spend key: the wallet can see it but
+            // cannot spend it, so a transaction that tries is malformed.
+            let account_key_id = output.owner_key_id.ok_or_else(|| {
+                invalid_request(format!(
+                    "Cannot spend view-only stealth output {} (lock {lock_id}): no owner key",
+                    output.commitment
+                ))
+            })?;
+            signers.insert(StealthUtxoSpendKeyId {
+                account_key_id,
+                public_nonce: output.sender_public_nonce,
+            });
+        }
+    }
+
+    Ok(signers.into_iter().collect())
 }
 
 /// Parses the request's variables, blobs and manifest source into instructions, mapping parse
@@ -272,6 +348,45 @@ fn map_transaction_submission_error(e: TransactionServiceError) -> anyhow::Error
     }
 }
 
+/// Resolve a transaction's inputs without submitting anything, so a caller that
+/// cannot detect them itself can build a complete transaction before requesting
+/// or signing. Returns the transaction with the detected inputs merged in.
+pub async fn handle_detect_inputs(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: TransactionDetectInputsRequest,
+) -> Result<TransactionDetectInputsResponse, anyhow::Error> {
+    context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
+    let sdk = context.wallet_sdk();
+
+    let substates = req.transaction.to_referenced_substates()?;
+    let substates = substates
+        .into_iter()
+        .chain(req.transaction.inputs().iter().map(|r| r.substate_id().clone()))
+        .collect::<Vec<_>>();
+    let detected = sdk
+        .substate_api()
+        .locate_dependent_substates(&substates, req.use_unversioned)
+        .await?
+        .into_iter()
+        .map(|input| {
+            if req.use_unversioned {
+                input.into_unversioned()
+            } else {
+                input
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let transaction = context
+        .transaction_builder()
+        .with_unsigned_transaction(req.transaction)
+        .with_inputs(detected)
+        .build_unsigned();
+
+    Ok(TransactionDetectInputsResponse { transaction })
+}
+
 pub async fn handle_submit_dry_run(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -291,9 +406,6 @@ async fn submit_dry_run_inner(
     req.transaction
         .validate_blob_references()
         .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
-    let key_api = sdk.key_manager_api();
-    // Fetch the key to sign the transaction
-    let key = key_api.get_public_key(req.seal_signer)?;
 
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
@@ -317,23 +429,35 @@ async fn submit_dry_run_inner(
         vec![]
     };
 
-    let transaction = context
+    let mut transaction = context
         .transaction_builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
-        .finish();
-    let transaction = sdk.signer_api().sign(key.key_id, transaction)?;
+        .with_signatures(req.signatures);
 
-    for lock_id in req.lock_ids {
-        // update the proofs table with the corresponding transaction hash
-        sdk.transaction_api()
-            .locks_set_transaction_id(lock_id, transaction.calculate_id())?;
+    // Sign exactly as a real submission would, so the dry run reflects a
+    // spendable transaction: stealth inputs are signed with keys derived from
+    // the locks, and the seal signature is added last.
+    let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
+    if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
+        let main_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
+        let main_signer_pk = main_signer.public_key.to_byte_type();
+        let local_signer = sdk.signer_api().with_context(&main_signer_pk);
+        for key in req.other_signers {
+            transaction = local_signer.sign(key, transaction)?;
+        }
+        for key in &stealth_signers {
+            transaction = local_signer.sign_with_stealth_key(key, transaction)?;
+        }
     }
+    let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
 
+    // A dry run never finalizes, so it must not link the locks: a lock tied to a
+    // transaction that never resolves would never be released.
     info!(
         target: LOG_TARGET,
-        "Submitted transaction with hash {}",
+        "Submitted dry-run transaction {}",
         transaction.calculate_id()
     );
     let exec_result = context
@@ -649,6 +773,7 @@ pub async fn handle_publish_template(
             transaction,
             seal_signer: owner_key_id,
             other_signers: vec![],
+            signatures: vec![],
             detect_inputs: req.detect_inputs,
             detect_inputs_use_unversioned: true,
             lock_ids: vec![],
@@ -671,6 +796,7 @@ pub async fn handle_publish_template(
         transaction,
         seal_signer: owner_key_id,
         other_signers: vec![],
+        signatures: vec![],
         detect_inputs: req.detect_inputs,
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],

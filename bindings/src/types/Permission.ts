@@ -3,6 +3,7 @@ import type { ComponentAddress } from "./ComponentAddress";
 import type { Crud } from "./Crud";
 import type { ReadOnly } from "./ReadOnly";
 import type { ResourceAddress } from "./ResourceAddress";
+import type { TxRequestAction } from "./TxRequestAction";
 
 /**
  * A capability the wallet daemon recognises as granted by a caller or required
@@ -19,6 +20,7 @@ export type Permission =
   | { Accounts: [Crud, ComponentAddress | null] }
   | { Keys: Crud }
   | { Transactions: Crud }
+  | { TransactionRequests: TxRequestAction }
   | { Transfer: [Crud, ComponentAddress | null] }
   | { Templates: Crud }
   | { Nfts: [Crud, ResourceAddress | null] }

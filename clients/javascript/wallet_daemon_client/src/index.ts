@@ -26,6 +26,16 @@ import type {
   AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  TransactionRequestCreateRequest,
+  TransactionRequestCreateResponse,
+  TransactionRequestDecisionRequest,
+  TransactionRequestDecisionResponse,
+  TransactionRequestGetRequest,
+  TransactionRequestGetResponse,
+  TransactionRequestListRequest,
+  TransactionRequestListResponse,
+  TransactionRequestSubmitRequest,
+  TransactionRequestSubmitResponse,
   AuthCreateApiKeyRequest,
   AuthCreateApiKeyResponse,
   AuthCredentials,
@@ -100,6 +110,8 @@ import type {
   TransactionGetResultRequest,
   TransactionGetResultResponse,
   TransactionSubmitDryRunResponse,
+  TransactionDetectInputsRequest,
+  TransactionDetectInputsResponse,
   TransactionSubmitManifestRequest,
   TransactionSubmitManifestResponse,
   TransactionSubmitRequest,
@@ -218,6 +230,36 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
    * If the granted permissions include `Admin`, the request must set
    * `confirm_admin: true`.
    */
+  public transactionRequestsCreate(params: TransactionRequestCreateRequest): Promise<TransactionRequestCreateResponse> {
+    return this.sendRequest("transaction_requests.create", params);
+  }
+
+  public transactionRequestsGet(params: TransactionRequestGetRequest): Promise<TransactionRequestGetResponse> {
+    return this.sendRequest("transaction_requests.get", params);
+  }
+
+  public transactionRequestsList(
+    params: TransactionRequestListRequest = { status: null },
+  ): Promise<TransactionRequestListResponse> {
+    return this.sendRequest("transaction_requests.list", params);
+  }
+
+  public transactionRequestsApprove(
+    params: TransactionRequestDecisionRequest,
+  ): Promise<TransactionRequestDecisionResponse> {
+    return this.sendRequest("transaction_requests.approve", params);
+  }
+
+  public transactionRequestsReject(
+    params: TransactionRequestDecisionRequest,
+  ): Promise<TransactionRequestDecisionResponse> {
+    return this.sendRequest("transaction_requests.reject", params);
+  }
+
+  public transactionRequestsSubmit(params: TransactionRequestSubmitRequest): Promise<TransactionRequestSubmitResponse> {
+    return this.sendRequest("transaction_requests.submit", params);
+  }
+
   public authCreateApiKey(params: AuthCreateApiKeyRequest): Promise<AuthCreateApiKeyResponse> {
     return this.sendRequest("auth.create_api_key", params);
   }
@@ -328,6 +370,10 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public submitTransactionDryRun(params: TransactionSubmitRequest): Promise<TransactionSubmitDryRunResponse> {
     return this.sendRequest("transactions.submit_dry_run", params);
+  }
+
+  public transactionsDetectInputs(params: TransactionDetectInputsRequest): Promise<TransactionDetectInputsResponse> {
+    return this.sendRequest("transactions.detect_inputs", params);
   }
 
   public submitTransactionManifest(

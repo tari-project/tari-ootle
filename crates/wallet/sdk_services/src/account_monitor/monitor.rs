@@ -284,7 +284,8 @@ where
             WalletEvent::AccountChangedOnChain(_) |
             WalletEvent::AuthLoginRequest(_) |
             WalletEvent::UtxoRecoveryStarted(_) |
-            WalletEvent::UtxoRecoveryCompleted(_) => {},
+            WalletEvent::UtxoRecoveryCompleted(_) |
+            WalletEvent::TransactionRequestCreated(_) => {},
         }
         Ok(())
     }

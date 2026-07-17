@@ -246,8 +246,13 @@ impl TransactionBuilder<MainIntent> {
         self
     }
 
-    pub fn with_disabled_seal_signer_authorization(mut self) -> Self {
-        self.unsigned_transaction = self.unsigned_transaction.disabled_authorized_sealed_signer();
+    /// Set whether the seal signature also authorises the transaction (defaults to `true`).
+    ///
+    /// The value is final: neither the builder nor sealing changes it afterwards, so a
+    /// transaction whose seal signer must not carry authority (e.g. a co-signed spend) can
+    /// settle the flag here before any signing message is computed.
+    pub fn with_seal_signer_authorized(mut self, authorized: bool) -> Self {
+        self.unsigned_transaction.set_seal_signer_authorized(authorized);
         self
     }
 

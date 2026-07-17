@@ -360,7 +360,8 @@ where
             WalletEvent::UtxoRecoveryStarted(_) |
             WalletEvent::UtxoRecovered(_) |
             WalletEvent::UtxoRecoveryCompleted(_) |
-            WalletEvent::UtxoSpent(_) => {},
+            WalletEvent::UtxoSpent(_) |
+            WalletEvent::TransactionRequestCreated(_) => {},
         }
         Ok(())
     }

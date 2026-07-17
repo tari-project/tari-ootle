@@ -242,9 +242,9 @@ pub fn seal_and_encode_stealth_transfer(
 /// Sets `is_seal_signer_authorized`, builds the unsealed tx with the planned authorization signatures,
 /// computes the seal signature over the seal digest with the planned key (random nonce), and injects it.
 fn finalize_seal(unsigned_v1: &mut UnsignedTransactionV1, plan: SealPlan) -> Result<Transaction, OotleSdkError> {
-    // The stock `seal()` sets `is_seal_signer_authorized = true` BEFORE computing the seal message iff
-    // there are zero authorization signatures. The flag is committed by the seal digest, so it must be
-    // applied before constructing the unsealed tx.
+    // The flag is committed by the seal digest, so it must be settled before constructing the
+    // unsealed tx: with zero authorization signatures the seal signer is the transaction's only
+    // authority and must be authorized.
     if plan.auth_signatures.is_empty() {
         unsigned_v1.is_seal_signer_authorized = true;
     }

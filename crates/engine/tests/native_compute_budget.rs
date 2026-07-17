@@ -120,6 +120,90 @@ fn unpaid_native_verification_traps_before_the_crypto_runs() {
     assert_reject_reason(reason, "Insufficient fees to fund native verification");
 }
 
+/// Revealed-only statements (no stealth/confidential inputs or outputs) short-circuit every
+/// verifier — no balance proof, no range proof — so they must price at zero: free-coins claims and
+/// revealed→revealed transfers keep their pre-metering fees.
+#[test]
+fn revealed_only_statements_price_at_zero() {
+    use tari_template_lib::types::{confidential::ConfidentialWithdrawProof, crypto::PedersenCommitmentBytes};
+
+    let revealed_transfer = stealth::generate_transfer_data(stealth::NO_INPUTS, 100u64, Vec::<u64>::new(), 100u64);
+    assert_eq!(
+        tari_engine_types::stealth::transfer_native_points(&revealed_transfer.statement),
+        0
+    );
+
+    let revealed_withdraw = ConfidentialWithdrawProof::revealed_withdraw(1000u64);
+    assert_eq!(
+        tari_engine_types::confidential::withdraw_native_points(&revealed_withdraw),
+        0
+    );
+    assert_eq!(
+        tari_engine_types::confidential::statement_native_points(&revealed_withdraw.output_proof),
+        0
+    );
+
+    // Any input brings the balance-proof verification: a withdraw-everything-to-revealed proof
+    // (inputs, no outputs) is not free.
+    let mut with_input = ConfidentialWithdrawProof::revealed_withdraw(1000u64);
+    with_input.inputs.push(PedersenCommitmentBytes::zero());
+    assert_eq!(
+        tari_engine_types::confidential::withdraw_native_points(&with_input),
+        NativeExecutionPoints::PER_STATEMENT + NativeExecutionPoints::PER_INPUT
+    );
+}
+
+/// WASM consumed in-flight counts toward the allowance a mid-invocation native charge is checked
+/// against. The template grinds most of the grace away and only then triggers a stealth transfer
+/// (a host call) whose native price would fit the allowance if the in-flight consumption were
+/// invisible — the charge must see it and trap. Guards the meter sync at host-call entry: without
+/// it, a transaction could spend the whole grace on WASM and still extract native verification on
+/// top for free.
+#[test]
+fn in_flight_wasm_counts_toward_the_native_allowance() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    // Revealed output amount funds the faucet's supply vault, which the programmatic transfer
+    // draws its revealed input from.
+    let mint = stealth::generate_mint_statement([100, 1000], 200u64, None);
+    let (faucet, _faucet_resx) = setup_faucet(&mut test, &mint);
+    let (account, owner, key) = test.create_funded_account();
+    enable_point_priced_fees(&mut test);
+
+    // Calibrate points-per-round with a paid transaction.
+    let points_for = |test: &mut TemplateTest, rounds: u64| -> u64 {
+        let tx = Transaction::builder_localnet()
+            .pay_fee_from_component(account, 100_000_000u64)
+            .call_method(faucet, "burn_compute", args![rounds])
+            .build_and_seal(&key);
+        let result = test.execute_expect_success(tx, vec![owner.clone()]);
+        result
+            .finalize
+            .fee_receipt
+            .fee_breakdown()
+            .iter()
+            .find_map(|(s, a)| (*s == FeeSource::WasmExecution).then_some(*a))
+            .expect("WasmExecution charge present")
+    };
+    let per_round = (points_for(&mut test, 2_000) - points_for(&mut test, 1_000)) / 1_000;
+
+    // A revealed-funded single-output transfer: ~10.1M native points. Grind enough that the
+    // in-flight WASM plus the native price exceeds the grace, while each alone fits within it.
+    let transfer = stealth::generate_transfer_data(stealth::NO_INPUTS, 100u64, [50], 50u64);
+    let native_points = tari_engine_types::stealth::transfer_native_points(&transfer.statement);
+    assert!(native_points < FREE_COMPUTE_GRACE_POINTS);
+    let grind_points = FREE_COMPUTE_GRACE_POINTS - native_points / 2;
+    let rounds = grind_points / per_round;
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(faucet, "burn_compute_then_transfer", args![rounds, transfer.statement])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, "Insufficient fees to fund native verification");
+}
+
 /// A paying transaction's native verification is charged under `FeeSource::NativeExecution` at the
 /// per-point rate.
 #[test]

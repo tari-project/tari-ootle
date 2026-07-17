@@ -54,6 +54,17 @@ pub struct WasmEnv<T> {
     mem_free: Option<WasmFreeFn>,
     last_panic: Arc<Mutex<Option<String>>>,
     last_engine_error: Arc<Mutex<Option<RuntimeError>>>,
+    invocation_meter: Arc<Mutex<Option<InvocationMeter>>>,
+}
+
+/// Per-invocation view of the Wasmer meter, letting host calls read the in-flight consumption of
+/// the invocation they interrupt. `synced` is the portion already recorded on the transaction's
+/// running total, so consumption is recorded exactly once across incremental syncs and the final
+/// end-of-invocation accounting.
+pub(super) struct InvocationMeter {
+    instance: Instance,
+    start_points: u64,
+    synced: u64,
 }
 
 impl<T> WasmEnv<T> {
@@ -65,7 +76,49 @@ impl<T> WasmEnv<T> {
             mem_free: None,
             last_panic: Arc::new(Mutex::new(None)),
             last_engine_error: Arc::new(Mutex::new(None)),
+            invocation_meter: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Begins metering an invocation that starts with `start_points` on the Wasmer meter. One
+    /// invocation is in flight per process instance at a time (cross-template calls run in their
+    /// own process, with their own meter).
+    pub(super) fn begin_metered_invocation(&self, instance: Instance, start_points: u64) {
+        *self.invocation_meter_mut() = Some(InvocationMeter {
+            instance,
+            start_points,
+            synced: 0,
+        });
+    }
+
+    /// Ends the in-flight invocation, returning the points already synced to the transaction
+    /// total, so the caller records only the unsynced tail.
+    pub(super) fn end_metered_invocation(&self) -> u64 {
+        self.invocation_meter_mut().take().map(|m| m.synced).unwrap_or(0)
+    }
+
+    /// Reads the in-flight invocation's consumed-but-unsynced points from the Wasmer meter and
+    /// marks them synced. Returns `None` when no invocation is in flight (host calls made outside
+    /// a WASM invocation) or nothing new was consumed.
+    pub(super) fn take_unsynced_in_flight_points<S: AsStoreMut>(&self, store: &mut S) -> Option<u64> {
+        use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points};
+
+        let mut guard = self.invocation_meter_mut();
+        let meter = guard.as_mut()?;
+        let consumed = match get_remaining_points(store, &meter.instance) {
+            MeteringPoints::Remaining(n) => meter.start_points.saturating_sub(n),
+            MeteringPoints::Exhausted => meter.start_points,
+        };
+        let delta = consumed.saturating_sub(meter.synced);
+        if delta == 0 {
+            return None;
+        }
+        meter.synced = consumed;
+        Some(delta)
+    }
+
+    fn invocation_meter_mut(&self) -> MutexGuard<'_, Option<InvocationMeter>> {
+        self.invocation_meter.lock().expect("invocation_meter poisoned")
     }
 
     pub(super) fn set_last_panic(&self, message: String) {

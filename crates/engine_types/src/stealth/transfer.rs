@@ -27,9 +27,14 @@ pub struct ValidatedStealthTransfer {
 /// The native-execution metering points [`validate_transfer`] (plus the per-input spend
 /// authorisation pass) costs for this statement. Charged against the payment-funded allowance
 /// *before* any verification runs, so a non-paying transaction cannot extract the crypto work for
-/// free. Must stay in lock-step with what [`validate_transfer`] actually verifies.
+/// free. Must stay in lock-step with what [`validate_transfer`] actually verifies: a revealed-only
+/// statement (no stealth inputs or outputs) verifies no balance proof and no range proof, so it
+/// prices at zero.
 pub fn transfer_native_points(transfer: &StealthTransferStatement) -> u64 {
     use crate::limits::NativeExecutionPoints as P;
+    if transfer.inputs_statement.inputs.is_empty() && transfer.outputs_statement.outputs.is_empty() {
+        return 0;
+    }
     P::PER_STATEMENT
         .saturating_add(P::PER_OUTPUT.saturating_mul(transfer.outputs_statement.outputs.len() as u64))
         .saturating_add(P::PER_INPUT.saturating_mul(transfer.inputs_statement.inputs.len() as u64))

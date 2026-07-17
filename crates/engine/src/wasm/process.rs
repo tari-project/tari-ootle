@@ -147,7 +147,19 @@ impl WasmProcess {
             return WasmPtr::null();
         }
 
-        let (env_mut, store) = env.data_and_store_mut();
+        let (env_mut, mut store) = env.data_and_store_mut();
+
+        // Sync this invocation's in-flight meter consumption onto the transaction total before
+        // dispatching, so budget and allowance checks made inside the host call (native
+        // verification pre-charges, nested cross-template call budgets) see it. Without this, a
+        // call could spend its whole metering allowance and still pass mid-call checks that read
+        // the stale end-of-invocation total.
+        if let Some(delta) = env_mut.take_unsynced_in_flight_points(&mut store) &&
+            let Err(err) = env_mut.state_mut().interface_mut().record_wasm_execution(delta)
+        {
+            env_mut.set_last_engine_error(err);
+            return WasmPtr::null();
+        }
 
         log::debug!(target: LOG_TARGET, "Engine call: {:?}", op);
 
@@ -377,6 +389,10 @@ impl Invokable<Store> for WasmProcess {
         let fee_allowance_is_binding =
             paid_allowance_remaining.is_some_and(|remaining| remaining < budget_remaining && remaining <= per_call_cap);
         set_remaining_points(store, &self.instance, points_before);
+        // Expose the in-flight meter to host calls: consumption inside this invocation must be
+        // visible to budget/allowance checks made mid-call (native verification pre-charges,
+        // nested cross-template call budgets), not only after the call returns.
+        self.env.begin_metered_invocation(self.instance.clone(), points_before);
 
         // Call the contract entrypoint
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
@@ -389,11 +405,13 @@ impl Invokable<Store> for WasmProcess {
             // budget — the host will report a runtime error and the partial work was already done.
             MeteringPoints::Exhausted => points_before,
         };
+        // Record only the tail not already synced to the transaction total by mid-call host calls.
+        let already_synced = self.env.end_metered_invocation();
         // Charging happens before we return the result so fees are recorded even on failure paths.
         self.env
             .state_mut()
             .interface_mut()
-            .record_wasm_execution(points_consumed)?;
+            .record_wasm_execution(points_consumed.saturating_sub(already_synced))?;
 
         match res {
             Ok(return_ptr) => {

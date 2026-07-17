@@ -156,7 +156,9 @@ impl TariWalletDaemonProcess {
         let req = ClaimBurnRequest {
             account: ComponentAddressOrName::Name(account_name.into()),
             claim_proof,
-            max_fee: 5000,
+            // A burn claim pays the claim-proof NativeExecution charge (~3.2k µT) plus the stealth
+            // withdraw that sources the fee from the claimed UTXO (~10k µT); excess refunds.
+            max_fee: 50_000,
             is_dry_run: false,
         };
 

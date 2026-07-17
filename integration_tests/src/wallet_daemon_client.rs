@@ -136,7 +136,9 @@ pub async fn transfer_stealth(
                 attach_sender_address: false,
                 pay_ref: None,
             }],
-            max_fee: 2000,
+            // Stealth transfers now carry the NativeExecution charge (~8k µT per blinded output +
+            // ~2.1k per statement), so the ceiling leaves generous headroom; the excess refunds.
+            max_fee: 50_000,
             dry_run: false,
         })
         .await

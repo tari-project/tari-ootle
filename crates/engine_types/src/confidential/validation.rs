@@ -24,10 +24,14 @@ pub struct ValidatedConfidentialProof {
 /// The native-execution metering points [`validate_confidential_statement`] costs for this
 /// statement (range proof + viewable-balance proof per present output, plus the fixed base).
 /// Charged against the payment-funded allowance *before* verification runs. Must stay in
-/// lock-step with what [`validate_confidential_statement`] actually verifies.
+/// lock-step with what [`validate_confidential_statement`] actually verifies: a statement with no
+/// confidential outputs (revealed-only) verifies no range proof, so it prices at zero.
 pub fn statement_native_points(proof: &ConfidentialOutputStatement) -> u64 {
     use crate::limits::NativeExecutionPoints as P;
     let num_outputs = u64::from(proof.output.is_some()) + u64::from(proof.change_statement.is_some());
+    if num_outputs == 0 {
+        return 0;
+    }
     P::PER_STATEMENT.saturating_add(P::PER_OUTPUT.saturating_mul(num_outputs))
 }
 

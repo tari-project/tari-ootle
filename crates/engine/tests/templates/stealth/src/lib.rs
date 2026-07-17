@@ -96,6 +96,38 @@ mod template {
             manager.stealth_transfer(transfer);
         }
 
+        /// Burns `rounds` of metered compute (a serial dependent division chain, mirroring the
+        /// `metering_bench` template) and then performs a programmatic stealth transfer, all inside
+        /// one WASM invocation. Exercises a native-verification charge issued mid-invocation, after
+        /// real in-flight metering consumption.
+        pub fn burn_compute_then_transfer(&self, rounds: u64, transfer: StealthTransferStatement) -> u64 {
+            // Returned so the optimiser cannot eliminate the pure grind loop.
+            let acc = Self::grind(rounds);
+            self.programmatic_transfer(transfer);
+            acc
+        }
+
+        /// The compute burner alone, for calibrating points-per-round in tests.
+        pub fn burn_compute(&self, rounds: u64) -> u64 {
+            Self::grind(rounds)
+        }
+
+        fn grind(rounds: u64) -> u64 {
+            let mut acc: u64 = 0xD1B5_4A32_D192_ED03;
+            let mut i: u64 = 0;
+            while i < rounds {
+                let mut j: u32 = 0;
+                while j < 64 {
+                    let d = (acc & 0xFFFF) | 1;
+                    let v = acc.wrapping_div(d);
+                    acc = (v ^ d).rotate_left(1).wrapping_mul(0x9E37_79B9_7F4A_7C17);
+                    j = j.wrapping_add(1);
+                }
+                i = i.wrapping_add(1);
+            }
+            acc
+        }
+
         pub fn mint(&self, amount: Amount) {
             let bucket = self.manager.mint_stealth(amount);
             self.supply_vault.deposit(bucket);

@@ -71,6 +71,10 @@ async fn main() {
                 .normalized()
                 .summarized(),
         ))
+        // Standard cucumber CLI: e.g. `cargo test -p integration_tests --test cucumber --
+        // --tags '@confidential or @claim_burn'` runs a subset (every feature carries its name
+        // as a tag), `--name <regex>` matches scenario names.
+        .with_cli(cucumber::cli::Opts::<_, _, _, cucumber::cli::Empty>::parsed())
         .before(move |_feature, _rule, scenario, world| {
             log::info!(target: LOG_TARGET, "\n\n\n");
             log::info!(target: LOG_TARGET, "-------------------------------------------------------");

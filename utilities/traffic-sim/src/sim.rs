@@ -239,7 +239,7 @@ impl TrafficSim {
                     attach_sender_address: false,
                     pay_ref: None,
                 }],
-                max_fee: 1000,
+                max_fee: 10000,
                 dry_run: false,
             })
             .await?;

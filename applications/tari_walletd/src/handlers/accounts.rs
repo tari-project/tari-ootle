@@ -21,8 +21,8 @@ use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutput
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
-        stealth_outputs::TransferStatementParams,
-        stealth_transfer::{StealthTransferParams, TransferOutput},
+        stealth_outputs::{StealthOutputsApiError, TransferStatementParams},
+        stealth_transfer::{InputsToSpend, StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
     models::{
@@ -1397,19 +1397,42 @@ pub async fn handle_create_stealth_transfer_statement(
 
         let amount_to_spend = req.total_output_amount();
 
-        let inputs = req
-            .input_selection
-            .as_selection()
-            .map(|sel| {
-                sdk.stealth_transfer_api().lock_inputs_for_transfer(
-                    lock.id(),
+        let inputs = if let Some(utxo_addresses) = req.input_selection.as_specific() {
+            // Exact stealth inputs named by the caller: resolve, validate and lock precisely these UTXOs,
+            // preserving the requested order. They contribute no revealed amount. Naming exact UTXOs (and thus
+            // learning their decrypted totals through the balance check) requires scoped stealth-UTXO read
+            // authority in addition to the transfer-create scope enforced above.
+            enforce_scopes(&granted, &[Permission::StealthUtxos(
+                Crud::Read,
+                Some(*sender_account.component_address()),
+            )])?;
+            let inputs = sdk
+                .stealth_outputs_api()
+                .lock_specific_outputs(
                     sender_account.component_address(),
-                    req.resource_address,
-                    amount_to_spend,
-                    sel,
+                    &req.resource_address,
+                    lock.id(),
+                    utxo_addresses,
                 )
+                .map_err(map_specific_selection_error)?;
+            Some(InputsToSpend {
+                inputs,
+                revealed: Amount::zero(),
             })
-            .transpose()?;
+        } else {
+            req.input_selection
+                .as_selection()
+                .map(|sel| {
+                    sdk.stealth_transfer_api().lock_inputs_for_transfer(
+                        lock.id(),
+                        sender_account.component_address(),
+                        req.resource_address,
+                        amount_to_spend,
+                        sel,
+                    )
+                })
+                .transpose()?
+        };
 
         let must_sign_with_account_key = inputs.as_ref().is_some_and(|i| i.revealed.is_positive());
         let signing_key_id = if must_sign_with_account_key {
@@ -1468,6 +1491,22 @@ pub async fn handle_create_stealth_transfer_statement(
         signing_keys: required_signers.into_iter().collect(),
         utxo_signers: utxo_signers.into_iter().collect(),
     })
+}
+
+/// Map a `lock_specific_outputs` failure to an RPC error. Caller-invalid selections (the SDK's `InvalidParameter`)
+/// collapse to a single generic `invalid_params` that never reveals whether a named UTXO is unknown, foreign,
+/// wrong-resource, or otherwise ineligible; genuine internal failures (storage, crypto) propagate unchanged as a
+/// server error.
+fn map_specific_selection_error(err: StealthOutputsApiError) -> anyhow::Error {
+    if matches!(err, StealthOutputsApiError::InvalidParameter { .. }) {
+        debug!(target: LOG_TARGET, "Rejected specific stealth input selection: {err}");
+        invalid_params(
+            "utxo_addresses",
+            Some("one or more requested UTXOs are unavailable or ineligible for this account"),
+        )
+    } else {
+        err.into()
+    }
 }
 
 pub async fn handle_associate_stealth_resource(
@@ -1743,5 +1782,421 @@ mod balance_change_handler_tests {
         drop(transaction_service);
         utxo_worker.abort();
         drop(utxo_worker.await);
+    }
+}
+
+#[cfg(test)]
+mod create_stealth_transfer_statement_handler_tests {
+    use std::str::FromStr;
+
+    use axum_extra::headers::{Authorization, authorization::Bearer};
+    use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
+    use tari_engine_types::resource::Resource;
+    use tari_ootle_address::{Network, OotleAddress, RistrettoOotleAddress};
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_wallet_crypto::pay_to::PayTo;
+    use tari_ootle_wallet_sdk::{
+        WalletSdkConfig,
+        cipher_seed::CipherSeedRestore,
+        models::{EpochBirthday, KeyBranch, KeyId, OutputStatus, StealthOutputModel},
+    };
+    use tari_ootle_wallet_sdk_services::{
+        account_monitor::AccountMonitor,
+        indexer_rest_api::IndexerRestApiNetworkInterface,
+        notify::Notify,
+        transaction_service::TransactionService,
+        utxo_scanner::StealthUtxoScannerWorker,
+    };
+    use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+    use tari_ootle_walletd_client::{
+        permissions::Permissions,
+        types::{InputSelection, TransferStatementRequest},
+    };
+    use tari_shutdown::Shutdown;
+    use tari_template_lib_types::{
+        ComponentAddress,
+        Metadata,
+        ResourceAddress,
+        SubstateOwnerRule,
+        UtxoAddress,
+        access_rules::ResourceAccessRules,
+        constants::TOKEN_SYMBOL,
+        crypto::PedersenCommitmentBytes,
+    };
+    use tari_utilities::SafePassword;
+
+    use super::*;
+    use crate::{
+        WalletSdk,
+        config::{WalletDaemonAuth, WalletDaemonConfig},
+        handlers::{
+            HandlerContext,
+            auth::{create_authenticator, jwt::AuthError},
+        },
+    };
+
+    /// A ready-to-use handler context for `account`, with a stealth resource cached locally so `fetch_resource`
+    /// resolves offline. Tests mint their own bearer with [`StatementTest::bearer`] to control which scopes are
+    /// granted. The wallet's background workers are not exercised by this handler, so they are torn down during
+    /// setup. `_temp` keeps the SQLite directory alive for the test.
+    struct StatementTest {
+        context: HandlerContext,
+        account: ComponentAddress,
+        stealth_resource: ResourceAddress,
+        _temp: tempfile::TempDir,
+    }
+
+    impl StatementTest {
+        /// A bearer token granting exactly `permissions` (a comma-separated scope string).
+        fn bearer(&self, permissions: &str) -> Bearer {
+            let permissions = Permissions::from_str(permissions).unwrap();
+            let claims = self.context.jwt_api().generate_auth_claims(permissions).unwrap();
+            let token = self.context.jwt_api().grant(&claims).unwrap();
+            Authorization::<Bearer>::bearer(&token).unwrap().0
+        }
+
+        /// Both scopes the Specific path requires: transfer-create and stealth-UTXO-read for this account.
+        fn transfer_and_read_scopes(&self) -> String {
+            format!(
+                "transfer:create:{account},stealth_utxos:read:{account}",
+                account = self.account
+            )
+        }
+    }
+
+    async fn setup() -> StatementTest {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SqliteWalletStore::try_open(temp.path().join("wallet.sqlite")).unwrap();
+        store.run_migrations().unwrap();
+        let mut sdk = WalletSdk::initialize_with_local_key_store(
+            store.clone(),
+            IndexerRestApiNetworkInterface::new("http://127.0.0.1:18300"),
+            WalletSdkConfig {
+                network: Network::LocalNet,
+                override_keyring_password: Some(SafePassword::from_str("test wallet password").unwrap()),
+            },
+            EpochBirthday::far_future(),
+        )
+        .unwrap();
+        sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
+            .unwrap();
+
+        let account: ComponentAddress = "component_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
+            .parse()
+            .unwrap();
+        sdk.accounts_api()
+            .add_account(
+                Some("stealth"),
+                &account,
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                KeyId::derived(KeyBranch::Account, 0),
+                Epoch::zero(),
+                true,
+                true,
+            )
+            .unwrap();
+
+        let stealth_resource: ResourceAddress =
+            "resource_0000000000000000000000000000000000000000000000000000000000000abc"
+                .parse()
+                .unwrap();
+        sdk.resources_api()
+            .upsert_resource(
+                &stealth_resource,
+                &Resource::new(
+                    ResourceType::Stealth,
+                    SubstateOwnerRule::None,
+                    ResourceAccessRules::new(),
+                    Metadata::from([(TOKEN_SYMBOL, "sTST")]),
+                    None,
+                    None,
+                    0,
+                    false,
+                ),
+            )
+            .unwrap();
+
+        let notify = Notify::new(10);
+        let mut shutdown = Shutdown::new();
+        let (transaction_service, transaction_service_handle) =
+            TransactionService::new(notify.clone(), sdk.clone(), shutdown.to_signal());
+        let (utxo_worker, utxo_scanner_handle) = StealthUtxoScannerWorker::new(sdk.clone(), notify.clone()).spawn();
+        let (account_monitor, account_monitor_handle) =
+            AccountMonitor::new(notify.clone(), sdk.clone(), utxo_scanner_handle, shutdown.to_signal());
+        let mut config = WalletDaemonConfig::default();
+        config.network = Network::LocalNet;
+        config.authentication = WalletDaemonAuth::None;
+        let context = HandlerContext::new(
+            sdk,
+            notify,
+            transaction_service_handle,
+            account_monitor_handle,
+            config.clone(),
+            create_authenticator(&config, store).unwrap(),
+            SafePassword::from_str("test jwt secret").unwrap(),
+            shutdown.to_signal(),
+        );
+
+        // The transaction service, account monitor and scanner are not used by this handler; shut them down now.
+        shutdown.trigger();
+        drop(account_monitor);
+        drop(transaction_service);
+        utxo_worker.abort();
+        drop(utxo_worker.await);
+
+        StatementTest {
+            context,
+            account,
+            stealth_resource,
+            _temp: temp,
+        }
+    }
+
+    /// The test account's Ootle address, used as the destination for balancing outputs.
+    fn account_ootle_address(test: &StatementTest) -> OotleAddress {
+        let account = ComponentAddressOrName::from(test.account);
+        let sender = get_account(&account, &test.context.wallet_sdk().accounts_api()).unwrap();
+        sender.address().clone()
+    }
+
+    /// Mints a cryptographically valid, wallet-owned, on-chain stealth output for the test account worth `value` and
+    /// inserts it. The commitment/nonce/encrypted-data/auth all come from a real output witness, so the input can be
+    /// decrypted and spent through the statement flow. Returns the stored model.
+    fn insert_valid_output(test: &StatementTest, value: u64) -> StealthOutputModel {
+        let sdk = test.context.wallet_sdk();
+        let account = ComponentAddressOrName::from(test.account);
+        let sender = get_account(&account, &sdk.accounts_api()).unwrap();
+        let owner_address: RistrettoOotleAddress = sender.address().try_from_byte_type().unwrap();
+        let witness = sdk
+            .stealth_outputs_api()
+            .create_output_witness(
+                &owner_address,
+                value,
+                &test.stealth_resource,
+                None,
+                None,
+                PayTo::StealthPublicKey,
+            )
+            .unwrap();
+        let model = StealthOutputModel {
+            owner_account: test.account,
+            resource_address: test.stealth_resource,
+            commitment: witness.witness.to_commitment().to_byte_type(),
+            value,
+            sender_public_nonce: witness.witness.sender_public_nonce.to_byte_type(),
+            view_only_key_id: sender.view_only_key_id(),
+            owner_key_id: sender.owner_key_id(),
+            encrypted_data: witness.witness.encrypted_data.clone(),
+            tag_byte: witness.tag,
+            memo: None,
+            auth: witness.auth.clone(),
+            minimum_value_promise: witness.witness.minimum_value_promise,
+            status: OutputStatus::Unspent,
+            is_burnt: false,
+            is_frozen: false,
+            is_on_chain: true,
+            is_condition_spendable: true,
+            lock_id: None,
+        };
+        sdk.stealth_outputs_api().add_output(&model).unwrap();
+        model
+    }
+
+    /// Reads a stored output back by commitment for post-call assertions.
+    fn stored_output(test: &StatementTest, commitment: &PedersenCommitmentBytes) -> StealthOutputModel {
+        test.context
+            .wallet_sdk()
+            .stealth_outputs_api()
+            .utxos_get_many(&test.stealth_resource, Some(&test.account), None)
+            .unwrap()
+            .into_iter()
+            .find(|o| &o.commitment == commitment)
+            .expect("output present in store")
+    }
+
+    fn specific_request(
+        account: ComponentAddress,
+        resource: ResourceAddress,
+        utxo_addresses: Vec<UtxoAddress>,
+    ) -> AccountsCreateStealthTransferStatementRequest {
+        AccountsCreateStealthTransferStatementRequest {
+            requests: vec![TransferStatementRequest {
+                sender_account: account.into(),
+                resource_address: resource,
+                input_selection: InputSelection::Specific { utxo_addresses },
+                outputs: vec![],
+            }],
+        }
+    }
+
+    /// Downcasts a handler error to a `JsonRpcError` and asserts it is `InvalidParams`.
+    fn assert_invalid_params(err: &anyhow::Error) -> &JsonRpcError {
+        let rpc = err
+            .downcast_ref::<JsonRpcError>()
+            .unwrap_or_else(|| panic!("expected a JsonRpcError, got: {err}"));
+        assert!(
+            matches!(rpc.error_reason(), JsonRpcErrorReason::InvalidParams),
+            "expected InvalidParams, got: {:?}",
+            rpc.error_reason()
+        );
+        rpc
+    }
+
+    #[tokio::test]
+    async fn specific_requires_stealth_utxo_read_scope() {
+        let test = setup().await;
+        // Only transfer-create is granted; the specific path additionally requires stealth_utxos:read.
+        let bearer = test.bearer(&format!("transfer:create:{}", test.account));
+        let utxo = UtxoAddress::new(
+            test.stealth_resource,
+            PedersenCommitmentBytes::from_array([1u8; PedersenCommitmentBytes::length()]).into(),
+        );
+        let request = specific_request(test.account, test.stealth_resource, vec![utxo]);
+        let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
+            .await
+            .expect_err("specific selection without stealth_utxos:read must be rejected");
+        let auth_err = err
+            .downcast_ref::<AuthError>()
+            .unwrap_or_else(|| panic!("expected an AuthError, got: {err}"));
+        assert!(matches!(auth_err, AuthError::InsufficientPermissions { .. }));
+        assert!(
+            auth_err.to_string().contains("StealthUtxos"),
+            "the missing scope should be the stealth-UTXO read scope: {auth_err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_specific_inputs() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let request = specific_request(test.account, test.stealth_resource, vec![]);
+        let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
+            .await
+            .expect_err("empty specific input list must be rejected");
+        assert_invalid_params(&err);
+    }
+
+    #[tokio::test]
+    async fn rejects_ineligible_specific_input_without_disclosure() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        // A well-formed but unknown UTXO for the correct resource.
+        let unknown = UtxoAddress::new(
+            test.stealth_resource,
+            PedersenCommitmentBytes::from_array([9u8; PedersenCommitmentBytes::length()]).into(),
+        );
+        let request = specific_request(test.account, test.stealth_resource, vec![unknown]);
+        let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
+            .await
+            .expect_err("unknown specific input must be rejected");
+        let message = assert_invalid_params(&err).to_string();
+        // The wire message is generic: it must not reveal whether the commitment is unknown, foreign, or otherwise
+        // ineligible.
+        assert!(
+            message.contains("unavailable or ineligible"),
+            "not a generic message: {message}"
+        );
+        assert!(!message.contains("not known"), "leaks existence: {message}");
+        assert!(!message.contains("does not belong"), "leaks ownership: {message}");
+    }
+
+    #[tokio::test]
+    async fn specific_selection_builds_balanced_statement_in_request_order() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+
+        // Two valid wallet-owned inputs, inserted a then b.
+        let output_a = insert_valid_output(&test, 100);
+        let output_b = insert_valid_output(&test, 200);
+
+        // Request them in reverse insertion order, with a single output that balances the selected inputs exactly.
+        let request = AccountsCreateStealthTransferStatementRequest {
+            requests: vec![TransferStatementRequest {
+                sender_account: test.account.into(),
+                resource_address: test.stealth_resource,
+                input_selection: InputSelection::Specific {
+                    utxo_addresses: vec![output_b.to_utxo_address(), output_a.to_utxo_address()],
+                },
+                outputs: vec![TransferOutput {
+                    address: account_ootle_address(&test),
+                    revealed_amount: Amount::zero(),
+                    blinded_amount: 300,
+                    memo: None,
+                    pay_to: PayTo::StealthPublicKey,
+                }],
+            }],
+        };
+
+        let response = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
+            .await
+            .expect("a valid, balanced specific request should succeed");
+
+        // Exactly one statement, whose inputs follow the caller's requested order (b then a).
+        assert_eq!(response.statements.len(), 1);
+        let inputs = &response.statements[0].inputs_statement.inputs;
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].commitment, output_b.commitment);
+        assert_eq!(inputs[1].commitment, output_a.commitment);
+
+        // UTXO signers are returned in the same requested order.
+        assert_eq!(response.utxo_signers.len(), 2);
+        assert_eq!(response.utxo_signers[0].public_nonce, output_b.sender_public_nonce);
+        assert_eq!(response.utxo_signers[1].public_nonce, output_a.sender_public_nonce);
+
+        // keep_locked was reached: both selected outputs remain LockedForSpend under the returned lock.
+        for output in [&output_b, &output_a] {
+            let stored = stored_output(&test, &output.commitment);
+            assert!(
+                matches!(stored.status, OutputStatus::LockedForSpend),
+                "expected LockedForSpend, got {:?}",
+                stored.status
+            );
+            assert_eq!(stored.lock_id, Some(response.lock_id));
+        }
+    }
+
+    #[tokio::test]
+    async fn unbalanced_specific_statement_releases_the_lock() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+
+        // A valid, spendable input worth 100.
+        let output = insert_valid_output(&test, 100);
+
+        // Deliberately provide an output that does not balance the selected input (100 in, 40 out): a deterministic
+        // statement-construction failure that happens after the input has been locked.
+        let request = AccountsCreateStealthTransferStatementRequest {
+            requests: vec![TransferStatementRequest {
+                sender_account: test.account.into(),
+                resource_address: test.stealth_resource,
+                input_selection: InputSelection::Specific {
+                    utxo_addresses: vec![output.to_utxo_address()],
+                },
+                outputs: vec![TransferOutput {
+                    address: account_ootle_address(&test),
+                    revealed_amount: Amount::zero(),
+                    blinded_amount: 40,
+                    memo: None,
+                    pay_to: PayTo::StealthPublicKey,
+                }],
+            }],
+        };
+
+        let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
+            .await
+            .expect_err("an unbalanced statement must fail after locking");
+        assert!(
+            err.to_string().contains("do not balance"),
+            "expected a balance error, got: {err}"
+        );
+
+        // The lock guard released the selected output on failure: it is Unspent again with no lock.
+        let stored = stored_output(&test, &output.commitment);
+        assert!(
+            matches!(stored.status, OutputStatus::Unspent),
+            "expected Unspent after release, got {:?}",
+            stored.status
+        );
+        assert_eq!(stored.lock_id, None);
     }
 }

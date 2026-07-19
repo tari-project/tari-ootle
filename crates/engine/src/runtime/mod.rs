@@ -97,6 +97,7 @@ use tari_template_lib::{
     },
     models::{BucketId, VaultRef},
     types::{
+        Amount,
         ComponentAddress,
         EntityId,
         LogLevel,
@@ -183,7 +184,11 @@ pub trait RuntimeInterface {
         output_data: ClaimBurnOutputData,
     ) -> Result<(), RuntimeError>;
 
-    fn claim_validator_fees(&mut self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
+    fn claim_validator_fees(
+        &mut self,
+        address: ValidatorFeePoolAddress,
+        max_amount: Option<Amount>,
+    ) -> Result<(), RuntimeError>;
 
     fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError>;
     fn finalize(&mut self) -> Result<FinalizeResult, RuntimeError>;

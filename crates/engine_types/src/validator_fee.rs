@@ -85,13 +85,19 @@ impl ValidatorFeePool {
     /// If the pool has insufficient funds, an error is returned.
     /// This function is used in the engine to withdraw the funds from the pool and create a Bucket.
     pub fn withdraw_all(&mut self) -> Result<ResourceContainer, ResourceError> {
+        self.withdraw_up_to(Amount::MAX)
+    }
+
+    /// Withdraws up to max_amount from the pool and returns them in a ResourceContainer.
+    pub fn withdraw_up_to(&mut self, max_amount: Amount) -> Result<ResourceContainer, ResourceError> {
         if self.amount == 0 {
             return Err(ResourceError::InsufficientBalance {
                 details: "ValidatorFeePool has insufficient balance. Current balance is 0".to_string(),
             });
         }
-        let amount = self.amount;
-        self.amount = 0;
+        let max_u64 = u64::try_from(max_amount.to_u128()).unwrap_or(u64::MAX);
+        let amount = self.amount.min(max_u64);
+        self.amount -= amount;
         Ok(ResourceContainer::Stealth {
             address: TARI_TOKEN,
             revealed_amount: amount.into(),

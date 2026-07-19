@@ -356,10 +356,10 @@ export function displayNftId(nftId: NonFungibleId): string {
     return `NFT #${nftId.Uint32}`;
   }
   if ("String" in nftId) {
-    return `NFT #${nftId.String}`;
+    return `NFT: ${nftId.String}`;
   }
 
-  return `NFT #${JSON.stringify(nftId)}`;
+  return `NFT ${JSON.stringify(nftId)}`;
 }
 
 /**

@@ -782,7 +782,19 @@ impl<D> TransactionBuilder<D> {
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
         self.then(|b| if b.fill_inputs { b.add_input(address) } else { b })
-            .add_instruction(Instruction::ClaimValidatorFees { address })
+            .add_instruction(Instruction::ClaimValidatorFees {
+                address,
+                max_amount: None,
+            })
+    }
+
+    pub fn claim_validator_fees_up_to<A: Into<Amount>>(self, address: ValidatorFeePoolAddress, max_amount: A) -> Self {
+        let max_amount = max_amount.into();
+        self.then(|b| if b.fill_inputs { b.add_input(address) } else { b })
+            .add_instruction(Instruction::ClaimValidatorFees {
+                address,
+                max_amount: Some(max_amount),
+            })
     }
 
     pub fn create_proof<A: Into<ComponentReference>>(self, account: A, resource_addr: ResourceAddress) -> Self {
@@ -904,7 +916,7 @@ impl<D> TransactionBuilder<D> {
 
                 self.add_input_for_resource_ref(resource_address_ref);
             },
-            Instruction::ClaimValidatorFees { address } => {
+            Instruction::ClaimValidatorFees { address, .. } => {
                 self.unsigned_transaction.inputs_mut().insert((*address).into());
             },
             Instruction::Assert {

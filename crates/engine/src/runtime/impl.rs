@@ -3353,9 +3353,16 @@ where
         Ok(())
     }
 
-    fn claim_validator_fees(&mut self, pool_address: ValidatorFeePoolAddress) -> Result<(), RuntimeError> {
+    fn claim_validator_fees(
+        &mut self,
+        pool_address: ValidatorFeePoolAddress,
+        max_amount: Option<Amount>,
+    ) -> Result<(), RuntimeError> {
         self.tracker.write_with(|state| {
-            let resource = state.withdraw_all_fees_from_pool(pool_address)?;
+            let resource = match max_amount {
+                Some(max_amount) => state.withdraw_fees_from_pool_up_to(pool_address, max_amount)?,
+                None => state.withdraw_all_fees_from_pool(pool_address)?,
+            };
             let bucket_id = state.new_bucket_id();
             state.new_bucket(bucket_id, resource)?;
             state.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);

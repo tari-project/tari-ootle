@@ -22,11 +22,11 @@
 
 use std::{collections::HashSet, fmt::Display};
 
-use libp2p::{PeerId, gossipsub};
+use libp2p::gossipsub::MessageAcceptance;
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
-use tari_networking::NetworkingHandle;
+use tari_networking::{GossipMessage, NetworkingHandle};
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_p2p::{NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::TransactionRecord};
@@ -40,7 +40,7 @@ use super::metrics::PrometheusMempoolMetrics;
 use crate::{
     consensus::ConsensusHandle,
     p2p::services::mempool::{
-        gossip::{IncomingMessage, MempoolGossip},
+        gossip::{GossipValidation, IncomingMessage, MempoolGossip},
         handle::MempoolRequest,
     },
 };
@@ -74,7 +74,7 @@ where
         state_store: TStateStore,
         consensus_handle: ConsensusHandle,
         networking: NetworkingHandle<TariMessagingSpec>,
-        rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+        rx_gossip: mpsc::UnboundedReceiver<GossipMessage>,
         #[cfg(feature = "metrics")] metrics: PrometheusMempoolMetrics,
     ) -> Self {
         Self {
@@ -192,7 +192,7 @@ where
         self.handle_new_transaction(
             transaction,
             transaction_id,
-            true,
+            None,
             self.gossip.get_num_incoming_messages(),
         )
         .await?;
@@ -209,20 +209,25 @@ where
             message: msg,
             num_pending,
             message_size,
+            validation,
         } = result?;
         let TariMessage::NewTransaction(msg) = msg;
         let NewTransactionMessage { transaction } = *msg;
         let transaction_id = transaction.calculate_id();
 
+        // Well-formed but of no interest to us: withhold it without penalising the sender. Another
+        // node still holding it will propagate it if it is useful to them.
         if !self.consensus_handle.is_running() {
             info!(
                 target: LOG_TARGET,
                 "🎱 Transaction {transaction_id} received while not in running state. Ignoring",
             );
+            self.gossip.report(validation, MessageAcceptance::Ignore).await;
             return Ok(());
         }
 
         if self.transaction_exists(&transaction_id)? {
+            self.gossip.report(validation, MessageAcceptance::Ignore).await;
             return Ok(());
         }
         debug!(
@@ -234,7 +239,7 @@ where
             transaction
         );
 
-        self.handle_new_transaction(transaction, transaction_id, false, num_pending)
+        self.handle_new_transaction(transaction, transaction_id, Some(validation), num_pending)
             .await?;
 
         Ok(())
@@ -242,18 +247,38 @@ where
 
     /// `tx_id` must be the id of `transaction`. Taken from the caller rather than recomputed:
     /// deriving it hashes every blob payload, and both callers already hold it.
+    ///
+    /// `gossip_validation` is `Some` for a transaction that arrived over gossip, and carries the
+    /// handle its verdict must be reported against; `None` marks a transaction introduced by a local
+    /// client, which we are responsible for publishing.
     #[allow(clippy::too_many_lines)]
     async fn handle_new_transaction(
         &mut self,
         transaction: Transaction,
         tx_id: TransactionId,
-        is_local: bool,
+        gossip_validation: Option<GossipValidation>,
         num_pending: usize,
     ) -> Result<(), MempoolError> {
         #[cfg(feature = "metrics")]
         self.metrics.on_transaction_received(&transaction);
+        let is_local = gossip_validation.is_none();
 
-        if let Err(e) = self.before_execute_validator.validate(&(), &transaction) {
+        let validation_result = self.before_execute_validator.validate(&(), &transaction);
+
+        // Reported here rather than at the end of this function: everything below is about whether
+        // *we* act on the transaction, not whether it is valid, and gossipsub only holds a message
+        // in its validation cache for a few heartbeats. A transaction we are not involved in is
+        // still accepted — other shard groups need it.
+        if let Some(validation) = gossip_validation {
+            let acceptance = if validation_result.is_ok() {
+                MessageAcceptance::Accept
+            } else {
+                MessageAcceptance::Reject
+            };
+            self.gossip.report(validation, acceptance).await;
+        }
+
+        if let Err(e) = validation_result {
             // Throw the transaction away
             #[cfg(feature = "metrics")]
             self.metrics.on_transaction_validation_error(&tx_id, &e);

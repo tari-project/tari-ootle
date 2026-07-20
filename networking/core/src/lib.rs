@@ -8,6 +8,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use libp2p::gossipsub;
 use tokio::sync::oneshot;
 
 mod worker;
@@ -66,6 +67,20 @@ pub trait NetworkingService<TMsg: MessageSpec> {
         &mut self,
         topic: TTopic,
         message: Vec<u8>,
+    ) -> Result<(), NetworkingError>;
+
+    /// Reports the outcome of validating an inbound gossip message.
+    ///
+    /// gossipsub runs in `validate_messages` mode: a message is propagated to the rest of the mesh
+    /// only once `Accept` is reported for it, so every message a consumer receives must be reported
+    /// exactly once or that topic stops propagating. `Reject` withholds it and counts against the
+    /// propagating peer's score; `Ignore` withholds it without penalty, for messages that are
+    /// well-formed but uninteresting to us (duplicates, wrong epoch).
+    async fn report_gossip_validation(
+        &mut self,
+        message_id: gossipsub::MessageId,
+        propagation_source: PeerId,
+        acceptance: gossipsub::MessageAcceptance,
     ) -> Result<(), NetworkingError>;
 
     async fn subscribe_topic<T: Into<String> + Send>(&mut self, topic: T) -> Result<(), NetworkingError> {

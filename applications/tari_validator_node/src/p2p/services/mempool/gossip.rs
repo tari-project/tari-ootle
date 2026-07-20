@@ -3,7 +3,7 @@
 
 use libp2p::{PeerId, gossipsub};
 use log::*;
-use tari_networking::{NetworkingHandle, NetworkingService};
+use tari_networking::{GossipMessage, NetworkingHandle, NetworkingService};
 use tari_ootle_p2p::{NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec, proto};
 use tari_swarm::messaging::{Codec, prost::ProstCodec};
 use tokio::sync::mpsc;
@@ -48,14 +48,14 @@ impl MempoolGossipCodec {
 pub(super) struct MempoolGossip {
     is_subscribed: bool,
     networking: NetworkingHandle<TariMessagingSpec>,
-    rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+    rx_gossip: mpsc::UnboundedReceiver<GossipMessage>,
     codec: MempoolGossipCodec,
 }
 
 impl MempoolGossip {
     pub fn new(
         networking: NetworkingHandle<TariMessagingSpec>,
-        rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+        rx_gossip: mpsc::UnboundedReceiver<GossipMessage>,
     ) -> Self {
         Self {
             is_subscribed: false,
@@ -66,17 +66,38 @@ impl MempoolGossip {
     }
 
     pub async fn next_message(&mut self) -> Option<Result<IncomingMessage, MempoolError>> {
-        let (from, msg) = self.rx_gossip.recv().await?;
+        let gossip = self.rx_gossip.recv().await?;
         // Number of transactions still to receive
         let num_pending = self.rx_gossip.len();
-        match self.codec.decode(msg).await {
+        let validation = GossipValidation::new(gossip.validation_key());
+        let from = gossip.source;
+        match self.codec.decode(gossip.message).await {
             Ok((msg_len, msg)) => Some(Ok(IncomingMessage {
                 address: from.into(),
                 message: msg,
                 num_pending,
                 message_size: msg_len,
+                validation,
             })),
-            Err(e) => Some(Err(MempoolError::InvalidMessage(e.into()))),
+            Err(e) => {
+                // Undecodable: withhold from the mesh and count it against the peer that sent it.
+                self.report(validation, gossipsub::MessageAcceptance::Reject).await;
+                Some(Err(MempoolError::InvalidMessage(e.into())))
+            },
+        }
+    }
+
+    /// Reports an inbound message's validation verdict. gossipsub withholds the message from the
+    /// rest of the mesh until this is called, so every message taken from `next_message` must be
+    /// reported exactly once.
+    pub async fn report(&mut self, validation: GossipValidation, acceptance: gossipsub::MessageAcceptance) {
+        let (message_id, propagation_source) = validation.into_key();
+        if let Err(e) = self
+            .networking
+            .report_gossip_validation(message_id, propagation_source, acceptance)
+            .await
+        {
+            warn!(target: LOG_TARGET, "Failed to report gossip validation result: {e}");
         }
     }
 
@@ -127,4 +148,24 @@ pub struct IncomingMessage {
     pub message: TariMessage,
     pub num_pending: usize,
     pub message_size: usize,
+    /// Identifies this message when reporting its validation verdict. Must be passed to
+    /// [`MempoolGossip::report`] exactly once, or the message is never propagated onward.
+    pub validation: GossipValidation,
+}
+
+/// Handle identifying one inbound gossip message for the purpose of reporting its validation
+/// verdict. Deliberately not `Clone`: a verdict is reported once per message.
+#[derive(Debug)]
+pub struct GossipValidation {
+    key: (gossipsub::MessageId, PeerId),
+}
+
+impl GossipValidation {
+    fn new(key: (gossipsub::MessageId, PeerId)) -> Self {
+        Self { key }
+    }
+
+    fn into_key(self) -> (gossipsub::MessageId, PeerId) {
+        self.key
+    }
 }

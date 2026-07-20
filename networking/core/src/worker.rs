@@ -53,6 +53,7 @@ use tokio::{
 };
 
 use crate::{
+    GossipMessage,
     MessageSpec,
     MessagingMode,
     NetworkingError,
@@ -306,6 +307,19 @@ where
                     debug!(target: LOG_TARGET, "🚨 Failed to publish gossipsub message on {topic}: {}", err);
                     let _ignore = reply_tx.send(Err(err.into()));
                 },
+            },
+            NetworkingRequest::ReportGossipValidation {
+                message_id,
+                propagation_source,
+                acceptance,
+            } => {
+                if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                    &message_id,
+                    &propagation_source,
+                    acceptance,
+                ) {
+                    warn!(target: LOG_TARGET, "Unable to report gossip validation result for {message_id} because message was not in cache");
+                }
             },
             NetworkingRequest::SubscribeTopic {
                 topic,
@@ -738,20 +752,45 @@ where
         source: PeerId,
         message: gossipsub::Message,
     ) -> Result<(), NetworkingError> {
-        // We accept all messages as we cannot validate them in this service.
-        // We could allow users to report back the validation result e.g. if a proposal is valid, however a naive
-        // implementation would likely incur a substantial cost for many messages.
-        if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
-            &message_id,
-            &propagation_source,
-            gossipsub::MessageAcceptance::Accept,
-        ) {
-            warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
-        }
-        if let Err(e) = self.messaging_mode.send_gossip_message(source, message) {
+        // Propagation is withheld until the consumer reports a verdict via
+        // `NetworkingRequest::ReportGossipValidation`, so an invalid message is never relayed on our
+        // behalf. If no consumer is subscribed to the topic there is nobody to produce a verdict, so
+        // report `Ignore` here rather than leaving the message pinned in the validation cache.
+        let topic = message.topic.clone();
+        let len = message.data.len();
+        if let Err(e) = self.messaging_mode.send_gossip_message(GossipMessage {
+            source,
+            propagation_source,
+            message_id: message_id.clone(),
+            message,
+        }) {
             warn!(target: LOG_TARGET, "📢 Gossipsub message failed to be handled: {}", e);
+            self.report_gossip_validation(
+                &message_id,
+                &propagation_source,
+                gossipsub::MessageAcceptance::Ignore,
+                &topic,
+                len,
+            );
         }
         Ok(())
+    }
+
+    fn report_gossip_validation(
+        &mut self,
+        message_id: &gossipsub::MessageId,
+        propagation_source: &PeerId,
+        acceptance: gossipsub::MessageAcceptance,
+        topic: &gossipsub::TopicHash,
+        len: usize,
+    ) {
+        if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+            message_id,
+            propagation_source,
+            acceptance,
+        ) {
+            warn!(target: LOG_TARGET, "Unable to report gossip validation result for topic {topic}, {len} bytes because message was not in cache");
+        }
     }
 
     #[cfg(feature = "metrics")]

@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use libp2p::{PeerId, gossipsub};
+use libp2p::PeerId;
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::EpochManagerEvent;
-use tari_networking::NetworkingHandle;
+use tari_networking::{GossipMessage, NetworkingHandle};
 use tari_ootle_p2p::{TariMessagingSpec, proto};
 use tokio::{
     sync::{broadcast, mpsc},
@@ -40,7 +40,7 @@ pub fn spawn(
     epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
     consensus_events: broadcast::Receiver<HotstuffEvent>,
     networking: NetworkingHandle<TariMessagingSpec>,
-    rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+    rx_gossip: mpsc::UnboundedReceiver<GossipMessage>,
 ) -> (
     ConsensusGossipHandle,
     JoinHandle<anyhow::Result<()>>,

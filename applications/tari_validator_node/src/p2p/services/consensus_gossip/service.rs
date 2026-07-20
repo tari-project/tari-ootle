@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use libp2p::{PeerId, gossipsub};
+use libp2p::{PeerId, gossipsub::MessageAcceptance};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::EpochManagerEvent;
-use tari_networking::{NetworkingHandle, NetworkingService};
+use tari_networking::{GossipMessage, NetworkingHandle, NetworkingService};
 use tari_ootle_p2p::{TariMessagingSpec, proto};
 use tari_swarm::messaging::{Codec, prost::ProstCodec};
 use tokio::sync::{broadcast, mpsc};
@@ -45,7 +45,7 @@ pub(super) struct ConsensusGossipService {
     is_subscribed: bool,
     networking: NetworkingHandle<TariMessagingSpec>,
     codec: ProstCodec<proto::consensus::HotStuffMessage>,
-    rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+    rx_gossip: mpsc::UnboundedReceiver<GossipMessage>,
     tx_consensus_gossip: mpsc::Sender<(PeerId, proto::consensus::HotStuffMessage)>,
 }
 
@@ -54,7 +54,7 @@ impl ConsensusGossipService {
         epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
         consensus_events: broadcast::Receiver<HotstuffEvent>,
         networking: NetworkingHandle<TariMessagingSpec>,
-        rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
+        rx_gossip: mpsc::UnboundedReceiver<GossipMessage>,
         tx_consensus_gossip: mpsc::Sender<(PeerId, proto::consensus::HotStuffMessage)>,
     ) -> Self {
         Self {
@@ -102,17 +102,29 @@ impl ConsensusGossipService {
         Ok(())
     }
 
-    async fn handle_incoming_gossip_message(
-        &mut self,
-        msg: (PeerId, gossipsub::Message),
-    ) -> Result<(), ConsensusGossipError> {
-        let (from, msg) = msg;
+    async fn handle_incoming_gossip_message(&mut self, gossip: GossipMessage) -> Result<(), ConsensusGossipError> {
+        let (message_id, propagation_source) = gossip.validation_key();
+        let from = gossip.source;
 
-        let (_, msg) = self
-            .codec
-            .decode_from(&mut msg.data.as_slice())
+        let decoded = self.codec.decode_from(&mut gossip.message.data.as_slice()).await;
+
+        // gossipsub withholds the message from the mesh until a verdict is reported. A message we
+        // cannot decode is withheld and counted against the peer that sent it; anything well-formed
+        // is accepted so it continues to propagate.
+        let acceptance = if decoded.is_ok() {
+            MessageAcceptance::Accept
+        } else {
+            MessageAcceptance::Reject
+        };
+        if let Err(e) = self
+            .networking
+            .report_gossip_validation(message_id, propagation_source, acceptance)
             .await
-            .map_err(|e| ConsensusGossipError::InvalidMessage(e.into()))?;
+        {
+            warn!(target: LOG_TARGET, "Failed to report gossip validation result: {e}");
+        }
+
+        let (_, msg) = decoded.map_err(|e| ConsensusGossipError::InvalidMessage(e.into()))?;
 
         self.tx_consensus_gossip
             .send((from, msg))

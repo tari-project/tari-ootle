@@ -135,7 +135,7 @@ async fn start_a_network_with_spec(world: &mut TariWorld, step: &Step) {
     let mut spec = NetworkSpec::default();
 
     if let Some(spec_toml) = step.docstring.as_ref() {
-        spec = serde_yaml::from_str::<NetworkSpec>(spec_toml).expect("Failed to parse network spec");
+        spec = yaml_serde::from_str::<NetworkSpec>(spec_toml).expect("Failed to parse network spec");
     }
 
     create_network(world, step, spec).await;

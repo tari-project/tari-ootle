@@ -569,12 +569,15 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
         throw origError;
       }
       const id = this.id++;
-      const refreshResp = (await this.transport.sendRequest<any>({
-        method: "auth.refresh",
-        jsonrpc: "2.0",
-        id,
-        params: {},
-      })) as RpcResponse<AuthLoginResponse>;
+      const refreshResp = (await this.transport.sendRequest<any>(
+        {
+          method: "auth.refresh",
+          jsonrpc: "2.0",
+          id,
+          params: {},
+        },
+        { token: this.token, timeout_millis: null },
+      )) as RpcResponse<AuthLoginResponse>;
 
       if (refreshResp.error) {
         console.debug("Refresh resp", refreshResp);

@@ -11377,6 +11377,7 @@ dependencies = [
  "ootle_byte_type",
  "rand 0.10.1",
  "serde",
+ "serde_json",
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",

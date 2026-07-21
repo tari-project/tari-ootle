@@ -25,7 +25,7 @@ use crate::support::{TEST_NUM_PRESHARDS, committee_number_to_shard_group, helper
 
 /// WASM metering points attributed to every fabricated test execution — a typical "normal"
 /// transaction. Sized so that even a block filled to `max_commands_in_block` stays within the
-/// default `max_block_wasm_points` budget: normal test transactions must never hit the budget.
+/// default `max_block_execution_points` budget: normal test transactions must never hit the budget.
 /// `TestBuilder::start` asserts this invariant against the final test config.
 pub const TEST_WASM_EXECUTION_POINTS: u64 = 5_000_000;
 
@@ -162,6 +162,7 @@ pub fn create_execution_result_for_transaction(
         execution_time: Duration::from_secs(0),
         execute_epoch: None,
         wasm_execution_points: TEST_WASM_EXECUTION_POINTS,
+        native_execution_points: 0,
     }
 }
 

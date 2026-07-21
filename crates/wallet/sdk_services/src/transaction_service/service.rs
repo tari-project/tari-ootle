@@ -145,6 +145,7 @@ where
                                 execution_time: finalized_transaction.execution_time.unwrap_or_default(),
                                 execute_epoch: None,
                                 wasm_execution_points: 0,
+                                native_execution_points: 0,
                             }))
                             .map_err(|_| TransactionServiceError::ServiceShutdown)?;
                     },

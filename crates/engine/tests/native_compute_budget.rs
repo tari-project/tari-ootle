@@ -15,7 +15,7 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::fees::FeeTable;
 use tari_engine_types::{
     fees::FeeSource,
-    limits::{FREE_COMPUTE_GRACE_POINTS, NativeExecutionPoints},
+    limits::{FREE_COMPUTE_GRACE_POINTS, MAX_NATIVE_POINTS_PER_TRANSACTION, NativeExecutionPoints, STEALTH_LIMITS},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Transaction, args};
@@ -29,6 +29,30 @@ use tari_template_test_tooling::{
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];
 const TEMPLATE_NAME: &str = "StealthFaucet";
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
+
+/// [`MAX_NATIVE_POINTS_PER_TRANSACTION`] must sit above the most expensive statement set
+/// [`STEALTH_LIMITS`] admits, or a transaction the structural caps accept traps on the ceiling
+/// instead of executing. The two move for unrelated reasons — the caps bound one transaction's
+/// verification, the ceiling bounds how far a block may overshoot its propose-time execution
+/// budget — so the relation between them is asserted rather than assumed.
+///
+/// Priced at the view-key rate, the dearest an output can be. A transaction that stacks *several*
+/// categories at their individual maxima (a full stealth set plus a full confidential set) can
+/// still exceed the ceiling and trap; that is intended, since it is ~1s of verification in a single
+/// transaction and no real flow needs it.
+#[test]
+fn native_ceiling_admits_every_structurally_valid_stealth_transaction() {
+    let per_output = NativeExecutionPoints::PER_OUTPUT + NativeExecutionPoints::PER_OUTPUT_VIEWABLE_SURCHARGE;
+    let worst_case = STEALTH_LIMITS.max_transfers_per_transaction as u64 * NativeExecutionPoints::PER_STATEMENT +
+        STEALTH_LIMITS.max_total_outputs_per_transaction as u64 * per_output +
+        STEALTH_LIMITS.max_total_inputs_per_transaction as u64 * NativeExecutionPoints::PER_INPUT;
+
+    assert!(
+        worst_case <= MAX_NATIVE_POINTS_PER_TRANSACTION,
+        "MAX_NATIVE_POINTS_PER_TRANSACTION ({MAX_NATIVE_POINTS_PER_TRANSACTION}) must admit the dearest structurally \
+         valid stealth transaction ({worst_case} points); raise it or tighten STEALTH_LIMITS",
+    );
+}
 
 /// The grace must cover every legitimate fee-sourcing flow with margin, since all of it runs on
 /// credit before `pay_fee`. The stealth-UTXO-funded fee is the ceiling: one transfer statement

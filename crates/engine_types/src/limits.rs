@@ -33,6 +33,21 @@ pub const MAX_WASM_POINTS_PER_CALL: u64 = 100_000_000;
 /// all its calls. The aggregate across a *block* still needs a separate per-block budget.
 pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
 
+/// Maximum native-verification points (priced by [`NativeExecutionPoints`]) a whole transaction may consume. The
+/// native counterpart of [`MAX_WASM_POINTS_PER_TRANSACTION`], enforced in `StateTracker::charge_native_execution`.
+///
+/// Both per-transaction ceilings exist so the block execution budget has a bounded overshoot: a leader only learns
+/// a transaction's cost after executing it, so an honest block may exceed the propose budget by one transaction's
+/// worth, and `max_block_validation_execution_points` must leave room for it. Without this cap the native half of
+/// that overshoot is bounded only by the structural limits, which permit ~2.2e9 points of stealth verification —
+/// and, for `ClaimBurn`, only by transaction weight, which permits ~2.9e9. Either would exceed the headroom and
+/// get honest blocks rejected.
+///
+/// Sized just above the most expensive statement set the structural caps allow ([`STEALTH_LIMITS`]: 64 transfers,
+/// 256 outputs each carrying the view-key surcharge, 1024 inputs ≈ 2.23e9), so no transaction the other limits
+/// admit can trip this one. Tightening it means tightening those caps first.
+pub const MAX_NATIVE_POINTS_PER_TRANSACTION: u64 = 2_400_000_000;
+
 /// Execution metering points a transaction may consume *before* its fee payments cover them. A
 /// transaction sources its fee in the fee intent (withdraw, claim-burn, AMM swap to TARI, stealth
 /// transfer, …) and only then calls `pay_fee`, so it must be allowed to run some compute on credit;
@@ -166,11 +181,13 @@ pub struct StealthLimits {
     pub max_total_outputs_per_transaction: usize,
 }
 
-/// Verifying a stealth transfer is native, unmetered work dominated by the per-output bulletproof range proof and
-/// ElGamal viewable-balance proof (~1ms per output on x86-class hardware). The per-transfer limits bound one statement;
-/// the per-transaction limits bound the aggregate so a single transaction cannot stack enough stealth verification to
-/// exceed the block execution budget and stall the proposing leader. The per-transaction caps are a consensus-relevant
-/// execution rule enforced uniformly during execution, not just a mempool heuristic.
+/// Verifying a stealth transfer is native work dominated by the per-output bulletproof range proof and ElGamal
+/// viewable-balance proof (~1ms per output on x86-class hardware). It is priced in metering points by
+/// [`NativeExecutionPoints`] and counted toward the per-block execution budget, so the block-level bound is the
+/// budget rather than these caps. The per-transfer limits bound one statement and the per-transaction limits bound
+/// the aggregate, capping how much verification a single transaction can stack — which keeps any one transaction
+/// from consuming a whole block's budget by itself. The per-transaction caps are a consensus-relevant execution
+/// rule enforced uniformly during execution, not just a mempool heuristic.
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
     max_outputs: 8,

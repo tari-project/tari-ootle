@@ -314,16 +314,15 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
 
     // Fixed cost of a transfer (resource lock, balance-proof verification, basic validation).
     const WEIGHT_PER_TRANSFER: u64 = 100;
-    // An input contributes a commitment aggregation and a substate lookup — cheap relative to an output.
+    // An input contributes a commitment aggregation and a substate lookup.
     const WEIGHT_PER_INPUT: u64 = 1;
-    // Each output is verified natively via an aggregated bulletproof range proof plus an ElGamal viewable-balance
-    // proof (~1ms/output on x86-class hardware) — the dominant cost of a transfer. Priced well above an input so the
-    // per-transaction and per-block weight budgets bound this unmetered native verification work.
-    const WEIGHT_PER_OUTPUT: u64 = 8;
 
+    // Outputs carry no weight term. Weight is a size/IO measure; an output's cost is its native verification, which
+    // the engine charges directly in metering points and the per-block execution budget bounds, and its storage,
+    // which the fee table charges per byte and per created substate. A weight term on top would price the same
+    // output a third time.
     WEIGHT_PER_TRANSFER +
         statement.inputs_statement.inputs.len() as u64 * WEIGHT_PER_INPUT +
-        statement.outputs_statement.outputs.len() as u64 * WEIGHT_PER_OUTPUT +
         witness_bytes / SPEND_WITNESS_BYTE_DIVISOR
 }
 

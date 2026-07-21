@@ -316,6 +316,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// priced crypto — rather than extracting it for free. No allowance applies (dry runs, unpriced
     /// WASM execution) ⇒ the charge only accumulates, so dry-run fee estimates stay accurate.
     pub fn charge_native_execution(&mut self, points: u64) -> Result<(), RuntimeError> {
+        // Hard per-transaction ceiling, independent of what the transaction pays: it bounds how far a block may
+        // overshoot the propose-time execution budget, which the validation budget has to leave room for.
+        let native_total = self.accumulated_native_points().saturating_add(points);
+        if native_total > limits::MAX_NATIVE_POINTS_PER_TRANSACTION {
+            return Err(RuntimeError::MaxNativeExecutionPointsExceeded {
+                consumed_points: native_total,
+                max_points: limits::MAX_NATIVE_POINTS_PER_TRANSACTION,
+            });
+        }
         if let Some(allowance) = self.wasm_point_allowance() {
             let consumed = self
                 .accumulated_wasm_points()

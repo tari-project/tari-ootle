@@ -72,22 +72,27 @@ pub struct ConsensusConstants {
     /// max-size template publish (`limits::ENGINE_LIMITS.max_template_binary_size_bytes`) — so honest
     /// transactions are never rejected. Enforced at RPC submit / mempool admission, not in consensus.
     pub max_transaction_weight: u64,
-    /// The maximum total WASM metering points a leader will pack into a single block, summed from each
-    /// transaction's actual metered execution (`ExecuteResult::wasm_execution_points`). Transaction weight is
-    /// size/IO-based and blind to execution cost, so a low-weight compute-heavy transaction evades the weight
-    /// budget — this bounds the pure WASM compute a block adds on top of the weight-bounded work. Like
+    /// The maximum total execution points a leader will pack into a single block, summed from each transaction's
+    /// actual cost (`ExecuteResult::total_execution_points`): WASM metering plus native crypto verification.
+    /// Transaction weight is size/IO-based and blind to execution cost, so a low-weight compute-heavy
+    /// transaction evades the weight budget — this bounds the compute a block adds on top of the weight-bounded
+    /// work. Native verification is counted here rather than approximated by transaction weight, so a block full
+    /// of stealth or confidential statements is governed by the same budget as one full of WASM. Like
     /// `max_block_weight`, this is a local proposing heuristic only and carries no fork risk. A transaction's
     /// points are only known after it executes, so a block may overshoot this budget by up to
-    /// `MAX_WASM_POINTS_PER_TRANSACTION`; `max_block_validation_wasm_points` must allow for this.
-    pub max_block_wasm_points: u64,
-    /// The maximum total WASM metering points a block may contain to be considered valid. Like
+    /// `MAX_WASM_POINTS_PER_TRANSACTION + MAX_NATIVE_POINTS_PER_TRANSACTION`;
+    /// `max_block_validation_execution_points` must allow for this.
+    pub max_block_execution_points: u64,
+    /// The maximum total execution points a block may contain to be considered valid. Like
     /// `max_block_validation_weight` this IS enforced when receiving/voting on a block: a replica keeps a
     /// running points total while executing the block's commands and stops at the first command that pushes the
-    /// total over this limit (no-vote), bounding the CPU a misbehaving leader can extract from replicas.
-    /// Metering is deterministic, so every replica stops at the same command and votes identically. Must be at
-    /// least `max_block_wasm_points + MAX_WASM_POINTS_PER_TRANSACTION` so honest proposals are never rejected.
+    /// total over this limit (no-vote), bounding the CPU a misbehaving leader can extract from replicas. Both
+    /// halves are deterministic — metering is, and the native price is a pure function of the declared statement
+    /// — so every replica stops at the same command and votes identically. Must be at least
+    /// `max_block_execution_points + MAX_WASM_POINTS_PER_TRANSACTION + MAX_NATIVE_POINTS_PER_TRANSACTION` so
+    /// honest proposals are never rejected.
     /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on block validity.
-    pub max_block_validation_wasm_points: u64,
+    pub max_block_validation_execution_points: u64,
     /// The exhaust burn rate in basis points, charged to the fee payer on top of the execution fee and burned. 0
     /// means no fees are burned. CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on the burn
     /// totals in block headers. Use `exhaust_burn_rate` to resolve the rate for a given epoch rather than reading
@@ -132,10 +137,11 @@ impl ConsensusConstants {
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
-            max_block_wasm_points: 4_500_000_000,
-            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
-            // honest proposals are never rejected.
-            max_block_validation_wasm_points: 5_000_000_000,
+            max_block_execution_points: 4_500_000_000,
+            // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
+            // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
+            // proposals are never rejected.
+            max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
             epoch_end_spread_blocks: 10,
         }
@@ -171,10 +177,11 @@ impl ConsensusConstants {
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
-            max_block_wasm_points: 4_500_000_000,
-            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
-            // honest proposals are never rejected.
-            max_block_validation_wasm_points: 5_000_000_000,
+            max_block_execution_points: 4_500_000_000,
+            // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
+            // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
+            // proposals are never rejected.
+            max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
             epoch_end_spread_blocks: 1,
         }
@@ -210,10 +217,11 @@ impl ConsensusConstants {
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
-            max_block_wasm_points: 4_500_000_000,
-            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
-            // honest proposals are never rejected.
-            max_block_validation_wasm_points: 5_000_000_000,
+            max_block_execution_points: 4_500_000_000,
+            // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
+            // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
+            // proposals are never rejected.
+            max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
             epoch_end_spread_blocks: 5,
         }
@@ -249,10 +257,11 @@ impl ConsensusConstants {
             // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
             // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
             // of the metering costs on x86-class hardware.
-            max_block_wasm_points: 4_500_000_000,
-            // Proposal budget + one max-points transaction (the post-execution overshoot) + margin, so
-            // honest proposals are never rejected.
-            max_block_validation_wasm_points: 5_000_000_000,
+            max_block_execution_points: 4_500_000_000,
+            // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
+            // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
+            // proposals are never rejected.
+            max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
             epoch_end_spread_blocks: 5,
         }
@@ -285,7 +294,11 @@ impl From<Network> for ConsensusConstants {
 
 #[cfg(test)]
 mod tests {
-    use tari_engine_types::limits::{ENGINE_LIMITS, MAX_WASM_POINTS_PER_TRANSACTION};
+    use tari_engine_types::limits::{
+        ENGINE_LIMITS,
+        MAX_NATIVE_POINTS_PER_TRANSACTION,
+        MAX_WASM_POINTS_PER_TRANSACTION,
+    };
 
     use super::*;
 
@@ -298,11 +311,14 @@ mod tests {
             ConsensusConstants::testnet(),
         ] {
             assert!(constants.max_block_validation_weight >= constants.max_block_weight);
-            // A leader only learns a transaction's points after executing it, so an honest block may
-            // exceed the propose budget by up to one transaction's full points budget.
+            // A leader only learns a transaction's points after executing it, so an honest block may exceed
+            // the propose budget by up to one transaction's full budget — both halves of it, since the
+            // execution budget covers native verification as well as WASM.
             assert!(
-                constants.max_block_validation_wasm_points >=
-                    constants.max_block_wasm_points + MAX_WASM_POINTS_PER_TRANSACTION
+                constants.max_block_validation_execution_points >=
+                    constants.max_block_execution_points +
+                        MAX_WASM_POINTS_PER_TRANSACTION +
+                        MAX_NATIVE_POINTS_PER_TRANSACTION
             );
         }
     }

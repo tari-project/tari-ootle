@@ -212,6 +212,11 @@ pub enum RuntimeError {
         consumed_points: u64,
         allowance: u64,
     },
+    #[error(
+        "Native verification points {consumed_points} exceed the per-transaction maximum {max_points}. Split the work \
+         across transactions."
+    )]
+    MaxNativeExecutionPointsExceeded { consumed_points: u64, max_points: u64 },
     #[error("No fees paid from stealth transfer: {details}")]
     NoFeesPaid { details: String },
     #[error("No fee checkpoint")]

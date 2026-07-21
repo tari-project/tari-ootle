@@ -469,10 +469,10 @@ where TConsensusSpec: ConsensusSpec
         let mut num_executed = 0usize;
         // Running total of WASM metering points consumed by transactions executed for this block. A
         // transaction's points are only known after it executes, so the block can overshoot the budget
-        // by at most MAX_WASM_POINTS_PER_TRANSACTION — `max_block_validation_wasm_points` allows for
+        // by at most MAX_WASM_POINTS_PER_TRANSACTION — `max_block_validation_execution_points` allows for
         // this, so honest proposals are never rejected.
-        let max_block_wasm_points = self.config.consensus_constants.max_block_wasm_points;
-        let mut wasm_points_total = 0u64;
+        let max_block_execution_points = self.config.consensus_constants.max_block_execution_points;
+        let mut execution_points_total = 0u64;
         for (idx, mut transaction) in batch.transactions.into_iter().enumerate() {
             // Always attempt at least the first transaction before honouring the deadline so we make
             // progress even when a single transaction is slow to execute.
@@ -487,12 +487,12 @@ where TConsensusSpec: ConsensusSpec
                 );
                 break;
             }
-            if idx > 0 && wasm_points_total >= max_block_wasm_points {
+            if idx > 0 && execution_points_total >= max_block_execution_points {
                 warn!(
                     target: LOG_TARGET,
                     "🔋 PROPOSE: wasm points budget ({}/{}) reached after {} of {} transaction(s); deferring {} to a later block",
-                    wasm_points_total,
-                    max_block_wasm_points,
+                    execution_points_total,
+                    max_block_execution_points,
                     idx,
                     batch_size,
                     batch_size - idx,
@@ -527,7 +527,8 @@ where TConsensusSpec: ConsensusSpec
                 // skipped transaction (e.g. lock conflict) is counted in the later block that proposes it;
                 // its propose-time execution cost here is bounded by the soft deadline above.
                 if !had_execution && let Some(execution) = executed_transactions.get(&tx_id) {
-                    wasm_points_total = wasm_points_total.saturating_add(execution.result().wasm_execution_points);
+                    execution_points_total =
+                        execution_points_total.saturating_add(execution.result().total_execution_points());
                 }
                 total_leader_fee = total_leader_fee
                     .checked_add(

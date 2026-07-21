@@ -107,18 +107,27 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// no payment-funded bound applies (WASM execution is not priced, or this is a dry run) — only
     /// the per-transaction hard cap then constrains compute.
     ///
-    /// The allowance is the points the fees paid can cover plus [`limits::FREE_COMPUTE_GRACE_POINTS`]
-    /// of credit, so a transaction can run its fee-sourcing instructions before it pays while a
-    /// transaction that never pays cannot consume more than the grace.
+    /// Within the fee intent the allowance is the points the fees paid can cover plus
+    /// [`limits::FREE_COMPUTE_GRACE_POINTS`] of credit, so a transaction can run its fee-sourcing
+    /// instructions before it pays, while a transaction that never pays cannot consume more than the
+    /// grace. Past the fee checkpoint the credit no longer applies: the transaction has paid what its
+    /// fee intent charged, and the compute it may still run is funded by that payment alone.
     pub fn wasm_point_allowance(&self) -> Option<u64> {
         let rate = self.wasm_metering_rate;
+        // The credit exists only so a transaction can source its fee before paying. Taking the fee
+        // checkpoint is precisely the point at which that need has been met, so the credit ends there.
+        let is_fee_intent = self.fee_checkpoint.is_none();
         self.read_with(|state| {
             let fee_state = state.fee_state();
             if fee_state.is_dry_run() {
                 return None;
             }
             let funded = rate.points_funded_by(fee_state.total_payments())?;
-            Some(funded.saturating_add(limits::FREE_COMPUTE_GRACE_POINTS))
+            if is_fee_intent {
+                Some(funded.saturating_add(limits::FREE_COMPUTE_GRACE_POINTS))
+            } else {
+                Some(funded)
+            }
         })
     }
 

@@ -83,12 +83,12 @@ fn assert_insufficient_fees(reason: &RejectReason) {
     );
 }
 
-/// A transaction that pays only a tiny fee cannot run more than the grace of compute, even though the
-/// call is well under the per-transaction hard cap and would otherwise succeed. The fee intent still
-/// commits and the whole payment is collected — the validator is paid for the grace compute it ran,
-/// and only the compute beyond the payment is the (bounded) absorbed loss.
+/// A transaction that pays only a tiny fee cannot run more compute than that fee funds, even though
+/// the call is well under the per-transaction hard cap and would otherwise succeed. The fee intent
+/// still commits and the whole payment is collected, and because the credit does not extend past the
+/// fee checkpoint the validator is paid for every point it ran — there is no absorbed loss.
 #[test]
-fn underpaid_compute_is_capped_at_grace() {
+fn underpaid_compute_is_capped_at_what_the_payment_funds() {
     const FEE_PAYMENT: u64 = 1_000_000;
 
     let Harness {
@@ -124,10 +124,42 @@ fn underpaid_compute_is_capped_at_grace() {
         0,
         "nothing is refunded when compute exceeds the payment"
     );
-    assert!(
-        fee_receipt.unpaid_debt() > 0,
-        "compute charged beyond the payment is the bounded, absorbed loss",
+    assert_eq!(
+        fee_receipt.unpaid_debt(),
+        0,
+        "the allowance is exactly what the payment funds, so no compute runs unpaid",
     );
+}
+
+/// The credit is scoped to the fee intent. A call sized within the grace — and which therefore
+/// succeeds inside a fee intent, per `fee_intent_may_spend_compute_within_grace_before_paying` —
+/// still traps when it runs in the main instructions of a transaction whose payment does not fund
+/// it. Without this scoping every transaction would carry `FREE_COMPUTE_GRACE_POINTS` of compute it
+/// never pays for, on top of what it bought.
+#[test]
+fn grace_does_not_extend_past_the_fee_checkpoint() {
+    const FEE_PAYMENT: u64 = 1_000_000;
+    // The payment must fund materially less than the call needs, so the credit is what the call
+    // would otherwise be leaning on.
+    const _: () = assert!(BELOW_GRACE_POINTS > FEE_PAYMENT * 2);
+
+    let Harness {
+        mut test,
+        bench,
+        account,
+        owner,
+        key,
+        per_round,
+    } = setup();
+
+    let rounds = BELOW_GRACE_POINTS / per_round;
+    let tx = Transaction::builder_localnet()
+        .pay_fee_from_component(account, FEE_PAYMENT)
+        .call_function(bench, "bench_div_u64", args![rounds])
+        .build_and_seal(&key);
+
+    let result = test.try_execute(tx, vec![owner]).unwrap();
+    assert_insufficient_fees(result.expect_failure());
 }
 
 /// Paying more fees raises the compute allowance: the same call that fails when underpaid commits

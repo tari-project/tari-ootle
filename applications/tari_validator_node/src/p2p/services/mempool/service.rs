@@ -270,10 +270,15 @@ where
         // in its validation cache for a few heartbeats. A transaction we are not involved in is
         // still accepted — other shard groups need it.
         if let Some(validation) = gossip_validation {
-            let acceptance = if validation_result.is_ok() {
-                MessageAcceptance::Accept
-            } else {
-                MessageAcceptance::Reject
+            // Only a failure the sender is responsible for is rejected back to the mesh, since
+            // rejection counts against their peer score. A transaction we consider invalid because
+            // of our own view of runtime state — a template we have not synced — or because of our
+            // own storage health is withheld without penalty: a peer that is ahead of us, or our
+            // own failing database, must not graylist honest peers.
+            let acceptance = match &validation_result {
+                Ok(_) => MessageAcceptance::Accept,
+                Err(err) if err.is_sender_fault() => MessageAcceptance::Reject,
+                Err(_) => MessageAcceptance::Ignore,
             };
             self.gossip.report(validation, acceptance).await;
         }

@@ -217,6 +217,12 @@ pub async fn spawn_services(
                 user_agent: format!("/tari/validator/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.validator_node.p2p.enable_mdns,
                 enable_relay: config.validator_node.p2p.enable_relay,
+                // Both topics report a `Reject` verdict for messages that fail to decode or fail
+                // validation, so both can score the peers that send them.
+                gossip_sub_scored_topics: vec![
+                    mempool::TOPIC_PREFIX.to_string(),
+                    consensus_gossip::TOPIC_PREFIX.to_string(),
+                ],
                 // TODO: allow node operator to configure
                 relay_circuit_limits: RelayCircuitLimits::high(),
                 relay_reservation_limits: RelayReservationLimits::high(),

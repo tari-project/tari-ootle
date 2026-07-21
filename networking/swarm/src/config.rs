@@ -23,6 +23,12 @@ pub struct Config {
     pub relay_reservation_limits: RelayReservationLimits,
     pub identify_interval: Duration,
     pub gossip_sub_max_message_size: usize,
+    /// Gossipsub topics on which peers are scored for delivering invalid messages. Empty disables
+    /// peer scoring entirely.
+    ///
+    /// Only topics named here contribute to a peer's score, so a topic left out is one where
+    /// invalid deliveries cost the sender nothing. Names are topic strings, matched exactly.
+    pub gossip_sub_scored_topics: Vec<String>,
     pub rendezvous_server_enabled: bool,
 }
 
@@ -43,6 +49,7 @@ impl Default for Config {
             // This is the default for identify
             identify_interval: Duration::from_secs(5 * 60),
             gossip_sub_max_message_size: 2 * 1024 * 1024,
+            gossip_sub_scored_topics: Vec::new(),
             rendezvous_server_enabled: false,
         }
     }

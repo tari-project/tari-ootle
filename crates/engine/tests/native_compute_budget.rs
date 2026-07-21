@@ -195,9 +195,13 @@ fn in_flight_wasm_counts_toward_the_native_allowance() {
     let grind_points = FREE_COMPUTE_GRACE_POINTS - native_points / 2;
     let rounds = grind_points / per_round;
 
+    // Runs in the fee intent, which is where the credit applies — the main instructions are funded by
+    // the payment alone and would trap on the WASM grind long before the native charge.
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(faucet, "burn_compute_then_transfer", args![rounds, transfer.statement])
+            .with_fee_instructions_builder(|builder| {
+                builder.call_method(faucet, "burn_compute_then_transfer", args![rounds, transfer.statement])
+            })
             .build_and_seal(test.secret_key()),
         vec![],
     );

@@ -44,6 +44,12 @@ pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
 /// can extract from a validator. Payments raise the allowance above this value proportionally to
 /// the WASM fee rate.
 ///
+/// The credit applies to the fee intent only. Sourcing a fee is the whole reason a transaction may
+/// run anything before paying, so once the fee checkpoint is taken the credit ends and the remaining
+/// instructions are funded by the payment alone (`StateTracker::wasm_point_allowance`). Extending it
+/// past the checkpoint would hand every transaction this many points of compute it never pays for,
+/// on top of what it bought.
+///
 /// Sized at ~3x the most expensive legitimate fee-sourcing flow: paying a fee from stealth UTXOs
 /// (one transfer: fixed cost + 1 stealth change output + up to 64 dust inputs ≈ 10.8M points at
 /// the calibrated native prices below — fees are TARI, which has no view key, so the flow prices

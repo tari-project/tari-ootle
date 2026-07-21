@@ -77,3 +77,121 @@ pub enum TransactionValidationError {
         actual: usize,
     },
 }
+
+impl TransactionValidationError {
+    /// Whether this failure is attributable to whoever sent us the transaction.
+    ///
+    /// A transaction arriving over gossip is rejected back to the mesh when it is, and merely
+    /// ignored when it is not: rejection counts against the sending peer's score and can graylist
+    /// it, so it must be reserved for failures that peer is responsible for.
+    ///
+    /// The distinction is whether the verdict could differ between two honest nodes. Structural
+    /// failures — malformed, wrong network, over a cap, bad signature — are properties of the
+    /// transaction itself and every node agrees on them. Failures that depend on this node's view
+    /// of runtime state, or on this node's own health, do not: a transaction referencing a template
+    /// we have not synced yet is valid to a peer that has, and a database error is our problem
+    /// entirely. Penalising a peer for either would let lagging or unhealthy nodes graylist honest
+    /// ones, and a node with a failing store would graylist everything it talks to.
+    ///
+    /// Matched exhaustively so that a new variant has to make this choice deliberately.
+    pub fn is_sender_fault(&self) -> bool {
+        match self {
+            // Ours, not theirs: local storage, pool and networking failures say nothing about the
+            // transaction.
+            Self::StorageError(_) |
+            Self::TransactionPoolError(_) |
+            Self::TemplateLookupError { .. } |
+            Self::NetworkingError(_) => false,
+
+            // Depends on this node's view of runtime state, which legitimately lags behind a peer's.
+            Self::TemplateNotFound { .. } |
+            Self::OutputSubstateExists { .. } |
+            Self::ValidatorFeeClaimEpochInvalid { .. } |
+            Self::CurrentEpochLessThanMinimum { .. } |
+            Self::CurrentEpochGreaterThanMaximum { .. } => false,
+
+            // Properties of the transaction itself, on which every node agrees.
+            Self::NoFeeInstructions { .. } |
+            Self::InvalidSignature |
+            Self::NoMainSigner { .. } |
+            Self::TransactionNotSigned { .. } |
+            Self::UnknownNetwork { .. } |
+            Self::NetworkMismatch { .. } |
+            Self::ContainsPayFeeInstruction { .. } |
+            Self::DryRunNotAllowed |
+            Self::TransactionExceedsMaxWeight { .. } |
+            Self::ExceedsStealthTransactionLimit { .. } |
+            Self::TooManyPublishTemplateInstructions { .. } |
+            Self::TooManySignatures { .. } => true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tx_id() -> TransactionId {
+        TransactionId::new([1; 32])
+    }
+
+    /// A peer that is ahead of us, or our own unhealthy node, must not be able to graylist honest
+    /// peers. These are the failures where our verdict can differ from another honest node's.
+    #[test]
+    fn node_local_failures_are_not_blamed_on_the_sender() {
+        let node_local = [
+            TransactionValidationError::TemplateNotFound {
+                address: TemplateAddress::from_array([1; 32]),
+            },
+            TransactionValidationError::TemplateLookupError {
+                source: anyhow::anyhow!("db unavailable"),
+            },
+            TransactionValidationError::OutputSubstateExists {
+                transaction_id: tx_id(),
+            },
+            TransactionValidationError::CurrentEpochLessThanMinimum {
+                current_epoch: Epoch(1),
+                min_epoch: Epoch(2),
+            },
+            TransactionValidationError::CurrentEpochGreaterThanMaximum {
+                current_epoch: Epoch(3),
+                max_epoch: Epoch(2),
+            },
+        ];
+        for err in node_local {
+            assert!(!err.is_sender_fault(), "must not penalise the sender for: {err}");
+        }
+    }
+
+    /// Properties of the transaction itself: every honest node reaches the same verdict, so the
+    /// peer that sent it is answerable for it.
+    #[test]
+    fn structural_failures_are_blamed_on_the_sender() {
+        let structural = [
+            TransactionValidationError::InvalidSignature,
+            TransactionValidationError::NoMainSigner {
+                transaction_id: tx_id(),
+            },
+            TransactionValidationError::NoFeeInstructions {
+                transaction_id: tx_id(),
+            },
+            TransactionValidationError::ContainsPayFeeInstruction {
+                transaction_id: tx_id(),
+            },
+            TransactionValidationError::DryRunNotAllowed,
+            TransactionValidationError::TransactionExceedsMaxWeight {
+                transaction_id: tx_id(),
+                weight: 2,
+                max_weight: 1,
+            },
+            TransactionValidationError::TooManySignatures {
+                transaction_id: tx_id(),
+                max: 1,
+                actual: 2,
+            },
+        ];
+        for err in structural {
+            assert!(err.is_sender_fault(), "must penalise the sender for: {err}");
+        }
+    }
+}

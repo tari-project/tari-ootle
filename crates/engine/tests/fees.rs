@@ -206,7 +206,8 @@ fn fail_partial_paid_fees() {
     test.enable_fees();
 
     // Must cover the fee section's own cost (so the fee instructions succeed) yet stay smaller
-    // than the full transaction's fee (so InsufficientFeesPaid is triggered on commit).
+    // than the full transaction's fee, so the main instructions exhaust the compute the payment
+    // funds and trap.
     const FEE_PAID: u64 = 100;
 
     let result = test.execute_expect_commit(
@@ -235,7 +236,7 @@ fn fail_partial_paid_fees() {
     );
     let reason = result.expect_failure();
     assert!(
-        matches!(reason, RejectReason::InsufficientFeesPaid(_)),
+        matches!(reason, RejectReason::ExecutionFailure(msg) if msg.contains("Insufficient fees")),
         "actual reason: {reason}"
     );
 

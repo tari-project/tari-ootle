@@ -162,27 +162,26 @@ where TConsensusSpec: ConsensusSpec
         // rather than on finalization keeps the outcome identical on every node regardless of what
         // its local records remember, so a proposal containing a previously-aborted id can never
         // split votes.
-        if rec.is_finalized(&**tx)? {
-            match TransactionRecord::get_finalized_decision(&**tx, rec.id())? {
-                Some(decision) if decision.is_commit() => {
-                    warn!(
-                        target: LOG_TARGET, "Transaction {} is already committed. Consensus will ignore it.", rec.id()
-                    );
-                    return Ok(None);
-                },
-                _ => {
-                    info!(
-                        target: LOG_TARGET,
-                        "🔄 Transaction {} was previously finalized as aborted. Removing the previous attempt and \
-                         sequencing it again.",
-                        rec.id()
-                    );
-                    // The aborted attempt's bookkeeping must not survive into the new lifecycle,
-                    // otherwise the stale execution could be returned as this id's finalized result
-                    // after the new attempt finalizes.
-                    TransactionRecord::remove_finalized(tx, rec.id())?;
-                },
-            }
+        match TransactionRecord::get_finalized_decision(&**tx, rec.id())? {
+            Some(decision) if decision.is_commit() => {
+                warn!(
+                    target: LOG_TARGET, "Transaction {} is already committed. Consensus will ignore it.", rec.id()
+                );
+                return Ok(None);
+            },
+            Some(_) => {
+                info!(
+                    target: LOG_TARGET,
+                    "🔄 Transaction {} was previously finalized as aborted. Removing the previous attempt and \
+                     sequencing it again.",
+                    rec.id()
+                );
+                // The aborted attempt's bookkeeping must not survive into the new lifecycle,
+                // otherwise the stale execution could be returned as this id's finalized result
+                // after the new attempt finalizes.
+                TransactionRecord::remove_finalized(tx, rec.id())?;
+            },
+            None => {},
         }
 
         // Mempool-originated transactions have already passed full validation; their structural properties are

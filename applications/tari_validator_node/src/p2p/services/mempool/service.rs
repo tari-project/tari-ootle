@@ -25,11 +25,12 @@ use std::{collections::HashSet, fmt::Display, mem};
 use libp2p::gossipsub::MessageAcceptance;
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
+use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::{GossipMessage, NetworkingHandle};
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_p2p::{NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec};
-use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::TransactionRecord};
+use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StorageError, consensus_models::TransactionRecord};
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_transaction_validation::{TransactionValidationError, Validator};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -355,7 +356,27 @@ where
                 );
                 return Ok(true);
             }
-            TransactionRecord::exists(tx, id)
+            if TransactionRecord::exists(tx, id)? {
+                return Ok(true);
+            }
+            // A commit outlives the local records: the transaction's receipt substate proves the id
+            // has committed even when the records were pruned. Best-effort — a node that does not
+            // host the receipt's shard (or is behind on sync) simply never finds it and the
+            // consensus gate makes the authoritative refusal.
+            let receipt_id = SubstateId::TransactionReceipt((*id).into());
+            if tx
+                .substates_get_max_version_for_substate(&receipt_id)
+                .optional()?
+                .is_some()
+            {
+                debug!(
+                    target: LOG_TARGET,
+                    "🎱 Transaction {} has a receipt in state and has already committed. Ignoring",
+                    id
+                );
+                return Ok(true);
+            }
+            Ok::<_, StorageError>(false)
         })?;
 
         if transaction_exists {

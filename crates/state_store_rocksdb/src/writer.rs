@@ -687,6 +687,27 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
+    fn transactions_finalized_remove(&mut self, tx_id: &TransactionId) -> Result<(), StorageError> {
+        const OPERATION: &str = "transactions_finalized_remove";
+
+        self.db().cf(FinalizedTransactionLinkCf)?.delete(tx_id, OPERATION)?;
+
+        let exec_cf = self.db().cf(BlockTransactionExecutionCf)?;
+        let exec_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
+        let exec_index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
+
+        let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), tx_id);
+        for result in iter {
+            let (tx_id, block_id, height) = result?;
+            exec_cf.delete(&(tx_id, block_id, height), OPERATION)?;
+            // The block index entry is removed at finalize, but executions recorded by proposals
+            // still in flight at that point may have index entries remaining.
+            exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
+        }
+
+        Ok(())
+    }
+
     fn block_transaction_executions_insert_or_ignore(
         &mut self,
         transaction_execution: &BlockTransactionExecution,

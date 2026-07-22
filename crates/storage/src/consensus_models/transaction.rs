@@ -9,6 +9,7 @@ use std::{
 use log::*;
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::Decision;
 use tari_ootle_common_types::{
     NumPreshards,
     ToSubstateAddress,
@@ -213,6 +214,27 @@ impl TransactionRecord {
             .finalized_transaction_execution_get_finalized_time(transaction_id)
             .optional()?;
         Ok(time.is_some())
+    }
+
+    /// Returns the decision of the finalized execution, or `None` if the transaction has not been
+    /// finalized. A finalized marker without a recorded execution also returns `None`: a commit
+    /// always records the execution it committed, so such a record cannot represent a commit.
+    pub fn get_finalized_decision<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<Option<Decision>, StorageError> {
+        let maybe_execution = tx.finalized_transaction_execution_get(transaction_id).optional()?;
+        Ok(maybe_execution.map(|execution| execution.decision()))
+    }
+
+    /// Removes the finalized marker and recorded executions for this id so consensus can sequence
+    /// the transaction again. Must only be called for transactions finalized with an abort: an
+    /// abort commits no state, so its bookkeeping can be discarded without inconsistency.
+    pub fn remove_finalized<TTx: StateStoreWriteTransaction>(
+        tx: &mut TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<(), StorageError> {
+        tx.transactions_finalized_remove(transaction_id)
     }
 
     pub fn finalize_all<'a, TTx, I>(tx: &mut TTx, transactions: I) -> Result<(), StorageError>

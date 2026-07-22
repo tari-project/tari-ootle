@@ -178,6 +178,130 @@ async fn single_transaction_abort() {
     test.assert_clean_shutdown().await;
 }
 
+/// An abort commits no state, so consensus must accept the identical transaction again and give it a
+/// full lifecycle: the resubmission may commit if conditions have changed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn single_transaction_abort_then_resubmit_is_sequenced_again() {
+    setup_logger();
+    let mut test = Test::builder().add_committee(0, vec!["1"]).start().await;
+    let (tx1, inputs, new_outputs) = test
+        .send_transaction_to_all(Decision::Abort(AbortReason::ExecutionFailure), 1, 1, 1)
+        .await;
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(10) {
+            panic!("Transaction not finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ExecutionFailure))
+        .await;
+    test.assert_all_validators_did_not_commit(tx1.id());
+
+    // Resubmit the identical transaction; this time execution commits.
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &tx1,
+        Decision::Commit,
+        1,
+        inputs
+            .iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        new_outputs,
+    );
+    test.send_transaction_to_destination(TestVnDestination::All, tx1.clone())
+        .await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(20) {
+            panic!("Resubmitted transaction not finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.stop();
+    test.assert_all_validators_committed(tx1.id());
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
+        .await;
+
+    test.assert_clean_shutdown().await;
+}
+
+/// A commit consumes the transaction id permanently: resubmitting a committed transaction must be
+/// ignored. The resubmission's execution spec is set to abort so that, if consensus wrongly gave the
+/// id a new lifecycle, the finalized decision would visibly change and fail the final assertion.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resubmitted_committed_transaction_is_ignored() {
+    setup_logger();
+    let mut test = Test::builder().add_committee(0, vec!["1"]).start().await;
+    let (tx1, inputs, _) = test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(10) {
+            panic!("Transaction not finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.assert_all_validators_committed(tx1.id());
+
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &tx1,
+        Decision::Abort(AbortReason::ExecutionFailure),
+        1,
+        inputs
+            .iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        vec![],
+    );
+    test.send_transaction_to_destination(TestVnDestination::All, tx1.clone())
+        .await;
+
+    // A subsequent transaction on the same channel guarantees the resubmission has been processed by
+    // the time the pool drains.
+    let (tx2, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(20) {
+            panic!("Not all transactions finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.stop();
+    test.assert_all_validators_committed(tx2.id());
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
+        .await;
+
+    test.assert_clean_shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn propose_blocks_with_queued_up_transactions_until_all_committed() {
     setup_logger();

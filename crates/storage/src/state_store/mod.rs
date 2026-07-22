@@ -443,6 +443,12 @@ pub trait StateStoreWriteTransaction {
         transaction: I,
     ) -> Result<(), StorageError>;
 
+    /// Removes the finalized marker and all recorded executions for a transaction, returning it to
+    /// an unsequenced state so that consensus can process the same transaction id through a fresh
+    /// lifecycle. Only valid for transactions finalized with an abort decision: an abort commits no
+    /// state, so discarding its bookkeeping leaves the store consistent.
+    fn transactions_finalized_remove(&mut self, tx_id: &TransactionId) -> Result<(), StorageError>;
+
     // -------------------------------- Transaction Executions -------------------------------- //
 
     fn block_transaction_executions_insert_or_ignore(

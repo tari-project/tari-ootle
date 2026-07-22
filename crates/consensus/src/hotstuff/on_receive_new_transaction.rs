@@ -155,13 +155,34 @@ where TConsensusSpec: ConsensusSpec
             return Ok(None);
         }
 
-        // Edge case: a validator sends a transaction that is already finalized as a missing transaction or via
-        // propagation
+        // Consensus refuses to re-sequence an id only once it has committed: a commit consumes the id
+        // permanently (its effects, including fee payment, are in state). An abort is a circumstance,
+        // not a verdict — it commits nothing, so the same transaction may be sequenced again and
+        // either commit under current conditions or abort again. Deciding this on the commit decision
+        // rather than on finalization keeps the outcome identical on every node regardless of what
+        // its local records remember, so a proposal containing a previously-aborted id can never
+        // split votes.
         if rec.is_finalized(&**tx)? {
-            warn!(
-                target: LOG_TARGET, "Transaction {} is already finalized. Consensus will ignore it.", rec.id()
-            );
-            return Ok(None);
+            match TransactionRecord::get_finalized_decision(&**tx, rec.id())? {
+                Some(decision) if decision.is_commit() => {
+                    warn!(
+                        target: LOG_TARGET, "Transaction {} is already committed. Consensus will ignore it.", rec.id()
+                    );
+                    return Ok(None);
+                },
+                _ => {
+                    info!(
+                        target: LOG_TARGET,
+                        "🔄 Transaction {} was previously finalized as aborted. Removing the previous attempt and \
+                         sequencing it again.",
+                        rec.id()
+                    );
+                    // The aborted attempt's bookkeeping must not survive into the new lifecycle,
+                    // otherwise the stale execution could be returned as this id's finalized result
+                    // after the new attempt finalizes.
+                    TransactionRecord::remove_finalized(tx, rec.id())?;
+                },
+            }
         }
 
         // Mempool-originated transactions have already passed full validation; their structural properties are

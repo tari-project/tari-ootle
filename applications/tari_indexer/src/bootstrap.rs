@@ -45,6 +45,7 @@ use tari_epoch_oracles::{
     store::EpochOracleStore,
 };
 use tari_indexer_client::event::{IndexerEvent, TransactionEvent};
+use tari_indexer_lib::substate_versions::SubstateVersionTracker;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::KnowledgeProofVerifier,
@@ -200,6 +201,10 @@ pub async fn spawn_services(
     #[cfg(feature = "metrics")]
     let network_state_metrics = network_state_sync::NetworkStateMetrics::register(metrics_registry);
 
+    // Shared between the state sync (which records committed substate versions) and the substate
+    // manager (which uses them to tell a superseded cache entry from a current one).
+    let substate_versions = Arc::new(SubstateVersionTracker::new());
+
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
         networking.clone(),
@@ -212,6 +217,7 @@ pub async fn spawn_services(
         event_notifier.clone(),
         transaction_event_notifier.clone(),
         validator_status.clone(),
+        substate_versions.clone(),
         #[cfg(feature = "metrics")]
         network_state_metrics,
         #[cfg(feature = "metrics")]
@@ -227,7 +233,9 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         substate_cache,
+        substate_versions,
     )
+    .with_latest_version_ttl(config.indexer.latest_substate_cache_ttl)
     .with_substate_proof_verification(config.indexer.verify_substate_proofs);
     #[cfg(feature = "metrics")]
     let substate_manager = substate_manager.with_metrics(metrics_registry);

@@ -38,6 +38,7 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
+    StateStoreWriteTransaction,
     consensus_models::{Block, Command, SubstateRecord, TransactionRecord},
 };
 use tari_ootle_transaction::{Transaction, args};
@@ -298,6 +299,83 @@ async fn resubmitted_committed_transaction_is_ignored() {
     test.assert_all_validators_committed(tx2.id());
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
+
+    test.assert_clean_shutdown().await;
+}
+
+/// The receipt substate is the durable proof of commit: even when a node's finalized records are
+/// gone (pruned by GC, or a freshly synced node that never had them), a resubmitted committed
+/// transaction must still be refused because its receipt exists in synced state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resubmitted_committed_transaction_is_ignored_after_records_pruned() {
+    setup_logger();
+    let mut test = Test::builder().add_committee(0, vec!["1"]).start().await;
+    let (tx1, inputs, _) = test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(10) {
+            panic!("Transaction not finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.assert_all_validators_committed(tx1.id());
+
+    // Forget the finalized bookkeeping, as record GC would.
+    test.get_validator(&TestAddress::new("1"))
+        .state_store
+        .with_write_tx(|tx| tx.transactions_finalized_remove(tx1.id()))
+        .unwrap();
+
+    // Tripwire: if consensus wrongly gave the id a new lifecycle, it would finalize as an abort and
+    // the final assertion would see a finalized record reappear.
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &tx1,
+        Decision::Abort(AbortReason::ExecutionFailure),
+        1,
+        inputs
+            .iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        vec![],
+    );
+    test.send_transaction_to_destination(TestVnDestination::All, tx1.clone())
+        .await;
+
+    // A subsequent transaction on the same channel guarantees the resubmission has been processed by
+    // the time the pool drains.
+    let (tx2, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(20) {
+            panic!("Not all transactions finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.stop();
+    test.assert_all_validators_committed(tx2.id());
+    let finalized = test
+        .get_validator(&TestAddress::new("1"))
+        .state_store
+        .with_read_tx(|tx| TransactionRecord::is_record_finalized(tx, tx1.id()))
+        .unwrap();
+    assert!(
+        !finalized,
+        "resubmitted committed transaction was re-sequenced despite its receipt existing in state"
+    );
 
     test.assert_clean_shutdown().await;
 }

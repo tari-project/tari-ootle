@@ -447,10 +447,12 @@ pub trait StateStoreWriteTransaction {
         transaction: I,
     ) -> Result<(), StorageError>;
 
-    /// Removes the finalized marker and all recorded executions for a transaction, returning it to
-    /// an unsequenced state so that consensus can process the same transaction id through a fresh
-    /// lifecycle. Only valid for transactions finalized with an abort decision: an abort commits no
-    /// state, so discarding its bookkeeping leaves the store consistent.
+    /// Forgets the node-local finalized bookkeeping for a transaction: the finalized marker and all
+    /// recorded executions. This never reverts committed state — a commit's effects, fees and
+    /// receipt substate live in synced state — it only makes the id appear unsequenced to this
+    /// node's records. Used to give an aborted transaction a fresh lifecycle, and by record GC to
+    /// prune old bookkeeping; committed ids remain refused via the receipt-existence check, which
+    /// does not depend on these records.
     fn transactions_finalized_remove(&mut self, tx_id: &TransactionId) -> Result<(), StorageError>;
 
     // -------------------------------- Transaction Executions -------------------------------- //

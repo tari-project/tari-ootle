@@ -217,9 +217,10 @@ impl TransactionRecord {
         Ok(time.is_some())
     }
 
-    /// Returns the decision of the finalized execution, or `None` if the transaction has not been
-    /// finalized. A finalized marker without a recorded execution also returns `None`: a commit
-    /// always records the execution it committed, so such a record cannot represent a commit.
+    /// Returns the decision of the finalized execution held in this node's records, or `None` when
+    /// the records hold none — either the transaction was never finalized here, or its bookkeeping
+    /// has since been removed. This reports only what the local records prove; proof of commit that
+    /// survives record removal is the receipt substate (see [`Self::receipt_exists`]).
     pub fn get_finalized_decision<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         transaction_id: &TransactionId,
@@ -228,9 +229,9 @@ impl TransactionRecord {
         Ok(maybe_execution.map(|execution| execution.decision()))
     }
 
-    /// Removes the finalized marker and recorded executions for this id so consensus can sequence
-    /// the transaction again. Must only be called for transactions finalized with an abort: an
-    /// abort commits no state, so its bookkeeping can be discarded without inconsistency.
+    /// Forgets the node-local finalized bookkeeping for this id (marker and recorded executions),
+    /// making it appear unsequenced to this node's records. Never reverts committed state; see
+    /// [`StateStoreWriteTransaction::transactions_finalized_remove`].
     pub fn remove_finalized<TTx: StateStoreWriteTransaction>(
         tx: &mut TTx,
         transaction_id: &TransactionId,

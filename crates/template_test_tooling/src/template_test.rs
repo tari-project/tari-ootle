@@ -344,6 +344,10 @@ impl TemplateTest {
         ReadOnlyStateStore::new(&self.state_store)
     }
 
+    pub fn get_state_store_mut(&mut self) -> &mut MemoryStateStore {
+        &mut self.state_store
+    }
+
     /// Extracts and deserializes a value from a component's state at the given JSON pointer `path`.
     ///
     /// # Panics

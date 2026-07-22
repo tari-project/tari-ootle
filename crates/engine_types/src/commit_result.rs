@@ -56,21 +56,39 @@ pub struct ExecuteResult {
     pub execute_epoch: Option<Epoch>,
     /// Total WASM metering points consumed by the transaction across all calls, including failed/aborted execution.
     /// Metering is deterministic, so every validator computes the identical value for the same transaction and
-    /// pledged state. Used to enforce the per-block WASM points budget. Defaults to 0 when decoding executions
-    /// persisted before this field existed.
+    /// pledged state. Defaults to 0 when decoding executions persisted before this field existed.
     #[n(3)]
     #[cbor(default)]
     #[serde(default)]
     pub wasm_execution_points: u64,
+    /// Total native-verification points (stealth transfers, confidential withdraws, burn claims) charged to the
+    /// transaction, priced in WASM-point equivalents by [`NativeExecutionPoints`]. Deterministic for the same
+    /// reason as [`Self::wasm_execution_points`] — the price is a pure function of the declared statement — so
+    /// every validator computes the identical value. Defaults to 0 when decoding executions persisted before this
+    /// field existed.
+    ///
+    /// [`NativeExecutionPoints`]: crate::limits::NativeExecutionPoints
+    #[n(4)]
+    #[cbor(default)]
+    #[serde(default)]
+    pub native_execution_points: u64,
 }
 
 impl ExecuteResult {
+    /// Every metering point the transaction cost a validator to execute — WASM and native crypto alike. This, not
+    /// the WASM figure alone, is what the per-block execution budget must be enforced against: native verification
+    /// is real CPU time on every replica, and bounding only the WASM half leaves it ungoverned.
+    pub fn total_execution_points(&self) -> u64 {
+        self.wasm_execution_points.saturating_add(self.native_execution_points)
+    }
+
     pub fn new_rejected(transaction_hash: Hash32, reason: RejectReason, execute_epoch: Option<Epoch>) -> Self {
         Self {
             finalize: FinalizeResult::new_rejected(transaction_hash, reason),
             execution_time: Duration::default(),
             execute_epoch,
             wasm_execution_points: 0,
+            native_execution_points: 0,
         }
     }
 

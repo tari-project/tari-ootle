@@ -53,6 +53,7 @@ use crate::{
     fees::WasmMeteringRate,
     runtime::{
         RuntimeError,
+        error::ArgumentValidationError,
         locking::LockedSubstate,
         scope::{CallScope, PushCallFrame},
         working_state::WorkingState,
@@ -69,6 +70,10 @@ pub struct StateTracker<TStore> {
     fee_checkpoint: Option<WorkingState<TStore>>,
     transaction_weight: TransactionWeight,
     wasm_metering_rate: WasmMeteringRate,
+    /// Stealth transfers performed so far in the fee intent. Lives here rather than in `WorkingState` because the fee
+    /// intent is delimited by `fee_checkpoint`, and because the checkpoint clones the working state — a count held
+    /// there would be duplicated into the clone.
+    fee_intent_stealth_transfers: usize,
 }
 
 impl<TStore: StateReader> StateTracker<TStore> {
@@ -95,6 +100,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
             fee_checkpoint: None,
             transaction_weight,
             wasm_metering_rate,
+            fee_intent_stealth_transfers: 0,
         }
     }
 
@@ -107,18 +113,27 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// no payment-funded bound applies (WASM execution is not priced, or this is a dry run) — only
     /// the per-transaction hard cap then constrains compute.
     ///
-    /// The allowance is the points the fees paid can cover plus [`limits::FREE_COMPUTE_GRACE_POINTS`]
-    /// of credit, so a transaction can run its fee-sourcing instructions before it pays while a
-    /// transaction that never pays cannot consume more than the grace.
+    /// Within the fee intent the allowance is the points the fees paid can cover plus
+    /// [`limits::FREE_COMPUTE_GRACE_POINTS`] of credit, so a transaction can run its fee-sourcing
+    /// instructions before it pays, while a transaction that never pays cannot consume more than the
+    /// grace. Past the fee checkpoint the credit no longer applies: the transaction has paid what its
+    /// fee intent charged, and the compute it may still run is funded by that payment alone.
     pub fn wasm_point_allowance(&self) -> Option<u64> {
         let rate = self.wasm_metering_rate;
+        // The credit exists only so a transaction can source its fee before paying. Taking the fee
+        // checkpoint is precisely the point at which that need has been met, so the credit ends there.
+        let is_fee_intent = self.fee_checkpoint.is_none();
         self.read_with(|state| {
             let fee_state = state.fee_state();
             if fee_state.is_dry_run() {
                 return None;
             }
             let funded = rate.points_funded_by(fee_state.total_payments())?;
-            Some(funded.saturating_add(limits::FREE_COMPUTE_GRACE_POINTS))
+            if is_fee_intent {
+                Some(funded.saturating_add(limits::FREE_COMPUTE_GRACE_POINTS))
+            } else {
+                Some(funded)
+            }
         })
     }
 
@@ -307,6 +322,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// priced crypto — rather than extracting it for free. No allowance applies (dry runs, unpriced
     /// WASM execution) ⇒ the charge only accumulates, so dry-run fee estimates stay accurate.
     pub fn charge_native_execution(&mut self, points: u64) -> Result<(), RuntimeError> {
+        // Hard per-transaction ceiling, independent of what the transaction pays: it bounds how far a block may
+        // overshoot the propose-time execution budget, which the validation budget has to leave room for.
+        let native_total = self.accumulated_native_points().saturating_add(points);
+        if native_total > limits::MAX_NATIVE_POINTS_PER_TRANSACTION {
+            return Err(RuntimeError::MaxNativeExecutionPointsExceeded {
+                consumed_points: native_total,
+                max_points: limits::MAX_NATIVE_POINTS_PER_TRANSACTION,
+            });
+        }
         if let Some(allowance) = self.wasm_point_allowance() {
             let consumed = self
                 .accumulated_wasm_points()
@@ -487,6 +511,26 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
         self.fee_checkpoint.is_some()
+    }
+
+    /// Accounts one more stealth transfer against [`limits::StealthLimits::max_fee_intent_transfers`]; a no-op once
+    /// the fee intent is over. Called before the transfer's native cost is charged and before any of its crypto runs,
+    /// so an over-cap fee intent is rejected without the work being performed.
+    ///
+    /// Counts every transfer the fee intent performs, whether from a `StealthTransfer` instruction or from a template
+    /// calling `ResourceManager::stealth_transfer` — both reach this through `RuntimeInterfaceImpl::stealth_transfer`.
+    /// Counting instructions alone would leave the WASM route uncapped, and so make the more expensive route the way
+    /// to exceed the limit.
+    pub(super) fn account_fee_intent_stealth_transfer(&mut self) -> Result<(), RuntimeError> {
+        if self.is_fee_intent_checkpointed() {
+            return Ok(());
+        }
+        let max_transfers = limits::STEALTH_LIMITS.max_fee_intent_transfers;
+        if self.fee_intent_stealth_transfers + 1 > max_transfers {
+            return Err(ArgumentValidationError::MaxFeeIntentStealthTransfersExceeded { max_transfers }.into());
+        }
+        self.fee_intent_stealth_transfers += 1;
+        Ok(())
     }
 }
 

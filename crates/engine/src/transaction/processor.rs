@@ -214,6 +214,7 @@ where
                 execution_time: timer.elapsed(),
                 execute_epoch: execute_epoch.map(Into::into),
                 wasm_execution_points: 0,
+                native_execution_points: 0,
             });
         }
 
@@ -249,6 +250,7 @@ where
                         execution_time: timer.elapsed(),
                         execute_epoch: execute_epoch.map(Into::into),
                         wasm_execution_points: runtime.interface().wasm_points_consumed(),
+                        native_execution_points: runtime.interface().native_points_consumed(),
                     });
                 }
                 execution_results
@@ -265,6 +267,7 @@ where
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
                     wasm_execution_points: runtime.interface().wasm_points_consumed(),
+                    native_execution_points: runtime.interface().native_points_consumed(),
                 });
             },
         };
@@ -279,6 +282,7 @@ where
 
         // Must be captured before finalize consumes the working state.
         let wasm_execution_points = runtime.interface().wasm_points_consumed();
+        let native_execution_points = runtime.interface().native_points_consumed();
 
         match instruction_result {
             Ok(execution_results) => {
@@ -289,6 +293,7 @@ where
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
                     wasm_execution_points,
+                    native_execution_points,
                 })
             },
             // This can happen e.g if you have dangling buckets after running the instructions
@@ -303,6 +308,7 @@ where
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
                     wasm_execution_points,
+                    native_execution_points,
                 })
             },
         }

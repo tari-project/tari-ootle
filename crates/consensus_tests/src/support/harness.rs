@@ -680,8 +680,8 @@ impl TestBuilder {
                     // TEST_WASM_EXECUTION_POINTS each, sized so normal test transactions can never
                     // hit the budget (asserted in `start`). Tests exercising excessive computation
                     // lower these explicitly and opt out via `allow_wasm_budget_deferrals`.
-                    max_block_wasm_points: 4_500_000_000,
-                    max_block_validation_wasm_points: 5_000_000_000,
+                    max_block_execution_points: 4_500_000_000,
+                    max_block_validation_execution_points: 5_000_000_000,
                     exhaust_burn_rate_bps: 500,
                     epoch_end_spread_blocks: 0,
                 },
@@ -818,14 +818,14 @@ impl TestBuilder {
             let constants = &self.config.consensus_constants;
             let max_points_per_block = constants.max_commands_in_block as u64 * TEST_WASM_EXECUTION_POINTS;
             assert!(
-                max_points_per_block <= constants.max_block_wasm_points,
+                max_points_per_block <= constants.max_block_execution_points,
                 "Test config allows normal transactions to hit the wasm points budget: {} commands × {} points/tx = \
-                 {} > max_block_wasm_points {}. If this test deliberately exercises excessive computation, opt out \
-                 with allow_wasm_budget_deferrals().",
+                 {} > max_block_execution_points {}. If this test deliberately exercises excessive computation, opt \
+                 out with allow_wasm_budget_deferrals().",
                 constants.max_commands_in_block,
                 TEST_WASM_EXECUTION_POINTS,
                 max_points_per_block,
-                constants.max_block_wasm_points,
+                constants.max_block_execution_points,
             );
         }
 

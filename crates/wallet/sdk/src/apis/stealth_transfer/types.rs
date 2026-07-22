@@ -43,6 +43,15 @@ pub struct InputsToSpend {
 }
 
 impl InputsToSpend {
+    /// No funds locked. Used for the fee half of a transfer whose fee is sourced by the transfer
+    /// statement itself rather than by a statement of its own.
+    pub fn empty() -> Self {
+        Self {
+            inputs: vec![],
+            revealed: Amount::zero(),
+        }
+    }
+
     pub fn inputs_iter(&self) -> impl Iterator<Item = &InputSpendData> + '_ {
         self.inputs.iter()
     }

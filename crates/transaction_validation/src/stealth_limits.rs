@@ -17,6 +17,10 @@ const LOG_TARGET: &str = "tari::ootle::mempool::validators::stealth_limits";
 /// proposing leader past the block time. The engine enforces the same per-transfer and per-transaction caps during
 /// execution; this mirrors them to reject doomed transactions at ingress, before they are gossiped, stored and
 /// executed.
+///
+/// `max_fee_intent_transfers` is mirrored here too, over the fee instructions alone. The engine counts transfers a
+/// template performs as well, which an instruction count cannot see, so this catches the common case at ingress while
+/// the engine remains authoritative.
 #[derive(Debug, Clone, Default)]
 pub struct StealthTransactionLimitsValidator;
 
@@ -32,10 +36,16 @@ impl Validator<Transaction> for StealthTransactionLimitsValidator {
 
     fn validate(&self, _context: &(), transaction: &Transaction) -> Result<(), Self::Error> {
         let mut transfers = 0usize;
+        let mut fee_intent_transfers = 0usize;
         let mut inputs = 0usize;
         let mut outputs = 0usize;
 
-        for instruction in transaction.instructions().iter().chain(transaction.fee_instructions()) {
+        for (is_fee_intent, instruction) in transaction
+            .fee_instructions()
+            .iter()
+            .map(|i| (true, i))
+            .chain(transaction.instructions().iter().map(|i| (false, i)))
+        {
             if let Instruction::StealthTransfer { statement, .. } = instruction {
                 let transfer_inputs = statement.inputs_statement.inputs.len();
                 let transfer_outputs = statement.outputs_statement.outputs.len();
@@ -54,11 +64,20 @@ impl Validator<Transaction> for StealthTransactionLimitsValidator {
                     transaction,
                 )?;
                 transfers += 1;
+                if is_fee_intent {
+                    fee_intent_transfers += 1;
+                }
                 inputs += transfer_inputs;
                 outputs += transfer_outputs;
             }
         }
 
+        self.check(
+            "fee intent transfers",
+            fee_intent_transfers,
+            STEALTH_LIMITS.max_fee_intent_transfers,
+            transaction,
+        )?;
         self.check(
             "transfers",
             transfers,
@@ -157,21 +176,31 @@ mod tests {
         stmt
     }
 
-    fn tx_with_stealth_transfers(statements: Vec<StealthTransferStatement>) -> Transaction {
-        let instructions = statements
+    fn transfer_instructions(statements: Vec<StealthTransferStatement>) -> Vec<Instruction> {
+        statements
             .into_iter()
             .map(|statement| Instruction::StealthTransfer {
                 resource_address_ref: ResourceAddressRef::from(0u16),
                 statement,
                 revealed_input_bucket: None,
             })
-            .collect();
+            .collect()
+    }
+
+    fn tx_with_stealth_transfers(statements: Vec<StealthTransferStatement>) -> Transaction {
+        tx_with_intents(vec![], statements)
+    }
+
+    fn tx_with_intents(
+        fee_statements: Vec<StealthTransferStatement>,
+        main_statements: Vec<StealthTransferStatement>,
+    ) -> Transaction {
         Transaction::new(
             UnsealedTransactionV1::new(
                 UnsignedTransactionV1::new(
                     Network::LocalNet.as_byte(),
-                    vec![],
-                    instructions,
+                    transfer_instructions(fee_statements),
+                    transfer_instructions(main_statements),
                     IndexSet::new(),
                     None,
                     None,
@@ -233,6 +262,28 @@ mod tests {
         assert!(matches!(
             err,
             TransactionValidationError::ExceedsStealthTransactionLimit { limit: "transfers", .. }
+        ));
+    }
+
+    /// One fee-sourcing transfer is admitted, and the cap applies to the fee intent alone — the main intent may carry
+    /// as many transfers as the per-transaction caps allow.
+    #[test]
+    fn admits_one_fee_intent_transfer_alongside_several_main_intent_transfers() {
+        let tx = tx_with_intents(vec![statement(16, 1)], (0..8).map(|_| statement(4, 2)).collect());
+        StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_second_fee_intent_transfer() {
+        let n = STEALTH_LIMITS.max_fee_intent_transfers + 1;
+        let tx = tx_with_intents((0..n).map(|_| statement(1, 1)).collect(), vec![]);
+        let err = StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(
+            err,
+            TransactionValidationError::ExceedsStealthTransactionLimit {
+                limit: "fee intent transfers",
+                ..
+            }
         ));
     }
 

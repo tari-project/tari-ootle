@@ -3,6 +3,7 @@
 
 use libp2p::PeerId;
 use tari_consensus::{messages::HotstuffMessage, traits::InboundMessagingError};
+use tari_networking::InboundMessage;
 use tari_ootle_p2p::{PeerAddress, proto};
 use tokio::sync::mpsc;
 
@@ -10,7 +11,7 @@ use crate::p2p::logging::MessageLogger;
 
 pub struct ConsensusInboundMessaging<TMsgLogger> {
     local_address: PeerAddress,
-    rx_inbound_msg: mpsc::UnboundedReceiver<(PeerId, proto::consensus::HotStuffMessage)>,
+    rx_inbound_msg: mpsc::Receiver<InboundMessage<proto::consensus::HotStuffMessage>>,
     rx_gossip: mpsc::Receiver<(PeerId, proto::consensus::HotStuffMessage)>,
     rx_loopback: mpsc::UnboundedReceiver<HotstuffMessage>,
     msg_logger: TMsgLogger,
@@ -19,7 +20,7 @@ pub struct ConsensusInboundMessaging<TMsgLogger> {
 impl<TMsgLogger: MessageLogger> ConsensusInboundMessaging<TMsgLogger> {
     pub fn new(
         local_address: PeerAddress,
-        rx_inbound_msg: mpsc::UnboundedReceiver<(PeerId, proto::consensus::HotStuffMessage)>,
+        rx_inbound_msg: mpsc::Receiver<InboundMessage<proto::consensus::HotStuffMessage>>,
         rx_gossip: mpsc::Receiver<(PeerId, proto::consensus::HotStuffMessage)>,
         rx_loopback: mpsc::UnboundedReceiver<HotstuffMessage>,
         msg_logger: TMsgLogger,
@@ -70,8 +71,8 @@ impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::InboundMessaging
                 Ok((self.local_address, msg))
             }),
             maybe_msg = self.rx_inbound_msg.recv() => {
-                let (from, msg) = maybe_msg?;
-                self.handle_message(from, msg)
+                let inbound = maybe_msg?;
+                self.handle_message(inbound.peer_id, inbound.message)
             },
             maybe_msg = self.rx_gossip.recv() => {
                 let (from, msg) = maybe_msg?;

@@ -25,6 +25,8 @@ mod publish_template_limits;
 pub use publish_template_limits::*;
 mod signature;
 pub use signature::*;
+mod signature_limits;
+pub use signature_limits::*;
 mod stealth_limits;
 pub use stealth_limits::*;
 mod template_exists;

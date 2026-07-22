@@ -97,11 +97,18 @@ where
                 .build()
                 .unwrap();
 
-            let gossipsub = gossipsub::Behaviour::new(
+            let mut gossipsub = gossipsub::Behaviour::new(
                 gossipsub::MessageAuthenticity::Signed(keypair.clone()),
                 gossipsub_config,
             )
             .unwrap();
+
+            if !config.gossip_sub_scored_topics.is_empty() {
+                let (params, thresholds) = peer_score_params(&config.gossip_sub_scored_topics);
+                // Only fails if the parameters are invalid or scoring is already active, both of
+                // which are constructed here.
+                gossipsub.with_peer_score(params, thresholds).unwrap();
+            }
 
             // Ping
             let ping = ping::Behaviour::new(config.ping);
@@ -239,4 +246,56 @@ fn noise_config(keypair: &Keypair) -> Result<noise::Config, noise::Error> {
 fn noise_prologue() -> Vec<u8> {
     const PROLOGUE: &str = "tari-digital-asset-network";
     PROLOGUE.as_bytes().to_vec()
+}
+
+/// Peer-scoring parameters for the topics in [`Config::gossip_sub_scored_topics`].
+///
+/// Deliberately narrow: of gossipsub's seven scoring parameters only P4 (invalid message
+/// deliveries) and P7 (protocol-level misbehaviour) are enabled.
+///
+/// P1–P3b score *delivery rates* — how long a peer has been in the mesh, how often it delivers a
+/// message first, whether it meets a delivery quota. Their defaults assume a busy topic:
+/// `mesh_message_deliveries_threshold` of 20 penalises any peer delivering fewer than 20 messages
+/// per window, which on a quiet network is every honest peer. Scoring liveness that way would
+/// punish peers for the network being idle, so they are disabled rather than tuned.
+///
+/// P6 (IP colocation) is omitted. It exists to make Sybil identities cost IP addresses, which
+/// matters where identity is free; here consensus participation is gated by validator registration
+/// on the base layer, so how an operator distributes their nodes says nothing about whether they
+/// are one entity or many. Penalising colocation would tax honest deployments — a local swarm on
+/// one host, nodes sharing a NAT egress address — for no signal. Its residual value is bounding
+/// eclipse of the gossip mesh, which is accepted: that degrades propagation but not consensus
+/// safety, since intra-committee traffic uses direct messaging to peers drawn from the registered
+/// set rather than from mesh selection.
+///
+/// That leaves P4 carrying the signal the application actually produces: a `Reject` verdict from
+/// `report_gossip_validation`, reported for messages that fail to decode or fail validation. The
+/// penalty is the square of a decaying counter, so occasional invalid messages (version skew, an
+/// epoch-boundary race) are forgiven within seconds, while a sustained flood accumulates. At these
+/// weights a peer must sustain roughly twenty invalid messages per second to be graylisted.
+///
+/// The thresholds are libp2p's defaults. Scoring too aggressively partitions a network by
+/// graylisting honest peers, which is a far worse failure than scoring too leniently — so this
+/// starts permissive, and should be tightened against observed behaviour rather than guessed at.
+fn peer_score_params(topics: &[String]) -> (gossipsub::PeerScoreParams, gossipsub::PeerScoreThresholds) {
+    let topic_params = gossipsub::TopicScoreParams {
+        topic_weight: 1.0,
+        time_in_mesh_weight: 0.0,
+        first_message_deliveries_weight: 0.0,
+        mesh_message_deliveries_weight: 0.0,
+        mesh_failure_penalty_weight: 0.0,
+        invalid_message_deliveries_weight: -1.0,
+        ..Default::default()
+    };
+
+    let params = gossipsub::PeerScoreParams {
+        topics: topics
+            .iter()
+            .map(|topic| (gossipsub::IdentTopic::new(topic).hash(), topic_params.clone()))
+            .collect(),
+        ip_colocation_factor_weight: 0.0,
+        ..Default::default()
+    };
+
+    (params, gossipsub::PeerScoreThresholds::default())
 }

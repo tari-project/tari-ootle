@@ -187,14 +187,13 @@ impl JsonRpcHandlers {
     pub async fn submit_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let SubmitTransactionRequest { transaction } = value.parse_params()?;
+        let tx_id = transaction.calculate_id();
         debug!(
             target: LOG_TARGET,
             "Transaction {} has {} involved substate addresses",
-            transaction.calculate_id(),
+            tx_id,
             transaction.involved_substate_addresses_iter().count()
         );
-
-        let tx_id = transaction.calculate_id();
 
         if transaction.is_dry_run() {
             return Err(invalid_operation(

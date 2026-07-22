@@ -98,7 +98,19 @@ impl TransactionSealSignature {
     }
 
     pub fn verify_v1(&self, transaction: &UnsealedTransactionV1) -> bool {
-        let message = Self::create_message_v1(transaction);
+        self.verify_message(Self::create_message_v1(transaction))
+    }
+
+    /// Verifies the seal against a transaction whose blob commitments have already been derived.
+    ///
+    /// Deriving them hashes every blob payload, so a caller that also verifies the authorization
+    /// signatures should derive [`BlobHashes`] once and use this for both.
+    pub fn verify_v1_with_blob_hashes(&self, transaction: &UnsealedTransactionV1, blob_hashes: &BlobHashes) -> bool {
+        self.verify_message(Self::create_message_v1_with_blob_hashes(transaction, blob_hashes))
+    }
+
+    /// Verifies this seal against an already-derived signing message.
+    pub fn verify_message(&self, message: [u8; 64]) -> bool {
         let Ok(public_key) = self.public_key.try_from_byte_type() else {
             return false;
         };
@@ -127,12 +139,20 @@ impl TransactionSealSignature {
     }
 
     pub fn create_message_v1(transaction: &UnsealedTransactionV1) -> [u8; 64] {
-        let unsigned = transaction.unsigned_transaction();
-        let blob_hashes = unsigned.blobs.hashes();
+        let blob_hashes = transaction.unsigned_transaction().blobs.hashes();
+        Self::create_message_v1_with_blob_hashes(transaction, &blob_hashes)
+    }
+
+    /// Seal message for a transaction whose blob commitments have already been derived. Produces
+    /// the same digest as [`Self::create_message_v1`] given commitments over the same blobs.
+    pub fn create_message_v1_with_blob_hashes(
+        transaction: &UnsealedTransactionV1,
+        blob_hashes: &BlobHashes,
+    ) -> [u8; 64] {
         Self::create_message_v1_inner(
             transaction.schema_version(),
-            TransactionSignatureFields::from(unsigned),
-            &blob_hashes,
+            TransactionSignatureFields::from(transaction.unsigned_transaction()),
+            blob_hashes,
             transaction.signatures(),
         )
     }
@@ -191,14 +211,7 @@ impl TransactionSealSignature {
     }
 
     pub fn verify_v1_pruned(&self, transaction: &PrunedUnsealedTransactionV1) -> bool {
-        let message = Self::create_message_v1_pruned(transaction);
-        let Ok(public_key) = self.public_key.try_from_byte_type() else {
-            return false;
-        };
-        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
-            return false;
-        };
-        signature.verify(&public_key, message)
+        self.verify_message(Self::create_message_v1_pruned(transaction))
     }
 }
 
@@ -253,7 +266,17 @@ impl TransactionSignature {
     }
 
     pub fn verify_v1(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
-        let message = Self::create_message_v1(seal_signer, transaction);
+        self.verify_message(Self::create_message_v1(seal_signer, transaction))
+    }
+
+    /// Verifies this signature against an already-derived signing message.
+    ///
+    /// The message is identical for every signature over the same transaction, and deriving it
+    /// hashes the entire body — including a commitment over every blob's bytes. A caller verifying
+    /// more than one signature MUST derive the message once and use this: deriving it per signature
+    /// makes verification cost `O(signatures × body bytes)`, which an attacker controls on both
+    /// factors within a single transaction.
+    pub fn verify_message(&self, message: [u8; 64]) -> bool {
         let Ok(public_key) = self.public_key.try_from_byte_type() else {
             return false;
         };
@@ -279,11 +302,22 @@ impl TransactionSignature {
 
     pub fn create_message_v1(seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> [u8; 64] {
         let blob_hashes = transaction.blobs.hashes();
+        Self::create_message_v1_with_blob_hashes(seal_signer, transaction, &blob_hashes)
+    }
+
+    /// Authorization message for a transaction whose blob commitments have already been derived.
+    /// Produces the same digest as [`Self::create_message_v1`] given commitments over the same
+    /// blobs.
+    pub fn create_message_v1_with_blob_hashes(
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &UnsignedTransactionV1,
+        blob_hashes: &BlobHashes,
+    ) -> [u8; 64] {
         Self::create_message_v1_inner(
             seal_signer,
             transaction.schema_version(),
             TransactionSignatureFields::from(transaction),
-            &blob_hashes,
+            blob_hashes,
         )
     }
 
@@ -350,14 +384,7 @@ impl TransactionSignature {
         transaction: &PrunedUnsignedTransactionV1,
         blob_hashes: &BlobHashes,
     ) -> bool {
-        let message = Self::create_message_v1_pruned(seal_signer, transaction, blob_hashes);
-        let Ok(public_key) = self.public_key.try_from_byte_type() else {
-            return false;
-        };
-        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
-            return false;
-        };
-        signature.verify(&public_key, message)
+        self.verify_message(Self::create_message_v1_pruned(seal_signer, transaction, blob_hashes))
     }
 }
 
@@ -757,6 +784,62 @@ mod tests {
         BorshSerialize::serialize(&unsealed.signatures(), &mut expected).unwrap();
 
         assert_eq!(reconstructed, expected);
+    }
+
+    /// The `_with_blob_hashes` entry points let a caller derive blob commitments once and share
+    /// them between the seal and authorization messages. They must produce digests identical to
+    /// deriving the commitments inline — otherwise a signature would verify on one path and fail on
+    /// the other.
+    #[test]
+    fn with_blob_hashes_matches_inline_derivation() {
+        let seal_signer = sample_seal_signer();
+        let mut unsigned = sample_unsigned();
+        unsigned.blobs.push(crate::Blob::from(vec![4, 5, 6])).unwrap();
+        let sig = random_signature(&unsigned, &seal_signer);
+        let unsealed = unsealed_with(unsigned.clone(), vec![sig]);
+        let blob_hashes = unsigned.blobs.hashes();
+
+        assert_eq!(
+            TransactionSignature::create_message_v1(&seal_signer, &unsigned),
+            TransactionSignature::create_message_v1_with_blob_hashes(&seal_signer, &unsigned, &blob_hashes),
+            "authorization message",
+        );
+        assert_eq!(
+            TransactionSealSignature::create_message_v1(&unsealed),
+            TransactionSealSignature::create_message_v1_with_blob_hashes(&unsealed, &blob_hashes),
+            "seal message",
+        );
+    }
+
+    /// The signing message is derived once for the whole signature set, so every signature must
+    /// still be checked against it individually: a fully valid set verifies, and a signature over a
+    /// different body fails at any position in the set.
+    #[test]
+    fn verify_all_signatures_checks_every_signature() {
+        let seal_signer = sample_seal_signer();
+        let unsigned = sample_unsigned();
+
+        let sigs: Vec<_> = (0..4).map(|_| random_signature(&unsigned, &seal_signer)).collect();
+        let all_valid = unsealed_with(unsigned.clone(), sigs.clone());
+        assert!(all_valid.verify_all_signatures(&seal_signer));
+
+        let mut other_body = unsigned.clone();
+        other_body.dry_run = !other_body.dry_run;
+        let foreign = random_signature(&other_body, &seal_signer);
+
+        for i in 0..sigs.len() {
+            let mut planted = sigs.clone();
+            planted[i] = foreign.clone();
+            assert!(
+                !unsealed_with(unsigned.clone(), planted).verify_all_signatures(&seal_signer),
+                "a signature over a different body at index {i} must fail verification",
+            );
+        }
+
+        assert!(
+            !all_valid.verify_all_signatures(&sample_seal_signer()),
+            "the set is bound to the seal signer it was signed under",
+        );
     }
 
     #[test]

@@ -7,7 +7,11 @@ use log::*;
 use ootle_byte_type::{ConvertFromByteType, FromByteType};
 use ootle_network::Network;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{
+    limits::FREE_COMPUTE_GRACE_POINTS,
+    stealth::transfer_native_points_for_shape,
+    substate::SubstateId,
+};
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{SubstateRequirement, displayable::Displayable, optional::Optional};
 use tari_ootle_transaction::{Transaction, UnsignedTransaction, args};
@@ -47,15 +51,32 @@ use crate::{
     models::{
         AccountWithAddress,
         KeyBranch,
+        KeyId,
         OutputStatus,
         StealthOutputModel,
         StealthUtxoSpendKeyId,
         WalletLockDropGuard,
         WalletLockId,
+        WalletPublicKey,
     },
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::stealth_transfers";
+
+/// The share of [`FREE_COMPUTE_GRACE_POINTS`] a merged statement may occupy. That credit is the entire
+/// allowance funding the fee intent until `pay_fee` settles, and the engine traps mid-execution once
+/// native verification exceeds it, so the merge only fires with headroom against the engine's own price.
+const MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT: u64 = 80;
+
+/// Whether a merged statement of this shape verifies within the credit funding the fee intent.
+///
+/// A merged statement sources the fee from its own revealed remainder, so all of its verification
+/// precedes `pay_fee` and is funded by the credit alone rather than by the payment. Outputs dominate
+/// the price, which is what bounds how many recipients one statement may serve.
+fn merged_statement_fits_credit(num_inputs: usize, num_outputs: usize, has_view_key: bool) -> bool {
+    let budget = FREE_COMPUTE_GRACE_POINTS / 100 * MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT;
+    transfer_native_points_for_shape(num_inputs, num_outputs, has_view_key) <= budget
+}
 
 pub struct StealthTransferApi<'a, TSpec: WalletSdkSpec> {
     accounts_api: AccountsApi<'a, TSpec>,
@@ -294,6 +315,111 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         )
     }
 
+    /// Locks fee inputs and builds the statement that sources the fee, registering its change output as
+    /// unconfirmed so that a same-resource transfer can spend it. Used whenever the fee cannot be
+    /// sourced by the transfer statement itself: a differing fee resource, a swap, or a merged statement
+    /// that would not fit the fee-intent credit.
+    fn build_fee_statement(
+        &self,
+        lock_id: WalletLockId,
+        owner_account: &AccountWithAddress,
+        params: &StealthTransferParams,
+        owner_address: &RistrettoOotleAddress,
+        account_key_id: KeyId,
+    ) -> Result<(InputsToSpend, WalletPublicKey, StealthTransferStatement), StealthTransferApiError> {
+        let fee_inputs_to_spend = self.lock_fee_inputs(
+            lock_id,
+            owner_account.component_address(),
+            params.max_fee,
+            &params.fee_params,
+        )?;
+
+        debug!(
+            target: LOG_TARGET,
+            "🔒️ Locked {} fee inputs for fee spending worth {} (max fee {})",
+            fee_inputs_to_spend.inputs.len(),
+            fee_inputs_to_spend.total_stealth_input_amount(),
+            params.max_fee,
+        );
+
+        // When paying with a swap, the amount to spend is the swap input_amount (non-TARI token),
+        // not max_fee (which is in microtari and has a different exchange rate).
+        let fee_amount_to_spend = match params.fee_params.pay_fee_with_swap.as_ref() {
+            Some(swap) => swap.input_amount,
+            None => params.max_fee.into(),
+        };
+
+        let fee_stealth_change_amt = fee_inputs_to_spend
+            .total_stealth_input_amount()
+            .saturating_sub(fee_amount_to_spend)
+            .to_u64_checked()
+            .ok_or_else(|| {
+                StealthTransferApiError::InvariantViolation {
+                    // Technically, you could create multiple outputs, but for simplicity and because this is
+                    // extremely unlikely to be needed, we only create one here
+                    details: "Fee change amount exceeds u64".to_string(),
+                }
+            })?;
+
+        // Generate fee change outputs if required
+        let fee_change_output = Some(fee_stealth_change_amt)
+            .filter(|amt| *amt > 0)
+            .map(|amt| StealthOutputToCreate {
+                owner_address: owner_address.clone(),
+                amount: amt,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            });
+
+        // Figure out which signing key to use - if there are revealed funds, we need to use an account
+        // withdraw auth signature, otherwise we can use a "throw-away" and private nonce.
+        let must_sign_with_account_key = fee_inputs_to_spend.revealed.is_positive();
+        let signing_key_id = if must_sign_with_account_key {
+            account_key_id
+        } else {
+            self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
+        };
+        let fee_signer = self.key_manager_api.get_public_key(signing_key_id)?;
+
+        let fee_resource = params
+            .fee_params
+            .pay_fee_with_swap
+            .as_ref()
+            .map(|swap| swap.input_resource)
+            .unwrap_or(TARI_TOKEN);
+        // Generate fee transfer statement
+        let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+            view_only_key_id: owner_account.view_only_key_id(),
+            resource_address: &fee_resource,
+            resource_view_key: None,
+            inputs: &fee_inputs_to_spend.inputs,
+            input_revealed_amount: fee_inputs_to_spend.revealed,
+            outputs: fee_change_output,
+            output_revealed_amount: fee_amount_to_spend,
+        })?;
+
+        // Add the unconfirmed fee change output to the wallet store
+        if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
+            debug!(
+                target: LOG_TARGET,
+                "Adding FEE unconfirmed output with commitment {} for amount {} to account {}",
+                output.output.commitment,
+                fee_stealth_change_amt,
+                owner_account.component_address()
+            );
+            self.add_unconfirmed_output_from_statement(
+                lock_id,
+                owner_account,
+                fee_resource,
+                output,
+                fee_stealth_change_amt,
+                None,
+            )?;
+        }
+
+        Ok((fee_inputs_to_spend, fee_signer, fee_transfer_statement))
+    }
+
     #[allow(clippy::too_many_lines)]
     pub async fn transfer(
         &self,
@@ -395,61 +521,31 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // Create a lock with a timeout, the lock timeout will be removed if the lock is assigned a transaction
             let lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
-            // Lock up funds for fees and transfer
-            let fee_inputs_to_spend = self.lock_fee_inputs(
-                lock.id(),
-                owner_account.component_address(),
-                params.max_fee,
-                &params.fee_params,
-            )?;
+            // A transfer statement whose revealed remainder covers the fee replaces the separate fee
+            // statement, doing in one statement what otherwise takes two. It requires the fee and the
+            // transfer resource to coincide, and the merged statement's whole verification then runs in
+            // the fee intent ahead of `pay_fee`, funded by FREE_COMPUTE_GRACE_POINTS alone.
+            let merge_candidate =
+                params.fee_params.pay_fee_with_swap.is_none() && params.resource_address == TARI_TOKEN;
 
-            debug!(
-                target: LOG_TARGET,
-                "🔒️ Locked {} fee inputs for fee spending worth {} (max fee {})",
-                fee_inputs_to_spend.inputs.len(),
-                fee_inputs_to_spend.total_stealth_input_amount(),
-                params.max_fee,
-            );
-
-            // When paying with a swap, the amount to spend is the swap input_amount (non-TARI token),
-            // not max_fee (which is in microtari and has a different exchange rate).
-            let fee_amount_to_spend = match params.fee_params.pay_fee_with_swap.as_ref() {
-                Some(swap) => swap.input_amount,
-                None => params.max_fee.into(),
-            };
-
-            let fee_stealth_change_amt = fee_inputs_to_spend
-                .total_stealth_input_amount()
-                .saturating_sub(fee_amount_to_spend)
-                .to_u64_checked()
-                .ok_or_else(|| {
-                    StealthTransferApiError::InvariantViolation {
-                        // Technically, you could create multiple outputs, but for simplicity and because this is
-                        // extremely unlikely to be needed, we only create one here
-                        details: "Fee change amount exceeds u64".to_string(),
-                    }
-                })?;
-
-            // Generate fee change outputs if required
-            let fee_change_output =
-                Some(fee_stealth_change_amt)
-                    .filter(|amt| *amt > 0)
-                    .map(|amt| StealthOutputToCreate {
-                        owner_address: owner_address.clone(),
-                        amount: amt,
-                        memo: None,
-                        pay_to: PayTo::StealthPublicKey,
-                    });
-
-            // Figure out which signing key to use - if there are revealed funds, we need to use an account
-            // withdraw auth signature, otherwise we can use a "throw-away" and private nonce.
-            let must_sign_with_account_key = fee_inputs_to_spend.revealed.is_positive();
-            let signing_key_id = if must_sign_with_account_key {
-                account_key_id
+            // On the separate-statement path the fee half must run before transfer input selection, so
+            // that its change output reaches the store in time for the transfer to be able to spend it.
+            // Merged, there is no fee half and the single selection covers the fee as well.
+            let mut fee_half = if merge_candidate {
+                None
             } else {
-                self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
+                Some(self.build_fee_statement(lock.id(), &owner_account, &params, &owner_address, account_key_id)?)
             };
-            let fee_signer = self.key_manager_api.get_public_key(signing_key_id)?;
+
+            // The fee the transfer statement itself reveals. Non-zero only while the merge holds: on
+            // fallback the fee reverts to a statement of its own and this drops back to zero, so the
+            // transfer statement reveals only what the recipients are owed and the surplus locked against
+            // the fee becomes change.
+            let mut merged_fee_amount = if merge_candidate {
+                Amount::from(params.max_fee)
+            } else {
+                Amount::zero()
+            };
 
             let fee_resource = params
                 .fee_params
@@ -457,59 +553,84 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 .as_ref()
                 .map(|swap| swap.input_resource)
                 .unwrap_or(TARI_TOKEN);
-            // Generate fee transfer statement
-            let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-                view_only_key_id: owner_account.view_only_key_id(),
-                resource_address: &fee_resource,
-                resource_view_key: None,
-                inputs: &fee_inputs_to_spend.inputs,
-                input_revealed_amount: fee_inputs_to_spend.revealed,
-                outputs: fee_change_output,
-                output_revealed_amount: fee_amount_to_spend,
-            })?;
 
-            // Add the unconfirmed fee change output to the wallet store
-            if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
-                debug!(
-                    target: LOG_TARGET,
-                    "Adding FEE unconfirmed output with commitment {} for amount {} to account {}",
-                    output.output.commitment,
-                    fee_stealth_change_amt,
-                    owner_account.component_address()
-                );
-                self.add_unconfirmed_output_from_statement(
-                    lock.id(),
-                    &owner_account,
-                    fee_resource,
-                    output,
-                    fee_stealth_change_amt,
-                    None,
-                )?;
-            }
-
-            // NOTE: important to add this after we add the fee change, because this allows us to spend the fee change
-            // UTXO (XTR case)
             let inputs_to_spend = self.lock_inputs_for_transfer(
                 lock.id(),
                 owner_account.account().component_address(),
                 params.resource_address,
-                params.total_output_amount(),
+                params.total_output_amount() + merged_fee_amount,
                 params.input_selection,
             )?;
 
-            // Signing key for main transfer intent
-            let must_sign_with_account_key = !params.badge_usage.is_none() || inputs_to_spend.revealed.is_positive();
-            let signing_key_id = if must_sign_with_account_key {
-                Some(account_key_id)
-            } else {
-                None
+            // Output count drives the price and is known up front, but the realised input count is not,
+            // so the credit check waits for selection. Falling back is not a failure: past the credit the
+            // separate-statement shape is genuinely cheaper, since only the fee statement's inputs are
+            // funded by the credit and the transfer's move to the payment-funded main intent.
+            if merge_candidate {
+                let num_blinded_outputs = params.outputs.iter().filter(|o| o.blinded_amount > 0).count();
+                let has_change = inputs_to_spend.total_amount() > params.total_output_amount() + merged_fee_amount;
+                let num_outputs = num_blinded_outputs + usize::from(has_change);
+                if !merged_statement_fits_credit(inputs_to_spend.inputs.len(), num_outputs, resource_view_key.is_some())
+                {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Merged fee/transfer statement ({} inputs, {} outputs) exceeds the fee-intent credit; \
+                         sourcing the fee from a statement of its own",
+                        inputs_to_spend.inputs.len(),
+                        num_outputs,
+                    );
+                    // The transfer inputs already cover the fee, so this locks more of the account than is
+                    // strictly needed. The surplus comes back as transfer change.
+                    fee_half = Some(self.build_fee_statement(
+                        lock.id(),
+                        &owner_account,
+                        &params,
+                        &owner_address,
+                        account_key_id,
+                    )?);
+                    // The fee is now sourced separately, so the transfer statement must stop revealing it.
+                    merged_fee_amount = Amount::zero();
+                }
+            }
+
+            let is_merged = fee_half.is_none();
+
+            let (fee_inputs_to_spend, fee_signer, fee_transfer_statement) = match fee_half {
+                Some((inputs, signer, statement)) => (inputs, signer, Some(statement)),
+                None => {
+                    // Merged: the transfer statement is itself the fee source, so its signer is the only
+                    // signer the transaction has.
+                    let signing_key_id = if !params.badge_usage.is_none() || inputs_to_spend.revealed.is_positive() {
+                        account_key_id
+                    } else {
+                        self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
+                    };
+                    (
+                        InputsToSpend::empty(),
+                        self.key_manager_api.get_public_key(signing_key_id)?,
+                        None,
+                    )
+                },
             };
 
-            // No need to add another signature if the fee signer is the same as the main signer
-            let main_intent_signer = signing_key_id
-                .filter(|key_id| *key_id != fee_signer.key_id())
-                .map(|key_id| self.key_manager_api.get_public_key(key_id))
-                .transpose()?;
+            // Signing key for main transfer intent. A merged transaction has no main intent to sign for.
+            let main_intent_signer = if is_merged {
+                None
+            } else {
+                let must_sign_with_account_key =
+                    !params.badge_usage.is_none() || inputs_to_spend.revealed.is_positive();
+                let signing_key_id = if must_sign_with_account_key {
+                    Some(account_key_id)
+                } else {
+                    None
+                };
+
+                // No need to add another signature if the fee signer is the same as the main signer
+                signing_key_id
+                    .filter(|key_id| *key_id != fee_signer.key_id())
+                    .map(|key_id| self.key_manager_api.get_public_key(key_id))
+                    .transpose()?
+            };
 
             // If we're spending from the owner account, add the inputs
             if inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive() {
@@ -535,15 +656,16 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 }
             }
 
-            // Any change outputs?
+            // Any change outputs? When merged, the fee is revealed by this statement too, so it comes out
+            // of the inputs before any change is left over.
             let change_amount = inputs_to_spend
                 .total_amount()
-                .checked_sub(params.total_output_amount())
+                .checked_sub(params.total_output_amount() + merged_fee_amount)
                 .ok_or_else(|| StealthTransferApiError::InvariantViolation {
                     details: format!(
                         "Total input amount {} is less than total output amount {}",
                         inputs_to_spend.total_amount(),
-                        params.total_output_amount()
+                        params.total_output_amount() + merged_fee_amount
                     ),
                 })?;
 
@@ -560,7 +682,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 pay_to: PayTo::StealthPublicKey,
             });
 
-            let output_revealed_amount = params.total_revealed_output_amount();
+            // Merged, the fee is drawn from this statement's revealed remainder alongside any revealed
+            // amounts owed to recipients.
+            let output_revealed_amount = params.total_revealed_output_amount() + merged_fee_amount;
             let outputs_to_create = params
                 .outputs
                 .iter()
@@ -771,9 +895,21 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         owner_account: &AccountWithAddress,
         params: StealthTransferParams,
         inputs: Vec<SubstateRequirement>,
-        fee_transfer_statement: StealthTransferStatement,
+        fee_transfer_statement: Option<StealthTransferStatement>,
         transfer_statement: StealthTransferStatement,
     ) -> Result<UnsignedTransaction, StealthTransferApiError> {
+        // Without a fee statement the transfer statement is itself the fee source, which only works
+        // while it precedes `pay_fee` - so the whole flow moves into the fee intent.
+        let Some(fee_transfer_statement) = fee_transfer_statement else {
+            return self.generate_merged_transfer_transaction(
+                network,
+                owner_account,
+                params,
+                inputs,
+                transfer_statement,
+            );
+        };
+
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
         let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
 
@@ -917,6 +1053,118 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         Ok(transaction)
     }
 
+    /// Builds a transaction whose single stealth transfer both pays the recipients and reveals the fee.
+    /// Every instruction sits in the fee intent: the statement has to precede `pay_fee` for its revealed
+    /// remainder to fund the fee at all, which is the whole point of merging, so the main intent is empty.
+    #[allow(clippy::too_many_lines)]
+    fn generate_merged_transfer_transaction(
+        &self,
+        network: Network,
+        owner_account: &AccountWithAddress,
+        params: StealthTransferParams,
+        inputs: Vec<SubstateRequirement>,
+        transfer_statement: StealthTransferStatement,
+    ) -> Result<UnsignedTransaction, StealthTransferApiError> {
+        let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
+        let revealed_to_recipients = params.total_revealed_output_amount();
+        let account_address = *owner_account.component_address();
+
+        let transaction = Transaction::builder(network.as_byte())
+            .with_dry_run(params.is_dry_run)
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    // A badge proof has to exist before the transfer relying on it. The merged flow is
+                    // wholly contained in this intent, so the proof is created and dropped here too.
+                    .then(|b| match &params.badge_usage {
+                        BadgeUsage::None => b,
+                        BadgeUsage::Resource(resx) => b
+                            .call_method(account_address, "create_proof_for_resource", args![resx])
+                            .put_last_instruction_output_on_workspace("proof"),
+                        BadgeUsage::NonFungible(nft) => b
+                            .call_method(account_address, "create_proof_by_non_fungible", args![nft])
+                            .put_last_instruction_output_on_workspace("proof"),
+                        BadgeUsage::AmountOfResource { amount, resource } => b
+                            .call_method(account_address, "create_proof_by_amount", args![resource, amount])
+                            .put_last_instruction_output_on_workspace("proof"),
+                    })
+                    .then(|b| {
+                        // When there are no stealth inputs or outputs, skip the stealth transfer
+                        // instruction and use a standard withdraw instead. A stealth transfer would still
+                        // work correctly, but a plain withdraw is more fee-efficient.
+                        let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() &&
+                            transfer_statement.inputs_statement.inputs.is_empty();
+                        if has_no_inputs_or_outputs {
+                            return b.call_method(account_address, "withdraw", args![
+                                params.resource_address,
+                                revealed_input_amount
+                            ]);
+                        }
+
+                        if revealed_input_amount.is_positive() {
+                            b.call_method(account_address, "withdraw", args![
+                                params.resource_address,
+                                revealed_input_amount
+                            ])
+                            .put_last_instruction_output_on_workspace("input_bucket")
+                            .stealth_transfer_with_input_bucket(
+                                params.resource_address,
+                                transfer_statement,
+                                "input_bucket",
+                            )
+                        } else {
+                            b.stealth_transfer(params.resource_address, transfer_statement)
+                        }
+                    })
+                    .put_last_instruction_output_on_workspace("revealed_bucket")
+                    .then(|b| {
+                        // The revealed remainder covers the fee plus anything owed to recipients as
+                        // revealed funds. With nothing owed, the whole bucket is the fee.
+                        if revealed_to_recipients.is_zero() {
+                            b.pay_fee_from_bucket("revealed_bucket")
+                        } else {
+                            b.take_from_bucket("revealed_bucket", params.max_fee, "fee_input_bucket")
+                                .pay_fee_from_bucket("fee_input_bucket")
+                        }
+                    })
+                    .then(|b| {
+                        if revealed_to_recipients.is_zero() {
+                            return b;
+                        }
+                        params.outputs.iter().enumerate().fold(b, |b, (i, output)| {
+                            if !output.revealed_amount.is_positive() {
+                                return b;
+                            }
+                            let needs_to_split = params.outputs.len() > 1;
+
+                            if needs_to_split {
+                                let sub_bucket_name = format!("output-sub-bucket-{i}");
+                                b.take_from_bucket("revealed_bucket", output.revealed_amount, &sub_bucket_name)
+                                    .create_account_with_bucket(*output.address.account_public_key(), sub_bucket_name)
+                            } else {
+                                b.create_account_with_bucket(*output.address.account_public_key(), "revealed_bucket")
+                            }
+                        })
+                    })
+                    .then(|b| {
+                        if params.badge_usage.is_none() {
+                            b
+                        } else {
+                            b.drop_all_proofs_in_workspace()
+                        }
+                    })
+            })
+            .then(|builder| match &params.badge_usage {
+                BadgeUsage::None => builder,
+                BadgeUsage::Resource(resx) => builder.add_input(*resx),
+                BadgeUsage::NonFungible(nft) => builder.add_input(*nft.resource_address()).add_input(nft.clone()),
+                BadgeUsage::AmountOfResource { resource, .. } => builder.add_input(*resource),
+            })
+            .with_inputs(inputs)
+            .build_unsigned();
+
+        Ok(transaction)
+    }
+
     fn add_unconfirmed_output_from_statement(
         &self,
         lock_id: WalletLockId,
@@ -947,5 +1195,47 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             is_condition_spendable: self.outputs_api.is_spendable_auth(&output.auth),
         })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod merged_credit_tests {
+    use tari_engine_types::limits::{FREE_COMPUTE_GRACE_POINTS, NativeExecutionPoints as P};
+
+    use super::{MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT, merged_statement_fits_credit};
+
+    fn budget() -> u64 {
+        FREE_COMPUTE_GRACE_POINTS / 100 * MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT
+    }
+
+    #[test]
+    fn a_single_recipient_send_merges() {
+        // One recipient output plus one change output, the overwhelmingly common shape.
+        assert!(merged_statement_fits_credit(2, 2, false));
+    }
+
+    #[test]
+    fn two_recipients_plus_change_is_the_ceiling() {
+        // Three no-view-key outputs is the most the credit funds; the fourth tips it over even with
+        // zero inputs, which is what caps a merged send at two recipients.
+        assert!(merged_statement_fits_credit(0, 3, false));
+        assert!(!merged_statement_fits_credit(0, 4, false));
+    }
+
+    #[test]
+    fn inputs_can_exhaust_the_credit_for_a_mergeable_output_count() {
+        // Outputs dominate, but enough inputs still push a 3-output statement past the budget and force
+        // the fallback - the case the runtime input count guards after selection.
+        let per_output_room = budget() - (P::PER_STATEMENT + 3 * P::PER_OUTPUT);
+        let max_inputs = (per_output_room / P::PER_INPUT) as usize;
+        assert!(merged_statement_fits_credit(max_inputs, 3, false));
+        assert!(!merged_statement_fits_credit(max_inputs + 1, 3, false));
+    }
+
+    #[test]
+    fn a_view_key_resource_is_priced_more_strictly() {
+        // The per-output ElGamal surcharge lowers the output ceiling for view-key resources.
+        assert!(merged_statement_fits_credit(0, 3, false));
+        assert!(!merged_statement_fits_credit(0, 3, true));
     }
 }

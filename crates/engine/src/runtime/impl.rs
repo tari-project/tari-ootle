@@ -3771,6 +3771,11 @@ where
         // only creation-time invariant is that an output is spendable by at least one path (`spend_key` or
         // `condition_root` is `Some`), enforced by `validate_stealth_outputs_statement` during execution.
 
+        // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked first, so
+        // an over-cap fee intent is rejected before any substate read, charge or crypto. Both the `StealthTransfer`
+        // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
+        self.tracker.account_fee_intent_stealth_transfer()?;
+
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction
         // that will not pay traps here without extracting the crypto work. The resource peek is a

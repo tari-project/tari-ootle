@@ -103,7 +103,7 @@ pub enum NoVoteReason {
     #[error("Block transaction execution weight {total_weight} exceeds the maximum {max_weight}")]
     BlockWeightExceeded { total_weight: u64, max_weight: u64 },
     #[error("Block wasm execution points {total_points} exceed the maximum {max_points}")]
-    BlockWasmPointsExceeded { total_points: u64, max_points: u64 },
+    BlockExecutionPointsExceeded { total_points: u64, max_points: u64 },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -153,7 +153,7 @@ impl NoVoteReason {
             Self::NotAllInputsOutputsAccepted => "NotAllInputsOutputsAccepted",
             Self::InvalidEvidence { .. } => "InvalidEvidence",
             Self::BlockWeightExceeded { .. } => "BlockWeightExceeded",
-            Self::BlockWasmPointsExceeded { .. } => "BlockWasmPointsExceeded",
+            Self::BlockExecutionPointsExceeded { .. } => "BlockExecutionPointsExceeded",
         }
     }
 }

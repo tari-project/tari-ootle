@@ -10,6 +10,7 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    BlobHashes,
     Blobs,
     Instruction,
     IntoSigned,
@@ -92,12 +93,29 @@ impl UnsealedTransactionV1 {
     }
 
     pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
+        self.verify_all_signatures_with_blob_hashes(seal_signer, &self.transaction.blobs.hashes())
+    }
+
+    /// Verifies every authorization signature against a transaction whose blob commitments have
+    /// already been derived.
+    ///
+    /// Deriving them hashes every blob payload, so a caller that also verifies the seal should
+    /// derive [`Blobs::hashes`] once and use this for both.
+    pub fn verify_all_signatures_with_blob_hashes(
+        &self,
+        seal_signer: &RistrettoPublicKeyBytes,
+        blob_hashes: &BlobHashes,
+    ) -> bool {
         if self.signatures().is_empty() {
             return true;
         }
 
+        // Derived once and reused: every signature over this transaction signs the same message, and
+        // deriving it hashes the whole body including a commitment over every blob's bytes.
+        let message =
+            TransactionSignature::create_message_v1_with_blob_hashes(seal_signer, &self.transaction, blob_hashes);
         self.signatures().iter().enumerate().all(|(i, sig)| {
-            if sig.verify_v1(seal_signer, &self.transaction) {
+            if sig.verify_message(message) {
                 true
             } else {
                 log::debug!(target: LOG_TARGET, "Failed to verify signature at index {}", i);

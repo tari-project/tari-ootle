@@ -6,6 +6,7 @@ use tari_ootle_transaction::{Network, Transaction};
 use crate::{
     BasicValidations,
     PublishTemplateLimitValidator,
+    SignatureLimitValidator,
     StealthTransactionLimitsValidator,
     TransactionNetworkValidator,
     TransactionSignatureValidator,
@@ -31,5 +32,7 @@ pub fn create_structural_transaction_validator(
         .and_then(TransactionWeightValidator::new(max_transaction_weight))
         .and_then(StealthTransactionLimitsValidator::new())
         .and_then(PublishTemplateLimitValidator::new())
+        // Bounds the number of signature verifications the next validator performs.
+        .and_then(SignatureLimitValidator::new())
         .and_then(TransactionSignatureValidator)
 }

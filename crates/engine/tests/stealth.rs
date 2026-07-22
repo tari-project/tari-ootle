@@ -131,6 +131,107 @@ fn basic_transfer() {
     assert!(utxos[0].output().is_some());
 }
 
+/// Two independent transfers, both valid on their own, for the fee-intent cap tests. Each spends a different minted
+/// UTXO, so the first completes and only the cap can stop the second.
+fn two_transfers(mint: &StealthSecretTransferData) -> (StealthSecretTransferData, StealthSecretTransferData) {
+    let first = stealth::generate_transfer_data(
+        [MaskAndValue {
+            mask: mint.output_masks[0].clone(),
+            value: 100,
+        }],
+        0u64,
+        Some(100),
+        0,
+    );
+    let second = stealth::generate_transfer_data(
+        [MaskAndValue {
+            mask: mint.output_masks[1].clone(),
+            value: 1000,
+        }],
+        0u64,
+        Some(1000),
+        0,
+    );
+    (first, second)
+}
+
+const FEE_INTENT_CAP_REASON: &str = "Maximum number of stealth transfers in the fee intent exceeded";
+
+/// The fee intent runs on free-compute credit, so it may perform only one stealth transfer.
+#[test]
+fn fee_intent_rejects_a_second_stealth_transfer() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let mint = stealth::generate_mint_statement(vec![100, 1000], 0u64, None);
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
+    let (first, second) = two_transfers(&mint);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    .stealth_transfer(faucet_resx, first.statement)
+                    .stealth_transfer(faucet_resx, second.statement)
+            })
+            .finish()
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, FEE_INTENT_CAP_REASON);
+}
+
+/// The cap counts transfers *performed*, so routing the second through a template does not evade it. Were only
+/// `StealthTransfer` instructions counted, the WASM route — which costs an invocation and a host call on top of the
+/// same verification — would be the way to exceed the limit.
+#[test]
+fn fee_intent_counts_a_stealth_transfer_performed_from_wasm() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let mint = stealth::generate_mint_statement(vec![100, 1000], 0u64, None);
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    let (first, second) = two_transfers(&mint);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .with_fee_instructions_builder(|builder| {
+                builder.stealth_transfer(faucet_resx, first.statement).call_function(
+                    template_addr,
+                    "static_programmatic_transfer",
+                    args![faucet_resx, second.statement],
+                )
+            })
+            .finish()
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, FEE_INTENT_CAP_REASON);
+}
+
+/// The cap is scoped to the fee intent: the main intent may perform further transfers, funded by the fee just paid.
+#[test]
+fn main_intent_may_transfer_after_the_fee_intent_has() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let mint = stealth::generate_mint_statement(vec![100, 1000], 0u64, None);
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
+    let (first, second) = two_transfers(&mint);
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .with_fee_instructions_builder(|builder| builder.stealth_transfer(faucet_resx, first.statement))
+            .stealth_transfer(faucet_resx, second.statement)
+            .finish()
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .seal(test.secret_key()),
+        vec![],
+    );
+}
+
 #[test]
 fn programmatic_transfer() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);

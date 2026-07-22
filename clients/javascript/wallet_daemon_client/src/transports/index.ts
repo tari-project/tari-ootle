@@ -6,6 +6,7 @@
 import FetchRpcTransport from "./fetch";
 
 export { FetchRpcTransport };
+export type { FetchRpcTransportOptions } from "./fetch";
 
 export interface RpcTransport {
   sendRequest<T>(request: RpcRequest, options?: RpcTransportOptions): Promise<RpcResponse<T>>;

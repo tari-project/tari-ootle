@@ -1569,22 +1569,38 @@ impl TransferStatementRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum InputSelection {
-    FromBucket { revealed_amount: Amount },
+    FromBucket {
+        revealed_amount: Amount,
+    },
     Selection(UtxoInputSelection),
+    /// Spend exactly the named wallet-owned stealth UTXOs, in the given order. The wallet resolves, validates and
+    /// locks precisely these outputs via `StealthOutputsApi::lock_specific_outputs`, rather than choosing inputs to
+    /// cover an amount.
+    Specific {
+        utxo_addresses: Vec<UtxoAddress>,
+    },
 }
 
 impl InputSelection {
     pub fn as_selection(&self) -> Option<UtxoInputSelection> {
         match self {
-            InputSelection::FromBucket { .. } => None,
             InputSelection::Selection(s) => Some(*s),
+            InputSelection::FromBucket { .. } | InputSelection::Specific { .. } => None,
         }
     }
 
     pub fn as_from_bucket(&self) -> Option<Amount> {
         match self {
             InputSelection::FromBucket { revealed_amount } => Some(*revealed_amount),
-            InputSelection::Selection(_) => None,
+            InputSelection::Selection(_) | InputSelection::Specific { .. } => None,
+        }
+    }
+
+    /// The exact UTXOs to spend when this is an [`InputSelection::Specific`] selection.
+    pub fn as_specific(&self) -> Option<&[UtxoAddress]> {
+        match self {
+            InputSelection::Specific { utxo_addresses } => Some(utxo_addresses),
+            InputSelection::FromBucket { .. } | InputSelection::Selection(_) => None,
         }
     }
 }
@@ -1946,5 +1962,64 @@ mod tests {
             serde_json::to_value(BalanceChangeSource::Recovery).unwrap(),
             serde_json::json!({ "type": "Recovery" })
         );
+    }
+
+    fn sample_utxo_address() -> UtxoAddress {
+        let resource: ResourceAddress = "resource_0000000000000000000000000000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        UtxoAddress::new(
+            resource,
+            PedersenCommitmentBytes::from_array([7u8; PedersenCommitmentBytes::length()]).into(),
+        )
+    }
+
+    #[test]
+    fn input_selection_specific_round_trips() {
+        let utxo = sample_utxo_address();
+        let selection = InputSelection::Specific {
+            utxo_addresses: vec![utxo.clone()],
+        };
+        let json = serde_json::to_value(&selection).unwrap();
+        // Exact externally tagged wire shape, consistent with the other variants.
+        assert_eq!(
+            json,
+            serde_json::json!({ "Specific": { "utxo_addresses": [serde_json::to_value(&utxo).unwrap()] } })
+        );
+
+        let parsed: InputSelection = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.as_specific().unwrap().to_vec(), vec![utxo]);
+        assert!(parsed.as_selection().is_none());
+        assert!(parsed.as_from_bucket().is_none());
+    }
+
+    #[test]
+    fn input_selection_from_bucket_serialization_is_unchanged() {
+        let amount = Amount::from(5u64);
+        let json = serde_json::to_value(InputSelection::FromBucket {
+            revealed_amount: amount,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "FromBucket": { "revealed_amount": serde_json::to_value(amount).unwrap() } })
+        );
+
+        let parsed: InputSelection = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.as_from_bucket(), Some(amount));
+        assert!(parsed.as_specific().is_none());
+    }
+
+    #[test]
+    fn input_selection_selection_serialization_is_unchanged() {
+        let json = serde_json::to_value(InputSelection::Selection(UtxoInputSelection::ConfidentialOnly)).unwrap();
+        assert_eq!(json, serde_json::json!({ "Selection": "ConfidentialOnly" }));
+
+        let parsed: InputSelection = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            parsed.as_selection(),
+            Some(UtxoInputSelection::ConfidentialOnly)
+        ));
+        assert!(parsed.as_specific().is_none());
     }
 }

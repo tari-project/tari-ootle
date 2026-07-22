@@ -52,7 +52,15 @@ use tari_epoch_oracles::{
     hybrid::{HybridEpochOracle, mpsc_ticker},
     store::EpochOracleStore,
 };
-use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
+use tari_networking::{
+    MessagingMode,
+    NetworkingHandle,
+    RelayCircuitLimits,
+    RelayReservationLimits,
+    SwarmConfig,
+    gossip_queue,
+    message_queue,
+};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
     configuration::convert_network_to_l1_network,
@@ -73,6 +81,7 @@ use tari_ootle_transaction_validation::{
     BasicValidations,
     EpochRangeValidator,
     PublishTemplateLimitValidator,
+    SignatureLimitValidator,
     StealthTransactionLimitsValidator,
     TemplateExistsValidator,
     TransactionDryRunValidator,
@@ -95,6 +104,8 @@ use tokio::{
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 #[cfg(feature = "metrics")]
 use crate::epoch_metrics::{EpochManagerCollector, MeteredEpochOracle, PrometheusEpochOracleMetrics};
+#[cfg(feature = "metrics")]
+use crate::inbound_queue_metrics::InboundQueueCollector;
 use crate::{
     ApplicationConfig,
     ValidatorNodeEpochManagerSpec,
@@ -135,12 +146,33 @@ pub async fn spawn_services(
 
     ensure_directories_exist(&config)?;
 
-    // Networking
-    let (tx_consensus_messages, rx_consensus_messages) = mpsc::unbounded_channel();
+    // Bounded ingress queues. Each is drained serially by its service, so a queue absorbs arrival
+    // bursts that outpace processing; beyond its budget messages are dropped rather than queued
+    // without limit. Budgets are per-queue — see `ValidatorNodeConfig`. The message-count bound is
+    // a secondary guard against a flood of tiny messages, whose per-message overhead the byte
+    // budget does not capture.
+    const MAX_QUEUED_INBOUND_MESSAGES: usize = 100_000;
 
-    // gossip channels
-    let (tx_transaction_gossip_messages, rx_transaction_gossip_messages) = mpsc::unbounded_channel();
-    let (tx_consensus_gossip_messages, rx_consensus_gossip_messages) = mpsc::unbounded_channel();
+    let (tx_consensus_messages, rx_consensus_messages) = message_queue(
+        MAX_QUEUED_INBOUND_MESSAGES,
+        config.validator_node.max_consensus_messaging_queue_bytes,
+    );
+    let (tx_transaction_gossip_messages, rx_transaction_gossip_messages) = gossip_queue(
+        MAX_QUEUED_INBOUND_MESSAGES,
+        config.validator_node.max_transaction_gossip_queue_bytes,
+    );
+    let (tx_consensus_gossip_messages, rx_consensus_gossip_messages) = gossip_queue(
+        MAX_QUEUED_INBOUND_MESSAGES,
+        config.validator_node.max_consensus_gossip_queue_bytes,
+    );
+    #[cfg(feature = "metrics")]
+    InboundQueueCollector::new(
+        tx_transaction_gossip_messages.clone(),
+        tx_consensus_gossip_messages.clone(),
+        tx_consensus_messages.clone(),
+    )
+    .register(metrics_registry);
+
     let mut tx_gossip_messages_by_topic = HashMap::new();
     tx_gossip_messages_by_topic.insert(mempool::TOPIC_PREFIX.to_string(), tx_transaction_gossip_messages);
     tx_gossip_messages_by_topic.insert(consensus_gossip::TOPIC_PREFIX.to_string(), tx_consensus_gossip_messages);
@@ -185,6 +217,12 @@ pub async fn spawn_services(
                 user_agent: format!("/tari/validator/{}", env!("CARGO_PKG_VERSION")),
                 enable_mdns: config.validator_node.p2p.enable_mdns,
                 enable_relay: config.validator_node.p2p.enable_relay,
+                // Both topics report a `Reject` verdict for messages that fail to decode or fail
+                // validation, so both can score the peers that send them.
+                gossip_sub_scored_topics: vec![
+                    mempool::TOPIC_PREFIX.to_string(),
+                    consensus_gossip::TOPIC_PREFIX.to_string(),
+                ],
                 // TODO: allow node operator to configure
                 relay_circuit_limits: RelayCircuitLimits::high(),
                 relay_reservation_limits: RelayReservationLimits::high(),
@@ -488,6 +526,8 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
         // verifying signatures or executing.
         .and_then(StealthTransactionLimitsValidator::new())
         .and_then(PublishTemplateLimitValidator::new())
+        // Bounds the number of signature verifications the next validator performs.
+        .and_then(SignatureLimitValidator::new())
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
 }

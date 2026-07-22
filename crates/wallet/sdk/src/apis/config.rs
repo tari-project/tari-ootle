@@ -47,17 +47,6 @@ impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
         Ok(record.value)
     }
 
-    pub fn get_decrypted<T: DeserializeOwned>(
-        &self,
-        key: ConfigKey,
-        _decryption_key: impl AsRef<[u8]>,
-    ) -> Result<T, ConfigApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let record = tx.config_get(key.as_key_str())?;
-        // TODO: decryption if record.is_encrypted
-        Ok(record.value)
-    }
-
     pub fn exists(&self, key: ConfigKey) -> Result<bool, ConfigApiError> {
         let mut tx = self.store.create_read_tx()?;
         let exists = tx.config_exists(key.as_key_str())?;
@@ -65,27 +54,8 @@ impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
     }
 
     pub fn set<T: Serialize + ?Sized>(&self, key: ConfigKey, value: &T) -> Result<(), ConfigApiError> {
-        self.set_opts(key, value, false)
-    }
-
-    pub fn set_encrypted<T: Serialize + ?Sized>(
-        &self,
-        key: ConfigKey,
-        value: &T,
-        _encryption_key: impl AsRef<[u8]>,
-    ) -> Result<(), ConfigApiError> {
-        // TODO: encrypt
-        self.set_opts(key, value, true)
-    }
-
-    fn set_opts<T: Serialize + ?Sized>(
-        &self,
-        key: ConfigKey,
-        value: &T,
-        is_encrypted: bool,
-    ) -> Result<(), ConfigApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.config_set(key.as_key_str(), value, is_encrypted)?;
+        tx.config_set(key.as_key_str(), value, false)?;
         tx.commit()?;
         Ok(())
     }

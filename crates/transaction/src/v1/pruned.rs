@@ -156,9 +156,12 @@ impl PrunedUnsealedTransactionV1 {
         if self.signatures.is_empty() {
             return true;
         }
-        let blob_hashes = self.blob_hashes();
+        // Derived once and reused: every signature over this transaction signs the same message, and
+        // deriving it hashes the whole body.
+        let message =
+            TransactionSignature::create_message_v1_pruned(seal_signer, &self.transaction, self.blob_hashes());
         self.signatures.iter().enumerate().all(|(i, sig)| {
-            if sig.verify_v1_pruned(seal_signer, &self.transaction, blob_hashes) {
+            if sig.verify_message(message) {
                 true
             } else {
                 debug!(target: LOG_TARGET, "Failed to verify pruned signature at index {}", i);

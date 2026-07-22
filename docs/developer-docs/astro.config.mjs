@@ -47,7 +47,7 @@ export default defineConfig({
         },
         {
           label: "Reference",
-          autogenerate: { directory: "reference" },
+          items: [{ autogenerate: { directory: "reference" } }],
         },
         { label: "For Bots", link: "/llms.txt", attrs: { target: "_blank" } },
       ],

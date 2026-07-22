@@ -31,6 +31,8 @@ mod file_l1_submitter;
 mod genesis_state;
 #[cfg(feature = "web_ui")]
 mod http_ui;
+#[cfg(feature = "metrics")]
+mod inbound_queue_metrics;
 mod json_rpc;
 #[cfg(feature = "metrics")]
 mod metrics;

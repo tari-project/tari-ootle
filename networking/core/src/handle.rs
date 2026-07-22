@@ -23,7 +23,7 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use libp2p::{PeerId, StreamProtocol, gossipsub::IdentTopic, swarm::dial_opts::DialOpts};
+use libp2p::{PeerId, StreamProtocol, gossipsub, gossipsub::IdentTopic, swarm::dial_opts::DialOpts};
 use log::*;
 use tari_rpc_framework::{
     NamedProtocolService,
@@ -78,6 +78,13 @@ pub enum NetworkingRequest<TMsg: MessageSpec> {
         topic: IdentTopic,
         explicit_topic_peers: Vec<PeerId>,
         reply_tx: Reply<()>,
+    },
+    /// Fire-and-forget: gossip validation verdicts are reported once per inbound message, so they
+    /// carry no reply channel.
+    ReportGossipValidation {
+        message_id: gossipsub::MessageId,
+        propagation_source: PeerId,
+        acceptance: gossipsub::MessageAcceptance,
     },
     UnsubscribeTopic {
         topic: IdentTopic,
@@ -366,6 +373,23 @@ impl<TMsg: MessageSpec + Send + 'static> NetworkingService<TMsg> for NetworkingH
             .await
             .map_err(|_| NetworkingHandleError::ServiceHasShutdown)?;
         rx.await?
+    }
+
+    async fn report_gossip_validation(
+        &mut self,
+        message_id: gossipsub::MessageId,
+        propagation_source: PeerId,
+        acceptance: gossipsub::MessageAcceptance,
+    ) -> Result<(), NetworkingError> {
+        self.tx_request
+            .send(NetworkingRequest::ReportGossipValidation {
+                message_id,
+                propagation_source,
+                acceptance,
+            })
+            .await
+            .map_err(|_| NetworkingHandleError::ServiceHasShutdown)?;
+        Ok(())
     }
 
     async fn subscribe_topic_with_explicit_peers<T: Into<String> + Send>(

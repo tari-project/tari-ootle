@@ -105,6 +105,38 @@ pub struct ValidatorNodeConfig {
     pub layer_one_transaction_path: PathBuf,
     /// Consensus configuration
     pub consensus: ConsensusConfig,
+    /// Maximum total size of inbound transaction gossip awaiting mempool validation. The mempool
+    /// drains this queue serially, so it absorbs bursts that arrive faster than validation; once it
+    /// is full, further messages are dropped rather than queued without limit. Sized in bytes
+    /// because every message may be up to `gossip_sub_max_message_size`: at ordinary transaction
+    /// sizes this admits a very deep backlog, while capping a flood of maximum-size messages.
+    #[serde(default = "default_max_transaction_gossip_queue_bytes")]
+    pub max_transaction_gossip_queue_bytes: usize,
+    /// Maximum total size of inbound consensus gossip awaiting processing. This topic carries
+    /// `HotStuffMessage`s between shard groups, including block-sized foreign proposals, and it
+    /// feeds a short blocking channel into consensus — so this queue absorbs real bursts rather
+    /// than sitting idle. Budgeted above transactions because a dropped proposal or vote can cost a
+    /// view, whereas a dropped transaction can be re-requested.
+    #[serde(default = "default_max_consensus_gossip_queue_bytes")]
+    pub max_consensus_gossip_queue_bytes: usize,
+    /// Maximum total size of inbound direct consensus messages awaiting processing. Carries
+    /// intra-committee `HotStuffMessage`s. Reaching this queue requires an established connection
+    /// rather than a topic publish, so it is harder to flood than the gossip topics, but it is
+    /// equally liveness-critical.
+    #[serde(default = "default_max_consensus_messaging_queue_bytes")]
+    pub max_consensus_messaging_queue_bytes: usize,
+}
+
+fn default_max_transaction_gossip_queue_bytes() -> usize {
+    128 * 1024 * 1024
+}
+
+fn default_max_consensus_gossip_queue_bytes() -> usize {
+    256 * 1024 * 1024
+}
+
+fn default_max_consensus_messaging_queue_bytes() -> usize {
+    128 * 1024 * 1024
 }
 
 impl ValidatorNodeConfig {
@@ -161,6 +193,9 @@ impl Default for ValidatorNodeConfig {
             sidechain_id: None,
             layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
             consensus: ConsensusConfig::default(),
+            max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),
+            max_consensus_gossip_queue_bytes: default_max_consensus_gossip_queue_bytes(),
+            max_consensus_messaging_queue_bytes: default_max_consensus_messaging_queue_bytes(),
         }
     }
 }

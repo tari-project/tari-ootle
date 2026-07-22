@@ -515,6 +515,7 @@ fn parse_execute_result(
         execution_time: std::time::Duration::from_secs(1),
         execute_epoch: epoch.map(tari_engine_types::Epoch),
         wasm_execution_points: 0,
+        native_execution_points: 0,
     }
 }
 

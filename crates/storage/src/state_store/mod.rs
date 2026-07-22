@@ -268,6 +268,10 @@ pub trait StateStoreReadTransaction: Sized {
     fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
     where I: IntoIterator<Item = VersionedSubstateIdRef<'a>>;
 
+    /// Returns true if any version of the given substate id exists, up or down. A pure key-existence
+    /// check — cheaper than fetching the head version when the caller does not need it.
+    fn substates_exists_any_version(&self, substate_id: &SubstateId) -> Result<bool, StorageError>;
+
     /// Returns an iterator of all substates in the given shard, starting from the given state version (inclusive).
     /// It returns substates, ordered by state version however, the ordering within state versions is by the node key,
     /// meaning it is essentially random. WARNING: do not use this as it only works when all stale state tree nodes

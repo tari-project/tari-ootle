@@ -10,6 +10,7 @@ use log::*;
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::Decision;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     NumPreshards,
     ToSubstateAddress,
@@ -235,6 +236,19 @@ impl TransactionRecord {
         transaction_id: &TransactionId,
     ) -> Result<(), StorageError> {
         tx.transactions_finalized_remove(transaction_id)
+    }
+
+    /// Returns true if this transaction's receipt substate exists in state. Every commit — including
+    /// a fee-only commit — writes the receipt at an address derived from the transaction id, so its
+    /// existence is the durable, synced proof that the id has committed, independent of local
+    /// transaction records. Only nodes hosting the receipt's shard can observe it; on any other node
+    /// this returns false.
+    pub fn receipt_exists<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<bool, StorageError> {
+        let receipt_id = SubstateId::TransactionReceipt((*transaction_id).into());
+        tx.substates_exists_any_version(&receipt_id)
     }
 
     pub fn finalize_all<'a, TTx, I>(tx: &mut TTx, transactions: I) -> Result<(), StorageError>

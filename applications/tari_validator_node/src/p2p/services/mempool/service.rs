@@ -25,7 +25,6 @@ use std::{collections::HashSet, fmt::Display, mem};
 use libp2p::gossipsub::MessageAcceptance;
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::{GossipMessage, NetworkingHandle};
 use tari_ootle_common_types::optional::Optional;
@@ -363,12 +362,7 @@ where
             // has committed even when the records were pruned. Best-effort — a node that does not
             // host the receipt's shard (or is behind on sync) simply never finds it and the
             // consensus gate makes the authoritative refusal.
-            let receipt_id = SubstateId::TransactionReceipt((*id).into());
-            if tx
-                .substates_get_max_version_for_substate(&receipt_id)
-                .optional()?
-                .is_some()
-            {
+            if TransactionRecord::receipt_exists(tx, id)? {
                 debug!(
                     target: LOG_TARGET,
                     "🎱 Transaction {} has a receipt in state and has already committed. Ignoring",

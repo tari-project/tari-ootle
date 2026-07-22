@@ -1475,6 +1475,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok((data.version, data.is_up))
     }
 
+    fn substates_exists_any_version(&self, substate_id: &SubstateId) -> Result<bool, StorageError> {
+        const OPERATION: &str = "substates_exists_any_version";
+        let exists = self.db().cf(substate::HeadIndex)?.exists(substate_id, OPERATION)?;
+        Ok(exists)
+    }
+
     fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
     where I: IntoIterator<Item = VersionedSubstateIdRef<'a>> {
         const OPERATION: &str = "substates_any_exist";

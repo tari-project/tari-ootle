@@ -3,11 +3,9 @@
 
 use log::*;
 use tari_consensus_types::Decision;
-use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{Epoch, committee::CommitteeInfo, optional::Optional};
+use tari_ootle_common_types::{Epoch, committee::CommitteeInfo};
 use tari_ootle_storage::{
     StateStore,
-    StateStoreReadTransaction,
     consensus_models::{TransactionPool, TransactionRecord},
 };
 use tari_ootle_transaction::TransactionId;
@@ -186,20 +184,12 @@ where TConsensusSpec: ConsensusSpec
             None => {},
         }
 
-        // The local records are only a cache: every commit writes a TransactionReceipt substate at an
-        // address derived from the transaction id, so the receipt's existence in synced state proves
-        // the id has committed even when this node's records no longer (or never) knew it — freshly
-        // synced nodes included. Only nodes whose committee includes the receipt's shard can check
-        // this, and that group is always involved because the receipt is a known output of every
-        // transaction; other shard groups fall back to their local records and rely on the receipt's
-        // home group refusing the replay.
-        let receipt_id = SubstateId::TransactionReceipt(rec.to_receipt_id());
-        if local_committee_info.includes_substate_id(&receipt_id) &&
-            (**tx)
-                .substates_get_max_version_for_substate(&receipt_id)
-                .optional()?
-                .is_some()
-        {
+        // The local records are only a cache: the receipt's existence in synced state proves the id
+        // has committed even when this node's records no longer (or never) knew it — freshly synced
+        // nodes included. The receipt's shard group is always involved because the receipt is a
+        // known output of every transaction; shard groups that do not host it never observe the
+        // receipt and rely on the receipt's home group refusing the replay.
+        if TransactionRecord::receipt_exists(&**tx, rec.id())? {
             warn!(
                 target: LOG_TARGET,
                 "Transaction {} has a receipt in state and has therefore already committed. Consensus will ignore it.",

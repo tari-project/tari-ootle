@@ -3,8 +3,8 @@
 
 use tari_engine::state_store::StateWriter;
 use tari_engine_types::{
-    substate::{Substate, SubstateId},
     ValidatorFeePool,
+    substate::{Substate, SubstateId},
 };
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::ValidatorFeePoolAddress;
@@ -17,8 +17,8 @@ fn test_claim_validator_fees_up_to() {
     let mut test = TemplateTest::new(CRATE_PATH, std::iter::empty::<&str>());
     let (account, _token, private_key) = test.create_funded_account();
 
-    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
     use ootle_byte_type::ToByteType;
+    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
     let public_key = RistrettoPublicKey::from_secret_key(&private_key);
     let pk: tari_template_lib::types::crypto::RistrettoPublicKeyBytes = public_key.to_byte_type();
     let addr = ValidatorFeePoolAddress::from_array(pk.into_array());
@@ -50,8 +50,8 @@ fn test_claim_validator_fees_up_to() {
     let pool = pool_state.substate_value().as_validator_fee_pool().unwrap();
     assert_eq!(pool.amount(), 40);
 
-    // To check ValidatorFeeWithdrawal, we can look at the FinalizeResult's fee receipt? No, it's not exposed publicly or it's not a field.
-    // Let's just rely on the substate balance assertion and the successful execution.
+    // To check ValidatorFeeWithdrawal, we can look at the FinalizeResult's fee receipt? No, it's not exposed publicly
+    // or it's not a field. Let's just rely on the substate balance assertion and the successful execution.
 
     // 2. Claim all remaining (up to 1000)
     test.execute_expect_success(

@@ -24,18 +24,15 @@ fn test_claim_validator_fees_up_to() {
     let addr = ValidatorFeePoolAddress::from_array(pk.into_array());
 
     // Setup an initial fee pool with 100 TARI
-    let initial_pool = ValidatorFeePool::new(pk.clone(), 100);
+    let initial_pool = ValidatorFeePool::new(pk, 100);
     test.get_state_store_mut()
-        .set_state(
-            SubstateId::ValidatorFeePool(addr.clone()),
-            Substate::new(0, initial_pool),
-        )
+        .set_state(SubstateId::ValidatorFeePool(addr), Substate::new(0, initial_pool))
         .unwrap();
 
     // 1. Claim up to 60 TARI
-    let result = test.execute_expect_success(
+    test.execute_expect_success(
         Transaction::builder_localnet()
-            .claim_validator_fees_up_to(addr.clone(), 60u64)
+            .claim_validator_fees_up_to(addr, 60u64)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
             .build_and_seal(&private_key),
@@ -45,7 +42,7 @@ fn test_claim_validator_fees_up_to() {
     // Verify amount is 60 and the pool surplus is 40
     let pool_state = test
         .read_only_state_store()
-        .get_substate(&SubstateId::ValidatorFeePool(addr.clone()))
+        .get_substate(&SubstateId::ValidatorFeePool(addr))
         .unwrap();
     let pool = pool_state.substate_value().as_validator_fee_pool().unwrap();
     assert_eq!(pool.amount(), 40);
@@ -56,7 +53,7 @@ fn test_claim_validator_fees_up_to() {
     // 2. Claim all remaining (up to 1000)
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .claim_validator_fees_up_to(addr.clone(), 1000u64)
+            .claim_validator_fees_up_to(addr, 1000u64)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
             .build_and_seal(&private_key),
@@ -65,6 +62,6 @@ fn test_claim_validator_fees_up_to() {
 
     let result = test
         .read_only_state_store()
-        .get_substate(&SubstateId::ValidatorFeePool(addr.clone()));
+        .get_substate(&SubstateId::ValidatorFeePool(addr));
     assert!(result.is_err(), "ValidatorFeePool should be destroyed when empty");
 }

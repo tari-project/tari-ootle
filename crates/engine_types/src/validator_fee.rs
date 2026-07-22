@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn test_withdraw_up_to() {
         let pk = RistrettoPublicKeyBytes::default();
-        let mut pool = ValidatorFeePool::new(pk.clone(), 100);
+        let mut pool = ValidatorFeePool::new(pk, 100);
 
         // 1. Cap below balance
         let (amt, container) = pool.withdraw_up_to(Amount::from(40u64)).unwrap();

@@ -632,9 +632,8 @@ impl NetworkWideStateSync {
             let utxos = std::mem::take(utxos_buf);
             let transactions = std::mem::take(transactions_buf);
 
-            // A committed receipt names every substate the transaction upped, and upping a substate is
-            // the point at which its previous version goes down. This is the substate cache's only
-            // signal that an entry it holds has been superseded.
+            // Upping a substate is the point at which its previous version goes down, so this is the
+            // substate cache's only signal that an entry it holds has been superseded.
             self.substate_versions.record_up_all(
                 transactions
                     .iter()

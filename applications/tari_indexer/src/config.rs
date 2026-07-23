@@ -124,11 +124,9 @@ pub struct IndexerConfig {
     /// A shorter TTL reduces the chance of stale fee estimates.
     #[serde(with = "serializers::seconds")]
     pub dry_run_cache_ttl: Duration,
-    /// How long a cached substate may be served as the latest version of that substate, bounding how
-    /// far behind the chain a version served to a client can be. Raising it trades a wider window for
-    /// pinning an already-spent input version against fewer validator round trips on hot substates;
-    /// lowering it does the reverse. Requests for a specific version are unaffected: those answers are
-    /// immutable.
+    /// How long a cached substate may be served as the latest version of that substate. Raising it
+    /// trades a wider window for handing out an already-spent input version against fewer validator
+    /// round trips on hot substates. Requests for a specific version are unaffected.
     #[serde(default = "default_latest_substate_cache_ttl", with = "serializers::seconds")]
     pub latest_substate_cache_ttl: Duration,
     /// The event filtering configuration

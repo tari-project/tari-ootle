@@ -9,25 +9,18 @@ use std::{
 
 use tari_engine_types::substate::SubstateId;
 
-/// Number of substate IDs held per generation. Two generations are kept, so the tracker remembers
-/// between one and two times this many of the most recently updated substates.
+/// Substate IDs held per generation. Two are kept, so the tracker remembers between one and two times
+/// this many of the most recently updated substates.
 const CAPACITY_PER_GENERATION: usize = 50_000;
 
-/// The newest version of each recently-updated substate, as observed from committed transaction
-/// receipts.
+/// The newest version of each recently-updated substate, taken from committed transaction receipts.
 ///
-/// A substate cache entry records the version that was current when it was written, and nothing
-/// touches that entry when the substate is later spent, so an entry cannot on its own distinguish
-/// "current" from "superseded". This tracker supplies that missing signal: a committed receipt names
-/// every substate the transaction upped, which is exactly the point at which the previous version of
-/// each went down.
-///
-/// Capacity is bounded, so this is a positive signal only: [`Self::is_superseded`] returning `false`
-/// means "not known to be superseded", never "current".
+/// A substate cache entry holds the version that was current when it was written and is not touched
+/// when that version is later spent, so it cannot tell "current" from "superseded" on its own. This
+/// supplies that signal. Capacity is bounded, so it is positive-only: [`Self::is_superseded`]
+/// returning `false` means "not known to be superseded", never "current".
 #[derive(Debug)]
 pub struct SubstateVersionTracker {
-    // Lookups happen on every cache read and writes only when a sync round commits, so readers must
-    // not serialize against each other.
     inner: RwLock<Generations>,
     capacity_per_generation: usize,
 }
@@ -55,9 +48,8 @@ impl SubstateVersionTracker {
         self.record_up_all(std::iter::once((substate_id, version)));
     }
 
-    /// Records a batch of upped substates under a single acquisition of the write lock. Callers record
-    /// one committed batch at a time, and taking the lock per substate would put the writer in
-    /// contention with every concurrent lookup for the length of that batch.
+    /// Batched form of [`Self::record_up`], taking the write lock once for the whole batch rather than
+    /// contending with concurrent lookups on every substate.
     pub fn record_up_all<'a, I>(&self, ups: I)
     where I: IntoIterator<Item = (&'a SubstateId, u32)> {
         let mut inner = self.write();
@@ -68,10 +60,8 @@ impl SubstateVersionTracker {
             }
             inner.current.insert(substate_id.clone(), version);
 
-            // Roll generations rather than evicting individually: a substate that is still being
-            // updated is re-recorded into the new generation on its next commit, while everything
-            // untouched ages out. Lookups continue to hit the previous generation until it is dropped
-            // in turn.
+            // Rolling rather than evicting individually keeps substates that are still being updated:
+            // they are re-recorded into the new generation on their next commit.
             if inner.current.len() > self.capacity_per_generation {
                 inner.previous = mem::take(&mut inner.current);
             }
@@ -86,8 +76,8 @@ impl SubstateVersionTracker {
         current.max(previous).is_some_and(|latest| latest > version)
     }
 
-    // The guarded state is a plain map with no invariants to uphold across a panic, so a poisoned lock
-    // is recovered rather than propagated.
+    // Poisoning is recovered from rather than propagated: the maps hold no invariant a panic could
+    // break.
 
     fn read(&self) -> RwLockReadGuard<'_, Generations> {
         self.inner.read().unwrap_or_else(|e| e.into_inner())

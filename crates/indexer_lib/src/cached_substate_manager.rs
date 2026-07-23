@@ -65,11 +65,9 @@ const LOG_TARGET: &str = "tari::indexer::scanner";
 
 const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(300);
 
-/// How long a cached value may be served as the latest version of its substate. Bounds how far
-/// behind the chain a version handed out as "latest" can be, and so how often a wallet pins an input
-/// version that consensus has already spent. Short enough that the window is comparable to the
-/// unavoidable one between submitting a transaction and it committing, long enough that a hot
-/// substate costs at most one committee round trip per window rather than one per request.
+/// How long a cached value may be served as the latest version of its substate: the window in which a
+/// wallet can be handed a version consensus has already spent. Comparable to the unavoidable gap
+/// between submitting a transaction and it committing, below which a fresher indexer buys nothing.
 const DEFAULT_LATEST_VERSION_TTL: Duration = Duration::from_secs(2);
 
 /// A store of committee-validated shard-group state merkle roots that the read path consults to
@@ -102,17 +100,13 @@ pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     committee_provider: TEpochManager,
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
-    /// Bounds how long an entry may answer for the exact version it holds. The value at a given
-    /// version never changes, so what this covers is the entry's verdict on whether that version is
-    /// up. It is also the backstop for what [`SubstateVersionTracker`] cannot reach: that signal is
-    /// capacity bounded, lags the chain by a state-sync interval, and starts empty after a restart
-    /// while the on-disk cache does not.
+    /// Bounds how long an entry may answer for the exact version it holds - specifically its verdict
+    /// on whether that version is still up, since the value itself never changes. Backstops
+    /// [`SubstateVersionTracker`], which is capacity bounded, lags by a sync interval, and is empty
+    /// after a restart while the on-disk cache is not.
     cache_ttl: Duration,
-    /// How long an entry may answer a request for the *latest* version of its substate, which is a
-    /// claim the chain invalidates without touching the entry. See [`DEFAULT_LATEST_VERSION_TTL`].
+    /// See [`DEFAULT_LATEST_VERSION_TTL`].
     latest_version_ttl: Duration,
-    /// Records the newest committed version of recently-updated substates, so a cache entry that has
-    /// since been spent is not served. See [`SubstateVersionTracker`].
     substate_versions: Arc<SubstateVersionTracker>,
     /// When set, substates fetched from a validator must come with a proof that verifies against the
     /// shard group committee, or they are rejected (fail-closed). The negative `DoesNotExist` case
@@ -162,8 +156,7 @@ where
         self
     }
 
-    /// An entry that has aged out for exact-version reads cannot still be current, so the latest-version
-    /// window can never outlast the entry itself however the two are configured.
+    /// Clamped: an entry that has aged out for exact-version reads cannot still be the latest.
     fn latest_version_ttl(&self) -> Duration {
         self.latest_version_ttl.min(self.cache_ttl)
     }
@@ -210,20 +203,14 @@ where
                 let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
                 let age = now.saturating_sub(entry.cached_at);
                 let is_up = matches!(entry.substate_result, SubstateResult::Up { .. });
-                // An entry's verdict on whether its version is up can be falsified by a later commit
-                // without anything touching the entry. The signal lags the chain by a state-sync
-                // interval, so it retires long-lived entries rather than keeping the latest-version
-                // window honest - that is the TTL's job.
+                // Lags the chain by a sync interval, so it retires long-lived entries rather than
+                // policing the latest-version window - that is the TTL's job.
                 let is_superseded = self.substate_versions.is_superseded(substate_id, entry.version);
 
                 let is_servable = !is_superseded &&
                     match specific_version {
-                        // The value at a version never changes, but whether that version is still up
-                        // does, so an entry answers for its own version only for as long as the TTL.
                         Some(version) => entry.version == version && age <= self.cache_ttl.as_secs(),
-                        // "The latest version of id" moves under the entry every time the substate is
-                        // spent, and nothing rewrites the entry at that moment, so this claim is only good
-                        // for as long as the freshness window. A `Down` entry can never be the latest.
+                        // A `Down` entry can never be the latest version.
                         None => is_up && age <= self.latest_version_ttl().as_secs(),
                     };
 

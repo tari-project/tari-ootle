@@ -13,10 +13,6 @@ use tari_engine_types::substate::SubstateId;
 /// between one and two times this many of the most recently updated substates.
 const CAPACITY_PER_GENERATION: usize = 50_000;
 
-/// Substates recorded per acquisition of the write lock. Bounds how long a single batch can hold off
-/// readers, which matters because a batch is as large as a sync round's worth of commits.
-const WRITE_CHUNK: usize = 1024;
-
 /// The newest version of each recently-updated substate, as observed from committed transaction
 /// receipts.
 ///
@@ -59,28 +55,25 @@ impl SubstateVersionTracker {
         self.record_up_all(std::iter::once((substate_id, version)));
     }
 
-    /// Records a batch of upped substates under as few acquisitions of the write lock as [`WRITE_CHUNK`]
-    /// allows. Callers have a whole commit batch to record, and taking the lock per substate would put
-    /// the writer in contention with every concurrent lookup for the length of that batch.
+    /// Records a batch of upped substates under a single acquisition of the write lock. Callers record
+    /// one committed batch at a time, and taking the lock per substate would put the writer in
+    /// contention with every concurrent lookup for the length of that batch.
     pub fn record_up_all<'a, I>(&self, ups: I)
     where I: IntoIterator<Item = (&'a SubstateId, u32)> {
-        let mut ups = ups.into_iter().peekable();
-        while ups.peek().is_some() {
-            let mut inner = self.write();
-            for (substate_id, version) in ups.by_ref().take(WRITE_CHUNK) {
-                if let Some(recorded) = inner.current.get_mut(substate_id) {
-                    *recorded = (*recorded).max(version);
-                    continue;
-                }
-                inner.current.insert(substate_id.clone(), version);
+        let mut inner = self.write();
+        for (substate_id, version) in ups {
+            if let Some(recorded) = inner.current.get_mut(substate_id) {
+                *recorded = (*recorded).max(version);
+                continue;
+            }
+            inner.current.insert(substate_id.clone(), version);
 
-                // Roll generations rather than evicting individually: a substate that is still being
-                // updated is re-recorded into the new generation on its next commit, while everything
-                // untouched ages out. Lookups continue to hit the previous generation until it is
-                // dropped in turn.
-                if inner.current.len() > self.capacity_per_generation {
-                    inner.previous = mem::take(&mut inner.current);
-                }
+            // Roll generations rather than evicting individually: a substate that is still being
+            // updated is re-recorded into the new generation on its next commit, while everything
+            // untouched ages out. Lookups continue to hit the previous generation until it is dropped
+            // in turn.
+            if inner.current.len() > self.capacity_per_generation {
+                inner.previous = mem::take(&mut inner.current);
             }
         }
     }
@@ -153,12 +146,11 @@ mod tests {
     }
 
     #[test]
-    fn batch_spanning_write_chunks_records_every_substate() {
+    fn batch_records_every_substate_at_its_newest_version() {
         let tracker = SubstateVersionTracker::new();
         let ids = (0..=u8::MAX).map(component).collect::<Vec<_>>();
-        let batch = std::iter::repeat_n(ids.iter(), WRITE_CHUNK / ids.len() + 2)
-            .flatten()
-            .map(|id| (id, 7));
+        // Every id appears twice, newest first, so the batch covers the duplicate-within-a-batch path.
+        let batch = ids.iter().map(|id| (id, 7)).chain(ids.iter().map(|id| (id, 3)));
         tracker.record_up_all(batch);
         for id in &ids {
             assert!(tracker.is_superseded(id, 6));

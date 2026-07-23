@@ -635,11 +635,12 @@ impl NetworkWideStateSync {
             // A committed receipt names every substate the transaction upped, and upping a substate is
             // the point at which its previous version goes down. This is the substate cache's only
             // signal that an entry it holds has been superseded.
-            for (_, receipt) in &transactions {
-                for up in &receipt.diff_summary().upped {
-                    self.substate_versions.record_up(&up.substate_id, up.version);
-                }
-            }
+            self.substate_versions.record_up_all(
+                transactions
+                    .iter()
+                    .flat_map(|(_, receipt)| receipt.diff_summary().upped.iter())
+                    .map(|up| (&up.substate_id, up.version)),
+            );
             let validator_fee_pools = std::mem::take(validator_fee_pools_buf);
             let template_catalogue = std::mem::take(template_catalogue_buf);
 

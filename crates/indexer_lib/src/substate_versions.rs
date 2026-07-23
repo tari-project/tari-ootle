@@ -1,13 +1,21 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, mem, sync::Mutex};
+use std::{
+    collections::HashMap,
+    mem,
+    sync::{RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use tari_engine_types::substate::SubstateId;
 
 /// Number of substate IDs held per generation. Two generations are kept, so the tracker remembers
 /// between one and two times this many of the most recently updated substates.
 const CAPACITY_PER_GENERATION: usize = 50_000;
+
+/// Substates recorded per acquisition of the write lock. Bounds how long a single batch can hold off
+/// readers, which matters because a batch is as large as a sync round's worth of commits.
+const WRITE_CHUNK: usize = 1024;
 
 /// The newest version of each recently-updated substate, as observed from committed transaction
 /// receipts.
@@ -22,7 +30,9 @@ const CAPACITY_PER_GENERATION: usize = 50_000;
 /// means "not known to be superseded", never "current".
 #[derive(Debug)]
 pub struct SubstateVersionTracker {
-    inner: Mutex<Generations>,
+    // Lookups happen on every cache read and writes only when a sync round commits, so readers must
+    // not serialize against each other.
+    inner: RwLock<Generations>,
     capacity_per_generation: usize,
 }
 
@@ -39,40 +49,59 @@ impl SubstateVersionTracker {
 
     pub fn with_capacity(capacity_per_generation: usize) -> Self {
         Self {
-            inner: Mutex::new(Generations::default()),
+            inner: RwLock::new(Generations::default()),
             capacity_per_generation: capacity_per_generation.max(1),
         }
     }
 
     /// Records that `substate_id` reached `version`, implying every lower version of it is down.
     pub fn record_up(&self, substate_id: &SubstateId, version: u32) {
-        let mut inner = self.lock();
-        if let Some(recorded) = inner.current.get_mut(substate_id) {
-            *recorded = (*recorded).max(version);
-            return;
-        }
-        inner.current.insert(substate_id.clone(), version);
+        self.record_up_all(std::iter::once((substate_id, version)));
+    }
 
-        // Roll generations rather than evicting individually: a substate that is still being updated
-        // is re-recorded into the new generation on its next commit, while everything untouched ages
-        // out. Lookups continue to hit the previous generation until it is dropped in turn.
-        if inner.current.len() > self.capacity_per_generation {
-            inner.previous = mem::take(&mut inner.current);
+    /// Records a batch of upped substates under as few acquisitions of the write lock as [`WRITE_CHUNK`]
+    /// allows. Callers have a whole commit batch to record, and taking the lock per substate would put
+    /// the writer in contention with every concurrent lookup for the length of that batch.
+    pub fn record_up_all<'a, I>(&self, ups: I)
+    where I: IntoIterator<Item = (&'a SubstateId, u32)> {
+        let mut ups = ups.into_iter().peekable();
+        while ups.peek().is_some() {
+            let mut inner = self.write();
+            for (substate_id, version) in ups.by_ref().take(WRITE_CHUNK) {
+                if let Some(recorded) = inner.current.get_mut(substate_id) {
+                    *recorded = (*recorded).max(version);
+                    continue;
+                }
+                inner.current.insert(substate_id.clone(), version);
+
+                // Roll generations rather than evicting individually: a substate that is still being
+                // updated is re-recorded into the new generation on its next commit, while everything
+                // untouched ages out. Lookups continue to hit the previous generation until it is
+                // dropped in turn.
+                if inner.current.len() > self.capacity_per_generation {
+                    inner.previous = mem::take(&mut inner.current);
+                }
+            }
         }
     }
 
     /// True if a version newer than `version` of `substate_id` is known to have been committed.
     pub fn is_superseded(&self, substate_id: &SubstateId, version: u32) -> bool {
-        let inner = self.lock();
+        let inner = self.read();
         let current = inner.current.get(substate_id).copied();
         let previous = inner.previous.get(substate_id).copied();
         current.max(previous).is_some_and(|latest| latest > version)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Generations> {
-        // The guarded state is a plain map with no invariants to uphold across a panic, so a poisoned
-        // lock is recovered rather than propagated.
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    // The guarded state is a plain map with no invariants to uphold across a panic, so a poisoned lock
+    // is recovered rather than propagated.
+
+    fn read(&self) -> RwLockReadGuard<'_, Generations> {
+        self.inner.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn write(&self) -> RwLockWriteGuard<'_, Generations> {
+        self.inner.write().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -121,6 +150,20 @@ mod tests {
             tracker.record_up(&component(i), 1);
         }
         assert!(tracker.is_superseded(&component(1), 4));
+    }
+
+    #[test]
+    fn batch_spanning_write_chunks_records_every_substate() {
+        let tracker = SubstateVersionTracker::new();
+        let ids = (0..=u8::MAX).map(component).collect::<Vec<_>>();
+        let batch = std::iter::repeat_n(ids.iter(), WRITE_CHUNK / ids.len() + 2)
+            .flatten()
+            .map(|id| (id, 7));
+        tracker.record_up_all(batch);
+        for id in &ids {
+            assert!(tracker.is_superseded(id, 6));
+            assert!(!tracker.is_superseded(id, 7));
+        }
     }
 
     #[test]

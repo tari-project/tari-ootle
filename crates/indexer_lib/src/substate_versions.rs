@@ -6,7 +6,7 @@ use std::{collections::HashMap, mem, sync::Mutex};
 use tari_engine_types::substate::SubstateId;
 
 /// Number of substate IDs held per generation. Two generations are kept, so the tracker remembers
-/// between `CAPACITY` and `2 * CAPACITY` of the most recently updated substates.
+/// between one and two times this many of the most recently updated substates.
 const CAPACITY_PER_GENERATION: usize = 50_000;
 
 /// The newest version of each recently-updated substate, as observed from committed transaction

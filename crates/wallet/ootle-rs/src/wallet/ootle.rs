@@ -222,6 +222,21 @@ impl OotleWallet {
             sig,
         ))
     }
+
+    /// Derive the one-time stealth owner public key for `public_nonce` owned by `address`,
+    /// without producing a signature. This is the public key that a stealth-sealed transaction
+    /// would carry as its seal signature's public key, and therefore the key the engine uses to
+    /// verify every authorization signature on that transaction.
+    pub async fn derive_stealth_owner_public_key(
+        &self,
+        address: &Address,
+        public_nonce: &RistrettoPublicKey,
+    ) -> signer::Result<RistrettoPublicKeyBytes> {
+        let signer = self.key_providers.get(address).ok_or_else(|| {
+            signer::SignerError::other(format!("Signer for address {address} not found in wallet signers"))
+        })?;
+        signer.derive_stealth_owner_public_key(public_nonce).await
+    }
 }
 
 impl NetworkWallet for OotleWallet {

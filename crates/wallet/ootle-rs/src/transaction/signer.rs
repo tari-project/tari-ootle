@@ -50,4 +50,22 @@ pub trait TransactionStealthKeySigner {
         public_nonce: &RistrettoPublicKey,
         message: &UnsealedTransaction,
     ) -> signer::Result<TransactionSealSignature>;
+
+    /// Derive the one-time stealth owner public key for `public_nonce`, without signing.
+    ///
+    /// This is the public key that a `seal_transaction_with_stealth` call would produce as the
+    /// seal signature's public key. The engine verifies every authorization signature against
+    /// *this* key (the seal signature's public key), so authorization signatures for additional
+    /// stealth inputs must be bound to it — not to the account key.
+    async fn derive_stealth_owner_public_key(
+        &self,
+        public_nonce: &RistrettoPublicKey,
+    ) -> signer::Result<RistrettoPublicKeyBytes> {
+        // Default: not supported by this signer (e.g. a hardware signer that cannot derive
+        // the public key without signing). Local software providers override this.
+        let _ = public_nonce;
+        Err(signer::SignerError::other(
+            "derive_stealth_owner_public_key is not supported for this signer",
+        ))
+    }
 }

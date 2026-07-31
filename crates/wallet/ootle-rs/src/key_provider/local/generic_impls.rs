@@ -307,6 +307,20 @@ impl<C: StealthKeyPrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> + Send +
         let sig = TransactionSealSignature::new(public_key.to_byte_type(), signature.to_byte_type());
         Ok(sig)
     }
+
+    async fn derive_stealth_owner_public_key(
+        &self,
+        public_nonce: &RistrettoPublicKey,
+    ) -> signer::Result<RistrettoPublicKeyBytes> {
+        // The one-time public key is derived solely from the account secret and the public
+        // nonce, so the prehash passed here is irrelevant — we discard the signature.
+        let dummy_prehash = [0u8; 64];
+        let (_signature, public_key) = self
+            .credentials
+            .sign_prehash_with_stealth_key(public_nonce, &dummy_prehash)
+            .await?;
+        Ok(public_key.to_byte_type())
+    }
 }
 
 #[cfg(test)]

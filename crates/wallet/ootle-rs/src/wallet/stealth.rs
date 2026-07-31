@@ -56,16 +56,31 @@ impl WalletStealthAuthorizer<'_, OotleWallet> {
         &self,
         unsigned: &UnsignedTransaction,
     ) -> signer::Result<Vec<TransactionAuthorization>> {
-        let Some(seal_signer) = self.seal_signer() else {
-            // There are no inputs to sign for
-            return Ok(vec![]);
+        // The engine verifies every authorization signature against the seal signature's public
+        // key. For account-sealed transactions that is the account key (K); for stealth-sealed
+        // transactions it is the seal signer's *one-time* key (P), NOT the account key. The
+        // previous implementation always bound authorizations to K, which is invisible with a
+        // single stealth input (no authorizations) but produces an invalid signature as soon as a
+        // second stealth input requires an authorization signature.
+        let seal_pk: RistrettoPublicKeyBytes = if self.required_signatures.must_sign_with_account_key() {
+            match self.seal_signer() {
+                Some(k) => *k,
+                None => return Ok(vec![]),
+            }
+        } else {
+            let Some(seal_signer) = self.required_signatures.seal_signer() else {
+                return Ok(vec![]);
+            };
+            self.wallet
+                .derive_stealth_owner_public_key(seal_signer.signer(), seal_signer.public_nonce())
+                .await?
         };
 
         let mut authorizations = Vec::with_capacity(self.required_signatures.len().saturating_sub(1));
         for req in self.required_signatures.other_signers() {
             let auth = self
                 .wallet
-                .authorize_transaction_with_stealth_key(req.signer(), req.public_nonce(), seal_signer, unsigned)
+                .authorize_transaction_with_stealth_key(req.signer(), req.public_nonce(), &seal_pk, unsigned)
                 .await?;
             authorizations.push(auth);
         }

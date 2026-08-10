@@ -36,7 +36,7 @@ pub trait TransactionSealSigner: Sync {
     /// Each one commits to the public key this signer will seal with, so only the seal signer can produce them —
     /// which is why they are made here rather than by the caller. Defaults to none: a signer that seals with a key
     /// the caller already knows has nothing to add.
-    async fn create_authorizations(
+    async fn authorizations_for(
         &self,
         _unsigned: &UnsignedTransaction,
     ) -> signer::Result<Vec<TransactionAuthorization>> {

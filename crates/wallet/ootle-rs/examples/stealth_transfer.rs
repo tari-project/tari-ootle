@@ -67,14 +67,15 @@ async fn main() {
     // The faucet funds are split across two outputs so that the transfer below spends two stealth inputs. One of them
     // seals that transaction and the other must attach an authorization signature committing to the seal signer's
     // one-time public key.
+    const FEE_BUDGET: u64 = 2000;
     const FIRST_INPUT_AMOUNT: u64 = 6 * TARI;
-    const SECOND_INPUT_AMOUNT: u64 = 10 * TARI + 1000 - 500 - FIRST_INPUT_AMOUNT;
+    const SECOND_INPUT_AMOUNT: u64 = 10 * TARI + 2 * FEE_BUDGET - FEE_BUDGET - FIRST_INPUT_AMOUNT;
     // // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
-        // Tell the transfer to expect 10 TARI (+1000 to cover fees) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
-        .spend_revealed_input(10 * TARI + 1000)
-        // The transfer will output 500 micro TARI as revealed funds to pay for the fee
-        .to_revealed_output(500u64)
+        // Tell the transfer to expect 10 TARI (plus a fee budget for this transaction and the transfer below) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
+        .spend_revealed_input(10 * TARI + 2 * FEE_BUDGET)
+        // The transfer will output the fee budget as revealed funds to pay for the fee. Creating each stealth output costs a substate-creation premium plus its stored bytes, so this has to cover two of them.
+        .to_revealed_output(FEE_BUDGET)
         // Spend the remaining value (10 TARI - fee) into outputs for the sender address. NOTE: the sender address is not actually included in the output (privacy!),
         // but a supporting wallet that holds the secret key would be able to spend the output.
         // You can specify any address here and split up into many outputs as needed, as long as ∑inputs == ∑outputs.
@@ -116,11 +117,11 @@ async fn main() {
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
         // Spend both existing stealth inputs that are controlled by the sender address.
-        // Together these are worth 10.000500 TARI
+        // Together these are worth 10 TARI plus the second transaction's fee budget.
         .spend_stealth_input(sender_address.clone(), inputs_to_spend[0].commitment())
         .spend_stealth_input(sender_address.clone(), inputs_to_spend[1].commitment())
-        // The transfer will output 0.000500 TARI as revealed funds to pay for the fee
-        .to_revealed_output(500u64)
+        // The transfer will output the fee budget as revealed funds to pay for the fee. Two inputs means an extra authorization signature to verify on top of the two new outputs.
+        .to_revealed_output(FEE_BUDGET)
         // Spend to a new output (8 TARI) that we'll generate for the recipient address.
         .to_stealth_output(
             Output::new(recipient, tari_token, const_nonzero_u64!(8 * TARI))

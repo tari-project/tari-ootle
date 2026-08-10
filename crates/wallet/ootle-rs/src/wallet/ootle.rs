@@ -186,6 +186,8 @@ impl OotleWallet {
         Ok(statement)
     }
 
+    /// An authorizer for one transaction. Call this per transaction rather than reusing the result: an ephemeral seal
+    /// draws its key here, so a shared authorizer seals every transaction with the same key and links them.
     pub fn stealth_authorizer(&self, required_signatures: SignatureRequirements) -> WalletStealthAuthorizer<'_, Self> {
         WalletStealthAuthorizer::new(self, required_signatures)
     }

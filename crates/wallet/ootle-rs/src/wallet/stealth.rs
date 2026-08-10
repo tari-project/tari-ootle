@@ -42,6 +42,9 @@ impl From<SealSource> for Seal {
 /// Both halves live here because an authorization signs a message committing to the seal signer's public key: only
 /// whoever decides the seal key can produce them, and they must be attached before the seal signature is made over
 /// them.
+///
+/// Build one authorizer per transaction. An ephemeral seal draws its key once, when the authorizer is constructed, so
+/// reusing an authorizer seals every transaction with the same key and links them to each other.
 pub struct WalletStealthAuthorizer<'a, W: ?Sized> {
     wallet: &'a W,
     seal: Seal,
@@ -86,7 +89,7 @@ impl WalletStealthAuthorizer<'_, OotleWallet> {
 
 #[async_trait]
 impl TransactionSealSigner for WalletStealthAuthorizer<'_, OotleWallet> {
-    async fn create_authorizations(
+    async fn authorizations_for(
         &self,
         unsigned: &UnsignedTransaction,
     ) -> signer::Result<Vec<TransactionAuthorization>> {

@@ -11,8 +11,9 @@ use tari_ootle_transaction::{Transaction, UnsealedTransaction};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 /// A transaction seal signer that uses an ephemeral secret.
-/// WARNING: This signer generates a cryptographically secure secret, signs a transaction and throws the secret away.
-/// You probably want to use another implementation e.g. OotleWallet
+/// WARNING: This signer generates a cryptographically secure secret and keeps it for its own lifetime. Every
+/// transaction it seals therefore carries the same seal public key and is linkable to the others, so a signer must not
+/// outlive the transaction it seals. You probably want to use another implementation e.g. OotleWallet
 ///
 /// This is primarily used in pure stealth transactions where no accounts/components are accessed, no inputs are being
 /// spent etc. and thus no specific signature is required.

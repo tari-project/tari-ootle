@@ -255,14 +255,22 @@ jobs:
   # without requiring branch protection rule changes.
   test:
     name: test
-    if: always()
+    # `!cancelled()` rather than `always()`: the aggregator must still run when a shard fails, but a run cancelled by
+    # `cancel-in-progress` must leave this check cancelled rather than failed.
+    if: ${{ !cancelled() }}
     needs: [ test-shards ]
     runs-on: [ ubuntu-latest ]
     steps:
       - name: check shard results
         run: |
-          if [[ "${{ needs.test-shards.result }}" != "success" ]]; then
-            echo "One or more test shards failed or were cancelled"
+          result="${{ needs.test-shards.result }}"
+          # A shard cancelled while the run as a whole was not means this run is superseded; the newer run reports.
+          if [[ "$result" == "cancelled" ]]; then
+            echo "::notice::Test shards were cancelled; a newer run supersedes this one"
+            exit 0
+          fi
+          if [[ "$result" != "success" ]]; then
+            echo "One or more test shards failed"
             exit 1
           fi
 
@@ -270,13 +278,18 @@ jobs:
   # rule. The full workspace is already compiled by the test shards on stable.
   check-stable:
     name: check stable
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [ test-shards ]
     runs-on: [ ubuntu-latest ]
     steps:
       - name: check shard results
         run: |
-          if [[ "${{ needs.test-shards.result }}" != "success" ]]; then
+          result="${{ needs.test-shards.result }}"
+          if [[ "$result" == "cancelled" ]]; then
+            echo "::notice::Test shards were cancelled; a newer run supersedes this one"
+            exit 0
+          fi
+          if [[ "$result" != "success" ]]; then
             echo "Compilation check failed (test shards did not pass)"
             exit 1
           fi

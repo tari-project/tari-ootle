@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use ootle_byte_type::FromByteType;
 use tari_ootle_common_types::engine_types::{stealth::validate_transfer, substate::SubstateId};
 use tari_template_lib_types::{
@@ -87,38 +87,39 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
     /// here is public material, so it stays on this side of the
     /// [`StealthStatementProvider`](crate::stealth::StealthStatementProvider) boundary.
     async fn resolve_inputs(&mut self) -> WalletResult<(Vec<ResolvedStealthInput>, SignatureRequirements)> {
-        // The UTXO each input spends, in the order the caller added them. A commitment may only appear once: the same
-        // UTXO cannot be spent twice, and two entries naming it would otherwise silently collapse into one.
-        let mut utxo_ids = Vec::with_capacity(self.spec.inputs_to_spend.len());
-        for (_, input) in &self.spec.inputs_to_spend {
+        // Keyed by the UTXO each input spends, so several inputs owned by one address stay distinct, and iterated in
+        // the order the caller added them. A commitment may appear only once: the same UTXO cannot be spent twice, and
+        // two entries naming it would otherwise silently collapse into one.
+        let mut inputs_by_utxo = IndexMap::with_capacity(self.spec.inputs_to_spend.len());
+        for (spender_addr, input) in self.spec.inputs_to_spend.drain(..) {
             let id = SubstateId::from(UtxoAddress::new(self.spec.resource_address, input.commitment.into()));
-            if utxo_ids.contains(&id) {
+            if inputs_by_utxo.contains_key(&id) {
                 return Err(StealthProviderError::UnexpectedError {
                     details: format!("The stealth input {id} was added to this transfer more than once"),
                 }
                 .into());
             }
-            utxo_ids.push(id);
+            inputs_by_utxo.insert(id, (spender_addr, input));
         }
 
         let mut found_substates = self
             .provider
-            .fetch_substates(utxo_ids.iter().cloned())
+            .fetch_substates(inputs_by_utxo.keys().cloned())
             .await
             .map_err(|e| StealthProviderError::UnexpectedError {
                 details: format!("Failed to fetch stealth input substates: {}", e),
             })?;
 
-        let mut required_signers = IndexSet::with_capacity(utxo_ids.len());
+        let mut required_signers = IndexSet::with_capacity(inputs_by_utxo.len());
         // Accessing the account component to take the revealed input bucket requires the account key's badge, so it
         // must seal; otherwise the inputs' own one-time keys are all the transaction needs.
         let must_sign_with_account_key = self.spec.revealed_input_amount.is_positive();
-        let mut resolved_inputs = Vec::with_capacity(utxo_ids.len());
+        let mut resolved_inputs = Vec::with_capacity(inputs_by_utxo.len());
 
         // Driven by the caller's inputs rather than the fetched substates, which arrive in a `HashMap`: the first
         // input is promoted to seal signer, so iterating in a nondeterministic order would pick a different seal
         // signer, and order the statement's inputs differently, from one run to the next.
-        for ((spender_addr, to_spend), id) in self.spec.inputs_to_spend.drain(..).zip(utxo_ids) {
+        for (id, (spender_addr, to_spend)) in inputs_by_utxo {
             // TODO: work on the error types
             let Some(address) = id.as_utxo_address() else {
                 return Err(StealthProviderError::UnexpectedError {

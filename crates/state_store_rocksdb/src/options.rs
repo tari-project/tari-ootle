@@ -16,6 +16,13 @@ pub struct DatabaseOptions {
     /// Whether to store additional debugging data in the database. This may increase storage requirements and slow
     /// down some operations, so it should only be enabled for debugging purposes.
     pub debugging_data: bool,
+    /// Whether epoch GC prunes finalized transaction bookkeeping (payloads, results and finalized
+    /// markers) once it ages past `epoch_history_length`. Disable to retain the full transaction
+    /// history (an archival node). Chain state — committed effects and transaction receipts — is
+    /// retained regardless, so consensus behaviour is identical either way. The epoch index that
+    /// drives pruning is always maintained, so pruning can be enabled later and will still remove
+    /// history accumulated while it was disabled.
+    pub prune_transaction_history: bool,
 }
 
 impl DatabaseOptions {
@@ -43,6 +50,13 @@ impl DatabaseOptions {
         self.epoch_history_length = epoch_history_length;
         self
     }
+
+    /// Whether epoch GC prunes finalized transaction bookkeeping once it ages past
+    /// `epoch_history_length`. Disable to retain the full transaction history (an archival node).
+    pub fn with_prune_transaction_history(mut self, prune_transaction_history: bool) -> Self {
+        self.prune_transaction_history = prune_transaction_history;
+        self
+    }
 }
 
 impl Default for DatabaseOptions {
@@ -51,6 +65,7 @@ impl Default for DatabaseOptions {
             state_history_length: 100,
             epoch_history_length: 1,
             debugging_data: false,
+            prune_transaction_history: true,
         }
     }
 }

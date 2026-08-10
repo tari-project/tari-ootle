@@ -31,7 +31,7 @@ export type Instruction =
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
   | { EmitLog: { level: LogLevel; message: string } }
   | { ClaimBurn: { claim: MinotariBurnClaimProof; output_data: ClaimBurnOutputData } }
-  | { ClaimValidatorFees: { address: ValidatorFeePoolAddress } }
+  | { ClaimValidatorFees: { address: ValidatorFeePoolAddress; max_amount: Amount | null } }
   | "DropAllProofsInWorkspace"
   | { Assert: { key: WorkspaceOffsetId; assertion: Assertion } }
   | { TakeFromBucket: { input_bucket: WorkspaceOffsetId; amount: Amount; output_bucket: number } }

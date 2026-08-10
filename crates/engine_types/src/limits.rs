@@ -175,6 +175,19 @@ pub struct StealthLimits {
     pub max_inclusion_proof_len: usize,
     /// Maximum number of stealth transfers across a whole transaction.
     pub max_transfers_per_transaction: usize,
+    /// Maximum number of stealth transfers the fee intent may perform.
+    ///
+    /// The fee intent runs on [`FREE_COMPUTE_GRACE_POINTS`] of credit before any payment, so whatever it contains is
+    /// the transaction's free-execution surface. Sourcing a fee needs one transfer statement — inputs producing the
+    /// revealed fee amount plus a stealth change output — so one is what the fee intent gets. Further transfers
+    /// belong in the main intent, where the fee just paid funds them.
+    ///
+    /// Counts transfers *performed*, not `StealthTransfer` instructions: a template calling
+    /// `ResourceManager::stealth_transfer` counts the same, since both routes reach
+    /// `RuntimeInterfaceImpl::stealth_transfer`. Counting instructions alone would leave the WASM route uncapped and
+    /// so make the costlier route — a WASM invocation and host call on top of the same verification — the way to
+    /// exceed this limit.
+    pub max_fee_intent_transfers: usize,
     /// Maximum total stealth inputs across a whole transaction.
     pub max_total_inputs_per_transaction: usize,
     /// Maximum total stealth outputs across a whole transaction.
@@ -195,6 +208,7 @@ pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_witness_data_len: 4096,
     max_inclusion_proof_len: 32,
     max_transfers_per_transaction: 64,
+    max_fee_intent_transfers: 1,
     max_total_inputs_per_transaction: 1024,
     max_total_outputs_per_transaction: 256,
 };

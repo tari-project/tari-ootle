@@ -153,6 +153,8 @@ mod tests {
         max_witness_data_len: 4096,
         max_inclusion_proof_len: 32,
         max_transfers_per_transaction: 2,
+        // Enforced by `StateTracker`, not by this accumulator.
+        max_fee_intent_transfers: 1,
         max_total_inputs_per_transaction: 3,
         max_total_outputs_per_transaction: 2,
     };

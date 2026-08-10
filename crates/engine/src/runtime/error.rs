@@ -411,6 +411,11 @@ pub enum ArgumentValidationError {
     MaxStealthInputsExceeded { max_inputs: usize, actual_inputs: usize },
     #[error("Maximum number of stealth transfers per transaction exceeded: max {max_transfers}")]
     MaxStealthTransfersPerTransactionExceeded { max_transfers: usize },
+    #[error(
+        "Maximum number of stealth transfers in the fee intent exceeded: max {max_transfers}. Perform further \
+         transfers in the main intent."
+    )]
+    MaxFeeIntentStealthTransfersExceeded { max_transfers: usize },
     #[error("Maximum total stealth outputs per transaction exceeded: max {max_outputs}, got at least {actual_outputs}")]
     MaxStealthOutputsPerTransactionExceeded { max_outputs: usize, actual_outputs: usize },
     #[error("Maximum total stealth inputs per transaction exceeded: max {max_inputs}, got at least {actual_inputs}")]

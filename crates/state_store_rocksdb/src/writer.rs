@@ -122,6 +122,7 @@ use crate::{
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
         evicted_node::{EvictedNodeCf, EvictedNodeData},
+        finalized_transaction,
         finalized_transaction::{FinalizedTransactionLinkCf, FinalizedTransactionLinkData},
         foreign_parked_blocks,
         foreign_parked_blocks::ForeignParkedBlockCf,
@@ -662,19 +663,33 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(
         &mut self,
+        epoch: Epoch,
         transactions: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "transactions_finalize_all";
 
         let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
+        let epoch_index_cf = self.db().cf(finalized_transaction::EpochIndex)?;
         let exec_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let exec_index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
 
         let iter = transactions.into_iter();
         // Add transactions to finalized CF
-        let data = FinalizedTransactionLinkData { finalized_at: now() };
+        let data = FinalizedTransactionLinkData {
+            finalized_at: now(),
+            epoch,
+        };
         for transaction in iter {
+            // The epoch index holds exactly one entry per id: a re-finalized id (a previously
+            // aborted transaction sequenced again) moves to the epoch it last finalized in, so the
+            // GC horizon applies to the latest attempt.
+            if let Some(prev) = finalized_cf.get(transaction.id(), OPERATION).optional()? &&
+                prev.epoch != epoch
+            {
+                epoch_index_cf.delete(&(prev.epoch, *transaction.id()), OPERATION)?;
+            }
             finalized_cf.put(transaction.id(), &data, OPERATION)?;
+            epoch_index_cf.put(&(epoch, *transaction.id()), &(), OPERATION)?;
 
             // Delete from block index which is used for querying pending executions
             let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), transaction.id());
@@ -682,6 +697,35 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 let (tx_id, block_id, height) = result?;
                 exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
             }
+        }
+
+        Ok(())
+    }
+
+    fn transactions_finalized_remove(&mut self, tx_id: &TransactionId) -> Result<(), StorageError> {
+        const OPERATION: &str = "transactions_finalized_remove";
+
+        let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
+        // The epoch index entry must go with the link, otherwise epoch GC would later delete the
+        // payload of an id that has been re-sequenced and is live again.
+        if let Some(link) = finalized_cf.get(tx_id, OPERATION).optional()? {
+            self.db()
+                .cf(finalized_transaction::EpochIndex)?
+                .delete(&(link.epoch, *tx_id), OPERATION)?;
+        }
+        finalized_cf.delete(tx_id, OPERATION)?;
+
+        let exec_cf = self.db().cf(BlockTransactionExecutionCf)?;
+        let exec_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
+        let exec_index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
+
+        let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), tx_id);
+        for result in iter {
+            let (tx_id, block_id, height) = result?;
+            exec_cf.delete(&(tx_id, block_id, height), OPERATION)?;
+            // The block index entry is removed at finalize, but executions recorded by proposals
+            // still in flight at that point may have index entries remaining.
+            exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
         }
 
         Ok(())
@@ -1757,6 +1801,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         cleanup::cleanup_blocks_for_epoch(&db, prune_epoch)?;
         cleanup::cleanup_qcs_for_epoch(&db, prune_epoch)?;
         cleanup::foreign_proposals_for_epoch(&db, prune_epoch)?;
+        if self.options.prune_transaction_history {
+            cleanup::cleanup_finalized_transactions_for_epoch(&db, prune_epoch)?;
+        }
 
         Ok(())
     }
@@ -1914,6 +1961,54 @@ mod cleanup {
         info!(
             target: LOG_TARGET,
             "Cleaned up {} blocks for ..{}",
+            count,
+            up_to_epoch
+        );
+
+        Ok(())
+    }
+
+    /// Prunes finalized transaction bookkeeping — the payload, finalized link, recorded executions
+    /// and the epoch-index entry — for everything finalized up to and including `up_to_epoch`.
+    ///
+    /// Only bookkeeping is removed: a commit's effects and its receipt substate are synced state and
+    /// remain, so committed ids stay refused via the receipt-existence check after their records are
+    /// gone. The prune horizon matches block retention, so a transaction's payload outlives every
+    /// retained block that references it.
+    pub fn cleanup_finalized_transactions_for_epoch(
+        db: &DbWriteContext<'_>,
+        up_to_epoch: Epoch,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "cleanup::cleanup_finalized_transactions_for_epoch";
+        let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
+        let tx_cf = db.cf(TransactionCf)?;
+        let link_cf = db.cf(FinalizedTransactionLinkCf)?;
+        let epoch_index_cf = db.cf(finalized_transaction::EpochIndex)?;
+        let exec_cf = db.cf(BlockTransactionExecutionCf)?;
+        let exec_query = db.cf(block_transaction_execution::ByTransactionIdQuery)?;
+        let exec_index_cf = db.cf(block_transaction_execution::BlockIndex)?;
+
+        let query = db.cf(finalized_transaction::ByEpochQuery)?;
+        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch::zero()..up_to_epoch);
+
+        let mut count = 0usize;
+        for result in iter {
+            let (epoch, tx_id) = result?;
+            tx_cf.delete(&tx_id, OPERATION)?;
+            link_cf.delete(&tx_id, OPERATION)?;
+            let exec_iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), &tx_id);
+            for result in exec_iter {
+                let (tx_id, block_id, height) = result?;
+                exec_cf.delete(&(tx_id, block_id, height), OPERATION)?;
+                exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
+            }
+            epoch_index_cf.delete(&(epoch, tx_id), OPERATION)?;
+            count += 1;
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "Cleaned up {} finalized transactions for ..{}",
             count,
             up_to_epoch
         );

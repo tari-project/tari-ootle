@@ -1791,7 +1791,11 @@ mod create_stealth_transfer_statement_handler_tests {
 
     use axum_extra::headers::{Authorization, authorization::Bearer};
     use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
-    use tari_engine_types::resource::Resource;
+    use tari_crypto::{keys::SecretKey as _, ristretto::RistrettoSecretKey};
+    use tari_engine_types::{
+        resource::Resource,
+        stealth::{MerkleTree, hashlock_digest},
+    };
     use tari_ootle_address::{Network, OotleAddress, RistrettoOotleAddress};
     use tari_ootle_common_types::Epoch;
     use tari_ootle_wallet_crypto::pay_to::PayTo;
@@ -1816,12 +1820,15 @@ mod create_stealth_transfer_statement_handler_tests {
     use tari_template_lib_types::{
         ComponentAddress,
         Metadata,
+        NonFungibleAddress,
         ResourceAddress,
         SubstateOwnerRule,
         UtxoAddress,
-        access_rules::ResourceAccessRules,
+        access_rules::{AccessRule, RequireRule, ResourceAccessRules, RestrictedAccessRule, RuleRequirement},
         constants::TOKEN_SYMBOL,
-        crypto::PedersenCommitmentBytes,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        rule,
+        stealth::{AtomicCondition, BuiltinPredicate, HashAlg, SpendAuthorization, SpendCondition},
     };
     use tari_utilities::SafePassword;
 
@@ -2198,5 +2205,173 @@ mod create_stealth_transfer_statement_handler_tests {
             stored.status
         );
         assert_eq!(stored.lock_id, None);
+    }
+
+    /// A deterministic Ristretto public key standing in for an HTLC participant. Only the public half exists in this
+    /// test: a condition tree commits public terms only, so no participant secret is needed to *create* a
+    /// `PayTo::Conditions` output — a secret is required only later, to satisfy a leaf at spend time.
+    fn htlc_participant_key(seed: u8) -> RistrettoPublicKeyBytes {
+        let secret = RistrettoSecretKey::from_uniform_bytes(&[seed; 64]).unwrap();
+        RistrettoPublicKey::from_secret_key(&secret).to_byte_type()
+    }
+
+    /// The access rule satisfied only by a proof of `public_key`, spelled out without the `rule!` macro so the
+    /// condition-leaf assertions restate the rule independently of how the leaves were built.
+    fn requires_public_key(public_key: RistrettoPublicKeyBytes) -> AccessRule {
+        AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
+            RuleRequirement::NonFungibleAddress(NonFungibleAddress::from_public_key(public_key)),
+        )))
+    }
+
+    /// The two leaves of the HTLC condition tree, keyed on `refund_epoch` and the SHA-256 digest of `preimage`.
+    ///
+    /// Claim: hashlock AND before the refund epoch AND the claimant's key.
+    /// Refund: at or after the refund epoch AND the refunder's key.
+    ///
+    /// The epoch bound is the same on both leaves, so exactly one path is admissible at any epoch.
+    fn htlc_conditions(
+        preimage: &[u8],
+        refund_epoch: u64,
+        claimant: RistrettoPublicKeyBytes,
+        refunder: RistrettoPublicKeyBytes,
+    ) -> (SpendCondition, SpendCondition) {
+        let claim = SpendCondition::all([
+            AtomicCondition::Builtin(BuiltinPredicate::HashLock {
+                hash: hashlock_digest(HashAlg::Sha256, preimage),
+                alg: HashAlg::Sha256,
+            }),
+            AtomicCondition::Builtin(BuiltinPredicate::BeforeEpoch(refund_epoch)),
+            AtomicCondition::AccessRule(rule!(public_key(claimant))),
+        ]);
+        let refund = SpendCondition::all([
+            AtomicCondition::Builtin(BuiltinPredicate::AfterEpoch(refund_epoch)),
+            AtomicCondition::AccessRule(rule!(public_key(refunder))),
+        ]);
+        (claim, refund)
+    }
+
+    /// Phase 3C: the statement handler can build a fully blinded stealth output whose spend authority is a committed
+    /// two-leaf HTLC condition tree (`PayTo::Conditions`), from an exactly-named `InputSelection::Specific` input set.
+    ///
+    /// This is the creation half of TIP-0006 script-path spending: the output commits only public terms (a SHA-256
+    /// digest, two epoch bounds and two public keys), carries no key path, and needs no participant secret to build.
+    #[tokio::test]
+    async fn specific_selection_builds_blinded_pay_to_conditions_htlc_output() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+
+        // Two valid wallet-owned inputs, inserted a then b, funding a single HTLC output of their exact total.
+        let output_a = insert_valid_output(&test, 100);
+        let output_b = insert_valid_output(&test, 150);
+
+        const REFUND_EPOCH: u64 = 4_242;
+        let preimage = b"phase3c-htlc-preimage";
+        let claimant = htlc_participant_key(1);
+        let refunder = htlc_participant_key(2);
+        let (claim_condition, refund_condition) = htlc_conditions(preimage, REFUND_EPOCH, claimant, refunder);
+        let conditions = vec![claim_condition.clone(), refund_condition.clone()];
+
+        // The committed root, computed independently of the handler from the public leaves via the canonical
+        // condition-tree code in `tari_engine_types`.
+        let expected_condition_root = MerkleTree::from_conditions(&conditions).unwrap().root();
+
+        // Request the inputs in reverse insertion order (b then a) to pin the ordering guarantee, and pay the whole
+        // 250 to a blinded conditions output: nothing revealed.
+        let request = AccountsCreateStealthTransferStatementRequest {
+            requests: vec![TransferStatementRequest {
+                sender_account: test.account.into(),
+                resource_address: test.stealth_resource,
+                input_selection: InputSelection::Specific {
+                    utxo_addresses: vec![output_b.to_utxo_address(), output_a.to_utxo_address()],
+                },
+                outputs: vec![TransferOutput {
+                    address: account_ootle_address(&test),
+                    revealed_amount: Amount::zero(),
+                    blinded_amount: 250,
+                    memo: None,
+                    pay_to: PayTo::Conditions(conditions),
+                }],
+            }],
+        };
+
+        let response = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
+            .await
+            .expect("a balanced specific request paying to a condition tree should succeed");
+
+        // Exactly the two named inputs, in the requested order, contributing nothing revealed.
+        assert_eq!(response.statements.len(), 1);
+        let statement = &response.statements[0];
+        let inputs = &statement.inputs_statement.inputs;
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].commitment, output_b.commitment);
+        assert_eq!(inputs[1].commitment, output_a.commitment);
+        assert_eq!(statement.inputs_statement.revealed_amount, Amount::zero());
+
+        // One signer per input, in the same requested order.
+        assert_eq!(response.utxo_signers.len(), 2);
+        assert_eq!(response.utxo_signers[0].public_nonce, output_b.sender_public_nonce);
+        assert_eq!(response.utxo_signers[1].public_nonce, output_a.sender_public_nonce);
+
+        // A single, fully blinded output: the whole 250 is committed, none of it revealed.
+        assert_eq!(statement.outputs_statement.revealed_output_amount, Amount::zero());
+        let outputs = statement.stealth_outputs();
+        assert_eq!(outputs.len(), 1);
+
+        // The output is script-path only: its authorization is the independently computed condition root, and it has
+        // no key path at all.
+        assert_eq!(outputs[0].auth, SpendAuthorization::Script(expected_condition_root));
+        assert_eq!(outputs[0].auth.condition_root(), Some(&expected_condition_root));
+        assert!(
+            outputs[0].auth.spend_key().is_none(),
+            "a conditions output must carry no key path"
+        );
+
+        // The root commits both leaves and is order-independent: neither leaf alone reproduces it, and reversing the
+        // leaf order does not change it.
+        assert_ne!(
+            expected_condition_root,
+            MerkleTree::from_conditions([&claim_condition]).unwrap().root()
+        );
+        assert_ne!(
+            expected_condition_root,
+            MerkleTree::from_conditions([&refund_condition]).unwrap().root()
+        );
+        assert_eq!(
+            expected_condition_root,
+            MerkleTree::from_conditions([&refund_condition, &claim_condition])
+                .unwrap()
+                .root()
+        );
+
+        // The leaves are the HTLC conjunctions, spelled out without the `rule!` macro: claim = SHA-256 hashlock AND
+        // refund-epoch deadline AND claimant key; refund = refund epoch reached AND refunder key.
+        assert_eq!(claim_condition.conditions(), &[
+            AtomicCondition::Builtin(BuiltinPredicate::HashLock {
+                hash: hashlock_digest(HashAlg::Sha256, preimage),
+                alg: HashAlg::Sha256,
+            }),
+            AtomicCondition::Builtin(BuiltinPredicate::BeforeEpoch(REFUND_EPOCH)),
+            AtomicCondition::AccessRule(requires_public_key(claimant)),
+        ]);
+        assert_eq!(refund_condition.conditions(), &[
+            AtomicCondition::Builtin(BuiltinPredicate::AfterEpoch(REFUND_EPOCH)),
+            AtomicCondition::AccessRule(requires_public_key(refunder)),
+        ]);
+
+        // A real lock was taken and kept: both selected inputs are LockedForSpend under the returned lock id.
+        assert!(
+            response.lock_id > 0,
+            "expected a real lock id, got {}",
+            response.lock_id
+        );
+        for output in [&output_b, &output_a] {
+            let stored = stored_output(&test, &output.commitment);
+            assert!(
+                matches!(stored.status, OutputStatus::LockedForSpend),
+                "expected LockedForSpend, got {:?}",
+                stored.status
+            );
+            assert_eq!(stored.lock_id, Some(response.lock_id));
+        }
     }
 }

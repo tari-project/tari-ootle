@@ -3,14 +3,15 @@
 
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
+use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_ootle_transaction::TransactionId;
 
 use crate::{
-    codecs::{DefaultCodec, KeyPrefix, TransactionIdCodec},
+    codecs::{DefaultCodec, EpochCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
     column_families::cf_names,
     prefixed,
-    traits::Cf,
+    traits::{Cf, QueryCf},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
@@ -19,6 +20,12 @@ pub struct FinalizedTransactionLinkData {
     #[n(0)]
     #[cbor(with = "tari_bor::adapters::serde_bridge")]
     pub finalized_at: PrimitiveDateTime,
+    /// The epoch of the block that finalized the transaction. Keyed into [`EpochIndex`] so epoch GC
+    /// can prune finalized transaction bookkeeping by age.
+    #[n(1)]
+    #[cbor(default)]
+    #[serde(default)]
+    pub epoch: Epoch,
 }
 
 prefixed!(FinalizedTransactionLinkPrefix, KeyPrefix::FinalizedTransactionLinks);
@@ -35,4 +42,35 @@ impl Cf for FinalizedTransactionLinkCf {
     fn name() -> &'static str {
         cf_names::TRANSACTIONS
     }
+}
+
+prefixed!(
+    FinalizedTransactionEpochIndexPrefix,
+    KeyPrefix::FinalizedTransactionEpochIndex
+);
+
+/// Index of finalized transaction ids by the epoch they finalized in, used by epoch GC to prune
+/// transaction bookkeeping by age. Exactly one entry exists per finalized id — re-finalizing an id
+/// (a previously aborted transaction sequenced again) moves its entry to the latest epoch.
+pub struct EpochIndex;
+
+impl Cf for EpochIndex {
+    type Key = (Epoch, TransactionId);
+    type KeyCodec = (EpochCodec, TransactionIdCodec);
+    type Prefix = FinalizedTransactionEpochIndexPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        cf_names::TRANSACTIONS
+    }
+}
+
+/// Used to range-query [`EpochIndex`] up to a prune epoch.
+pub struct ByEpochQuery;
+
+impl QueryCf for ByEpochQuery {
+    type Cf = EpochIndex;
+    type Key = Epoch;
+    type KeyCodec = EpochCodec;
 }

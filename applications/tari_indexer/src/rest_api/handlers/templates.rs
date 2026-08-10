@@ -27,7 +27,7 @@ use crate::{
 
 #[utoipa::path(
     get,
-    path = "/templates/{template_id}",
+    path = "/templates/{template_address}",
     description = "Fetch a template definition by its address",
     responses(
         (status = 200, description = "Template definition", body = GetTemplateDefinitionResponse),

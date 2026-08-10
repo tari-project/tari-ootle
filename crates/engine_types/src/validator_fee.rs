@@ -84,19 +84,30 @@ impl ValidatorFeePool {
     /// Withdraws all the funds from the pool and returns them in a ResourceContainer.
     /// If the pool has insufficient funds, an error is returned.
     /// This function is used in the engine to withdraw the funds from the pool and create a Bucket.
-    pub fn withdraw_all(&mut self) -> Result<ResourceContainer, ResourceError> {
+    pub fn withdraw_all(&mut self) -> Result<(u64, ResourceContainer), ResourceError> {
+        self.withdraw_up_to(Amount::MAX)
+    }
+
+    /// Withdraws up to max_amount from the pool and returns them in a ResourceContainer.
+    pub fn withdraw_up_to(&mut self, max_amount: Amount) -> Result<(u64, ResourceContainer), ResourceError> {
+        if max_amount == Amount::zero() {
+            return Err(ResourceError::InsufficientBalance {
+                details: "Cannot withdraw zero from ValidatorFeePool".to_string(),
+            });
+        }
         if self.amount == 0 {
             return Err(ResourceError::InsufficientBalance {
                 details: "ValidatorFeePool has insufficient balance. Current balance is 0".to_string(),
             });
         }
-        let amount = self.amount;
-        self.amount = 0;
-        Ok(ResourceContainer::Stealth {
+        let max_u64 = u64::try_from(max_amount.to_u128()).unwrap_or(u64::MAX);
+        let amount = self.amount.min(max_u64);
+        self.amount -= amount;
+        Ok((amount, ResourceContainer::Stealth {
             address: TARI_TOKEN,
             revealed_amount: amount.into(),
             locked_amount: Amount::zero(),
-        })
+        }))
     }
 }
 
@@ -109,4 +120,37 @@ pub struct ValidatorFeeWithdrawal {
     pub address: ValidatorFeePoolAddress,
     #[n(1)]
     pub amount: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_withdraw_up_to() {
+        let pk = RistrettoPublicKeyBytes::default();
+        let mut pool = ValidatorFeePool::new(pk, 100);
+
+        // 1. Cap below balance
+        let (amt, container) = pool.withdraw_up_to(Amount::from(40u64)).unwrap();
+        assert_eq!(amt, 40);
+        assert_eq!(container.unlocked_amount(), Amount::from(40u64));
+        assert_eq!(pool.amount(), 60);
+
+        // 2. Cap at or above balance
+        let (amt, container) = pool.withdraw_up_to(Amount::from(100u64)).unwrap();
+        assert_eq!(amt, 60);
+        assert_eq!(container.unlocked_amount(), Amount::from(60u64));
+        assert_eq!(pool.amount(), 0);
+
+        // 3. Attempt to withdraw from empty pool
+        let err = pool.withdraw_up_to(Amount::from(10u64)).unwrap_err();
+        assert!(matches!(err, ResourceError::InsufficientBalance { .. }));
+
+        // 4. Attempt to withdraw 0
+        let mut pool = ValidatorFeePool::new(pk, 100);
+        let err = pool.withdraw_up_to(Amount::from(0u64)).unwrap_err();
+        assert!(matches!(err, ResourceError::InsufficientBalance { .. }));
+        assert_eq!(pool.amount(), 100); // untouched
+    }
 }

@@ -250,7 +250,9 @@ pub async fn spawn_services(
     let state_store = ValidatorNodeStateStore::open(
         &config.validator_node.state_db_path,
         // TODO: just enable it always for now, later make it configurable and default to true for testnets
-        DatabaseOptions::default().with_debugging_data(true),
+        DatabaseOptions::default()
+            .with_debugging_data(true)
+            .with_prune_transaction_history(!config.validator_node.keep_transaction_history),
     )?;
 
     state_store.with_write_tx(|tx| migrations::migrate(tx, config.network, &consensus_constants))?;

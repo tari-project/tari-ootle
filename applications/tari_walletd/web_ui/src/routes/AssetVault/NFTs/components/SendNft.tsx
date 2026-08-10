@@ -58,13 +58,17 @@ export default function SendNft({ nftId, resourceAddress }: TransferNftProps) {
       <Button variant="outlined" onClick={() => setOpen(true)}>
         Send
       </Button>
-      <TransferNftDialog
-        open={open}
-        handleClose={() => setOpen(false)}
-        onSendComplete={() => setOpen(false)}
-        preSelectedNftId={nftId}
-        preSelectedResourceAddress={resourceAddress}
-      />
+      {/* Mounted only while open: the dialog loads the account's full NFT list, and one instance is rendered per
+          NFT in the list. */}
+      {open && (
+        <TransferNftDialog
+          open
+          handleClose={() => setOpen(false)}
+          onSendComplete={() => setOpen(false)}
+          preSelectedNftId={nftId}
+          preSelectedResourceAddress={resourceAddress}
+        />
+      )}
     </>
   );
 }

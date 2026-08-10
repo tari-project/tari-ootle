@@ -58,11 +58,17 @@ use tari_validator_node_rpc::client::{
 use crate::{
     error::IndexerError,
     substate_cache::{SubstateCache, SubstateCacheEntry, SubstateCacheEntryRef},
+    substate_versions::SubstateVersionTracker,
 };
 
 const LOG_TARGET: &str = "tari::indexer::scanner";
 
 const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(300);
+
+/// How long a cached value may be served as the latest version of its substate: the window in which a
+/// wallet can be handed a version consensus has already spent. Comparable to the unavoidable gap
+/// between submitting a transaction and it committing, below which a fresher indexer buys nothing.
+const DEFAULT_LATEST_VERSION_TTL: Duration = Duration::from_secs(2);
 
 /// A store of committee-validated shard-group state merkle roots that the read path consults to
 /// avoid re-validating a served commit proof's QC chain when its root is already trusted.
@@ -94,7 +100,14 @@ pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     committee_provider: TEpochManager,
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
+    /// Bounds how long an entry may answer for the exact version it holds - specifically its verdict
+    /// on whether that version is still up, since the value itself never changes. Backstops
+    /// [`SubstateVersionTracker`], which is capacity bounded, lags by a sync interval, and is empty
+    /// after a restart while the on-disk cache is not.
     cache_ttl: Duration,
+    /// See [`DEFAULT_LATEST_VERSION_TTL`].
+    latest_version_ttl: Duration,
+    substate_versions: Arc<SubstateVersionTracker>,
     /// When set, substates fetched from a validator must come with a proof that verifies against the
     /// shard group committee, or they are rejected (fail-closed). The negative `DoesNotExist` case
     /// is not provable and is left to the existing f+1 agreement.
@@ -117,12 +130,15 @@ where
         committee_provider: TEpochManager,
         validator_node_client_factory: TVnClient,
         substate_cache: TSubstateCache,
+        substate_versions: Arc<SubstateVersionTracker>,
     ) -> Self {
         Self {
             committee_provider,
             validator_node_client_factory,
             substate_cache,
             cache_ttl: DEFAULT_CACHE_TTL,
+            latest_version_ttl: DEFAULT_LATEST_VERSION_TTL,
+            substate_versions,
             verify_substate_proofs: false,
             trusted_root_store: None,
             #[cfg(feature = "metrics")]
@@ -133,6 +149,16 @@ where
     pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
         self.cache_ttl = ttl;
         self
+    }
+
+    pub fn with_latest_version_ttl(mut self, ttl: Duration) -> Self {
+        self.latest_version_ttl = ttl;
+        self
+    }
+
+    /// Clamped: an entry that has aged out for exact-version reads cannot still be the latest.
+    fn latest_version_ttl(&self) -> Duration {
+        self.latest_version_ttl.min(self.cache_ttl)
     }
 
     pub fn with_substate_proof_verification(mut self, enabled: bool) -> Self {
@@ -174,42 +200,39 @@ where
             // enabled) is never served while verification is on: refetch so it can be replaced with
             // a proven copy.
             if entry.verified || !self.verify_substate_proofs {
-                if let Some(version) = specific_version {
-                    if entry.version == version {
-                        debug!(target: LOG_TARGET, "Substate cache hit for {} with version {}", entry.version, substate_id);
-                        #[cfg(feature = "metrics")]
-                        self.metrics.as_ref().inspect(|m| m.inc_cache_hits());
-                        return Ok(SubstateLookupResult {
-                            result: entry.substate_result,
-                            verified: entry.verified,
-                        });
-                    }
-                } else {
-                    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
-                    let is_stale = now.saturating_sub(entry.cached_at) > self.cache_ttl.as_secs();
-                    // A cached `Down` result means the substate has advanced past `entry.version`. An
-                    // unversioned lookup asks for the *latest* version, so a `Down` entry can never
-                    // satisfy it: refetch from the committee (which always returns the latest Up for an
-                    // unversioned request) to discover the new version. Serving the stale `Down`
-                    // surfaces as a spurious "input substate is down" error — e.g. dry-running a
-                    // transaction whose unversioned inputs include a frequently-updated substate such as
-                    // a swap pool reserve.
-                    let is_down = matches!(entry.substate_result, SubstateResult::Down { .. });
-                    if is_stale {
-                        debug!(target: LOG_TARGET, "Cached substate {} is stale. Fetching fresh copy.", substate_id);
-                    } else if is_down {
-                        debug!(target: LOG_TARGET, "Cached substate {} is down at v{}. Fetching latest version.", substate_id, entry.version);
-                    } else {
-                        debug!(target: LOG_TARGET, "Substate cache hit for {} with version {}", substate_id, entry.version);
-                        #[cfg(feature = "metrics")]
-                        self.metrics.as_ref().inspect(|m| m.inc_cache_hits());
-                        return Ok(SubstateLookupResult {
-                            result: entry.substate_result.clone(),
-                            verified: entry.verified,
-                        });
-                    }
+                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+                let age = now.saturating_sub(entry.cached_at);
+                let is_up = matches!(entry.substate_result, SubstateResult::Up { .. });
+                // Lags the chain by a sync interval, so it retires long-lived entries rather than
+                // policing the latest-version window - that is the TTL's job.
+                let is_superseded = self.substate_versions.is_superseded(substate_id, entry.version);
+
+                let is_servable = !is_superseded &&
+                    match specific_version {
+                        Some(version) => entry.version == version && age <= self.cache_ttl.as_secs(),
+                        // A `Down` entry can never be the latest version.
+                        None => is_up && age <= self.latest_version_ttl().as_secs(),
+                    };
+
+                if is_servable {
+                    debug!(target: LOG_TARGET, "Substate cache hit for {} with version {}", substate_id, entry.version);
+                    #[cfg(feature = "metrics")]
+                    self.metrics.as_ref().inspect(|m| m.inc_cache_hits());
+                    return Ok(SubstateLookupResult {
+                        result: entry.substate_result,
+                        verified: entry.verified,
+                    });
                 }
 
+                debug!(
+                    target: LOG_TARGET,
+                    "Cached substate {} at v{} (age {}s) cannot answer a request for v{} (superseded: {}). Fetching from committee.",
+                    substate_id,
+                    entry.version,
+                    age,
+                    specific_version.display(),
+                    is_superseded,
+                );
                 cached_version = Some(entry.version);
             }
         }

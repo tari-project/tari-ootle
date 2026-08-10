@@ -7,7 +7,10 @@ use axum::{
     Extension,
     Json,
     extract::Query,
-    http::header::HeaderMap,
+    http::{
+        HeaderValue,
+        header::{self, HeaderMap},
+    },
     response::{IntoResponse, Response},
 };
 use log::*;
@@ -29,7 +32,7 @@ use crate::rest_api::{
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::handlers::utxos";
 
-#[utoipa::path(post, path = "/utxos/updates", description = "Streams UTXO updates",
+#[utoipa::path(post, path = "/utxos/stream", description = "Streams UTXO updates",
     request_body = GetUtxoUpdatesRequest,
     responses(
         (status = 200, description = "Stream of UTXO updates"),
@@ -96,7 +99,13 @@ pub async fn stream_utxo_updates(
     }
 
     let stream = UtxoUpdateStream::new(context.substate_manager().clone(), req, encoder);
-    Ok(stream.into_response())
+    let mut response = stream.into_response();
+    // The body encoding is negotiated from `Accept`, so a cache keyed on the URL alone would serve
+    // protobuf bytes to a client that asked for JSON.
+    response
+        .headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("accept"));
+    Ok(response)
 }
 
 #[utoipa::path(

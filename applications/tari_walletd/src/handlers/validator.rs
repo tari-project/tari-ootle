@@ -171,22 +171,22 @@ pub async fn handle_claim_validator_fees(
             })
             .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
     } else {
-        let statement =
+        let (statement, pool_amounts) =
             build_self_stealth_statement(&sdk, &account, account_key_id, &fee_pool_addresses, max_fee).await?;
-        let (first, rest) = fee_pool_addresses
+        let (first, rest) = pool_amounts
             .split_first()
             .ok_or_else(|| invalid_params("shards", Some("At least one shard must be specified")))?;
-        let first = *first;
+        let (first_address, first_amount) = *first;
         let rest = rest.to_vec();
         builder.with_fee_instructions_builder(move |builder| {
             let builder = builder
-                .claim_validator_fees(first)
+                .claim_validator_fees_up_to(first_address, first_amount)
                 .put_last_instruction_output_on_workspace("joined");
             rest.into_iter()
                 .enumerate()
-                .fold(builder, |b, (i, address)| {
+                .fold(builder, |b, (i, (address, amount))| {
                     let tmp = format!("tmp{i}");
-                    b.claim_validator_fees(address)
+                    b.claim_validator_fees_up_to(address, amount)
                         .put_last_instruction_output_on_workspace(tmp.clone())
                         .put_into_bucket(tmp, "joined")
                 })
@@ -278,7 +278,7 @@ async fn build_self_stealth_statement(
     account_owner_key_id: tari_ootle_wallet_sdk::models::KeyId,
     fee_pool_addresses: &[ValidatorFeePoolAddress],
     max_fee: u64,
-) -> Result<StealthTransferStatement, anyhow::Error> {
+) -> Result<(StealthTransferStatement, Vec<(ValidatorFeePoolAddress, u64)>), anyhow::Error> {
     let network = sdk.config_api().get_network()?;
     let account_owner = sdk.key_manager_api().get_public_key(account_owner_key_id)?;
     let view_only = sdk.key_manager_api().get_public_key(account.view_only_key_id())?;
@@ -299,6 +299,7 @@ async fn build_self_stealth_statement(
         }
     }
 
+    let mut pool_amounts = Vec::with_capacity(fee_pool_addresses.len());
     let mut total: u64 = 0;
     for address in fee_pool_addresses {
         let amount = amounts.get(address).copied().unwrap_or(0);
@@ -311,6 +312,7 @@ async fn build_self_stealth_statement(
         total = total
             .checked_add(amount)
             .ok_or_else(|| invalid_params("shards", Some("Total claimable fee pool amount overflows u64")))?;
+        pool_amounts.push((*address, amount));
     }
 
     if total <= max_fee {
@@ -368,5 +370,5 @@ async fn build_self_stealth_statement(
         0,
     )?;
 
-    Ok(statement)
+    Ok((statement, pool_amounts))
 }

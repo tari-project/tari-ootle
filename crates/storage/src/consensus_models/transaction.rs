@@ -9,7 +9,10 @@ use std::{
 use log::*;
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::Decision;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
+    Epoch,
     NumPreshards,
     ToSubstateAddress,
     committee::CommitteeInfo,
@@ -215,13 +218,48 @@ impl TransactionRecord {
         Ok(time.is_some())
     }
 
-    pub fn finalize_all<'a, TTx, I>(tx: &mut TTx, transactions: I) -> Result<(), StorageError>
+    /// Returns the decision of the finalized execution held in this node's records, or `None` when
+    /// the records hold none — either the transaction was never finalized here, or its bookkeeping
+    /// has since been removed. This reports only what the local records prove; proof of commit that
+    /// survives record removal is the receipt substate (see [`Self::receipt_exists`]).
+    pub fn get_finalized_decision<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<Option<Decision>, StorageError> {
+        let maybe_execution = tx.finalized_transaction_execution_get(transaction_id).optional()?;
+        Ok(maybe_execution.map(|execution| execution.decision()))
+    }
+
+    /// Forgets the node-local finalized bookkeeping for this id (marker and recorded executions),
+    /// making it appear unsequenced to this node's records. Never reverts committed state; see
+    /// [`StateStoreWriteTransaction::transactions_finalized_remove`].
+    pub fn remove_finalized<TTx: StateStoreWriteTransaction>(
+        tx: &mut TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<(), StorageError> {
+        tx.transactions_finalized_remove(transaction_id)
+    }
+
+    /// Returns true if this transaction's receipt substate exists in state. Every commit — including
+    /// a fee-only commit — writes the receipt at an address derived from the transaction id, so its
+    /// existence is the durable, synced proof that the id has committed, independent of local
+    /// transaction records. Only nodes hosting the receipt's shard can observe it; on any other node
+    /// this returns false.
+    pub fn receipt_exists<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<bool, StorageError> {
+        let receipt_id = SubstateId::TransactionReceipt((*transaction_id).into());
+        tx.substates_exists_any_version(&receipt_id)
+    }
+
+    pub fn finalize_all<'a, TTx, I>(tx: &mut TTx, epoch: Epoch, transactions: I) -> Result<(), StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
         I: IntoIterator<Item = &'a TransactionPoolRecord>,
     {
-        tx.transactions_finalize_all(transactions)
+        tx.transactions_finalize_all(epoch, transactions)
     }
 
     pub fn has_all_required_input_pledges<TTx: StateStoreReadTransaction>(

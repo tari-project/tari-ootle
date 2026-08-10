@@ -53,6 +53,7 @@ use crate::{
     fees::WasmMeteringRate,
     runtime::{
         RuntimeError,
+        error::ArgumentValidationError,
         locking::LockedSubstate,
         scope::{CallScope, PushCallFrame},
         working_state::WorkingState,
@@ -69,6 +70,10 @@ pub struct StateTracker<TStore> {
     fee_checkpoint: Option<WorkingState<TStore>>,
     transaction_weight: TransactionWeight,
     wasm_metering_rate: WasmMeteringRate,
+    /// Stealth transfers performed so far in the fee intent. Lives here rather than in `WorkingState` because the fee
+    /// intent is delimited by `fee_checkpoint`, and because the checkpoint clones the working state — a count held
+    /// there would be duplicated into the clone.
+    fee_intent_stealth_transfers: usize,
 }
 
 impl<TStore: StateReader> StateTracker<TStore> {
@@ -95,6 +100,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
             fee_checkpoint: None,
             transaction_weight,
             wasm_metering_rate,
+            fee_intent_stealth_transfers: 0,
         }
     }
 
@@ -505,6 +511,26 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
         self.fee_checkpoint.is_some()
+    }
+
+    /// Accounts one more stealth transfer against [`limits::StealthLimits::max_fee_intent_transfers`]; a no-op once
+    /// the fee intent is over. Called before the transfer's native cost is charged and before any of its crypto runs,
+    /// so an over-cap fee intent is rejected without the work being performed.
+    ///
+    /// Counts every transfer the fee intent performs, whether from a `StealthTransfer` instruction or from a template
+    /// calling `ResourceManager::stealth_transfer` — both reach this through `RuntimeInterfaceImpl::stealth_transfer`.
+    /// Counting instructions alone would leave the WASM route uncapped, and so make the more expensive route the way
+    /// to exceed the limit.
+    pub(super) fn account_fee_intent_stealth_transfer(&mut self) -> Result<(), RuntimeError> {
+        if self.is_fee_intent_checkpointed() {
+            return Ok(());
+        }
+        let max_transfers = limits::STEALTH_LIMITS.max_fee_intent_transfers;
+        if self.fee_intent_stealth_transfers + 1 > max_transfers {
+            return Err(ArgumentValidationError::MaxFeeIntentStealthTransfersExceeded { max_transfers }.into());
+        }
+        self.fee_intent_stealth_transfers += 1;
+        Ok(())
     }
 }
 

@@ -3353,9 +3353,16 @@ where
         Ok(())
     }
 
-    fn claim_validator_fees(&mut self, pool_address: ValidatorFeePoolAddress) -> Result<(), RuntimeError> {
+    fn claim_validator_fees(
+        &mut self,
+        pool_address: ValidatorFeePoolAddress,
+        max_amount: Option<Amount>,
+    ) -> Result<(), RuntimeError> {
         self.tracker.write_with(|state| {
-            let resource = state.withdraw_all_fees_from_pool(pool_address)?;
+            let resource = match max_amount {
+                Some(max_amount) => state.withdraw_fees_from_pool_up_to(pool_address, max_amount)?,
+                None => state.withdraw_all_fees_from_pool(pool_address)?,
+            };
             let bucket_id = state.new_bucket_id();
             state.new_bucket(bucket_id, resource)?;
             state.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);
@@ -3763,6 +3770,11 @@ where
         // cannot be validated at creation — that happens at spend time when a leaf is revealed (below / inline). The
         // only creation-time invariant is that an output is spendable by at least one path (`spend_key` or
         // `condition_root` is `Some`), enforced by `validate_stealth_outputs_statement` during execution.
+
+        // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked first, so
+        // an over-cap fee intent is rejected before any substate read, charge or crypto. Both the `StealthTransfer`
+        // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
+        self.tracker.account_fee_intent_stealth_transfer()?;
 
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction

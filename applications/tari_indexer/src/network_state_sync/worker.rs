@@ -4,6 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     pin::pin,
+    sync::Arc,
 };
 
 use futures::StreamExt;
@@ -17,6 +18,7 @@ use tari_engine_types::{
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader, service::EpochManagerHandle};
 use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionEvent, TransactionFinalizedEvent};
+use tari_indexer_lib::substate_versions::SubstateVersionTracker;
 use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::{
     Epoch,
@@ -83,6 +85,7 @@ pub struct NetworkWideStateSync {
     notify: Notify<IndexerEvent>,
     transaction_event_notify: Notify<TransactionEvent>,
     validator_status: ValidatorStatusMonitor,
+    substate_versions: Arc<SubstateVersionTracker>,
     #[cfg(feature = "metrics")]
     metrics: NetworkStateMetrics,
     #[cfg(feature = "metrics")]
@@ -98,6 +101,7 @@ impl NetworkWideStateSync {
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
         validator_status: ValidatorStatusMonitor,
+        substate_versions: Arc<SubstateVersionTracker>,
         #[cfg(feature = "metrics")] metrics: NetworkStateMetrics,
         #[cfg(feature = "metrics")] consensus_constants: ConsensusConstants,
     ) -> Self {
@@ -110,6 +114,7 @@ impl NetworkWideStateSync {
             notify,
             transaction_event_notify,
             validator_status,
+            substate_versions,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -626,6 +631,15 @@ impl NetworkWideStateSync {
             let updates = std::mem::take(update_buf);
             let utxos = std::mem::take(utxos_buf);
             let transactions = std::mem::take(transactions_buf);
+
+            // Upping a substate is the point at which its previous version goes down, so this is the
+            // substate cache's only signal that an entry it holds has been superseded.
+            self.substate_versions.record_up_all(
+                transactions
+                    .iter()
+                    .flat_map(|(_, receipt)| receipt.diff_summary().upped.iter())
+                    .map(|up| (&up.substate_id, up.version)),
+            );
             let validator_fee_pools = std::mem::take(validator_fee_pools_buf);
             let template_catalogue = std::mem::take(template_catalogue_buf);
 

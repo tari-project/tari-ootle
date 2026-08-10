@@ -1,7 +1,32 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use axum::http::{HeaderMap, HeaderValue, header};
+use axum::{
+    extract::Request,
+    http::{HeaderMap, HeaderValue, header},
+    middleware::Next,
+    response::Response,
+};
+
+const NO_STORE: HeaderValue = HeaderValue::from_static("no-store");
+
+/// Marks every response that did not choose a caching policy of its own as uncacheable, at every layer
+/// - browser, proxy and CDN.
+///
+/// Default-deny because the unsafe case is the quiet one: a response whose meaning changes under a
+/// fixed URL, such as the latest version of a substate, is a correctness hazard once cached, and
+/// nothing in the code would say so. A handler that wants caching states that with
+/// [`HandlerContext::apply_cache_control`](super::context::HandlerContext::apply_cache_control), which
+/// this leaves alone.
+pub async fn default_no_store(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    apply_default_no_store(response.headers_mut());
+    response
+}
+
+fn apply_default_no_store(headers: &mut HeaderMap) {
+    headers.entry(header::CACHE_CONTROL).or_insert(NO_STORE);
+}
 
 pub struct HttpCacheConfig {
     pub is_public: bool,
@@ -50,5 +75,28 @@ impl Default for HttpCacheConfig {
             s_maxage: 30,
             stale_while_revalidate: 15,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_store_applies_when_the_handler_chose_no_policy() {
+        let mut headers = HeaderMap::new();
+        apply_default_no_store(&mut headers);
+        assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    }
+
+    #[test]
+    fn no_store_never_overrides_a_handler_policy() {
+        let mut headers = HeaderMap::new();
+        HttpCacheConfig::new().with_max_age(30).apply(&mut headers);
+        apply_default_no_store(&mut headers);
+        assert_eq!(
+            headers[header::CACHE_CONTROL],
+            "public, max-age=30, s-maxage=15, stale-while-revalidate=7"
+        );
     }
 }

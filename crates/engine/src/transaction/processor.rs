@@ -386,8 +386,8 @@ where
                 runtime.interface_mut().claim_burn(*claim, output_data)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::ClaimValidatorFees { address } => {
-                runtime.interface_mut().claim_validator_fees(address)?;
+            Instruction::ClaimValidatorFees { address, max_amount } => {
+                runtime.interface_mut().claim_validator_fees(address, max_amount)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::Assert { key, assertion } => {

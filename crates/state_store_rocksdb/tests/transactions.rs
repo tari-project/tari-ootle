@@ -412,7 +412,7 @@ mod transaction_execution_operations {
             .unwrap();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
         assert_eq!(transactions.len(), 1);
-        tx.transactions_finalize_all(transactions.iter()).unwrap();
+        tx.transactions_finalize_all(Epoch(1), transactions.iter()).unwrap();
 
         let rec = tx.transactions_get(tx1.id()).unwrap();
         assert!(rec.is_finalized(&*tx).unwrap(), "Transaction should be finalized");
@@ -495,6 +495,130 @@ mod transaction_execution_operations {
             matches!(res, Err(StorageError::NotFound { .. })),
             "orphan-branch execution must not be reused, got {res:?}"
         );
+
+        tx.rollback().unwrap();
+    }
+}
+
+mod finalized_transaction_gc {
+    use super::*;
+
+    fn insert_transaction(tx: &mut impl StateStoreWriteTransaction) -> TransactionRecord {
+        let rec = TransactionRecord::new(
+            Transaction::builder_localnet()
+                .add_instruction(Instruction::DropAllProofsInWorkspace)
+                .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
+                .build_and_seal(&PrivateKey::default()),
+        );
+        tx.transactions_insert(&rec).unwrap();
+        rec
+    }
+
+    #[test]
+    fn epoch_gc_prunes_finalized_transactions_rocksdb() {
+        let (db, _tmp) = create_rocksdb();
+        epoch_gc_prunes_finalized_transactions(db);
+    }
+
+    fn epoch_gc_prunes_finalized_transactions(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+
+        let chain = create_chain(10);
+        commit_chain(&mut tx, &chain);
+
+        let tx1 = insert_transaction(&mut tx);
+        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
+            .unwrap();
+        let pool = tx.transaction_pool_get_all(1000).unwrap();
+        tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
+        assert!(tx.transactions_exists(tx1.id()).unwrap());
+        assert!(TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
+
+        // epoch_history_length is 1 (default options): cleaning at epoch 1 prunes ..=0, which keeps
+        // bookkeeping finalized in epoch 1.
+        tx.epoch_cleanup(Epoch(1)).unwrap();
+        assert!(tx.transactions_exists(tx1.id()).unwrap());
+        assert!(TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
+
+        // Cleaning at epoch 2 prunes ..=1: payload, finalized link and executions all go.
+        tx.epoch_cleanup(Epoch(2)).unwrap();
+        assert!(!tx.transactions_exists(tx1.id()).unwrap());
+        assert!(!TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
+        assert!(tx.finalized_transaction_execution_get(tx1.id()).is_err());
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn archival_node_keeps_transaction_history_rocksdb() {
+        use helpers::create_rocksdb_with_opts;
+        use tari_state_store_rocksdb::DatabaseOptions;
+
+        let (db, _tmp) = create_rocksdb_with_opts(DatabaseOptions::default().with_prune_transaction_history(false));
+        let mut tx = db.create_write_tx().unwrap();
+
+        let chain = create_chain(10);
+        commit_chain(&mut tx, &chain);
+
+        let tx1 = insert_transaction(&mut tx);
+        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
+            .unwrap();
+        let pool = tx.transaction_pool_get_all(1000).unwrap();
+        tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
+
+        tx.epoch_cleanup(Epoch(10)).unwrap();
+        assert!(tx.transactions_exists(tx1.id()).unwrap());
+        assert!(TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn refinalized_transaction_ages_from_its_latest_epoch_rocksdb() {
+        let (db, _tmp) = create_rocksdb();
+        refinalized_transaction_ages_from_its_latest_epoch(db);
+    }
+
+    /// The epoch index must hold exactly one entry per id, keyed to the latest finalization: a
+    /// stale entry from an earlier finalization (or one left behind by
+    /// `transactions_finalized_remove`) would let epoch GC delete the bookkeeping of a transaction
+    /// that finalized recently. Survival across the earlier epochs' cleanup is the proof that the
+    /// stale entries are gone.
+    fn refinalized_transaction_ages_from_its_latest_epoch(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+
+        let chain = create_chain(10);
+        commit_chain(&mut tx, &chain);
+
+        let tx1 = insert_transaction(&mut tx);
+        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
+            .unwrap();
+        let pool = tx.transaction_pool_get_all(1000).unwrap();
+
+        // Finalized in epoch 1, then finalized again in epoch 5: the index entry moves.
+        tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
+        tx.transactions_finalize_all(Epoch(5), pool.iter()).unwrap();
+        tx.epoch_cleanup(Epoch(2)).unwrap();
+        assert!(
+            tx.transactions_exists(tx1.id()).unwrap(),
+            "an id re-finalized in a later epoch must not age out from its earlier epoch"
+        );
+        assert!(TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
+
+        // Resurrected (as consensus does for an aborted id) and finalized again in epoch 7.
+        tx.transactions_finalized_remove(tx1.id()).unwrap();
+        assert!(!TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
+        tx.transactions_finalize_all(Epoch(7), pool.iter()).unwrap();
+        tx.epoch_cleanup(Epoch(6)).unwrap();
+        assert!(
+            tx.transactions_exists(tx1.id()).unwrap(),
+            "a resurrected id must not age out from the epoch of the removed finalization"
+        );
+
+        // It ages out from its latest finalization epoch.
+        tx.epoch_cleanup(Epoch(8)).unwrap();
+        assert!(!tx.transactions_exists(tx1.id()).unwrap());
+        assert!(!TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
 
         tx.rollback().unwrap();
     }

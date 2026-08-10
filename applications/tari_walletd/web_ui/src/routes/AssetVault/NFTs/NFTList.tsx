@@ -250,16 +250,18 @@ export default function NFTList(props: NftListProps) {
         )}
       </Stack>
 
-      <TransferNftDialog
-        open={sendDialogOpen}
-        handleClose={() => setSendDialogOpen(false)}
-        onSendComplete={() => {
-          setSendDialogOpen(false);
-          setSelectedMap(new Map());
-        }}
-        preSelectedNfts={selectedNfts}
-        preSelectedResourceAddress={lockedResourceAddress ?? undefined}
-      />
+      {sendDialogOpen && (
+        <TransferNftDialog
+          open
+          handleClose={() => setSendDialogOpen(false)}
+          onSendComplete={() => {
+            setSendDialogOpen(false);
+            setSelectedMap(new Map());
+          }}
+          preSelectedNfts={selectedNfts}
+          preSelectedResourceAddress={lockedResourceAddress ?? undefined}
+        />
+      )}
     </FetchStatusCheck>
   );
 }

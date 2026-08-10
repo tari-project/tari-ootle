@@ -1763,7 +1763,7 @@ where TConsensusSpec: ConsensusSpec
                 .with_iterations(finalized_transactions.len());
             // Remove locks for finalized transactions
             SubstateRecord::unlock_all(tx, finalized_transactions.iter().map(|t| t.id()))?;
-            TransactionRecord::finalize_all(tx, &finalized_transactions)?;
+            TransactionRecord::finalize_all(tx, block.epoch(), &finalized_transactions)?;
 
             debug!(
                 target: LOG_TARGET,

@@ -52,8 +52,8 @@ pub async fn list_transaction_receipts(
 
 #[utoipa::path(
     get,
-    path = "/transaction-receipt/{transaction_id}",
-    description = "Get the transaction receipt by transaction ID",
+    path = "/transaction-receipts/{address}",
+    description = "Get the transaction receipt by its address",
     responses(
         (status = 200, description = "Transaction receipt found", body = GetTransactionReceiptResponse),
         (status = 404, description = "Transaction receipt not found", body = ErrorResponse),
@@ -63,7 +63,7 @@ pub async fn list_transaction_receipts(
 pub async fn get_transaction_receipt(
     Extension(context): Extension<HandlerContext>,
     Path(receipt_addr): Path<TransactionReceiptAddress>,
-) -> HandlerResult<Json<GetTransactionReceiptResponse>> {
+) -> HandlerResult<Response> {
     let receipt = context
         .read_only_store()
         .get_transaction_receipt(&receipt_addr)
@@ -72,5 +72,7 @@ pub async fn get_transaction_receipt(
         .map_err(ErrorResponse::anyhow)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Transaction receipt {receipt_addr} not found")))?;
 
-    Ok(Json(GetTransactionReceiptResponse { receipt }))
+    // A receipt records a finalized transaction, so the answer at this address never changes. Only the
+    // success path is cached: a miss here means the indexer has not synced that far yet.
+    Ok(context.apply_cache_control(Json(GetTransactionReceiptResponse { receipt }), 120 * 60))
 }

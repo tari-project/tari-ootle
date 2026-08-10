@@ -90,6 +90,10 @@ pub enum Instruction {
     ClaimValidatorFees {
         #[n(0)]
         address: ValidatorFeePoolAddress,
+        #[n(1)]
+        #[cfg_attr(feature = "serde", serde(default))]
+        #[cbor(default)]
+        max_amount: Option<Amount>,
     },
     #[n(7)]
     DropAllProofsInWorkspace,
@@ -415,8 +419,15 @@ impl Display for Instruction {
             Self::ClaimBurn { claim, .. } => {
                 write!(f, "ClaimBurn {{ {claim} }}",)
             },
-            Self::ClaimValidatorFees { address } => {
-                write!(f, "ClaimValidatorFees {{ address: {} }}", address)
+            Self::ClaimValidatorFees { address, max_amount } => {
+                if let Some(max_amount) = max_amount {
+                    write!(
+                        f,
+                        "ClaimValidatorFees {{ address: {address}, max_amount: {max_amount} }}"
+                    )
+                } else {
+                    write!(f, "ClaimValidatorFees {{ address: {address} }}")
+                }
             },
 
             Self::DropAllProofsInWorkspace => {

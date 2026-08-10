@@ -124,6 +124,11 @@ pub struct IndexerConfig {
     /// A shorter TTL reduces the chance of stale fee estimates.
     #[serde(with = "serializers::seconds")]
     pub dry_run_cache_ttl: Duration,
+    /// How long a cached substate may be served as the latest version of that substate. Raising it
+    /// trades a wider window for handing out an already-spent input version against fewer validator
+    /// round trips on hot substates. Requests for a specific version are unaffected.
+    #[serde(default = "default_latest_substate_cache_ttl", with = "serializers::seconds")]
+    pub latest_substate_cache_ttl: Duration,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
     /// Template addresses to watch for component creation/update events.
@@ -143,6 +148,10 @@ pub struct IndexerConfig {
 
 fn default_verify_substate_proofs() -> bool {
     true
+}
+
+fn default_latest_substate_cache_ttl() -> Duration {
+    Duration::from_secs(2)
 }
 
 fn default_watched_templates() -> Vec<TemplateAddress> {
@@ -166,6 +175,7 @@ impl Default for IndexerConfig {
             state_scanning_interval: Duration::from_secs(60),
             sidechain_id: None,
             dry_run_cache_ttl: Duration::from_secs(10),
+            latest_substate_cache_ttl: default_latest_substate_cache_ttl(),
             event_filters: vec![],
             watched_templates: default_watched_templates(),
             verify_substate_proofs: default_verify_substate_proofs(),

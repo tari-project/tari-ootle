@@ -143,17 +143,29 @@ import type {
   AddressBookDeleteRequest,
   AddressBookDeleteResponse,
 } from "@tari-project/ootle-ts-bindings";
-import { FetchRpcTransport, RpcErrorResponse, RpcResponse, RpcTransport } from "./transports";
+import { FetchRpcTransport, FetchRpcTransportOptions, RpcErrorResponse, RpcResponse, RpcTransport } from "./transports";
 
 export * as transports from "./transports";
 
 export { substateIdToString, stringToSubstateId, rejectReasonToString };
+
+/**
+ * Prefix the daemon puts on every API key it mints. A bearer carrying it is
+ * resolved against the api_keys table rather than decoded as a JWT.
+ */
+const API_KEY_PREFIX = "tw_";
+
+/** True if `token` is an API key rather than a session JWT. */
+export function isApiKey(token: string): boolean {
+  return token.startsWith(API_KEY_PREFIX);
+}
 
 export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
   private token: string | null;
   private transport: T;
   private id: number;
   private reauthEnabled: boolean = true;
+  private hasWarnedApiKeyReauth: boolean = false;
 
   constructor(transport: T) {
     this.token = null;
@@ -165,12 +177,13 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return new WalletDaemonClient(transport);
   }
 
-  public static usingFetchTransport(url: string): WalletDaemonClient {
-    return WalletDaemonClient.new(FetchRpcTransport.new(url));
+  public static usingFetchTransport(url: string, options?: FetchRpcTransportOptions): WalletDaemonClient {
+    return WalletDaemonClient.new(FetchRpcTransport.new(url, options));
   }
 
   public setReauthenticationEnabled(enabled: boolean) {
     this.reauthEnabled = enabled;
+    this.warnIfApiKeyReauth();
   }
 
   public isAuthenticated() {
@@ -179,6 +192,32 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public setToken(token: string) {
     this.token = token;
+    this.warnIfApiKeyReauth();
+  }
+
+  private clearToken() {
+    this.token = null;
+    this.hasWarnedApiKeyReauth = false;
+  }
+
+  /**
+   * Reauthentication is inert for an API key: the key is validated against the
+   * api_keys table on every call rather than expiring into a refreshable
+   * session, and `auth.refresh` consumes the login cookie that an API-key
+   * holder never receives. Warn once so a 401 from a revoked or under-scoped
+   * key isn't mistaken for a refresh that failed.
+   *
+   * Called from both setters so the warning fires whichever order they run in.
+   */
+  private warnIfApiKeyReauth() {
+    if (this.hasWarnedApiKeyReauth || !this.reauthEnabled || !this.token || !isApiKey(this.token)) {
+      return;
+    }
+    this.hasWarnedApiKeyReauth = true;
+    console.warn(
+      "WalletDaemonClient: reauthentication is enabled but the credential is an API key. API keys cannot be " +
+        "refreshed; a 401 means the key is revoked, expired, or lacks the required permission.",
+    );
   }
 
   public getToken(): string | null {
@@ -565,10 +604,20 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
       // Refresh failed with 401. No point in trying it again
       if (method.startsWith("auth.")) {
         console.warn("Token refresh failed");
-        this.token = null;
+        this.clearToken();
+        throw origError;
+      }
+      // An API key has no refresh grant behind it, so a 401 is final. The key
+      // is the caller's configured credential rather than a stale access
+      // token, so it is kept for the caller to revoke or replace.
+      if (this.token && isApiKey(this.token)) {
         throw origError;
       }
       const id = this.id++;
+      // `auth.refresh` is authorised by the HttpOnly refresh cookie set at
+      // login, never by the bearer token, so this call deliberately carries no
+      // token. It only succeeds for a same-origin browser caller whose
+      // transport sends cookies.
       const refreshResp = (await this.transport.sendRequest<any>({
         method: "auth.refresh",
         jsonrpc: "2.0",
@@ -578,7 +627,7 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
       if (refreshResp.error) {
         console.debug("Refresh resp", refreshResp);
-        this.token = null;
+        this.clearToken();
         // Throw the original 401 error instead of the refresh error
         throw origError;
       }

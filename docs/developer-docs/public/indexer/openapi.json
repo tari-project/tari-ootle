@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.35.1"
+    "version": "0.37.0"
   },
   "paths": {
     "/epoch-checkpoints": {
@@ -227,7 +227,7 @@
         "tags": [
           "handlers::network"
         ],
-        "description": "Get network-wide XTR economic totals (claimed, burned, fee volume, supply, target rate)",
+        "description": "Get network-wide TARI economic totals (claimed, burned, fee volume, supply, target rate)",
         "operationId": "get_economics",
         "responses": {
           "200": {
@@ -727,7 +727,7 @@
         }
       }
     },
-    "/templates/{template_id}": {
+    "/templates/{template_address}": {
       "get": {
         "tags": [
           "handlers::templates"
@@ -757,47 +757,6 @@
           },
           "500": {
             "description": "Failed to fetch template definition",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/transaction-receipt/{transaction_id}": {
-      "get": {
-        "tags": [
-          "handlers::transaction_receipts"
-        ],
-        "description": "Get the transaction receipt by transaction ID",
-        "operationId": "get_transaction_receipt",
-        "responses": {
-          "200": {
-            "description": "Transaction receipt found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetTransactionReceiptResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Transaction receipt not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Failed to fetch transaction receipt",
             "content": {
               "application/json": {
                 "schema": {
@@ -839,6 +798,47 @@
           },
           "500": {
             "description": "Failed to list transaction receipts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transaction-receipts/{address}": {
+      "get": {
+        "tags": [
+          "handlers::transaction_receipts"
+        ],
+        "description": "Get the transaction receipt by its address",
+        "operationId": "get_transaction_receipt",
+        "responses": {
+          "200": {
+            "description": "Transaction receipt found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTransactionReceiptResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transaction receipt not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to fetch transaction receipt",
             "content": {
               "application/json": {
                 "schema": {
@@ -1215,7 +1215,7 @@
         }
       }
     },
-    "/utxos/updates": {
+    "/utxos/stream": {
       "post": {
         "tags": [
           "handlers::utxos"

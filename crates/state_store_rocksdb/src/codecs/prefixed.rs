@@ -56,6 +56,7 @@ pub enum KeyPrefix {
     StateTreeShardVersion = 42,
     ValidatorNodeEpochStats = 43,
     RollbackHistory = 44,
+    FinalizedTransactionEpochIndex = 45,
 }
 
 impl KeyPrefix {

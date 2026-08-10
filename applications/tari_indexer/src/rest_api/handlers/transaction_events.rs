@@ -6,8 +6,8 @@ use std::pin::Pin;
 use axum::{
     Extension,
     extract::Query,
-    http::HeaderMap,
-    response::{Sse, sse},
+    http::{HeaderMap, HeaderValue, header},
+    response::{IntoResponse, Response, Sse, sse},
 };
 use futures::Stream;
 use log::*;
@@ -50,7 +50,7 @@ pub async fn sse_transaction_events(
     Extension(context): Extension<HandlerContext>,
     headers: HeaderMap,
     Query(req): Query<StreamTransactionEventsRequest>,
-) -> HandlerResult<Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>> {
+) -> HandlerResult<Response> {
     // Resolve after_id: prefer Last-Event-ID header (SSE spec), fall back to query param
     let after_id = headers
         .get("Last-Event-ID")
@@ -86,7 +86,13 @@ pub async fn sse_transaction_events(
         None => Box::pin(live_only_stream(broadcast_rx, filter)),
     };
 
-    Ok(Sse::new(event_stream).keep_alive(sse::KeepAlive::new()))
+    let mut response = Sse::new(event_stream).keep_alive(sse::KeepAlive::new()).into_response();
+    // `Last-Event-ID` selects where the stream resumes from, so the same URL does not describe the
+    // same response.
+    response
+        .headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("last-event-id"));
+    Ok(response)
 }
 
 /// Stream that only forwards live broadcast events (no replay).

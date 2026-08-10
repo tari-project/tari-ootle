@@ -101,6 +101,12 @@ pub struct ValidatorNodeConfig {
     /// The (optional) sidechain to run this on. Identifies this chain for validator-node and
     /// template registration filtering, block-header validation, and L1 burn-claim binding.
     pub sidechain_id: Option<RistrettoPublicKey>,
+    /// Retain the full transaction history instead of pruning finalized transaction records once
+    /// they age out of the epoch retention window. Chain state (committed effects and transaction
+    /// receipts) is retained regardless; this only controls the node-local transaction payloads,
+    /// results and finalized markers used for queries and history.
+    #[serde(default)]
+    pub keep_transaction_history: bool,
     /// The path to store layer-one transactions.
     pub layer_one_transaction_path: PathBuf,
     /// Consensus configuration
@@ -191,6 +197,7 @@ impl Default for ValidatorNodeConfig {
             fee_claim_public_key: RistrettoPublicKey::default(),
             dont_create_id: false,
             sidechain_id: None,
+            keep_transaction_history: false,
             layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
             consensus: ConsensusConfig::default(),
             max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),

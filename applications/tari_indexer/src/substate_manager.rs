@@ -38,6 +38,7 @@ use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, UtxoStat
 use tari_indexer_lib::{
     cached_substate_manager::{CachedSubstateManager, TrustedRootStore},
     error::IndexerError,
+    substate_versions::SubstateVersionTracker,
 };
 use tari_ootle_common_types::{
     Epoch,
@@ -124,6 +125,7 @@ impl SubstateManager {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         validator_node_client_factory: TariValidatorNodeRpcClientFactory,
         substate_cache: SubstateFileCache,
+        substate_versions: Arc<SubstateVersionTracker>,
     ) -> Self {
         // Consulted only when proof verification is enabled (the dry-run manager has it off, so its
         // copy is inert). Lets a read skip re-validating a served commit proof when its root is
@@ -135,6 +137,7 @@ impl SubstateManager {
             epoch_manager.clone(),
             validator_node_client_factory.clone(),
             substate_cache,
+            substate_versions,
         )
         .with_trusted_root_store(trusted_root_store);
 
@@ -146,6 +149,11 @@ impl SubstateManager {
 
     pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
         self.cache_manager = self.cache_manager.with_cache_ttl(ttl);
+        self
+    }
+
+    pub fn with_latest_version_ttl(mut self, ttl: Duration) -> Self {
+        self.cache_manager = self.cache_manager.with_latest_version_ttl(ttl);
         self
     }
 

@@ -34,6 +34,9 @@ struct QueueReading {
     dropped_bytes: u64,
 }
 
+/// A metric family: its name, its help text, and how to pull its value out of a [`QueueReading`].
+type MetricFamily = (&'static str, &'static str, fn(&QueueReading) -> Reading);
+
 /// Reports depth, budget and drop totals for every inbound queue, labelled by `queue`.
 pub struct InboundQueueCollector {
     transaction_gossip: GossipQueueSender,
@@ -98,7 +101,7 @@ impl Collector for InboundQueueCollector {
         // Units are carried in the metric names rather than passed to the encoder, which would
         // append them a second time; counter names omit `_total`, which prometheus-client appends
         // itself. Both match `EpochManagerCollector`.
-        let families: [(&str, &str, fn(&QueueReading) -> Reading); 5] = [
+        let families: [MetricFamily; 5] = [
             (
                 "queued_bytes",
                 "Bytes currently held by messages awaiting processing",

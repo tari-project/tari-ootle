@@ -1034,14 +1034,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &mut self,
         address: ValidatorFeePoolAddress,
     ) -> Result<ResourceContainer, RuntimeError> {
+        self.withdraw_fees_from_pool_up_to(address, Amount::MAX)
+    }
+
+    pub fn withdraw_fees_from_pool_up_to(
+        &mut self,
+        address: ValidatorFeePoolAddress,
+        max_amount: Amount,
+    ) -> Result<ResourceContainer, RuntimeError> {
         let locked_substate = self.lock_substate(SubstateId::ValidatorFeePool(address), LockFlag::Write)?;
         {
             let fee_pool = self
                 .get_locked_substate(&locked_substate)?
                 .as_validator_fee_pool()
                 .ok_or_else(|| RuntimeError::InvariantError {
-                    function: "StateTracker::withdraw_all_fees_from_pool",
-                    details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
+                    function: "WorkingState::withdraw_fees_from_pool_up_to",
+                    details: format!("Expected substate at address {address} to be a ValidatorFeePool"),
                 })?;
 
             self.authorization()
@@ -1052,12 +1060,11 @@ impl<TStore: StateReader> WorkingState<TStore> {
             .get_locked_substate_mut(&locked_substate)?
             .as_validator_fee_pool_mut()
             .ok_or_else(|| RuntimeError::InvariantError {
-                function: "StateTracker::withdraw_all_fees_from_pool",
-                details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
+                function: "WorkingState::withdraw_fees_from_pool_up_to",
+                details: format!("Expected substate at address {address} to be a ValidatorFeePool"),
             })?;
 
-        let amount = pool_mut.amount();
-        let resource_container = pool_mut.withdraw_all()?;
+        let (amount, resource_container) = pool_mut.withdraw_up_to(max_amount)?;
         self.validator_fee_withdrawals
             .push(ValidatorFeeWithdrawal { address, amount });
         Ok(resource_container)

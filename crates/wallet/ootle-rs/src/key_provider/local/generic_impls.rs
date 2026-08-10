@@ -307,6 +307,11 @@ impl<C: StealthKeyPrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> + Send +
         let sig = TransactionSealSignature::new(public_key.to_byte_type(), signature.to_byte_type());
         Ok(sig)
     }
+
+    async fn stealth_public_key(&self, public_nonce: &RistrettoPublicKey) -> signer::Result<RistrettoPublicKeyBytes> {
+        let public_key = self.credentials.stealth_public_key(public_nonce).await?;
+        Ok(public_key.to_byte_type())
+    }
 }
 
 #[cfg(test)]
@@ -564,5 +569,31 @@ mod tests {
         assert_eq!(statement.inputs_statement.inputs.len(), 1);
         assert_eq!(statement.inputs_statement.inputs[0].commitment, commitment);
         validate_transfer(&statement, None).expect("the engine must accept the burn claim statement");
+    }
+
+    /// `stealth_public_key` must agree with the key the signing methods actually use, since authorization signatures
+    /// commit to it before any signature over the transaction is made.
+    #[tokio::test]
+    async fn the_derived_stealth_public_key_is_the_one_that_signs() {
+        let provider = PrivateKeyProvider::random(Network::LocalNet);
+        let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let unsigned = tari_ootle_transaction::Transaction::builder(Network::LocalNet).build_unsigned();
+
+        let derived = provider
+            .stealth_public_key(&public_nonce)
+            .await
+            .expect("a local provider derives its own stealth key");
+
+        let seal = provider
+            .seal_transaction_with_stealth(&public_nonce, &unsigned.clone().finish())
+            .await
+            .expect("sealing with a stealth key must succeed");
+        assert_eq!(seal.public_key(), &derived);
+
+        let auth = provider
+            .sign_authorization_with_stealth(&public_nonce, &derived, &unsigned)
+            .await
+            .expect("authorizing with a stealth key must succeed");
+        assert_eq!(auth.signature().public_key(), &derived);
     }
 }

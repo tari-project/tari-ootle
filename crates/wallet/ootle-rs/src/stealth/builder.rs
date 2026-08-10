@@ -89,26 +89,27 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
     /// here is public material, so it stays on this side of the
     /// [`StealthStatementProvider`](crate::stealth::StealthStatementProvider) boundary.
     async fn resolve_inputs(&mut self) -> WalletResult<(Vec<ResolvedStealthInput>, SignatureRequirements)> {
-        let substate_id_to_addr_map = self
+        // Keyed by the UTXO each input spends, so that several inputs owned by the same address stay distinct.
+        let mut inputs_by_utxo = self
             .spec
             .inputs_to_spend
-            .iter()
+            .drain(..)
             .map(|(addr, i)| {
                 (
                     SubstateId::from(UtxoAddress::new(self.spec.resource_address, i.commitment.into())),
-                    addr.clone(),
+                    (addr, i),
                 )
             })
             .collect::<HashMap<_, _>>();
 
         let found_substates = self
             .provider
-            .fetch_substates(substate_id_to_addr_map.keys().cloned())
+            .fetch_substates(inputs_by_utxo.keys().cloned())
             .await
             .map_err(|e| StealthProviderError::UnexpectedError {
                 details: format!("Failed to fetch stealth input substates: {}", e),
             })?;
-        if found_substates.len() != self.spec.inputs_to_spend.len() {
+        if found_substates.len() != inputs_by_utxo.len() {
             return Err(StealthProviderError::UnexpectedError {
                 details: "Some stealth inputs could not be found in the provider substates".to_string(),
             }
@@ -116,7 +117,8 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
         }
 
         let mut required_signers = IndexSet::with_capacity(found_substates.len());
-        let mut seal_signer = None;
+        // Accessing the account component to take the revealed input bucket requires the account key's badge, so it
+        // must seal; otherwise the inputs' own one-time keys are all the transaction needs.
         let must_sign_with_account_key = self.spec.revealed_input_amount.is_positive();
         let mut resolved_inputs = Vec::with_capacity(found_substates.len());
 
@@ -156,33 +158,22 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
                 }
                 .into());
             };
-            let Some(spender_addr) = substate_id_to_addr_map.get(&id) else {
+            let Some((spender_addr, to_spend)) = inputs_by_utxo.remove(&id) else {
                 tracing::warn!(
                     "The provider returned a substate that we did not request: {id}. We'll continue but that should \
                      never happen!"
                 );
                 continue;
             };
-            if !must_sign_with_account_key && seal_signer.is_none() {
-                seal_signer = Some(StealthSignerRequirement::new(spender_addr.clone(), public_nonce));
-            } else {
-                required_signers.insert(StealthSignerRequirement::new(spender_addr.clone(), public_nonce));
-            }
-
-            let Some(to_spend) = self.spec.inputs_to_spend.remove(spender_addr) else {
-                return Err(StealthProviderError::UnexpectedError {
-                    details: format!("No stealth input to spend for resolved address {spender_addr}"),
-                }
-                .into());
-            };
+            required_signers.insert(StealthSignerRequirement::new(spender_addr, public_nonce));
 
             resolved_inputs.push(ResolvedStealthInput::new(to_spend, input.output().clone()));
         }
 
         let signatures = if must_sign_with_account_key {
-            SignatureRequirements::new_must_sign_with_account_key(required_signers)
+            SignatureRequirements::account_key_seal_with(required_signers)
         } else {
-            SignatureRequirements::new_opt_with_seal_signer(required_signers, seal_signer)
+            SignatureRequirements::stealth_seal(required_signers)
         };
 
         Ok((resolved_inputs, signatures))
@@ -200,9 +191,10 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
         self
     }
 
+    /// Spend a stealth input owned by `owner_address`. Call repeatedly to spend several inputs, including several
+    /// owned by the same address.
     pub fn spend_stealth_input<I: Into<StealthInput>>(mut self, owner_address: Address, input: I) -> Self {
-        let input = input.into();
-        self.spec.inputs_to_spend.insert(owner_address, input);
+        self.spec.inputs_to_spend.push((owner_address, input.into()));
         self
     }
 
@@ -230,7 +222,7 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
 pub struct StealthTransferSpec {
     pub resource_address: ResourceAddress,
     pub revealed_input_amount: Amount,
-    pub inputs_to_spend: HashMap<Address, StealthInput>,
+    pub inputs_to_spend: Vec<(Address, StealthInput)>,
     pub outputs: Vec<Output>,
     pub revealed_output_amount: Amount,
 }

@@ -1,9 +1,14 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use rand::{CryptoRng, Rng};
-use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+use tari_crypto::{
+    keys::{PublicKey, SecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_ootle_transaction::{Transaction, UnsealedTransaction};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 /// A transaction seal signer that uses an ephemeral secret.
 /// WARNING: This signer generates a cryptographically secure secret, signs a transaction and throws the secret away.
@@ -26,7 +31,13 @@ impl EphemeralKeySigner {
         Self::random_with(&mut rand::rng())
     }
 
-    pub fn seal_transaction(self, transaction: UnsealedTransaction) -> Transaction {
+    /// The public key this signer seals with. An authorization made before the seal must commit to it, so it has to be
+    /// available without sealing.
+    pub fn public_key(&self) -> RistrettoPublicKeyBytes {
+        RistrettoPublicKey::from_secret_key(&self.key).to_byte_type()
+    }
+
+    pub fn seal_transaction(&self, transaction: UnsealedTransaction) -> Transaction {
         transaction.seal(&self.key)
     }
 }

@@ -187,6 +187,7 @@ async fn main() {
         .stealth_authorizer(SignatureRequirements::account_key_seal());
     let claim_msg = authorizer
         .authorization_message(&claim_tx)
+        .await
         .expect("account-key seal yields an authorization message");
 
     // Our side of the 2-of-2: an ordinary signature we make outright.

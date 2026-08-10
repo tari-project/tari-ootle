@@ -66,8 +66,11 @@ impl TransactionRequest<WithTx> {
     }
 
     pub async fn build(self, seal_signer: &dyn TransactionSealSigner) -> WalletResult<Transaction> {
-        let builder = self.state.0;
-        let unsealed = builder.with_signatures(self.authorizations.into_iter().map(|a| a.into_signature()).collect());
+        let unsigned = self.state.0;
+        let mut authorizations = self.authorizations;
+        authorizations.extend(seal_signer.create_authorizations(&unsigned).await?);
+
+        let unsealed = unsigned.with_signatures(authorizations.into_iter().map(|a| a.into_signature()).collect());
         let final_tx = seal_signer.seal_transaction(unsealed).await?;
         Ok(final_tx)
     }

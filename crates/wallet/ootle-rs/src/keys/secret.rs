@@ -111,6 +111,11 @@ impl StealthKeyPrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> for OotleSe
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         Ok((signature, public_key))
     }
+
+    async fn stealth_public_key(&self, public_nonce: &RistrettoPublicKey) -> signer::Result<RistrettoPublicKey> {
+        let secret = kdfs::owner_stealth_dh_secret(self.network(), self.account_secret(), public_nonce);
+        Ok(RistrettoPublicKey::from_secret_key(&secret))
+    }
 }
 
 #[async_trait]

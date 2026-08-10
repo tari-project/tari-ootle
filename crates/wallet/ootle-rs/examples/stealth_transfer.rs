@@ -64,25 +64,32 @@ async fn main() {
     // Send some TARI to another address. You can replace TARI with any other fungible token resource address.
     let tari_token = TARI_TOKEN; // resource_address!("resource_0123456789abcdef...");
 
-    const INPUT_AMOUNT: u64 = 10 * TARI + 1000 - 500;
+    // The faucet funds are split across two outputs so that the transfer below spends two stealth inputs. One of them
+    // seals that transaction and the other must attach an authorization signature committing to the seal signer's
+    // one-time public key.
+    const FIRST_INPUT_AMOUNT: u64 = 6 * TARI;
+    const SECOND_INPUT_AMOUNT: u64 = 10 * TARI + 1000 - 500 - FIRST_INPUT_AMOUNT;
     // // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
         // Tell the transfer to expect 10 TARI (+1000 to cover fees) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
         .spend_revealed_input(10 * TARI + 1000)
         // The transfer will output 500 micro TARI as revealed funds to pay for the fee
         .to_revealed_output(500u64)
-        // Spend the remaining value (10 TARI - fee) into an output for the sender address. NOTE: the sender address is not actually included in the output (privacy!),
+        // Spend the remaining value (10 TARI - fee) into outputs for the sender address. NOTE: the sender address is not actually included in the output (privacy!),
         // but a supporting wallet that holds the secret key would be able to spend the output.
         // You can specify any address here and split up into many outputs as needed, as long as ∑inputs == ∑outputs.
         .to_stealth_output(
-            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(INPUT_AMOUNT))
+            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(FIRST_INPUT_AMOUNT))
+        )
+        .to_stealth_output(
+            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(SECOND_INPUT_AMOUNT))
         )
         .prepare()
         .await
         .unwrap();
 
     // Keep track of the input commitments to spend later.
-    let input_to_spend = faucet_transfer.stealth_outputs().to_vec();
+    let inputs_to_spend = faucet_transfer.stealth_outputs().to_vec();
 
     // First let's transfer some faucet TARI to our account to have funds for fees and transfers.
     let unsigned_tx = IFaucet::new(&provider)
@@ -108,9 +115,10 @@ async fn main() {
     // Then we'll send it to the recipient
     // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
-        // Spend an existing stealth input that is controlled by the sender address.
-        // This is worth 10.000500 TARI
-        .spend_stealth_input(sender_address.clone(), input_to_spend[0].commitment())
+        // Spend both existing stealth inputs that are controlled by the sender address.
+        // Together these are worth 10.000500 TARI
+        .spend_stealth_input(sender_address.clone(), inputs_to_spend[0].commitment())
+        .spend_stealth_input(sender_address.clone(), inputs_to_spend[1].commitment())
         // The transfer will output 0.000500 TARI as revealed funds to pay for the fee
         .to_revealed_output(500u64)
         // Spend to a new output (8 TARI) that we'll generate for the recipient address.
@@ -137,8 +145,9 @@ async fn main() {
         })
         // This isn't necessary because all transactions implicitly use TARI for fees, but you'd need to include this if other resources are being used
         .add_input(tari_token)
-        // Add the UTXO substate as an input. This will be DOWNed (destroyed) if the transaction is successful.
-        .add_input(UtxoAddress::new(tari_token, input_to_spend[0].commitment().into()))
+        // Add the UTXO substates as inputs. These will be DOWNed (destroyed) if the transaction is successful.
+        .add_input(UtxoAddress::new(tari_token, inputs_to_spend[0].commitment().into()))
+        .add_input(UtxoAddress::new(tari_token, inputs_to_spend[1].commitment().into()))
         .build_unsigned();
 
     // This authorizer adds the required (stealth) signatures to spend inputs
@@ -154,10 +163,10 @@ async fn main() {
         "Estimated fees for transfer: {}",
         result.finalize.fee_receipt.total_fees_charged()
     );
-    let authorizations = authorizer.create_authorizations(&unsigned_tx).await.unwrap();
+    // One of the two stealth inputs seals the transaction; `build` asks the authorizer for the authorization signature
+    // the other one needs, which commits to the seal signer's one-time public key.
     let transaction = TransactionRequest::default()
         .with_transaction(unsigned_tx)
-        .with_authorizations(authorizations)
         .build(&authorizer)
         .await
         .unwrap();

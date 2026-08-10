@@ -30,7 +30,19 @@ pub trait TransactionSigner {
 /// The seal signature is the last signature applied, proving that the transaction
 /// originator approved the final set of instructions and authorizations.
 #[async_trait]
-pub trait TransactionSealSigner {
+pub trait TransactionSealSigner: Sync {
+    /// The authorizations this signer contributes, produced before the transaction is sealed.
+    ///
+    /// Each one commits to the public key this signer will seal with, so only the seal signer can produce them —
+    /// which is why they are made here rather than by the caller. Defaults to none: a signer that seals with a key
+    /// the caller already knows has nothing to add.
+    async fn create_authorizations(
+        &self,
+        _unsigned: &UnsignedTransaction,
+    ) -> signer::Result<Vec<TransactionAuthorization>> {
+        Ok(Vec::new())
+    }
+
     /// Asynchronously sign (seal) an unsealed transaction.
     async fn seal_transaction(&self, transaction: UnsealedTransaction) -> signer::Result<Transaction>;
 }
@@ -38,6 +50,12 @@ pub trait TransactionSealSigner {
 /// Trait for signing transactions using derived stealth keys for confidential transactions.
 #[async_trait]
 pub trait TransactionStealthKeySigner {
+    /// The one-time public key this signer signs with for `public_nonce`, derived without producing a signature.
+    ///
+    /// Every authorization signature commits to the seal signer's public key, so when a stealth input seals, its
+    /// one-time key must be resolvable before any authorization is made.
+    async fn stealth_public_key(&self, public_nonce: &RistrettoPublicKey) -> signer::Result<RistrettoPublicKeyBytes>;
+
     async fn sign_authorization_with_stealth(
         &self,
         public_nonce: &RistrettoPublicKey,

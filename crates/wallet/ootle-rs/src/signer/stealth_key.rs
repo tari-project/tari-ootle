@@ -13,4 +13,11 @@ pub trait StealthKeyPrehashSigner<S> {
         public_key: &RistrettoPublicKey,
         prehash: &[u8],
     ) -> impl Future<Output = signer::Result<S>> + Send;
+
+    /// The public key [`sign_prehash_with_stealth_key`](Self::sign_prehash_with_stealth_key) signs with for
+    /// `public_nonce`, derived without producing a signature.
+    fn stealth_public_key(
+        &self,
+        public_nonce: &RistrettoPublicKey,
+    ) -> impl Future<Output = signer::Result<RistrettoPublicKey>> + Send;
 }

@@ -190,6 +190,20 @@ impl OotleWallet {
         WalletStealthAuthorizer::new(self, required_signatures)
     }
 
+    /// The one-time public key `address` signs a stealth input with, derived from the input's `public_nonce`.
+    /// See [`crate::transaction::TransactionStealthKeySigner::stealth_public_key`].
+    pub async fn stealth_public_key(
+        &self,
+        address: &Address,
+        public_nonce: &RistrettoPublicKey,
+    ) -> signer::Result<RistrettoPublicKeyBytes> {
+        let signer = self.key_providers.get(address).ok_or_else(|| {
+            signer::SignerError::other(format!("Signer for address {address} not found in wallet signers"))
+        })?;
+
+        signer.stealth_public_key(public_nonce).await
+    }
+
     pub async fn authorize_transaction_with_stealth_key(
         &self,
         address: &Address,

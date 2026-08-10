@@ -155,6 +155,15 @@ where
     T: Exchange + Send + Sync,
     T::Error: core::fmt::Display + Send + Sync,
 {
+    async fn stealth_public_key(&self, _public_nonce: &RistrettoPublicKey) -> signer::Result<RistrettoPublicKeyBytes> {
+        // `GetPublicKey` derives from (account, index, key_type) only; the device has no request that takes a sender
+        // public nonce, so `c + k` is only ever returned alongside a signature it makes with it.
+        Err(SignerError::other(
+            "the Ledger device cannot derive a stealth public key without signing, so it cannot seal a stealth \
+             transfer that also needs authorization signatures",
+        ))
+    }
+
     async fn sign_authorization_with_stealth(
         &self,
         public_nonce: &RistrettoPublicKey,

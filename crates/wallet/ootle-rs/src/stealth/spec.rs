@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{num::NonZeroU64, ops::Not};
+use std::num::NonZeroU64;
 
 use indexmap::IndexSet;
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -37,85 +37,92 @@ impl StealthSignerRequirement {
     }
 }
 
-/// Specifies the signature requirements for a stealth transfer transaction.
-/// This aims to capture the invariants around which signers are required to sign a transaction to either provider the
-/// necessary access or to stealth inputs and/or substate components. If no access is required to substate components,
-/// the public keys appear to be ephemeral to any outside observer. If no input access nor substate access is required,
-/// an ephemeral key can be used to seal the transaction.
+/// The key that seals a stealth transaction.
+///
+/// Every authorization signature commits to the seal signer's public key, so which key seals must be settled — and
+/// its public key known — before any authorization is produced.
+// One instance exists per transaction, so the size gap to the unit variants does not matter.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SealSource {
+    /// The wallet's default account key seals. Required whenever the transaction touches the account component itself,
+    /// e.g. it funds the transfer from a revealed input bucket.
+    AccountKey,
+    /// A stealth input's one-time key seals. The seal signature is that input's spend authorization, which is why the
+    /// same signer does not also appear in [`SignatureRequirements::authorizers`].
+    StealthInput(StealthSignerRequirement),
+    /// Nothing is spent and the account is not touched, so a fresh one-time key seals and is discarded. This keeps the
+    /// wallet's account key off a transaction that has no need of it.
+    Ephemeral,
+}
+
+/// Which key seals a stealth transfer transaction, and which stealth signers must additionally authorize it.
+///
+/// Every stealth input has to be authorized by its owner's one-time key. One of those signers seals the transaction —
+/// its seal signature doubles as its own authorization — and the rest sign an authorization committing to the seal
+/// signer's public key. When the account component itself is accessed (a revealed input bucket) the account key must
+/// seal instead, and every stealth input signer authorizes. When neither applies the public keys on the transaction
+/// are ephemeral to an outside observer.
 #[derive(Debug, Clone)]
 pub struct SignatureRequirements {
-    required_signers: IndexSet<StealthSignerRequirement>,
-    must_sign_with_account_key: bool,
-    seal_signer: Option<StealthSignerRequirement>,
+    seal: SealSource,
+    authorizers: IndexSet<StealthSignerRequirement>,
 }
 
 impl SignatureRequirements {
-    /// Creates a new `SignatureSpec` where the account key must sign, along with the provided required signers.
-    /// The seal signer is always None, meaning users should sign with some account key.
-    pub fn new_must_sign_with_account_key(required_signers: IndexSet<StealthSignerRequirement>) -> Self {
+    /// The account key seals and each of `authorizers` authorizes with its one-time stealth key. Use when the
+    /// transaction accesses the account component, e.g. it spends a revealed input bucket.
+    pub fn account_key_seal_with(authorizers: IndexSet<StealthSignerRequirement>) -> Self {
         Self {
-            required_signers,
-            must_sign_with_account_key: true,
-            seal_signer: None,
+            seal: SealSource::AccountKey,
+            authorizers,
         }
     }
 
-    /// A requirement where the wallet's account key seals the transaction and no stealth signers are derived. The
-    /// account key is the seal signer only (`is_seal_signer_authorized` stays false when authorizations are attached),
-    /// so its badge is not added to the auth scope. Use this when every authorization is supplied externally — e.g. a
-    /// script-path `AccessRule` leaf whose keys the wallet does not own (adaptor-signature co-signers) — so the seal
-    /// signer, and hence the authorization message, is fixed and known before the authorizations are produced.
+    /// The account key seals and no stealth signers are derived. Use this when every authorization is supplied
+    /// externally — e.g. a script-path `AccessRule` leaf whose keys the wallet does not own (adaptor-signature
+    /// co-signers) — so the seal signer, and hence the authorization message, is known without consulting a key
+    /// provider.
     pub fn account_key_seal() -> Self {
-        Self::new_must_sign_with_account_key(IndexSet::new())
+        Self::account_key_seal_with(IndexSet::new())
     }
 
-    /// Creates a new `SignatureSpec` with the provided required signers and an optional seal signer.
-    /// The account key is not required to sign the transaction. If there are no required signers, an ephemeral key
-    /// will be used to seal the transaction.
-    pub fn new_opt_with_seal_signer(
-        required_signers: IndexSet<StealthSignerRequirement>,
-        seal_signer: Option<StealthSignerRequirement>,
+    /// The first of `signers` seals with its one-time stealth key and the rest authorize against it. With no signers
+    /// there is nothing to authorize and an ephemeral key seals.
+    pub fn stealth_seal(signers: IndexSet<StealthSignerRequirement>) -> Self {
+        let mut signers = signers.into_iter();
+        match signers.next() {
+            Some(seal_signer) => Self::stealth_seal_with(seal_signer, signers.collect()),
+            None => Self {
+                seal: SealSource::Ephemeral,
+                authorizers: IndexSet::new(),
+            },
+        }
+    }
+
+    /// `seal_signer` seals with its one-time stealth key and each of `authorizers` authorizes against it. Use when the
+    /// sealing input is not the first one.
+    pub fn stealth_seal_with(
+        seal_signer: StealthSignerRequirement,
+        authorizers: IndexSet<StealthSignerRequirement>,
     ) -> Self {
         Self {
-            required_signers,
-            must_sign_with_account_key: false,
-            seal_signer,
+            seal: SealSource::StealthInput(seal_signer),
+            authorizers,
         }
     }
 
-    pub fn must_sign_with_account_key(&self) -> bool {
-        self.must_sign_with_account_key
+    pub fn seal(&self) -> &SealSource {
+        &self.seal
     }
 
-    pub fn can_sign_with_ephemeral_key(&self) -> bool {
-        !self.must_sign_with_account_key && self.required_signers.is_empty() && self.seal_signer.is_none()
+    pub fn into_parts(self) -> (SealSource, IndexSet<StealthSignerRequirement>) {
+        (self.seal, self.authorizers)
     }
 
-    /// Returns the seal signer to be used for the transaction.
-    /// If `must_sign_with_account_key()` is true, returns None.
-    /// If `must_sign_with_account_key()` is false, and `can_sign_with_ephemeral_key()` is true, returns None
-    /// If `must_sign_with_account_key()` is false, and `can_sign_with_ephemeral_key()` is false, returns the seal
-    /// signer if set, otherwise returns the first required signer.
-    pub fn seal_signer(&self) -> Option<&StealthSignerRequirement> {
-        self.must_sign_with_account_key
-            .not()
-            .then(|| self.seal_signer.as_ref().or_else(|| self.required_signers.first()))
-            .flatten()
-    }
-
-    pub fn other_signers(&self) -> impl Iterator<Item = &StealthSignerRequirement> {
-        // Skip the first signer if must_sign_with_account_key is true and seal signer is not set because that signer is
-        // used as the seal signer
-        let skip = usize::from(!self.must_sign_with_account_key && self.seal_signer.is_none());
-        self.required_signers.iter().skip(skip)
-    }
-
-    pub fn len(&self) -> usize {
-        self.required_signers.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.required_signers.is_empty()
+    /// The signers that must produce an authorization signature, each committing to the seal signer's public key.
+    pub fn authorizers(&self) -> impl ExactSizeIterator<Item = &StealthSignerRequirement> {
+        self.authorizers.iter()
     }
 }
 
@@ -275,71 +282,74 @@ mod tests {
         StealthSignerRequirement::new(addr, pk)
     }
 
+    fn signers<const N: usize>(seeds: [u8; N]) -> IndexSet<StealthSignerRequirement> {
+        seeds.into_iter().map(signer_from_seed).collect()
+    }
+
     mod signature_requirement_invariants {
         use super::*;
 
-        /// If `must_sign_with_account_key()` is true, returns None.
+        /// The account key seals and every stealth signer authorizes: none of them is promoted to seal signer.
         #[test]
-        fn invariant1() {
-            let signer1 = signer_from_seed(1);
-            let signer2 = signer_from_seed(2);
-            let mut required_signers = IndexSet::new();
-            required_signers.insert(signer1.clone());
-            required_signers.insert(signer2.clone());
+        fn account_key_seal_authorizes_every_signer() {
+            let spec = SignatureRequirements::account_key_seal_with(signers([1, 2]));
 
-            let spec = SignatureRequirements::new_must_sign_with_account_key(required_signers);
-            assert!(spec.must_sign_with_account_key());
-            assert!(!spec.can_sign_with_ephemeral_key());
-            assert_eq!(spec.seal_signer(), None);
-
-            let other_signers = spec.other_signers().collect::<Vec<_>>();
-            assert_eq!(other_signers, vec![&signer1, &signer2]);
+            assert_eq!(spec.seal(), &SealSource::AccountKey);
+            assert_eq!(spec.authorizers().collect::<Vec<_>>(), vec![
+                &signer_from_seed(1),
+                &signer_from_seed(2)
+            ]);
         }
 
-        /// If `must_sign_with_account_key()` is false, and `can_sign_with_ephemeral_key()` is false, returns the seal
-        /// signer if set, otherwise returns the first required signer.
+        /// With no stealth signers the account key is the only signature on the transaction.
         #[test]
-        fn invariant2() {
-            let signer1 = signer_from_seed(1);
-            let signer2 = signer_from_seed(2);
-            let mut required_signers = IndexSet::new();
-            required_signers.insert(signer1.clone());
-            required_signers.insert(signer2.clone());
+        fn account_key_seal_without_signers_has_no_authorizers() {
+            let spec = SignatureRequirements::account_key_seal();
 
-            let spec = SignatureRequirements::new_opt_with_seal_signer(required_signers, None);
-            assert!(!spec.must_sign_with_account_key());
-            assert!(!spec.can_sign_with_ephemeral_key());
-            let seal_signer = spec.seal_signer();
-            assert_eq!(seal_signer, Some(&signer1));
-
-            let other_signers = spec.other_signers().collect::<Vec<_>>();
-            assert_eq!(other_signers, vec![&signer2]);
-
-            let signer3 = signer_from_seed(3);
-            let mut required_signers = IndexSet::new();
-            required_signers.insert(signer1.clone());
-            required_signers.insert(signer3.clone());
-
-            let spec = SignatureRequirements::new_opt_with_seal_signer(required_signers, Some(signer2.clone()));
-            assert!(!spec.must_sign_with_account_key());
-            assert!(!spec.can_sign_with_ephemeral_key());
-            let seal_signer = spec.seal_signer();
-            assert_eq!(seal_signer, Some(&signer2));
-
-            let other_signers = spec.other_signers().collect::<Vec<_>>();
-            assert_eq!(other_signers, vec![&signer1, &signer3]);
+            assert_eq!(spec.seal(), &SealSource::AccountKey);
+            assert_eq!(spec.authorizers().len(), 0);
         }
 
-        /// If `must_sign_with_account_key()` is false, and `can_sign_with_ephemeral_key()` is true, returns None
+        /// The first stealth signer is promoted to seal signer; the rest authorize against it.
         #[test]
-        fn invariant3() {
-            // Case 1: seal signer is set
-            let spec = SignatureRequirements::new_opt_with_seal_signer(Default::default(), None);
-            assert!(!spec.must_sign_with_account_key());
-            assert!(spec.can_sign_with_ephemeral_key());
-            let seal_signer = spec.seal_signer();
-            assert_eq!(seal_signer, None);
-            assert_eq!(spec.other_signers().next(), None);
+        fn stealth_seal_promotes_the_first_signer() {
+            let spec = SignatureRequirements::stealth_seal(signers([1, 2, 3]));
+
+            assert_eq!(spec.seal(), &SealSource::StealthInput(signer_from_seed(1)));
+            assert_eq!(spec.authorizers().collect::<Vec<_>>(), vec![
+                &signer_from_seed(2),
+                &signer_from_seed(3)
+            ]);
+        }
+
+        /// A single stealth input seals and needs no authorization: the seal signature is its own.
+        #[test]
+        fn a_single_stealth_signer_seals_and_authorizes_nothing() {
+            let spec = SignatureRequirements::stealth_seal(signers([1]));
+
+            assert_eq!(spec.seal(), &SealSource::StealthInput(signer_from_seed(1)));
+            assert_eq!(spec.authorizers().len(), 0);
+        }
+
+        /// An explicitly chosen seal signer is not one of the authorizers.
+        #[test]
+        fn stealth_seal_with_an_explicit_seal_signer() {
+            let spec = SignatureRequirements::stealth_seal_with(signer_from_seed(2), signers([1, 3]));
+
+            assert_eq!(spec.seal(), &SealSource::StealthInput(signer_from_seed(2)));
+            assert_eq!(spec.authorizers().collect::<Vec<_>>(), vec![
+                &signer_from_seed(1),
+                &signer_from_seed(3)
+            ]);
+        }
+
+        /// Nothing to spend and no account access: an ephemeral key seals.
+        #[test]
+        fn no_signers_seals_ephemerally() {
+            let spec = SignatureRequirements::stealth_seal(IndexSet::new());
+
+            assert_eq!(spec.seal(), &SealSource::Ephemeral);
+            assert_eq!(spec.authorizers().len(), 0);
         }
     }
 }

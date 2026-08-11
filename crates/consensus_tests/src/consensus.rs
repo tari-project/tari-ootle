@@ -1125,16 +1125,19 @@ async fn single_shard_input_conflict() {
     let mut test = Test::builder().add_committee(0, vec!["1", "2"]).start().await;
 
     let substate_id = test.create_substates_on_vns(TestVnDestination::All, 1).pop().unwrap();
-    let secret = PrivateKey::from_canonical_bytes(&[1u8; 32]).unwrap();
+    // Distinct sealers: the transaction id excludes the seal nonce, so an identical body sealed
+    // by the same key would be one transaction, not two conflicting ones.
+    let secret1 = PrivateKey::from_canonical_bytes(&[1u8; 32]).unwrap();
+    let secret2 = PrivateKey::from_canonical_bytes(&[2u8; 32]).unwrap();
 
     let tx1 = Transaction::builder_localnet()
         .add_input(substate_id.clone())
-        .build_and_seal(&secret);
+        .build_and_seal(&secret1);
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder_localnet()
         .add_input(substate_id.clone())
-        .build_and_seal(&secret);
+        .build_and_seal(&secret2);
     let tx2 = TransactionRecord::new(tx2);
 
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
@@ -1344,16 +1347,18 @@ async fn multishard_unversioned_input_conflict() {
         .pop()
         .unwrap();
 
+    // Distinct sealers: the transaction id excludes the seal nonce, so an identical body sealed
+    // by the same key would be one transaction, not two conflicting ones.
     let tx1 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
-        .build_and_seal(&Default::default());
+        .build_and_seal(&PrivateKey::from_canonical_bytes(&[1u8; 32]).unwrap());
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
-        .build_and_seal(&Default::default());
+        .build_and_seal(&PrivateKey::from_canonical_bytes(&[2u8; 32]).unwrap());
     let tx2 = TransactionRecord::new(tx2);
 
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {

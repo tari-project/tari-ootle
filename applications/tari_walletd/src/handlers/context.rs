@@ -287,7 +287,13 @@ impl HandlerContext {
     }
 
     /// Returns a TransactionBuilder with the current network configured.
+    ///
+    /// The builder is stamped with a random nonce so that repeated identical intents (same
+    /// instructions, inputs and signer) produce distinct transaction ids. Paths that submit
+    /// caller-provided bytes replace the whole unsigned transaction via
+    /// `with_unsigned_transaction`, which discards the stamp — the caller's bytes are preserved
+    /// verbatim there.
     pub fn transaction_builder(&self) -> TransactionBuilder {
-        Transaction::builder(self.config().network.as_byte())
+        Transaction::builder(self.config().network.as_byte()).with_nonce(rand::random())
     }
 }

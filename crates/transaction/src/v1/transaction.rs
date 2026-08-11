@@ -12,7 +12,12 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
-use tari_template_lib_types::{ComponentAddress, constants::TARI_TOKEN, stealth::StealthTransferStatement};
+use tari_template_lib_types::{
+    ComponentAddress,
+    constants::TARI_TOKEN,
+    crypto::RistrettoPublicKeyBytes,
+    stealth::StealthTransferStatement,
+};
 
 use crate::{
     Blobs,
@@ -115,23 +120,18 @@ impl TransactionV1 {
         &self.body
     }
 
-    /// Compute the deterministic transaction id.
-    ///
-    /// The id projection deliberately excludes raw blob bytes — only their per-blob commitments
-    /// (`BlobHashes`) participate. This keeps the id stable across pruning: a `TransactionV1`
-    /// and the `PrunedTransactionV1` derived from it produce the same id.
+    /// Compute the deterministic transaction id. See [`calculate_id_v1`] for the projection
+    /// invariants.
     pub fn calculate_id(&self) -> TransactionId {
         let unsigned = self.body.unsigned_transaction();
         let blob_hashes = unsigned.blobs.hashes();
-        hasher32(EngineHashDomainLabel::Transaction)
-            .chain(&self.schema_version())
-            .chain(&TransactionSignatureFields::from(unsigned))
-            .chain(&blob_hashes)
-            .chain(self.body.signatures())
-            .chain(&self.seal_signature)
-            .result()
-            .into_array()
-            .into()
+        calculate_id_v1(
+            self.schema_version(),
+            TransactionSignatureFields::from(unsigned),
+            &blob_hashes,
+            self.body.signatures(),
+            self.seal_signature.public_key(),
+        )
     }
 
     pub fn calculate_transaction_weight(&self) -> TransactionWeight {
@@ -237,6 +237,37 @@ impl TransactionV1 {
         }
         Ok(())
     }
+}
+
+/// The shared v1 transaction id projection — the full and pruned forms must produce the
+/// identical id, so both delegate here.
+///
+/// The projection deliberately excludes raw blob bytes — only their per-blob commitments
+/// (`BlobHashes`) participate, keeping the id stable across pruning.
+///
+/// The seal *signature* is also excluded — only the seal signer's public key participates.
+/// The signature is witness data (a fresh Schnorr nonce per seal), so hashing it would give
+/// every re-seal of the same body, signatures and sealer a distinct id, defeating id-based
+/// dedup: a co-signature authorizes one id, and the network must be able to recognise a
+/// re-sealed copy as the same transaction. The public key must remain in the projection —
+/// with no co-signatures nothing else binds the sealer, and excluding it would let a
+/// different sealer produce a colliding id for a semantically different transaction.
+pub(crate) fn calculate_id_v1(
+    schema_version: u16,
+    fields: TransactionSignatureFields<'_>,
+    blob_hashes: &crate::BlobHashes,
+    signatures: &[TransactionSignature],
+    seal_signer: &RistrettoPublicKeyBytes,
+) -> TransactionId {
+    hasher32(EngineHashDomainLabel::Transaction)
+        .chain(&schema_version)
+        .chain(&fields)
+        .chain(blob_hashes)
+        .chain(signatures)
+        .chain(seal_signer)
+        .result()
+        .into_array()
+        .into()
 }
 
 /// Failure modes for `TransactionV1::validate_blob_references`.
@@ -394,6 +425,7 @@ mod blob_validation_tests {
             is_seal_signer_authorized: true,
             dry_run: false,
             blobs,
+            nonce: 0,
         };
         let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let unsealed = UnsealedTransactionV1::new(unsigned, vec![]);
@@ -525,5 +557,131 @@ mod blob_validation_tests {
     #[allow(dead_code)]
     fn pk_smoke() {
         let _ = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng())).to_byte_type();
+    }
+}
+
+#[cfg(test)]
+mod transaction_id_tests {
+    use ootle_byte_type::ToByteType;
+    use tari_crypto::{
+        keys::{PublicKey as PublicKeyT, SecretKey},
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    };
+    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+    use super::*;
+    use crate::{TransactionSealSignature, UnsignedTransactionV1, v1::signature::TransactionSignature};
+
+    fn sample_unsigned() -> UnsignedTransactionV1 {
+        UnsignedTransactionV1 {
+            network: 1,
+            fee_instructions: vec![Instruction::DropAllProofsInWorkspace],
+            instructions: vec![Instruction::PutLastInstructionOutputOnWorkspace { key: 3 }],
+            inputs: indexmap::IndexSet::new(),
+            min_epoch: None,
+            max_epoch: Some(Epoch(10)),
+            is_seal_signer_authorized: true,
+            dry_run: false,
+            blobs: Blobs::empty(),
+            nonce: 0,
+        }
+    }
+
+    fn random_key() -> (RistrettoSecretKey, RistrettoPublicKeyBytes) {
+        let sk = RistrettoSecretKey::random(&mut rand::rng());
+        let pk = RistrettoPublicKey::from_secret_key(&sk).to_byte_type();
+        (sk, pk)
+    }
+
+    fn cosigned(seal_signer: &RistrettoPublicKeyBytes) -> UnsealedTransactionV1 {
+        let (cosigner, _) = random_key();
+        let unsigned = sample_unsigned();
+        let sig = TransactionSignature::sign_v1(&cosigner, seal_signer, &unsigned);
+        UnsealedTransactionV1::new(unsigned, vec![sig])
+    }
+
+    /// One authorization set = one id: re-sealing the identical body + signatures with the same
+    /// key must produce the same id even though each seal carries a fresh Schnorr nonce. Id-based
+    /// dedup relies on this — a co-signature authorizes a single id, and a re-sealed copy must be
+    /// recognisable as the same transaction.
+    #[test]
+    fn id_is_stable_across_reseals() {
+        let (sealer_sk, sealer_pk) = random_key();
+        let unsealed = cosigned(&sealer_pk);
+
+        let a = TransactionV1::new(
+            unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+        );
+        let b = TransactionV1::new(
+            unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+        );
+
+        assert_ne!(
+            a.seal_signature().signature(),
+            b.seal_signature().signature(),
+            "two seals must carry distinct nonces for this test to be meaningful",
+        );
+        assert_eq!(a.calculate_id(), b.calculate_id());
+    }
+
+    /// With zero co-signatures the id is the only thing binding the sealer: the same body sealed
+    /// by two different keys is two semantically different transactions (different authorized
+    /// signer) and must not collide on one id.
+    #[test]
+    fn id_binds_seal_signer_public_key() {
+        let unsealed = UnsealedTransactionV1::new(sample_unsigned(), vec![]);
+        let (sk_a, _) = random_key();
+        let (sk_b, _) = random_key();
+
+        let a = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign_v1(&sk_a, &unsealed));
+        let b = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign_v1(&sk_b, &unsealed));
+
+        assert_ne!(a.calculate_id(), b.calculate_id());
+    }
+
+    /// The nonce is the intent-level distinguisher: identical bodies sealed by the same key
+    /// differing only in nonce must be distinct transactions.
+    #[test]
+    fn id_binds_nonce() {
+        let (sealer_sk, _) = random_key();
+        let mut a_unsigned = sample_unsigned();
+        a_unsigned.nonce = 1;
+        let mut b_unsigned = sample_unsigned();
+        b_unsigned.nonce = 2;
+
+        let a_unsealed = UnsealedTransactionV1::new(a_unsigned, vec![]);
+        let b_unsealed = UnsealedTransactionV1::new(b_unsigned, vec![]);
+        let a = TransactionV1::new(
+            a_unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &a_unsealed),
+        );
+        let b = TransactionV1::new(
+            b_unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &b_unsealed),
+        );
+
+        assert_ne!(a.calculate_id(), b.calculate_id());
+    }
+
+    /// The co-signature set stays inside the id: a sealer that strips (or gains) a co-signature
+    /// produces a different transaction, not a same-id variant.
+    #[test]
+    fn id_binds_co_signatures() {
+        let (sealer_sk, sealer_pk) = random_key();
+        let with_sig = cosigned(&sealer_pk);
+        let without_sig = UnsealedTransactionV1::new(sample_unsigned(), vec![]);
+
+        let a = TransactionV1::new(
+            with_sig.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &with_sig),
+        );
+        let b = TransactionV1::new(
+            without_sig.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &without_sig),
+        );
+
+        assert_ne!(a.calculate_id(), b.calculate_id());
     }
 }

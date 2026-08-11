@@ -2,6 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    cell::Cell,
     collections::{HashMap, HashSet},
     env,
     ffi::OsStr,
@@ -36,7 +37,12 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
-use tari_ootle_common_types::{SubstateRequirement, crypto::create_key_pair_from_seed, substate_type::SubstateType};
+use tari_ootle_common_types::{
+    Epoch,
+    SubstateRequirement,
+    crypto::create_key_pair_from_seed,
+    substate_type::SubstateType,
+};
 use tari_ootle_transaction::{
     Instruction,
     Network,
@@ -109,6 +115,12 @@ pub struct TemplateTest {
     virtual_substates: HashMap<VirtualSubstateId, VirtualSubstate>,
     key_seed: u8,
     auto_add_proofs_from_signers: bool,
+    /// Uniquifies each transaction built via [`Self::transaction`]. The transaction id excludes
+    /// the seal signature, so two transactions with identical bodies sealed by the same test key
+    /// are the *same* transaction — and would collide on id-derived addresses. A distinct
+    /// `max_epoch` per transaction keeps bodies distinct; the engine does not evaluate epoch
+    /// bounds, so this has no behavioural effect.
+    transaction_seq: Cell<u64>,
 }
 
 impl TemplateTest {
@@ -224,6 +236,7 @@ impl TemplateTest {
             last_outputs: HashSet::new(),
             state_store: MemoryStateStore::new(),
             virtual_substates,
+            transaction_seq: Cell::new(0),
             enable_fees: false,
             fee_table: FeeTable {
                 per_transaction_weight_cost: 1,
@@ -454,7 +467,8 @@ impl TemplateTest {
     ) -> ComponentAddress {
         let result = self
             .build_and_execute(
-                Transaction::builder_localnet().create_account_custom(owner_public_key, None, None, workspace_id),
+                self.transaction()
+                    .create_account_custom(owner_public_key, None, None, workspace_id),
                 proofs,
             )
             .unwrap_success();
@@ -590,7 +604,7 @@ impl TemplateTest {
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
         self.execute_expect_success(
-            Transaction::builder_localnet()
+            self.transaction()
                 .create_account(public_key.to_byte_type())
                 .put_last_instruction_output_on_workspace("account")
                 .call_method(xtr_faucet_component(), "take", args![Workspace("account")])
@@ -623,7 +637,7 @@ impl TemplateTest {
         self.enable_fees = false;
         let public_key_bytes = public_key.to_byte_type();
         self.execute_expect_success(
-            Transaction::builder_localnet()
+            self.transaction()
                 .create_account(public_key_bytes)
                 .put_last_instruction_output_on_workspace("account")
                 .call_method(xtr_faucet_component(), "take", args![Workspace("account")])
@@ -667,7 +681,8 @@ impl TemplateTest {
         instructions: Vec<Instruction>,
         proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
-        let transaction = Transaction::builder_localnet()
+        let transaction = self
+            .transaction()
             .with_fee_instructions(fee_instructions)
             .with_instructions(instructions)
             .build_and_seal(&self.secret_key);
@@ -775,8 +790,13 @@ impl TemplateTest {
 
     /// Returns a new [`TransactionBuilder`] configured for the local test network.
     /// Use this to construct custom transactions with multiple instructions.
+    ///
+    /// Each returned builder carries a distinct `max_epoch` so that otherwise-identical
+    /// transactions produce distinct transaction ids (see [`Self::transaction_seq`]).
     pub fn transaction(&self) -> TransactionBuilder<MainIntent> {
-        Transaction::builder(Network::LocalNet)
+        let seq = self.transaction_seq.get();
+        self.transaction_seq.set(seq + 1);
+        Transaction::builder(Network::LocalNet).with_max_epoch(Some(Epoch(seq)))
     }
 
     /// Executes a transaction. Panics if the transaction is not finalized (fee transaction fails). Does not panic if

@@ -30,4 +30,8 @@ export type PrunedUnsignedTransactionV1 = {
    * archives that didn't record sizes.
    */
   blob_sizes: Array<number>;
+  /**
+   * Mirrors `UnsignedTransactionV1::nonce` of the full form.
+   */
+  nonce: bigint;
 };

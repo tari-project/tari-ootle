@@ -12,7 +12,6 @@
 
 use indexmap::IndexSet;
 use log::*;
-use tari_engine_types::hashing::{EngineHashDomainLabel, hasher32};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
@@ -68,6 +67,11 @@ pub struct PrunedUnsignedTransactionV1 {
     #[cbor(default)]
     #[borsh(skip)]
     pub blob_sizes: Vec<u32>,
+    /// Mirrors `UnsignedTransactionV1::nonce` of the full form.
+    #[n(10)]
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[cbor(default)]
+    pub nonce: u64,
 }
 
 impl PrunedUnsignedTransactionV1 {
@@ -107,6 +111,7 @@ impl From<UnsignedTransactionV1> for PrunedUnsignedTransactionV1 {
             dry_run: t.dry_run,
             blob_hashes,
             blob_sizes,
+            nonce: t.nonce,
         }
     }
 }
@@ -257,17 +262,16 @@ impl PrunedTransactionV1 {
         self.body.transaction.dry_run
     }
 
-    /// Compute the deterministic transaction id. Identical to the full form's id.
+    /// Compute the deterministic transaction id. Identical to the full form's id — see
+    /// [`calculate_id_v1`](super::transaction::calculate_id_v1) for the projection invariants.
     pub fn calculate_id(&self) -> TransactionId {
-        hasher32(EngineHashDomainLabel::Transaction)
-            .chain(&self.schema_version())
-            .chain(&TransactionSignatureFields::from(&self.body.transaction))
-            .chain(self.blob_hashes())
-            .chain(self.signatures())
-            .chain(&self.seal_signature)
-            .result()
-            .into_array()
-            .into()
+        super::transaction::calculate_id_v1(
+            self.schema_version(),
+            TransactionSignatureFields::from(&self.body.transaction),
+            self.blob_hashes(),
+            self.signatures(),
+            self.seal_signature.public_key(),
+        )
     }
 
     /// Verify the seal and all extra signatures.
@@ -311,6 +315,7 @@ impl PrunedTransactionV1 {
             dry_run,
             blob_hashes: _,
             blob_sizes: _,
+            nonce,
         } = transaction;
 
         let unsigned = UnsignedTransactionV1 {
@@ -323,6 +328,7 @@ impl PrunedTransactionV1 {
             is_seal_signer_authorized,
             dry_run,
             blobs,
+            nonce,
         };
         let unsealed = UnsealedTransactionV1::new(unsigned, signatures);
         Ok(TransactionV1::new(unsealed, seal_signature))
@@ -368,6 +374,7 @@ mod tests {
             is_seal_signer_authorized: false,
             dry_run: true,
             blobs,
+            nonce: 7,
         }
     }
 

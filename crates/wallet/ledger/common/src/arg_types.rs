@@ -131,8 +131,9 @@ pub enum SigningField {
     MaxEpoch = 7,
     IsSealSignerAuthorized = 8,
     DryRun = 9,
-    BlobHashes = 10,
-    Signatures = 11,
+    TransactionNonce = 10,
+    BlobHashes = 11,
+    Signatures = 12,
 }
 
 impl SigningField {
@@ -158,8 +159,9 @@ impl TryFrom<u8> for SigningField {
             7 => Ok(MaxEpoch),
             8 => Ok(IsSealSignerAuthorized),
             9 => Ok(DryRun),
-            10 => Ok(BlobHashes),
-            11 => Ok(Signatures),
+            10 => Ok(TransactionNonce),
+            11 => Ok(BlobHashes),
+            12 => Ok(Signatures),
             _ => Err(()),
         }
     }

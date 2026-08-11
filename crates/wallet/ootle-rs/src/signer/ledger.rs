@@ -252,6 +252,7 @@ fn to_wire(field: PreimageField) -> SigningField {
         PreimageField::IsSealSignerAuthorized => SigningField::IsSealSignerAuthorized,
         PreimageField::DryRun => SigningField::DryRun,
         PreimageField::BlobHashes => SigningField::BlobHashes,
+        PreimageField::Nonce => SigningField::TransactionNonce,
         PreimageField::Signatures => SigningField::Signatures,
     }
 }

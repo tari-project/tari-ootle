@@ -2,8 +2,8 @@
   "name": "arg_dsl/address_template",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.35.0",
-    "git_rev": "acdba58436eaa92184dfa7947942acc881fd6521",
+    "core_version": "0.37.0",
+    "git_rev": "be2591689b664cddf465a7540277d41b09ecfd0d",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "encode_arg",

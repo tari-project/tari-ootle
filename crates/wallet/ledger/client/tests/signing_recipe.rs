@@ -182,6 +182,7 @@ fn sample_unsigned() -> UnsignedTransactionV1 {
         is_seal_signer_authorized: false,
         dry_run: true,
         blobs,
+        nonce: 42,
     }
 }
 
@@ -208,6 +209,7 @@ fn preimage_field_tags_match_protocol() {
             SigningField::IsSealSignerAuthorized,
         ),
         (PreimageField::DryRun, SigningField::DryRun),
+        (PreimageField::Nonce, SigningField::TransactionNonce),
         (PreimageField::BlobHashes, SigningField::BlobHashes),
         (PreimageField::Signatures, SigningField::Signatures),
     ];

@@ -259,6 +259,7 @@ mod tests {
             max_epoch: None,
             is_seal_signer_authorized: false,
             dry_run: false,
+            nonce: 0,
             blobs,
         }
     }

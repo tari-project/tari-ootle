@@ -199,6 +199,14 @@ impl TransactionBuilder<MainIntent> {
         self
     }
 
+    /// Stamps the transaction nonce. The transaction id excludes the seal signature, so an
+    /// intent builder must give otherwise-identical transactions distinct nonces for each to
+    /// execute independently.
+    pub fn with_nonce(mut self, nonce: u64) -> Self {
+        self.unsigned_transaction.set_nonce(nonce);
+        self
+    }
+
     pub fn add_signer(
         self,
         sealed_signer: &RistrettoPublicKeyBytes,

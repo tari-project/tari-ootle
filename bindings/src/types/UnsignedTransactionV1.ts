@@ -23,4 +23,11 @@ export type UnsignedTransactionV1 = {
    * signature verifiability or transaction id.
    */
   blobs: Blobs;
+  /**
+   * Distinguishes otherwise-identical transactions. The transaction id excludes the seal
+   * signature, so two identical bodies sealed by the same key are the *same* transaction —
+   * an intent builder (e.g. a wallet) that wants each submission to execute independently
+   * must stamp a distinct nonce per intent. Part of the signing and id domains.
+   */
+  nonce: bigint;
 };

@@ -4,8 +4,12 @@
 use tari_ootle_address::Network;
 use tari_ootle_transaction::TransactionBuilder;
 
+/// The builder is stamped with a random nonce so that repeated identical calls (concurrent or
+/// sequential steps invoking the same method with unversioned inputs) build distinct
+/// transactions — the transaction id excludes the seal signature, so identical bodies sealed by
+/// the same key would otherwise be a single transaction.
 pub fn transaction_builder() -> TransactionBuilder {
-    TransactionBuilder::new(Network::LocalNet)
+    TransactionBuilder::new(Network::LocalNet).with_nonce(rand::random())
 }
 
 #[macro_export]

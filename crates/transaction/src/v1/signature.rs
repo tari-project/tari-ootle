@@ -42,8 +42,9 @@ pub enum PreimageField {
     MaxEpoch = 7,
     IsSealSignerAuthorized = 8,
     DryRun = 9,
-    BlobHashes = 10,
-    Signatures = 11,
+    Nonce = 10,
+    BlobHashes = 11,
+    Signatures = 12,
 }
 
 /// One ordered segment of the canonical signing preimage: the exact borsh bytes chained into the
@@ -179,6 +180,7 @@ impl TransactionSealSignature {
                 &unsigned.is_seal_signer_authorized,
             ),
             preimage_segment(PreimageField::DryRun, &unsigned.dry_run),
+            preimage_segment(PreimageField::Nonce, &unsigned.nonce),
             preimage_segment(PreimageField::BlobHashes, &blob_hashes),
             preimage_segment(PreimageField::Signatures, transaction.signatures()),
         ]
@@ -346,6 +348,7 @@ impl TransactionSignature {
                 &transaction.is_seal_signer_authorized,
             ),
             preimage_segment(PreimageField::DryRun, &transaction.dry_run),
+            preimage_segment(PreimageField::Nonce, &transaction.nonce),
             preimage_segment(PreimageField::BlobHashes, &blob_hashes),
         ]
     }
@@ -411,6 +414,7 @@ pub(crate) struct TransactionSignatureFields<'a> {
     max_epoch: Option<Epoch>,
     is_seal_signer_authorized: bool,
     dry_run: bool,
+    nonce: u64,
 }
 
 impl<'a> From<&'a UnsignedTransactionV1> for TransactionSignatureFields<'a> {
@@ -424,6 +428,7 @@ impl<'a> From<&'a UnsignedTransactionV1> for TransactionSignatureFields<'a> {
             max_epoch: transaction.max_epoch,
             is_seal_signer_authorized: transaction.is_seal_signer_authorized,
             dry_run: transaction.dry_run,
+            nonce: transaction.nonce,
         }
     }
 }
@@ -441,6 +446,7 @@ impl<'a> From<&'a PrunedUnsignedTransactionV1> for TransactionSignatureFields<'a
             max_epoch: transaction.max_epoch,
             is_seal_signer_authorized: transaction.is_seal_signer_authorized,
             dry_run: transaction.dry_run,
+            nonce: transaction.nonce,
         }
     }
 }
@@ -481,6 +487,7 @@ mod tests {
             is_seal_signer_authorized: false,
             dry_run: true,
             blobs: crate::Blobs::empty(),
+            nonce: 5,
         }
     }
 
@@ -586,6 +593,11 @@ mod tests {
         let mut tx = base.clone();
         tx.dry_run = !tx.dry_run;
         assert_ne!(sig_msg(&signer, &tx), base_msg, "dry_run");
+
+        // nonce
+        let mut tx = base.clone();
+        tx.nonce = tx.nonce.wrapping_add(1);
+        assert_ne!(sig_msg(&signer, &tx), base_msg, "nonce");
 
         // blobs: payload contents must influence the digest via per-blob commitments
         let mut tx = base.clone();
@@ -710,6 +722,11 @@ mod tests {
         let mut u = base_unsigned.clone();
         u.dry_run = !u.dry_run;
         assert_ne!(seal_msg(&with_body(u)), base_msg, "dry_run");
+
+        // nonce
+        let mut u = base_unsigned.clone();
+        u.nonce = u.nonce.wrapping_add(1);
+        assert_ne!(seal_msg(&with_body(u)), base_msg, "nonce");
 
         // blobs: changes to the payload must alter the seal digest via per-blob commitments
         let mut u = base_unsigned.clone();

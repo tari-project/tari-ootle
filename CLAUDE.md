@@ -21,6 +21,10 @@ invariants, the reason for a non-obvious approach, tricky edge cases. They must 
   changed it. The corrected code no longer has the issue, so such a comment describes a problem that isn't
   in the code — it serves no future reader.
 - Rationale for a fix belongs in the commit message and PR description, not in the source.
+- Never answer a reviewer in a code comment. When addressing review feedback, the justification goes in the
+  reply on the review thread; the source gets only what a reader who never saw the review needs. A comment
+  that argues for the new code over what the reviewer objected to is narrating a change — the thing it
+  contrasts against isn't in the file.
 - Write present-tense statements of intent/invariant ("X must be Y because Z"), never history ("changed
   this from A to B", "without this guard X would happen", "previously this did A").
 

@@ -45,6 +45,15 @@ pub struct UnsignedTransactionV1 {
     #[cfg_attr(feature = "serde", serde(default))]
     #[cbor(default)]
     pub blobs: Blobs,
+
+    /// Distinguishes otherwise-identical transactions. The transaction id excludes the seal
+    /// signature, so two identical bodies sealed by the same key are the *same* transaction —
+    /// an intent builder (e.g. a wallet) that wants each submission to execute independently
+    /// must stamp a distinct nonce per intent. Part of the signing and id domains.
+    #[n(9)]
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[cbor(default)]
+    pub nonce: u64,
 }
 
 impl UnsignedTransactionV1 {
@@ -59,6 +68,7 @@ impl UnsignedTransactionV1 {
             is_seal_signer_authorized: true,
             dry_run: false,
             blobs: Blobs::empty(),
+            nonce: 0,
         }
     }
 
@@ -81,6 +91,7 @@ impl UnsignedTransactionV1 {
             is_seal_signer_authorized: true,
             dry_run,
             blobs: Blobs::empty(),
+            nonce: 0,
         }
     }
 

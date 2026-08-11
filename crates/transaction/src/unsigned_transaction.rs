@@ -165,6 +165,19 @@ impl UnsignedTransaction {
         self
     }
 
+    pub fn nonce(&self) -> u64 {
+        match self {
+            Self::V1(tx) => tx.nonce,
+        }
+    }
+
+    pub fn set_nonce(&mut self, nonce: u64) -> &mut Self {
+        match self {
+            Self::V1(tx) => tx.nonce = nonce,
+        }
+        self
+    }
+
     pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
         self.inputs_mut().extend(inputs);
         self

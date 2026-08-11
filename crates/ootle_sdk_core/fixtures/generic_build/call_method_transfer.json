@@ -2,8 +2,8 @@
   "name": "generic_build/call_method_transfer",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.35.0",
-    "git_rev": "184979ea3d66d6e0a1bcde32fdae049582dbb8b8",
+    "core_version": "0.37.0",
+    "git_rev": "be2591689b664cddf465a7540277d41b09ecfd0d",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_instructions",
@@ -131,7 +131,8 @@
             "is_seal_signer_authorized": true,
             "max_epoch": 10,
             "min_epoch": 1,
-            "network": 38
+            "network": 38,
+            "nonce": 0
           }
         },
         "seal_signature": {

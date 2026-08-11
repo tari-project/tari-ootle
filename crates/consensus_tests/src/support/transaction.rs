@@ -136,7 +136,6 @@ pub fn create_execution_result_for_transaction(
                 diff_summary: Default::default(),
                 fee_withdrawals: Default::default(),
                 events: Default::default(),
-                logs: Default::default(),
                 fee_receipt: create_test_fee_receipt(fee),
                 epoch: Epoch::zero(),
                 intent_commitment: transaction.calculate_intent_commitment(),

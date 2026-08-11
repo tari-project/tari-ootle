@@ -179,13 +179,6 @@ async fn print_fancy_results(pending_tx: &PendingTransaction) {
     println!("🔹 Outcome: {:?}", receipt.outcome);
     println!("🔹 Fees Paid: {}", receipt.fee_receipt.total_fees_paid());
 
-    if !receipt.logs.is_empty() {
-        println!("\n🪵 Logs:");
-        for log in receipt.logs {
-            println!("  - {}", log);
-        }
-    }
-
     if !receipt.events.is_empty() {
         println!("\n🎉 Events:");
         for event in receipt.events {

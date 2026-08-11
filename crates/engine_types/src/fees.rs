@@ -73,6 +73,22 @@ impl FeeReceipt {
         FeeReceiptBuilder::default()
     }
 
+    /// The widest form this type can encode to: every amount at full varint width and a breakdown
+    /// entry for every [`FeeSource`]. Bounds the encoded size of a receipt whose fees are not yet
+    /// settled — see `TransactionReceipt::encoded_size_upper_bound`.
+    pub fn widest() -> Self {
+        let mut cost_breakdown = FeeBreakdown::default();
+        for source in FeeSource::ALL {
+            cost_breakdown.add(source, u64::MAX);
+        }
+        Self {
+            total_fee_payment: u64::MAX,
+            total_fees_paid: u64::MAX,
+            total_fee_overcharge: u64::MAX,
+            cost_breakdown,
+        }
+    }
+
     pub fn to_cost_breakdown(&self) -> FeeCostBreakdown {
         FeeCostBreakdown {
             total_fees_charged: self.total_fees_charged(),
@@ -209,6 +225,24 @@ pub enum FeeSource {
     NativeExecution = 10,
 }
 
+impl FeeSource {
+    /// Every variant. `fee_source_all_is_exhaustive` fails to compile if a variant is added without
+    /// being listed here.
+    pub const ALL: [Self; 11] = [
+        Self::Initial,
+        Self::RuntimeCall,
+        Self::Storage,
+        Self::TransactionWeight,
+        Self::SignatureVerification,
+        Self::TemplateLoad,
+        Self::SubstateCreate,
+        Self::WasmExecution,
+        Self::TemplatePublish,
+        Self::ExhaustBurn,
+        Self::NativeExecution,
+    ];
+}
+
 #[derive(
     Debug,
     Clone,
@@ -260,4 +294,47 @@ pub struct FeeCostBreakdown {
     pub total_fees_charged: u64,
     pub required_fees: u64,
     pub breakdown: FeeBreakdown,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fee_source_all_is_exhaustive() {
+        for source in FeeSource::ALL {
+            // An added variant fails to compile here until it is listed in `FeeSource::ALL`.
+            match source {
+                FeeSource::Initial |
+                FeeSource::RuntimeCall |
+                FeeSource::Storage |
+                FeeSource::TransactionWeight |
+                FeeSource::SignatureVerification |
+                FeeSource::TemplateLoad |
+                FeeSource::SubstateCreate |
+                FeeSource::WasmExecution |
+                FeeSource::TemplatePublish |
+                FeeSource::ExhaustBurn |
+                FeeSource::NativeExecution => {},
+            }
+        }
+    }
+
+    #[test]
+    fn widest_bounds_every_other_receipt() {
+        let widest = minicbor::len(FeeReceipt::widest());
+
+        let mut breakdown = FeeBreakdown::default();
+        breakdown.add(FeeSource::Initial, 1000);
+        breakdown.add(FeeSource::Storage, u64::MAX);
+        let realistic = FeeReceipt::builder()
+            .with_total_fee_payment(u64::MAX)
+            .with_total_fees_paid(u64::MAX)
+            .with_total_fee_overcharge(u64::MAX)
+            .with_cost_breakdown(breakdown)
+            .build();
+
+        assert!(minicbor::len(&realistic) <= widest);
+        assert!(minicbor::len(FeeReceipt::default()) <= widest);
+    }
 }

@@ -26,7 +26,6 @@ import { CURRENCY } from "../../../utils/constants";
 import { formatCurrency } from "../../../utils/helpers";
 import EventsContent from "../../Transaction/components/EventsContent";
 import FeeReceipt from "../../Transaction/components/FeeReceipt";
-import LogsContent from "../../Transaction/components/LogsContent";
 import SubstateChanges from "./SubstateChanges";
 
 function TransactionReceiptDetails({ address }: { address: string }) {
@@ -41,7 +40,7 @@ function TransactionReceiptDetails({ address }: { address: string }) {
     setExpandedPanels((prev) => (isExpanded ? [...prev, panel] : prev.filter((p) => p !== panel)));
   };
 
-  const expandAll = () => setExpandedPanels(["p1", "p2", "p3", "p4", "p5"]);
+  const expandAll = () => setExpandedPanels(["p1", "p3", "p4", "p5"]);
   const collapseAll = () => setExpandedPanels([]);
 
   const receipt = data?.receipt;
@@ -128,17 +127,6 @@ function TransactionReceiptDetails({ address }: { address: string }) {
                   </AccordionSummary>
                   <AccordionDetails>
                     <EventsContent data={receipt.events} />
-                  </AccordionDetails>
-                </Accordion>
-              )}
-
-              {receipt.logs.length > 0 && (
-                <Accordion expanded={expandedPanels.includes("p2")} onChange={handleChange("p2")}>
-                  <AccordionSummary>
-                    <Typography variant="h5">Logs ({receipt.logs.length})</Typography>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    <LogsContent data={receipt.logs} />
                   </AccordionDetails>
                 </Accordion>
               )}

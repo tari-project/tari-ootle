@@ -451,6 +451,12 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| f(state.mutated_substates()))
     }
 
+    /// The storage footprint of the transaction receipt, which finalization persists in addition to
+    /// the substates seen by [`Self::with_substates_to_persist`].
+    pub fn transaction_receipt_size(&mut self) -> Result<usize, RuntimeError> {
+        self.write_with(|state| state.transaction_receipt_size())
+    }
+
     /// Counts substates in the to-persist set that did not previously exist in the state store.
     /// Used by the fee module to charge a slot-allocation premium on top of per-byte storage.
     pub fn count_newly_created_substates(&self) -> Result<usize, RuntimeError> {

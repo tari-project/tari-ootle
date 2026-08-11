@@ -133,6 +133,17 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             Ok::<_, RuntimeModuleError>((counter.get(), base_bytes, charge))
         })?;
 
+        // Finalization persists the transaction receipt on top of the mutated substates. It carries
+        // the transaction's events, so leaving it out of the tally would make that payload — the
+        // largest caller-controlled contribution to permanent state after the substates themselves —
+        // free.
+        let receipt_bytes = track
+            .transaction_receipt_size()
+            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?;
+        let total_storage = total_storage
+            .checked_add(receipt_bytes)
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow accumulating storage bytes".to_string()))?;
+
         let cost = self
             .fee_table
             .per_byte_storage_cost()
@@ -155,9 +166,12 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             track.add_fee_charge(FeeSource::TemplatePublish, template_publish_cost);
         }
 
+        // The receipt occupies a slot of its own — it is always newly created, since it is addressed
+        // by a transaction id that can only be finalized once.
         let new_substate_count = track
             .count_newly_created_substates()
-            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?;
+            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?
+            .saturating_add(1);
         let create_cost = (new_substate_count as u64)
             .checked_mul(self.fee_table.per_substate_create_cost())
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating substate create cost".to_string()))?;

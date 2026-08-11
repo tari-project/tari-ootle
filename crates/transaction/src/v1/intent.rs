@@ -159,7 +159,6 @@ mod tests {
             diff_summary: Default::default(),
             fee_withdrawals: Default::default(),
             events: Default::default(),
-            logs: Default::default(),
             fee_receipt: Default::default(),
             epoch: Epoch(1),
             intent_commitment: commitment,

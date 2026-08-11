@@ -1316,6 +1316,21 @@ impl<TStore: StateReader> WorkingState<TStore> {
         self.last_instruction_output = Some(output);
     }
 
+    /// The storage footprint of the transaction receipt this state will finalize into.
+    ///
+    /// The receipt is persisted like any other substate but is only built once fees are settled, so
+    /// it cannot be measured alongside the substates in [`Self::mutated_substates`] — it is bounded
+    /// here instead. See [`TransactionReceipt::encoded_size_upper_bound`] for what the bound covers.
+    pub fn transaction_receipt_size(&mut self) -> Result<usize, RuntimeError> {
+        let epoch = self.get_current_epoch()?;
+        Ok(TransactionReceipt::encoded_size_upper_bound(
+            &self.events,
+            &self.validator_fee_withdrawals,
+            self.store.mutated_substates().keys(),
+            epoch,
+        ))
+    }
+
     pub fn finalize_transaction_receipt(
         &mut self,
         outcome: FinalizeOutcome,
@@ -1328,7 +1343,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
             diff_summary: DiffSummary::from_diff(diff, epoch),
             fee_withdrawals: diff.validator_fee_withdrawals().to_vec().into_boxed_slice(),
             events: self.events.clone().into_boxed_slice(),
-            logs: self.logs.clone().into_boxed_slice(),
             fee_receipt,
             epoch,
             intent_commitment: self.intent_commitment,

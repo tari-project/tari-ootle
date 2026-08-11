@@ -239,13 +239,6 @@ async fn print_fancy_results(label: &str, pending_tx: &PendingTransaction) -> Tr
         fee_receipt.total_refunded()
     );
 
-    if !receipt.logs.is_empty() {
-        println!("\n🪵 Logs:");
-        for log in receipt.logs() {
-            println!("  - {}", log);
-        }
-    }
-
     if !receipt.events.is_empty() {
         println!("\n🎉 Events:");
         for event in receipt.events() {

@@ -164,7 +164,7 @@ use crate::{
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
         scope::PushCallFrame,
-        tracker::StateTracker,
+        tracker::{FinalizedState, StateTracker},
     },
     state_store::StateReader,
     template::LoadedTemplate,
@@ -271,6 +271,29 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     fn invoke_modules_on_before_finalize(&mut self) -> Result<(), RuntimeError> {
         for module in self.modules.iter() {
             module.on_before_finalize(&mut self.tracker)?;
+        }
+        Ok(())
+    }
+
+    /// Settles the transaction into a result.
+    ///
+    /// The fee module charges twice here, and the order is the point of the split. It first charges
+    /// against the live state: those charges are what [`StateTracker::select_finalized_state`] tests
+    /// against the payments, so they decide whether the transaction commits or falls back to a
+    /// fee-intent commit. Once that is decided, it charges again against the state actually chosen,
+    /// which on a fee-intent commit holds only what the fee intent touched. A transaction is
+    /// therefore gated on the cost of the state it asked to commit, but pays for the state that is
+    /// really persisted.
+    fn finalize_with(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
+        self.invoke_modules_on_before_finalize()?;
+        let mut finalized = self.tracker.select_finalized_state(failure)?;
+        self.invoke_modules_on_before_persist(&mut finalized)?;
+        self.tracker.finalize(finalized)
+    }
+
+    fn invoke_modules_on_before_persist(&mut self, finalized: &mut FinalizedState<TStore>) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_before_persist(finalized.state_mut())?;
         }
         Ok(())
     }
@@ -3351,16 +3374,12 @@ where
 
     fn finalize(&mut self) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize")?;
-        // If the fee module is present, this will add substate storage fees
-        self.invoke_modules_on_before_finalize()?;
-        self.tracker.finalize(None)
+        self.finalize_with(None)
     }
 
     fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize_failure")?;
-        // If the fee module is present, this will add substate storage fees
-        self.invoke_modules_on_before_finalize()?;
-        self.tracker.finalize(Some(reason))
+        self.finalize_with(Some(reason))
     }
 
     fn validate_finalized(&self) -> Result<(), RuntimeError> {

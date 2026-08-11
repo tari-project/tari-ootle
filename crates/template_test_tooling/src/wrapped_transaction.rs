@@ -4,7 +4,7 @@
 use tari_engine::executables::{Executable, Instructions, WeightedExecutable};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::SubstateRequirement;
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 pub struct WrappedTransaction {
     transaction: tari_ootle_transaction::Transaction,
@@ -28,6 +28,14 @@ impl WrappedTransaction {
 impl Executable for WrappedTransaction {
     fn to_id(&self) -> tari_ootle_transaction::TransactionId {
         self.transaction.calculate_id()
+    }
+
+    fn calculate_intent_commitment(&self) -> Hash32 {
+        self.transaction.calculate_intent_commitment()
+    }
+
+    fn to_id_and_intent_commitment(&self) -> (tari_ootle_transaction::TransactionId, Hash32) {
+        self.transaction.to_id_and_intent_commitment()
     }
 
     fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_ {

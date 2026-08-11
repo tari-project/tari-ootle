@@ -142,6 +142,8 @@ impl borsh::BorshSerialize for TransactionReceiptHashMessage<'_> {
         BorshSerialize::serialize(&logs, writer)?;
         BorshSerialize::serialize(&self.receipt.fee_receipt, writer)?;
         BorshSerialize::serialize(&self.receipt.epoch, writer)?;
+        // Serialized in full: the commitment is already 32 bytes, so part-hashing it saves nothing.
+        BorshSerialize::serialize(&self.receipt.intent_commitment, writer)?;
         Ok(())
     }
 }

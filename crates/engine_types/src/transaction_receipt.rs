@@ -37,6 +37,18 @@ pub struct TransactionReceipt {
     pub fee_receipt: FeeReceipt,
     #[n(6)]
     pub epoch: Epoch,
+    /// Commitment to the transaction's intent: every field the signers authorized (network, fee
+    /// instructions, instructions, inputs, epoch bounds, flags and blob commitments), excluding the
+    /// signatures themselves.
+    ///
+    /// The receipt is already bound to the transaction transitively — it is addressed by the
+    /// transaction id — but reproducing that id requires the signatures and the seal signature, so
+    /// establishing the link that way reveals the signers. This commitment is over the same
+    /// projection minus the signatures, so whoever holds the transaction can link it to this
+    /// receipt without revealing who authorized it. It identifies the intent, not the signers:
+    /// transactions differing only in who signed them share a commitment.
+    #[n(7)]
+    pub intent_commitment: Hash32,
 }
 
 impl TransactionReceipt {
@@ -66,6 +78,10 @@ impl TransactionReceipt {
 
     pub fn epoch(&self) -> Epoch {
         self.epoch
+    }
+
+    pub fn intent_commitment(&self) -> Hash32 {
+        self.intent_commitment
     }
 }
 

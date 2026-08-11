@@ -95,6 +95,9 @@ const LOG_TARGET: &str = "dan::engine::runtime::working_state";
 #[derive(Debug, Clone)]
 pub(super) struct WorkingState<TStore> {
     transaction_hash: Hash32,
+    /// Commitment to the executing transaction's intent, recorded verbatim in the transaction
+    /// receipt.
+    intent_commitment: Hash32,
     events: Vec<Event>,
     logs: Vec<LogEntry>,
     buckets: HashMap<BucketId, Bucket>,
@@ -133,6 +136,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
         transaction_hash: Hash32,
+        intent_commitment: Hash32,
         burn_rate_bps: u16,
         dry_run: bool,
     ) -> Self {
@@ -141,6 +145,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         fee_state.set_dry_run(dry_run);
         Self {
             transaction_hash,
+            intent_commitment,
             events: Vec::new(),
             logs: Vec::new(),
             buckets: HashMap::new(),
@@ -1172,6 +1177,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             logs: self.logs.clone().into_boxed_slice(),
             fee_receipt,
             epoch,
+            intent_commitment: self.intent_commitment,
         })
     }
 

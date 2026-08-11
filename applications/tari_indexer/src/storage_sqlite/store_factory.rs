@@ -357,6 +357,7 @@ mod tests {
             logs: [].into(),
             fee_receipt: FeeReceiptBuilder::default().with_total_fees_paid(123).build(),
             epoch: Epoch(1),
+            intent_commitment: Default::default(),
         };
         store
             .with_write_tx(move |tx| {

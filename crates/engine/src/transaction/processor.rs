@@ -139,7 +139,7 @@ where
 
     #[expect(clippy::too_many_lines)]
     pub fn execute<E: Executable + WeightedExecutable>(self, executable: E) -> Result<ExecuteResult, TransactionError> {
-        let id = executable.to_id();
+        let (id, intent_commitment) = executable.to_id_and_intent_commitment();
         let timer = Instant::now();
         let entity_id_provider = EntityIdProvider::new(id.as_hash(), 1000);
         let Self {
@@ -177,6 +177,7 @@ where
             virtual_substates,
             initial_call_scope,
             id.as_hash(),
+            intent_commitment,
             transaction_weight,
             wasm_metering_rate,
             burn_rate_bps,

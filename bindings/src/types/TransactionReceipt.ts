@@ -4,6 +4,7 @@ import type { Epoch } from "./Epoch";
 import type { Event } from "./Event";
 import type { FeeReceipt } from "./FeeReceipt";
 import type { FinalizeOutcome } from "./FinalizeOutcome";
+import type { Hash32 } from "./Hash32";
 import type { LogEntry } from "./LogEntry";
 import type { ValidatorFeeWithdrawal } from "./ValidatorFeeWithdrawal";
 
@@ -15,4 +16,5 @@ export type TransactionReceipt = {
   logs: Array<LogEntry>;
   fee_receipt: FeeReceipt;
   epoch: Epoch;
+  intent_commitment: Hash32;
 };

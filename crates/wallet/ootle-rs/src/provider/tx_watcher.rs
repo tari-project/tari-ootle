@@ -22,7 +22,7 @@ use tari_indexer_client::{
 use tari_ootle_common_types::{
     engine_types::{
         commit_result::{ExecuteResult, TransactionResult},
-        transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
+        transaction_receipt::{FinalizeOutcome, TransactionReceipt},
     },
     optional::Optional,
 };
@@ -431,38 +431,12 @@ impl PendingTransaction {
                     //
                     // TODO: improvements to the indexer may be needed to fully resolve this.
                     tracing::warn!("Transaction committed but receipt not found for tx_id: {}", self.tx_id);
-                    let execute_epoch = execution_result
+                    // The accept diff carries the receipt substate.
+                    return execution_result
                         .as_ref()
-                        .and_then(|res| res.execute_epoch)
-                        .unwrap_or_default();
-                    return Ok(TransactionReceipt {
-                        outcome: FinalizeOutcome::Commit,
-                        diff_summary: execution_result
-                            .as_ref()
-                            .and_then(|res| res.finalize.any_accept())
-                            .map(|diff| DiffSummary::from_diff(diff, execute_epoch))
-                            .unwrap_or_default(),
-                        fee_withdrawals: execution_result
-                            .as_ref()
-                            .and_then(|res| res.finalize.any_accept())
-                            .map(|diff| diff.validator_fee_withdrawals().to_vec().into_boxed_slice())
-                            .unwrap_or_default(),
-                        events: execution_result
-                            .as_ref()
-                            .map(|res| res.finalize.events.clone().into_boxed_slice())
-                            .unwrap_or_default(),
-                        logs: execution_result
-                            .as_ref()
-                            .map(|res| res.finalize.logs.clone().into_boxed_slice())
-                            .unwrap_or_default(),
-                        fee_receipt: execution_result
-                            .as_ref()
-                            .map(|res| res.finalize.fee_receipt.clone())
-                            .unwrap_or_default(),
-                        epoch: execute_epoch,
-                    });
-
-                    // return Err(PendingTransactionError::ReceiptNotFound { tx_id: self.tx_id });
+                        .and_then(|res| res.finalize.get_transaction_receipt())
+                        .cloned()
+                        .ok_or_else(|| PendingTransactionError::ReceiptNotFound { tx_id: self.tx_id });
                 }
             },
         }

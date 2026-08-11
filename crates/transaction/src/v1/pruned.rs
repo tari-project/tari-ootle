@@ -4,7 +4,8 @@
 //! Pruned, archive-only transaction types that retain blob commitments but drop blob payloads.
 //!
 //! Invariants:
-//!  * A `PrunedTransactionV1` derived from a `TransactionV1` produces the same `TransactionId`.
+//!  * A `PrunedTransactionV1` derived from a `TransactionV1` produces the same `TransactionId` and the same intent
+//!    commitment.
 //!  * Signature verification on a pruned form succeeds iff it would have succeeded on the full form.
 //!  * There is no public path that lets a caller fabricate a `BlobHashes` — they are obtained only via
 //!    `Blobs::hashes()` (i.e. by deriving from real blobs) or via deserialization of a pruned form previously written
@@ -13,19 +14,20 @@
 use indexmap::IndexSet;
 use log::*;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     BlobHashes,
     Blobs,
     Instruction,
     TransactionId,
+    TransactionIntent,
     TransactionSealSignature,
     TransactionSignature,
     TransactionV1,
     UnsealedTransactionV1,
     UnsignedTransactionV1,
-    v1::signature::TransactionSignatureFields,
+    v1::{intent::calculate_intent_commitment_v1, signature::TransactionSignatureFields},
 };
 
 const LOG_TARGET: &str = "tari::ootle::transaction::pruned";
@@ -199,6 +201,17 @@ pub struct PrunedTransactionV1 {
     body: PrunedUnsealedTransactionV1,
     #[n(1)]
     seal_signature: TransactionSealSignature,
+}
+
+impl TransactionIntent for PrunedTransactionV1 {
+    /// Identical to the full form's commitment.
+    fn calculate_intent_commitment(&self) -> Hash32 {
+        calculate_intent_commitment_v1(
+            self.schema_version(),
+            &TransactionSignatureFields::from(&self.body.transaction),
+            self.blob_hashes(),
+        )
+    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]

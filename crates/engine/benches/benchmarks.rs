@@ -18,7 +18,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight, call_args};
-use tari_template_lib::types::{constants::XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::{Hash32, constants::XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, crypto::RistrettoPublicKeyBytes};
 use tari_template_test_tooling::{Package, mocks::AlwaysPassesProofVerifier};
 
 use crate::common::{FAUCET_COMPONENT_ADDRESS, FAUCET_VAULT_ID, setup_store};
@@ -30,6 +30,10 @@ pub struct CreateAndFundAccountExecutable;
 impl Executable for CreateAndFundAccountExecutable {
     fn to_id(&self) -> TransactionId {
         TransactionId::default()
+    }
+
+    fn calculate_intent_commitment(&self) -> Hash32 {
+        Hash32::default()
     }
 
     fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_ {

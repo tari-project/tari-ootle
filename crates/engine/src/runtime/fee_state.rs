@@ -93,6 +93,12 @@ impl FeeState {
         self.fee_charges.add(source, amount)
     }
 
+    /// Replaces the charge for `source`. Used by the fee module to recompute the finalization
+    /// charges once the state that will actually be persisted is known.
+    pub fn set_charge(&mut self, source: FeeSource, amount: u64) {
+        self.fee_charges.set(source, amount)
+    }
+
     pub fn accumulate_wasm_points(&mut self, points: u64) {
         self.accumulated_wasm_points = self.accumulated_wasm_points.saturating_add(points);
     }

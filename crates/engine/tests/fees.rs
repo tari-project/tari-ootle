@@ -196,6 +196,46 @@ fn failed_fee_transaction() {
     assert_eq!(new_balance, initial_balance);
 }
 
+/// Runs a transaction that creates several components, paying `fee` towards it, and returns the
+/// storage fee it was charged along with whether the main intent committed.
+fn storage_charged_for_creating_components(fee: u64) -> (u64, bool) {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    test.enable_fees();
+
+    let state_template = test.get_template_address("State");
+    let mut builder = Transaction::builder_localnet().pay_fee_from_component(account, Amount::from(fee));
+    for _ in 0..5 {
+        builder = builder.call_function(state_template, "new", args![]);
+    }
+
+    let result = test.execute_expect_commit(builder.build_and_seal(&private_key), vec![owner_token]);
+    let committed = result.finalize.result.is_accept();
+    (
+        result.finalize.fee_receipt.fee_breakdown().get(FeeSource::Storage),
+        committed,
+    )
+}
+
+/// A transaction that cannot pay for its main intent commits only its fee intent, so the storage it
+/// is charged for is the fee checkpoint's — not that of the state it built and abandoned.
+#[test]
+fn a_fee_intent_commit_is_not_charged_for_the_state_it_abandons() {
+    let (storage_rejected, committed) = storage_charged_for_creating_components(100);
+    assert!(!committed, "expected the main intent to be rejected");
+
+    let (storage_committed, committed) = storage_charged_for_creating_components(100_000);
+    assert!(committed, "expected the main intent to commit");
+
+    // The components only exist in the committed run, so only it pays for them. Charging the
+    // rejected run over the live state instead of the checkpoint would put the two within a few
+    // bytes of each other.
+    assert!(
+        storage_rejected * 2 < storage_committed,
+        "rejected run charged {storage_rejected} storage against the committed run's {storage_committed}"
+    );
+}
+
 #[test]
 fn fail_partial_paid_fees() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);

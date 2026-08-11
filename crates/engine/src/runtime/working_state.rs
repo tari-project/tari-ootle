@@ -94,7 +94,7 @@ use crate::{
 const LOG_TARGET: &str = "dan::engine::runtime::working_state";
 
 #[derive(Debug, Clone)]
-pub(super) struct WorkingState<TStore> {
+pub(crate) struct WorkingState<TStore> {
     transaction_hash: Hash32,
     /// Commitment to the executing transaction's intent, recorded verbatim in the transaction
     /// receipt.
@@ -1314,6 +1314,20 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn set_last_instruction_output(&mut self, output: IndexedValue) {
         self.last_instruction_output = Some(output);
+    }
+
+    /// Counts substates in the to-persist set that did not previously exist in the state store.
+    /// Used by the fee module to charge a slot-allocation premium on top of per-byte storage.
+    pub fn count_newly_created_substates(&self) -> Result<usize, RuntimeError> {
+        let mut count = 0;
+        for id in self.store.mutated_substates().keys() {
+            match self.store.get_unmodified_substate(id) {
+                Ok(_) => {},
+                Err(RuntimeError::SubstateNotFound { .. }) => count += 1,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(count)
     }
 
     /// The storage footprint of the transaction receipt this state will finalize into.

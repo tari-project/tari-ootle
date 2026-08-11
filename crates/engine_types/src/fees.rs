@@ -274,6 +274,23 @@ impl FeeBreakdown {
         }
     }
 
+    /// Replaces whatever `source` has been charged so far.
+    ///
+    /// Charges accrued during execution accumulate with [`Self::add`], but the charges computed at
+    /// finalization are absolute functions of the state being persisted. They are recomputed once
+    /// that state is known, so they must be assignable rather than additive.
+    pub fn set(&mut self, source: FeeSource, amount: u64) {
+        match self.breakdown.entry(source) {
+            Entry::Occupied(entry) => {
+                *entry.into_mut() = amount;
+            },
+            Entry::Vacant(entry) => {
+                entry.insert(amount);
+                self.breakdown.sort_keys();
+            },
+        }
+    }
+
     /// Returns an iterator over the fee breakdown in a canonical order.
     pub fn iter(&self) -> impl Iterator<Item = (&FeeSource, &u64)> {
         self.breakdown.iter()

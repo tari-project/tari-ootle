@@ -20,7 +20,6 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use indexmap::IndexMap;
 use log::*;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
@@ -63,6 +62,25 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::state_tracker";
+
+/// The state finalization will persist, detached from the tracker and awaiting fee settlement.
+#[derive(Debug)]
+pub struct FinalizedState<TStore> {
+    state: WorkingState<TStore>,
+    outcome: FinalizeOutcome,
+    /// Why the main intent was rejected, when this is a fee-intent commit.
+    reason: Option<RejectReason>,
+}
+
+impl<TStore> FinalizedState<TStore> {
+    pub fn state_mut(&mut self) -> &mut WorkingState<TStore> {
+        &mut self.state
+    }
+
+    pub fn outcome(&self) -> FinalizeOutcome {
+        self.outcome
+    }
+}
 
 #[derive(Debug)]
 pub struct StateTracker<TStore> {
@@ -349,7 +367,19 @@ impl<TStore: StateReader> StateTracker<TStore> {
         Ok(())
     }
 
-    pub fn finalize(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
+    /// Chooses the state that finalization will persist.
+    ///
+    /// A transaction that failed — either explicitly, or by not covering the fees charged against
+    /// the live state — commits only its fee intent, so the state to persist is the fee checkpoint
+    /// rather than the state execution ended on. The live fee state carries over either way, so the
+    /// work done before the failure is still charged for.
+    ///
+    /// Split out from [`Self::finalize`] so the runtime can run its modules against the chosen state
+    /// before its fees are settled.
+    pub fn select_finalized_state(
+        &mut self,
+        failure: Option<RejectReason>,
+    ) -> Result<FinalizedState<TStore>, RuntimeError> {
         let failure = failure.or_else(|| {
             self.read_with(|state| {
                 let fee_state = state.fee_state();
@@ -365,73 +395,67 @@ impl<TStore: StateReader> StateTracker<TStore> {
             })
         });
 
-        if let Some(reason) = failure {
-            let mut checkpoint_state = self.take_fee_checkpoint().ok_or(RuntimeError::NoFeeCheckpoint)?;
-            // Preserve fee state across resets so that we can charge for fees incurred during execution before the
-            // failure
-            self.read_with(|state| {
-                // Fee state in `state` includes the payments and charges from the fee transaction
-                *checkpoint_state.fee_state_mut() = state.fee_state().clone();
+        let Some(reason) = failure else {
+            // Finalise will always reset the state
+            return Ok(FinalizedState {
+                state: self.take_working_state()?,
+                outcome: FinalizeOutcome::Commit,
+                reason: None,
             });
-            let mut substates_to_persist = checkpoint_state.take_mutated_substates();
-            // Process fees and refunds based on the fee checkpoint state
-            let fee_receipt = checkpoint_state.finalize_fees_and_refunds(&mut substates_to_persist)?;
+        };
 
-            let downed_utxos = checkpoint_state.take_downed_utxos();
-            let downed_confidential_outputs = checkpoint_state.take_downed_confidential_outputs();
-            let fee_withdrawals = checkpoint_state.take_validator_fee_withdrawals();
+        let mut checkpoint_state = self.take_fee_checkpoint().ok_or(RuntimeError::NoFeeCheckpoint)?;
+        // Preserve fee state across resets so that we can charge for fees incurred during execution before the
+        // failure
+        self.read_with(|state| {
+            // Fee state in `state` includes the payments and charges from the fee transaction
+            *checkpoint_state.fee_state_mut() = state.fee_state().clone();
+        });
 
-            let mut diff = checkpoint_state.generate_substate_diff(
-                substates_to_persist,
-                downed_utxos,
-                downed_confidential_outputs,
-                fee_withdrawals,
-            )?;
-            let transaction_receipt = checkpoint_state.finalize_transaction_receipt(
-                FinalizeOutcome::FeeIntentCommit,
-                &diff,
-                fee_receipt.clone(),
-            )?;
-            diff.up(
-                SubstateId::TransactionReceipt(checkpoint_state.transaction_hash().into()),
-                Substate::new(0, transaction_receipt),
-            );
+        Ok(FinalizedState {
+            state: checkpoint_state,
+            outcome: FinalizeOutcome::FeeIntentCommit,
+            reason: Some(reason),
+        })
+    }
 
-            return Ok(FinalizeResult::new(
-                checkpoint_state.transaction_hash(),
-                checkpoint_state.take_logs(),
-                checkpoint_state.take_events(),
-                TransactionResult::AcceptFeeRejectRest(diff, reason),
-                fee_receipt,
-            ));
-        }
+    pub fn finalize(&mut self, finalized: FinalizedState<TStore>) -> Result<FinalizeResult, RuntimeError> {
+        let FinalizedState {
+            mut state,
+            outcome,
+            reason,
+        } = finalized;
 
-        // Finalise will always reset the state
-        let mut state = self.take_working_state()?;
         // Resolve the transfers to the fee pool resource and vault refunds
         let mut substates_to_persist = state.take_mutated_substates();
         let fee_receipt = state.finalize_fees_and_refunds(&mut substates_to_persist)?;
+
         let downed_utxos = state.take_downed_utxos();
         let downed_confidential_outputs = state.take_downed_confidential_outputs();
         let fee_withdrawals = state.take_validator_fee_withdrawals();
+
         let mut diff = state.generate_substate_diff(
             substates_to_persist,
             downed_utxos,
             downed_confidential_outputs,
             fee_withdrawals,
         )?;
-        let transaction_receipt =
-            state.finalize_transaction_receipt(FinalizeOutcome::Commit, &diff, fee_receipt.clone())?;
+        let transaction_receipt = state.finalize_transaction_receipt(outcome, &diff, fee_receipt.clone())?;
         diff.up(
             SubstateId::TransactionReceipt(state.transaction_hash().into()),
             Substate::new(0, transaction_receipt),
         );
 
+        let result = match reason {
+            Some(reason) => TransactionResult::AcceptFeeRejectRest(diff, reason),
+            None => TransactionResult::Accept(diff),
+        };
+
         Ok(FinalizeResult::new(
             state.transaction_hash(),
             state.take_logs(),
             state.take_events(),
-            TransactionResult::Accept(diff),
+            result,
             fee_receipt,
         ))
     }
@@ -447,31 +471,12 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    pub fn with_substates_to_persist<F: FnMut(&IndexMap<SubstateId, SubstateValue>) -> R, R>(&mut self, mut f: F) -> R {
-        self.write_with(|state| f(state.mutated_substates()))
-    }
-
-    /// The storage footprint of the transaction receipt, which finalization persists in addition to
-    /// the substates seen by [`Self::with_substates_to_persist`].
-    pub fn transaction_receipt_size(&mut self) -> Result<usize, RuntimeError> {
-        self.write_with(|state| state.transaction_receipt_size())
-    }
-
-    /// Counts substates in the to-persist set that did not previously exist in the state store.
-    /// Used by the fee module to charge a slot-allocation premium on top of per-byte storage.
-    pub fn count_newly_created_substates(&self) -> Result<usize, RuntimeError> {
-        self.read_with(|state| {
-            let store = state.store();
-            let mut count = 0;
-            for id in store.mutated_substates().keys() {
-                match store.get_unmodified_substate(id) {
-                    Ok(_) => {},
-                    Err(RuntimeError::SubstateNotFound { .. }) => count += 1,
-                    Err(e) => return Err(e),
-                }
-            }
-            Ok(count)
-        })
+    /// Runs `f` against the live working state.
+    ///
+    /// The fee module uses this to compute its finalization charges before the state to persist has
+    /// been chosen; once it has been, the same computation runs against that state directly.
+    pub fn with_working_state_mut<R>(&mut self, f: impl FnOnce(&mut WorkingState<TStore>) -> R) -> R {
+        self.write_with(f)
     }
 
     pub fn are_fees_paid_in_full(&self) -> bool {

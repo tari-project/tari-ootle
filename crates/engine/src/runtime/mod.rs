@@ -50,7 +50,7 @@ mod spend_script_execution;
 mod state_store;
 mod tracker_auth;
 mod validation;
-mod working_state;
+pub(crate) mod working_state;
 mod workspace;
 
 use std::{fmt::Debug, ptr::NonNull};
@@ -109,7 +109,7 @@ use tari_template_lib::{
         stealth::StealthTransferStatement,
     },
 };
-pub use tracker::StateTracker;
+pub use tracker::{FinalizedState, StateTracker};
 
 use crate::runtime::{locking::LockedSubstate, scope::PushCallFrame};
 

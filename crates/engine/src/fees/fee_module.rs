@@ -7,7 +7,7 @@ use tari_template_lib::types::TemplateAddress;
 
 use super::FeeTable;
 use crate::{
-    runtime::{RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker},
+    runtime::{RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker, working_state::WorkingState},
     state_store::StateReader,
 };
 
@@ -45,6 +45,113 @@ impl FeeModule {
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating template publish premium".to_string()))?;
 
         Ok((base_bytes, charge))
+    }
+
+    /// Charges everything that is a function of the state being persisted, rather than of the work
+    /// done to produce it: storage, the template-publish premium, substate slots, the metering of
+    /// WASM and native execution, and the exhaust burn over the resulting total.
+    ///
+    /// Every charge here is *assigned*, not accumulated, so that running this again against a
+    /// different state replaces the result rather than doubling it. That is what lets a transaction
+    /// be gated on the cost of the state it asked to commit and then billed for the state that is
+    /// actually persisted — see [`RuntimeModule::on_before_persist`].
+    fn charge_finalization_fees<TStore: StateReader>(
+        &self,
+        state: &mut WorkingState<TStore>,
+    ) -> Result<(), RuntimeModuleError> {
+        let mut counter = ByteCounter::new();
+        let mut template_base_bytes = 0u64;
+        let mut template_charge = 0u64;
+        for substate in state.mutated_substates().values() {
+            // A published template's binary is priced by the dedicated base + quadratic publish
+            // model, so keep it out of the flat per-byte storage tally. Accumulate the raw
+            // metrics here and apply the storage divisor once below.
+            if let SubstateValue::Template(template) = substate {
+                let (tpl_base_bytes, tpl_charge) = self.template_publish_metrics(template.binary.len())?;
+                template_base_bytes = template_base_bytes.checked_add(tpl_base_bytes).ok_or_else(|| {
+                    RuntimeModuleError::Overflow("Overflow accumulating template base bytes".to_string())
+                })?;
+                template_charge = template_charge.checked_add(tpl_charge).ok_or_else(|| {
+                    RuntimeModuleError::Overflow("Overflow accumulating template publish premium".to_string())
+                })?;
+                continue;
+            }
+            encode_into_writer(substate, &mut counter)?;
+        }
+
+        // Finalization persists the transaction receipt on top of the mutated substates. It carries
+        // the transaction's events, so leaving it out of the tally would make that payload — the
+        // largest caller-controlled contribution to permanent state after the substates themselves —
+        // free.
+        let receipt_bytes = state
+            .transaction_receipt_size()
+            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?;
+        let total_storage = counter
+            .get()
+            .checked_add(receipt_bytes)
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow accumulating storage bytes".to_string()))?;
+
+        let cost = self
+            .fee_table
+            .per_byte_storage_cost()
+            .checked_mul(total_storage as u64)
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating storage cost".to_string()))?;
+        let storage_cost = cost / self.fee_table.storage_cost_divisor();
+
+        let template_base_cost = self
+            .fee_table
+            .per_byte_storage_cost()
+            .checked_mul(template_base_bytes)
+            .ok_or_else(|| {
+                RuntimeModuleError::Overflow("Overflow calculating template base storage cost".to_string())
+            })? /
+            self.fee_table.storage_cost_divisor();
+        let template_publish_cost = template_base_cost
+            .checked_add(template_charge)
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating template publish cost".to_string()))?;
+
+        // The receipt occupies a slot of its own — it is always newly created, since it is addressed
+        // by a transaction id that can only be finalized once.
+        let new_substate_count = state
+            .count_newly_created_substates()
+            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?
+            .saturating_add(1);
+        let create_cost = (new_substate_count as u64)
+            .checked_mul(self.fee_table.per_substate_create_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating substate create cost".to_string()))?;
+
+        // WASM execution: charge once against the transaction's accumulated points so the divisor
+        // rounds against the total. Per-call rounding would let a transaction split work into
+        // sub-divisor chunks and pay zero for any single one (each `points/divisor` is `0`), even
+        // though the summed work is non-trivial.
+        let units = state.fee_state().accumulated_wasm_points() / self.fee_table.wasm_points_cost_divisor();
+        let wasm_cost = units
+            .checked_mul(self.fee_table.per_wasm_point_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating WASM execution cost".to_string()))?;
+
+        // Native verification is priced in the same points and charged at the same rate, under its
+        // own source so the breakdown distinguishes crypto verification from template execution.
+        let native_units = state.fee_state().accumulated_native_points() / self.fee_table.wasm_points_cost_divisor();
+        let native_cost = native_units
+            .checked_mul(self.fee_table.per_wasm_point_cost())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating native execution cost".to_string()))?;
+
+        let fee_state = state.fee_state_mut();
+        fee_state.set_charge(FeeSource::Storage, storage_cost);
+        fee_state.set_charge(FeeSource::TemplatePublish, template_publish_cost);
+        fee_state.set_charge(FeeSource::SubstateCreate, create_cost);
+        fee_state.set_charge(FeeSource::WasmExecution, wasm_cost);
+        fee_state.set_charge(FeeSource::NativeExecution, native_cost);
+
+        // Exhaust burn: charged on top of the execution fee accrued so far, so leaders receive the execution fee in
+        // full and the burn amount is destroyed separately. The rate is seeded onto the fee state at execution time
+        // for the execution epoch. Zeroed first so that the total it is taken over never includes a burn from an
+        // earlier pass over a different state.
+        fee_state.set_charge(FeeSource::ExhaustBurn, 0);
+        let burn = calculate_burn_amount(fee_state.total_charges(), fee_state.burn_rate_bps())?;
+        fee_state.set_charge(FeeSource::ExhaustBurn, burn);
+
+        Ok(())
     }
 
     #[cfg(test)]
@@ -110,98 +217,11 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
     }
 
     fn on_before_finalize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
-        let (total_storage, template_base_bytes, template_charge) = track.with_substates_to_persist(|changes| {
-            let mut counter = ByteCounter::new();
-            let mut base_bytes = 0u64;
-            let mut charge = 0u64;
-            for substate in changes.values() {
-                // A published template's binary is priced by the dedicated base + quadratic publish
-                // model, so keep it out of the flat per-byte storage tally. Accumulate the raw
-                // metrics here and apply the storage divisor once below.
-                if let SubstateValue::Template(template) = substate {
-                    let (tpl_base_bytes, tpl_charge) = self.template_publish_metrics(template.binary.len())?;
-                    base_bytes = base_bytes.checked_add(tpl_base_bytes).ok_or_else(|| {
-                        RuntimeModuleError::Overflow("Overflow accumulating template base bytes".to_string())
-                    })?;
-                    charge = charge.checked_add(tpl_charge).ok_or_else(|| {
-                        RuntimeModuleError::Overflow("Overflow accumulating template publish premium".to_string())
-                    })?;
-                    continue;
-                }
-                encode_into_writer(substate, &mut counter)?;
-            }
-            Ok::<_, RuntimeModuleError>((counter.get(), base_bytes, charge))
-        })?;
+        track.with_working_state_mut(|state| self.charge_finalization_fees(state))
+    }
 
-        // Finalization persists the transaction receipt on top of the mutated substates. It carries
-        // the transaction's events, so leaving it out of the tally would make that payload — the
-        // largest caller-controlled contribution to permanent state after the substates themselves —
-        // free.
-        let receipt_bytes = track
-            .transaction_receipt_size()
-            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?;
-        let total_storage = total_storage
-            .checked_add(receipt_bytes)
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow accumulating storage bytes".to_string()))?;
-
-        let cost = self
-            .fee_table
-            .per_byte_storage_cost()
-            .checked_mul(total_storage as u64)
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating storage cost".to_string()))?;
-        track.add_fee_charge(FeeSource::Storage, cost / self.fee_table.storage_cost_divisor());
-
-        let template_base_cost = self
-            .fee_table
-            .per_byte_storage_cost()
-            .checked_mul(template_base_bytes)
-            .ok_or_else(|| {
-                RuntimeModuleError::Overflow("Overflow calculating template base storage cost".to_string())
-            })? /
-            self.fee_table.storage_cost_divisor();
-        let template_publish_cost = template_base_cost
-            .checked_add(template_charge)
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating template publish cost".to_string()))?;
-        if template_publish_cost > 0 {
-            track.add_fee_charge(FeeSource::TemplatePublish, template_publish_cost);
-        }
-
-        // The receipt occupies a slot of its own — it is always newly created, since it is addressed
-        // by a transaction id that can only be finalized once.
-        let new_substate_count = track
-            .count_newly_created_substates()
-            .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?
-            .saturating_add(1);
-        let create_cost = (new_substate_count as u64)
-            .checked_mul(self.fee_table.per_substate_create_cost())
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating substate create cost".to_string()))?;
-        track.add_fee_charge(FeeSource::SubstateCreate, create_cost);
-
-        // WASM execution: charge once against the transaction's accumulated points so the divisor
-        // rounds against the total. Per-call rounding would let a transaction split work into
-        // sub-divisor chunks and pay zero for any single one (each `points/divisor` is `0`), even
-        // though the summed work is non-trivial.
-        let units = track.accumulated_wasm_points() / self.fee_table.wasm_points_cost_divisor();
-        let wasm_cost = units
-            .checked_mul(self.fee_table.per_wasm_point_cost())
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating WASM execution cost".to_string()))?;
-        track.add_fee_charge(FeeSource::WasmExecution, wasm_cost);
-
-        // Native verification is priced in the same points and charged at the same rate, under its
-        // own source so the breakdown distinguishes crypto verification from template execution.
-        let native_units = track.accumulated_native_points() / self.fee_table.wasm_points_cost_divisor();
-        let native_cost = native_units
-            .checked_mul(self.fee_table.per_wasm_point_cost())
-            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating native execution cost".to_string()))?;
-        track.add_fee_charge(FeeSource::NativeExecution, native_cost);
-
-        // Exhaust burn: charged on top of the execution fee accrued so far, so leaders receive the execution fee in
-        // full and the burn amount is destroyed separately. The rate is seeded onto the fee state at execution time
-        // for the execution epoch.
-        let burn = calculate_burn_amount(track.total_fee_charges(), track.fee_burn_rate_bps())?;
-        track.add_fee_charge(FeeSource::ExhaustBurn, burn);
-
-        Ok(())
+    fn on_before_persist(&self, state: &mut WorkingState<TStore>) -> Result<(), RuntimeModuleError> {
+        self.charge_finalization_fees(state)
     }
 
     fn on_runtime_event(

@@ -86,7 +86,7 @@ fn deposit_from_faucet_then_pay() {
                 builder
                     // Faucet deposits free coins into the account
                     .call_method(xtr_faucet_component(), "take", args![account])
-                    .call_method(account, "pay_fee", args![1000])
+                    .call_method(account, "pay_fee", args![3000])
             })
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
@@ -124,7 +124,7 @@ fn another_account_pays_partially_for_fees() {
             // Faucet pays a little
             .pay_fee_from_component(account_fee, Amount::from(FAUCET_CAP))
             // Account pays the rest
-            .pay_fee_from_component(account_fee2, Amount::from(1000u64))
+            .pay_fee_from_component(account_fee2, Amount::from(3000u64))
             .call_method(xtr_faucet_component(), "take", args![account])
             // NOTE: the test harness provides the virtual proofs as provided, so the transaction signer does not matter
             .build_and_seal(test.secret_key()),
@@ -228,11 +228,14 @@ fn fail_partial_paid_fees() {
     );
 
     let total_fees = result.finalize.fee_receipt.fee_breakdown().get_total();
-    // The fee charged exceeds the fee paid (so the transaction is rejected), but should not be far above it
-    // since execution stops as soon as fees are determined insufficient.
+    // The fee charged exceeds the fee paid, so the transaction is rejected. Execution stops as soon
+    // as the fees are determined insufficient, so the *execution* charges stay close to what was
+    // paid. Storage is excluded: it is charged at finalization for the substates and the receipt
+    // that a fee-intent commit still persists, whenever execution gave up.
+    let storage = result.finalize.fee_receipt.fee_breakdown().get(FeeSource::Storage);
     assert!(
-        total_fees > FEE_PAID && total_fees < FEE_PAID * 3,
-        "total fees: {total_fees}"
+        total_fees > FEE_PAID && total_fees - storage < FEE_PAID * 3,
+        "total fees: {total_fees}, of which storage: {storage}"
     );
     let reason = result.expect_failure();
     assert!(

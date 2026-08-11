@@ -138,8 +138,6 @@ impl borsh::BorshSerialize for TransactionReceiptHashMessage<'_> {
         BorshSerialize::serialize(&self.receipt.fee_withdrawals, writer)?;
         let events = hash(&self.receipt.events);
         BorshSerialize::serialize(&events, writer)?;
-        let logs = hash(&self.receipt.logs);
-        BorshSerialize::serialize(&logs, writer)?;
         BorshSerialize::serialize(&self.receipt.fee_receipt, writer)?;
         BorshSerialize::serialize(&self.receipt.epoch, writer)?;
         // Serialized in full: the commitment is already 32 bytes, so part-hashing it saves nothing.

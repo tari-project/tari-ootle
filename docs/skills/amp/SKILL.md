@@ -1,21 +1,19 @@
 ---
 name: amp
-description: Tari Ootle development instructions for Amp
+description: "Scaffold, build, test, and deploy Tari Ootle templates (Rust → WASM smart contracts) on Tari L2. Covers template authoring with #[template] macros, ResourceBuilder for fungible/NFT assets, Vault/Bucket lifecycle, transaction manifests, cross-component calls, access rules, client-side transaction building with ootle-rs, and local testing with tari_template_test_tooling. Use when developing, debugging, or deploying Tari Ootle templates and components."
 ---
-
-Use these instructions when building Tari Ootle templates (WASM smart contracts) and client applications. This document covers accurate APIs and patterns from the codebase.
 
 ## Overview
 
-Tari Ootle is a decentralized application platform built on the Tari Layer 2 network. You build **templates** (smart contracts) in Rust, compile them to WASM (`wasm32-unknown-unknown`), publish them to the network, and interact with deployed **components** (instances of templates) via transactions.
+Tari Ootle is a decentralized application platform on Tari Layer 2. Build **templates** (smart contracts) in Rust, compile to WASM (`wasm32-unknown-unknown`), publish to the network, and interact with deployed **components** via transactions.
 
 **Key concepts:**
-- **Template** — A Rust module annotated with `#[template]` that defines the logic and state structure. Compiled to WASM and deployed to the network.
-- **Component** — A live instance of a template on-chain. Holds state (struct fields) and exposes public methods.
-- **Resource** — A native digital asset (fungible token or non-fungible NFT). Created with `ResourceBuilder`. Cannot be copied or accidentally destroyed.
-- **Vault** — An on-chain container that holds exactly one type of resource. Must be stored in a component before the function returns.
-- **Bucket** — A temporary container for resources during a transaction. Used to move assets between vaults or to/from method calls.
-- **Transaction** — A set of instructions (CallFunction, CallMethod, etc.) that are signed, submitted, and executed atomically.
+- **Template** — Rust module annotated with `#[template]`; defines logic and state. Compiled to WASM and deployed.
+- **Component** — Live instance of a template on-chain. Holds state and exposes public methods.
+- **Resource** — Native digital asset (fungible token or NFT). Created with `ResourceBuilder`.
+- **Vault** — On-chain container for exactly one resource type. Must be stored in a component before the function returns.
+- **Bucket** — Temporary container for resources during a transaction. Moves assets between vaults or method calls.
+- **Transaction** — Set of instructions (CallFunction, CallMethod, etc.) signed, submitted, and executed atomically.
 
 **Crate ecosystem:**
 
@@ -303,8 +301,8 @@ pub fn do_something(&mut self, value: u64) {
 ## Resources
 
 There are 4 resource types:
-- **Public Fungible** — Interchangeable tokens (like ERC-20), amounts visible on-chain
-- **Public Non-Fungible** — Unique tokens (like ERC-721), metadata visible on-chain
+- **Public Fungible** — Interchangeable tokens, amounts visible on-chain
+- **Public Non-Fungible** — Unique tokens, metadata visible on-chain
 - **Confidential** — Fungible tokens with hidden amounts (Pedersen commitments)
 - **Stealth** — Confidential UTXOs with hidden owners (TARI/tTARI is a stealth resource)
 

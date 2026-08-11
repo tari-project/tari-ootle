@@ -7,7 +7,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::stealth;
+use tari_engine_types::{crypto::messages, stealth};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_wallet_crypto::{
     MaskAndValue,
@@ -17,7 +17,21 @@ use tari_ootle_wallet_crypto::{
     confidential,
     stealth::create_transfer_statement,
 };
-use tari_template_lib_types::{Amount, EncryptedData, crypto::UtxoTag, stealth::SpendAuthorization};
+use tari_template_lib_types::{
+    Amount,
+    EncryptedData,
+    access_rules::AccessRule,
+    bytes::Bytes,
+    crypto::UtxoTag,
+    stealth::{
+        AtomicCondition,
+        MerkleProof,
+        SpendAuthorization,
+        SpendCondition,
+        SpendWitness,
+        StealthTransferStatement,
+    },
+};
 
 #[test]
 fn it_create_a_valid_revealed_only_proof() {
@@ -107,6 +121,119 @@ mod stealth_tests {
         )
         .unwrap();
         stealth::validate_transfer(&statement, None).unwrap_err(); // Invalid, output is less than input
+    }
+
+    /// The balance proof's challenge covers the output authorisation, so an intercepted statement cannot be
+    /// re-targeted at another spend key: `auth` does not enter the excess, and the commitments are untouched.
+    #[test]
+    fn balance_proof_binds_output_auth() {
+        let mut statement = valid_statement();
+        let (_, attacker_pk) = create_key_pair_from_seed(99);
+        statement.outputs_statement.outputs[0].auth = SpendAuthorization::Key(attacker_pk.to_byte_type());
+
+        stealth::validate_transfer(&statement, None).unwrap_err();
+    }
+
+    #[test]
+    fn balance_proof_binds_output_tag() {
+        let mut statement = valid_statement();
+        statement.outputs_statement.outputs[0].tag = UtxoTag::new(7);
+
+        stealth::validate_transfer(&statement, None).unwrap_err();
+    }
+
+    /// Rewriting the sender nonce leaves the recipient unable to derive the decryption key for the output's
+    /// encrypted mask and value, so it must invalidate the proof even though no committed value changes.
+    #[test]
+    fn balance_proof_binds_sender_public_nonce() {
+        let mut statement = valid_statement();
+        let (_, other_nonce) = create_key_pair_from_seed(98);
+        statement.outputs_statement.outputs[0].output.sender_public_nonce = other_nonce.to_byte_type();
+
+        stealth::validate_transfer(&statement, None).unwrap_err();
+    }
+
+    #[test]
+    fn balance_proof_binds_input_witness() {
+        let mut statement = valid_statement();
+        statement.inputs_statement.inputs[0].witness = SpendWitness::ScriptPath {
+            leaf: SpendCondition::single(AtomicCondition::AccessRule(AccessRule::AllowAll)),
+            proof: MerkleProof::empty(),
+            data: Bytes::default(),
+        };
+
+        stealth::validate_transfer(&statement, None).unwrap_err();
+    }
+
+    /// The auditor's path: a record holding the commitments, the minimum value promises, the revealed amounts and
+    /// the 32-byte aux digest must reproduce the challenge the signer committed to. If these ever diverge, a
+    /// retained proof stops being re-verifiable.
+    #[test]
+    fn challenge_reconstructs_from_retained_parts() {
+        let statement = valid_statement();
+        let inputs = &statement.inputs_statement;
+        let outputs = &statement.outputs_statement;
+
+        let (_, excess) = create_key_pair_from_seed(11);
+        let (_, nonce) = create_key_pair_from_seed(12);
+
+        let from_statement = messages::stealth_balance_proof64(&excess, &nonce, inputs, outputs);
+
+        // The auditor's shape: values recovered from a stored record rather than projected out of a statement.
+        let record_inputs = inputs.inputs.iter().map(|i| i.commitment).collect::<Vec<_>>();
+        let record_outputs = outputs
+            .outputs
+            .iter()
+            .map(|o| (*o.commitment(), o.output.minimum_value_promise))
+            .collect::<Vec<_>>();
+        let from_parts =
+            messages::stealth_balance_proof64_from_parts(&excess, &nonce, &messages::StealthBalanceProofParts {
+                input_commitments: record_inputs.iter(),
+                revealed_input_amount: &inputs.revealed_amount,
+                outputs: record_outputs.iter().map(|(commitment, minimum_value_promise)| {
+                    messages::StealthOutputBinding {
+                        commitment,
+                        minimum_value_promise: *minimum_value_promise,
+                    }
+                }),
+                revealed_output_amount: &outputs.revealed_output_amount,
+                aux_digest: &messages::stealth_balance_proof_aux32(inputs, outputs),
+            });
+
+        assert_eq!(from_statement, from_parts);
+    }
+
+    /// `minimum_value_promise` is bound by the explicit half rather than the aux digest, so a verifier working from
+    /// a record cannot be handed a promise other than the one signed. Asserted against the challenge directly:
+    /// tampering with it in a statement also invalidates the aggregate range proof, which would mask the binding.
+    #[test]
+    fn challenge_binds_minimum_value_promise() {
+        let statement = valid_statement();
+        let inputs = &statement.inputs_statement;
+        let outputs = &statement.outputs_statement;
+
+        let (_, excess) = create_key_pair_from_seed(13);
+        let (_, nonce) = create_key_pair_from_seed(14);
+
+        let mut tampered = outputs.clone();
+        tampered.outputs[0].output.minimum_value_promise += 1;
+
+        assert_ne!(
+            messages::stealth_balance_proof64(&excess, &nonce, inputs, outputs),
+            messages::stealth_balance_proof64(&excess, &nonce, inputs, &tampered)
+        );
+    }
+
+    fn valid_statement() -> StealthTransferStatement {
+        let statement = create_transfer_statement(
+            make_input_statements(&[(1, 1000), (2, 2000)]),
+            Amount::zero(),
+            make_output_statements(&[1000, 2000]).iter(),
+            Amount::zero(),
+        )
+        .unwrap();
+        stealth::validate_transfer(&statement, None).expect("statement must be valid before tampering");
+        statement
     }
 
     fn make_input_statements(amounts: &[(u8, u64)]) -> Vec<StealthInputWitness> {

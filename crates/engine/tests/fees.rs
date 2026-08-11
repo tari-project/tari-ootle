@@ -266,6 +266,8 @@ fn an_unaffordable_fee_intent_commits_nothing() {
         )
         .unwrap();
 
+    // Rejected outright rather than committed as a fee intent: the checkpoint is what a fee-intent
+    // commit falls back to, so a fee intent that cannot pay for its own writes leaves nothing behind.
     assert!(
         matches!(
             result.finalize.result,

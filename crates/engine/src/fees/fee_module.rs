@@ -45,6 +45,10 @@ impl FeeModule {
         Ok((base_bytes, premium))
     }
 
+    fn storage_cost_for(&self, bytes: u64) -> Option<u64> {
+        Some(self.fee_table.per_byte_storage_cost().checked_mul(bytes)? / self.fee_table.storage_cost_divisor())
+    }
+
     /// Charges everything that is a function of the state being persisted, rather than of the work
     /// done to produce it: storage, the template-publish premium, substate slots, the metering of
     /// WASM and native execution, and the exhaust burn over the resulting total.
@@ -89,12 +93,9 @@ impl FeeModule {
             .checked_add(receipt_bytes)
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow accumulating storage bytes".to_string()))?;
 
-        let cost = self
-            .fee_table
-            .per_byte_storage_cost()
-            .checked_mul(total_storage as u64)
+        let storage_cost = self
+            .storage_cost_for(total_storage as u64)
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating storage cost".to_string()))?;
-        let storage_cost = cost / self.fee_table.storage_cost_divisor();
 
         let template_base_cost = self
             .fee_table
@@ -211,6 +212,17 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             })?;
 
         track.add_fee_charge(FeeSource::TemplateLoad, fee_charge);
+        Ok(())
+    }
+
+    fn on_storage_written(&self, track: &mut StateTracker<TStore>, bytes: u64) -> Result<(), RuntimeModuleError> {
+        let mut state = track.chargeable_state();
+        let fee_state = state.fee_state_mut();
+        fee_state.accumulate_storage_bytes(bytes);
+        let cost = self
+            .storage_cost_for(fee_state.accumulated_storage_bytes())
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating storage cost".to_string()))?;
+        fee_state.set_charge(FeeSource::Storage, cost);
         Ok(())
     }
 

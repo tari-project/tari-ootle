@@ -16,6 +16,11 @@ pub struct FeeState {
     fee_payments: Vec<(ResourceContainer, VaultId)>,
     running_payments_total: u64,
     fee_charges: FeeBreakdown,
+    /// Substate growth metered during execution, in encoded bytes. Charged as the transaction runs so
+    /// that one which cannot pay for the state it is writing stops there rather than at finalization,
+    /// and so the fee intent's own storage is covered by the checkpoint's paid-in-full check. The
+    /// resulting charge is provisional: finalization recomputes it over the state actually persisted.
+    accumulated_storage_bytes: u64,
     /// Raw Wasmer metering points consumed across every WASM invocation in this transaction.
     /// Summed across invocations so the divisor in `FeeModule::on_before_finalize` rounds once
     /// against the total — dividing per-call would let small invocations round to zero and let a
@@ -97,6 +102,17 @@ impl FeeState {
     /// charges once the state that will actually be persisted is known.
     pub fn set_charge(&mut self, source: FeeSource, amount: u64) {
         self.fee_charges.set(source, amount)
+    }
+
+    /// Bytes of substate growth metered so far. Summed across the transaction so that the storage
+    /// divisor rounds once against the total — rounding each drain separately would let a
+    /// transaction write in sub-divisor increments and be charged nothing for any of them.
+    pub fn accumulate_storage_bytes(&mut self, bytes: u64) {
+        self.accumulated_storage_bytes = self.accumulated_storage_bytes.saturating_add(bytes);
+    }
+
+    pub fn accumulated_storage_bytes(&self) -> u64 {
+        self.accumulated_storage_bytes
     }
 
     pub fn accumulate_wasm_points(&mut self, points: u64) {

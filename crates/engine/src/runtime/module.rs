@@ -32,6 +32,12 @@ pub trait RuntimeModule<TStore>: Send + Sync {
         Ok(())
     }
 
+    /// Invoked at instruction boundaries with the encoded bytes of substate growth since the last
+    /// call, so that storage can be charged as a transaction writes rather than only once it ends.
+    fn on_storage_written(&self, _track: &mut StateTracker<TStore>, _bytes: u64) -> Result<(), RuntimeModuleError> {
+        Ok(())
+    }
+
     /// Invoked at the start of finalization, against the live working state — before it is known
     /// whether the transaction commits or falls back to a fee-intent commit. Charges added here
     /// decide that outcome: they are what the paid-in-full check sees.

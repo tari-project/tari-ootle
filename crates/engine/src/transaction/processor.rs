@@ -325,8 +325,15 @@ where
             .into_iter()
             .enumerate()
             .map(|(idx, instruction)| {
-                Self::process_instruction(template_provider, &mut runtime, instruction, blobs)
-                    .map_err(|e| TransactionError::new(idx + 1, e))
+                let result = Self::process_instruction(template_provider, &mut runtime, instruction, blobs)
+                    .map_err(|e| TransactionError::new(idx + 1, e))?;
+                // Charge for what this instruction wrote before starting the next one, so a
+                // transaction that cannot pay for the state it is producing stops here.
+                runtime
+                    .interface_mut()
+                    .charge_storage_written()
+                    .map_err(|e| TransactionError::new(idx + 1, e.into()))?;
+                Ok(result)
             })
             .collect();
 

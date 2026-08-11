@@ -191,6 +191,11 @@ pub trait RuntimeInterface {
         max_amount: Option<Amount>,
     ) -> Result<(), RuntimeError>;
 
+    /// Meters the substate growth since the last call and charges for it. Called at instruction
+    /// boundaries, so a transaction that writes more state than it has paid for stops at the next
+    /// boundary instead of running to completion and being rejected at finalization.
+    fn charge_storage_written(&mut self) -> Result<(), RuntimeError>;
+
     fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError>;
     fn finalize(&mut self) -> Result<FinalizeResult, RuntimeError>;
     fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError>;

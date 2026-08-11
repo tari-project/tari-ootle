@@ -3361,6 +3361,33 @@ where
         })
     }
 
+    fn charge_storage_written(&mut self) -> Result<(), RuntimeError> {
+        let bytes = self.tracker.take_storage_bytes_written()?;
+        if bytes > 0 {
+            for module in self.modules.iter() {
+                module.on_storage_written(&mut self.tracker, bytes)?;
+            }
+        }
+
+        // Within the fee intent a transaction may still be sourcing its fee, so its writes are not
+        // tested against payments here — `checkpoint_fee_intent` does that once the intent ends, and
+        // now sees the storage those instructions accrued. Past the checkpoint the payment is what it
+        // is, and charges only grow, so a transaction that is already over cannot come back.
+        if self.tracker.is_fee_state_dry_run() || !self.tracker.has_fee_checkpoint() {
+            return Ok(());
+        }
+
+        let charges = self.tracker.total_fee_charges();
+        let payments = self.tracker.total_fee_payments();
+        if payments < charges {
+            return Err(RuntimeError::InsufficientFeesPaid {
+                required_fee: charges,
+                fees_paid: payments,
+            });
+        }
+        Ok(())
+    }
+
     fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError> {
         if !self.tracker.is_fee_state_dry_run() && self.tracker.total_fee_payments() < self.tracker.total_fee_charges()
         {

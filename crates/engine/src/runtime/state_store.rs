@@ -4,6 +4,7 @@
 use std::{collections::HashMap, mem};
 
 use indexmap::{IndexMap, IndexSet};
+use tari_bor::{ByteCounter, encode_into_writer};
 use tari_engine_types::{
     Utxo,
     component::Component,
@@ -36,6 +37,18 @@ pub struct WorkingStateStore<TStore> {
 
     downed_utxos: IndexSet<UtxoAddress>,
     downed_confidential_outputs: IndexSet<ConfidentialOutputAddress>,
+
+    /// Substates written since storage was last metered. Only these are re-encoded when the running
+    /// tally is drained, so a transaction pays the encoding cost of what it touched rather than of
+    /// everything it has ever touched.
+    ///
+    /// Entries are added wherever a caller *could* have written, not where one provably did: an
+    /// over-marked substate re-encodes to the same size and contributes nothing.
+    written_since_metered: IndexSet<SubstateId>,
+    /// Encoded size each substate has already been metered for, so that repeated writes to one
+    /// substate are charged for its growth rather than for its whole size again.
+    metered_bytes: HashMap<SubstateId, usize>,
+
     /// The underlying state store that is used to load substates that are not in the working state maps.
     state_store: TStore,
 }
@@ -48,8 +61,42 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
             locked_substates: LockedSubstates::default(),
             downed_utxos: IndexSet::default(),
             downed_confidential_outputs: IndexSet::default(),
+            written_since_metered: IndexSet::default(),
+            metered_bytes: HashMap::new(),
             state_store,
         }
+    }
+
+    fn mark_written(&mut self, id: &SubstateId) {
+        self.written_since_metered.insert(id.clone());
+    }
+
+    /// Encoded bytes newly occupied by substates written since the last call.
+    ///
+    /// Only growth counts: a substate that shrank does not give bytes back. The running tally exists
+    /// to bound what a transaction may write before it has paid, not to settle the bill — the charge
+    /// finalization computes over the persisted state replaces it.
+    pub fn take_storage_bytes_written(&mut self) -> Result<u64, RuntimeError> {
+        let mut accrued = 0u64;
+        for id in mem::take(&mut self.written_since_metered) {
+            let Some(substate) = self.new_substates.get(&id) else {
+                // Written and then removed again — a UTXO downed after being mutated, say. Nothing
+                // is left to persist, and the bytes it did occupy are not clawed back.
+                continue;
+            };
+            let mut counter = ByteCounter::new();
+            encode_into_writer(substate, &mut counter).map_err(|e| RuntimeError::InvariantError {
+                function: "WorkingStateStore::take_storage_bytes_written",
+                details: format!("Failed to encode substate {id}: {e}"),
+            })?;
+            let size = counter.get();
+            let metered = self.metered_bytes.entry(id).or_insert(0);
+            if size > *metered {
+                accrued = accrued.saturating_add((size - *metered) as u64);
+                *metered = size;
+            }
+        }
+        Ok(accrued)
     }
 
     pub fn try_lock(&mut self, id: SubstateId, lock_flag: LockFlag) -> Result<LockId, RuntimeError> {
@@ -87,8 +134,9 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         if let Some(mut substate) = self.loaded_substates.remove(lock.substate_id()) {
             return match callback(lock.substate_id(), substate.substate_value_mut())? {
                 Some(ret) => {
-                    self.new_substates
-                        .insert(lock.substate_id().clone(), substate.into_substate_value());
+                    let id = lock.substate_id().clone();
+                    self.new_substates.insert(id.clone(), substate.into_substate_value());
+                    self.mark_written(&id);
                     Ok(Some(ret))
                 },
                 None => {
@@ -108,7 +156,10 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
                 })?;
 
         // Since the substate is already mutated, we don't really care if the callback mutates it again or not
-        callback(lock.substate_id(), substate_mut)
+        let id = lock.substate_id().clone();
+        let ret = callback(&id, substate_mut);
+        self.mark_written(&id);
+        ret
     }
 
     pub fn get_locked_substate(&self, lock_id: LockId) -> Result<(SubstateId, &SubstateValue), RuntimeError> {
@@ -132,6 +183,10 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
                 .insert(address.clone(), substate.into_substate_value());
         }
 
+        // The caller holds a write lock and receives a mutable reference, so the write completes out
+        // of sight of this store. Mark it here — the size is read back when storage is next metered.
+        self.written_since_metered.insert(address.clone());
+
         if let Some(substate_mut) = self.new_substates.get_mut(address) {
             return Ok(substate_mut);
         }
@@ -152,7 +207,8 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         if self.exists(&id)? {
             return Err(RuntimeError::DuplicateSubstate { address: id });
         }
-        self.new_substates.insert(id, value);
+        self.new_substates.insert(id.clone(), value);
+        self.mark_written(&id);
         Ok(())
     }
 

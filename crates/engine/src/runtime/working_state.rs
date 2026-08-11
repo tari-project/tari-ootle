@@ -1203,6 +1203,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
         self.last_instruction_output = Some(output);
     }
 
+    pub fn take_storage_bytes_written(&mut self) -> Result<u64, RuntimeError> {
+        self.store.take_storage_bytes_written()
+    }
+
     /// Counts substates in the to-persist set that did not previously exist in the state store.
     /// Used by the fee module to charge a slot-allocation premium on top of per-byte storage.
     pub fn count_newly_created_substates(&self) -> Result<usize, RuntimeError> {

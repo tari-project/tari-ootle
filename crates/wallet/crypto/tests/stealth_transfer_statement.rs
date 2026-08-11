@@ -7,7 +7,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::{crypto::messages, stealth};
+use tari_engine_types::{Hash64, crypto::messages, stealth};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_wallet_crypto::{
     MaskAndValue,
@@ -22,13 +22,15 @@ use tari_template_lib_types::{
     EncryptedData,
     access_rules::AccessRule,
     bytes::Bytes,
-    crypto::UtxoTag,
+    crypto::{PedersenCommitmentBytes, UtxoTag},
     stealth::{
         AtomicCondition,
         MerkleProof,
         SpendAuthorization,
         SpendCondition,
         SpendWitness,
+        StealthInputsStatement,
+        StealthOutputsStatement,
         StealthTransferStatement,
     },
 };
@@ -177,37 +179,19 @@ mod stealth_tests {
         let (_, excess) = create_key_pair_from_seed(11);
         let (_, nonce) = create_key_pair_from_seed(12);
 
-        let from_statement = messages::stealth_balance_proof64(&excess, &nonce, inputs, outputs);
-
-        // The auditor's shape: values recovered from a stored record rather than projected out of a statement.
-        let record_inputs = inputs.inputs.iter().map(|i| i.commitment).collect::<Vec<_>>();
-        let record_outputs = outputs
-            .outputs
-            .iter()
-            .map(|o| (*o.commitment(), o.output.minimum_value_promise))
-            .collect::<Vec<_>>();
-        let from_parts =
-            messages::stealth_balance_proof64_from_parts(&excess, &nonce, &messages::StealthBalanceProofParts {
-                input_commitments: record_inputs.iter(),
-                revealed_input_amount: &inputs.revealed_amount,
-                outputs: record_outputs.iter().map(|(commitment, minimum_value_promise)| {
-                    messages::StealthOutputBinding {
-                        commitment,
-                        minimum_value_promise: *minimum_value_promise,
-                    }
-                }),
-                revealed_output_amount: &outputs.revealed_output_amount,
-                aux_digest: &messages::stealth_balance_proof_aux32(inputs, outputs),
-            });
-
-        assert_eq!(from_statement, from_parts);
+        assert_eq!(
+            messages::stealth_balance_proof64(&excess, &nonce, inputs, outputs),
+            challenge_from_record(&excess, &nonce, inputs, outputs, &record_outputs(outputs))
+        );
     }
 
-    /// `minimum_value_promise` is bound by the explicit half rather than the aux digest, so a verifier working from
-    /// a record cannot be handed a promise other than the one signed. Asserted against the challenge directly:
-    /// tampering with it in a statement also invalidates the aggregate range proof, which would mask the binding.
+    /// `minimum_value_promise` is bound by the explicit half, not by the aux digest.
+    ///
+    /// A record carries the promise separately from the digest, so the threat is a record that alters the promise
+    /// while replaying the digest verbatim. Were the promise bound only inside the digest, the altered value would
+    /// contribute nothing and the challenge would still reproduce.
     #[test]
-    fn challenge_binds_minimum_value_promise() {
+    fn challenge_binds_minimum_value_promise_outside_the_aux_digest() {
         let statement = valid_statement();
         let inputs = &statement.inputs_statement;
         let outputs = &statement.outputs_statement;
@@ -215,13 +199,47 @@ mod stealth_tests {
         let (_, excess) = create_key_pair_from_seed(13);
         let (_, nonce) = create_key_pair_from_seed(14);
 
-        let mut tampered = outputs.clone();
-        tampered.outputs[0].output.minimum_value_promise += 1;
+        let mut tampered = record_outputs(outputs);
+        tampered[0].1 += 1;
 
         assert_ne!(
             messages::stealth_balance_proof64(&excess, &nonce, inputs, outputs),
-            messages::stealth_balance_proof64(&excess, &nonce, inputs, &tampered)
+            challenge_from_record(&excess, &nonce, inputs, outputs, &tampered)
         );
+    }
+
+    /// The `(commitment, minimum_value_promise)` pairs a retained record carries for these outputs.
+    fn record_outputs(outputs: &StealthOutputsStatement) -> Vec<(PedersenCommitmentBytes, u64)> {
+        outputs
+            .outputs
+            .iter()
+            .map(|o| (*o.commitment(), o.output.minimum_value_promise))
+            .collect()
+    }
+
+    /// Rebuilds the challenge the way a verifier holding a retained record does: the value fields come from
+    /// `record_outputs`, while the aux digest is replayed as the opaque 32 bytes the record stored.
+    fn challenge_from_record(
+        excess: &RistrettoPublicKey,
+        nonce: &RistrettoPublicKey,
+        inputs: &StealthInputsStatement,
+        outputs: &StealthOutputsStatement,
+        record_outputs: &[(PedersenCommitmentBytes, u64)],
+    ) -> Hash64 {
+        let record_inputs = inputs.inputs.iter().map(|i| i.commitment).collect::<Vec<_>>();
+
+        messages::stealth_balance_proof64_from_parts(excess, nonce, &messages::StealthBalanceProofParts {
+            input_commitments: record_inputs.iter(),
+            revealed_input_amount: &inputs.revealed_amount,
+            outputs: record_outputs
+                .iter()
+                .map(|(commitment, minimum_value_promise)| messages::StealthOutputBinding {
+                    commitment,
+                    minimum_value_promise: *minimum_value_promise,
+                }),
+            revealed_output_amount: &outputs.revealed_output_amount,
+            aux_digest: &messages::stealth_balance_proof_aux32(inputs, outputs),
+        })
     }
 
     fn valid_statement() -> StealthTransferStatement {

@@ -373,17 +373,23 @@ fn basic_constant_product_swap() {
 
     // ACT 2: Swap to pay fees
     test.enable_fees();
+
+    // The swap has to return more XTR than the whole transaction costs — it is the only XTR user2
+    // ever holds — and the fee payment has to cover that cost out of what the swap returned.
+    const SWAP_AMOUNT: u64 = 20_000;
+    const FEE_PAYMENT: u64 = 5_000;
+
     let result = test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 // User2 would like to swap stablecoin for XTR to pay fees
                 builder
-                    .call_method(user2, "withdraw", args![faucet_resource, 5000])
+                    .call_method(user2, "withdraw", args![faucet_resource, SWAP_AMOUNT])
                     .put_last_instruction_output_on_workspace("coins_to_swap")
                     .call_method(pool_addr, "swap_constant_product", args![Workspace("coins_to_swap")])
                     .put_last_instruction_output_on_workspace("swapped_coins")
                     .call_method(user2, "deposit", args![Workspace("swapped_coins")])
-                    .pay_fee_from_component(user2, 2000u64)
+                    .pay_fee_from_component(user2, FEE_PAYMENT)
             })
             // Some instruction to make fees
             .call_method(user2, "create_proof_by_amount", args![faucet_resource, 1])
@@ -414,7 +420,7 @@ fn basic_constant_product_swap() {
 
     assert_eq!(
         xtr_coins.balance(),
-        constant_product_calc(INITIAL_STABLECOIN_AMOUNT, INITIAL_XTR_AMOUNT, 5000) - fees
+        constant_product_calc(INITIAL_STABLECOIN_AMOUNT, INITIAL_XTR_AMOUNT, SWAP_AMOUNT) - fees
     );
 }
 

@@ -321,6 +321,44 @@ pub fn build_stealth_inputs_statement(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Build a `StealthInputsStatement` JSON from a JSON array of per-input `{commitment, witness}` pairs
+/// and a revealed amount.
+///
+/// Unlike `buildStealthInputsStatement`, which only builds key-path inputs from raw commitment bytes,
+/// this accepts a caller-supplied `witness` per input -- the only way to spend an output committed with
+/// `PayTo::Conditions` (e.g. claiming or refunding an HTLC-style hashlock/timelock output). Build each
+/// script-path input's witness with `buildScriptPathWitness` first; a plain key-path input can still be
+/// included in the same call, either with `"witness":"KeyPath"` or by omitting `witness` entirely
+/// (defaults to key path).
+///
+/// `inputs_json` shape: `[{ "commitment": <hex 32 bytes>, "witness"?: <SpendWitness> }, ...]`.
+#[wasm_bindgen(js_name = "buildStealthInputsStatementFromInputs")]
+pub fn build_stealth_inputs_statement_from_inputs(
+    inputs_json: &str,
+    revealed_amount_microtari: u64,
+) -> Result<String, JsError> {
+    ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement_from_inputs(inputs_json, revealed_amount_microtari)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Build a script-path `SpendWitness` revealing `leaf` from the committed `conditions` set, optionally
+/// supplying a witness `data` blob the leaf's predicate interprets (e.g. a hashlock preimage). Returns a
+/// JSON object: `{ "witness": <SpendWitness>, "condition_root": <Hash32> }`.
+///
+/// `conditions_json` is the JSON array of `SpendCondition` leaves exactly as passed to
+/// `createStealthOutputWitness`'s `PayTo::Conditions` when the output was created; `leaf_json` is the
+/// single leaf being revealed. The returned `condition_root` must match the `Script` root recorded in
+/// that output's `SpendAuthorization` -- record it against the spent input via
+/// `buildStealthInputsStatementFromInputs`.
+///
+/// Pass an empty `data` array for a leaf whose predicate needs no spender-supplied data (e.g. a plain
+/// timelock refund).
+#[wasm_bindgen(js_name = "buildScriptPathWitness")]
+pub fn build_script_path_witness(conditions_json: &str, leaf_json: &str, data: &[u8]) -> Result<String, JsError> {
+    ootle_wasm_core::stealth::inputs::build_script_path_witness(conditions_json, leaf_json, data)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Aggregate the commitment masks of stealth inputs into a single 32-byte Ristretto scalar.
 ///
 /// `masks_concat` is the concatenated bytes of all input masks (32 bytes per mask, so the input

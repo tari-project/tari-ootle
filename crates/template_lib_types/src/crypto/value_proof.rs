@@ -5,7 +5,7 @@ use minicbor::{CborLen, Decode, Encode};
 
 use crate::{
     Amount,
-    crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+    crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
 };
 
 /// Proof of knowledge of the opening to a commitment and that the commitment commits to a specific value.
@@ -34,9 +34,18 @@ pub enum ValueKnowledgeProof {
     },
     #[n(1)]
     ElgamalEncrypted {
-        /// The R.p term of the ElGamal encryption. This allows validators to check the provided value is correct using
-        /// the viewable balance. This assumes that the verifiable proof was originally validated correctly.
+        /// Chaum-Pedersen (DLEQ) proof of knowledge of the view private key `p` such that `P = p.G` (the resource
+        /// view key) and `E - v.G = p.R`, where `(E, R)` is the UTXO's viewable balance and `v` is the claimed value.
+        /// Binding both equations to a single scalar forces `v` to equal the value encrypted for the view key.
+        ///
+        /// `K_g = k.G` for the proof nonce `k`
         #[n(0)]
-        reveal_key: RistrettoPublicKeyBytes,
+        public_nonce_g: RistrettoPublicKeyBytes,
+        /// `K_r = k.R`
+        #[n(1)]
+        public_nonce_r: RistrettoPublicKeyBytes,
+        /// `s = k + e.p` for the Fiat-Shamir challenge `e`
+        #[n(2)]
+        s_p: Scalar32Bytes,
     },
 }

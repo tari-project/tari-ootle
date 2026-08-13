@@ -37,7 +37,7 @@ use tari_template_test_tooling::{
         stealth,
         stealth::{NO_INPUTS, StealthSecretTransferData},
     },
-    wallet_crypto::MaskAndValue,
+    wallet_crypto::{MaskAndValue, viewable_balance_proof::generate_elgamal_value_proof},
 };
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];
@@ -734,6 +734,102 @@ fn burn_then_attempt_spend() {
             .unwrap();
         assert!(utxo.is_burnt());
     }
+}
+
+#[test]
+fn burn_with_elgamal_value_proof_adjusts_supply() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    let mint = stealth::generate_mint_statement([100u64, 1000], 0u64, Some(&view_key));
+    let (faucet, faucet_resx) = setup(&mut test, &mint, Some(&view_key));
+
+    let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
+    assert_eq!(resource.total_supply().unwrap(), 1100);
+
+    // The view-key holder proves the burnt UTXO's value from its viewable balance
+    let commitment_bytes = get_commitment_factory()
+        .commit_value(&mint.output_masks[1], 1000)
+        .to_byte_type();
+    let utxo_id = UtxoId::from(commitment_bytes);
+    let utxo = test
+        .read_only_state_store()
+        .get_utxo(UtxoAddress::new(faucet_resx, utxo_id))
+        .unwrap();
+    let viewable_balance: ElgamalVerifiableBalance = utxo
+        .output()
+        .unwrap()
+        .output
+        .viewable_balance
+        .as_ref()
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let proof = generate_elgamal_value_proof(&view_key_secret, 1000, &commitment_bytes, &viewable_balance);
+
+    let owner = test.owner_proof();
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet, "burn_utxos", args![vec![(utxo_id, proof)]])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+
+    let utxo = test
+        .read_only_state_store()
+        .get_utxo(UtxoAddress::new(faucet_resx, utxo_id))
+        .unwrap();
+    assert!(utxo.is_burnt());
+    let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
+    assert_eq!(resource.total_supply().unwrap(), 100);
+}
+
+#[test]
+fn burn_rejects_elgamal_value_proof_for_a_false_value() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    let mint = stealth::generate_mint_statement([100u64, 1000], 0u64, Some(&view_key));
+    let (faucet, faucet_resx) = setup(&mut test, &mint, Some(&view_key));
+
+    let commitment_bytes = get_commitment_factory()
+        .commit_value(&mint.output_masks[1], 1000)
+        .to_byte_type();
+    let utxo_id = UtxoId::from(commitment_bytes);
+    let utxo = test
+        .read_only_state_store()
+        .get_utxo(UtxoAddress::new(faucet_resx, utxo_id))
+        .unwrap();
+    let viewable_balance: ElgamalVerifiableBalance = utxo
+        .output()
+        .unwrap()
+        .output
+        .viewable_balance
+        .as_ref()
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    // The view-key holder claims a value other than the one encrypted in the viewable balance
+    let proof = generate_elgamal_value_proof(&view_key_secret, 1, &commitment_bytes, &viewable_balance);
+
+    let owner = test.owner_proof();
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(faucet, "burn_utxos", args![vec![(utxo_id, proof)]])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+    assert_reject_reason(reason, ResourceError::UtxoBurnFailed {
+        id: utxo_id,
+        details: "Invalid Elgamal encrypted value proof (s.R != K_r + e.D)".to_string(),
+    });
+
+    let utxo = test
+        .read_only_state_store()
+        .get_utxo(UtxoAddress::new(faucet_resx, utxo_id))
+        .unwrap();
+    assert!(!utxo.is_burnt());
+    let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
+    assert_eq!(resource.total_supply().unwrap(), 1100);
 }
 
 /// The resource-level `withdrawable` rule gates stealth transfers: spending a stealth UTXO of a

@@ -300,10 +300,3 @@ pub fn generate_value_proof_mask_knowledge(value: Amount, mask: &RistrettoSecret
         },
     }
 }
-
-pub fn generate_value_proof_elgamal(value: Amount, reveal_key: RistrettoPublicKeyBytes) -> StealthValueProof {
-    StealthValueProof {
-        value,
-        knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted { reveal_key },
-    }
-}

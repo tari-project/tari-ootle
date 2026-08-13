@@ -2035,6 +2035,18 @@ where
                         });
                     }
 
+                    let maybe_view_key =
+                        resource
+                            .to_view_key_public_key()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "ResourceAction::StealthUtxoBurn",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.substate_id(),
+                                    e
+                                ),
+                            })?;
+
                     state_mut.authorization().check_resource_access_rules(
                         ResourceAuthAction::Burn,
                         resource.as_ownership(),
@@ -2062,18 +2074,23 @@ where
                         }));
                     }
 
-                    utxo_mut.burn();
-
                     if is_total_supply_tracking_enabled {
                         let value_proof = arg.value_proof.as_ref().expect(
                             "BUG: is_total_supply_tracking_enabled is true and value proof is some has been checked",
                         );
                         let commitment = arg.utxo_id.into_commitment_bytes();
+                        // Burning discards the output, so the proof is validated against the viewable balance first
                         let elgamal_proof = utxo_mut
                             .output
                             .as_ref()
                             .and_then(|o| o.output.viewable_balance.as_ref());
-                        let value = stealth::validate_value_proof(&commitment, elgamal_proof, value_proof)?;
+                        let value = stealth::validate_value_proof(
+                            &commitment,
+                            maybe_view_key.as_ref(),
+                            elgamal_proof,
+                            value_proof,
+                        )?;
+                        utxo_mut.burn();
                         if value.is_positive() {
                             let resource_lock =
                                 state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
@@ -2081,6 +2098,8 @@ where
                             resource_mut.decrease_total_supply(value);
                             state_mut.unlock_substate(resource_lock)?;
                         }
+                    } else {
+                        utxo_mut.burn();
                     }
 
                     state_mut.unlock_substate(utxo_lock)?;

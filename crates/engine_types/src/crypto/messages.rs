@@ -262,3 +262,28 @@ pub fn value_proof_message(commitment: &PedersenCommitmentBytes, value: &Amount)
         .result()
         .into()
 }
+
+/// Fiat-Shamir challenge for the DLEQ proof in [`ValueKnowledgeProof::ElgamalEncrypted`]. Binds the full statement
+/// (commitment, view key, viewable balance and claimed value) and both proof nonces.
+///
+/// [`ValueKnowledgeProof::ElgamalEncrypted`]: tari_template_lib::types::crypto::ValueKnowledgeProof
+pub fn elgamal_value_proof64(
+    commitment: &PedersenCommitmentBytes,
+    view_key: &RistrettoPublicKey,
+    encrypted: &RistrettoPublicKey,
+    elgamal_public_nonce: &RistrettoPublicKey,
+    value: &Amount,
+    public_nonce_g: &RistrettoPublicKey,
+    public_nonce_r: &RistrettoPublicKey,
+) -> Hash64 {
+    engine_hasher64(EngineHashDomainLabel::ElgamalValueProof)
+        .chain(commitment)
+        .chain(view_key)
+        .chain(encrypted)
+        .chain(elgamal_public_nonce)
+        .chain(value)
+        .chain(public_nonce_g)
+        .chain(public_nonce_r)
+        .result()
+        .into()
+}

@@ -7,9 +7,10 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
-use tari_engine_types::crypto::{get_commitment_factory, messages};
+use tari_engine_types::crypto::{ElgamalVerifiableBalance, get_commitment_factory, messages};
 use tari_template_lib_types::{
-    crypto::Scalar32Bytes,
+    Amount,
+    crypto::{PedersenCommitmentBytes, Scalar32Bytes, StealthValueProof, ValueKnowledgeProof},
     stealth::{ViewableBalanceProof, ViewableBalanceProofMessageFields},
 };
 use tari_utilities::ByteArray;
@@ -113,4 +114,46 @@ pub fn generate_elgamal_viewable_balance_proof_seeded(
         s_r: Scalar32Bytes::from_bytes(s_r.get_signature().as_bytes())
             .expect("INVARIANT VIOLATION: s_r length mismatch"),
     })
+}
+
+/// Generates a [`StealthValueProof`] for the value encrypted in a UTXO's viewable balance. The prover is the
+/// view-key holder: the proof is a Chaum-Pedersen DLEQ demonstrating knowledge of the view private key `p` such
+/// that `P = p.G` and `E - v.G = p.R`, which holds only when `v` is the value encrypted for the view key.
+pub fn generate_elgamal_value_proof(
+    view_private_key: &RistrettoSecretKey,
+    value: u64,
+    commitment: &PedersenCommitmentBytes,
+    verifiable_balance: &ElgamalVerifiableBalance,
+) -> StealthValueProof {
+    let mut rng = rand::rng();
+    let value = Amount::from(value);
+    let view_key = RistrettoPublicKey::from_secret_key(view_private_key);
+
+    let k = RistrettoSecretKey::random(&mut rng);
+    let public_nonce_g = RistrettoPublicKey::from_secret_key(&k);
+    let public_nonce_r = &k * &verifiable_balance.public_nonce;
+
+    let challenge = messages::elgamal_value_proof64(
+        commitment,
+        &view_key,
+        &verifiable_balance.encrypted,
+        &verifiable_balance.public_nonce,
+        &value,
+        &public_nonce_g,
+        &public_nonce_r,
+    );
+    let e = RistrettoSecretKey::from_uniform_bytes(&challenge)
+        .expect("INVARIANT VIOLATION: RistrettoSecretKey::from_uniform_bytes and challenge hash length mismatch");
+
+    // s = k + e.p
+    let s_p = &k + &e * view_private_key;
+
+    StealthValueProof {
+        value,
+        knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted {
+            public_nonce_g: public_nonce_g.to_byte_type(),
+            public_nonce_r: public_nonce_r.to_byte_type(),
+            s_p: Scalar32Bytes::from_bytes(s_p.as_bytes()).expect("INVARIANT VIOLATION: s_p length mismatch"),
+        },
+    }
 }

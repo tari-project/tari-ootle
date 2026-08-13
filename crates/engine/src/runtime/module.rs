@@ -3,7 +3,7 @@
 
 use tari_template_lib::types::TemplateAddress;
 
-use crate::runtime::{StateTracker, working_state::WorkingState};
+use crate::runtime::{ChargeableState, StateTracker};
 
 pub trait RuntimeModule<TStore>: Send + Sync {
     fn on_initialize(&self, _track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
@@ -43,7 +43,7 @@ pub trait RuntimeModule<TStore>: Send + Sync {
     /// are settled. On a fee-intent commit that state is the fee checkpoint, not the live state
     /// [`Self::on_before_finalize`] saw, so any charge that is a function of what gets persisted
     /// must be recomputed here against `state`.
-    fn on_before_persist(&self, _state: &mut WorkingState<TStore>) -> Result<(), RuntimeModuleError> {
+    fn on_before_persist(&self, _state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 

@@ -7,7 +7,7 @@ use tari_template_lib::types::TemplateAddress;
 
 use super::FeeTable;
 use crate::{
-    runtime::{RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker, working_state::WorkingState},
+    runtime::{ChargeableState, RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker},
     state_store::StateReader,
 };
 
@@ -55,12 +55,12 @@ impl FeeModule {
     /// actually persisted — see [`RuntimeModule::on_before_persist`].
     fn charge_finalization_fees<TStore: StateReader>(
         &self,
-        state: &mut WorkingState<TStore>,
+        state: &mut ChargeableState<'_, TStore>,
     ) -> Result<(), RuntimeModuleError> {
         let mut counter = ByteCounter::new();
         let mut template_base_bytes = 0u64;
         let mut template_premium = 0u64;
-        for substate in state.mutated_substates().values() {
+        for substate in state.substates_to_persist().values() {
             // A published template's binary is priced by the dedicated base + quadratic publish
             // model, so keep it out of the flat per-byte storage tally. Accumulate the raw
             // metrics here and apply the storage divisor once below.
@@ -215,10 +215,10 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
     }
 
     fn on_before_finalize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
-        track.with_working_state_mut(|state| self.charge_finalization_fees(state))
+        self.charge_finalization_fees(&mut track.chargeable_state())
     }
 
-    fn on_before_persist(&self, state: &mut WorkingState<TStore>) -> Result<(), RuntimeModuleError> {
+    fn on_before_persist(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
         self.charge_finalization_fees(state)
     }
 

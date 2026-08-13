@@ -55,7 +55,7 @@ use crate::{
         error::ArgumentValidationError,
         locking::LockedSubstate,
         scope::{CallScope, PushCallFrame},
-        working_state::WorkingState,
+        working_state::{ChargeableState, WorkingState},
         workspace::Workspace,
     },
     state_store::StateReader,
@@ -73,8 +73,8 @@ pub struct FinalizedState<TStore> {
 }
 
 impl<TStore> FinalizedState<TStore> {
-    pub fn state_mut(&mut self) -> &mut WorkingState<TStore> {
-        &mut self.state
+    pub fn chargeable_state(&mut self) -> ChargeableState<'_, TStore> {
+        ChargeableState::new(&mut self.state)
     }
 
     pub fn outcome(&self) -> FinalizeOutcome {
@@ -471,12 +471,16 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    /// Runs `f` against the live working state.
+    /// The live working state, as a module may charge against it.
     ///
     /// The fee module uses this to compute its finalization charges before the state to persist has
     /// been chosen; once it has been, the same computation runs against that state directly.
-    pub fn with_working_state_mut<R>(&mut self, f: impl FnOnce(&mut WorkingState<TStore>) -> R) -> R {
-        self.write_with(f)
+    pub fn chargeable_state(&mut self) -> ChargeableState<'_, TStore> {
+        ChargeableState::new(
+            self.working_state
+                .as_mut()
+                .expect("BUG: chargeable_state called after finalize consumed working state"),
+        )
     }
 
     pub fn are_fees_paid_in_full(&self) -> bool {

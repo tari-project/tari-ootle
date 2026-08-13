@@ -79,6 +79,7 @@ use tari_ootle_template_provider::MemoryCacheTemplateProvider;
 use tari_ootle_transaction::{Network, Transaction};
 use tari_ootle_transaction_validation::{
     BasicValidations,
+    BlobReferenceValidator,
     EpochRangeValidator,
     PublishTemplateLimitValidator,
     SignatureLimitValidator,
@@ -522,6 +523,9 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
     TransactionNetworkValidator::new(network)
         .and_then(TransactionDryRunValidator)
         .and_then(BasicValidations::new())
+        // Blob payloads must be exactly what the instructions reference: bad indices would only
+        // fail at execution, and unreferenced blobs would never fail at all.
+        .and_then(BlobReferenceValidator::new())
         // Cheap structural check — reject over-weight transactions before verifying signatures.
         .and_then(TransactionWeightValidator::new(max_transaction_weight))
         // Reject transactions whose aggregate stealth-transfer work exceeds the per-transaction caps before

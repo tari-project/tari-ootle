@@ -15,6 +15,8 @@ pub use error::*;
 
 mod basic;
 pub use basic::*;
+mod blob_references;
+pub use blob_references::*;
 mod dry_run;
 pub use dry_run::*;
 mod epoch_range;

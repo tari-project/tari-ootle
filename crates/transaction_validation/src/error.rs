@@ -4,7 +4,7 @@
 use tari_networking::NetworkingError;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{StorageError, consensus_models::TransactionPoolError};
-use tari_ootle_transaction::{Network, TransactionId};
+use tari_ootle_transaction::{BlobValidationError, Network, TransactionId};
 use tari_template_lib::types::TemplateAddress;
 
 #[derive(thiserror::Error, Debug)]
@@ -76,6 +76,11 @@ pub enum TransactionValidationError {
         max: usize,
         actual: usize,
     },
+    #[error("Transaction {transaction_id} has invalid blob references: {source}")]
+    InvalidBlobReferences {
+        transaction_id: TransactionId,
+        source: BlobValidationError,
+    },
 }
 
 impl TransactionValidationError {
@@ -122,7 +127,8 @@ impl TransactionValidationError {
             Self::TransactionExceedsMaxWeight { .. } |
             Self::ExceedsStealthTransactionLimit { .. } |
             Self::TooManyPublishTemplateInstructions { .. } |
-            Self::TooManySignatures { .. } => true,
+            Self::TooManySignatures { .. } |
+            Self::InvalidBlobReferences { .. } => true,
         }
     }
 }
@@ -188,6 +194,10 @@ mod tests {
                 transaction_id: tx_id(),
                 max: 1,
                 actual: 2,
+            },
+            TransactionValidationError::InvalidBlobReferences {
+                transaction_id: tx_id(),
+                source: BlobValidationError::UnreferencedBlob { index: 0 },
             },
         ];
         for err in structural {

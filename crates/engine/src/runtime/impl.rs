@@ -297,7 +297,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
     fn invoke_modules_on_before_persist(&mut self, finalized: &mut FinalizedState<TStore>) -> Result<(), RuntimeError> {
         for module in self.modules.iter() {
-            module.on_before_persist(finalized.state_mut())?;
+            module.on_before_persist(&mut finalized.chargeable_state())?;
         }
         Ok(())
     }

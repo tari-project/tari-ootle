@@ -50,7 +50,7 @@ mod spend_script_execution;
 mod state_store;
 mod tracker_auth;
 mod validation;
-pub(crate) mod working_state;
+mod working_state;
 mod workspace;
 
 use std::{fmt::Debug, ptr::NonNull};
@@ -110,6 +110,7 @@ use tari_template_lib::{
     },
 };
 pub use tracker::{FinalizedState, StateTracker};
+pub use working_state::ChargeableState;
 
 use crate::runtime::{locking::LockedSubstate, scope::PushCallFrame};
 

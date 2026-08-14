@@ -10,7 +10,7 @@ use tari_crypto::{
 use tari_template_lib::types::{
     Amount,
     UtxoId,
-    crypto::{PedersenCommitmentBytes, StealthValueProof, ValueKnowledgeProof},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, StealthValueProof, ValueKnowledgeProof},
 };
 
 use crate::{
@@ -67,106 +67,126 @@ pub fn validate_value_proof(
             }
         },
         ValueKnowledgeProof::ElgamalEncrypted {
-            public_nonce_g,
-            public_nonce_r,
-            s_p,
+            ref public_nonce_g,
+            ref public_nonce_r,
+            ref s_p,
         } => {
-            // Viewable balances encrypt a u64 value, so a larger claimed value can never be honest. This also keeps
-            // the bound consistent with the Commitment variant, which inherits it from `commit_amount`.
-            if proof.value > u64::MAX {
-                return Err(ResourceError::UtxoBurnFailed {
-                    id: UtxoId::from(*commitment_bytes),
-                    details: "Value proof amount is too large".to_string(),
-                });
-            }
-
-            let elgamal = elgamal_verifiable_balance.ok_or_else(|| ResourceError::UtxoBurnFailed {
-                id: UtxoId::from(*commitment_bytes),
-                details: "Utxo does not have a viewable balance".to_string(),
-            })?;
-
-            let view_key = view_key.ok_or_else(|| ResourceError::UtxoBurnFailed {
-                id: UtxoId::from(*commitment_bytes),
-                details: "Resource does not have a view key".to_string(),
-            })?;
-
-            let encrypted: RistrettoPublicKey =
-                elgamal
-                    .encrypted
-                    .try_from_byte_type()
-                    .map_err(|e| ResourceError::UtxoBurnFailed {
-                        id: UtxoId::from(*commitment_bytes),
-                        details: format!("Invalid encrypted balance bytes: {}", e),
-                    })?;
-
-            let elgamal_public_nonce: RistrettoPublicKey =
-                elgamal
-                    .public_nonce
-                    .try_from_byte_type()
-                    .map_err(|e| ResourceError::UtxoBurnFailed {
-                        id: UtxoId::from(*commitment_bytes),
-                        details: format!("Invalid ElGamal public nonce bytes: {}", e),
-                    })?;
-
-            let public_nonce_g: RistrettoPublicKey =
-                public_nonce_g
-                    .try_from_byte_type()
-                    .map_err(|e| ResourceError::UtxoBurnFailed {
-                        id: UtxoId::from(*commitment_bytes),
-                        details: format!("Invalid public nonce (G) bytes: {}", e),
-                    })?;
-
-            let public_nonce_r: RistrettoPublicKey =
-                public_nonce_r
-                    .try_from_byte_type()
-                    .map_err(|e| ResourceError::UtxoBurnFailed {
-                        id: UtxoId::from(*commitment_bytes),
-                        details: format!("Invalid public nonce (R) bytes: {}", e),
-                    })?;
-
-            let s_p = RistrettoSecretKey::from_canonical_bytes(s_p.as_bytes()).map_err(|e| {
-                ResourceError::UtxoBurnFailed {
-                    id: UtxoId::from(*commitment_bytes),
-                    details: format!("Invalid scalar s_p bytes: {}", e),
-                }
-            })?;
-
-            let challenge = messages::elgamal_value_proof64(
+            validate_elgamal_knowledge_proof(
                 commitment_bytes,
                 view_key,
-                &encrypted,
-                &elgamal_public_nonce,
-                &proof.value,
-                &public_nonce_g,
-                &public_nonce_r,
-            );
-            let e = RistrettoSecretKey::from_uniform_bytes(&challenge)
-                .expect("INVARIANT VIOLATION: RistrettoSecretKey::from_uniform_bytes and hash output length mismatch");
-
-            // D = E - v.G is p.R exactly when v is the value encrypted for the view key
-            let value = convert_amount_to_secret(&proof.value);
-            let value_g = RistrettoPublicKey::from_secret_key(&value);
-            let d = encrypted - value_g;
-
-            // Check s.G ?= K_g + e.P
-            if RistrettoPublicKey::from_secret_key(&s_p) != public_nonce_g + &e * view_key {
-                return Err(ResourceError::UtxoBurnFailed {
-                    id: UtxoId::from(*commitment_bytes),
-                    details: "Invalid Elgamal encrypted value proof (s.G != K_g + e.P)".to_string(),
-                });
-            }
-
-            // Check s.R ?= K_r + e.D
-            if &s_p * &elgamal_public_nonce != public_nonce_r + &e * d {
-                return Err(ResourceError::UtxoBurnFailed {
-                    id: UtxoId::from(*commitment_bytes),
-                    details: "Invalid Elgamal encrypted value proof (s.R != K_r + e.D)".to_string(),
-                });
-            }
+                elgamal_verifiable_balance,
+                proof.value,
+                public_nonce_g,
+                public_nonce_r,
+                s_p,
+            )?;
         },
     }
 
     Ok(proof.value)
+}
+
+fn validate_elgamal_knowledge_proof(
+    commitment_bytes: &PedersenCommitmentBytes,
+    view_key: Option<&RistrettoPublicKey>,
+    elgamal_verifiable_balance: Option<&ElgamalVerifiableBalanceBytes>,
+    value: Amount,
+    public_nonce_g: &RistrettoPublicKeyBytes,
+    public_nonce_r: &RistrettoPublicKeyBytes,
+    s_p: &Scalar32Bytes,
+) -> Result<(), ResourceError> {
+    // Viewable balances encrypt a u64 value, so a larger claimed value can never be honest. This also keeps
+    // the bound consistent with the Commitment variant, which inherits it from `commit_amount`.
+    if value > u64::MAX {
+        return Err(ResourceError::UtxoBurnFailed {
+            id: UtxoId::from(*commitment_bytes),
+            details: "Value proof amount is too large".to_string(),
+        });
+    }
+
+    let elgamal = elgamal_verifiable_balance.ok_or_else(|| ResourceError::UtxoBurnFailed {
+        id: UtxoId::from(*commitment_bytes),
+        details: "Utxo does not have a viewable balance".to_string(),
+    })?;
+
+    let view_key = view_key.ok_or_else(|| ResourceError::UtxoBurnFailed {
+        id: UtxoId::from(*commitment_bytes),
+        details: "Resource does not have a view key".to_string(),
+    })?;
+
+    let encrypted: RistrettoPublicKey =
+        elgamal
+            .encrypted
+            .try_from_byte_type()
+            .map_err(|e| ResourceError::UtxoBurnFailed {
+                id: UtxoId::from(*commitment_bytes),
+                details: format!("Invalid encrypted balance bytes: {}", e),
+            })?;
+
+    let elgamal_public_nonce: RistrettoPublicKey =
+        elgamal
+            .public_nonce
+            .try_from_byte_type()
+            .map_err(|e| ResourceError::UtxoBurnFailed {
+                id: UtxoId::from(*commitment_bytes),
+                details: format!("Invalid ElGamal public nonce bytes: {}", e),
+            })?;
+
+    let public_nonce_g: RistrettoPublicKey =
+        public_nonce_g
+            .try_from_byte_type()
+            .map_err(|e| ResourceError::UtxoBurnFailed {
+                id: UtxoId::from(*commitment_bytes),
+                details: format!("Invalid public nonce (G) bytes: {}", e),
+            })?;
+
+    let public_nonce_r: RistrettoPublicKey =
+        public_nonce_r
+            .try_from_byte_type()
+            .map_err(|e| ResourceError::UtxoBurnFailed {
+                id: UtxoId::from(*commitment_bytes),
+                details: format!("Invalid public nonce (R) bytes: {}", e),
+            })?;
+
+    let s_p = RistrettoSecretKey::from_canonical_bytes(s_p.as_bytes()).map_err(|e| ResourceError::UtxoBurnFailed {
+        id: UtxoId::from(*commitment_bytes),
+        details: format!("Invalid scalar s_p bytes: {}", e),
+    })?;
+
+    let challenge = messages::elgamal_value_proof64(
+        commitment_bytes,
+        view_key,
+        &encrypted,
+        &elgamal_public_nonce,
+        &value,
+        &public_nonce_g,
+        &public_nonce_r,
+    );
+    let e = RistrettoSecretKey::from_uniform_bytes(&challenge)
+        .expect("INVARIANT VIOLATION: RistrettoSecretKey::from_uniform_bytes and hash output length mismatch");
+
+    // Check s.G ?= K_g + e.P
+    if RistrettoPublicKey::from_secret_key(&s_p) != public_nonce_g + &e * view_key {
+        return Err(ResourceError::UtxoBurnFailed {
+            id: UtxoId::from(*commitment_bytes),
+            details: "Invalid Elgamal encrypted value proof (s.G != K_g + e.P)".to_string(),
+        });
+    }
+
+    // D = E - v.G is p.R exactly when v is the value encrypted for the view key
+    let value = convert_amount_to_secret(&value);
+    let value_g = RistrettoPublicKey::from_secret_key(&value);
+    let d = encrypted - value_g;
+
+    // Check s.R ?= K_r + e.D
+    if &s_p * &elgamal_public_nonce != public_nonce_r + &e * d {
+        return Err(ResourceError::UtxoBurnFailed {
+            id: UtxoId::from(*commitment_bytes),
+            details: "Invalid Elgamal encrypted value proof (s.R != K_r + e.D)".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -367,7 +387,7 @@ mod tests {
             let utxo = new_viewable_utxo(value);
             let view_secret = utxo.view_secret.clone();
 
-            let proof = generate_proof(&utxo, Amount::from(u64::MAX as u128) + Amount::ONE, &view_secret);
+            let proof = generate_proof(&utxo, Amount::from(u128::from(u64::MAX)) + Amount::ONE, &view_secret);
 
             let err = validate_value_proof(
                 &utxo.commitment_bytes,

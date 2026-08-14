@@ -505,9 +505,13 @@ This has implications for minting and burning:
 - **Minting** always produces a revealed amount returned as a `Bucket`. The minted value is public because the
   engine needs to update the total supply. You then use a stealth transfer to convert the bucket into
   stealth UTXOs.
-- **Burning** a stealth UTXO requires a `StealthValueProof` when supply tracking is enabled. This proof reveals
+- **Burning** a stealth UTXO requires a `CommitmentValueProof` when supply tracking is enabled. This proof reveals
   the value of the UTXO being burnt so that the total supply can be decremented. This effectively limits burns to
-  the UTXO owner or the holder of the secret view key, since only they can construct the proof.
+  the UTXO owner (who proves knowledge of the commitment mask) or the holder of the secret view key (who proves
+  the value against the encrypted viewable balance), since only they can construct the proof.
+- The same applies to **burning a bucket** that holds confidential commitments: use
+  `Bucket::burn_with_value_proofs` with one `CommitmentValueProof` per commitment, and to **minting**
+  commitments via `mint_confidential`, which requires a proof for each commitment the statement mints.
 
 If your resource does not need total supply tracking, you can disable it to save on fees and avoid
 revealing values during burns:
@@ -520,7 +524,7 @@ ResourceBuilder::stealth()
 ```
 
 <Aside type="note">
-When total supply tracking is disabled, `burn_utxo` can be called without a `StealthValueProof`
+When total supply tracking is disabled, `burn_utxo` can be called without a `CommitmentValueProof`
 (pass `None`), and the burnt value remains hidden.
 </Aside>
 

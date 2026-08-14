@@ -170,6 +170,11 @@ pub enum RuntimeError {
         resource_address: ResourceAddress,
         commitment: PedersenCommitmentBytes,
     },
+    #[error(
+        "The proven values of the confidential commitments of resource {resource_address} sum to more than the \
+         maximum amount"
+    )]
+    CommitmentValueSumOverflow { resource_address: ResourceAddress },
     #[error("Bucket {bucket_id} was dropped but was not empty")]
     BucketNotEmpty { bucket_id: BucketId },
     #[error("Item at id {id} does not exist on the workspace (existing ids: {})", .existing_ids.display())]

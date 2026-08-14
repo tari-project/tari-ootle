@@ -644,11 +644,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             )?;
             proven_value = proven_value
                 .checked_add(value)
-                .ok_or(RuntimeError::ResourceSupplyWouldOverflow {
-                    resource_address,
-                    current_supply: proven_value,
-                    amount: value,
-                })?;
+                .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
         }
         Ok(proven_value)
     }
@@ -765,14 +761,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
                     value_proofs,
                     maybe_view_key.as_ref(),
                 )?;
-                destroyed_amount =
-                    destroyed_amount
-                        .checked_add(proven_value)
-                        .ok_or(RuntimeError::ResourceSupplyWouldOverflow {
-                            resource_address,
-                            current_supply: burnt_amount,
-                            amount: proven_value,
-                        })?;
+                destroyed_amount = destroyed_amount
+                    .checked_add(proven_value)
+                    .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
             } else {
                 self.spend_confidential_outputs(resource_address, commitments)?;
             }
@@ -925,13 +916,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
                             body.viewable_balance.as_ref(),
                             value_proof,
                         )?;
-                        minted_commitment_value = minted_commitment_value.checked_add(value).ok_or(
-                            RuntimeError::ResourceSupplyWouldOverflow {
-                                resource_address,
-                                current_supply: minted_commitment_value,
-                                amount: value,
-                            },
-                        )?;
+                        minted_commitment_value = minted_commitment_value
+                            .checked_add(value)
+                            .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
                     }
                 }
 
@@ -968,16 +955,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
             // The minted amount is the revealed funds plus the value of any minted commitments
             let minted_amount = resource_container
                 .unlocked_amount()
-                .checked_add(minted_commitment_value);
-            let overflows = match minted_amount {
-                Some(amount) => !resource_mut.increase_total_supply(amount),
-                None => true,
-            };
-            if overflows {
+                .checked_add(minted_commitment_value)
+                .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
+            if !resource_mut.increase_total_supply(minted_amount) {
                 return Err(RuntimeError::ResourceSupplyWouldOverflow {
                     resource_address,
                     current_supply,
-                    amount: minted_amount.unwrap_or(Amount::MAX),
+                    amount: minted_amount,
                 });
             }
         }

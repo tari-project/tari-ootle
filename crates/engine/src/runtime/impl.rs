@@ -28,6 +28,7 @@ use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
     Utxo,
     UtxoOutput,
+    bucket::Bucket,
     commit_result::{FinalizeResult, RejectReason},
     component::Component,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
@@ -465,6 +466,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             function: function.to_string(),
             details: e.to_string(),
         })
+    }
+
+    /// It is invalid to burn a bucket that has locked funds (e.g. by a proof). Burning downs only the unlocked
+    /// commitments, so a locked one would be left live with nothing referencing it.
+    fn check_bucket_is_burnable(bucket_id: BucketId, bucket: &Bucket) -> Result<(), RuntimeError> {
+        if bucket.has_locked_funds() {
+            return Err(RuntimeError::InvalidOpDepositLockedBucket {
+                bucket_id,
+                locked_amount: bucket.locked_amount(),
+            });
+        }
+        Ok(())
     }
 
     /// Charges the native verification cost of a confidential mint against the payment-funded allowance before any
@@ -2892,10 +2905,12 @@ where
 
                 let arg: BurnBucketArg = args.assert_one_arg()?;
 
-                let (resource_lock, maybe_auth_hook, auth_caller, num_value_proofs) =
+                let (resource_lock, maybe_auth_hook, auth_caller, tracks_supply) =
                     self.tracker.write_with(|state_mut| {
                         let bucket = state_mut.get_bucket(bucket_id)?;
-                        let num_commitments = bucket.number_of_confidential_commitments();
+                        // Reject a burn that cannot succeed before the auth hook runs or anything is charged for it.
+                        // This is re-checked after the hook, which may lock funds itself.
+                        Self::check_bucket_is_burnable(bucket_id, bucket)?;
 
                         let resource_lock =
                             state_mut.write_lock_substate(SubstateId::Resource(*bucket.resource_address()))?;
@@ -2908,25 +2923,31 @@ where
                             resource.access_rules(),
                         )?;
 
-                        // A value proof is verified per held commitment, and only when supply tracking is enabled.
-                        let num_value_proofs = if resource.is_supply_tracking_enabled() {
-                            num_commitments
-                        } else {
-                            0
-                        };
-
                         let auth_caller = state_mut.get_auth_caller()?;
                         Ok::<_, RuntimeError>((
                             resource_lock,
                             resource.auth_hook().cloned(),
                             auth_caller,
-                            num_value_proofs,
+                            resource.is_supply_tracking_enabled(),
                         ))
                     })?;
 
                 if let Some(auth_hook) = maybe_auth_hook {
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Burn)?;
                 }
+
+                // The hook may have altered the bucket, so the commitments are counted after it runs: the charge
+                // must cover the proofs actually verified below, not those held when the hook was scheduled.
+                let num_value_proofs = self.tracker.write_with(|state_mut| {
+                    let bucket = state_mut.get_bucket(bucket_id)?;
+                    // A value proof is verified per held commitment, and only when supply tracking is enabled.
+                    let num_commitments = if tracks_supply {
+                        bucket.number_of_confidential_commitments()
+                    } else {
+                        0
+                    };
+                    Ok::<_, RuntimeError>(num_commitments)
+                })?;
 
                 // Charge the value proofs' native verification against the payment-funded allowance before they run.
                 if num_value_proofs > 0 {
@@ -2938,14 +2959,7 @@ where
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
-                    // It is invalid to burn a bucket that has locked funds (e.g. via a proof). Burning downs only
-                    // the unlocked commitments, so a locked one would be left live with nothing referencing it.
-                    if bucket.has_locked_funds() {
-                        return Err(RuntimeError::InvalidOpDepositLockedBucket {
-                            bucket_id,
-                            locked_amount: bucket.locked_amount(),
-                        });
-                    }
+                    Self::check_bucket_is_burnable(bucket_id, &bucket)?;
 
                     state.burn_bucket(bucket, &resource_lock, &arg.value_proofs)?;
 

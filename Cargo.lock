@@ -12066,7 +12066,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_wallet_sdk"
-version = "0.40.0"
+version = "0.40.1"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -12134,6 +12134,7 @@ dependencies = [
  "digest 0.10.7",
  "ootle_byte_type",
  "rand 0.10.1",
+ "tari_consensus_types",
  "tari_crypto",
  "tari_engine_types",
  "tari_indexer_client",
@@ -12147,6 +12148,8 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction_components",
  "tempfile",
+ "time",
+ "tokio",
 ]
 
 [[package]]

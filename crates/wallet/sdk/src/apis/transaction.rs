@@ -291,8 +291,9 @@ where
                         self.commit_diff(tx, diff)?;
                     }
 
-                    let final_fee =
-                        execution_result.as_ref().map(|e| e.finalize.fee_receipt.required_fees());
+                    let final_fee = execution_result
+                        .as_ref()
+                        .map(|e| e.finalize.fee_receipt.total_fees_paid());
 
                     tx.transactions_update(
                         WalletTransactionUpdate::new(transaction_id)

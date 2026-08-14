@@ -587,9 +587,23 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &mut self,
         resource_address: ResourceAddress,
         commitments: I,
-    ) -> Result<(), RuntimeError> {
-        self.spend_confidential_outputs_internal(resource_address, commitments, None)
-            .map(|_| ())
+    ) -> Result<Vec<(PedersenCommitmentBytes, ConfidentialOutput)>, RuntimeError> {
+        commitments
+            .into_iter()
+            .map(|commitment| {
+                let address = ConfidentialOutputAddress::new(resource_address, commitment);
+                let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Write)?;
+                let output = self.store.down_confidential_output(lock_id)?;
+                self.store.try_unlock(lock_id)?;
+                if output.is_frozen() {
+                    return Err(ResourceError::InvalidSpend {
+                        details: format!("Confidential output {} is frozen", address),
+                    }
+                    .into());
+                }
+                Ok((commitment, output))
+            })
+            .collect()
     }
 
     /// Downs each commitment's [`ConfidentialOutput`] substate, verifying the caller's value proof for it and
@@ -602,51 +616,26 @@ impl<TStore: StateReader> WorkingState<TStore> {
         value_proofs: &BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
         view_key: Option<&RistrettoPublicKey>,
     ) -> Result<Amount, RuntimeError> {
-        self.spend_confidential_outputs_internal(resource_address, commitments, Some((value_proofs, view_key)))
-    }
-
-    fn spend_confidential_outputs_internal<I: IntoIterator<Item = PedersenCommitmentBytes>>(
-        &mut self,
-        resource_address: ResourceAddress,
-        commitments: I,
-        value_proofs: Option<(
-            &BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
-            Option<&RistrettoPublicKey>,
-        )>,
-    ) -> Result<Amount, RuntimeError> {
-        let mut proven_value = Amount::ZERO;
-        for commitment in commitments {
-            let address = ConfidentialOutputAddress::new(resource_address, commitment);
-            let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Write)?;
-            let output = self.store.down_confidential_output(lock_id)?;
-            self.store.try_unlock(lock_id)?;
-            if output.is_frozen() {
-                return Err(ResourceError::InvalidSpend {
-                    details: format!("Confidential output {} is frozen", address),
-                }
-                .into());
-            }
-
-            let Some((value_proofs, view_key)) = value_proofs else {
-                continue;
-            };
-            let value_proof = value_proofs
-                .get(&commitment)
-                .ok_or(RuntimeError::MissingValueProofForCommitment {
-                    resource_address,
-                    commitment,
-                })?;
-            let value = crypto::validate_value_proof(
-                &commitment,
-                view_key,
-                output.output().viewable_balance.as_ref(),
-                value_proof,
-            )?;
-            proven_value = proven_value
-                .checked_add(value)
-                .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
-        }
-        Ok(proven_value)
+        self.spend_confidential_outputs(resource_address, commitments)?
+            .into_iter()
+            .try_fold(Amount::ZERO, |proven_value, (commitment, output)| {
+                let value_proof =
+                    value_proofs
+                        .get(&commitment)
+                        .ok_or(RuntimeError::MissingValueProofForCommitment {
+                            resource_address,
+                            commitment,
+                        })?;
+                let value = crypto::validate_value_proof(
+                    &commitment,
+                    view_key,
+                    output.output().viewable_balance.as_ref(),
+                    value_proof,
+                )?;
+                proven_value
+                    .checked_add(value)
+                    .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })
+            })
     }
 
     /// Applies the substate-level effects of a confidential mint/withdraw: downs the spent input substates and
@@ -722,14 +711,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             return Ok(());
         }
         let resource_address = *bucket.resource_address();
-        let resource = self.get_resource(resource_lock)?;
-        let is_total_supply_tracking_enabled = resource.is_supply_tracking_enabled();
-        let maybe_view_key = resource
-            .to_view_key_public_key()
-            .map_err(|e| RuntimeError::InvariantError {
-                function: "burn_bucket",
-                details: format!("Resource contained a malformed view key: {e}. This should never happen!"),
-            })?;
+        let is_total_supply_tracking_enabled = self.get_resource(resource_lock)?.is_supply_tracking_enabled();
 
         let burnt_amount = bucket.unlocked_amount();
         // Confidential outputs are held by id in the bucket; downing them destroys the value.
@@ -755,6 +737,15 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let mut destroyed_amount = burnt_amount;
         if let Some(commitments) = confidential_commitments {
             if is_total_supply_tracking_enabled {
+                // Decompressing the view key costs a point decompression, so it is only done once a proof is
+                // actually going to be verified against it.
+                let maybe_view_key = self
+                    .get_resource(resource_lock)?
+                    .to_view_key_public_key()
+                    .map_err(|e| RuntimeError::InvariantError {
+                        function: "burn_bucket",
+                        details: format!("Resource contained a malformed view key: {e}. This should never happen!"),
+                    })?;
                 let proven_value = self.spend_confidential_outputs_with_value_proofs(
                     resource_address,
                     commitments,

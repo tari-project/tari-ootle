@@ -489,7 +489,11 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         has_view_key: bool,
         is_total_supply_tracking_enabled: bool,
     ) -> Result<(), RuntimeError> {
-        let MintArg::Confidential { statement, .. } = mint_arg else {
+        let MintArg::Confidential {
+            statement,
+            value_proofs,
+        } = mint_arg
+        else {
             return Ok(());
         };
 
@@ -499,9 +503,17 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 has_view_key,
             ))?;
 
-        if is_total_supply_tracking_enabled && statement.output.is_some() {
-            self.tracker
-                .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_VALUE_PROOF)?;
+        if is_total_supply_tracking_enabled {
+            // One proof is verified per minted commitment; the price depends on each proof's variant.
+            let points = statement
+                .output
+                .iter()
+                .filter_map(|output| value_proofs.get(&output.commitment))
+                .map(crypto::value_proof_native_points)
+                .fold(0u64, u64::saturating_add);
+            if points > 0 {
+                self.tracker.charge_native_execution(points)?;
+            }
         }
 
         Ok(())
@@ -2936,25 +2948,27 @@ where
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Burn)?;
                 }
 
-                // The hook may have altered the bucket, so the commitments are counted after it runs: the charge
-                // must cover the proofs actually verified below, not those held when the hook was scheduled.
-                let num_value_proofs = self.tracker.write_with(|state_mut| {
+                // The hook may have altered the bucket, so the commitments are read after it runs: the charge must
+                // cover the proofs actually verified below, not those held when the hook was scheduled.
+                let value_proof_points = self.tracker.write_with(|state_mut| {
                     let bucket = state_mut.get_bucket(bucket_id)?;
-                    // A value proof is verified per held commitment, and only when supply tracking is enabled.
-                    let num_commitments = if tracks_supply {
-                        bucket.number_of_confidential_commitments()
-                    } else {
-                        0
-                    };
-                    Ok::<_, RuntimeError>(num_commitments)
+                    if !tracks_supply {
+                        return Ok::<_, RuntimeError>(0);
+                    }
+                    // One proof is verified per unlocked commitment; the price depends on each proof's variant.
+                    let points = bucket
+                        .get_confidential_commitments()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|commitment| arg.value_proofs.get(commitment))
+                        .map(crypto::value_proof_native_points)
+                        .fold(0u64, u64::saturating_add);
+                    Ok(points)
                 })?;
 
                 // Charge the value proofs' native verification against the payment-funded allowance before they run.
-                if num_value_proofs > 0 {
-                    self.tracker.charge_native_execution(
-                        tari_engine_types::limits::NativeExecutionPoints::PER_VALUE_PROOF
-                            .saturating_mul(num_value_proofs as u64),
-                    )?;
+                if value_proof_points > 0 {
+                    self.tracker.charge_native_execution(value_proof_points)?;
                 }
 
                 self.tracker.write_with(|state| {

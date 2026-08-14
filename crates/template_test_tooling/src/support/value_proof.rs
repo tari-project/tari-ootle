@@ -1,13 +1,28 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::BTreeMap;
+
 use ootle_byte_type::ToByteType;
 use tari_crypto::ristretto::{RistrettoSchnorr, RistrettoSecretKey};
 use tari_engine_types::crypto::{commit_amount, messages};
 use tari_template_lib::types::{
     Amount,
-    crypto::{CommitmentValueProof, ValueKnowledgeProof},
+    crypto::{CommitmentValueProof, PedersenCommitmentBytes, ValueKnowledgeProof},
 };
+
+/// The proof map the engine requires to mint or burn a single commitment of `amount` under `mask`, keyed by the
+/// commitment as the engine sees it.
+pub fn value_proofs_for_commitment<A: Into<Amount>>(
+    amount: A,
+    mask: &RistrettoSecretKey,
+) -> BTreeMap<PedersenCommitmentBytes, CommitmentValueProof> {
+    let amount = amount.into();
+    let commitment = commit_amount(mask, amount)
+        .expect("value_proofs_for_commitment: amount exceeds u64::MAX")
+        .to_byte_type();
+    BTreeMap::from([(commitment, generate_value_proof_mask_knowledge(amount, mask))])
+}
 
 /// Proves the value of a commitment by knowledge of its mask. For the view-key path, build the DLEQ proof with
 /// `tari_ootle_wallet_crypto::generate_elgamal_value_proof` instead.

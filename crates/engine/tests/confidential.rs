@@ -40,7 +40,7 @@ use tari_template_test_tooling::{
             generate_withdraw_proof_with_inputs,
             generate_withdraw_proof_with_view_key,
         },
-        value_proof::generate_value_proof_mask_knowledge,
+        value_proof::{generate_value_proof_mask_knowledge, value_proofs_for_commitment},
     },
 };
 use tari_transaction_manifest::ManifestValue;
@@ -58,17 +58,10 @@ fn mint_statement(
         Some(vk) => generate_confidential_proof_with_view_key(amount, None, vk),
         None => generate_confidential_output_statement(amount, None),
     };
-    (statement, mask.clone(), value_proofs_for(amount, &mask))
+    (statement, mask.clone(), value_proofs_for_commitment(amount, &mask))
 }
 
 type ValueProofs = BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>;
-
-/// The single-commitment proof map for a commitment of `amount` under `mask`.
-fn value_proofs_for(amount: u64, mask: &RistrettoSecretKey) -> ValueProofs {
-    let amount = Amount::from(amount);
-    let commitment = commit_amount(mask, amount).unwrap().to_byte_type();
-    BTreeMap::from([(commitment, generate_value_proof_mask_knowledge(amount, mask))])
-}
 
 fn setup(
     initial_supply: ConfidentialOutputStatement,

@@ -23,6 +23,17 @@ use crate::{
     resource_container::ResourceError,
 };
 
+/// The native-execution metering points [`validate_value_proof`] costs for `proof`, which depends on the variant:
+/// the ElGamal DLEQ verifies two Schnorr-style equations where the mask-knowledge variant verifies one. Must stay
+/// in lock-step with what [`validate_value_proof`] actually verifies.
+pub fn value_proof_native_points(proof: &CommitmentValueProof) -> u64 {
+    use crate::limits::NativeExecutionPoints as P;
+    match proof.knowledge_proof {
+        ValueKnowledgeProof::Commitment { .. } => P::PER_VALUE_PROOF,
+        ValueKnowledgeProof::ElgamalEncrypted { .. } => P::PER_ELGAMAL_VALUE_PROOF,
+    }
+}
+
 /// Verifies that `commitment_bytes` commits to `proof.value` and returns that value.
 ///
 /// This is the only way the engine can learn the value hidden in a commitment, so it is required wherever a

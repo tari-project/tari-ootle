@@ -1,15 +1,11 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::BTreeMap;
-
-use ootle_byte_type::ToByteType;
-use tari_engine_types::crypto::commit_amount;
 use tari_ootle_transaction::args;
-use tari_template_lib::types::{Amount, ComponentAddress, Metadata, ResourceAddress};
+use tari_template_lib::types::{ComponentAddress, Metadata, ResourceAddress};
 use tari_template_test_tooling::{
     TemplateTest,
-    support::{confidential::generate_confidential_output_statement, value_proof::generate_value_proof_mask_knowledge},
+    support::{confidential::generate_confidential_output_statement, value_proof::value_proofs_for_commitment},
 };
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -33,9 +29,7 @@ fn confidential_join() {
     let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/resource"]);
     let component: ComponentAddress = test.call_function("ResourceTest", "new", args![], vec![]);
     let (output, mask, _) = generate_confidential_output_statement(1000, None);
-    let amount = Amount::from(1000u64);
-    let commitment = commit_amount(&mask, amount).unwrap().to_byte_type();
-    let value_proofs = BTreeMap::from([(commitment, generate_value_proof_mask_knowledge(amount, &mask))]);
+    let value_proofs = value_proofs_for_commitment(1000u64, &mask);
     test.call_method::<()>(component, "confidential_join", args![output, value_proofs], vec![]);
 }
 

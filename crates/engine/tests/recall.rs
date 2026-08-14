@@ -4,14 +4,13 @@
 use std::collections::BTreeMap;
 
 use ootle_byte_type::ToByteType;
-use tari_engine_types::crypto::commit_amount;
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleId, ResourceAddress, VaultId};
 use tari_template_test_tooling::{
     TemplateTest,
     support::{
         confidential::{generate_confidential_output_statement, generate_withdraw_proof},
-        value_proof::generate_value_proof_mask_knowledge,
+        value_proof::value_proofs_for_commitment,
     },
 };
 
@@ -25,11 +24,7 @@ fn it_recalls_all_resource_types() {
 
     let (mut initial_supply, mask, _) = generate_confidential_output_statement(1000, None);
     initial_supply.output_revealed_amount = Amount::from(1000u64);
-    let commitment = commit_amount(&mask, Amount::from(1000u64)).unwrap().to_byte_type();
-    let value_proofs = BTreeMap::from([(
-        commitment,
-        generate_value_proof_mask_knowledge(Amount::from(1000u64), &mask),
-    )]);
+    let value_proofs = value_proofs_for_commitment(1000u64, &mask);
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet()

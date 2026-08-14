@@ -88,6 +88,9 @@ impl NativeExecutionPoints {
     /// same primitives as [`Self::PER_STATEMENT`]) and a bounded kernel-MMR inclusion proof
     /// (Blake2b hashes, microseconds). Priced as the statement cost with headroom.
     pub const PER_CLAIM_BURN: u64 = 3_200_000;
+    /// One ElGamal (DLEQ) value proof. It verifies two Schnorr-style equations over four decompressed
+    /// points rather than one, so it is priced at double the mask-knowledge variant.
+    pub const PER_ELGAMAL_VALUE_PROOF: u64 = 1_200_000;
     /// One stealth/confidential input commitment: decompress + point aggregation (~4.8µs measured).
     /// Substate access is charged separately by the fee module.
     pub const PER_INPUT: u64 = 42_000;
@@ -102,8 +105,8 @@ impl NativeExecutionPoints {
     /// Fixed per-statement cost: balance-proof Schnorr verification, bulletproof base cost and
     /// basic validations (~0.24ms measured).
     pub const PER_STATEMENT: u64 = 2_100_000;
-    /// One UTXO value proof (supply-tracked burns): a Schnorr verification plus commitment
-    /// arithmetic (~60µs class), priced with headroom.
+    /// One mask-knowledge value proof (supply-tracked mints and burns): a Schnorr verification plus
+    /// commitment arithmetic (~60µs class), priced with headroom.
     pub const PER_VALUE_PROOF: u64 = 600_000;
 }
 

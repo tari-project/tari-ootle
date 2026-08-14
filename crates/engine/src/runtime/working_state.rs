@@ -634,7 +634,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 )?;
                 proven_value
                     .checked_add(value)
-                    .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })
+                    .ok_or(RuntimeError::ValueSumOverflow { resource_address })
             })
     }
 
@@ -754,7 +754,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 )?;
                 destroyed_amount = destroyed_amount
                     .checked_add(proven_value)
-                    .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
+                    .ok_or(RuntimeError::ValueSumOverflow { resource_address })?;
             } else {
                 self.spend_confidential_outputs(resource_address, commitments)?;
             }
@@ -909,7 +909,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                         )?;
                         minted_commitment_value = minted_commitment_value
                             .checked_add(value)
-                            .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
+                            .ok_or(RuntimeError::ValueSumOverflow { resource_address })?;
                     }
                 }
 
@@ -947,7 +947,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             let minted_amount = resource_container
                 .unlocked_amount()
                 .checked_add(minted_commitment_value)
-                .ok_or(RuntimeError::CommitmentValueSumOverflow { resource_address })?;
+                .ok_or(RuntimeError::ValueSumOverflow { resource_address })?;
             if !resource_mut.increase_total_supply(minted_amount) {
                 return Err(RuntimeError::ResourceSupplyWouldOverflow {
                     resource_address,

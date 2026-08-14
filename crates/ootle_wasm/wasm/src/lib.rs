@@ -359,6 +359,40 @@ pub fn build_script_path_witness(conditions_json: &str, leaf_json: &str, data: &
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Build a complete `StealthTransferStatement` JSON from unblinded input/output witnesses.
+///
+/// Unlike `generateStealthOutputsStatement` / `buildStealthInputsStatementFromInputs` +
+/// `generateStealthBalanceProofSignature`, which build and sign each half of a transfer
+/// separately and never populate `covenant_claims`, this wraps the single primitive that
+/// produces the *entire*, internally-consistent statement -- including a real covenant
+/// balance-integrity proof for any script-path-spent input's condition-root partition. **This is
+/// the only correct way to spend a `PayTo::Conditions` (ScriptPath) stealth output.**
+///
+/// `input_witnesses_json` is a JSON array of `{ "mask_and_value": { "value": <u64>, "mask": <hex
+/// 32 bytes> }, "witness"?: <SpendWitness>, "condition_root"?: <Hash32> }` -- each entry's
+/// `witness`/`condition_root` are the exact pair `buildScriptPathWitness` returns, for a
+/// script-path input; omit both for a plain key-path input. Mixing key-path and script-path
+/// inputs in one call is supported.
+///
+/// `output_witnesses_json` is a JSON array of the same `{ "witness": {...}, "auth": ..., "tag":
+/// ... }` shape `createStealthOutputWitness` returns -- collect one entry per output (including
+/// change).
+#[wasm_bindgen(js_name = "buildStealthTransferStatement")]
+pub fn build_stealth_transfer_statement(
+    input_witnesses_json: &str,
+    revealed_input_amount_microtari: u64,
+    output_witnesses_json: &str,
+    revealed_output_amount_microtari: u64,
+) -> Result<String, JsError> {
+    ootle_wasm_core::stealth::transfer::build_stealth_transfer_statement(
+        input_witnesses_json,
+        revealed_input_amount_microtari,
+        output_witnesses_json,
+        revealed_output_amount_microtari,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Aggregate the commitment masks of stealth inputs into a single 32-byte Ristretto scalar.
 ///
 /// `masks_concat` is the concatenated bytes of all input masks (32 bytes per mask, so the input

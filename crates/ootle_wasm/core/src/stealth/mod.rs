@@ -11,6 +11,7 @@ pub mod encrypted_data;
 pub mod inputs;
 pub mod kdfs;
 pub mod outputs;
+pub mod transfer;
 mod types;
 pub mod validate;
 pub mod viewable_balance;

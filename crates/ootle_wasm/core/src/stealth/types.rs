@@ -17,7 +17,12 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness};
-use tari_template_lib_types::{EncryptedData, crypto::UtxoTag, stealth::SpendAuthorization};
+use tari_template_lib_types::{
+    EncryptedData,
+    Hash32,
+    crypto::UtxoTag,
+    stealth::{SpendAuthorization, SpendWitness},
+};
 
 use crate::{
     error::OotleWasmError,
@@ -122,32 +127,38 @@ pub struct InputWitness {
     pub mask: String,
 }
 
-/// A stealth input being spent (currently just the unblinded commitment opening).
+/// A stealth input being spent: the unblinded commitment opening, plus (for a script-path spend
+/// only) the `SpendWitness` revealing one condition-tree leaf and the committed `condition_root`
+/// it was revealed against. `witness`/`condition_root` are the exact pair `buildScriptPathWitness`
+/// returns -- merge that result's `witness`/`condition_root` fields straight in alongside
+/// `mask_and_value` for a script-path input. Omit both for a plain key-path spend.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum StealthInputWitnessJson {
-    /// Object form: `{ "mask_and_value": { "value": 100, "mask": "..." } }`.
-    Wrapped { mask_and_value: InputWitness },
-    /// Flat form: `{ "value": 100, "mask": "..." }`.
-    Flat(InputWitness),
-}
-
-impl StealthInputWitnessJson {
-    fn into_inner(self) -> InputWitness {
-        match self {
-            Self::Wrapped { mask_and_value } => mask_and_value,
-            Self::Flat(w) => w,
-        }
-    }
+pub struct StealthInputWitnessJson {
+    pub mask_and_value: InputWitness,
+    #[serde(default)]
+    pub witness: Option<SpendWitness>,
+    #[serde(default)]
+    pub condition_root: Option<Hash32>,
 }
 
 impl TryFrom<StealthInputWitnessJson> for StealthInputWitness {
     type Error = OotleWasmError;
 
     fn try_from(value: StealthInputWitnessJson) -> Result<Self, Self::Error> {
-        let inner = value.into_inner();
-        let mask = decode_secret_key(&inner.mask, "mask")?;
-        Ok(StealthInputWitness::new(MaskAndValue::new(inner.value, mask)))
+        let mask = decode_secret_key(&value.mask_and_value.mask, "mask")?;
+        let mask_and_value = MaskAndValue::new(value.mask_and_value.value, mask);
+        match (value.witness, value.condition_root) {
+            (Some(witness), Some(condition_root)) => Ok(StealthInputWitness::with_script_path(
+                mask_and_value,
+                witness,
+                condition_root,
+            )),
+            (None, None) => Ok(StealthInputWitness::new(mask_and_value)),
+            _ => Err(OotleWasmError::Stealth(
+                "witness and condition_root must both be present (script-path input) or both absent (key-path input)"
+                    .to_string(),
+            )),
+        }
     }
 }
 

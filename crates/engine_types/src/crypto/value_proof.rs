@@ -9,8 +9,13 @@ use tari_crypto::{
 };
 use tari_template_lib::types::{
     Amount,
-    UtxoId,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, StealthValueProof, ValueKnowledgeProof},
+    crypto::{
+        CommitmentValueProof,
+        PedersenCommitmentBytes,
+        RistrettoPublicKeyBytes,
+        Scalar32Bytes,
+        ValueKnowledgeProof,
+    },
 };
 
 use crate::{
@@ -18,52 +23,40 @@ use crate::{
     resource_container::ResourceError,
 };
 
+/// Verifies that `commitment_bytes` commits to `proof.value` and returns that value.
+///
+/// This is the only way the engine can learn the value hidden in a commitment, so it is required wherever a
+/// commitment enters or leaves a supply-tracking resource.
 pub fn validate_value_proof(
     commitment_bytes: &PedersenCommitmentBytes,
     view_key: Option<&RistrettoPublicKey>,
     elgamal_verifiable_balance: Option<&ElgamalVerifiableBalanceBytes>,
-    proof: &StealthValueProof,
+    proof: &CommitmentValueProof,
 ) -> Result<Amount, ResourceError> {
-    if proof.value.is_negative() {
-        return Err(ResourceError::UtxoBurnFailed {
-            id: UtxoId::from(*commitment_bytes),
-            details: "Value proof amount cannot be negative".to_string(),
-        });
-    }
+    let invalid = |details: String| ResourceError::InvalidValueProof {
+        commitment: *commitment_bytes,
+        details,
+    };
 
-    let commitment: PedersenCommitment =
-        commitment_bytes
-            .try_from_byte_type()
-            .map_err(|e| ResourceError::UtxoBurnFailed {
-                id: UtxoId::from(*commitment_bytes),
-                details: format!("Invalid commitment bytes: {}", e),
-            })?;
+    let commitment: PedersenCommitment = commitment_bytes
+        .try_from_byte_type()
+        .map_err(|e| invalid(format!("Invalid commitment bytes: {e}")))?;
 
     match proof.knowledge_proof {
         ValueKnowledgeProof::Commitment { mask_knowledge_proof } => {
             let Some(commit_amount) = commit_amount(&RistrettoSecretKey::default(), proof.value) else {
-                return Err(ResourceError::UtxoBurnFailed {
-                    id: UtxoId::from(*commitment_bytes),
-                    details: "Value proof amount is too large".to_string(),
-                });
+                return Err(invalid("Value proof amount is too large".to_string()));
             };
             let public_mask = commitment.as_public_key() - commit_amount.as_public_key();
 
-            let sig: RistrettoSchnorr =
-                mask_knowledge_proof
-                    .try_from_byte_type()
-                    .map_err(|e| ResourceError::UtxoBurnFailed {
-                        id: UtxoId::from(*commitment_bytes),
-                        details: format!("Invalid mask knowledge proof bytes: {}", e),
-                    })?;
+            let sig: RistrettoSchnorr = mask_knowledge_proof
+                .try_from_byte_type()
+                .map_err(|e| invalid(format!("Invalid mask knowledge proof bytes: {e}")))?;
 
             let message = messages::value_proof_message(commitment_bytes, &proof.value);
 
             if !sig.verify(&public_mask, message) {
-                return Err(ResourceError::UtxoBurnFailed {
-                    id: UtxoId::from(*commitment_bytes),
-                    details: "Invalid mask knowledge proof".to_string(),
-                });
+                return Err(invalid("Invalid mask knowledge proof".to_string()));
             }
         },
         ValueKnowledgeProof::ElgamalEncrypted {
@@ -98,19 +91,19 @@ fn validate_elgamal_knowledge_proof(
     // Viewable balances encrypt a u64 value, so a larger claimed value can never be honest. This also keeps
     // the bound consistent with the Commitment variant, which inherits it from `commit_amount`.
     if value > u64::MAX {
-        return Err(ResourceError::UtxoBurnFailed {
-            id: UtxoId::from(*commitment_bytes),
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
             details: "Value proof amount is too large".to_string(),
         });
     }
 
-    let elgamal = elgamal_verifiable_balance.ok_or_else(|| ResourceError::UtxoBurnFailed {
-        id: UtxoId::from(*commitment_bytes),
+    let elgamal = elgamal_verifiable_balance.ok_or_else(|| ResourceError::InvalidValueProof {
+        commitment: *commitment_bytes,
         details: "Utxo does not have a viewable balance".to_string(),
     })?;
 
-    let view_key = view_key.ok_or_else(|| ResourceError::UtxoBurnFailed {
-        id: UtxoId::from(*commitment_bytes),
+    let view_key = view_key.ok_or_else(|| ResourceError::InvalidValueProof {
+        commitment: *commitment_bytes,
         details: "Resource does not have a view key".to_string(),
     })?;
 
@@ -118,8 +111,8 @@ fn validate_elgamal_knowledge_proof(
         elgamal
             .encrypted
             .try_from_byte_type()
-            .map_err(|e| ResourceError::UtxoBurnFailed {
-                id: UtxoId::from(*commitment_bytes),
+            .map_err(|e| ResourceError::InvalidValueProof {
+                commitment: *commitment_bytes,
                 details: format!("Invalid encrypted balance bytes: {}", e),
             })?;
 
@@ -127,31 +120,32 @@ fn validate_elgamal_knowledge_proof(
         elgamal
             .public_nonce
             .try_from_byte_type()
-            .map_err(|e| ResourceError::UtxoBurnFailed {
-                id: UtxoId::from(*commitment_bytes),
+            .map_err(|e| ResourceError::InvalidValueProof {
+                commitment: *commitment_bytes,
                 details: format!("Invalid ElGamal public nonce bytes: {}", e),
             })?;
 
     let public_nonce_g: RistrettoPublicKey =
         public_nonce_g
             .try_from_byte_type()
-            .map_err(|e| ResourceError::UtxoBurnFailed {
-                id: UtxoId::from(*commitment_bytes),
+            .map_err(|e| ResourceError::InvalidValueProof {
+                commitment: *commitment_bytes,
                 details: format!("Invalid public nonce (G) bytes: {}", e),
             })?;
 
     let public_nonce_r: RistrettoPublicKey =
         public_nonce_r
             .try_from_byte_type()
-            .map_err(|e| ResourceError::UtxoBurnFailed {
-                id: UtxoId::from(*commitment_bytes),
+            .map_err(|e| ResourceError::InvalidValueProof {
+                commitment: *commitment_bytes,
                 details: format!("Invalid public nonce (R) bytes: {}", e),
             })?;
 
-    let s_p = RistrettoSecretKey::from_canonical_bytes(s_p.as_bytes()).map_err(|e| ResourceError::UtxoBurnFailed {
-        id: UtxoId::from(*commitment_bytes),
-        details: format!("Invalid scalar s_p bytes: {}", e),
-    })?;
+    let s_p =
+        RistrettoSecretKey::from_canonical_bytes(s_p.as_bytes()).map_err(|e| ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
+            details: format!("Invalid scalar s_p bytes: {}", e),
+        })?;
 
     let challenge = messages::elgamal_value_proof64(
         commitment_bytes,
@@ -167,8 +161,8 @@ fn validate_elgamal_knowledge_proof(
 
     // Check s.G ?= K_g + e.P
     if RistrettoPublicKey::from_secret_key(&s_p) != public_nonce_g + &e * view_key {
-        return Err(ResourceError::UtxoBurnFailed {
-            id: UtxoId::from(*commitment_bytes),
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
             details: "Invalid Elgamal encrypted value proof (s.G != K_g + e.P)".to_string(),
         });
     }
@@ -180,8 +174,8 @@ fn validate_elgamal_knowledge_proof(
 
     // Check s.R ?= K_r + e.D
     if &s_p * &elgamal_public_nonce != public_nonce_r + &e * d {
-        return Err(ResourceError::UtxoBurnFailed {
-            id: UtxoId::from(*commitment_bytes),
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
             details: "Invalid Elgamal encrypted value proof (s.R != K_r + e.D)".to_string(),
         });
     }
@@ -193,7 +187,7 @@ fn validate_elgamal_knowledge_proof(
 mod tests {
     use ootle_byte_type::ToByteType;
     use tari_crypto::keys::SecretKey;
-    use tari_template_lib::types::crypto::{StealthValueProof, ValueKnowledgeProof};
+    use tari_template_lib::types::crypto::{CommitmentValueProof, ValueKnowledgeProof};
 
     use super::*;
 
@@ -209,7 +203,7 @@ mod tests {
         let message = messages::value_proof_message(&commitment_bytes, &value);
         let sig = RistrettoSchnorr::sign(&mask, message, &mut rng).unwrap();
 
-        let proof = StealthValueProof {
+        let proof = CommitmentValueProof {
             value,
             knowledge_proof: ValueKnowledgeProof::Commitment {
                 mask_knowledge_proof: sig.to_byte_type(),
@@ -235,7 +229,7 @@ mod tests {
         let message = messages::value_proof_message(&commitment_bytes, &other_value);
         let sig = RistrettoSchnorr::sign(&mask, message, &mut rng).unwrap();
 
-        let proof = StealthValueProof {
+        let proof = CommitmentValueProof {
             value: other_value,
             knowledge_proof: ValueKnowledgeProof::Commitment {
                 mask_knowledge_proof: sig.to_byte_type(),
@@ -245,7 +239,7 @@ mod tests {
         // Validate the proof
         let err = validate_value_proof(&commitment_bytes, None, None, &proof).unwrap_err();
         match err {
-            ResourceError::UtxoBurnFailed { details, .. } => {
+            ResourceError::InvalidValueProof { details, .. } => {
                 assert_eq!(details, "Invalid mask knowledge proof");
             },
             _ => panic!("Unexpected error type {err}"),
@@ -299,7 +293,7 @@ mod tests {
             utxo: &ViewableUtxo,
             claimed_value: Amount,
             witness: &RistrettoSecretKey,
-        ) -> StealthValueProof {
+        ) -> CommitmentValueProof {
             let mut rng = rand::rng();
             let k = RistrettoSecretKey::random(&mut rng);
             let public_nonce_g = RistrettoPublicKey::from_secret_key(&k);
@@ -317,7 +311,7 @@ mod tests {
             let e = RistrettoSecretKey::from_uniform_bytes(&challenge).unwrap();
             let s_p = &k + &e * witness;
 
-            StealthValueProof {
+            CommitmentValueProof {
                 value: claimed_value,
                 knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted {
                     public_nonce_g: public_nonce_g.to_byte_type(),
@@ -397,7 +391,7 @@ mod tests {
             )
             .unwrap_err();
             match err {
-                ResourceError::UtxoBurnFailed { details, .. } => {
+                ResourceError::InvalidValueProof { details, .. } => {
                     assert_eq!(details, "Value proof amount is too large");
                 },
                 _ => panic!("Unexpected error type {err}"),

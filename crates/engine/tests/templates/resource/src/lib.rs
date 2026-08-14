@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
 
 #[template]
@@ -66,8 +67,13 @@ mod template {
             self.non_fungible.deposit(joined);
         }
 
-        pub fn confidential_join(&self, output: ConfidentialOutputStatement) {
-            let commitments = ResourceManager::get(self.confidential.resource_address()).mint_confidential(output);
+        pub fn confidential_join(
+            &self,
+            output: ConfidentialOutputStatement,
+            value_proofs: BTreeMap<PedersenCommitmentBytes, crypto::CommitmentValueProof>,
+        ) {
+            let commitments = ResourceManager::get(self.confidential.resource_address())
+                .mint_confidential(output, value_proofs);
             let b1 = self.confidential.withdraw(10u32);
             let b2 = self.confidential.withdraw(900u32);
             let joined = b1.join(b2);

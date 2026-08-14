@@ -6,15 +6,14 @@ use std::iter;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
-    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::crypto::{commit_amount, messages};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, StealthInputWitness, StealthOutputWitness, stealth};
 use tari_template_lib::types::{
     Amount,
     EncryptedData,
     bytes::Bytes,
-    crypto::{RistrettoPublicKeyBytes, StealthValueProof, UtxoTag, ValueKnowledgeProof},
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     stealth::{SpendAuthorization, SpendCondition, StealthOutputsStatement, StealthTransferStatement},
 };
 
@@ -284,19 +283,5 @@ where
         output_masks: outputs.into_iter().map(|m| m.witness.mask).collect(),
         output_auths,
         statement: transfer,
-    }
-}
-
-pub fn generate_value_proof_mask_knowledge(value: Amount, mask: &RistrettoSecretKey) -> StealthValueProof {
-    let commitment = commit_amount(mask, value).unwrap();
-    let commitment_bytes = commitment.to_byte_type();
-    let message = messages::value_proof_message(&commitment_bytes, &value);
-    let sig = RistrettoSchnorr::sign(mask, message, &mut rand::rng()).expect("Signing cannot fail");
-
-    StealthValueProof {
-        value,
-        knowledge_proof: ValueKnowledgeProof::Commitment {
-            mask_knowledge_proof: sig.to_byte_type(),
-        },
     }
 }

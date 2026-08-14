@@ -5,7 +5,7 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
-    use tari_template_lib::prelude::crypto::StealthValueProof;
+    use tari_template_lib::prelude::crypto::CommitmentValueProof;
 
     use super::*;
 
@@ -141,7 +141,7 @@ mod template {
             self.manager.unfreeze_utxos(utxos);
         }
 
-        pub fn burn_utxos(&self, utxos: Vec<(UtxoId, StealthValueProof)>) {
+        pub fn burn_utxos(&self, utxos: Vec<(UtxoId, CommitmentValueProof)>) {
             for (utxo, proof) in utxos {
                 self.manager.burn_utxo(utxo, Some(proof));
             }

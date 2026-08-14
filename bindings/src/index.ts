@@ -150,7 +150,7 @@ export * from "./types/StealthOutputView";
 export * from "./types/StealthOutputsStatement";
 export * from "./types/StealthTransferStatement";
 export * from "./types/StealthUnspentOutput";
-export * from "./types/StealthValueProof";
+export * from "./types/CommitmentValueProof";
 export * from "./types/Substate";
 export * from "./types/SubstateAddress";
 export * from "./types/SubstateCreated";

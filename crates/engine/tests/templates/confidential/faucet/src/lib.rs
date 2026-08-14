@@ -20,6 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
 
 #[template]
@@ -31,10 +32,14 @@ mod faucet_template {
     }
 
     impl ConfidentialFaucet {
-        pub fn mint(confidential_proof: ConfidentialOutputStatement) -> Component<Self> {
+        pub fn mint(
+            confidential_proof: ConfidentialOutputStatement,
+            value_proofs: BTreeMap<PedersenCommitmentBytes, crypto::CommitmentValueProof>,
+        ) -> Component<Self> {
             let coins = ResourceBuilder::confidential()
                 .mintable(rule!(allow_all), OWNER)
-                .initial_supply(confidential_proof);
+                .burnable(rule!(allow_all), OWNER)
+                .initial_supply_with_value_proofs(confidential_proof, value_proofs);
 
             Component::new(Self {
                 vault: Vault::from_bucket(coins),
@@ -46,11 +51,13 @@ mod faucet_template {
         pub fn mint_with_view_key(
             confidential_proof: ConfidentialOutputStatement,
             view_key: RistrettoPublicKeyBytes,
+            value_proofs: BTreeMap<PedersenCommitmentBytes, crypto::CommitmentValueProof>,
         ) -> Component<Self> {
             let coins = ResourceBuilder::confidential()
                 .mintable(rule!(allow_all), OWNER)
+                .burnable(rule!(allow_all), OWNER)
                 .with_view_key(view_key)
-                .initial_supply(confidential_proof);
+                .initial_supply_with_value_proofs(confidential_proof, value_proofs);
 
             Component::new(Self {
                 vault: Vault::from_bucket(coins),
@@ -61,19 +68,23 @@ mod faucet_template {
 
         pub fn mint_revealed(&mut self, amount: Amount) {
             let proof = ConfidentialOutputStatement::mint_revealed(amount);
-            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof);
+            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof, BTreeMap::new());
             self.vault.deposit(bucket);
         }
 
         pub fn mint_revealed_with_bad_range_proof(&mut self, amount: Amount) {
             let mut proof = ConfidentialOutputStatement::mint_revealed(amount);
             proof.range_proof = crypto::RangeProofBytes::try_from(vec![1, 2, 3]).unwrap();
-            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof);
+            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof, BTreeMap::new());
             self.vault.deposit(bucket);
         }
 
-        pub fn mint_more(&mut self, proof: ConfidentialOutputStatement) {
-            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof);
+        pub fn mint_more(
+            &mut self,
+            proof: ConfidentialOutputStatement,
+            value_proofs: BTreeMap<PedersenCommitmentBytes, crypto::CommitmentValueProof>,
+        ) {
+            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof, value_proofs);
             self.vault.deposit(bucket);
         }
 

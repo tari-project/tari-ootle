@@ -8,9 +8,11 @@ pub mod messages;
 mod output;
 pub mod range_proof;
 mod value_lookup;
+mod value_proof;
 
 pub use covenant::*;
 pub use elgamal::*;
 pub use helpers::*;
 pub use output::*;
 pub use value_lookup::*;
+pub use value_proof::*;

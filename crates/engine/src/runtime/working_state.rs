@@ -3,7 +3,7 @@
 
 use std::{
     cmp,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     mem,
 };
 
@@ -18,6 +18,7 @@ use tari_engine_types::{
     bucket::Bucket,
     component::Component,
     confidential_output::ConfidentialOutput,
+    crypto,
     events::Event,
     fees::{FeeReceipt, FeeSource},
     id_provider::{IdProvider, ObjectIds},
@@ -58,7 +59,7 @@ use tari_template_lib::{
         access_rules::ResourceAuthAction,
         confidential::ConfidentialWithdrawProof,
         constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
-        crypto::PedersenCommitmentBytes,
+        crypto::{CommitmentValueProof, PedersenCommitmentBytes},
         metadata,
         stealth::{SpendAuthorization, StealthInput, StealthTransferStatement},
     },
@@ -587,6 +588,33 @@ impl<TStore: StateReader> WorkingState<TStore> {
         resource_address: ResourceAddress,
         commitments: I,
     ) -> Result<(), RuntimeError> {
+        self.spend_confidential_outputs_internal(resource_address, commitments, None)
+            .map(|_| ())
+    }
+
+    /// Downs each commitment's [`ConfidentialOutput`] substate, verifying the caller's value proof for it and
+    /// returning the total value proven. Requiring a proof here — where the commitments are enumerated — is what
+    /// makes it impossible to destroy a commitment's value without accounting for it.
+    pub fn spend_confidential_outputs_with_value_proofs<I: IntoIterator<Item = PedersenCommitmentBytes>>(
+        &mut self,
+        resource_address: ResourceAddress,
+        commitments: I,
+        value_proofs: &BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
+        view_key: Option<&RistrettoPublicKey>,
+    ) -> Result<Amount, RuntimeError> {
+        self.spend_confidential_outputs_internal(resource_address, commitments, Some((value_proofs, view_key)))
+    }
+
+    fn spend_confidential_outputs_internal<I: IntoIterator<Item = PedersenCommitmentBytes>>(
+        &mut self,
+        resource_address: ResourceAddress,
+        commitments: I,
+        value_proofs: Option<(
+            &BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
+            Option<&RistrettoPublicKey>,
+        )>,
+    ) -> Result<Amount, RuntimeError> {
+        let mut proven_value = Amount::ZERO;
         for commitment in commitments {
             let address = ConfidentialOutputAddress::new(resource_address, commitment);
             let lock_id = self.store.try_lock(address.clone().into(), LockFlag::Write)?;
@@ -598,8 +626,31 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 }
                 .into());
             }
+
+            let Some((value_proofs, view_key)) = value_proofs else {
+                continue;
+            };
+            let value_proof = value_proofs
+                .get(&commitment)
+                .ok_or(RuntimeError::MissingValueProofForCommitment {
+                    resource_address,
+                    commitment,
+                })?;
+            let value = crypto::validate_value_proof(
+                &commitment,
+                view_key,
+                output.output().viewable_balance.as_ref(),
+                value_proof,
+            )?;
+            proven_value = proven_value
+                .checked_add(value)
+                .ok_or(RuntimeError::ResourceSupplyWouldOverflow {
+                    resource_address,
+                    current_supply: proven_value,
+                    amount: value,
+                })?;
         }
-        Ok(())
+        Ok(proven_value)
     }
 
     /// Applies the substate-level effects of a confidential mint/withdraw: downs the spent input substates and
@@ -627,11 +678,64 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    pub fn burn_bucket(&mut self, bucket: Bucket) -> Result<(), RuntimeError> {
+    /// Decreases the total supply of the locked resource, rejecting the transaction rather than wrapping if the
+    /// decrease would underflow. Callers must only call this for a resource with supply tracking enabled.
+    pub fn decrease_total_supply(
+        &mut self,
+        resource_lock: &LockedSubstate,
+        amount: Amount,
+    ) -> Result<(), RuntimeError> {
+        let resource_address =
+            resource_lock
+                .substate_id()
+                .as_resource_address()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "decrease_total_supply",
+                    details: "LockedSubstate substate_id is not a ResourceAddress".to_string(),
+                })?;
+        let resource_mut = self.get_resource_mut(resource_lock)?;
+        if resource_mut.decrease_total_supply(amount) {
+            return Ok(());
+        }
+        Err(RuntimeError::ResourceSupplyWouldUnderflow {
+            resource_address,
+            current_supply: resource_mut
+                .total_supply()
+                .expect("Resource supply tracking is enabled"),
+            amount,
+        })
+    }
+
+    /// Destroys `bucket` and its contents, decreasing the resource's total supply by the value destroyed.
+    ///
+    /// `resource_lock` must be a write lock on the bucket's resource. When the resource tracks total supply,
+    /// `value_proofs` must prove the value of every confidential commitment the bucket holds: a commitment's value
+    /// is not visible to `unlocked_amount`, so without a proof the engine cannot know how much the burn destroys.
+    ///
+    /// A holder who knows the masks can prove a commitment directly. A holder who does not — a recaller, say — can
+    /// only prove one through the resource's view key, so commitments recalled from a resource without a view key
+    /// cannot be burnt at all. The supply figure stays correct either way: the value still exists, held by whoever
+    /// holds the commitment.
+    pub fn burn_bucket(
+        &mut self,
+        bucket: Bucket,
+        resource_lock: &LockedSubstate,
+        value_proofs: &BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
+    ) -> Result<(), RuntimeError> {
         if bucket.is_empty() {
             return Ok(());
         }
         let resource_address = *bucket.resource_address();
+        let resource = self.get_resource(resource_lock)?;
+        let is_total_supply_tracking_enabled = resource.is_supply_tracking_enabled();
+        let maybe_view_key = resource
+            .to_view_key_public_key()
+            .map_err(|e| RuntimeError::InvariantError {
+                function: "burn_bucket",
+                details: format!("Resource contained a malformed view key: {e}. This should never happen!"),
+            })?;
+
+        let burnt_amount = bucket.unlocked_amount();
         // Confidential outputs are held by id in the bucket; downing them destroys the value.
         let confidential_commitments = bucket.get_confidential_commitments().cloned();
         // Burn Non-fungibles (if resource is nf). Fungibles are burnt by removing the bucket from the tracker state
@@ -652,8 +756,30 @@ impl<TStore: StateReader> WorkingState<TStore> {
             self.unlock_substate(locked_nft)?;
         }
 
+        let mut destroyed_amount = burnt_amount;
         if let Some(commitments) = confidential_commitments {
-            self.spend_confidential_outputs(resource_address, commitments)?;
+            if is_total_supply_tracking_enabled {
+                let proven_value = self.spend_confidential_outputs_with_value_proofs(
+                    resource_address,
+                    commitments,
+                    value_proofs,
+                    maybe_view_key.as_ref(),
+                )?;
+                destroyed_amount =
+                    destroyed_amount
+                        .checked_add(proven_value)
+                        .ok_or(RuntimeError::ResourceSupplyWouldOverflow {
+                            resource_address,
+                            current_supply: burnt_amount,
+                            amount: proven_value,
+                        })?;
+            } else {
+                self.spend_confidential_outputs(resource_address, commitments)?;
+            }
+        }
+
+        if is_total_supply_tracking_enabled {
+            self.decrease_total_supply(resource_lock, destroyed_amount)?;
         }
 
         Ok(())
@@ -721,6 +847,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
             resource.is_supply_tracking_enabled()
         };
 
+        // The value minted into commitments. `ResourceContainer::unlocked_amount` cannot see it, so it is tracked
+        // separately and added to the supply increase below.
+        let mut minted_commitment_value = Amount::ZERO;
+
         let resource_container = match mint_arg {
             MintArg::Fungible { amount } => {
                 if amount.is_negative() {
@@ -760,7 +890,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
                 ResourceContainer::non_fungible(resource_address, token_ids)
             },
-            MintArg::Confidential { statement } => {
+            MintArg::Confidential {
+                statement,
+                value_proofs,
+            } => {
                 let resource = self.get_resource(locked_resource)?;
                 debug!(
                     target: LOG_TARGET,
@@ -774,6 +907,34 @@ impl<TStore: StateReader> WorkingState<TStore> {
                     })?;
                 let (container, created_outputs) =
                     ResourceContainer::mint_confidential(resource_address, *statement, maybe_view_key.as_ref())?;
+
+                // Every commitment the mint creates must be proven, so that the supply increase covers all of the
+                // value minted no matter how many outputs the statement turns out to produce.
+                if is_total_supply_tracking_enabled {
+                    for (commitment, body) in &created_outputs {
+                        let value_proof =
+                            value_proofs
+                                .get(commitment)
+                                .ok_or(RuntimeError::MissingValueProofForCommitment {
+                                    resource_address,
+                                    commitment: *commitment,
+                                })?;
+                        let value = crypto::validate_value_proof(
+                            commitment,
+                            maybe_view_key.as_ref(),
+                            body.viewable_balance.as_ref(),
+                            value_proof,
+                        )?;
+                        minted_commitment_value = minted_commitment_value.checked_add(value).ok_or(
+                            RuntimeError::ResourceSupplyWouldOverflow {
+                                resource_address,
+                                current_supply: minted_commitment_value,
+                                amount: value,
+                            },
+                        )?;
+                    }
+                }
+
                 for (commitment, body) in created_outputs {
                     let address = ConfidentialOutputAddress::new(resource_address, commitment);
                     self.new_substate(SubstateId::ConfidentialOutput(address), ConfidentialOutput::new(body))?;
@@ -801,14 +962,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // to the substate diff)
         if is_total_supply_tracking_enabled {
             let resource_mut = self.get_resource_mut(locked_resource)?;
-            // Increase the total supply of the resource
-            if !resource_mut.increase_total_supply(resource_container.unlocked_amount()) {
+            let current_supply = resource_mut
+                .total_supply()
+                .expect("Resource supply tracking is enabled");
+            // The minted amount is the revealed funds plus the value of any minted commitments
+            let minted_amount = resource_container
+                .unlocked_amount()
+                .checked_add(minted_commitment_value);
+            let overflows = match minted_amount {
+                Some(amount) => !resource_mut.increase_total_supply(amount),
+                None => true,
+            };
+            if overflows {
                 return Err(RuntimeError::ResourceSupplyWouldOverflow {
                     resource_address,
-                    current_supply: resource_mut
-                        .total_supply()
-                        .expect("Resource supply tracking is enabled"),
-                    amount: resource_container.unlocked_amount(),
+                    current_supply,
+                    amount: minted_amount.unwrap_or(Amount::MAX),
                 });
             }
         }

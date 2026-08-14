@@ -31,6 +31,7 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
     component::Component,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
+    crypto,
     crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
     events::Event,
@@ -68,6 +69,7 @@ use tari_template_lib::{
         BucketGetAmountArg,
         BucketRef,
         BuiltinTemplateAction,
+        BurnBucketArg,
         BurnStealthUtxoArg,
         CallAction,
         CallFunctionArg,
@@ -81,6 +83,7 @@ use tari_template_lib::{
         FreezeResourceArg,
         GenerateRandomAction,
         InvokeResult,
+        MintArg,
         MintResourceArg,
         NonFungibleAction,
         PayFeeArg,
@@ -462,6 +465,33 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             function: function.to_string(),
             details: e.to_string(),
         })
+    }
+
+    /// Charges the native verification cost of a confidential mint against the payment-funded allowance before any
+    /// of its proof crypto runs. The charged work must match what `WorkingState::mint_resource` goes on to verify:
+    /// the value proof is only checked when the resource tracks supply and the statement mints a commitment.
+    fn charge_confidential_mint(
+        &mut self,
+        mint_arg: &MintArg,
+        has_view_key: bool,
+        is_total_supply_tracking_enabled: bool,
+    ) -> Result<(), RuntimeError> {
+        let MintArg::Confidential { statement, .. } = mint_arg else {
+            return Ok(());
+        };
+
+        self.tracker
+            .charge_native_execution(tari_engine_types::confidential::statement_native_points(
+                statement,
+                has_view_key,
+            ))?;
+
+        if is_total_supply_tracking_enabled && statement.output.is_some() {
+            self.tracker
+                .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_VALUE_PROOF)?;
+        }
+
+        Ok(())
     }
 
     fn check_resource_auth_hook(&mut self, hook: &AuthHook) -> Result<(), RuntimeError> {
@@ -1393,12 +1423,12 @@ where
 
                 // Charge the initial mint's native verification cost against the payment-funded
                 // allowance before its proof crypto runs.
-                if let Some(tari_template_lib::args::MintArg::Confidential { statement }) = arg.mint_arg.as_ref() {
-                    self.tracker
-                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(
-                            statement,
-                            arg.view_key.is_some(),
-                        ))?;
+                if let Some(mint_arg) = arg.mint_arg.as_ref() {
+                    self.charge_confidential_mint(
+                        mint_arg,
+                        arg.view_key.is_some(),
+                        arg.is_total_supply_tracking_enabled,
+                    )?;
                 }
 
                 self.tracker.write_with(|state_mut| {
@@ -1503,7 +1533,7 @@ where
                         })?;
                 let mint_resource: MintResourceArg = args.assert_one_arg()?;
 
-                let (resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
+                let (resource_lock, maybe_auth_hook, auth_caller, has_view_key, tracks_supply) =
                     self.tracker.write_with(|state_mut| {
                         let resource_lock = state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
 
@@ -1517,7 +1547,14 @@ where
 
                         let auth_caller = state_mut.get_auth_caller()?;
                         let has_view_key = resource.view_key().is_some();
-                        Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller, has_view_key))
+                        let tracks_supply = resource.is_supply_tracking_enabled();
+                        Ok::<_, RuntimeError>((
+                            resource_lock,
+                            resource.auth_hook().cloned(),
+                            auth_caller,
+                            has_view_key,
+                            tracks_supply,
+                        ))
                     })?;
 
                 if let Some(auth_hook) = maybe_auth_hook {
@@ -1526,13 +1563,7 @@ where
 
                 // Charge the mint's native verification cost against the payment-funded allowance
                 // before its proof crypto runs.
-                if let tari_template_lib::args::MintArg::Confidential { statement } = &mint_resource.mint_arg {
-                    self.tracker
-                        .charge_native_execution(tari_engine_types::confidential::statement_native_points(
-                            statement,
-                            has_view_key,
-                        ))?;
-                }
+                self.charge_confidential_mint(&mint_resource.mint_arg, has_view_key, tracks_supply)?;
 
                 self.tracker.write_with(|state_mut| {
                     let mint_arg = mint_resource.mint_arg;
@@ -2084,7 +2115,7 @@ where
                             .output
                             .as_ref()
                             .and_then(|o| o.output.viewable_balance.as_ref());
-                        let value = stealth::validate_value_proof(
+                        let value = crypto::validate_value_proof(
                             &commitment,
                             maybe_view_key.as_ref(),
                             elgamal_proof,
@@ -2094,8 +2125,7 @@ where
                         if value.is_positive() {
                             let resource_lock =
                                 state_mut.write_lock_substate(SubstateId::Resource(resource_address))?;
-                            let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
-                            resource_mut.decrease_total_supply(value);
+                            state_mut.decrease_total_supply(&resource_lock, value)?;
                             state_mut.unlock_substate(resource_lock)?;
                         }
                     } else {
@@ -2860,26 +2890,50 @@ where
                     reason: "Burn bucket action requires a bucket id".to_string(),
                 })?;
 
-                let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let bucket = state_mut.get_bucket(bucket_id)?;
+                let arg: BurnBucketArg = args.assert_one_arg()?;
 
-                    let resource_lock =
-                        state_mut.write_lock_substate(SubstateId::Resource(*bucket.resource_address()))?;
+                let (resource_lock, maybe_auth_hook, auth_caller, num_value_proofs) =
+                    self.tracker.write_with(|state_mut| {
+                        let bucket = state_mut.get_bucket(bucket_id)?;
+                        let num_commitments = bucket.number_of_confidential_commitments();
 
-                    let resource = state_mut.get_resource(&resource_lock)?;
+                        let resource_lock =
+                            state_mut.write_lock_substate(SubstateId::Resource(*bucket.resource_address()))?;
 
-                    state_mut.authorization().check_resource_access_rules(
-                        ResourceAuthAction::Burn,
-                        resource.as_ownership(),
-                        resource.access_rules(),
-                    )?;
+                        let resource = state_mut.get_resource(&resource_lock)?;
 
-                    let auth_caller = state_mut.get_auth_caller()?;
-                    Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
-                })?;
+                        state_mut.authorization().check_resource_access_rules(
+                            ResourceAuthAction::Burn,
+                            resource.as_ownership(),
+                            resource.access_rules(),
+                        )?;
+
+                        // A value proof is verified per held commitment, and only when supply tracking is enabled.
+                        let num_value_proofs = if resource.is_supply_tracking_enabled() {
+                            num_commitments
+                        } else {
+                            0
+                        };
+
+                        let auth_caller = state_mut.get_auth_caller()?;
+                        Ok::<_, RuntimeError>((
+                            resource_lock,
+                            resource.auth_hook().cloned(),
+                            auth_caller,
+                            num_value_proofs,
+                        ))
+                    })?;
 
                 if let Some(auth_hook) = maybe_auth_hook {
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Burn)?;
+                }
+
+                // Charge the value proofs' native verification against the payment-funded allowance before they run.
+                if num_value_proofs > 0 {
+                    self.tracker.charge_native_execution(
+                        tari_engine_types::limits::NativeExecutionPoints::PER_VALUE_PROOF
+                            .saturating_mul(num_value_proofs as u64),
+                    )?;
                 }
 
                 self.tracker.write_with(|state| {
@@ -2892,11 +2946,8 @@ where
                             locked_amount: bucket.locked_amount(),
                         });
                     }
-                    let burnt_amount = bucket.unlocked_amount();
-                    state.burn_bucket(bucket)?;
 
-                    let resource_mut = state.get_resource_mut(&resource_lock)?;
-                    resource_mut.decrease_total_supply(burnt_amount);
+                    state.burn_bucket(bucket, &resource_lock, &arg.value_proofs)?;
 
                     state.unlock_substate(resource_lock)?;
 
@@ -3319,7 +3370,11 @@ where
             let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
             state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
 
-            // 3. Create the stealth UTXO
+            // 3. Create the stealth UTXO.
+            // This mints value with no `increase_total_supply` counterpart, which is sound only because the genesis
+            // TARI resource both disables supply tracking and denies `Burn` (see `get_stealth_tari_resource`).
+            // Enabling either would need an increase here to balance the decrease that
+            // `ResourceAction::StealthUtxoBurn` applies when the UTXO is burnt.
             let address = UtxoAddress::new(TARI_TOKEN, claim.commitment.into());
             let utxo = Utxo::new(UtxoOutput {
                 output: OutputBody {

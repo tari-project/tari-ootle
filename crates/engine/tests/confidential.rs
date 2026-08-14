@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::BTreeMap;
+
 use ootle_byte_type::ToByteType;
 use tari_crypto::{
     keys::PublicKey as _,
@@ -22,7 +24,7 @@ use tari_template_lib::{
         ComponentAddress,
         ConfidentialOutputAddress,
         confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-        crypto::RistrettoPublicKeyBytes,
+        crypto::{CommitmentValueProof, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     },
 };
 use tari_template_test_tooling::{
@@ -33,10 +35,12 @@ use tari_template_test_tooling::{
         confidential::{
             generate_confidential_output_statement,
             generate_confidential_proof_with_view_key,
+            generate_reveal_proof,
             generate_withdraw_proof,
             generate_withdraw_proof_with_inputs,
             generate_withdraw_proof_with_view_key,
         },
+        value_proof::generate_value_proof_mask_knowledge,
     },
 };
 use tari_transaction_manifest::ManifestValue;
@@ -44,8 +48,31 @@ use tari_utilities::ByteArray;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
+/// Generates a mint statement for `amount` along with the mask and the value proofs the engine requires to
+/// account for the minted commitment in the resource's total supply.
+fn mint_statement(
+    amount: u64,
+    view_key: Option<&RistrettoPublicKey>,
+) -> (ConfidentialOutputStatement, RistrettoSecretKey, ValueProofs) {
+    let (statement, mask, _change) = match view_key {
+        Some(vk) => generate_confidential_proof_with_view_key(amount, None, vk),
+        None => generate_confidential_output_statement(amount, None),
+    };
+    (statement, mask.clone(), value_proofs_for(amount, &mask))
+}
+
+type ValueProofs = BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>;
+
+/// The single-commitment proof map for a commitment of `amount` under `mask`.
+fn value_proofs_for(amount: u64, mask: &RistrettoSecretKey) -> ValueProofs {
+    let amount = Amount::from(amount);
+    let commitment = commit_amount(mask, amount).unwrap().to_byte_type();
+    BTreeMap::from([(commitment, generate_value_proof_mask_knowledge(amount, mask))])
+}
+
 fn setup(
     initial_supply: ConfidentialOutputStatement,
+    value_proofs: ValueProofs,
     view_key: Option<&RistrettoPublicKey>,
 ) -> (TemplateTest, ComponentAddress, SubstateId) {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec![
@@ -53,17 +80,23 @@ fn setup(
         "tests/templates/confidential/utilities",
     ]);
 
-    let faucet: ComponentAddress = view_key
-        .map(|vk| {
+    let faucet: ComponentAddress = match view_key {
+        Some(vk) => {
             let vk = RistrettoPublicKeyBytes::from_bytes(vk.as_bytes()).unwrap();
             template_test.call_function(
                 "ConfidentialFaucet",
                 "mint_with_view_key",
-                args![initial_supply, vk],
+                args![initial_supply, vk, value_proofs],
                 vec![],
             )
-        })
-        .unwrap_or_else(|| template_test.call_function("ConfidentialFaucet", "mint", args![initial_supply], vec![]));
+        },
+        None => template_test.call_function(
+            "ConfidentialFaucet",
+            "mint",
+            args![initial_supply, value_proofs],
+            vec![],
+        ),
+    };
 
     let resx = template_test.get_previous_output_address(SubstateType::Resource);
 
@@ -72,24 +105,47 @@ fn setup(
 
 #[test]
 fn mint_initial_commitment() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(100, None);
-    let (test, _faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, _mask, value_proofs) = mint_statement(100, None);
+    let (test, _faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     let resource = test
         .read_only_state_store()
         .get_resource(&faucet_resx.as_resource_address().unwrap())
         .unwrap();
-    // TODO: confidential total_supply tracking only tracks revealed funds
-    assert_eq!(resource.total_supply(), Some(Amount::from(0u64)));
+    assert_eq!(resource.total_supply(), Some(Amount::from(100u64)));
+}
+
+/// Minting a commitment on a supply-tracking resource is rejected unless the mint proves its value, otherwise the
+/// minted value would not be counted towards the supply.
+#[test]
+fn minting_a_commitment_without_a_value_proof_is_rejected() {
+    let (confidential_proof, _mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
+    let owner = test.owner_proof();
+
+    let (mint_proof, mint_mask, _value_proofs) = mint_statement(42, None);
+    let commitment = commit_amount(&mint_mask, Amount::from(42u64)).unwrap().to_byte_type();
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(faucet, "mint_more", args![mint_proof, ValueProofs::new()])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+
+    assert_reject_reason(reason, RuntimeError::MissingValueProofForCommitment {
+        resource_address: faucet_resx.as_resource_address().unwrap(),
+        commitment,
+    });
 }
 
 #[test]
 fn mint_more_later() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(0, None);
-    let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, _mask, value_proofs) = mint_statement(0, None);
+    let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, value_proofs, None);
 
-    let (confidential_proof, mask, _change) = generate_confidential_output_statement(100, None);
-    template_test.call_method::<()>(faucet, "mint_more", args![confidential_proof], vec![]);
+    let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
+    template_test.call_method::<()>(faucet, "mint_more", args![confidential_proof, value_proofs], vec![]);
 
     let (user_account, user_proof, user_key) = template_test.create_empty_account();
 
@@ -107,8 +163,8 @@ fn mint_more_later() {
 #[allow(clippy::too_many_lines)]
 #[test]
 fn transfer_confidential_amounts_between_accounts() {
-    let (confidential_proof, faucet_mask, _change) = generate_confidential_output_statement(100_000, None);
-    let (mut template_test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, faucet_mask, value_proofs) = mint_statement(100_000, None);
+    let (mut template_test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     // Create an account
     let (account1, owner1, _k) = template_test.create_funded_account();
@@ -196,8 +252,8 @@ fn transfer_confidential_amounts_between_accounts() {
 
 #[test]
 fn transfer_confidential_fails_with_invalid_balance() {
-    let (confidential_proof, faucet_mask, _change) = generate_confidential_output_statement(100_000, None);
-    let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, faucet_mask, value_proofs) = mint_statement(100_000, None);
+    let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     // Create an account
     let (account1, _owner1, _k) = template_test.create_funded_account();
@@ -228,8 +284,8 @@ fn transfer_confidential_fails_with_invalid_balance() {
 
 #[test]
 fn reveal_confidential_and_transfer() {
-    let (confidential_proof, faucet_mask, _change) = generate_confidential_output_statement(100_000, None);
-    let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, faucet_mask, value_proofs) = mint_statement(100_000, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     // Create an account
     let (account1, owner1, _k) = test.create_funded_account();
@@ -305,8 +361,8 @@ fn reveal_confidential_and_transfer() {
 
 #[test]
 fn attempt_to_reveal_with_unbalanced_proof() {
-    let (confidential_proof, faucet_mask, _change) = generate_confidential_output_statement(100_000, None);
-    let (mut template_test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, faucet_mask, value_proofs) = mint_statement(100_000, None);
+    let (mut template_test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     // Create an account
     let (account1, owner1, _k) = template_test.create_funded_account();
@@ -358,8 +414,8 @@ fn attempt_to_reveal_with_unbalanced_proof() {
 
 #[test]
 fn multi_commitment_join() {
-    let (confidential_proof, faucet_mask, _change) = generate_confidential_output_statement(100_000, None);
-    let (mut template_test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, faucet_mask, value_proofs) = mint_statement(100_000, None);
+    let (mut template_test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     // Create an account
     let (account1, owner1, _k) = template_test.create_funded_account();
@@ -431,8 +487,8 @@ fn multi_commitment_join() {
 
 #[test]
 fn mint_and_transfer_revealed() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(100, None);
-    let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, _mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     let faucet_resx = faucet_resx.as_resource_address().unwrap();
 
@@ -462,8 +518,8 @@ fn mint_and_transfer_revealed() {
 
 #[test]
 fn mint_revealed_with_invalid_proof() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(100, None);
-    let (mut test, faucet, _faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, _mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, _faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
@@ -500,11 +556,11 @@ where
 #[test]
 fn mint_with_view_key() {
     let (view_key_secret, ref view_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-    let (confidential_proof, _mask, _change) = generate_confidential_proof_with_view_key(123, None, view_key);
-    let (mut test, faucet, _faucet_resx) = setup(confidential_proof, Some(view_key));
+    let (confidential_proof, _mask, value_proofs) = mint_statement(123, Some(view_key));
+    let (mut test, faucet, _faucet_resx) = setup(confidential_proof, value_proofs, Some(view_key));
 
-    let (confidential_proof, mask, _change) = generate_confidential_proof_with_view_key(100, None, view_key);
-    test.call_method::<()>(faucet, "mint_more", args![confidential_proof], vec![]);
+    let (confidential_proof, mask, value_proofs) = mint_statement(100, Some(view_key));
+    test.call_method::<()>(faucet, "mint_more", args![confidential_proof, value_proofs], vec![]);
 
     let (user_account, user_proof, user_key) = test.create_empty_account();
 
@@ -555,8 +611,8 @@ fn mint_with_view_key() {
 
 #[test]
 fn freeze_then_attempt_spend() {
-    let (confidential_proof, mask, _change) = generate_confidential_output_statement(100, None);
-    let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     let commitment = commit_amount(&mask, Amount::from(100u64)).unwrap().to_byte_type();
     let frozen_address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
@@ -608,8 +664,8 @@ fn freeze_then_attempt_spend() {
 /// with its value already spent.
 #[test]
 fn unfreeze_and_spend_in_one_transaction_downs_the_output() {
-    let (confidential_proof, mask, _change) = generate_confidential_output_statement(100, None);
-    let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     let commitment = commit_amount(&mask, Amount::from(100u64)).unwrap().to_byte_type();
     let output_address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
@@ -653,14 +709,17 @@ fn unfreeze_and_spend_in_one_transaction_downs_the_output() {
 /// no longer keyed by a per-vault map.
 #[test]
 fn minting_a_duplicate_commitment_is_rejected() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(100, None);
-    let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, _mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
-    let (mint_proof, mint_mask, _change) = generate_confidential_output_statement(42, None);
+    let (mint_proof, mint_mask, mint_value_proofs) = mint_statement(42, None);
     let owner = test.owner_proof();
     test.execute_expect_success(
         Transaction::builder_localnet()
-            .call_method(faucet, "mint_more", args![mint_proof.clone()])
+            .call_method(faucet, "mint_more", args![
+                mint_proof.clone(),
+                mint_value_proofs.clone()
+            ])
             .build_and_seal(test.secret_key()),
         vec![owner.clone()],
     );
@@ -669,7 +728,7 @@ fn minting_a_duplicate_commitment_is_rejected() {
     let address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet()
-            .call_method(faucet, "mint_more", args![mint_proof])
+            .call_method(faucet, "mint_more", args![mint_proof, mint_value_proofs])
             .build_and_seal(test.secret_key()),
         vec![owner],
     );
@@ -683,8 +742,8 @@ fn minting_a_duplicate_commitment_is_rejected() {
 /// standalone checks: one withdraw over `max_withdraws_per_transaction` rejects the whole transaction.
 #[test]
 fn a_transaction_over_the_withdraw_cap_is_rejected() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(100, None);
-    let (mut test, faucet, _faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, _mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, _faucet_resx) = setup(confidential_proof, value_proofs, None);
     let owner = test.owner_proof();
 
     let max_withdraws = CONFIDENTIAL_LIMITS.max_withdraws_per_transaction;
@@ -709,4 +768,101 @@ fn a_transaction_over_the_withdraw_cap_is_rejected() {
         reason,
         ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { max_withdraws },
     );
+}
+
+fn read_total_supply(test: &TemplateTest, resource: &SubstateId) -> Option<Amount> {
+    test.read_only_state_store()
+        .get_resource(&resource.as_resource_address().unwrap())
+        .unwrap()
+        .total_supply()
+}
+
+/// Value minted into a commitment counts towards `total_supply`, revealing it is supply-neutral, and burning
+/// the revealed bucket removes it again.
+#[test]
+fn minting_and_burning_a_commitment_tracks_total_supply() {
+    let (confidential_proof, mask, value_proofs) = mint_statement(500, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
+    let owner = test.owner_proof();
+    let utilities = test.get_template_address("ConfidentialUtilities");
+
+    assert_eq!(read_total_supply(&test, &faucet_resx), Some(Amount::from(500u64)));
+
+    // Move the whole 500 out of the commitment and into revealed funds.
+    let reveal_proof = generate_reveal_proof(&mask, 500);
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet, "take_free_coins", args![reveal_proof])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_function(utilities, "burn_bucket", args![Workspace("coins")])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+
+    assert_eq!(read_total_supply(&test, &faucet_resx), Some(Amount::ZERO));
+}
+
+/// A bucket still holding commitments has an amount the engine cannot see, so burning it while supply
+/// tracking is enabled requires a value proof for each commitment.
+#[test]
+fn burning_a_bucket_holding_commitments_without_a_value_proof_is_rejected() {
+    let (confidential_proof, mask, value_proofs) = mint_statement(500, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
+    let owner = test.owner_proof();
+    let utilities = test.get_template_address("ConfidentialUtilities");
+
+    let withdraw_proof = generate_withdraw_proof(&mask, 500, None, 0u64);
+    let commitment = commit_amount(&withdraw_proof.output_mask, Amount::from(500u64))
+        .unwrap()
+        .to_byte_type();
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet()
+            .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_function(utilities, "burn_bucket", args![Workspace("coins")])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+
+    assert_reject_reason(reason, RuntimeError::MissingValueProofForCommitment {
+        resource_address: faucet_resx.as_resource_address().unwrap(),
+        commitment,
+    });
+}
+
+/// Given a value proof per commitment, a bucket holding commitments burns and the resource's total supply drops
+/// by the value destroyed. This is the path a holder who knows the masks takes instead of revealing first.
+#[test]
+fn burning_a_bucket_holding_commitments_with_value_proofs_decreases_total_supply() {
+    let (confidential_proof, mask, value_proofs) = mint_statement(500, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
+    let owner = test.owner_proof();
+    let utilities = test.get_template_address("ConfidentialUtilities");
+
+    assert_eq!(read_total_supply(&test, &faucet_resx), Some(Amount::from(500u64)));
+
+    // Split the 500 into a 200 output and 300 change, then burn the 200 output commitment.
+    let withdraw_proof = generate_withdraw_proof(&mask, 200, Some(300), 0u64);
+    let burnt = Amount::from(200u64);
+    let commitment = commit_amount(&withdraw_proof.output_mask, burnt)
+        .unwrap()
+        .to_byte_type();
+    let value_proofs = BTreeMap::from([(
+        commitment,
+        generate_value_proof_mask_knowledge(burnt, &withdraw_proof.output_mask),
+    )]);
+
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_function(utilities, "burn_bucket_with_value_proofs", args![
+                Workspace("coins"),
+                value_proofs
+            ])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+
+    assert_eq!(read_total_supply(&test, &faucet_resx), Some(Amount::from(300u64)));
 }

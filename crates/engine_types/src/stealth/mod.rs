@@ -6,11 +6,9 @@ mod condition_tree;
 mod hashlock;
 mod outputs;
 mod transfer;
-mod value_proof;
 
 pub use condition_structure::*;
 pub use condition_tree::*;
 pub use hashlock::*;
 pub use outputs::*;
 pub use transfer::*;
-pub use value_proof::*;

@@ -981,4 +981,9 @@ pub enum ResourceError {
     },
     #[error("UTXO {id} failed to burn: {details}")]
     UtxoBurnFailed { id: UtxoId, details: String },
+    #[error("Invalid value proof for commitment {commitment}: {details}")]
+    InvalidValueProof {
+        commitment: PedersenCommitmentBytes,
+        details: String,
+    },
 }

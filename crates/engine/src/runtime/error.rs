@@ -52,6 +52,7 @@ use tari_template_lib::{
         TemplateAddress,
         TransactionReceiptAddress,
         VaultId,
+        crypto::PedersenCommitmentBytes,
     },
 };
 
@@ -151,6 +152,23 @@ pub enum RuntimeError {
         resource_address: ResourceAddress,
         current_supply: Amount,
         amount: Amount,
+    },
+    #[error(
+        "Resource supply would underflow: resource {resource_address}, current supply {current_supply}, amount \
+         {amount}"
+    )]
+    ResourceSupplyWouldUnderflow {
+        resource_address: ResourceAddress,
+        current_supply: Amount,
+        amount: Amount,
+    },
+    #[error(
+        "Commitment {commitment} of resource {resource_address} requires a value proof because the resource tracks \
+         total supply"
+    )]
+    MissingValueProofForCommitment {
+        resource_address: ResourceAddress,
+        commitment: PedersenCommitmentBytes,
     },
     #[error("Bucket {bucket_id} was dropped but was not empty")]
     BucketNotEmpty { bucket_id: BucketId },

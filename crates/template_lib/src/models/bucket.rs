@@ -24,19 +24,20 @@ use tari_bor::BorTag;
 use tari_template_abi::{
     EngineOp,
     call_engine,
-    rust::{fmt, prelude::*},
+    rust::{collections::BTreeMap, fmt, prelude::*},
 };
 use tari_template_lib_types::{
     BinaryTag,
     NonFungibleId,
     ResourceAddress,
     confidential::ConfidentialWithdrawProof,
+    crypto::{CommitmentValueProof, PedersenCommitmentBytes},
     stealth::StealthTransferStatement,
 };
 
 use super::{NonFungible, Proof};
 use crate::{
-    args::{BucketAction, BucketGetAmountArg, BucketInvokeArg, BucketRef, InvokeResult},
+    args::{BucketAction, BucketGetAmountArg, BucketInvokeArg, BucketRef, BurnBucketArg, InvokeResult},
     resource::ResourceManager,
     types::{Amount, ResourceType},
 };
@@ -152,12 +153,25 @@ impl Bucket {
     }
 
     /// Destroy all the tokens that this bucket holds.
-    /// It will panic if the caller does not have the appropriate permission to burn the resource.
+    ///
+    /// It will panic if the caller does not have the appropriate permission to burn the resource, or if the bucket
+    /// holds confidential commitments on a resource that tracks total supply — those need
+    /// [`Self::burn_with_value_proofs`].
     pub fn burn(&self) {
+        self.burn_with_value_proofs(BTreeMap::new())
+    }
+
+    /// Destroy all the tokens that this bucket holds, proving the value of each confidential commitment it holds so
+    /// that the resource's total supply can be decreased by the value destroyed.
+    ///
+    /// A proof per commitment is required when the resource tracks total supply; otherwise `value_proofs` may be
+    /// empty. It will panic if a proof is missing or invalid, or if the caller does not have the appropriate
+    /// permission to burn the resource.
+    pub fn burn_with_value_proofs(&self, value_proofs: BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>) {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
             action: BucketAction::Burn,
-            args: invoke_args![],
+            args: invoke_args![BurnBucketArg { value_proofs }],
         });
 
         resp.decode().expect("Bucket Burn returned invalid result")

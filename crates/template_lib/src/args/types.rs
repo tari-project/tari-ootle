@@ -41,7 +41,7 @@ use tari_template_lib_types::{
     access_rules::{AccessRule, ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
     bytes::Bytes,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-    crypto::StealthValueProof,
+    crypto::CommitmentValueProof,
     stealth::StealthTransferStatement,
 };
 
@@ -268,6 +268,11 @@ pub enum MintArg {
     Confidential {
         #[n(0)]
         statement: Box<ConfidentialOutputStatement>,
+        /// Proves the value of each commitment the statement mints, keyed by commitment. One is required per
+        /// commitment when the resource tracks total supply, since the engine cannot otherwise learn the minted
+        /// value. Entries for commitments the statement does not mint are ignored.
+        #[n(1)]
+        value_proofs: BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
     },
     #[n(3)]
     Stealth {
@@ -946,7 +951,18 @@ pub struct BurnStealthUtxoArg {
     #[n(0)]
     pub utxo_id: UtxoId,
     #[n(1)]
-    pub value_proof: Option<StealthValueProof>,
+    pub value_proof: Option<CommitmentValueProof>,
+}
+
+/// Arguments for [`BucketAction::Burn`].
+#[derive(Clone, Debug, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BurnBucketArg {
+    /// Proves the value of each confidential commitment the bucket holds, keyed by commitment. One is required per
+    /// commitment when the resource tracks total supply, since the engine cannot otherwise learn how much value the
+    /// burn destroys. Entries for commitments the bucket does not hold are ignored.
+    #[n(0)]
+    pub value_proofs: BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
 }
 
 // -------------------------------- SpendContext -------------------------------- //

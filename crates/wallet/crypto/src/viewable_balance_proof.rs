@@ -10,7 +10,7 @@ use tari_crypto::{
 use tari_engine_types::crypto::{ElgamalVerifiableBalance, get_commitment_factory, messages};
 use tari_template_lib_types::{
     Amount,
-    crypto::{PedersenCommitmentBytes, Scalar32Bytes, StealthValueProof, ValueKnowledgeProof},
+    crypto::{CommitmentValueProof, PedersenCommitmentBytes, Scalar32Bytes, ValueKnowledgeProof},
     stealth::{ViewableBalanceProof, ViewableBalanceProofMessageFields},
 };
 use tari_utilities::ByteArray;
@@ -116,7 +116,7 @@ pub fn generate_elgamal_viewable_balance_proof_seeded(
     })
 }
 
-/// Generates a [`StealthValueProof`] for the value encrypted in a UTXO's viewable balance. The prover is the
+/// Generates a [`CommitmentValueProof`] for the value encrypted in a UTXO's viewable balance. The prover is the
 /// view-key holder: the proof is a Chaum-Pedersen DLEQ demonstrating knowledge of the view private key `p` such
 /// that `P = p.G` and `E - v.G = p.R`, which holds only when `v` is the value encrypted for the view key.
 pub fn generate_elgamal_value_proof(
@@ -124,7 +124,7 @@ pub fn generate_elgamal_value_proof(
     value: u64,
     commitment: &PedersenCommitmentBytes,
     verifiable_balance: &ElgamalVerifiableBalance,
-) -> StealthValueProof {
+) -> CommitmentValueProof {
     let mut rng = rand::rng();
     let value = Amount::from(value);
     let view_key = RistrettoPublicKey::from_secret_key(view_private_key);
@@ -148,7 +148,7 @@ pub fn generate_elgamal_value_proof(
     // s = k + e.p
     let s_p = &k + &e * view_private_key;
 
-    StealthValueProof {
+    CommitmentValueProof {
         value,
         knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted {
             public_nonce_g: public_nonce_g.to_byte_type(),

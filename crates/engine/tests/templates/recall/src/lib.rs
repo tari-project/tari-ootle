@@ -1,5 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
+use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
 
 #[template]
@@ -18,6 +19,7 @@ mod template {
     impl Recall {
         pub fn new(
             confidential_supply: ConfidentialOutputStatement,
+            confidential_value_proofs: BTreeMap<PedersenCommitmentBytes, crypto::CommitmentValueProof>,
         ) -> (
             Component<Self>,
             ResourceAddress,
@@ -38,7 +40,7 @@ mod template {
 
             let confidential = ResourceBuilder::confidential()
                 .recallable(rule!(allow_all), OWNER)
-                .initial_supply(confidential_supply);
+                .initial_supply_with_value_proofs(confidential_supply, confidential_value_proofs);
             let confidential_resource = confidential.resource_address();
 
             let stealth = ResourceBuilder::stealth()

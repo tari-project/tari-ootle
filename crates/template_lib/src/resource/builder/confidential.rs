@@ -1,6 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use tari_template_abi::rust::prelude::*;
+use tari_template_abi::rust::{collections::BTreeMap, prelude::*};
 use tari_template_lib_types::{
     AuthHook,
     ComponentAddress,
@@ -18,7 +18,10 @@ use crate::{
     error_variants::ERR_AUTH_HOOK_FN_NAME_LEN,
     models::{Bucket, ResourceAddressAllocation},
     resource::ResourceManager,
-    types::{ResourceType, crypto::RistrettoPublicKeyBytes},
+    types::{
+        ResourceType,
+        crypto::{CommitmentValueProof, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    },
 };
 
 /// Implements the builder pattern for Confidential resources.
@@ -270,9 +273,27 @@ impl ConfidentialResourceBuilder {
 
     /// Sets up how many tokens are going to be minted on resource creation
     /// This builds the resource and returns a bucket containing the initial supply.
+    ///
+    /// Equivalent to calling `initial_supply_with_value_proofs(initial_supply_proof, BTreeMap::new())`. Unless total
+    /// supply tracking is disabled, this only permits an initial supply of revealed funds.
     pub fn initial_supply(self, initial_supply_proof: ConfidentialOutputStatement) -> Bucket {
+        self.initial_supply_with_value_proofs(initial_supply_proof, BTreeMap::new())
+    }
+
+    /// Sets up how many tokens are going to be minted on resource creation, along with a proof of the value of each
+    /// commitment the statement mints, keyed by commitment.
+    ///
+    /// A proof per minted commitment is required when total supply tracking is enabled (the default), because the
+    /// engine cannot otherwise learn the minted value.
+    /// This builds the resource and returns a bucket containing the initial supply.
+    pub fn initial_supply_with_value_proofs(
+        self,
+        initial_supply_proof: ConfidentialOutputStatement,
+        value_proofs: BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
+    ) -> Bucket {
         let mint_arg = MintArg::Confidential {
             statement: Box::new(initial_supply_proof),
+            value_proofs,
         };
 
         let (_, bucket) = self.build_internal(Some(mint_arg));

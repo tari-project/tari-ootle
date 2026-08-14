@@ -76,6 +76,23 @@ fn generate_confidential_proof_internal(
     (proof, mask, change.map(|_| change_mask))
 }
 
+/// Generates a withdraw proof that spends a single commitment entirely into revealed funds, leaving no output
+/// commitment behind.
+pub fn generate_reveal_proof(input_mask: &RistrettoSecretKey, input_value: u64) -> ConfidentialWithdrawProof {
+    confidential::create_withdraw_proof(
+        &[MaskAndValue {
+            value: input_value,
+            mask: input_mask.clone(),
+        }],
+        Amount::zero(),
+        None,
+        Amount::from(input_value),
+        None,
+        Amount::zero(),
+    )
+    .unwrap()
+}
+
 pub struct ConfidentialWithdrawProofOutput {
     pub output_mask: RistrettoSecretKey,
     pub change_mask: Option<RistrettoSecretKey>,

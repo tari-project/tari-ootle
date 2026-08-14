@@ -176,9 +176,6 @@ impl Resource {
     /// Increases the total supply. This is a no-op if total supply tracking is disabled.
     /// Returns `true` if the total supply was successfully increased or supply tracking is disabled, or `false` if it
     /// would overflow.
-    ///
-    /// ## Panics
-    /// Panics if the amount is not positive
     pub fn increase_total_supply(&mut self, amount: Amount) -> bool {
         let Some(supply_mut) = self.total_supply.as_mut() else {
             // Total supply tracking is disabled, this call succeeded
@@ -195,14 +192,20 @@ impl Resource {
     }
 
     /// Decreases the total supply. This is a no-op if total supply tracking is disabled.
-    ///
-    /// ## Panics
-    /// Panics if the amount is not positive or if the amount is greater than the total supply.
-    pub fn decrease_total_supply(&mut self, amount: Amount) {
-        if let Some(supply_mut) = self.total_supply.as_mut() {
-            *supply_mut = supply_mut.checked_sub(amount).expect(
-                "Invariant violation in decrease_total_supply: decrease total supply by more than total supply",
-            );
+    /// Returns `true` if the total supply was successfully decreased or supply tracking is disabled, or `false` if it
+    /// would underflow. [`Amount`] is unsigned, so an underflow must be rejected rather than wrapped.
+    #[must_use]
+    pub fn decrease_total_supply(&mut self, amount: Amount) -> bool {
+        let Some(supply_mut) = self.total_supply.as_mut() else {
+            // Total supply tracking is disabled, this call succeeded
+            return true;
+        };
+        match supply_mut.checked_sub(amount) {
+            Some(new_supply) => {
+                *supply_mut = new_supply;
+                true
+            },
+            None => false,
         }
     }
 

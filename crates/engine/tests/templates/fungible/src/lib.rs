@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
 
 #[template]
@@ -41,8 +42,11 @@ mod template {
             let fungible = ResourceBuilder::public_fungible()
                 .mintable(rule!(allow_all), OWNER)
                 .initial_supply(supply);
+            // Supply tracking is off so that the tests can mint past `Amount::MAX` in total and exercise the
+            // vault's own overflow handling.
             let confidential = ResourceBuilder::confidential()
                 .mintable(rule!(allow_all), OWNER)
+                .disable_total_supply_tracking()
                 .initial_supply(ConfidentialOutputStatement::mint_revealed(supply));
 
             Component::new(Self {
@@ -60,7 +64,7 @@ mod template {
         }
 
         pub fn confidential_mint_more(&self, output: ConfidentialOutputStatement) {
-            let commitments = ResourceManager::get(self.confidential.resource_address()).mint_confidential(output);
+            let commitments = ResourceManager::get(self.confidential.resource_address()).mint_confidential(output, BTreeMap::new());
             self.confidential.deposit(commitments);
         }
 

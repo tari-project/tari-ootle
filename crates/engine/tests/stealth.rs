@@ -36,6 +36,7 @@ use tari_template_test_tooling::{
         spec::OutputAuthSpec,
         stealth,
         stealth::{NO_INPUTS, StealthSecretTransferData},
+        value_proof,
     },
     wallet_crypto::{MaskAndValue, viewable_balance_proof::generate_elgamal_value_proof},
 };
@@ -706,7 +707,7 @@ fn burn_then_attempt_spend() {
         .map(|(mask, amount)| {
             let commitment = get_commitment_factory().commit_value(mask, amount);
             let utxo_id = UtxoId::from(commitment.to_byte_type());
-            let proof = stealth::generate_value_proof_mask_knowledge(amount.into(), mask);
+            let proof = value_proof::generate_value_proof_mask_knowledge(amount.into(), mask);
             (utxo_id, proof)
         })
         .collect::<Vec<_>>();
@@ -818,8 +819,8 @@ fn burn_rejects_elgamal_value_proof_for_a_false_value() {
             .build_and_seal(test.secret_key()),
         vec![owner],
     );
-    assert_reject_reason(reason, ResourceError::UtxoBurnFailed {
-        id: utxo_id,
+    assert_reject_reason(reason, ResourceError::InvalidValueProof {
+        commitment: commitment_bytes,
         details: "Invalid Elgamal encrypted value proof (s.R != K_r + e.D)".to_string(),
     });
 

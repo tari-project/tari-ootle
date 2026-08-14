@@ -58,7 +58,7 @@ use tari_template_lib_types::{
     VaultId,
     access_rules::{AccessRule, ResourceAccessRules, ResourceAuthAction},
     confidential::ConfidentialOutputStatement,
-    crypto::StealthValueProof,
+    crypto::CommitmentValueProof,
     stealth::StealthTransferStatement,
 };
 
@@ -256,6 +256,8 @@ impl ResourceManager {
     /// * `statement` – A [`ConfidentialOutputStatement`] containing the zero-knowledge statement and associated
     ///   metadata. This includes the output and change statements, a range statement, and revealed amounts for output
     ///   and change.
+    /// * `value_proofs` – Proves the value of each commitment the statement mints, keyed by commitment. One is required
+    ///   per minted commitment if the resource tracks total supply.
     ///
     /// # Returns
     ///
@@ -266,17 +268,23 @@ impl ResourceManager {
     /// This method will panic if:
     /// - The resource is not of type [`ResourceType::Confidential`]
     /// - The provided statement is invalid or malformed
+    /// - The resource tracks total supply and a minted commitment has no valid proof in `value_proofs`
     /// - The caller lacks the required minting permissions, as defined by the resource's [`ResourceAccessRules`]
     ///
     /// # Example
     ///
     /// ```rust,ignore
-    /// let bucket = resource_manager.mint_confidential(statement);
+    /// let bucket = resource_manager.mint_confidential(statement, value_proofs);
     /// ```
-    pub fn mint_confidential(&self, statement: ConfidentialOutputStatement) -> Bucket {
+    pub fn mint_confidential(
+        &self,
+        statement: ConfidentialOutputStatement,
+        value_proofs: BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
+    ) -> Bucket {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::Confidential {
                 statement: Box::new(statement),
+                value_proofs,
             },
         })
     }
@@ -1033,11 +1041,11 @@ impl ResourceManager {
     }
 
     /// Burns the stealth UTXO, permanently removing them from circulation.
-    /// If total supply tracking is enabled for the resource, a valid `StealthValueProof` is required.
+    /// If total supply tracking is enabled for the resource, a valid `CommitmentValueProof` is required.
     /// NOTE: that this essentially limits burns to the UTXO owner or the secret view key holder regardless of the
     /// access rules (i.e. if burns are limited to an "admin" badge, the admin can only burn funds if they have the
     /// secret view key or burn their own funds). This is a limitation of the current protocol.
-    pub fn burn_utxo(&self, utxo_id: UtxoId, value_proof: Option<StealthValueProof>) {
+    pub fn burn_utxo(&self, utxo_id: UtxoId, value_proof: Option<CommitmentValueProof>) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
             action: ResourceAction::StealthUtxoBurn,

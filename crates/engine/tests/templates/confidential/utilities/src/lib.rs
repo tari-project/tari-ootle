@@ -20,6 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
 
 // A stateless utility template: it exposes only pure free functions over confidential buckets and
@@ -36,5 +37,18 @@ mod ConfidentialUtilities {
     /// Joins two buckets into one, returning a new bucket containing the combined value of the same resource.
     pub fn join_buckets(bucket1: Bucket, bucket2: Bucket) -> Bucket {
         bucket1.join(bucket2)
+    }
+
+    /// Destroys a bucket and its contents.
+    pub fn burn_bucket(bucket: Bucket) {
+        bucket.burn();
+    }
+
+    /// Destroys a bucket and its contents, proving the value of each commitment it holds.
+    pub fn burn_bucket_with_value_proofs(
+        bucket: Bucket,
+        value_proofs: BTreeMap<PedersenCommitmentBytes, crypto::CommitmentValueProof>,
+    ) {
+        bucket.burn_with_value_proofs(value_proofs);
     }
 }

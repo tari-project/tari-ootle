@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
+use tari_engine_types::{
+    commit_result::{RejectReason, TransactionResult},
+    fees::FeeSource,
+};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
@@ -221,7 +224,7 @@ fn storage_charged_for_creating_components(fee: u64) -> (u64, bool) {
 /// is charged for is the fee checkpoint's — not that of the state it built and abandoned.
 #[test]
 fn a_fee_intent_commit_is_not_charged_for_the_state_it_abandons() {
-    let (storage_rejected, committed) = storage_charged_for_creating_components(100);
+    let (storage_rejected, committed) = storage_charged_for_creating_components(1_000);
     assert!(!committed, "expected the main intent to be rejected");
 
     let (storage_committed, committed) = storage_charged_for_creating_components(100_000);
@@ -236,6 +239,56 @@ fn a_fee_intent_commit_is_not_charged_for_the_state_it_abandons() {
     );
 }
 
+/// A fee-intent commit persists real state, so it happens only when the payment covers what that
+/// state costs. When it does not, nothing commits — there is no shallower checkpoint to fall back
+/// to, and committing anyway would be a way to write state for free.
+#[test]
+fn an_unaffordable_fee_intent_commits_nothing() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_empty_account();
+    test.enable_fees();
+
+    // Enough for the fee intent's execution, nowhere near the state it writes.
+    const FEE: u64 = 100;
+
+    let result = test
+        .try_execute(
+            Transaction::builder_localnet()
+                .with_fee_instructions_builder(|builder| {
+                    builder
+                        // Writes the account's vault and the faucet's, then pays a fraction of what
+                        // storing them costs.
+                        .call_method(xtr_faucet_component(), "take", args![account])
+                        .call_method(account, "pay_fee", args![FEE])
+                })
+                .build_and_seal(&private_key),
+            vec![owner_token],
+        )
+        .unwrap();
+
+    assert!(
+        matches!(
+            result.finalize.result,
+            TransactionResult::Reject(RejectReason::InsufficientFeesPaid(_))
+        ),
+        "actual result: {:?}",
+        result.finalize.result
+    );
+
+    // Nothing was written, so nothing was charged either.
+    assert_eq!(result.finalize.fee_receipt.total_fees_paid(), 0);
+    let balance = test
+        .read_only_state_store()
+        .get_vaults_for_account(account)
+        .unwrap()
+        .get(&STEALTH_TARI_RESOURCE_ADDRESS)
+        .map(|v| v.balance());
+    assert!(
+        balance.is_none() || balance == Some(Amount::zero()),
+        "account was funded: {balance:?}"
+    );
+}
+
 #[test]
 fn fail_partial_paid_fees() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
@@ -245,10 +298,10 @@ fn fail_partial_paid_fees() {
     let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     test.enable_fees();
 
-    // Must cover the fee section's own cost (so the fee instructions succeed) yet stay smaller
-    // than the full transaction's fee, so the main instructions exhaust the compute the payment
-    // funds and trap.
-    const FEE_PAID: u64 = 100;
+    // Must cover what committing the fee intent costs — otherwise nothing commits at all — yet stay
+    // smaller than the full transaction's fee, so the main instructions exhaust the compute the
+    // payment funds and trap.
+    const FEE_PAID: u64 = 1000;
 
     let result = test.execute_expect_commit(
         Transaction::builder_localnet(Epoch(1))
@@ -267,25 +320,25 @@ fn fail_partial_paid_fees() {
         vec![owner_token, owner_token2],
     );
 
-    let total_fees = result.finalize.fee_receipt.fee_breakdown().get_total();
-    // The fee charged exceeds the fee paid, so the transaction is rejected. Execution stops as soon
-    // as the fees are determined insufficient, so the *execution* charges stay close to what was
-    // paid. Storage is excluded: it is charged at finalization for the substates and the receipt
-    // that a fee-intent commit still persists, whenever execution gave up.
-    let storage = result.finalize.fee_receipt.fee_breakdown().get(FeeSource::Storage);
-    assert!(
-        total_fees > FEE_PAID && total_fees - storage < FEE_PAID * 3,
-        "total fees: {total_fees}, of which storage: {storage}"
-    );
+    // The main instructions cost more than was paid, so they are rejected and only the fee intent
+    // commits.
     let reason = result.expect_failure();
     assert!(
-        matches!(reason, RejectReason::ExecutionFailure(msg) if msg.contains("Insufficient fees")),
+        matches!(reason, RejectReason::InsufficientFeesPaid(_)),
         "actual reason: {reason}"
     );
 
-    // Check that the fee paid was deducted
+    // What is charged is what the fee intent persisted, not what the abandoned instructions would
+    // have. That is below the payment, so the commit is affordable and the rest is refunded.
     let payment = result.finalize.fee_receipt;
-    assert!(!payment.is_paid_in_full());
+    let total_fees = payment.fee_breakdown().get_total();
+    assert!(
+        total_fees < FEE_PAID,
+        "total fees {total_fees} exceeds the {FEE_PAID} paid"
+    );
+    assert!(payment.is_paid_in_full());
+    assert_eq!(payment.total_refunded(), FEE_PAID - total_fees);
+
     let new_balance = test
         .read_only_state_store()
         .get_vaults_for_account(account)
@@ -293,7 +346,7 @@ fn fail_partial_paid_fees() {
         .get(&STEALTH_TARI_RESOURCE_ADDRESS)
         .unwrap()
         .balance();
-    assert_eq!(new_balance, orig_balance - Amount::from(FEE_PAID));
+    assert_eq!(new_balance, orig_balance - Amount::from(total_fees));
 }
 
 #[test]
@@ -341,9 +394,8 @@ fn fail_pay_less_fees_than_fee_transaction() {
                         .call_method(
                             account,
                             "pay_fee".to_string(),
-                            // Lands between the fee-instructions cost and the full transaction
-                            // cost, so the fee section is accepted while the rest fails for
-                            // InsufficientFeesPaid.
+                            // Less than the fee instructions themselves cost to commit, so not
+                            // even the fee intent survives.
                             args![150],
                         )
 
@@ -362,13 +414,15 @@ fn fail_pay_less_fees_than_fee_transaction() {
 
     test.disable_fees();
 
-    let (diff, reason) = result.expect_fee_accept_transaction_reject();
-    assert_reject_reason(reason, RejectReason::InsufficientFeesPaid(String::new()));
-
-    let (_, s) = diff.up_iter().find(|(id, _)| id.is_vault()).expect("Account not found");
-    assert_eq!(
-        s.substate_value().as_vault().unwrap().balance(),
-        orig_balance - Amount::from(150u64)
+    // The payment does not cover the state the fee intent writes, so nothing commits at all.
+    assert!(
+        matches!(result.finalize.result, TransactionResult::Reject(_)),
+        "actual result: {:?}",
+        result.finalize.result
+    );
+    assert_reject_reason(
+        result.expect_failure(),
+        RejectReason::InsufficientFeesPaid(String::new()),
     );
 
     // Fee was not deducted
@@ -474,8 +528,8 @@ fn dangling_bucket_pay_fees() {
     test.enable_fees();
 
     let result = test.execute_and_commit_on_success(
-        Transaction::builder_localnet(Epoch(1))
-            .pay_fee_from_component(account, Amount::from(500u64))
+        test.transaction()
+            .pay_fee_from_component(account, Amount::from(3000u64))
             .call_method(account, "withdraw", args![STEALTH_TARI_RESOURCE_ADDRESS, 10])
             .put_last_instruction_output_on_workspace("dangling_bucket")
             .build_and_seal(&private_key),

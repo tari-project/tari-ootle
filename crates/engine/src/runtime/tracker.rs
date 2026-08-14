@@ -426,6 +426,28 @@ impl<TStore: StateReader> StateTracker<TStore> {
             reason,
         } = finalized;
 
+        // Committing costs whatever the charges now say, and they have just been recomputed over
+        // this exact state. A payment that cannot cover that commits nothing: a fee-intent commit
+        // persists real state — substates, and a receipt carrying every event the intent emitted —
+        // and there is no shallower checkpoint left to fall back to. Letting it through is what
+        // would make an underfunded fee intent a way to write state for free.
+        //
+        // The commit path cannot fail here: its charges were tested against payments to reach it,
+        // and recomputing them over the same state does not change them.
+        let fee_state = state.fee_state();
+        if !fee_state.is_dry_run() && !fee_state.is_paid_in_full() {
+            // Whatever rejected the main intent is why the transaction failed and stays the reason
+            // reported; the shortfall below only decides that not even the fee intent survives it.
+            let reason = reason.unwrap_or_else(|| {
+                RejectReason::InsufficientFeesPaid(format!(
+                    "Committing requires {} but {} paid",
+                    fee_state.total_charges(),
+                    fee_state.total_payments()
+                ))
+            });
+            return Ok(FinalizeResult::new_rejected(state.transaction_hash(), reason));
+        }
+
         // Resolve the transfers to the fee pool resource and vault refunds
         let mut substates_to_persist = state.take_mutated_substates();
         let fee_receipt = state.finalize_fees_and_refunds(&mut substates_to_persist)?;

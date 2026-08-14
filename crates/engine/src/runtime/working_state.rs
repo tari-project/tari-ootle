@@ -703,10 +703,20 @@ impl<TStore: StateReader> WorkingState<TStore> {
     /// holds the commitment.
     pub fn burn_bucket(
         &mut self,
+        bucket_id: BucketId,
         bucket: Bucket,
         resource_lock: &LockedSubstate,
         value_proofs: &BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
     ) -> Result<(), RuntimeError> {
+        // Burning downs only the unlocked commitments, so a locked one would be left live with nothing referencing
+        // it. Callers reject this earlier to avoid charging for a burn that cannot succeed; the check lives here so
+        // that it holds for every caller.
+        if bucket.has_locked_funds() {
+            return Err(RuntimeError::InvalidOpDepositLockedBucket {
+                bucket_id,
+                locked_amount: bucket.locked_amount(),
+            });
+        }
         if bucket.is_empty() {
             return Ok(());
         }

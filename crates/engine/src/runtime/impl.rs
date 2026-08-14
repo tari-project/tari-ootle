@@ -2948,10 +2948,12 @@ where
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Burn)?;
                 }
 
-                // The hook may have altered the bucket, so the commitments are read after it runs: the charge must
-                // cover the proofs actually verified below, not those held when the hook was scheduled.
+                // The hook may have altered the bucket, so it is re-inspected after the hook runs and before
+                // anything is charged: a hook that locked funds makes the burn fail, and the charge must cover the
+                // proofs actually verified below rather than those held when the hook was scheduled.
                 let value_proof_points = self.tracker.write_with(|state_mut| {
                     let bucket = state_mut.get_bucket(bucket_id)?;
+                    Self::check_bucket_is_burnable(bucket_id, bucket)?;
                     if !tracks_supply {
                         return Ok::<_, RuntimeError>(0);
                     }
@@ -2973,9 +2975,8 @@ where
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
-                    Self::check_bucket_is_burnable(bucket_id, &bucket)?;
 
-                    state.burn_bucket(bucket, &resource_lock, &arg.value_proofs)?;
+                    state.burn_bucket(bucket_id, bucket, &resource_lock, &arg.value_proofs)?;
 
                     state.unlock_substate(resource_lock)?;
 

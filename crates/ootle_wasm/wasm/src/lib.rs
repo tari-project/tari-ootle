@@ -365,8 +365,8 @@ pub fn build_script_path_witness(conditions_json: &str, leaf_json: &str, data: &
 /// `generateStealthBalanceProofSignature`, which build and sign each half of a transfer
 /// separately, this wraps the single primitive that produces the *entire*, internally-consistent
 /// statement in one call, including a covenant balance-integrity proof for any script-path input
-/// whose revealed leaf gates on `Covenant::BalancePreserved` (see `buildStealthTransferStatement`
-/// in `ootle-wasm-core` for when a claim is and isn't needed).
+/// whose revealed leaf gates on `Covenant::BalancePreserved` (see `ootle_wasm_core::stealth::
+/// transfer::build_stealth_transfer_statement` for when a claim is and isn't needed).
 ///
 /// `input_witnesses_json` is a JSON array of `{ "mask_and_value": { "value": <u64>, "mask": <hex
 /// 32 bytes> }, "witness"?: <SpendWitness>, "condition_root"?: <Hash32> }` -- each entry's

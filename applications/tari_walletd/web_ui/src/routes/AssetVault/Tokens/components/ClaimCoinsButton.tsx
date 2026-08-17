@@ -91,7 +91,10 @@ function ClaimCoinsButton() {
     claimTestnetFaucetFunds(
       {
         account: { ComponentAddress: accountAddress },
-        fee: 1000,
+        // The claim creates the account and funds it, so it pays for a component, a vault, a badge
+        // and the receipt. Allocated well above that — the excess is refunded, and too low a value
+        // rejects the claim after the funds appear to have arrived.
+        fee: 50_000,
       },
       {
         onSuccess: async (resp: AccountsCreateFreeTestCoinsResponse) => {

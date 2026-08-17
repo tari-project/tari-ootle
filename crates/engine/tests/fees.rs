@@ -569,12 +569,20 @@ fn dangling_bucket_pay_fees() {
 }
 
 // A submitted `max_fee` is itself an input to what the transaction costs, so a dry run metered at
-// one `max_fee` does not predict a real run at another. Three mechanisms drive that, and these
-// tests isolate one each — `try_execute` never commits, so every run below starts from identical
-// state and the whole delta is attributable to `max_fee`.
+// one `max_fee` does not perfectly predict a real run at another. There are three quantities the
+// cost could read `max_fee` through, and what a caller can rely on is which of them it does:
 //
-// Each test varies exactly one of the three quantities `max_fee` is read through and holds the
-// other two fixed, so a failure names its mechanism rather than a total.
+// - the encoded *width* of the fee literal, through `calc_args_weight`. Live, and the only term that can make a real
+//   run cost more than the dry run said.
+// - the fee amount's *digit count*, through the `std.vault.pay_fee` event the persisted receipt carries. Neutralized —
+//   priced at its widest, so it buys nothing.
+// - the *residual vault balance*'s width, since the finalization charges run before refunds. Live, but one-directional:
+//   a dry run holds `max_fee` at its lowest and so sees the widest residual, which makes every real submission the same
+//   or cheaper.
+//
+// `try_execute` never commits, so every run below starts from identical state and the whole delta
+// is attributable to `max_fee`. Each test varies one of the three quantities and holds the other
+// two fixed, so a failure names its mechanism rather than a total.
 
 /// The balance `create_funded_account` starts an account with, so the residual vault balance the
 /// byte counter sees (`FUNDED - max_fee`) is predictable.
@@ -586,8 +594,9 @@ fn amount_len(value: u64) -> u64 {
     tari_bor::encode(&Amount::from(value)).unwrap().len() as u64
 }
 
-/// The `std.vault.pay_fee` event records the amount as a decimal string, so the receipt — and
-/// therefore the storage charge — reads `max_fee` through its digit count.
+/// The `std.vault.pay_fee` event records the amount as a decimal string, so the receipt's size — and
+/// with it the storage charge — would read `max_fee` through its digit count if the amount were not
+/// priced at its widest.
 fn digit_count(value: u64) -> u64 {
     value.to_string().len() as u64
 }
@@ -663,14 +672,15 @@ fn transaction_weight_follows_the_max_fee_literal_width() {
     }
 }
 
-/// The transaction receipt is part of the state the transaction pays to persist, and it carries the
-/// `std.vault.pay_fee` event, whose payload records the amount as a **decimal string**. Every extra
-/// digit in `max_fee` is therefore another byte of permanent state.
+/// The transaction receipt is part of the state a transaction pays to persist, and it carries the
+/// `std.vault.pay_fee` event, whose payload records the amount as a decimal string. Charging that
+/// verbatim would price permanent state by the digit count of `max_fee`, so the amount is priced at
+/// its widest instead and the digit count buys nothing.
 #[test]
-fn storage_follows_the_max_fee_digit_count() {
+fn storage_does_not_follow_the_max_fee_digit_count() {
     // One encoding width and one residual width throughout, so the digit count is the only thing
     // that varies.
-    const MAX_FEES: [u64; 3] = [65_536, 1_000_000, 100_000_000];
+    const MAX_FEES: [u64; 4] = [65_536, 1_000_000, 100_000_000, 999_000_000];
 
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let (account, owner_token, key) = test.create_funded_account();
@@ -678,8 +688,11 @@ fn storage_follows_the_max_fee_digit_count() {
     let build = state_transaction(&test, account, &key);
     let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
 
-    let per_byte = test.fee_table().per_byte_storage_cost();
-    let divisor = test.fee_table().storage_cost_divisor();
+    assert_ne!(
+        digit_count(MAX_FEES[0]),
+        digit_count(MAX_FEES[MAX_FEES.len() - 1]),
+        "the digit count must actually vary for this to prove anything"
+    );
     for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
         assert_eq!(
             amount_len(*max_fee),
@@ -691,10 +704,9 @@ fn storage_follows_the_max_fee_digit_count() {
             amount_len(FUNDED - MAX_FEES[0]),
             "residual width must hold"
         );
-        let extra_digits = digit_count(*max_fee) - digit_count(MAX_FEES[0]);
         assert_eq!(
-            receipt.fee_breakdown().get(FeeSource::Storage) - receipts[0].fee_breakdown().get(FeeSource::Storage),
-            extra_digits * per_byte / divisor,
+            receipt.fee_breakdown().get(FeeSource::Storage),
+            receipts[0].fee_breakdown().get(FeeSource::Storage),
             "Storage at max_fee {max_fee}"
         );
     }
@@ -770,6 +782,72 @@ fn a_template_publish_introduces_no_further_max_fee_sensitivity() {
     assert_only_weight_and_storage_move(&MAX_FEES, &receipts);
 }
 
+/// The property a caller actually depends on. A dry run meters at the smallest `max_fee` it can, so
+/// the question is not whether the real run costs something different but whether it can cost
+/// *more*, and by how much. Only the weight term can: the residual term moves the other way, and
+/// the digit count no longer counts at all. The literal's width crosses at most two multiples of
+/// `LITERAL_BYTE_DIVISOR` between a dry run's narrow amount and the widest a `u64` can encode to.
+#[test]
+fn a_real_run_costs_at_most_two_more_than_the_dry_run_estimate() {
+    // Spans every encoding width a fee above this transaction's cost can take, every residual
+    // width, and digit counts from four to nine.
+    const MAX_FEES: [u64; 8] = [
+        1_000,
+        65_535,
+        65_536,
+        1_000_000,
+        100_000_000,
+        FUNDED - 60_000,
+        FUNDED - 200,
+        FUNDED - 10,
+    ];
+    const MAX_UPWARD_DRIFT: u64 = 2;
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+
+    // The first entry is the smallest submittable max_fee, which is what a dry run meters at.
+    let estimate = receipts[0].total_fees_charged();
+    for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
+        assert!(
+            receipt.total_fees_charged() <= estimate + MAX_UPWARD_DRIFT,
+            "max_fee {max_fee} costs {} against an estimate of {estimate}",
+            receipt.total_fees_charged()
+        );
+    }
+}
+
+/// The residual term's direction, which is what makes it harmless. Raising `max_fee` narrows the
+/// balance left in the fee vault when the byte counter runs, so it can only ever take storage down.
+#[test]
+fn a_wider_max_fee_never_raises_the_storage_charge() {
+    // Ascending, at one encoding width, so only the residual moves and it only narrows.
+    const MAX_FEES: [u64; 4] = [65_536, FUNDED - 60_000, FUNDED - 200, FUNDED - 10];
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+
+    for (pair, fees) in receipts.windows(2).zip(MAX_FEES.windows(2)) {
+        assert!(
+            pair[1].fee_breakdown().get(FeeSource::Storage) <= pair[0].fee_breakdown().get(FeeSource::Storage),
+            "storage rose between max_fee {} and {}",
+            fees[0],
+            fees[1]
+        );
+    }
+    // The mechanism is live, not merely one-directional by accident.
+    assert!(
+        receipts[receipts.len() - 1].fee_breakdown().get(FeeSource::Storage) <
+            receipts[0].fee_breakdown().get(FeeSource::Storage)
+    );
+}
+
 fn assert_only_weight_and_storage_move(max_fees: &[u64], receipts: &[FeeReceipt]) {
     let base = &receipts[0];
     for (max_fee, receipt) in max_fees.iter().zip(receipts) {
@@ -818,9 +896,8 @@ fn the_pay_fee_event_records_max_fee_in_decimal() {
 #[test]
 fn the_exhaust_burn_compounds_the_drift() {
     const FULL_RATE_BPS: u16 = 10_000;
-    // Four extra digits at one encoding width and one residual width, so the drift beneath the
-    // burn is unambiguously non-zero.
-    const MAX_FEES: [u64; 2] = [65_536, 100_000_000];
+    // Four bytes of residual width apart, so the drift beneath the burn is unambiguously non-zero.
+    const MAX_FEES: [u64; 2] = [65_536, FUNDED - 10];
 
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let (account, owner_token, key) = test.create_funded_account();

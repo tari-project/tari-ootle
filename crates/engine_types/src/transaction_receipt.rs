@@ -85,8 +85,12 @@ impl TransactionReceipt {
     /// from this bound feeds into. Measuring it exactly would require a fixed point, so the two
     /// parts that are not yet known are replaced by worst-case stand-ins — a fee receipt whose
     /// amounts all encode at full varint width, and a max-width version on each diff-summary entry.
-    /// Everything else (`events`, `fee_withdrawals`, `epoch`, `intent_commitment`) is measured as it
-    /// will actually be encoded.
+    ///
+    /// Events are measured as they will actually be encoded, save for the amount a fee-payment event
+    /// records: that renders `max_fee` in decimal, so measuring it as written would reintroduce the
+    /// very fixed point the fee receipt's stand-in exists to avoid. It is priced at its widest — see
+    /// [`Event::charged_size_padding`]. `fee_withdrawals`, `epoch` and `intent_commitment` are
+    /// measured as they will actually be encoded.
     ///
     /// `upped` is the substates that will appear in the [`DiffSummary`] — one entry each. Nothing
     /// joins that set after the charge is computed: fee settlement only mutates substates already in
@@ -111,6 +115,7 @@ impl TransactionReceipt {
         let ctx = &mut ();
         let mut len = minicbor::len(&diff_summary);
         len += boxed_slice::cbor_len(events, ctx);
+        len += events.iter().map(Event::charged_size_padding).sum::<usize>();
         len += boxed_slice::cbor_len(fee_withdrawals, ctx);
         len += minicbor::len(FeeReceipt::widest());
         len += minicbor::len(epoch);

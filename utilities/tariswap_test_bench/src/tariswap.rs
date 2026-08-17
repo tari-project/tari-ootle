@@ -44,7 +44,7 @@ impl Runner {
             .new_transaction_builder()
             .pay_fee_from_component(
                 in_account.component_address,
-                Amount::from_usize(num_tariswaps) * 2000u64,
+                Amount::from_usize(num_tariswaps) * crate::MAX_FEE,
             )
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {
@@ -141,7 +141,7 @@ impl Runner {
                         SubstateRequirement::unversioned(faucet.resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .pay_fee_from_component(account.component_address, 3000u64)
+                    .pay_fee_from_component(account.component_address, crate::MAX_FEE)
                     .call_method(account.component_address, "withdraw", args![TARI_TOKEN, amount_a])
                     .put_last_instruction_output_on_workspace("a")
                     .call_method(account.component_address, "withdraw", args![
@@ -228,7 +228,7 @@ impl Runner {
         amount_b_for_a: Amount,
         faucet: &Faucet,
     ) -> anyhow::Result<()> {
-        const SWAP_FEE: u64 = 8000;
+        const SWAP_FEE: u64 = crate::MAX_FEE;
         let primary_account_key = self
             .sdk
             .key_manager_api()

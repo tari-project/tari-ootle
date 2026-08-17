@@ -53,7 +53,9 @@ function ClaimNftsButton() {
         mutableData: {
           image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
         },
-        maxFee: 3000,
+        // Minting writes the NFT, its resource and the account's vault, and pays for the receipt.
+        // Allocated well clear of that; the unspent remainder is refunded.
+        maxFee: 50_000,
       },
       {
         onSuccess: (resp: any) => {

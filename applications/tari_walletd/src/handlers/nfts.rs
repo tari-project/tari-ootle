@@ -116,7 +116,9 @@ pub async fn handle_mint_faucet(
         .substate_api()
         .locate_dependent_substates(slice::from_ref(&account.component_address.into()), true)
         .await?;
-    let fee = req.max_fee.unwrap_or(3000);
+    // Minting writes the NFT, its resource and the account's vault, and pays for the receipt.
+    // The default is set well clear of that; the unspent remainder is refunded.
+    let fee = req.max_fee.unwrap_or(50_000);
     let transaction = context
         .transaction_builder()
         .await?

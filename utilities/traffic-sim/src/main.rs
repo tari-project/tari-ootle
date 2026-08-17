@@ -1,6 +1,13 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+/// Fee allowance for every transaction this simulator submits.
+///
+/// An upper bound, not a payment — the unspent remainder is refunded — so it is set well clear of
+/// what these cost rather than tuned to them. A tight value stops the simulator dead the next time
+/// the engine's pricing moves.
+pub const MAX_FEE: u64 = 50_000;
+
 mod coin;
 mod config;
 mod sim;

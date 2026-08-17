@@ -319,7 +319,7 @@ impl TrafficSim {
 
         let max_epoch = exchange_wallet.max_epoch().await?;
         let transaction = Transaction::builder(exchange_wallet.network.as_byte(), max_epoch)
-            .pay_fee_from_component(*account.component_address(), 3000u64)
+            .pay_fee_from_component(*account.component_address(), crate::MAX_FEE)
             .allocate_component_address("sc")
             .call_function(stablecoin_template, "instantiate", args![
                 Workspace("sc"),
@@ -501,7 +501,7 @@ impl TrafficSim {
                 .await?;
 
             let transaction = Transaction::builder(wallet.network.as_byte(), max_epoch)
-                .pay_fee_from_component(*exchange_account.component_address(), 2000u64)
+                .pay_fee_from_component(*exchange_account.component_address(), crate::MAX_FEE)
                 .call_method(*exchange_account.component_address(), "create_proof_by_amount", args![
                     admin_resource_address,
                     1

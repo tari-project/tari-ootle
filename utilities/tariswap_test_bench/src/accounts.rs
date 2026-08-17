@@ -40,7 +40,7 @@ impl Runner {
                     .create_account(owner_public_key)
                     .put_last_instruction_output_on_workspace("account")
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("account")])
-                    .pay_fee_from_component("account", 2000u64)
+                    .pay_fee_from_component("account", crate::MAX_FEE)
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
@@ -124,7 +124,7 @@ impl Runner {
             })
             .pay_fee_from_component(
                 *default_account.component_address(),
-                Amount::from(1000 * num_accounts as u64),
+                Amount::from(crate::MAX_FEE * num_accounts as u64),
             )
             .with_inputs([
                 SubstateRequirement::unversioned(*default_account.component_address()),
@@ -195,7 +195,7 @@ impl Runner {
                 .new_transaction_builder()
                 .pay_fee_from_component(
                     fee_account.component_address,
-                    Amount::ONE_THOUSAND * Amount::from_usize(accounts.len()),
+                    Amount::from(crate::MAX_FEE) * Amount::from_usize(accounts.len()),
                 )
                 .fold(accounts.iter(), |builder, account| {
                     builder

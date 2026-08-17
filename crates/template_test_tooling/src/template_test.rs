@@ -112,6 +112,7 @@ pub struct TemplateTest {
     state_store: MemoryStateStore,
     enable_fees: bool,
     fee_table: FeeTable,
+    burn_rate_bps: u16,
     virtual_substates: HashMap<VirtualSubstateId, VirtualSubstate>,
     key_seed: u8,
     auto_add_proofs_from_signers: bool,
@@ -254,6 +255,7 @@ impl TemplateTest {
                 per_template_size_premium_unit_cost: 100,
                 per_template_publish_cost: 250_000,
             },
+            burn_rate_bps: 0,
             key_seed: 1,
             auto_add_proofs_from_signers: true,
         }
@@ -333,6 +335,13 @@ impl TemplateTest {
     /// Replaces the fee table with the given one. Only has effect when fees are enabled.
     pub fn set_fee_table(&mut self, fee_table: FeeTable) -> &mut Self {
         self.fee_table = fee_table;
+        self
+    }
+
+    /// Sets the exhaust burn rate applied to the transaction's accrued fees. Defaults to zero, so
+    /// tests see no burn unless they ask for one.
+    pub fn set_burn_rate_bps(&mut self, rate_bps: u16) -> &mut Self {
+        self.burn_rate_bps = rate_bps;
         self
     }
 
@@ -737,7 +746,7 @@ impl TemplateTest {
             Arc::from(modules.into_boxed_slice()),
             Arc::new(AlwaysPassesProofVerifier),
             wasm_metering_rate,
-            0,
+            self.burn_rate_bps,
             false,
         );
 

@@ -1,13 +1,24 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
-    fees::FeeSource,
+    fees::{FeeReceipt, FeeSource},
 };
 use tari_ootle_transaction::{Epoch, Transaction, args};
-use tari_template_lib::types::{Amount, ComponentAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS};
-use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
+use tari_template_lib::types::{
+    Amount,
+    ComponentAddress,
+    NonFungibleAddress,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+};
+use tari_template_test_tooling::{
+    TemplateTest,
+    compile::compile_template,
+    support::assert_error::assert_reject_reason,
+    xtr_faucet_component,
+};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 const TEMPLATE_PATHS: [&str; 1] = ["tests/templates/state"];
@@ -555,6 +566,279 @@ fn dangling_bucket_pay_fees() {
         .balance();
     assert_ne!(payment.total_fees_paid(), 0);
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
+}
+
+// A submitted `max_fee` is itself an input to what the transaction costs, so a dry run metered at
+// one `max_fee` does not predict a real run at another. Three mechanisms drive that, and these
+// tests isolate one each — `try_execute` never commits, so every run below starts from identical
+// state and the whole delta is attributable to `max_fee`.
+//
+// Each test varies exactly one of the three quantities `max_fee` is read through and holds the
+// other two fixed, so a failure names its mechanism rather than a total.
+
+/// The balance `create_funded_account` starts an account with, so the residual vault balance the
+/// byte counter sees (`FUNDED - max_fee`) is predictable.
+const FUNDED: u64 = 1_000_000_000;
+
+/// `calc_args_weight` prices an instruction's literal args by their encoded bytes, so the weight
+/// charge reads `max_fee` through the width of its encoding.
+fn amount_len(value: u64) -> u64 {
+    tari_bor::encode(&Amount::from(value)).unwrap().len() as u64
+}
+
+/// The `std.vault.pay_fee` event records the amount as a decimal string, so the receipt — and
+/// therefore the storage charge — reads `max_fee` through its digit count.
+fn digit_count(value: u64) -> u64 {
+    value.to_string().len() as u64
+}
+
+/// Meters `build(max_fee)` once per `max_fee`, from identical state each time.
+fn meter_across_max_fees(
+    test: &mut TemplateTest,
+    max_fees: &[u64],
+    proofs: &[NonFungibleAddress],
+    build: impl Fn(u64) -> Transaction,
+) -> Vec<FeeReceipt> {
+    max_fees
+        .iter()
+        .map(|&max_fee| {
+            let result = test.try_execute(build(max_fee), proofs.to_vec()).unwrap();
+            // A run that does not commit meters a different execution — only the fee intent — and
+            // would not be comparable with the others.
+            assert!(
+                matches!(result.finalize.result, TransactionResult::Accept(_)),
+                "max_fee {max_fee} did not commit, so this run is not comparable: {:?}",
+                result.finalize.result
+            );
+            result.finalize.fee_receipt
+        })
+        .collect()
+}
+
+fn state_transaction<'a>(
+    test: &TemplateTest,
+    account: ComponentAddress,
+    key: &'a RistrettoSecretKey,
+) -> impl Fn(u64) -> Transaction + use<'a> {
+    let template = test.get_template_address("State");
+    move |max_fee| {
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, max_fee)
+            .call_function(template, "new", args![])
+            .build_and_seal(key)
+    }
+}
+
+/// `max_fee` is the only literal arg of the `pay_fee` instruction, and `calc_args_weight` prices an
+/// instruction's literals at `total_bytes / LITERAL_BYTE_DIVISOR`. The whole weight of this
+/// transaction is that one term, so it steps whenever the encoded width crosses the divisor.
+#[test]
+fn transaction_weight_follows_the_max_fee_literal_width() {
+    const LITERAL_BYTE_DIVISOR: u64 = 3;
+    // Straddles an encoding-width boundary while keeping the digit count and the residual balance's
+    // width fixed, so the weight charge is the only thing that can move.
+    const MAX_FEES: [u64; 2] = [65_535, 65_536];
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+
+    assert_ne!(amount_len(MAX_FEES[0]), amount_len(MAX_FEES[1]));
+    assert_eq!(digit_count(MAX_FEES[0]), digit_count(MAX_FEES[1]));
+
+    let per_weight = test.fee_table().per_transaction_weight_cost();
+    for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
+        assert_eq!(
+            receipt.fee_breakdown().get(FeeSource::TransactionWeight),
+            (amount_len(*max_fee) / LITERAL_BYTE_DIVISOR) * per_weight,
+            "TransactionWeight at max_fee {max_fee}"
+        );
+        assert_eq!(
+            receipt.fee_breakdown().get(FeeSource::Storage),
+            receipts[0].fee_breakdown().get(FeeSource::Storage),
+            "Storage must not move while the digit count and residual width hold"
+        );
+    }
+}
+
+/// The transaction receipt is part of the state the transaction pays to persist, and it carries the
+/// `std.vault.pay_fee` event, whose payload records the amount as a **decimal string**. Every extra
+/// digit in `max_fee` is therefore another byte of permanent state.
+#[test]
+fn storage_follows_the_max_fee_digit_count() {
+    // One encoding width and one residual width throughout, so the digit count is the only thing
+    // that varies.
+    const MAX_FEES: [u64; 3] = [65_536, 1_000_000, 100_000_000];
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+
+    let per_byte = test.fee_table().per_byte_storage_cost();
+    let divisor = test.fee_table().storage_cost_divisor();
+    for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
+        assert_eq!(
+            amount_len(*max_fee),
+            amount_len(MAX_FEES[0]),
+            "encoding width must hold"
+        );
+        assert_eq!(
+            amount_len(FUNDED - max_fee),
+            amount_len(FUNDED - MAX_FEES[0]),
+            "residual width must hold"
+        );
+        let extra_digits = digit_count(*max_fee) - digit_count(MAX_FEES[0]);
+        assert_eq!(
+            receipt.fee_breakdown().get(FeeSource::Storage) - receipts[0].fee_breakdown().get(FeeSource::Storage),
+            extra_digits * per_byte / divisor,
+            "Storage at max_fee {max_fee}"
+        );
+    }
+}
+
+/// The finalization charges run before `finalize_fees_and_refunds` returns the unspent payment, so
+/// the fee vault is byte-counted holding `balance - max_fee`. A larger `max_fee` narrows that
+/// residual and makes storage *cheaper* — the opposite direction to the digit-count term above.
+#[test]
+fn storage_follows_the_residual_vault_balance_width() {
+    // One encoding width and one digit count throughout, so the residual width is the only thing
+    // that varies.
+    const MAX_FEES: [u64; 3] = [999_940_000, 999_999_800, 999_999_990];
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+
+    let per_byte = test.fee_table().per_byte_storage_cost();
+    let divisor = test.fee_table().storage_cost_divisor();
+    for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
+        assert_eq!(
+            amount_len(*max_fee),
+            amount_len(MAX_FEES[0]),
+            "encoding width must hold"
+        );
+        assert_eq!(digit_count(*max_fee), digit_count(MAX_FEES[0]), "digit count must hold");
+        let bytes_saved = amount_len(FUNDED - MAX_FEES[0]) - amount_len(FUNDED - max_fee);
+        assert_eq!(
+            receipts[0].fee_breakdown().get(FeeSource::Storage) - receipt.fee_breakdown().get(FeeSource::Storage),
+            bytes_saved * per_byte / divisor,
+            "Storage at max_fee {max_fee}"
+        );
+    }
+}
+
+/// Only `TransactionWeight` and `Storage` are `max_fee`-sensitive. Anything else moving would mean
+/// the three mechanisms above do not account for the whole drift.
+#[test]
+fn no_charge_other_than_weight_and_storage_moves_with_max_fee() {
+    const MAX_FEES: [u64; 6] = [1_000, 65_535, 65_536, 100_000_000, FUNDED - 60_000, FUNDED - 10];
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+
+    assert_only_weight_and_storage_move(&MAX_FEES, &receipts);
+}
+
+/// A publish carries a blob and takes the dedicated `TemplatePublish` pricing path, so it is the
+/// shape most likely to hide a fourth mechanism. It does not.
+#[test]
+fn a_template_publish_introduces_no_further_max_fee_sensitivity() {
+    // Every entry clears the publish cost; between them they move all three quantities.
+    const MAX_FEES: [u64; 4] = [400_000, 100_000_000, FUNDED - 60_000, FUNDED - 10];
+
+    let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+    let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
+    let template = compile_template("tests/templates/hello_world", &[]).unwrap();
+    test.enable_fees();
+
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_proof], |max_fee| {
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, max_fee)
+            .publish_template(template.clone().into_code())
+            .build_and_seal(&key)
+    });
+
+    assert_only_weight_and_storage_move(&MAX_FEES, &receipts);
+}
+
+fn assert_only_weight_and_storage_move(max_fees: &[u64], receipts: &[FeeReceipt]) {
+    let base = &receipts[0];
+    for (max_fee, receipt) in max_fees.iter().zip(receipts) {
+        for (source, amount) in receipt.fee_breakdown().iter() {
+            if matches!(source, FeeSource::TransactionWeight | FeeSource::Storage) {
+                continue;
+            }
+            assert_eq!(
+                *amount,
+                base.fee_breakdown().get(*source),
+                "{source:?} moved between max_fee {} and {max_fee}",
+                max_fees[0]
+            );
+        }
+    }
+}
+
+/// The digit-count mechanism traced to its source: the event payload the receipt carries holds
+/// `max_fee` itself, rendered in decimal.
+#[test]
+fn the_pay_fee_event_records_max_fee_in_decimal() {
+    const MAX_FEE: u64 = 123_456_789;
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let result = test.try_execute(build(MAX_FEE), vec![owner_token]).unwrap();
+
+    let pay_fee = result
+        .finalize
+        .events
+        .iter()
+        .find(|e| e.topic() == "std.vault.pay_fee")
+        .expect("pay_fee event");
+    assert_eq!(
+        pay_fee.get_payload("amount").as_deref(),
+        Some(MAX_FEE.to_string().as_str()),
+        "the event records the payment cap, not the fee actually charged"
+    );
+}
+
+/// The exhaust burn adds no mechanism of its own but re-multiplies the others, being taken over the
+/// running total. At a 100% rate the compounding is exact: the total moves by twice the movement of
+/// the charges beneath it.
+#[test]
+fn the_exhaust_burn_compounds_the_drift() {
+    const FULL_RATE_BPS: u16 = 10_000;
+    // Four extra digits at one encoding width and one residual width, so the drift beneath the
+    // burn is unambiguously non-zero.
+    const MAX_FEES: [u64; 2] = [65_536, 100_000_000];
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    test.set_burn_rate_bps(FULL_RATE_BPS);
+    let build = state_transaction(&test, account, &key);
+    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+
+    let pre_burn = |r: &FeeReceipt| r.total_fees_charged() - r.fee_breakdown().get(FeeSource::ExhaustBurn);
+    let pre_burn_delta = pre_burn(&receipts[1]).abs_diff(pre_burn(&receipts[0]));
+    assert!(pre_burn_delta > 0, "the chosen max_fees must move the pre-burn charges");
+    assert_eq!(
+        receipts[1]
+            .total_fees_charged()
+            .abs_diff(receipts[0].total_fees_charged()),
+        pre_burn_delta * 2,
+        "a 100% burn doubles whatever the max_fee-sensitive charges contribute"
+    );
 }
 
 #[test]

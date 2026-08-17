@@ -45,6 +45,7 @@ wasm-cache = ["dep:bytes", "dep:memmap2"]
 # depends on tari_engine, so we can't list it with a published version here or
 # `cargo publish` can't resolve the manifest.
 tari_template_test_tooling = { path = "../template_test_tooling" }
+tari_bor = { workspace = true, default-features = true, features = ["std"] }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_transaction = { workspace = true, features = ["serde"] }
 tari_template_builtin = { workspace = true, features = ["templates", "state"] }

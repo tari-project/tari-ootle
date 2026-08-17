@@ -4,7 +4,9 @@ import type { ValueKnowledgeProof } from "./ValueKnowledgeProof";
 
 /**
  * Proof of knowledge of the opening to a commitment and that the commitment commits to a specific value.
- * Currently used when burning UTXOs to allow the total supply to be adjusted.
+ *
+ * Used wherever a resource's total supply must account for a value that is otherwise hidden in a commitment:
+ * burning a stealth UTXO, and minting a confidential commitment.
  */
 export type CommitmentValueProof = {
   /**

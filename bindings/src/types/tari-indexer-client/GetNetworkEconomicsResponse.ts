@@ -4,11 +4,36 @@ import type { Epoch } from "../Epoch";
 
 export type GetNetworkEconomicsResponse = {
   current_epoch: Epoch;
+  /**
+   * Total XTR claimed (peg-in).
+   */
   total_claimed: Amount;
+  /**
+   * Total exhaust burned, sourced from checkpoint headers (consensus-backed, complete since genesis).
+   * Kept as a cross-check against `receipt_exhaust_burned`.
+   */
   total_exhaust_burned: Amount;
+  /**
+   * Total pre-burn execution fees `F`, summed from transaction receipts.
+   */
   fee_volume: Amount;
+  /**
+   * Total exhaust burned summed from the same receipts as `fee_volume`; `receipt_exhaust_burned /
+   * fee_volume` is the exact realized burn rate, and this is the burn netted from `total_supply`. May
+   * transiently trail `total_exhaust_burned` while the receipt sync frontier catches up to the checkpoint
+   * frontier.
+   */
   receipt_exhaust_burned: Amount;
+  /**
+   * Circulating L2 supply: `total_claimed - receipt_exhaust_burned`.
+   */
   total_supply: Amount;
+  /**
+   * Number of transaction receipts the indexer has stored.
+   */
   transaction_receipt_count: bigint;
+  /**
+   * The target exhaust burn rate in basis points in effect at `current_epoch`.
+   */
   target_burn_rate_bps: number;
 };

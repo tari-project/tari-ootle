@@ -37,7 +37,7 @@ export type TransactionPoolRecord = {
    */
   transaction_weight: bigint;
   /**
-   * The exhaust burn surcharge collected by the executor (`FeeReceipt::exhaust_burn_charged`), set from local
+   * The exhaust burn collected by the executor (`FeeReceipt::exhaust_burn_charged`), set from local
    * execution alongside `transaction_fee`.
    */
   exhaust_burn: bigint;

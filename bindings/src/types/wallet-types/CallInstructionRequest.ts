@@ -7,7 +7,14 @@ export type CallInstructionRequest = {
   instructions: Array<Instruction>;
   fee_account: ComponentAddressOrName;
   max_fee: number | bigint | string;
+  /**
+   * Substates the instructions require as transaction inputs. Needed for any input that cannot be inferred
+   * from the instructions, e.g. a `ConfidentialOutput` named only by a commitment inside an opaque proof.
+   */
   inputs: Array<SubstateRequirement>;
+  /**
+   * If true, inputs inferred from the instructions are added to `inputs`.
+   */
   override_inputs: boolean | null;
   new_outputs: number | null;
   proof_ids: Array<number>;

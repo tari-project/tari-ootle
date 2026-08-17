@@ -2,6 +2,7 @@
 import type { BucketId } from "./BucketId";
 import type { ClaimedOutputTombstoneAddress } from "./ClaimedOutputTombstoneAddress";
 import type { ComponentAddress } from "./ComponentAddress";
+import type { ConfidentialOutputAddress } from "./ConfidentialOutputAddress";
 import type { Metadata } from "./Metadata";
 import type { NonFungibleAddress } from "./NonFungibleAddress";
 import type { ProofId } from "./ProofId";
@@ -27,4 +28,5 @@ export type IndexedWellKnownTypes = {
   utxos: Array<UtxoAddress>;
   component_address_allocations: number[];
   resource_address_allocations: number[];
+  confidential_outputs: Array<ConfidentialOutputAddress>;
 };

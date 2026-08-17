@@ -5,7 +5,7 @@ import type { OutputBody } from "./OutputBody";
  * A confidential output stored as its own substate, referenced by a vault's commitment list.
  *
  * Spend authorization is entirely controlled by the owning vault's access rules (unlike a stealth
- * `Utxo`, which carries its own spend authorization), so no per-output spend key is held here.
+ * [`crate::utxo::Utxo`], which carries its own spend authorization), so no per-output spend key is held here.
  * Spending or burning downs this substate; the only in-place mutation is freezing.
  */
 export type ConfidentialOutput = { output: OutputBody; is_frozen: boolean };

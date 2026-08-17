@@ -88,10 +88,10 @@ impl TransactionReceipt {
     /// Everything else (`events`, `fee_withdrawals`, `epoch`, `intent_commitment`) is measured as it
     /// will actually be encoded.
     ///
-    /// `upped` is the substates that will appear in the [`DiffSummary`] — one entry each. Fee
-    /// settlement can still add a handful of substates (validator fee pools, the refund vault)
-    /// after the charge is computed, and those entries are not counted; the shortfall is bounded by
-    /// the committee size rather than by anything the transaction controls.
+    /// `upped` is the substates that will appear in the [`DiffSummary`] — one entry each. Nothing
+    /// joins that set after the charge is computed: fee settlement only mutates substates already in
+    /// it, and building the diff can only drop entries, never add them. The receipt is up'd after
+    /// its own summary is built, so it is absent from both.
     pub fn encoded_size_upper_bound<'a>(
         events: &[Event],
         fee_withdrawals: &[ValidatorFeeWithdrawal],

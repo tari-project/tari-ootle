@@ -131,8 +131,10 @@ pub struct InputWitness {
 /// only) the `SpendWitness` revealing one condition-tree leaf and the committed `condition_root`
 /// it was revealed against. `witness`/`condition_root` are the exact pair `buildScriptPathWitness`
 /// returns -- merge that result's `witness`/`condition_root` fields straight in alongside
-/// `mask_and_value` for a script-path input. Omit both for a plain key-path spend.
+/// `mask_and_value` for a script-path input. For a plain key-path spend, either omit `witness`
+/// entirely or set it to `"KeyPath"`; `condition_root` must then be absent.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StealthInputWitnessJson {
     pub mask_and_value: InputWitness,
     #[serde(default)]
@@ -148,14 +150,13 @@ impl TryFrom<StealthInputWitnessJson> for StealthInputWitness {
         let mask = decode_secret_key(&value.mask_and_value.mask, "mask")?;
         let mask_and_value = MaskAndValue::new(value.mask_and_value.value, mask);
         match (value.witness, value.condition_root) {
-            (Some(witness), Some(condition_root)) => Ok(StealthInputWitness::with_script_path(
-                mask_and_value,
-                witness,
-                condition_root,
-            )),
-            (None, None) => Ok(StealthInputWitness::new(mask_and_value)),
+            (None | Some(SpendWitness::KeyPath), None) => Ok(StealthInputWitness::new(mask_and_value)),
+            (Some(witness @ SpendWitness::ScriptPath { .. }), Some(condition_root)) => Ok(
+                StealthInputWitness::with_script_path(mask_and_value, witness, condition_root),
+            ),
             _ => Err(OotleWasmError::Stealth(
-                "witness and condition_root must both be present (script-path input) or both absent (key-path input)"
+                "a script-path input needs both witness (\"ScriptPath\") and condition_root; a key-path input needs \
+                 neither, or witness \"KeyPath\" alone"
                     .to_string(),
             )),
         }

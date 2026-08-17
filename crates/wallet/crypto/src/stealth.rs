@@ -250,7 +250,13 @@ fn generate_covenant_claims(
         let mut agg_output_mask = RistrettoSecretKey::default();
         let mut output_value = Amount::zero();
         let mut output_commitments = Vec::new();
-        for output in outputs.iter().filter(|o| o.auth.condition_root() == Some(&root)) {
+        // Only `Script(root)` keeps value under the covenant; a `KeyAndScript` output committing the same root is
+        // still key-spendable next block, so it must not be counted as conserving the partition (matches the
+        // engine's `StealthOutputView::is_locked_under`).
+        for output in outputs
+            .iter()
+            .filter(|o| matches!(&o.auth, SpendAuthorization::Script(r) if *r == root))
+        {
             agg_output_mask = agg_output_mask + &output.witness.mask;
             output_value = output_value
                 .checked_add(Amount::from_u64(output.witness.amount))

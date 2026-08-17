@@ -363,10 +363,10 @@ pub fn build_script_path_witness(conditions_json: &str, leaf_json: &str, data: &
 ///
 /// Unlike `generateStealthOutputsStatement` / `buildStealthInputsStatementFromInputs` +
 /// `generateStealthBalanceProofSignature`, which build and sign each half of a transfer
-/// separately and never populate `covenant_claims`, this wraps the single primitive that
-/// produces the *entire*, internally-consistent statement -- including a real covenant
-/// balance-integrity proof for any script-path-spent input's condition-root partition. **This is
-/// the only correct way to spend a `PayTo::Conditions` (ScriptPath) stealth output.**
+/// separately, this wraps the single primitive that produces the *entire*, internally-consistent
+/// statement in one call, including a covenant balance-integrity proof for any script-path input
+/// whose revealed leaf gates on `Covenant::BalancePreserved` (see `buildStealthTransferStatement`
+/// in `ootle-wasm-core` for when a claim is and isn't needed).
 ///
 /// `input_witnesses_json` is a JSON array of `{ "mask_and_value": { "value": <u64>, "mask": <hex
 /// 32 bytes> }, "witness"?: <SpendWitness>, "condition_root"?: <Hash32> }` -- each entry's

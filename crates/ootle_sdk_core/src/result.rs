@@ -194,8 +194,9 @@ struct WireDryRunResult {
 ///
 /// A dry-run executes fully (so it carries the same events / diff / logs an accepted transaction would)
 /// but is never committed; the surfaced `estimated_fee` is the engine's
-/// [`tari_engine_types::fees::FeeReceipt::required_fees`] — `total_fees_charged + 1`, the minimum
-/// `max_fee` to use for the real submission. A deserialize failure is an [`OotleSdkError::Parse`].
+/// [`tari_engine_types::fees::FeeReceipt::required_fees`] — the metered cost plus the allowance for
+/// the drift a differing `max_fee` introduces, i.e. the minimum `max_fee` the real submission can
+/// use. A deserialize failure is an [`OotleSdkError::Parse`].
 pub fn parse_dry_run_result(raw: &str) -> Result<FinalizedResult, OotleSdkError> {
     let value: serde_json::Value =
         serde_json::from_str(raw).map_err(|e| OotleSdkError::Parse(format!("indexer dry-run result JSON: {e}")))?;
@@ -468,13 +469,15 @@ mod tests {
     }
 
     /// A dry-run result parses through the shape-dispatching `parse_finalized_result` and surfaces a
-    /// `estimated_fee` of `required_fees() == total_fees_charged + 1`, alongside the metered receipt,
-    /// events, diff, and logs the full execution produced.
+    /// `estimated_fee` of `required_fees()`, alongside the metered receipt, events, diff, and logs
+    /// the full execution produced.
     #[test]
     fn parses_dry_run_with_estimated_fee() {
         let exec = execute_result(TransactionResult::Accept(accept_diff()), Some(5));
-        // The metered total: Initial(7) + Storage((1<<53)+11) = (1<<53)+18; required = +1.
-        let expected_estimate = ((1u64 << 53) + 18) + 1;
+        // The metered total: Initial(7) + Storage((1<<53)+11) = (1<<53)+18, plus the max-fee drift
+        // allowance the engine adds on top.
+        let expected_estimate = exec.finalize.fee_receipt.required_fees();
+        assert!(expected_estimate > (1u64 << 53) + 18, "the estimate must clear 2^53");
         let json = dry_run_wire_json(exec);
 
         // Both the shape-dispatching entry point and the explicit dry-run parser agree.

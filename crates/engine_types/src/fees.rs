@@ -4,6 +4,19 @@
 use indexmap::{IndexMap, map::Entry};
 use serde::{Deserialize, Serialize};
 
+/// The most a real run's cost can exceed the cost a dry run metered for the same transaction, when
+/// the two differ only in `max_fee`.
+///
+/// Two steps of transaction weight, plus what the exhaust burn makes of them. The weight term is
+/// bounded because the fee literal's encoded width is: it saturates at 11 bytes once the amount
+/// reaches `2^32` µT, which puts `total_bytes / LITERAL_BYTE_DIVISOR` two steps above the narrow
+/// amount a dry run carries — a 30_000 tTARI fee and `u64::MAX` drift no more than a 4_295 tTARI
+/// one. The burn is taken over the running total, so it lifts those two by
+/// `ceil(2 * rate / 10_000)`, which the 10_000 bps ceiling on the rate caps at two more.
+///
+/// See [`FeeReceipt::required_fees`]; `crates/engine/tests/fees.rs` measures both terms.
+const MAX_MAX_FEE_DRIFT: u64 = 4;
+
 #[derive(Debug, Clone, Default)]
 pub struct FeeReceiptBuilder {
     /// The total amount of the fee payment(s)
@@ -106,12 +119,25 @@ impl FeeReceipt {
         self.cost_breakdown.get_total()
     }
 
-    /// The minimum fee required to submit a transaction based on a dry run result.
-    /// This is `total_fees_charged + 1` to account for potential rounding differences in the storage cost calculation.
-    /// The storage fee depends on the vault balance at calculation time, which changes when a different max_fee is used
-    /// in the actual submission vs the dry run — this can shift `floor(total_bytes / 4)` by 1 at a rounding boundary.
+    /// The minimum fee to submit with, given what a dry run metered.
+    ///
+    /// A submission cannot simply use `total_fees_charged`: the `max_fee` it carries is itself an
+    /// input to the cost, so a real run meters slightly differently from the dry run that produced
+    /// the estimate. The allowance covers the whole of that difference.
+    ///
+    /// Two charges read `max_fee` back, and only one of them can read it *upwards*. The transaction
+    /// weight prices the fee instruction's literal args by their encoded bytes, so it steps whenever
+    /// the amount's width crosses a multiple of the literal divisor. The storage charge reads the
+    /// balance left in the fee vault, which a dry run's minimal `max_fee` already leaves at its
+    /// widest, so every real submission sees the same or fewer bytes there. The exhaust burn adds
+    /// no reading of its own but re-multiplies whatever the weight did, being taken over the running
+    /// total. [`MAX_MAX_FEE_DRIFT`] bounds the two that remain.
+    ///
+    /// This is a floor, not a recommendation. Overpayment is returned to the paying vault, so a
+    /// caller with a vault to refund to loses nothing by submitting above it — and one paying purely
+    /// by stealth reveal, where the overpayment is not refundable, has reason to sit on it.
     pub fn required_fees(&self) -> u64 {
-        self.total_fees_charged().saturating_add(1)
+        self.total_fees_charged().saturating_add(MAX_MAX_FEE_DRIFT)
     }
 
     /// The total amount of fees refunded to the respective vaults

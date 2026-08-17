@@ -231,8 +231,9 @@ pub struct FinalizedResult {
     /// The estimated minimum fee (in microtari), surfaced **only for a dry-run** result.
     ///
     /// A dry-run executes the transaction without committing and meters the fee; this is the engine's
-    /// [`tari_engine_types::fees::FeeReceipt::required_fees`] (`total_fees_charged + 1`) — the minimum
-    /// `max_fee` to use for the real submission. It is a native `u64` (never a float). A committed
+    /// [`tari_engine_types::fees::FeeReceipt::required_fees`] — the metered cost plus the allowance for
+    /// the drift a differing `max_fee` introduces, i.e. the minimum `max_fee` the real submission can
+    /// use. It is a native `u64` (never a float). A committed
     /// (non-dry-run) result leaves this `None` and exposes the realized fee in `fee_receipt` instead
     /// (additive field, omitted from JSON when absent so existing committed-result fixtures are
     /// unchanged).

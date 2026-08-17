@@ -782,17 +782,20 @@ fn a_template_publish_introduces_no_further_max_fee_sensitivity() {
     assert_only_weight_and_storage_move(&MAX_FEES, &receipts);
 }
 
-/// The property a caller actually depends on. A dry run meters at the smallest `max_fee` it can, so
-/// the question is not whether the real run costs something different but whether it can cost
-/// *more*, and by how much. Only the weight term can: the residual term moves the other way, and
-/// the digit count no longer counts at all. The literal's width crosses at most two multiples of
-/// `LITERAL_BYTE_DIVISOR` between a dry run's narrow amount and the widest a `u64` can encode to.
+/// The property a caller actually depends on, asserted as the promise itself rather than as a
+/// number: submitting what `required_fees` returned for the cheapest run must cover every other.
+///
+/// A dry run meters at the smallest `max_fee` it can, so the question is not whether the real run
+/// costs something different but whether it can cost *more*. The burn rate is varied because the
+/// burn is taken over the running total and so re-multiplies whatever the weight term contributes —
+/// a bound established with the burn disabled would not hold on a live network.
 #[test]
-fn a_real_run_costs_at_most_two_more_than_the_dry_run_estimate() {
+fn required_fees_covers_a_real_run_at_any_max_fee() {
     // Spans every encoding width a fee above this transaction's cost can take, every residual
     // width, and digit counts from four to nine.
+    // The smallest entry must still cover the transaction at a 100% burn, which roughly doubles it.
     const MAX_FEES: [u64; 8] = [
-        1_000,
+        2_000,
         65_535,
         65_536,
         1_000_000,
@@ -801,22 +804,24 @@ fn a_real_run_costs_at_most_two_more_than_the_dry_run_estimate() {
         FUNDED - 200,
         FUNDED - 10,
     ];
-    const MAX_UPWARD_DRIFT: u64 = 2;
 
-    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let (account, owner_token, key) = test.create_funded_account();
-    test.enable_fees();
-    let build = state_transaction(&test, account, &key);
-    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+    for rate in [0u16, 500, 2_000, 10_000] {
+        let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+        let (account, owner_token, key) = test.create_funded_account();
+        test.enable_fees();
+        test.set_burn_rate_bps(rate);
+        let build = state_transaction(&test, account, &key);
+        let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
 
-    // The first entry is the smallest submittable max_fee, which is what a dry run meters at.
-    let estimate = receipts[0].total_fees_charged();
-    for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
-        assert!(
-            receipt.total_fees_charged() <= estimate + MAX_UPWARD_DRIFT,
-            "max_fee {max_fee} costs {} against an estimate of {estimate}",
-            receipt.total_fees_charged()
-        );
+        // The first entry is the smallest submittable max_fee, which is what a dry run meters at.
+        let estimate = receipts[0].required_fees();
+        for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
+            assert!(
+                receipt.total_fees_charged() <= estimate,
+                "at {rate} bps, max_fee {max_fee} costs {} against an estimate of {estimate}",
+                receipt.total_fees_charged()
+            );
+        }
     }
 }
 

@@ -56,6 +56,25 @@ pub enum SealSource {
     Ephemeral,
 }
 
+impl SealSource {
+    /// Resolves two seals down to the one that seals the transaction, along with the stealth signer
+    /// displaced in the process — which must then authorize instead. See
+    /// [`SignatureRequirements::merge`] for the ordering and why it holds.
+    fn take_precedence_over(self, other: Self) -> (Self, Option<StealthSignerRequirement>) {
+        match (self, other) {
+            (Self::AccountKey, Self::StealthInput(displaced)) | (Self::StealthInput(displaced), Self::AccountKey) => {
+                (Self::AccountKey, Some(displaced))
+            },
+            (Self::AccountKey, _) | (_, Self::AccountKey) => (Self::AccountKey, None),
+            (Self::StealthInput(seal), Self::StealthInput(displaced)) => (Self::StealthInput(seal), Some(displaced)),
+            (Self::StealthInput(seal), Self::Ephemeral) | (Self::Ephemeral, Self::StealthInput(seal)) => {
+                (Self::StealthInput(seal), None)
+            },
+            (Self::Ephemeral, Self::Ephemeral) => (Self::Ephemeral, None),
+        }
+    }
+}
+
 /// Which key seals a stealth transfer transaction, and which stealth signers must additionally authorize it.
 ///
 /// Every stealth input has to be authorized by its owner's one-time key. One of those signers seals the transaction —
@@ -114,6 +133,31 @@ impl SignatureRequirements {
 
     pub fn seal(&self) -> &SealSource {
         &self.seal
+    }
+
+    /// Combines the requirements of two statements carried by one transaction.
+    ///
+    /// A transaction has a single seal, so one of the two gives way. An account key outranks a
+    /// stealth input, since a transaction that touches the account component must be sealed by the
+    /// account key whatever else it does, and either outranks an ephemeral key, which exists only
+    /// for the case where nothing needs signing. A stealth signer whose seal gives way still has to
+    /// authorize its own input, so it joins the authorizers.
+    ///
+    /// Splitting a transfer across the fee intent and the main intent is what makes this necessary:
+    /// the fee intent may carry one statement, and any further statement belongs in the main intent
+    /// where the fee just paid funds its verification.
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        let (seal, displaced) = self.seal.take_precedence_over(other.seal);
+        let mut authorizers = self.authorizers;
+        authorizers.extend(displaced);
+        authorizers.extend(other.authorizers);
+        // A sealing input's seal signature is its own authorization, so it must not also be asked
+        // for one.
+        if let SealSource::StealthInput(seal_signer) = &seal {
+            authorizers.swap_remove(seal_signer);
+        }
+        Self { seal, authorizers }
     }
 
     pub fn into_parts(self) -> (SealSource, IndexSet<StealthSignerRequirement>) {
@@ -350,6 +394,98 @@ mod tests {
 
             assert_eq!(spec.seal(), &SealSource::Ephemeral);
             assert_eq!(spec.authorizers().len(), 0);
+        }
+    }
+
+    /// Merging is what lets one transaction carry a fee-sourcing statement and a second, larger one
+    /// whose verification the fee pays for. The transaction still has a single seal, so the cases
+    /// below fix which of the two survives and what becomes of the signer it displaces.
+    mod merging_two_statements {
+        use super::*;
+
+        /// The displaced statement's seal signer still owns an input, so it has to authorize.
+        #[test]
+        fn a_displaced_stealth_seal_becomes_an_authorizer() {
+            let fee = SignatureRequirements::stealth_seal(signers([1]));
+            let transfer = SignatureRequirements::stealth_seal(signers([2]));
+
+            let merged = fee.merge(transfer);
+
+            assert_eq!(merged.seal(), &SealSource::StealthInput(signer_from_seed(1)));
+            assert_eq!(merged.authorizers().cloned().collect::<Vec<_>>(), vec![
+                signer_from_seed(2)
+            ]);
+        }
+
+        /// Authorizers from both statements are carried over, not just the displaced seal signer.
+        #[test]
+        fn authorizers_from_both_statements_are_kept() {
+            let fee = SignatureRequirements::stealth_seal(signers([1, 2]));
+            let transfer = SignatureRequirements::stealth_seal(signers([3, 4]));
+
+            let merged = fee.merge(transfer);
+
+            assert_eq!(merged.seal(), &SealSource::StealthInput(signer_from_seed(1)));
+            assert_eq!(merged.authorizers().cloned().collect::<Vec<_>>(), vec![
+                signer_from_seed(2),
+                signer_from_seed(3),
+                signer_from_seed(4),
+            ]);
+        }
+
+        /// A transaction touching the account component must be sealed by the account key, whichever
+        /// statement needed it and whatever the other one asked for.
+        #[test]
+        fn an_account_key_seal_outranks_a_stealth_one() {
+            let fee = SignatureRequirements::stealth_seal(signers([1]));
+            let transfer = SignatureRequirements::account_key_seal_with(signers([2]));
+
+            let merged = fee.clone().merge(transfer.clone());
+            assert_eq!(merged.seal(), &SealSource::AccountKey);
+            // Nothing seals on its behalf now, so signer 1 authorizes too.
+            assert_eq!(merged.authorizers().cloned().collect::<Vec<_>>(), vec![
+                signer_from_seed(1),
+                signer_from_seed(2),
+            ]);
+
+            // The same holds whichever way round the two are merged.
+            assert_eq!(transfer.merge(fee).seal(), &SealSource::AccountKey);
+        }
+
+        /// An ephemeral seal exists only where nothing needs signing, so it yields to anything real.
+        #[test]
+        fn an_ephemeral_seal_yields() {
+            let ephemeral = SignatureRequirements::stealth_seal(IndexSet::new());
+            let stealth = SignatureRequirements::stealth_seal(signers([1]));
+
+            assert_eq!(
+                ephemeral.clone().merge(stealth.clone()).seal(),
+                &SealSource::StealthInput(signer_from_seed(1))
+            );
+            assert_eq!(
+                stealth.merge(ephemeral.clone()).seal(),
+                &SealSource::StealthInput(signer_from_seed(1))
+            );
+            assert_eq!(ephemeral.clone().merge(ephemeral).seal(), &SealSource::Ephemeral);
+        }
+
+        /// The sealing signature doubles as that input's authorization, so the seal signer must not
+        /// also be asked for one.
+        #[test]
+        fn the_sealing_signer_is_never_also_an_authorizer() {
+            let fee = SignatureRequirements::stealth_seal(signers([1]));
+            let transfer = SignatureRequirements::account_key_seal_with(signers([1]));
+
+            // Account key seals, so signer 1 appears only once, as an authorizer.
+            let merged = fee.clone().merge(transfer);
+            assert_eq!(merged.authorizers().cloned().collect::<Vec<_>>(), vec![
+                signer_from_seed(1)
+            ]);
+
+            // Signer 1 seals, so it is not also listed.
+            let merged = fee.merge(SignatureRequirements::stealth_seal(signers([1])));
+            assert_eq!(merged.seal(), &SealSource::StealthInput(signer_from_seed(1)));
+            assert_eq!(merged.authorizers().len(), 0);
         }
     }
 }

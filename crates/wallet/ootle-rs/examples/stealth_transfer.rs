@@ -32,7 +32,7 @@ async fn main() {
     //     .init();
 
     // This is the address that we will transfer to (Feel free to change this another address!)
-    let recipient = address!( "otl_loc_1em0npr8f3uzs3fznygglr4eujwl0qgr6e30hu3whr9fpfh2w99r743uxd7qg6f7jchgm6pdht7lpcwcggcjgfejfpd4jgvfmzve9vec5xep5t" );
+    let recipient = address!( "otl_loc_1c62vh8e5cx3uwyypdp2gsxvywa97vy26z3mk4337ajhqw5fhqgm0cwcc07fn6gs34sqkeddzhcjwnsc6g3eeeyhv5heatuwg8l7lzmsk2kzfy" );
 
     let indexer_api_url = default_indexer_url(recipient.network());
 
@@ -71,19 +71,23 @@ async fn main() {
     // Send some TARI to another address. You can replace TARI with any other fungible token resource address.
     let tari_token = TARI_TOKEN; // resource_address!("resource_0123456789abcdef...");
 
-    // The faucet funds are split across two outputs so that the transfer below spends two stealth inputs. One of them
-    // seals that transaction and the other must attach an authorization signature committing to the seal signer's
-    // one-time public key.
+    // The faucet funds are split across two outputs because the transfer below is split across two statements: a
+    // small one in the fee intent that sources the fee, and the sixteen-output one in the main intent that the fee
+    // then pays for. Each statement spends its own input. One of the two inputs seals that transaction and the other
+    // attaches an authorization signature committing to the seal signer's one-time public key.
 
     // The revealed amount each transaction reserves to pay its fee. It is deliberately generous rather than fitted to
     // a dry-run estimate: the budget is part of the transfer statement, so spending an estimate would change the
     // transaction it was estimated from. Whatever is not charged is refunded (see the receipt's overcharge line).
     //
-    // It has to cover the second transfer's sixteen outputs, whose aggregated range proof alone prices at roughly
-    // 98,000 µT under the testnet schedule (~6,000 µT per output plus the fixed per-statement cost).
+    // It also has to fund the *compute allowance* the sixteen-output statement verifies under, not just the fee that
+    // statement is charged: the allowance is what the payment buys, at the fee table's point rate.
     const FEE_BUDGET: u64 = 250_000;
-    const FIRST_INPUT_AMOUNT: u64 = 6 * TARI;
-    const SECOND_INPUT_AMOUNT: u64 = 10 * TARI + FEE_BUDGET - FIRST_INPUT_AMOUNT;
+    // Spent by the fee-intent statement: the budget it reveals to pay the fee, plus a stealth output so the statement
+    // has somewhere to put the remainder.
+    const FEE_INPUT_AMOUNT: u64 = FEE_BUDGET + TARI;
+    // Spent by the main-intent statement, which fans it out into sixteen outputs.
+    const TRANSFER_INPUT_AMOUNT: u64 = 10 * TARI + FEE_BUDGET - FEE_INPUT_AMOUNT;
     // // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
     let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
         // Tell the transfer to expect 10 TARI (plus a fee budget for this transaction and the transfer below) as revealed funds from a bucket (the faucet looks at this value and automatically provides the bucket).
@@ -94,10 +98,10 @@ async fn main() {
         // but a supporting wallet that holds the secret key would be able to spend the output.
         // You can specify any address here and split up into many outputs as needed, as long as ∑inputs == ∑outputs.
         .to_stealth_output(
-            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(FIRST_INPUT_AMOUNT))
+            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(FEE_INPUT_AMOUNT))
         )
         .to_stealth_output(
-            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(SECOND_INPUT_AMOUNT))
+            Output::new(sender_address.clone(), tari_token, const_nonzero_u64!(TRANSFER_INPUT_AMOUNT))
         )
         .prepare()
         .await
@@ -127,31 +131,47 @@ async fn main() {
     let pending_tx = provider.send_transaction(transaction).await.unwrap();
     print_fancy_results("Faucet transfer", &pending_tx).await;
 
-    // Then we'll send it to the recipient
-    // This builder creates a stealth transfer statement (spend proof). This is added to the transaction later.
+    // Then we'll send it to the recipient, across two statements.
     //
-    // One statement may carry up to 16 stealth outputs, and all of them share a single aggregated range proof. That
-    // is what makes fanning out inside one statement cheaper than splitting the same outputs across several
-    // transfers, each of which would pay the fixed per-statement cost and need its own change output. Here the
-    // budget goes to two outputs worth spending plus fourteen dust ones.
+    // The fee intent runs on a fixed credit of compute before anything has been paid — enough to source a fee, and no
+    // more. Verifying sixteen outputs costs several times that, so a statement that size cannot live there: it is the
+    // main intent that the fee, once paid, buys the compute allowance for. The engine allows the fee intent exactly
+    // one transfer statement for this reason, and this is the shape it expects — a small statement that reveals the
+    // fee, then the real transfer.
+
+    // The fee-sourcing statement: reveal the budget to pay the fee, and put the remainder in a stealth output so the
+    // statement balances. Two outputs verify well inside the pre-payment credit.
+    let (fee_transfer, fee_signers) = StealthTransfer::new(tari_token, &provider)
+        .spend_stealth_input(sender_address.clone(), inputs_to_spend[0].commitment())
+        .to_revealed_output(FEE_BUDGET)
+        .to_stealth_output(Output::new(
+            sender_address.clone(),
+            tari_token,
+            const_nonzero_u64!(FEE_INPUT_AMOUNT - FEE_BUDGET),
+        ))
+        .prepare()
+        .await
+        .unwrap();
+
+    // The transfer itself. One statement may carry up to 16 stealth outputs, and all of them share a single
+    // aggregated range proof. That is what makes fanning out inside one statement cheaper than splitting the same
+    // outputs across several transfers, each of which would pay the fixed per-statement cost and need its own change
+    // output. Here the input goes to two outputs worth spending plus fourteen dust ones.
     const DUST_OUTPUT_COUNT: u64 = 14;
     // Dust in the literal sense: each of these holds 1 µT while costing ~6,000 µT of range-proof verification to
     // create. Fine for showing the fan-out, ruinous as a spending habit.
     const DUST_AMOUNT: u64 = 1;
     const RECIPIENT_AMOUNT: u64 = 8 * TARI;
     // The change absorbs the dust so that ∑inputs == ∑outputs still holds.
-    const CHANGE_AMOUNT: u64 = 2 * TARI - DUST_OUTPUT_COUNT * DUST_AMOUNT;
+    const CHANGE_AMOUNT: u64 = TRANSFER_INPUT_AMOUNT - RECIPIENT_AMOUNT - DUST_OUTPUT_COUNT * DUST_AMOUNT;
 
     let transfer_builder = StealthTransfer::new(tari_token, &provider)
-        // Spend both existing stealth inputs that are controlled by the sender address.
-        // Together these are worth 10 TARI plus the second transaction's fee budget.
-        .spend_stealth_input(sender_address.clone(), inputs_to_spend[0].commitment())
+        // Spend the other stealth input controlled by the sender address. This statement pays no fee of its own — the
+        // fee-sourcing statement above covers the whole transaction.
         .spend_stealth_input(sender_address.clone(), inputs_to_spend[1].commitment())
-        // The transfer will output the fee budget as revealed funds to pay for the fee.
-        .to_revealed_output(FEE_BUDGET)
         // Spend to a new output (8 TARI) that we'll generate for the recipient address.
         .to_stealth_output(
-            Output::new(recipient, tari_token, const_nonzero_u64!(RECIPIENT_AMOUNT))
+            Output::new(recipient.clone(), tari_token, const_nonzero_u64!(RECIPIENT_AMOUNT))
                 // NOTE: this memo is stored on-chain, and longer memos increase fees. It is encrypted so that only the recipient can read it.
                 .with_memo_message("transfer from ootle-rs!")
         )
@@ -161,7 +181,7 @@ async fn main() {
     // Fan the rest of the statement out into dust, taking the output count up to the per-statement maximum.
     let transfer_builder = (0..DUST_OUTPUT_COUNT).fold(transfer_builder, |builder, _| {
         builder.to_stealth_output(Output::new(
-            sender_address.clone(),
+            recipient.clone(),
             tari_token,
             NonZeroU64::new(DUST_AMOUNT).expect("DUST_AMOUNT is non-zero"),
         ))
@@ -169,17 +189,20 @@ async fn main() {
 
     // Load the inputs from the provider to build the transfer statement. NOTE: this will error if the total input
     // amounts != total output amounts.
-    let (transfer, required_signers) = transfer_builder.prepare().await.unwrap();
+    let (transfer, transfer_signers) = transfer_builder.prepare().await.unwrap();
 
     // We'll generate an unsigned transaction directly using the Transaction builder. In future, we may make this
     // easier.
     let unsigned_tx = Transaction::builder(provider.network(), max_epoch)
         .with_fee_instructions_builder(|builder| {
             builder
-                .stealth_transfer(tari_token, transfer)
+                .stealth_transfer(tari_token, fee_transfer)
                 .put_last_instruction_output_on_workspace("fees")
                 .pay_fee_from_bucket("fees")
         })
+        // The sixteen-output statement, funded by the fee the instructions above just paid. It reveals nothing, so it
+        // leaves no bucket behind to account for.
+        .stealth_transfer(tari_token, transfer)
         // This isn't necessary because all transactions implicitly use TARI for fees, but you'd need to include this if other resources are being used
         .add_input(tari_token)
         // Add the UTXO substates as inputs. These will be DOWNed (destroyed) if the transaction is successful.
@@ -187,8 +210,11 @@ async fn main() {
         .add_input(UtxoAddress::new(tari_token, inputs_to_spend[1].commitment().into()))
         .build_unsigned();
 
-    // This authorizer adds the required (stealth) signatures to spend inputs
-    let authorizer = provider.wallet().stealth_authorizer(required_signers);
+    // Both statements are spent by one transaction, which has a single seal: merging their requirements settles which
+    // input seals it and leaves the other to authorize against that seal signer's one-time public key.
+    let authorizer = provider
+        .wallet()
+        .stealth_authorizer(fee_signers.merge(transfer_signers));
 
     let result = provider
         .sign_and_send_dry_run_with(&authorizer, unsigned_tx.clone())

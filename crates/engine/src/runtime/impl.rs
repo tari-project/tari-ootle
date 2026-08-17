@@ -291,7 +291,12 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     fn finalize_with(&mut self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_before_finalize()?;
         let mut finalized = self.tracker.select_finalized_state(failure)?;
-        self.invoke_modules_on_before_persist(&mut finalized)?;
+        // A commit persists the very state the first pass charged against, so charging it again
+        // would recompute the same numbers from the same inputs. Only a fee-intent commit swaps the
+        // state out from under those charges, and only it needs them redone.
+        if !finalized.outcome().is_commit() {
+            self.invoke_modules_on_before_persist(&mut finalized)?;
+        }
         self.tracker.finalize(finalized)
     }
 

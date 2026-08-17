@@ -286,8 +286,15 @@ fn an_unaffordable_fee_intent_commits_nothing() {
         result.finalize.result
     );
 
-    // Nothing was written, so nothing was charged either.
+    // Nothing was written, so nothing was taken.
     assert_eq!(result.finalize.fee_receipt.total_fees_paid(), 0);
+
+    // What committing would have cost is still reported: it is the number the payer has to raise
+    // their fee to, and on a rejection there is nowhere else to read it from.
+    let charged = result.finalize.fee_receipt.total_fees_charged();
+    assert!(charged > FEE, "expected the metered charges, got {charged}");
+    assert!(result.finalize.fee_receipt.required_fees() > FEE);
+
     let balance = test
         .read_only_state_store()
         .get_vaults_for_account(account)

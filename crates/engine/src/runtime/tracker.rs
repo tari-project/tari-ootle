@@ -25,7 +25,7 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::{Component, ComponentBody, ComponentHeader},
     events::Event,
-    fees::FeeSource,
+    fees::{FeeReceipt, FeeSource},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
     lock::LockFlag,
@@ -445,7 +445,23 @@ impl<TStore: StateReader> StateTracker<TStore> {
                     fee_state.total_payments()
                 ))
             });
-            return Ok(FinalizeResult::new_rejected(state.transaction_hash(), reason));
+
+            // Nothing is persisted and nothing is taken, but what committing *would* have cost is
+            // the number the payer needs to retry with — and when the main intent failed for its own
+            // reason, the breakdown is the only signal that fees were the second problem. Report the
+            // charges as metered, against no payment.
+            let fee_receipt = FeeReceipt::builder()
+                .with_cost_breakdown(state.fee_state_mut().take_fee_charges())
+                .build();
+
+            return Ok(FinalizeResult::new(
+                state.transaction_hash(),
+                state.take_logs(),
+                // Events describe state changes, and none of them happened.
+                Vec::new(),
+                TransactionResult::Reject(reason),
+                fee_receipt,
+            ));
         }
 
         // Resolve the transfers to the fee pool resource and vault refunds

@@ -946,7 +946,7 @@ fn template_load_fee_charged_once_per_template_per_transaction() {
     // Five State calls — same template touched five extra times. Without dedup, TemplateLoad
     // would scale with call count; with dedup it must match the single-call baseline.
     let many = test.execute_expect_success(
-        Transaction::builder_localnet(Epoch(1))
+        test.transaction()
             .pay_fee_from_component(account, 1000u64)
             .call_method(state, "set", args![1u32])
             .call_method(state, "set", args![2u32])

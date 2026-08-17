@@ -118,9 +118,9 @@ pub struct TemplateTest {
     auto_add_proofs_from_signers: bool,
     /// Uniquifies each transaction built via [`Self::transaction`]. The transaction id excludes
     /// the seal signature, so two transactions with identical bodies sealed by the same test key
-    /// are the *same* transaction — and would collide on id-derived addresses. A distinct
-    /// `max_epoch` per transaction keeps bodies distinct; the engine does not evaluate epoch
-    /// bounds, so this has no behavioural effect.
+    /// are the *same* transaction — and would collide on id-derived addresses. Feeding this to the
+    /// nonce keeps their bodies distinct, and keeps them reproducible across runs the way a random
+    /// nonce would not.
     transaction_seq: Cell<u64>,
 }
 
@@ -801,12 +801,22 @@ impl TemplateTest {
     /// Returns a new [`TransactionBuilder`] configured for the local test network.
     /// Use this to construct custom transactions with multiple instructions.
     ///
-    /// Each returned builder carries a distinct `max_epoch` so that otherwise-identical
-    /// transactions produce distinct transaction ids (see [`Self::transaction_seq`]).
+    /// The builder is valid for the epoch the harness is executing in, and carries a distinct nonce
+    /// so that otherwise-identical transactions get distinct ids (see [`Self::transaction_seq`]).
     pub fn transaction(&self) -> TransactionBuilder<MainIntent> {
         let seq = self.transaction_seq.get();
         self.transaction_seq.set(seq + 1);
-        Transaction::builder(Network::LocalNet, Epoch(seq))
+        Transaction::builder(Network::LocalNet, self.current_epoch()).with_nonce(seq)
+    }
+
+    /// The epoch transactions execute in, as injected via [`Self::set_virtual_substate`]. Tests that
+    /// remove the virtual substate entirely still have to build transactions, so those fall back to
+    /// the genesis epoch.
+    pub fn current_epoch(&self) -> Epoch {
+        match self.virtual_substates.get(&VirtualSubstateId::CurrentEpoch) {
+            Some(VirtualSubstate::CurrentEpoch(epoch)) => Epoch(*epoch),
+            _ => Epoch(0),
+        }
     }
 
     /// Executes a transaction. Panics if the transaction is not finalized (fee transaction fails). Does not panic if

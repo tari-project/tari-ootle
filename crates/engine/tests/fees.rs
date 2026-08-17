@@ -218,7 +218,7 @@ fn storage_charged_for_creating_components(fee: u64) -> (u64, bool) {
     test.enable_fees();
 
     let state_template = test.get_template_address("State");
-    let mut builder = Transaction::builder_localnet().pay_fee_from_component(account, Amount::from(fee));
+    let mut builder = test.transaction().pay_fee_from_component(account, Amount::from(fee));
     for _ in 0..5 {
         builder = builder.call_function(state_template, "new", args![]);
     }
@@ -264,7 +264,7 @@ fn an_unaffordable_fee_intent_commits_nothing() {
 
     let result = test
         .try_execute(
-            Transaction::builder_localnet()
+            test.transaction()
                 .with_fee_instructions_builder(|builder| {
                     builder
                         // Writes the account's vault and the faucet's, then pays a fraction of what
@@ -630,8 +630,9 @@ fn state_transaction<'a>(
     key: &'a RistrettoSecretKey,
 ) -> impl Fn(u64) -> Transaction + use<'a> {
     let template = test.get_template_address("State");
+    let tx = test.transaction();
     move |max_fee| {
-        Transaction::builder_localnet()
+        tx.clone()
             .pay_fee_from_component(account, max_fee)
             .call_function(template, "new", args![])
             .build_and_seal(key)
@@ -772,8 +773,9 @@ fn a_template_publish_introduces_no_further_max_fee_sensitivity() {
     let template = compile_template("tests/templates/hello_world", &[]).unwrap();
     test.enable_fees();
 
+    let tx = test.transaction();
     let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_proof], |max_fee| {
-        Transaction::builder_localnet()
+        tx.clone()
             .pay_fee_from_component(account, max_fee)
             .publish_template(template.clone().into_code())
             .build_and_seal(&key)
@@ -889,7 +891,7 @@ fn the_pay_fee_event_records_max_fee_in_decimal() {
         .find(|e| e.topic() == "std.vault.pay_fee")
         .expect("pay_fee event");
     assert_eq!(
-        pay_fee.get_payload("amount").as_deref(),
+        pay_fee.get_payload("amount"),
         Some(MAX_FEE.to_string().as_str()),
         "the event records the payment cap, not the fee actually charged"
     );

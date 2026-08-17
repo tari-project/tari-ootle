@@ -23,7 +23,11 @@ pub fn builder(network: Network, max_epoch: Epoch) -> impl Fn(u64) -> Transactio
                     .create_account(signer_public_key)
                     .put_last_instruction_output_on_workspace("account")
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("account")])
-                    .call_method("account", "pay_fee", args![1000])
+                    // The fee intent creates the account and claims into it, so it pays for a
+                    // component, a vault, a badge and the receipt. Allocated well above what that
+                    // costs — the excess refunds, and a tight value silently stops generating
+                    // transactions whenever pricing moves.
+                    .call_method("account", "pay_fee", args![50_000])
             })
             .with_inputs([
                 SubstateRequirement::unversioned(TARI_TOKEN),

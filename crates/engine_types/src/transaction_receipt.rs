@@ -96,6 +96,11 @@ impl TransactionReceipt {
     /// joins that set after the charge is computed: fee settlement only mutates substates already in
     /// it, and building the diff can only drop entries, never add them. The receipt is up'd after
     /// its own summary is built, so it is absent from both.
+    ///
+    /// That holds only when `upped` comes from the same state the receipt is built from. Spending a
+    /// UTXO or confidential output removes it from the state that spent it, so a state which never
+    /// ran that instruction can carry an entry a later one has dropped — a fee-intent commit is
+    /// exactly that case. Callers must bound the state whose receipt they are pricing.
     pub fn encoded_size_upper_bound<'a>(
         events: &[Event],
         fee_withdrawals: &[ValidatorFeeWithdrawal],

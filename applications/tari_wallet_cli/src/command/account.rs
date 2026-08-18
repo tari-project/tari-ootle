@@ -187,7 +187,9 @@ async fn handle_create_free_test_coins(
     let resp = client
         .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
             account: account.component_address.into(),
-            max_fee: args.fee.unwrap_or(1500),
+            // The claim creates the account and funds it, so it pays for a component, a vault, a
+            // badge and the receipt. Defaulted well clear of that; the unspent remainder is refunded.
+            max_fee: args.fee.unwrap_or(50_000),
         })
         .await?;
 

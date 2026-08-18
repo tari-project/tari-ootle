@@ -99,7 +99,9 @@ pub async fn handle_claim_validator_fees(
                 .map(|name| ComponentAddressOrName::from_str(&name))
                 .transpose()?,
             claim_key_index: None,
-            max_fee: max_fee.map(Into::into).unwrap_or(1500),
+            // A claim writes the fee pool, the destination vault and the receipt. Defaulted well
+            // clear of that; the unspent remainder is refunded.
+            max_fee: max_fee.map(Into::into).unwrap_or(50_000),
             shards: vec![shard],
             dry_run,
             output_to_revealed: revealed,

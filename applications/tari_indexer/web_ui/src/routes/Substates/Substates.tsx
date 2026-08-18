@@ -242,12 +242,6 @@ function TransactionReceiptView({ data }: { data: any }) {
           <CodeBlock>{renderJson(data.events)}</CodeBlock>
         </>
       )}
-      {data.logs?.length > 0 && (
-        <>
-          <Typography variant="subtitle2">Logs ({data.logs.length})</Typography>
-          <CodeBlock>{renderJson(data.logs)}</CodeBlock>
-        </>
-      )}
       <Typography variant="subtitle2">Diff Summary</Typography>
       <CodeBlock>{renderJson(data.diff_summary)}</CodeBlock>
     </Stack>

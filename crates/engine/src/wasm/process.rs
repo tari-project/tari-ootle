@@ -63,14 +63,13 @@ const LOG_TARGET: &str = "tari::ootle::engine::wasm::process";
 
 pub struct WasmProcess {
     module: LoadedWasmTemplate,
-    env: WasmEnv<Runtime>,
+    fn_env: FunctionEnv<WasmEnv<Runtime>>,
     instance: Instance,
 }
 
 impl WasmProcess {
     pub fn init(store: &mut Store, module: LoadedWasmTemplate, state: Runtime) -> Result<Self, WasmExecutionError> {
-        let mut env = WasmEnv::new(state);
-        let fn_env = FunctionEnv::new(store, env.clone());
+        let fn_env = FunctionEnv::new(store, WasmEnv::new(state));
         let tari_engine = Function::new_typed_with_env(store, &fn_env, Self::tari_engine_entrypoint);
 
         let imports = imports! {
@@ -86,13 +85,14 @@ impl WasmProcess {
         let tari_free = instance.exports.get_typed_function(store, "tari_free")?;
         fn_env
             .as_mut(store)
-            .set_memory(memory.clone())
-            .set_alloc_funcs(tari_alloc.clone(), tari_free.clone());
+            .set_memory(memory)
+            .set_alloc_funcs(tari_alloc, tari_free);
 
-        // Also set these for the local copy
-        env.set_memory(memory).set_alloc_funcs(tari_alloc, tari_free);
-
-        Ok(Self { module, env, instance })
+        Ok(Self {
+            module,
+            fn_env,
+            instance,
+        })
     }
 
     fn with_alloc_and_mem_writer<S, F, R>(
@@ -116,37 +116,37 @@ impl WasmProcess {
         if ptr.is_null() {
             return Err(WasmExecutionError::MemoryAllocationFailed);
         }
-        let mut writer = self.env.memory_writer(store, ptr)?;
+        let mut fn_env = self.env_mut(store);
+        let (env, mut store) = fn_env.data_and_store_mut();
+        let mut writer = env.memory_writer(&mut store, ptr)?;
         callback(&mut writer)?;
 
         Ok(AllocPtr::new(ptr.offset(), len))
     }
 
+    /// Borrows the environment together with a store handle, as host calls receive them. Driving
+    /// `tari_alloc`/`tari_free` needs both at once: the exported function is read from the
+    /// environment and called against the store.
+    fn env_mut<'a, S: AsStoreMut>(&self, store: &'a mut S) -> FunctionEnvMut<'a, WasmEnv<Runtime>> {
+        self.fn_env.clone().into_mut(store)
+    }
+
     /// Calls the template's `tari_alloc`, failing the call if it called the engine.
     fn alloc_checked<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
-        let result = self.env.alloc(store, len);
-        self.take_refused_engine_call()?;
+        let mut fn_env = self.env_mut(store);
+        let (env, mut store) = fn_env.data_and_store_mut();
+        let result = env.alloc(&mut store, len);
+        take_refused_engine_call(env)?;
         result
     }
 
     /// Calls the template's `tari_free`, failing the call if it called the engine.
     fn free_checked<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
-        let result = self.env.free(store, ptr);
-        self.take_refused_engine_call()?;
+        let mut fn_env = self.env_mut(store);
+        let (env, mut store) = fn_env.data_and_store_mut();
+        let result = env.free(&mut store, ptr);
+        take_refused_engine_call(env)?;
         result
-    }
-
-    /// Reports an engine call `tari_engine_entrypoint` refused. It can only signal a refusal by
-    /// returning a null pointer, which a template is free to ignore, so the recorded refusal is
-    /// what actually fails the call. It takes precedence over any error the alloc or free itself
-    /// returned, being the cause of it.
-    fn take_refused_engine_call(&self) -> Result<(), WasmExecutionError> {
-        match self.env.take_refused_engine_call() {
-            Some(op) => Err(WasmExecutionError::RuntimeError(
-                RuntimeError::EngineCallOutsideInvocation { op },
-            )),
-            None => Ok(()),
-        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -403,7 +403,7 @@ impl Invokable<Store> for WasmProcess {
             MeteringPoints::Remaining(n) => n,
             MeteringPoints::Exhausted => 0,
         };
-        let consumed = self.env.state().interface().wasm_points_consumed();
+        let consumed = self.fn_env.as_ref(store).state().interface().wasm_points_consumed();
         let budget_remaining = limits::MAX_WASM_POINTS_PER_TRANSACTION.saturating_sub(consumed);
         // Cap further to the compute the transaction is authorized to run: the fee intent's flat
         // credit, or past the checkpoint what the fees paid can cover. This bounds the compute an
@@ -411,13 +411,19 @@ impl Invokable<Store> for WasmProcess {
         // rather than running up to the per-transaction hard cap. The allowance is shared with
         // native verification (which pre-charges its point cost), so it is reduced by the combined
         // consumption; the hard cap above bounds WASM work only.
-        let native_consumed = self.env.state().interface().native_points_consumed();
-        let allowance_remaining = self.env.state().interface().compute_allowance().map(|allowance| {
-            let remaining = allowance
-                .points
-                .saturating_sub(consumed.saturating_add(native_consumed));
-            (allowance, remaining)
-        });
+        let native_consumed = self.fn_env.as_ref(store).state().interface().native_points_consumed();
+        let allowance_remaining = self
+            .fn_env
+            .as_ref(store)
+            .state()
+            .interface()
+            .compute_allowance()
+            .map(|allowance| {
+                let remaining = allowance
+                    .points
+                    .saturating_sub(consumed.saturating_add(native_consumed));
+                (allowance, remaining)
+            });
         let points_before = match allowance_remaining {
             Some((_, remaining)) => per_call_cap.min(budget_remaining).min(remaining),
             None => per_call_cap.min(budget_remaining),
@@ -432,14 +438,16 @@ impl Invokable<Store> for WasmProcess {
         // Expose the in-flight meter to host calls: consumption inside this invocation must be
         // visible to budget/allowance checks made mid-call (native verification pre-charges,
         // nested cross-template call budgets), not only after the call returns.
-        self.env.begin_metered_invocation(self.instance.clone(), points_before);
+        self.fn_env
+            .as_mut(store)
+            .begin_metered_invocation(self.instance.clone(), points_before);
 
         // Call the contract entrypoint. Engine calls are admitted for exactly this window: the
         // `tari_alloc` above and the `tari_free` below run template code too, but outside any
         // invocation the engine could meter, charge or attribute effects to.
-        self.env.enter_template_invocation();
+        self.fn_env.as_mut(store).enter_template_invocation();
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
-        self.env.exit_template_invocation();
+        self.fn_env.as_mut(store).exit_template_invocation();
 
         let remaining_after_call = get_remaining_points(store, &self.instance);
         let exhausted = matches!(remaining_after_call, MeteringPoints::Exhausted);
@@ -450,9 +458,10 @@ impl Invokable<Store> for WasmProcess {
             MeteringPoints::Exhausted => points_before,
         };
         // Record only the tail not already synced to the transaction total by mid-call host calls.
-        let already_synced = self.env.end_metered_invocation();
+        let already_synced = self.fn_env.as_mut(store).end_metered_invocation();
         // Charging happens before we return the result so fees are recorded even on failure paths.
-        self.env
+        self.fn_env
+            .as_mut(store)
             .state_mut()
             .interface_mut()
             .record_wasm_execution(points_consumed.saturating_sub(already_synced))?;
@@ -462,15 +471,21 @@ impl Invokable<Store> for WasmProcess {
                 // Read response from memory
                 // SAFETY: WasmProcess is not used concurrently
                 let value = unsafe {
-                    self.env
-                        .with_memory_embedded_len(store, return_ptr.offset(), IndexedValue::from_raw)??
+                    let mut fn_env = self.env_mut(store);
+                    let (env, mut store) = fn_env.data_and_store_mut();
+                    env.with_memory_embedded_len(&mut store, return_ptr.offset(), IndexedValue::from_raw)??
                 };
 
                 // Free allocated memory containing the result
                 self.free_checked(store, return_ptr)?;
 
-                self.env.state().interface().validate_return_value(&value)?;
-                self.env
+                self.fn_env
+                    .as_ref(store)
+                    .state()
+                    .interface()
+                    .validate_return_value(&value)?;
+                self.fn_env
+                    .as_mut(store)
                     .state_mut()
                     .interface_mut()
                     .set_last_instruction_output(value.clone())?;
@@ -481,10 +496,10 @@ impl Invokable<Store> for WasmProcess {
                 })
             },
             Err(err) => {
-                if let Some(err) = self.env.take_last_engine_error() {
+                if let Some(err) = self.fn_env.as_mut(store).take_last_engine_error() {
                     return Err(WasmExecutionError::RuntimeError(err));
                 }
-                if let Some(message) = self.env.take_last_panic_message() {
+                if let Some(message) = self.fn_env.as_mut(store).take_last_panic_message() {
                     return Err(WasmExecutionError::Panic {
                         message,
                         runtime_error: err,
@@ -513,6 +528,19 @@ impl Invokable<Store> for WasmProcess {
     }
 }
 
+/// Reports an engine call `tari_engine_entrypoint` refused. It can only signal a refusal by
+/// returning a null pointer, which a template is free to ignore, so the recorded refusal is what
+/// actually fails the call. It takes precedence over any error the alloc or free itself returned,
+/// being the cause of it.
+fn take_refused_engine_call<T>(env: &mut WasmEnv<T>) -> Result<(), WasmExecutionError> {
+    match env.take_refused_engine_call() {
+        Some(op) => Err(WasmExecutionError::RuntimeError(
+            RuntimeError::EngineCallOutsideInvocation { op },
+        )),
+        None => Ok(()),
+    }
+}
+
 fn debug_handler<T: Send + 'static>(mut env: FunctionEnvMut<WasmEnv<T>>, arg_ptr: WasmPtr<u8>, arg_len: u32) {
     const WASM_DEBUG_LOG_TARGET: &str = "tari::ootle::wasm";
     let (state, mut store) = env.data_and_store_mut();
@@ -538,40 +566,42 @@ fn on_panic_handler<T: Send + 'static>(
     let (state, mut store) = env.data_and_store_mut();
 
     // SAFETY: There is no way to call this function concurrently
-    unsafe {
-        state
-            .with_memory_slice(&mut store, msg_ptr, msg_len as u32, |msg_bytes| {
-                if msg_bytes.len() > limits::ENGINE_LIMITS.max_panic_message_size {
-                    let Ok(msg) = str::from_utf8(msg_bytes) else {
-                        error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) <invalid utf8 message>", line, col);
-                        return;
-                    };
-                    log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
-                    let limit = limits::ENGINE_LIMITS.max_panic_message_size;
-                    let mut end = limit;
-                    // Ensure we truncate at a char boundary (to avoid a panic when calling truncate)
-                    while end > 0 && !msg.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    error!(target: LOG_TARGET, "Panic message size limit exceeded: for panic {}", msg);
-                    state.set_last_panic(msg[..end].to_string());
-                } else {
-                    let msg = String::from_utf8_lossy(msg_bytes);
-                    log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
-                    state.set_last_panic(msg.into_owned());
+    let panic_message = unsafe {
+        state.with_memory_slice(&mut store, msg_ptr, msg_len as u32, |msg_bytes| {
+            if msg_bytes.len() > limits::ENGINE_LIMITS.max_panic_message_size {
+                let Ok(msg) = str::from_utf8(msg_bytes) else {
+                    error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) <invalid utf8 message>", line, col);
+                    return None;
+                };
+                log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
+                let limit = limits::ENGINE_LIMITS.max_panic_message_size;
+                let mut end = limit;
+                // Ensure we truncate at a char boundary (to avoid a panic when calling truncate)
+                while end > 0 && !msg.is_char_boundary(end) {
+                    end -= 1;
                 }
-            })
-            .unwrap_or_else(|err| {
-                log::error!(
-                    target: WASM_DEBUG_LOG_TARGET,
-                    "📣 PANIC: WASM template panicked but did not provide a valid memory pointer to on_panic \
-                     callback: {}",
-                    err
-                );
-                state.set_last_panic(format!(
-                    "WASM panicked but did not provide a valid message pointer to on_panic callback: {}",
-                    err
-                ));
-            });
+                error!(target: LOG_TARGET, "Panic message size limit exceeded: for panic {}", msg);
+                Some(msg[..end].to_string())
+            } else {
+                let msg = String::from_utf8_lossy(msg_bytes);
+                log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
+                Some(msg.into_owned())
+            }
+        })
+    }
+    .unwrap_or_else(|err| {
+        log::error!(
+            target: WASM_DEBUG_LOG_TARGET,
+            "📣 PANIC: WASM template panicked but did not provide a valid memory pointer to on_panic callback: {}",
+            err
+        );
+        Some(format!(
+            "WASM panicked but did not provide a valid message pointer to on_panic callback: {}",
+            err
+        ))
+    });
+
+    if let Some(message) = panic_message {
+        state.set_last_panic(message);
     }
 }

@@ -20,15 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    fmt::{Debug, Formatter},
-    sync::{
-        Arc,
-        Mutex,
-        MutexGuard,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::fmt::{Debug, Formatter};
 
 use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, EngineOp, TemplateDef, WASM_PTR_SIZE};
 use wasmer::{
@@ -51,17 +43,19 @@ use crate::{
 pub(crate) type WasmAllocFn = TypedFunction<u32, WasmPtr<u8>>;
 pub(crate) type WasmFreeFn = TypedFunction<WasmPtr<u8>, ()>;
 
-#[derive(Clone)]
+/// State shared between the host and one WASM instance. It lives in the instance's
+/// [`wasmer::FunctionEnv`], which hands out `&mut` to whoever holds the store, so nothing here
+/// needs interior mutability: the engine executes one instance at a time on one thread.
 pub struct WasmEnv<T> {
     memory: Option<Memory>,
     state: T,
     mem_alloc: Option<WasmAllocFn>,
     mem_free: Option<WasmFreeFn>,
-    last_panic: Arc<Mutex<Option<String>>>,
-    last_engine_error: Arc<Mutex<Option<RuntimeError>>>,
-    invocation_meter: Arc<Mutex<Option<InvocationMeter>>>,
-    in_template_invocation: Arc<AtomicBool>,
-    refused_engine_call: Arc<Mutex<Option<EngineOp>>>,
+    last_panic: Option<String>,
+    last_engine_error: Option<RuntimeError>,
+    invocation_meter: Option<InvocationMeter>,
+    in_template_invocation: bool,
+    refused_engine_call: Option<EngineOp>,
 }
 
 /// Per-invocation view of the Wasmer meter, letting host calls read the in-flight consumption of
@@ -81,11 +75,11 @@ impl<T> WasmEnv<T> {
             state,
             mem_alloc: None,
             mem_free: None,
-            last_panic: Arc::new(Mutex::new(None)),
-            last_engine_error: Arc::new(Mutex::new(None)),
-            invocation_meter: Arc::new(Mutex::new(None)),
-            in_template_invocation: Arc::new(AtomicBool::new(false)),
-            refused_engine_call: Arc::new(Mutex::new(None)),
+            last_panic: None,
+            last_engine_error: None,
+            invocation_meter: None,
+            in_template_invocation: false,
+            refused_engine_call: None,
         }
     }
 
@@ -100,41 +94,37 @@ impl<T> WasmEnv<T> {
     ///
     /// One invocation is in flight per process at a time; cross-template calls run in their own
     /// process with their own [`WasmEnv`].
-    pub(super) fn enter_template_invocation(&self) {
-        self.in_template_invocation.store(true, Ordering::Relaxed);
+    pub(super) fn enter_template_invocation(&mut self) {
+        self.in_template_invocation = true;
     }
 
     /// Marks the template function invocation as finished. Template code the engine drives after
     /// this point — `tari_free` on the returned pointer — may no longer call the engine.
-    pub(super) fn exit_template_invocation(&self) {
-        self.in_template_invocation.store(false, Ordering::Relaxed);
+    pub(super) fn exit_template_invocation(&mut self) {
+        self.in_template_invocation = false;
     }
 
     pub(super) fn is_in_template_invocation(&self) -> bool {
-        self.in_template_invocation.load(Ordering::Relaxed)
+        self.in_template_invocation
     }
 
     /// Records that an engine call was refused for being made outside a template function
     /// invocation. Kept apart from [`Self::last_engine_error`], which carries failures of calls
     /// that were dispatched: a refusal must fail the transaction even when the template ignores
     /// the null pointer it is handed, so the host reads it back unambiguously.
-    pub(super) fn set_refused_engine_call(&self, op: EngineOp) {
-        *self.refused_engine_call_mut() = Some(op);
+    pub(super) fn set_refused_engine_call(&mut self, op: EngineOp) {
+        self.refused_engine_call = Some(op);
     }
 
-    pub(super) fn take_refused_engine_call(&self) -> Option<EngineOp> {
-        self.refused_engine_call_mut().take()
-    }
-
-    fn refused_engine_call_mut(&self) -> MutexGuard<'_, Option<EngineOp>> {
-        self.refused_engine_call.lock().expect("refused_engine_call poisoned")
+    pub(super) fn take_refused_engine_call(&mut self) -> Option<EngineOp> {
+        self.refused_engine_call.take()
     }
 
     /// Begins metering an invocation that starts with `start_points` on the Wasmer meter. One
     /// invocation is in flight per process instance at a time (cross-template calls run in their
     /// own process, with their own meter).
-    pub(super) fn begin_metered_invocation(&self, instance: Instance, start_points: u64) {
-        *self.invocation_meter_mut() = Some(InvocationMeter {
+    pub(super) fn begin_metered_invocation(&mut self, instance: Instance, start_points: u64) {
+        self.invocation_meter = Some(InvocationMeter {
             instance,
             start_points,
             synced: 0,
@@ -143,18 +133,17 @@ impl<T> WasmEnv<T> {
 
     /// Ends the in-flight invocation, returning the points already synced to the transaction
     /// total, so the caller records only the unsynced tail.
-    pub(super) fn end_metered_invocation(&self) -> u64 {
-        self.invocation_meter_mut().take().map(|m| m.synced).unwrap_or(0)
+    pub(super) fn end_metered_invocation(&mut self) -> u64 {
+        self.invocation_meter.take().map(|m| m.synced).unwrap_or(0)
     }
 
     /// Reads the in-flight invocation's consumed-but-unsynced points from the Wasmer meter and
     /// marks them synced. Returns `None` when no invocation is in flight (host calls made outside
     /// a WASM invocation) or nothing new was consumed.
-    pub(super) fn take_unsynced_in_flight_points<S: AsStoreMut>(&self, store: &mut S) -> Option<u64> {
+    pub(super) fn take_unsynced_in_flight_points<S: AsStoreMut>(&mut self, store: &mut S) -> Option<u64> {
         use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points};
 
-        let mut guard = self.invocation_meter_mut();
-        let meter = guard.as_mut()?;
+        let meter = self.invocation_meter.as_mut()?;
         let consumed = match get_remaining_points(store, &meter.instance) {
             MeteringPoints::Remaining(n) => meter.start_points.saturating_sub(n),
             MeteringPoints::Exhausted => meter.start_points,
@@ -167,12 +156,8 @@ impl<T> WasmEnv<T> {
         Some(delta)
     }
 
-    fn invocation_meter_mut(&self) -> MutexGuard<'_, Option<InvocationMeter>> {
-        self.invocation_meter.lock().expect("invocation_meter poisoned")
-    }
-
-    pub(super) fn set_last_panic(&self, message: String) {
-        *self.last_panic_mut() = Some(message);
+    pub(super) fn set_last_panic(&mut self, message: String) {
+        self.last_panic = Some(message);
     }
 
     pub(super) fn alloc<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
@@ -193,24 +178,16 @@ impl<T> WasmEnv<T> {
         Ok(())
     }
 
-    fn last_panic_mut(&self) -> MutexGuard<'_, Option<String>> {
-        self.last_panic.lock().expect("last_panic poisoned")
+    pub(super) fn take_last_panic_message(&mut self) -> Option<String> {
+        self.last_panic.take()
     }
 
-    pub(super) fn take_last_panic_message(&self) -> Option<String> {
-        self.last_panic_mut().take()
+    pub(super) fn set_last_engine_error(&mut self, error: RuntimeError) {
+        self.last_engine_error = Some(error);
     }
 
-    fn last_engine_error_mut(&self) -> MutexGuard<'_, Option<RuntimeError>> {
-        self.last_engine_error.lock().expect("last_engine_error poisoned")
-    }
-
-    pub(super) fn set_last_engine_error(&self, error: RuntimeError) {
-        *self.last_engine_error_mut() = Some(error);
-    }
-
-    pub(super) fn take_last_engine_error(&self) -> Option<RuntimeError> {
-        self.last_engine_error_mut().take()
+    pub(super) fn take_last_engine_error(&mut self) -> Option<RuntimeError> {
+        self.last_engine_error.take()
     }
 
     pub(super) fn load_template_def<S: AsStoreMut>(

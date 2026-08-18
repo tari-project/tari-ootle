@@ -1090,6 +1090,9 @@ where
 
     fn emit_log(&mut self, level: LogLevel, message: String) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("emit_log")?;
+        self.invoke_modules_on_runtime_event(RuntimeEvent::LogEmitted {
+            size_bytes: message.len(),
+        })?;
 
         let log_level = match level {
             LogLevel::Error => log::Level::Error,

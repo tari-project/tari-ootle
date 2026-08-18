@@ -37,6 +37,10 @@
 //! - **`per_byte_storage_cost`**: Cost per byte of data written to persistent storage (substates). Note: The actual
 //!   cost is reduced by a factor of 4 (cost × 0.25) to make storage more affordable.
 //!
+//! - **`log_bytes_cost_divisor`**: Divides the per-byte storage rate when charging for a log message
+//!   (`per_byte_storage_cost × message_bytes / log_bytes_cost_divisor`). A log is retained in every validator's
+//!   execution record but is not consensus state and is prunable, so it is priced below a persisted byte.
+//!
 //! ## Template Publishing Fees
 //!
 //! A published template's binary is priced by its own model instead of the flat per-byte storage rate, since it is
@@ -93,6 +97,12 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     template_load_bytes_cost_divisor: 3000,
     // 1 µT per 1000 Wasmer points. Lower values make metering more aggressive.
     wasm_points_cost_divisor: 1000,
+    // A log byte costs a 64th of a persisted byte. A log is retained in each validator's record of
+    // the execution rather than in consensus state, so it is priced well under permanent storage:
+    // a max-size entry (32 KiB) is ~512 µT and a transaction that fills `max_logs` with them is
+    // ~0.13 tTARI, against ~8.4 tTARI for the same bytes in a substate. An ordinary diagnostic line
+    // costs about as much as the host call that emits it.
+    log_bytes_cost_divisor: 64,
     // First 96 KiB of a template binary are priced at the per-byte storage rate; beyond that the
     // quadratic publish premium applies. A published template carries ~25 KiB of fixed
     // `template_lib` machinery before any author code, and a minimal component template optimised
@@ -133,6 +143,7 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     storage_cost_divisor: 1,
     template_load_bytes_cost_divisor: 3000,
     wasm_points_cost_divisor: 1000,
+    log_bytes_cost_divisor: 64,
     template_size_premium_free_bytes: 96 * 1024,
     template_size_premium_unit_bytes: 1024,
     per_template_size_premium_unit_cost: 100,

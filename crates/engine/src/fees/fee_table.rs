@@ -53,6 +53,12 @@ pub struct FeeTable {
     /// (`per_template_load_cost_unit × (bytes_loaded / template_load_bytes_cost_divisor)`). Lower
     /// values increase the load fee. Must be non-zero; a zero divisor is treated as `1`.
     pub template_load_bytes_cost_divisor: u64,
+    /// Divisor applied to a log message's bytes when charging for it
+    /// (`per_byte_storage_cost × message_bytes / log_bytes_cost_divisor`). A log is retained in
+    /// each validator's record of the execution rather than in consensus state, and is prunable, so
+    /// it is priced well below a persisted byte. Must be non-zero; a zero divisor is treated as
+    /// `1`.
+    pub log_bytes_cost_divisor: u64,
     /// Divisor applied to consumed Wasmer points when computing WASM execution units
     /// (`per_wasm_point_cost × (points_consumed / wasm_points_cost_divisor)`). Lower values make
     /// metering more aggressive. Must be non-zero; a zero divisor is treated as `1`.
@@ -88,6 +94,7 @@ impl FeeTable {
             per_wasm_point_cost: 0,
             storage_cost_divisor: 1,
             template_load_bytes_cost_divisor: 1,
+            log_bytes_cost_divisor: 1,
             wasm_points_cost_divisor: 1,
             template_size_premium_free_bytes: 0,
             template_size_premium_unit_bytes: 1,
@@ -156,6 +163,10 @@ impl FeeTable {
 
     pub fn wasm_points_cost_divisor(&self) -> u64 {
         non_zero(self.wasm_points_cost_divisor)
+    }
+
+    pub fn log_bytes_cost_divisor(&self) -> u64 {
+        non_zero(self.log_bytes_cost_divisor)
     }
 
     pub fn template_size_premium_free_bytes(&self) -> u64 {

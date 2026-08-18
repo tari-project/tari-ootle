@@ -257,6 +257,19 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
                     self.fee_table.per_signature_verification_cost(),
                 );
             },
+            RuntimeEvent::LogEmitted { size_bytes } => {
+                // Charged under the same source as the host call that emitted the log: the flat
+                // per-call cost prices the call, this prices what it carried. Division per call
+                // forgoes less than a divisor's worth of bytes per log, bounded by
+                // `ENGINE_LIMITS.max_logs`.
+                let cost = self
+                    .fee_table
+                    .per_byte_storage_cost()
+                    .checked_mul(*size_bytes as u64)
+                    .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating log cost".to_string()))? /
+                    self.fee_table.log_bytes_cost_divisor();
+                track.add_fee_charge(FeeSource::RuntimeCall, cost);
+            },
         }
 
         Ok(())

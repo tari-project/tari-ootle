@@ -250,6 +250,7 @@ impl TemplateTest {
                 storage_cost_divisor: 1,
                 template_load_bytes_cost_divisor: 3000,
                 wasm_points_cost_divisor: 1000,
+                log_bytes_cost_divisor: 64,
                 template_size_premium_free_bytes: 96 * 1024,
                 template_size_premium_unit_bytes: 1024,
                 per_template_size_premium_unit_cost: 100,

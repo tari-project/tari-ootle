@@ -84,6 +84,12 @@ pub trait RuntimeModule<TStore>: Send + Sync {
 #[derive(Debug, Clone)]
 pub enum RuntimeEvent {
     SignatureVerified,
+    /// A log entry was emitted, carrying `size_bytes` of message. The payload is held in memory for
+    /// the length of execution and retained in every validator's record of the execution, so its
+    /// size is charged for on top of the flat cost of the host call that emitted it.
+    LogEmitted {
+        size_bytes: usize,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

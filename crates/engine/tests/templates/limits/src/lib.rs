@@ -23,5 +23,9 @@ mod template {
         pub fn request_random_bytes(len: u32) -> Vec<u8> {
             rand::random_bytes(len)
         }
+
+        pub fn emit_log_of_size(len: u32) {
+            debug!("{}", "a".repeat(len as usize));
+        }
     }
 }

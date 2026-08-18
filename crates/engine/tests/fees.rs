@@ -2,9 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_engine::fees::FeeTable;
 use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
     fees::{FeeReceipt, FeeSource},
+    limits::ENGINE_LIMITS,
 };
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{
@@ -54,6 +56,45 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     assert_eq!(new_balance, orig_balance - payment.total_fees_charged());
     assert_eq!(payment.total_refunded(), 1000 - payment.total_fees_charged());
     assert!(payment.is_paid_in_full());
+}
+
+/// A log's message is charged for by the byte, so filling the per-transaction log budget costs in
+/// proportion to what it carries rather than a flat per-call fee.
+#[test]
+fn a_log_is_charged_for_the_bytes_it_carries() {
+    fn runtime_call_charge(message_len: usize) -> (u64, FeeTable) {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/limits"]);
+        let (account, owner_token, private_key) = test.create_funded_account();
+        test.enable_fees();
+
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .pay_fee_from_component(account, 100_000u64)
+                .call_function(
+                    test.get_template_address("PushItToTheLimit"),
+                    "emit_log_of_size",
+                    args![message_len as u32],
+                )
+                .build_and_seal(&private_key),
+            vec![owner_token],
+        );
+        (
+            result.finalize.fee_receipt.fee_breakdown().get(FeeSource::RuntimeCall),
+            test.fee_table().clone(),
+        )
+    }
+
+    let bytes = ENGINE_LIMITS.max_log_size_bytes;
+    let (with_log, table) = runtime_call_charge(bytes);
+    let (without_log, _) = runtime_call_charge(0);
+
+    // Both runs make the same host calls, so the difference is what the message carried.
+    let charged = with_log - without_log;
+    assert_eq!(
+        charged,
+        table.per_byte_storage_cost() * bytes as u64 / table.log_bytes_cost_divisor()
+    );
+    assert!(charged > 0, "a max-size log message was charged nothing");
 }
 
 #[test]

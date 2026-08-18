@@ -4,8 +4,4 @@ import type { RuleRequirement } from "./RuleRequirement";
 /**
  * A rule requiring specific condition(s) to be met
  */
-export type RequireRule =
-  | { Require: RuleRequirement }
-  | { AnyOf: Array<RuleRequirement> }
-  | { AllOf: Array<RuleRequirement> }
-  | { MOfN: [number, Array<RuleRequirement>] };
+export type RequireRule = { "Require": RuleRequirement } | { "AnyOf": Array<RuleRequirement> } | { "AllOf": Array<RuleRequirement> } | { "MOfN": [number, Array<RuleRequirement>] };

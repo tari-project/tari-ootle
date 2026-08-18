@@ -156,10 +156,16 @@ mod tests {
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
 
-        // Raw format
-        let cbor = encode(&[123u64, 0]).unwrap();
+        // Above u64::MAX the encoder switches to a bignum, and the decoder has to follow it back.
+        let amount = Amount::from(u128::from(u64::MAX) + 1);
+        let cbor = encode(&amount).unwrap();
         let decoded: Amount = decode_exact(&cbor).unwrap();
-        assert_eq!(decoded, 123);
+        assert_eq!(decoded, amount);
+
+        let amount = Amount::MAX;
+        let cbor = encode(&amount).unwrap();
+        let decoded: Amount = decode_exact(&cbor).unwrap();
+        assert_eq!(decoded, amount);
 
         // Decode directly from a number.
         let amount = 123i32;

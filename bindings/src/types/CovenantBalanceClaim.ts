@@ -11,18 +11,17 @@ import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
  * its partition by that index. The partition's `condition_root` is bound into `signature`, so a claim cannot be
  * validated against the wrong partition.
  */
-export type CovenantBalanceClaim = {
-  /**
-   * The index, within the transfer's spent inputs, of the first input belonging to this partition. Identifies the
-   * partition without restating its spend condition.
-   */
-  partition_input_index: number;
-  /**
-   * The exact net cleartext amount leaving the partition (zero for full conservation). Must be non-negative.
-   */
-  revealed_amount: Amount;
-  /**
-   * Schnorr proof of knowledge of the partition's aggregate mask difference.
-   */
-  signature: SchnorrSignatureBytes;
-};
+export type CovenantBalanceClaim = { 
+/**
+ * The index, within the transfer's spent inputs, of the first input belonging to this partition. Identifies the
+ * partition without restating its spend condition.
+ */
+partition_input_index: number, 
+/**
+ * The exact net cleartext amount leaving the partition (zero for full conservation). Must be non-negative.
+ */
+revealed_amount: Amount, 
+/**
+ * Schnorr proof of knowledge of the partition's aggregate mask difference.
+ */
+signature: SchnorrSignatureBytes, };

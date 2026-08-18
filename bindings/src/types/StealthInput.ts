@@ -5,13 +5,12 @@ import type { SpendWitness } from "./SpendWitness";
 /**
  * A statement for stealth outputs to spend as inputs.
  */
-export type StealthInput = {
-  /**
-   * The commitment of the unspent output being spent
-   */
-  commitment: PedersenCommitmentBytes;
-  /**
-   * Selects which authorisation path the spender is exercising for this input (TIP-0006). Defaults to the key path.
-   */
-  witness: SpendWitness;
-};
+export type StealthInput = { 
+/**
+ * The commitment of the unspent output being spent
+ */
+commitment: PedersenCommitmentBytes, 
+/**
+ * Selects which authorisation path the spender is exercising for this input (TIP-0006). Defaults to the key path.
+ */
+witness: SpendWitness, };

@@ -4,30 +4,29 @@ import type { Epoch } from "./Epoch";
 import type { Instruction } from "./Instruction";
 import type { SubstateRequirement } from "./SubstateRequirement";
 
-export type UnsignedTransactionV1 = {
-  network: number;
-  fee_instructions: Array<Instruction>;
-  instructions: Array<Instruction>;
-  /**
-   * Input objects that may be read/write
-   */
-  inputs: Array<SubstateRequirement>;
-  min_epoch: Epoch | null;
-  max_epoch: Epoch;
-  is_seal_signer_authorized: boolean;
-  dry_run: boolean;
-  /**
-   * Prunable side-channel of opaque payloads referenced by instructions via `BlobIndex`.
-   * Only the per-blob commitments (`blobs.hashes()`) participate in the signing domain —
-   * raw blob bytes are excluded so that storage layers can drop them without affecting
-   * signature verifiability or transaction id.
-   */
-  blobs: Blobs;
-  /**
-   * Distinguishes otherwise-identical transactions. The transaction id excludes the seal
-   * signature, so two identical bodies sealed by the same key are the *same* transaction —
-   * an intent builder (e.g. a wallet) that wants each submission to execute independently
-   * must stamp a distinct nonce per intent. Part of the signing and id domains.
-   */
-  nonce: number | bigint | string;
-};
+export type UnsignedTransactionV1 = { network: number, fee_instructions: Array<Instruction>, instructions: Array<Instruction>, 
+/**
+ * Input objects that may be read/write
+ */
+inputs: Array<SubstateRequirement>, min_epoch: Epoch | null, 
+/**
+ * The last epoch in which this transaction may be sequenced. Mandatory: every transaction has a
+ * bounded lifetime, capped at `ConsensusConstants::max_transaction_validity_epochs` past the
+ * current epoch, so a transaction's death is deterministic and an aborted attempt cannot be
+ * retried indefinitely.
+ */
+max_epoch: Epoch, is_seal_signer_authorized: boolean, dry_run: boolean, 
+/**
+ * Prunable side-channel of opaque payloads referenced by instructions via `BlobIndex`.
+ * Only the per-blob commitments (`blobs.hashes()`) participate in the signing domain —
+ * raw blob bytes are excluded so that storage layers can drop them without affecting
+ * signature verifiability or transaction id.
+ */
+blobs: Blobs, 
+/**
+ * Distinguishes otherwise-identical transactions. The transaction id excludes the seal
+ * signature, so two identical bodies sealed by the same key are the *same* transaction —
+ * an intent builder (e.g. a wallet) that wants each submission to execute independently
+ * must stamp a distinct nonce per intent. Part of the signing and id domains.
+ */
+nonce: number | bigint | string, };

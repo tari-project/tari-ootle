@@ -2,4 +2,4 @@
 import type { Hash32 } from "./Hash32";
 import type { SubstateId } from "./SubstateId";
 
-export type UpSubstate = { substate_id: SubstateId; version: number; value_hash: Hash32 };
+export type UpSubstate = { substate_id: SubstateId, version: number, value_hash: Hash32, };

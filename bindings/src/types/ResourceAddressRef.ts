@@ -2,4 +2,4 @@
 import type { ResourceAddress } from "./ResourceAddress";
 import type { WorkspaceOffsetId } from "./WorkspaceOffsetId";
 
-export type ResourceAddressRef = { Address: ResourceAddress } | { Workspace: WorkspaceOffsetId };
+export type ResourceAddressRef = { "Address": ResourceAddress } | { "Workspace": WorkspaceOffsetId };

@@ -24,39 +24,38 @@ import type { Scalar32Bytes } from "./Scalar32Bytes";
  *
  * The proof size is static (256 bytes).
  */
-export type ViewableBalanceProof = {
-  /**
-   * The encrypted value that takes the form: E = v.G + r.P
-   * where v is the value, G is the generator, r is the secret_nonce and P is the view key.
-   * The value is decrypted by brute forcing E - R.p = v.G
-   */
-  elgamal_encrypted: RistrettoPublicKeyBytes;
-  /**
-   * The public nonce used in the ElGamal encryption R = r.G
-   */
-  elgamal_public_nonce: RistrettoPublicKeyBytes;
-  /**
-   * Part of the proof that the encrypted value is correctly constructed. C' = x_v.H + x_m.G
-   */
-  c_prime: PedersenCommitmentBytes;
-  /**
-   * Part of the proof that the encrypted value is correctly constructed. E' = x_v.G + x_r.P
-   */
-  e_prime: RistrettoPublicKeyBytes;
-  /**
-   * Part of the proof that the encrypted value is correctly constructed. R' = x_r.G
-   */
-  r_prime: RistrettoPublicKeyBytes;
-  /**
-   * Part of the proof that the encrypted value is correctly constructed. s_v = x_v + e.v
-   */
-  s_v: Scalar32Bytes;
-  /**
-   * Part of the proof that the encrypted value is correctly constructed. s_m = x_m + e.m
-   */
-  s_m: Scalar32Bytes;
-  /**
-   * Part of the proof that the encrypted value is correctly constructed. s_r = x_r + e.r
-   */
-  s_r: Scalar32Bytes;
-};
+export type ViewableBalanceProof = { 
+/**
+ * The encrypted value that takes the form: E = v.G + r.P
+ * where v is the value, G is the generator, r is the secret_nonce and P is the view key.
+ * The value is decrypted by brute forcing E - R.p = v.G
+ */
+elgamal_encrypted: RistrettoPublicKeyBytes, 
+/**
+ * The public nonce used in the ElGamal encryption R = r.G
+ */
+elgamal_public_nonce: RistrettoPublicKeyBytes, 
+/**
+ * Part of the proof that the encrypted value is correctly constructed. C' = x_v.H + x_m.G
+ */
+c_prime: PedersenCommitmentBytes, 
+/**
+ * Part of the proof that the encrypted value is correctly constructed. E' = x_v.G + x_r.P
+ */
+e_prime: RistrettoPublicKeyBytes, 
+/**
+ * Part of the proof that the encrypted value is correctly constructed. R' = x_r.G
+ */
+r_prime: RistrettoPublicKeyBytes, 
+/**
+ * Part of the proof that the encrypted value is correctly constructed. s_v = x_v + e.v
+ */
+s_v: Scalar32Bytes, 
+/**
+ * Part of the proof that the encrypted value is correctly constructed. s_m = x_m + e.m
+ */
+s_m: Scalar32Bytes, 
+/**
+ * Part of the proof that the encrypted value is correctly constructed. s_r = x_r + e.r
+ */
+s_r: Scalar32Bytes, };

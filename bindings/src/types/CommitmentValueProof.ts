@@ -8,10 +8,8 @@ import type { ValueKnowledgeProof } from "./ValueKnowledgeProof";
  * Used wherever a resource's total supply must account for a value that is otherwise hidden in a commitment:
  * burning a stealth UTXO, and minting a confidential commitment.
  */
-export type CommitmentValueProof = {
-  /**
-   * The claimed value to prove
-   */
-  value: Amount;
-  knowledge_proof: ValueKnowledgeProof;
-};
+export type CommitmentValueProof = { 
+/**
+ * The claimed value to prove
+ */
+value: Amount, knowledge_proof: ValueKnowledgeProof, };

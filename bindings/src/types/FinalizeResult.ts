@@ -6,20 +6,15 @@ import type { InstructionResult } from "./InstructionResult";
 import type { LogEntry } from "./LogEntry";
 import type { TransactionResult } from "./TransactionResult";
 
-export type FinalizeResult = {
-  transaction_hash: Hash32;
-  events: Array<Event>;
-  logs: Array<LogEntry>;
-  execution_results: Array<InstructionResult>;
-  result: TransactionResult;
-  fee_receipt: FeeReceipt;
-  /**
-   * What committing the whole transaction was priced at, which is what the commit-or-reject
-   * decision was made against.
-   *
-   * Equal to the receipt's charged total on a full commit. When only the fee intent commits, the
-   * charges are re-derived over the fee checkpoint alone and so fall below what was paid; this keeps
-   * the figure the main intent was rejected for — the one a resubmission has to clear.
-   */
-  total_fees_required: bigint;
-};
+export type FinalizeResult = { transaction_hash: Hash32, events: Array<Event>, logs: Array<LogEntry>, execution_results: Array<InstructionResult>, result: TransactionResult, fee_receipt: FeeReceipt, 
+/**
+ * What committing the whole transaction was priced at, which is what the commit-or-reject
+ * decision was made against.
+ *
+ * Equal to `fee_receipt.total_fees_charged()` on a full commit. When only the fee intent
+ * commits, the charges are re-derived over the fee checkpoint alone and so fall below what was
+ * paid; this keeps the figure the main intent was rejected for — the one a resubmission has to
+ * clear. Execution metadata rather than settled state, so it stays out of the persisted
+ * receipt, whose every field is priced into the storage charge of each transaction.
+ */
+total_fees_required: bigint, };

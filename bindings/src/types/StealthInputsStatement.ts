@@ -5,13 +5,12 @@ import type { StealthInput } from "./StealthInput";
 /**
  * A statement for stealth outputs. A statement must contain confidential outputs
  */
-export type StealthInputsStatement = {
-  /**
-   * The stealth inputs that are to be spent
-   */
-  inputs: Array<StealthInput>;
-  /**
-   * The total amount of revealed funds being spent.
-   */
-  revealed_amount: Amount;
-};
+export type StealthInputsStatement = { 
+/**
+ * The stealth inputs that are to be spent
+ */
+inputs: Array<StealthInput>, 
+/**
+ * The total amount of revealed funds being spent.
+ */
+revealed_amount: Amount, };

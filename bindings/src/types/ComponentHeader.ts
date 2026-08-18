@@ -4,9 +4,4 @@ import type { EntityId } from "./EntityId";
 import type { Hash32 } from "./Hash32";
 import type { SubstateOwnerRule } from "./SubstateOwnerRule";
 
-export type ComponentHeader = {
-  template_address: Hash32;
-  owner_rule: SubstateOwnerRule;
-  access_rules: ComponentAccessRules;
-  entity_id: EntityId;
-};
+export type ComponentHeader = { template_address: Hash32, owner_rule: SubstateOwnerRule, access_rules: ComponentAccessRules, entity_id: EntityId, };

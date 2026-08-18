@@ -2,7 +2,4 @@
 import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 import type { ResourceAddress } from "./ResourceAddress";
 
-export type ConfidentialOutputAddressContents = {
-  resource_address: ResourceAddress;
-  commitment: PedersenCommitmentBytes;
-};
+export type ConfidentialOutputAddressContents = { resource_address: ResourceAddress, commitment: PedersenCommitmentBytes, };

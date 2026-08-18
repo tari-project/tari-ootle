@@ -6,4 +6,4 @@ import type { UtxoTag } from "./UtxoTag";
 /**
  * A stealth unspent output, authorised at spend time per its [`SpendAuthorization`] (TIP-0006).
  */
-export type StealthUnspentOutput = { output: UnspentOutput; auth: SpendAuthorization; tag: UtxoTag };
+export type StealthUnspentOutput = { output: UnspentOutput, auth: SpendAuthorization, tag: UtxoTag, };

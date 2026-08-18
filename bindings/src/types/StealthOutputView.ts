@@ -10,9 +10,4 @@ import type { UtxoTag } from "./UtxoTag";
  * [`SpendAuthorization`] and tag are visible. This is exactly what enables covenants: a predicate can assert
  * properties of the outputs it produces (e.g. that they preserve its own `condition_root`).
  */
-export type StealthOutputView = {
-  commitment: PedersenCommitmentBytes;
-  minimum_value_promise: bigint;
-  auth: SpendAuthorization;
-  tag: UtxoTag;
-};
+export type StealthOutputView = { commitment: PedersenCommitmentBytes, minimum_value_promise: bigint, auth: SpendAuthorization, tag: UtxoTag, };

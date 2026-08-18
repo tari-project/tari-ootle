@@ -47,15 +47,12 @@ impl FeeModule {
         Ok((base_bytes, charge))
     }
 
-    /// Charges everything that is a function of the state being persisted, rather than of the work
-    /// done to produce it: storage, the template-publish premium, substate slots, the metering of
-    /// WASM and native execution, and the exhaust burn over the resulting total.
+    /// Charges everything that is a function of the state being persisted: the per-byte storage
+    /// tally, the template-publish premium and the per-substate creation premium.
     ///
-    /// Every charge here is *assigned*, not accumulated, so that running this again against a
-    /// different state replaces the result rather than doubling it. That is what lets a transaction
-    /// be gated on the cost of the state it asked to commit and then billed for the state that is
-    /// actually persisted — see [`RuntimeModule::on_before_persist`].
-    fn charge_finalization_fees<TStore: StateReader>(
+    /// Assigned rather than accumulated, so running it again over a different state replaces the
+    /// result instead of doubling it — see [`RuntimeModule::on_before_persist`].
+    fn charge_state_fees<TStore: StateReader>(
         &self,
         state: &mut ChargeableState<'_, TStore>,
     ) -> Result<(), RuntimeModuleError> {
@@ -120,6 +117,27 @@ impl FeeModule {
             .checked_mul(self.fee_table.per_substate_create_cost())
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating substate create cost".to_string()))?;
 
+        let fee_state = state.fee_state_mut();
+        fee_state.set_charge(FeeSource::Storage, storage_cost);
+        fee_state.set_charge(FeeSource::TemplatePublish, template_publish_cost);
+        fee_state.set_charge(FeeSource::SubstateCreate, create_cost);
+
+        Ok(())
+    }
+
+    /// Charges everything that is a function of the state being persisted, plus the metering of WASM
+    /// and native execution and the exhaust burn over the resulting total.
+    ///
+    /// Every charge here is *assigned*, not accumulated, so that running this again against a
+    /// different state replaces the result rather than doubling it. That is what lets a transaction
+    /// be gated on the cost of the state it asked to commit and then billed for the state that is
+    /// actually persisted — see [`RuntimeModule::on_before_persist`].
+    fn charge_finalization_fees<TStore: StateReader>(
+        &self,
+        state: &mut ChargeableState<'_, TStore>,
+    ) -> Result<(), RuntimeModuleError> {
+        self.charge_state_fees(state)?;
+
         // WASM execution: charge once against the transaction's accumulated points so the divisor
         // rounds against the total. Per-call rounding would let a transaction split work into
         // sub-divisor chunks and pay zero for any single one (each `points/divisor` is `0`), even
@@ -137,9 +155,6 @@ impl FeeModule {
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating native execution cost".to_string()))?;
 
         let fee_state = state.fee_state_mut();
-        fee_state.set_charge(FeeSource::Storage, storage_cost);
-        fee_state.set_charge(FeeSource::TemplatePublish, template_publish_cost);
-        fee_state.set_charge(FeeSource::SubstateCreate, create_cost);
         fee_state.set_charge(FeeSource::WasmExecution, wasm_cost);
         fee_state.set_charge(FeeSource::NativeExecution, native_cost);
 
@@ -218,6 +233,12 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
 
     fn on_before_finalize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
         self.charge_finalization_fees(&mut track.chargeable_state())
+    }
+
+    fn on_fee_checkpoint(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
+        // Only the state-derived charges. Execution metering is charged once at finalization, over
+        // the whole transaction's accumulated points, so pricing it here would be replaced anyway.
+        self.charge_state_fees(state)
     }
 
     fn on_before_persist(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {

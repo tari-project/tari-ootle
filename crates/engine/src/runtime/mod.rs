@@ -60,6 +60,7 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
     component::Component,
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
+    fees::FeeReceipt,
     indexed_value::IndexedValue,
     lock::LockFlag,
     published_template::TemplateBlob,
@@ -270,6 +271,11 @@ pub trait RuntimeInterface {
     /// [`Self::wasm_points_consumed`] when capping a call's payment-funded allowance; excluded
     /// from the WASM-only per-transaction hard cap.
     fn native_points_consumed(&self) -> u64;
+
+    /// The charges metered so far, as a receipt against no payment. A transaction rejected before
+    /// finalization never settles a receipt of its own, so this is the only place the payer can read
+    /// what it would have cost.
+    fn metered_fee_receipt(&self) -> FeeReceipt;
 
     /// The maximum Wasmer metering points the transaction may consume given the fees paid so far,
     /// used by `WasmProcess::invoke` to cap each call's allowance so unpaid compute cannot exceed

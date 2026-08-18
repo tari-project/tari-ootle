@@ -151,6 +151,10 @@ impl FeeReceipt {
     /// This is a floor, not a recommendation. Overpayment is returned to the paying vault, so a
     /// caller with a vault to refund to loses nothing by submitting above it — and one paying purely
     /// by stealth reveal, where the overpayment is not refundable, has reason to sit on it.
+    ///
+    /// Reads what this receipt was charged. When only the fee intent committed, that is the fee
+    /// intent's own cost rather than what the transaction needed, so anything telling a caller what
+    /// to resubmit with wants [`crate::commit_result::FinalizeResult::required_fees`] instead.
     pub fn required_fees(&self) -> u64 {
         self.total_fees_charged().saturating_add(FEE_ESTIMATE_ALLOWANCE)
     }

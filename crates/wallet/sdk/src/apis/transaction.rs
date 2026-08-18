@@ -168,9 +168,7 @@ where
                         warn!(target: LOG_TARGET, "⚠️ Transaction ID mismatch in dry run response. Expected {}, got {}. Updating transaction status to DryRunFailed.", tx_id, query.transaction_id);
                     }
 
-                    let final_fee = execution_result
-                        .as_ref()
-                        .map(|e| e.finalize.fee_receipt.required_fees());
+                    let final_fee = execution_result.as_ref().map(|e| e.finalize.required_fees());
 
                     self.store.with_write_tx(|tx| {
                         tx.transactions_update(

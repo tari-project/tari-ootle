@@ -363,7 +363,7 @@ pub async fn handle_transfer(
             transaction_id,
             // Dry-run callers commonly pass a placeholder max_fee that clamps `total_fees_paid`. Report
             // the uncapped estimate so the response is usable for fee selection.
-            fee: finalize.fee_receipt.required_fees(),
+            fee: finalize.required_fees(),
             fee_refunded: finalize
                 .fee_receipt
                 .total_fee_payment()

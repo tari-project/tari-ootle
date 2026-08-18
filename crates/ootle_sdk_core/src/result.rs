@@ -208,7 +208,7 @@ fn parse_dry_run_result_value(value: serde_json::Value) -> Result<FinalizedResul
     let wire: WireDryRunResult =
         serde_json::from_value(value).map_err(|e| OotleSdkError::Parse(format!("indexer dry-run result JSON: {e}")))?;
     let mut finalized = finalized_from_execute_result(&wire.result);
-    finalized.estimated_fee = Some(wire.result.finalize.fee_receipt.required_fees());
+    finalized.estimated_fee = Some(wire.result.finalize.required_fees());
     Ok(finalized)
 }
 
@@ -477,7 +477,7 @@ mod tests {
         let exec = execute_result(TransactionResult::Accept(accept_diff()), Some(5));
         // The metered total: Initial(7) + Storage((1<<53)+11) = (1<<53)+18, plus the fee-estimate
         // allowance the engine adds on top.
-        let expected_estimate = exec.finalize.fee_receipt.required_fees();
+        let expected_estimate = exec.finalize.required_fees();
         assert!(expected_estimate > (1u64 << 53) + 18, "the estimate must clear 2^53");
         let json = dry_run_wire_json(exec);
 

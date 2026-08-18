@@ -688,7 +688,7 @@ pub(crate) async fn execute_claim_burn(
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
         let result = transaction_service.submit_dry_run_transaction(transaction).await?;
-        let required_fees = result.finalize.fee_receipt.required_fees();
+        let required_fees = result.finalize.required_fees();
         return Ok(ClaimBurnResponse {
             transaction_id,
             required_fees: Some(required_fees),

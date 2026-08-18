@@ -115,6 +115,10 @@ impl FeeState {
         self.accumulated_native_points
     }
 
+    pub fn fee_charges(&self) -> &FeeBreakdown {
+        &self.fee_charges
+    }
+
     pub fn take_fee_charges(&mut self) -> FeeBreakdown {
         std::mem::take(&mut self.fee_charges)
     }

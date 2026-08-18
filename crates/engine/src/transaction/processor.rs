@@ -246,6 +246,11 @@ where
                 if let Err(err) = runtime.interface_mut().checkpoint_fee_intent() {
                     let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason(None));
                     finalize.execution_results = execution_results;
+                    // Nothing is taken and nothing is written, but what committing would have cost is
+                    // the number the payer has to raise their fee to.
+                    let metered = runtime.interface().metered_fee_receipt();
+                    finalize.total_fees_required = metered.total_fees_charged();
+                    finalize.fee_receipt = metered;
                     return Ok(ExecuteResult {
                         finalize,
                         execution_time: timer.elapsed(),

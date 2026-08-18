@@ -32,6 +32,14 @@ pub trait RuntimeModule<TStore>: Send + Sync {
         Ok(())
     }
 
+    /// Invoked when the fee intent is checkpointed, against the state it ended on — which is the
+    /// state a transaction that cannot pay for its main intent will fall back to committing.
+    /// Pricing it here is what lets the paid-in-full check that follows, and the compute allowance
+    /// that follows it, both account for what that fallback costs.
+    fn on_fee_checkpoint(&self, _state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
+        Ok(())
+    }
+
     /// Invoked at the start of finalization, against the working state — before it is known
     /// whether the transaction commits or falls back to a fee-intent commit. Charges added here
     /// decide that outcome: they are what the paid-in-full check sees.

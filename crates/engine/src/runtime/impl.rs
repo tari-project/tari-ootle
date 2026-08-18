@@ -36,6 +36,7 @@ use tari_engine_types::{
     crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
     events::Event,
+    fees::FeeReceipt,
     hashing::hash_template_code,
     indexed_value::IndexedValue,
     instruction_result::InstructionResult,
@@ -298,6 +299,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             self.invoke_modules_on_before_persist(&mut finalized)?;
         }
         self.tracker.finalize(finalized)
+    }
+
+    fn invoke_modules_on_fee_checkpoint(&mut self) -> Result<(), RuntimeError> {
+        for module in self.modules.iter() {
+            module.on_fee_checkpoint(&mut self.tracker.chargeable_state())?;
+        }
+        Ok(())
     }
 
     fn invoke_modules_on_before_persist(&mut self, finalized: &mut FinalizedState<TStore>) -> Result<(), RuntimeError> {
@@ -3469,7 +3477,18 @@ where
         })
     }
 
+    fn metered_fee_receipt(&self) -> FeeReceipt {
+        FeeReceipt::builder()
+            .with_cost_breakdown(self.tracker.fee_charges())
+            .build()
+    }
+
     fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError> {
+        // Price the state the fee intent ended on before testing what was paid against it. This is
+        // the state a transaction that cannot afford its main intent falls back to committing, so a
+        // payment that cannot cover it cannot commit anything at all — better established here,
+        // before the main instructions run, than after they have consumed compute nobody pays for.
+        self.invoke_modules_on_fee_checkpoint()?;
         if !self.tracker.is_fee_state_dry_run() && self.tracker.total_fee_payments() < self.tracker.total_fee_charges()
         {
             return Err(RuntimeError::InsufficientFeesPaid {
@@ -3481,12 +3500,13 @@ where
     }
 
     fn finalize(&mut self) -> Result<FinalizeResult, RuntimeError> {
-        self.invoke_modules_on_runtime_call("finalize")?;
+        // Finalization adds no fee charge of its own. The template never invoked it, and the compute
+        // allowance is sized against the charges standing when it is computed, so anything charged
+        // afterwards puts the total past what that allowance was sized to fit inside.
         self.finalize_with(None)
     }
 
     fn finalize_failure(&mut self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
-        self.invoke_modules_on_runtime_call("finalize_failure")?;
         self.finalize_with(Some(reason))
     }
 

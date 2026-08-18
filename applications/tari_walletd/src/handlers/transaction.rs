@@ -467,7 +467,7 @@ async fn submit_dry_run_inner(
         .await
         .map_err(map_transaction_submission_error)?;
 
-    let required_fees = exec_result.finalize.fee_receipt.required_fees();
+    let required_fees = exec_result.finalize.required_fees();
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         required_fees,
@@ -571,7 +571,7 @@ pub async fn handle_submit_manifest(
             )
             .into());
         }
-        let required_fees = exec_result.finalize.fee_receipt.required_fees();
+        let required_fees = exec_result.finalize.required_fees();
         return Ok(TransactionSubmitManifestResponse {
             transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
             required_fees: Some(required_fees),
@@ -792,7 +792,7 @@ pub async fn handle_publish_template(
         }
         return Ok(PublishTemplateResponse {
             transaction_id: resp.transaction_id,
-            dry_run_fee: Some(resp.result.finalize.fee_receipt.required_fees()),
+            dry_run_fee: Some(resp.result.finalize.required_fees()),
         });
     }
     let request = TransactionSubmitRequest {

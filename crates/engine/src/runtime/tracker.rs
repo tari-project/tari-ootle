@@ -25,7 +25,7 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::{Component, ComponentBody, ComponentHeader},
     events::Event,
-    fees::{FeeReceipt, FeeSource},
+    fees::{FeeBreakdown, FeeReceipt, FeeSource},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
     lock::LockFlag,
@@ -62,6 +62,16 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::state_tracker";
+
+/// The part of a fee payment that charges can actually consume.
+///
+/// The exhaust burn is taken over the charges rather than deducted from the payment, so a payment of
+/// `P` covers charges of at most `P / (1 + rate)`. Rounds down, so the figure never over-states what
+/// is available.
+fn spendable_on_charges(payments: u64, burn_rate_bps: u16) -> u64 {
+    let scaled = u128::from(payments) * 10_000 / (10_000 + u128::from(burn_rate_bps));
+    u64::try_from(scaled).unwrap_or(u64::MAX)
+}
 
 /// The state finalization will persist, detached from the tracker and awaiting fee settlement.
 #[derive(Debug)]
@@ -141,6 +151,17 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// instructions before it pays, while a transaction that never pays cannot consume more than the
     /// grace. Past the fee checkpoint the credit no longer applies: the transaction has paid what its
     /// fee intent charged, and the compute it may still run is funded by that payment alone.
+    ///
+    /// Compute is funded by what the payment has *left*, not by the whole of it. A transaction that
+    /// cannot pay for the state it commits commits only its fee intent, and that state was priced
+    /// onto the charges when the checkpoint was taken — so the charges standing here already
+    /// include everything the fallback will cost except the compute being authorized. Funding
+    /// compute out of the full payment instead would let a transaction spend the whole of it on
+    /// execution and leave its own fee-intent commit unaffordable, which settles as a rejection
+    /// that collects nothing: the work would be done and never paid for.
+    ///
+    /// The exhaust burn is taken over whatever the charges come to, so the charges themselves can
+    /// only spend the payment net of it.
     pub fn wasm_point_allowance(&self) -> Option<u64> {
         let rate = self.wasm_metering_rate;
         // The credit exists only so a transaction can source its fee before paying. Taking the fee
@@ -151,7 +172,9 @@ impl<TStore: StateReader> StateTracker<TStore> {
             if fee_state.is_dry_run() {
                 return None;
             }
-            let funded = rate.points_funded_by(fee_state.total_payments())?;
+            let unspent = spendable_on_charges(fee_state.total_payments(), fee_state.burn_rate_bps())
+                .saturating_sub(fee_state.total_charges());
+            let funded = rate.points_funded_by(unspent)?;
             if is_fee_intent {
                 Some(funded.saturating_add(limits::FREE_COMPUTE_GRACE_POINTS))
             } else {
@@ -540,6 +563,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub fn total_fee_payments(&self) -> u64 {
         self.read_with(|state| state.fee_state().total_payments())
+    }
+
+    /// A copy of the charges metered so far.
+    pub fn fee_charges(&self) -> FeeBreakdown {
+        self.read_with(|state| state.fee_state().fee_charges().clone())
     }
 
     pub fn total_fee_charges(&self) -> u64 {

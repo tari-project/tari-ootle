@@ -225,7 +225,7 @@ pub async fn handle_claim_validator_fees(
             fee: transaction
                 .finalize
                 .as_ref()
-                .map(|f| f.fee_receipt.required_fees())
+                .map(|f| f.required_fees())
                 .unwrap_or_default(),
             result: transaction
                 .finalize

@@ -23,6 +23,7 @@ use std::iter;
 
 use serde::{Deserialize, Serialize};
 use tari_engine::{
+    runtime::RuntimeError,
     template::{TemplateLoaderError, TemplateModuleLoader},
     wasm::{WasmExecutionError, WasmModule},
 };
@@ -33,6 +34,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Epoch, Transaction, args};
+use tari_template_abi::EngineOp;
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, all_builtin_templates};
 use tari_template_lib::{
     models::NonFungible,
@@ -257,6 +259,33 @@ fn test_buggy_template() {
         err,
         TemplateLoaderError::WasmModuleError(WasmExecutionError::ExportError(ExportError::Missing(_)))
     ));
+}
+
+/// The engine calls a template's `tari_free` on the pointer the template function returned, which
+/// runs template code outside any invocation — after the invocation's meter has been torn down and
+/// its consumption charged. An engine call from there is refused, and the refusal fails the
+/// transaction rather than being swallowed: the template ignores the null pointer it gets back and
+/// returns normally, so the engine reports the error itself.
+#[test]
+fn test_engine_call_in_tari_free() {
+    let mut test = TemplateTest::new_builtin_only();
+    let template_addr = test.compile_new_template(
+        "Buggy",
+        "tests/templates/buggy",
+        &["engine_call_in_free"],
+        iter::empty::<(String, String)>(),
+    );
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_addr, "main", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::EngineCallOutsideInvocation {
+        op: EngineOp::EmitLog,
+    });
 }
 
 #[test]

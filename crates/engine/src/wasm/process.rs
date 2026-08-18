@@ -48,7 +48,7 @@ use wasmer::{AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store,
 use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points, set_remaining_points};
 
 use crate::{
-    runtime::{ComputeFunding, Runtime},
+    runtime::{ComputeFunding, Runtime, RuntimeError},
     traits::Invokable,
     wasm::{
         LoadedWasmTemplate,
@@ -112,7 +112,7 @@ impl WasmProcess {
         }
         let len = u32::try_from(alloc_size).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
 
-        let ptr = self.env.alloc(store, len)?;
+        let ptr = self.alloc_checked(store, len)?;
         if ptr.is_null() {
             return Err(WasmExecutionError::MemoryAllocationFailed);
         }
@@ -120,6 +120,30 @@ impl WasmProcess {
         callback(&mut writer)?;
 
         Ok(AllocPtr::new(ptr.offset(), len))
+    }
+
+    /// Calls the template's `tari_alloc`, rejecting the invocation if it called the engine.
+    fn alloc_checked<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
+        let result = self.env.alloc(store, len);
+        self.take_rejected_engine_call()?;
+        result
+    }
+
+    /// Calls the template's `tari_free`, rejecting the invocation if it called the engine.
+    fn free_checked<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
+        let result = self.env.free(store, ptr);
+        self.take_rejected_engine_call()?;
+        result
+    }
+
+    /// Reports an engine call `tari_engine_entrypoint` refused. It can only signal a refusal by
+    /// returning a null pointer, which a template is free to ignore, so the recorded error is what
+    /// actually fails the invocation.
+    fn take_rejected_engine_call(&self) -> Result<(), WasmExecutionError> {
+        match self.env.take_last_engine_error() {
+            Some(err) => Err(WasmExecutionError::RuntimeError(err)),
+            None => Ok(()),
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -148,6 +172,16 @@ impl WasmProcess {
         }
 
         let (env_mut, mut store) = env.data_and_store_mut();
+
+        // Only a template function invocation may call the engine. The engine also enters WASM to
+        // run `tari_alloc`/`tari_free`, which happens outside any invocation: an engine call made
+        // from there would mutate state and emit effects that no invocation is metered or charged
+        // for. `WasmProcess::alloc_checked`/`free_checked` turn the null returned here into the
+        // recorded error, so a template that ignores the null cannot proceed either.
+        if !env_mut.has_invocation_in_flight() {
+            env_mut.set_last_engine_error(RuntimeError::EngineCallOutsideInvocation { op });
+            return WasmPtr::null();
+        }
 
         // Sync this invocation's in-flight meter consumption onto the transaction total before
         // dispatching, so budget and allowance checks made inside the host call (native
@@ -426,7 +460,7 @@ impl Invokable<Store> for WasmProcess {
                 };
 
                 // Free allocated memory containing the result
-                self.env.free(store, return_ptr)?;
+                self.free_checked(store, return_ptr)?;
 
                 self.env.state().interface().validate_return_value(&value)?;
                 self.env

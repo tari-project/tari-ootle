@@ -38,6 +38,7 @@ use tari_ootle_transaction::{
     NftCheck,
     args::{WorkspaceId, WorkspaceOffsetId},
 };
+use tari_template_abi::EngineOp;
 use tari_template_lib::{
     args::{CallAction, VaultFreezeFlag},
     models::{AddressAllocationId, BucketId, ProofId},
@@ -309,6 +310,8 @@ pub enum RuntimeError {
     MaxCallDepthExceeded { max_depth: usize },
     #[error("{action} can only be called from within a component context")]
     NotInComponentContext { action: ActionIdent },
+    #[error("Engine call '{op}' is only permitted from within a template function invocation")]
+    EngineCallOutsideInvocation { op: EngineOp },
     #[error("Duplicate bucket {bucket_id}")]
     DuplicateBucket { bucket_id: BucketId },
     #[error("Duplicate proof {proof_id}")]

@@ -117,6 +117,13 @@ impl<T> WasmEnv<T> {
         Some(delta)
     }
 
+    /// Whether an invocation is in flight. WASM runs outside one when the engine calls the
+    /// template's `tari_alloc`/`tari_free` to move data across the boundary; work done there is
+    /// attributable to no invocation and so cannot be metered or charged.
+    pub(super) fn has_invocation_in_flight(&self) -> bool {
+        self.invocation_meter_mut().is_some()
+    }
+
     fn invocation_meter_mut(&self) -> MutexGuard<'_, Option<InvocationMeter>> {
         self.invocation_meter.lock().expect("invocation_meter poisoned")
     }

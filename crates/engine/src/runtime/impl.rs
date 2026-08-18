@@ -282,7 +282,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// Settles the transaction into a result.
     ///
     /// The fee module charges twice here, and the order is the point of the split. It first charges
-    /// against the live state: those charges are what [`StateTracker::select_finalized_state`] tests
+    /// against the working state: those charges are what [`StateTracker::select_finalized_state`] tests
     /// against the payments, so they decide whether the transaction commits or falls back to a
     /// fee-intent commit. Once that is decided, it charges again against the state actually chosen,
     /// which on a fee-intent commit holds only what the fee intent touched. A transaction is

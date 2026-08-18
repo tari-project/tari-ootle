@@ -394,13 +394,18 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
         witness_bytes / SPEND_WITNESS_BYTE_DIVISOR
 }
 
+/// Inline literal args carry their bytes directly in the instruction, so they are priced by size,
+/// consistent with blob/log byte costing. Applied once across an instruction's whole literal
+/// payload.
+///
+/// Public because the dry-run fee allowance is derived from it: the encoded width of the `max_fee`
+/// literal is the one term that can make a real run weigh more than the dry run that estimated it.
+pub const LITERAL_BYTE_DIVISOR: u64 = 3;
+
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {
     // Workspace and blob refs are cheap — just an index. Blob payloads are charged at the
     // transaction level by `calc_blobs_weight`, so we don't double-count them here.
     const NON_LITERAL_WEIGHT: u64 = 1;
-    // Inline literal args carry their bytes directly in the instruction, so price them by size,
-    // consistent with blob/log byte costing.
-    const LITERAL_BYTE_DIVISOR: u64 = 3;
 
     // Accumulate the raw literal bytes and apply the divisor once across the whole instruction.
     // Dividing per-argument would let a large literal be split into many small ones so each share

@@ -370,9 +370,9 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// Chooses the state that finalization will persist.
     ///
     /// A transaction that failed — either explicitly, or by not covering the fees charged against
-    /// the live state — commits only its fee intent, so the state to persist is the fee checkpoint
-    /// rather than the state execution ended on. The live fee state carries over either way, so the
-    /// work done before the failure is still charged for.
+    /// the working state — commits only its fee intent, so the state to persist is the fee
+    /// checkpoint rather than the state execution ended on. The fee state carries over either way,
+    /// so the work done before the failure is still charged for.
     ///
     /// Split out from [`Self::finalize`] so the runtime can run its modules against the chosen state
     /// before its fees are settled.
@@ -509,7 +509,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    /// The live working state, as a module may charge against it.
+    /// The working state, as a module may charge against it.
     ///
     /// The fee module uses this to compute its finalization charges before the state to persist has
     /// been chosen; once it has been, the same computation runs against that state directly.

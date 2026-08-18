@@ -13,10 +13,7 @@ impl<C> minicbor::Encode<C> for Amount {
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        let [lo, hi] = self.to_le_digits();
-        e.array(2)?;
-        e.u64(lo)?;
-        e.u64(hi)?;
+        e.u128(self.0)?;
         Ok(())
     }
 }
@@ -24,42 +21,9 @@ impl<C> minicbor::Encode<C> for Amount {
 impl<'b, C> minicbor::Decode<'b, C> for Amount {
     fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         use minicbor::data::Type;
-        let ty = d.datatype()?;
-        match ty {
-            Type::Array | Type::ArrayIndef => {
-                let n = d.array()?;
-                let mut digits = [0u64; 2];
-                match n {
-                    Some(len) => {
-                        if len != 2 {
-                            return Err(minicbor::decode::Error::message("Amount: expected 2-element array"));
-                        }
-                        for slot in &mut digits {
-                            *slot = d.u64()?;
-                        }
-                    },
-                    None => {
-                        let mut idx = 0usize;
-                        loop {
-                            if matches!(d.datatype()?, Type::Break) {
-                                d.skip()?;
-                                break;
-                            }
-                            if idx >= 2 {
-                                return Err(minicbor::decode::Error::message("Amount: too many elements"));
-                            }
-                            digits[idx] = d.u64()?;
-                            idx += 1;
-                        }
-                    },
-                }
-                Ok(Amount::from_le_digits(digits))
-            },
-            Type::U8 | Type::U16 | Type::U32 | Type::U64 => Ok(Amount::from(d.u64()?)),
-            Type::I8 | Type::I16 | Type::I32 | Type::I64 => {
-                let v = d.i64()?;
-                Amount::try_from(v).map_err(|e| minicbor::decode::Error::message(format!("Amount: {}", e)))
-            },
+        match d.datatype()? {
+            // Amounts also arrive as decimal strings, from callers whose own encoding cannot carry a
+            // 128-bit integer.
             Type::String => {
                 let s = d.str()?;
                 s.parse::<Amount>()
@@ -73,28 +37,20 @@ impl<'b, C> minicbor::Decode<'b, C> for Amount {
                 s.parse::<Amount>()
                     .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
             },
-            other => Err(minicbor::decode::Error::message(format!(
-                "Amount: unexpected CBOR datatype {:?}",
-                other
-            ))),
+            _ => d.u128().map(Amount::new),
         }
     }
 }
 
 impl<C> minicbor::CborLen<C> for Amount {
     fn cbor_len(&self, ctx: &mut C) -> usize {
-        let [lo, hi] = self.to_le_digits();
-        // array(2) + two u64 encodings
-        let mut total = <u64 as minicbor::CborLen<C>>::cbor_len(&2u64, ctx);
-        total += <u64 as minicbor::CborLen<C>>::cbor_len(&lo, ctx);
-        total += <u64 as minicbor::CborLen<C>>::cbor_len(&hi, ctx);
-        total
+        <u128 as minicbor::CborLen<C>>::cbor_len(&self.0, ctx)
     }
 }
 
-/// A 128-bit signed amount.
+/// A 128-bit unsigned amount.
 ///
-/// This is a general purpose signed integer, but is primarily used to represent the smallest unit of value in
+/// This is a general purpose unsigned integer, but is primarily used to represent the smallest unit of value in
 /// resources/vaults etc.
 ///
 /// This allows Tari to support a massive number tokens within resources.

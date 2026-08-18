@@ -4,18 +4,31 @@
 use indexmap::{IndexMap, map::Entry};
 use serde::{Deserialize, Serialize};
 
-/// The most a real run's cost can exceed the cost a dry run metered for the same transaction, when
-/// the two differ only in `max_fee`.
+/// The exhaust burn rate that [`FEE_ESTIMATE_ALLOWANCE`] is derived against, in basis points.
 ///
-/// Two steps of transaction weight, plus what the exhaust burn makes of them. The weight term is
-/// bounded because the fee literal's encoded width is: it saturates at 11 bytes once the amount
-/// reaches `2^32` µT, which puts `total_bytes / LITERAL_BYTE_DIVISOR` two steps above the narrow
-/// amount a dry run carries — a 30_000 tTARI fee and `u64::MAX` drift no more than a 4_295 tTARI
-/// one. The burn is taken over the running total, so it lifts those two by
-/// `ceil(2 * rate / 10_000)`, which the 10_000 bps ceiling on the rate caps at two more.
+/// The burn is taken over the running fee total, so it re-multiplies the one term that can make a
+/// real run cost more than the dry run that estimated it. A network configured above this rate
+/// under-states `FeeReceipt::required_fees`, and every submission built from a dry run is then
+/// rejected as underpaid — `every_shipped_network_stays_within_the_burn_rate_ceiling` holds the
+/// shipped networks to it.
+pub const MAX_EXHAUST_BURN_RATE_BPS: u16 = 10_000;
+
+/// The allowance a dry-run estimate carries on top of what it metered, so that a real run of the
+/// same transaction at a different `max_fee` can never cost more than the estimate.
 ///
-/// See [`FeeReceipt::required_fees`]; `crates/engine/tests/fees.rs` measures both terms.
-const MAX_MAX_FEE_DRIFT: u64 = 4;
+/// `max_fee` is itself an input to the cost, so the two runs meter differently. One term moves the
+/// cost *upward*: transaction weight prices the fee instruction's literal args by their encoded
+/// bytes, so a wider `max_fee` can push `literal_bytes / LITERAL_BYTE_DIVISOR` up by a bounded
+/// number of steps. The storage charge reads the fee vault's residual balance, which a dry run's
+/// minimal `max_fee` leaves at its widest, so a real submission sees the same or fewer bytes there.
+/// The exhaust burn reads nothing of its own but re-multiplies the weight term, being taken over
+/// the running total.
+///
+/// The value is derived rather than chosen: `FeeTable::fee_estimate_allowance` computes it from
+/// `per_transaction_weight_cost`, `LITERAL_BYTE_DIVISOR` and the burn rate, all of which live in
+/// crates downstream of this one. `fee_estimate_allowance_covers_every_shipped_network` asserts
+/// this value covers every shipped network at `MAX_EXHAUST_BURN_RATE_BPS`.
+pub const FEE_ESTIMATE_ALLOWANCE: u64 = 7;
 
 #[derive(Debug, Clone, Default)]
 pub struct FeeReceiptBuilder {
@@ -131,13 +144,13 @@ impl FeeReceipt {
     /// balance left in the fee vault, which a dry run's minimal `max_fee` already leaves at its
     /// widest, so every real submission sees the same or fewer bytes there. The exhaust burn adds
     /// no reading of its own but re-multiplies whatever the weight did, being taken over the running
-    /// total. [`MAX_MAX_FEE_DRIFT`] bounds the two that remain.
+    /// total. [`FEE_ESTIMATE_ALLOWANCE`] bounds what remains.
     ///
     /// This is a floor, not a recommendation. Overpayment is returned to the paying vault, so a
     /// caller with a vault to refund to loses nothing by submitting above it — and one paying purely
     /// by stealth reveal, where the overpayment is not refundable, has reason to sit on it.
     pub fn required_fees(&self) -> u64 {
-        self.total_fees_charged().saturating_add(MAX_MAX_FEE_DRIFT)
+        self.total_fees_charged().saturating_add(FEE_ESTIMATE_ALLOWANCE)
     }
 
     /// The total amount of fees refunded to the respective vaults

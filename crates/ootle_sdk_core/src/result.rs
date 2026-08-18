@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn parses_dry_run_with_estimated_fee() {
         let exec = execute_result(TransactionResult::Accept(accept_diff()), Some(5));
-        // The metered total: Initial(7) + Storage((1<<53)+11) = (1<<53)+18, plus the max-fee drift
+        // The metered total: Initial(7) + Storage((1<<53)+11) = (1<<53)+18, plus the fee-estimate
         // allowance the engine adds on top.
         let expected_estimate = exec.finalize.fee_receipt.required_fees();
         assert!(expected_estimate > (1u64 << 53) + 18, "the estimate must clear 2^53");

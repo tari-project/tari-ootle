@@ -32,7 +32,7 @@ pub trait RuntimeModule<TStore>: Send + Sync {
         Ok(())
     }
 
-    /// Invoked at the start of finalization, against the live working state — before it is known
+    /// Invoked at the start of finalization, against the working state — before it is known
     /// whether the transaction commits or falls back to a fee-intent commit. Charges added here
     /// decide that outcome: they are what the paid-in-full check sees.
     fn on_before_finalize(&self, _track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
@@ -40,7 +40,7 @@ pub trait RuntimeModule<TStore>: Send + Sync {
     }
 
     /// Invoked once the state that finalization will persist has been chosen, and before its fees
-    /// are settled. On a fee-intent commit that state is the fee checkpoint, not the live state
+    /// are settled. On a fee-intent commit that state is the fee checkpoint, not the working state
     /// [`Self::on_before_finalize`] saw, so any charge that is a function of what gets persisted
     /// must be recomputed here against `state`.
     fn on_before_persist(&self, _state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {

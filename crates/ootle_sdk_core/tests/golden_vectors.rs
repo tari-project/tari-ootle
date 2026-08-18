@@ -598,7 +598,7 @@ fn parse_dry_run_wire_json(result: tari_engine_types::commit_result::ExecuteResu
 }
 
 /// Dry-run vector: an executed-but-uncommitted transaction whose `estimated_fee` is surfaced
-/// (`required_fees`, the metered cost plus the max-fee drift allowance). Proves the additive field rides the existing
+/// (`required_fees`, the metered cost plus the dry-run fee allowance). Proves the additive field rides the existing
 /// parse op, the `> 2^53` fee stays a bare u64, and the committed fixtures (which omit `estimated_fee`) are
 /// unaffected.
 fn parse_dry_run_fixture_seed() -> Fixture {

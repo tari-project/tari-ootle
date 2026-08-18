@@ -242,7 +242,7 @@ fn a_fee_intent_commit_is_not_charged_for_the_state_it_abandons() {
     assert!(committed, "expected the main intent to commit");
 
     // The components only exist in the committed run, so only it pays for them. Charging the
-    // rejected run over the live state instead of the checkpoint would put the two within a few
+    // rejected run over the working state instead of the checkpoint would put the two within a few
     // bytes of each other.
     assert!(
         storage_rejected * 2 < storage_committed,

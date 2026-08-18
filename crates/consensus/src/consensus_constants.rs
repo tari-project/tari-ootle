@@ -308,6 +308,29 @@ impl From<Network> for ConsensusConstants {
 
 #[cfg(test)]
 mod tests {
+    use tari_engine_types::fees::MAX_EXHAUST_BURN_RATE_BPS;
+
+    /// `FeeReceipt::required_fees` is derived against `MAX_EXHAUST_BURN_RATE_BPS`. A network that
+    /// burns faster than that makes every dry-run estimate too low to submit with.
+    #[test]
+    fn every_shipped_network_stays_within_the_burn_rate_ceiling() {
+        for network in [
+            Network::MainNet,
+            Network::StageNet,
+            Network::NextNet,
+            Network::Igor,
+            Network::Esmeralda,
+            Network::LocalNet,
+        ] {
+            let constants = super::ConsensusConstants::from(network);
+            assert!(
+                constants.exhaust_burn_rate_bps <= MAX_EXHAUST_BURN_RATE_BPS,
+                "{network} burns at {} bps, above the {MAX_EXHAUST_BURN_RATE_BPS} bps the fee estimate assumes",
+                constants.exhaust_burn_rate_bps
+            );
+        }
+    }
+
     use tari_engine_types::limits::{
         ENGINE_LIMITS,
         MAX_NATIVE_POINTS_PER_TRANSACTION,

@@ -1,6 +1,23 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_ootle_transaction::LITERAL_BYTE_DIVISOR;
+
+/// The narrowest `max_fee` a run can meter at is `1`, which a dry run clamps to. `Amount` encodes as
+/// a native CBOR integer, so that is a single byte.
+const NARROWEST_FEE_LITERAL_BYTES: u64 = 1;
+/// The widest `max_fee` a submission can carry is `u64::MAX` — `FeeState::add_fee_payment_checked`
+/// rejects a payment above it — which encodes as a leading byte over eight payload bytes.
+const WIDEST_FEE_LITERAL_BYTES: u64 = 9;
+
+/// The most transaction-weight units the `max_fee` literal's encoded width can move a transaction.
+///
+/// `calc_args_weight` prices an instruction's literals as `literal_bytes / LITERAL_BYTE_DIVISOR`, so
+/// widening the amount by `d` bytes lifts that quotient by at most `ceil(d / LITERAL_BYTE_DIVISOR)`,
+/// attained when the narrow encoding sits just above a multiple of the divisor.
+const MAX_FEE_LITERAL_WEIGHT_DRIFT: u64 =
+    (WIDEST_FEE_LITERAL_BYTES - NARROWEST_FEE_LITERAL_BYTES).div_ceil(LITERAL_BYTE_DIVISOR);
+
 #[derive(Debug, Clone)]
 pub struct FeeTable {
     pub per_transaction_weight_cost: u64,
@@ -65,6 +82,22 @@ impl FeeTable {
             per_template_size_premium_unit_cost: 0,
             per_template_publish_cost: 0,
         }
+    }
+
+    /// The allowance a dry-run estimate must carry so that a real run of the same transaction at a
+    /// different `max_fee` cannot cost more than the estimate.
+    ///
+    /// The weight term is the fee literal's width drift priced at this table's weight cost. The burn
+    /// is taken over the running total, so it re-multiplies that term; the trailing `1` covers the
+    /// rounding boundary its floor division can land on.
+    ///
+    /// `tari_engine_types::fees::FEE_ESTIMATE_ALLOWANCE` is the value this yields, restated where
+    /// `FeeReceipt::required_fees` can reach it.
+    pub const fn fee_estimate_allowance(&self, burn_rate_bps: u16) -> u64 {
+        let weight_drift = MAX_FEE_LITERAL_WEIGHT_DRIFT.saturating_mul(self.per_transaction_weight_cost);
+        weight_drift
+            .saturating_add(weight_drift.saturating_mul(burn_rate_bps as u64) / 10_000)
+            .saturating_add(1)
     }
 
     pub fn per_transaction_weight_cost(&self) -> u64 {
@@ -168,3 +201,53 @@ impl WasmMeteringRate {
         Some(u64::try_from(funded).unwrap_or(u64::MAX))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::fees::{FEE_ESTIMATE_ALLOWANCE, MAX_EXHAUST_BURN_RATE_BPS};
+    use tari_template_lib::types::Amount;
+
+    use super::*;
+
+    /// The drift is computed from constant widths, so this holds the encoder to them.
+    #[test]
+    fn the_fee_literal_widths_match_the_encoder() {
+        assert_eq!(minicbor::len(Amount::from(1u64)) as u64, NARROWEST_FEE_LITERAL_BYTES);
+        assert_eq!(minicbor::len(Amount::from(u64::MAX)) as u64, WIDEST_FEE_LITERAL_BYTES);
+        // The width the instruction actually carries, which is what `calc_args_weight` prices.
+        assert_eq!(
+            tari_bor::encoded_len_via_writer(&Amount::from(u64::MAX)).unwrap() as u64,
+            WIDEST_FEE_LITERAL_BYTES
+        );
+        assert_eq!(MAX_FEE_LITERAL_WEIGHT_DRIFT, 3);
+    }
+
+    #[test]
+    fn the_allowance_scales_with_the_weight_cost_and_the_burn() {
+        let mut table = FeeTable::zero_rated();
+        table.per_transaction_weight_cost = 1;
+
+        // No burn: the weight drift, plus the rounding boundary.
+        assert_eq!(table.fee_estimate_allowance(0), 4);
+        // A full burn doubles the weight term.
+        assert_eq!(table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS), 7);
+
+        // The weight cost multiplies the whole thing.
+        table.per_transaction_weight_cost = 2;
+        assert_eq!(table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS), 13);
+    }
+
+    /// `FEE_ESTIMATE_ALLOWANCE` is stated in `tari_engine_types`, which cannot see a `FeeTable`. It
+    /// holds for a table priced like the shipped ones at the highest burn the estimate is derived
+    /// against.
+    #[test]
+    fn the_restated_allowance_matches_the_derivation() {
+        let mut table = FeeTable::zero_rated();
+        table.per_transaction_weight_cost = 1;
+        assert_eq!(
+            FEE_ESTIMATE_ALLOWANCE,
+            table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS)
+        );
+    }
+}
+

@@ -168,3 +168,31 @@ pub const fn get_fee_table_by_network(network: Network) -> &'static FeeTable {
         Network::MainNet => &MAINNET_FEE_TABLE,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::fees::{FEE_ESTIMATE_ALLOWANCE, MAX_EXHAUST_BURN_RATE_BPS};
+
+    use super::*;
+
+    /// `FEE_ESTIMATE_ALLOWANCE` is restated in `tari_engine_types`, which cannot see a `FeeTable`.
+    /// Every shipped table must come in under it at the highest burn the estimate is derived
+    /// against, or a dry run under-states what a real submission costs.
+    #[test]
+    fn fee_estimate_allowance_covers_every_shipped_network() {
+        for network in [
+            Network::MainNet,
+            Network::StageNet,
+            Network::NextNet,
+            Network::Igor,
+            Network::Esmeralda,
+            Network::LocalNet,
+        ] {
+            let derived = get_fee_table_by_network(network).fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS);
+            assert!(
+                derived <= FEE_ESTIMATE_ALLOWANCE,
+                "{network} needs an allowance of {derived}, above the restated {FEE_ESTIMATE_ALLOWANCE}"
+            );
+        }
+    }
+}

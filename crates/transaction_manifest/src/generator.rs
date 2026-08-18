@@ -236,12 +236,6 @@ impl ManifestInstructionGenerator {
                     .insert(assign.variable_name.to_string(), assign.blob_name.to_string());
                 Ok(vec![])
             },
-            ManifestIntent::Log(log) => Ok(vec![Instruction::EmitLog {
-                level: log.level,
-                message: log.message.try_into().map_err(|e| ManifestError::InvalidInstruction {
-                    reason: format!("Log message is too long: {}", e),
-                })?,
-            }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
             ManifestIntent::PutIntoBucket(p) => {
                 let resolve = |name: &Ident| {

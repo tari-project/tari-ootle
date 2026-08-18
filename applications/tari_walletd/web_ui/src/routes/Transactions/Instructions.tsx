@@ -117,10 +117,6 @@ function summarize(instruction: Instruction): string {
   if ("PutLastInstructionOutputOnWorkspace" in instruction) {
     return `PutLastInstructionOutputOnWorkspace($${instruction.PutLastInstructionOutputOnWorkspace.key})`;
   }
-  if ("EmitLog" in instruction) {
-    const { level, message } = instruction.EmitLog;
-    return `EmitLog(${level}, ${JSON.stringify(message)})`;
-  }
   if ("ClaimBurn" in instruction) {
     return `ClaimBurn(${instruction.ClaimBurn.claim.commitment})`;
   }

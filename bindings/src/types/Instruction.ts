@@ -7,7 +7,6 @@ import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { ComponentReference } from "./ComponentReference";
 import type { Hash32 } from "./Hash32";
 import type { InstructionArg } from "./InstructionArg";
-import type { LogLevel } from "./LogLevel";
 import type { MigrateFunction } from "./MigrateFunction";
 import type { MinotariBurnClaimProof } from "./MinotariBurnClaimProof";
 import type { OwnerRule } from "./OwnerRule";
@@ -29,7 +28,6 @@ export type Instruction =
   | { CallFunction: { address: Hash32; function: string; args: Array<InstructionArg> } }
   | { CallMethod: { call: ComponentReference; method: string; args: Array<InstructionArg> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
-  | { EmitLog: { level: LogLevel; message: string } }
   | { ClaimBurn: { claim: MinotariBurnClaimProof; output_data: ClaimBurnOutputData } }
   | { ClaimValidatorFees: { address: ValidatorFeePoolAddress; max_amount: Amount | null } }
   | "DropAllProofsInWorkspace"

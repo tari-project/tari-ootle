@@ -330,7 +330,6 @@ impl Display for TransactionV1 {
 }
 
 fn calc_instruction_weight(instruction: &Instruction) -> u64 {
-    const BINARY_WEIGHT_DIVISOR: u64 = 3;
     // TODO: formalize costing numbers
     const CLAIM_FIXED_COST: u64 = 1100;
     match instruction {
@@ -345,7 +344,6 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::CallFunction { args, .. } => calc_args_weight(args),
         Instruction::CallMethod { args, .. } => calc_args_weight(args),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
-        Instruction::EmitLog { message, .. } => message.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
         Instruction::ClaimValidatorFees { .. } => 1,
         Instruction::DropAllProofsInWorkspace => 1,

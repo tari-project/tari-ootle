@@ -3,17 +3,12 @@
 
 use std::fmt::{Display, Formatter};
 
-use tari_engine_types::{
-    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
-    limits,
-};
+use tari_engine_types::confidential::{ClaimBurnOutputData, MinotariBurnClaimProof};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{
     Amount,
     FunctionName,
-    LogLevel,
-    MaxString,
     OwnerRule,
     TemplateAddress,
     ValidatorFeePoolAddress,
@@ -70,14 +65,6 @@ pub enum Instruction {
     PutLastInstructionOutputOnWorkspace {
         #[n(0)]
         key: WorkspaceId,
-    },
-    #[n(4)]
-    EmitLog {
-        #[n(0)]
-        level: LogLevel,
-        #[n(1)]
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        message: MaxString<{ limits::ENGINE_LIMITS.max_log_size_bytes }>,
     },
     #[n(5)]
     ClaimBurn {
@@ -204,7 +191,6 @@ impl Instruction {
             // No blob references in these variants
             Self::CreateAccount { .. } |
             Self::PutLastInstructionOutputOnWorkspace { .. } |
-            Self::EmitLog { .. } |
             Self::ClaimBurn { .. } |
             Self::ClaimValidatorFees { .. } |
             Self::DropAllProofsInWorkspace |
@@ -250,7 +236,6 @@ impl Instruction {
             // No blob references in these variants
             Self::CreateAccount { .. } |
             Self::PutLastInstructionOutputOnWorkspace { .. } |
-            Self::EmitLog { .. } |
             Self::ClaimBurn { .. } |
             Self::ClaimValidatorFees { .. } |
             Self::DropAllProofsInWorkspace |
@@ -350,7 +335,6 @@ impl Instruction {
                 }
             },
             // No workspace IDs in these variants
-            Self::EmitLog { .. } |
             Self::ClaimBurn { .. } |
             Self::ClaimValidatorFees { .. } |
             Self::DropAllProofsInWorkspace |
@@ -412,9 +396,6 @@ impl Display for Instruction {
             ),
             Self::PutLastInstructionOutputOnWorkspace { key } => {
                 write!(f, "PutLastInstructionOutputOnWorkspace {{ key: {key} }}")
-            },
-            Self::EmitLog { level, message } => {
-                write!(f, "EmitLog {{ level: {level}, message: {message} }}")
             },
             Self::ClaimBurn { claim, .. } => {
                 write!(f, "ClaimBurn {{ {claim} }}",)

@@ -36,7 +36,6 @@ use tari_ootle_transaction::AllocatableAddressType;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
     Amount,
-    LogLevel,
     Metadata,
     NonFungibleId,
     TemplateAddress,
@@ -54,7 +53,6 @@ pub enum ManifestIntent {
     AssignBlob(AssignBlobStmt),
     AllocateAddress(AllocateAddressStmt),
     CreateAccount(CreateAccountIntent),
-    Log(LogIntent),
     DropAllProofs,
     PublishTemplate(PublishTemplateIntent),
     PutIntoBucket(PutIntoBucketIntent),
@@ -126,12 +124,6 @@ pub struct CreateAccountIntent {
     pub owner_rule: Option<Ident>,
     pub access_rules: Option<Ident>,
     pub bucket: Option<Ident>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LogIntent {
-    pub level: LogLevel,
-    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -486,23 +478,6 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
 
 fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::Error> {
     match mac.to_string().as_str() {
-        "info" => Ok(ManifestIntent::Log(LogIntent {
-            level: LogLevel::Info,
-            // TODO: Support format args - of course, this requires runtime support so is quite a heavy lift.
-            message: parse2::<LitStr>(tokens)?.value(),
-        })),
-        "debug" => Ok(ManifestIntent::Log(LogIntent {
-            level: LogLevel::Debug,
-            message: parse2::<LitStr>(tokens)?.value(),
-        })),
-        "warn" => Ok(ManifestIntent::Log(LogIntent {
-            level: LogLevel::Warn,
-            message: parse2::<LitStr>(tokens)?.value(),
-        })),
-        "error" => Ok(ManifestIntent::Log(LogIntent {
-            level: LogLevel::Error,
-            message: parse2::<LitStr>(tokens)?.value(),
-        })),
         "drop_all_proofs" => Ok(ManifestIntent::DropAllProofs),
         "put_into_bucket" => {
             let args = syn::parse::Parser::parse2(

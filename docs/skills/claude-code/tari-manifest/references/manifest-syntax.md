@@ -78,17 +78,6 @@ let addr = new_resource_addr!();
 let addr = allocate_component_address!();  // Alias
 ```
 
-### Logging
-
-```rust
-info!("Informational message");
-debug!("Debug message");
-warn!("Warning message");
-error!("Error message");
-```
-
-Note: only string literals are supported (no format args).
-
 ### Proof Management
 
 ```rust

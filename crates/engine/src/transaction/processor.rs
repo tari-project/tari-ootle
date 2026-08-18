@@ -387,10 +387,6 @@ where
                 Self::drop_all_proofs_in_workspace(runtime)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::EmitLog { level, message } => {
-                runtime.interface_mut().emit_log(level, message.into_string())?;
-                Ok(InstructionResult::empty())
-            },
             Instruction::ClaimBurn { claim, output_data } => {
                 runtime.interface_mut().claim_burn(*claim, output_data)?;
                 Ok(InstructionResult::empty())

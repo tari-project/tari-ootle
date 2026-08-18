@@ -960,7 +960,6 @@ impl<D> TransactionBuilder<D> {
             } |
             Instruction::CreateAccount { .. } |
             Instruction::PutLastInstructionOutputOnWorkspace { .. } |
-            Instruction::EmitLog { .. } |
             Instruction::ClaimBurn { .. } |
             Instruction::DropAllProofsInWorkspace |
             Instruction::TakeFromBucket { .. } |

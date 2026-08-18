@@ -113,12 +113,6 @@ account.deposit(item);
 let addr = new_component_addr!();
 let addr = new_resource_addr!();
 
-// Logging
-info!("message");
-debug!("message");
-warn!("message");
-error!("message");
-
 // Proof management
 drop_all_proofs!();
 ```

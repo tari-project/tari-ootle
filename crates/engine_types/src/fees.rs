@@ -20,15 +20,12 @@ pub const MAX_EXHAUST_BURN_RATE_BPS: u16 = 10_000;
 /// [`FEE_ESTIMATE_ALLOWANCE`] is derived against, so a network burning above it under-states what
 /// a dry run reports as required. A rate reaches consensus only through this type, so no such
 /// network can be configured.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExhaustBurnRate(u16);
 
 impl ExhaustBurnRate {
-    /// No fees are burned.
-    pub const ZERO: Self = Self(0);
-
-    /// Panics if `bps` is above [`MAX_EXHAUST_BURN_RATE_BPS`]. In a const context — where the
-    /// shipped network constants are evaluated — that panic is a compile error.
+    /// Panics if `bps` is above [`MAX_EXHAUST_BURN_RATE_BPS`]. The network constants are const
+    /// items, so for them that panic is a compile error.
     pub const fn new(bps: u16) -> Self {
         assert!(
             bps <= MAX_EXHAUST_BURN_RATE_BPS,
@@ -37,40 +34,10 @@ impl ExhaustBurnRate {
         Self(bps)
     }
 
-    /// Validates a rate that is only known at runtime, such as one read from configuration.
-    pub const fn try_new(bps: u16) -> Result<Self, ExhaustBurnRateOutOfRange> {
-        if bps > MAX_EXHAUST_BURN_RATE_BPS {
-            return Err(ExhaustBurnRateOutOfRange(bps));
-        }
-        Ok(Self(bps))
-    }
-
     pub const fn as_bps(self) -> u16 {
         self.0
     }
-
-    pub const fn is_zero(self) -> bool {
-        self.0 == 0
-    }
 }
-
-impl TryFrom<u16> for ExhaustBurnRate {
-    type Error = ExhaustBurnRateOutOfRange;
-
-    fn try_from(bps: u16) -> Result<Self, Self::Error> {
-        Self::try_new(bps)
-    }
-}
-
-impl fmt::Display for ExhaustBurnRate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} bps", self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("exhaust burn rate of {0} bps is above the maximum of {MAX_EXHAUST_BURN_RATE_BPS} bps")]
-pub struct ExhaustBurnRateOutOfRange(u16);
 
 /// The allowance a dry-run estimate carries on top of what it metered, so that a real run of the
 /// same transaction at a different `max_fee` can never cost more than the estimate.
@@ -298,6 +265,9 @@ impl Default for FeeReceipt {
 pub enum FeeSource {
     #[n(0)]
     Initial = 0,
+    /// Engine host calls: a flat per-call cost, plus the per-byte cost of a log's message. Two
+    /// unlike prices share this source because a source of its own would widen
+    /// [`FeeReceipt::widest`] and so the receipt size bound on every transaction.
     #[n(1)]
     RuntimeCall = 1,
     #[n(2)]
@@ -436,20 +406,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_burn_rate_cannot_be_built_above_the_ceiling() {
+    fn a_burn_rate_holds_every_value_up_to_the_ceiling() {
+        assert_eq!(ExhaustBurnRate::new(0).as_bps(), 0);
         assert_eq!(
             ExhaustBurnRate::new(MAX_EXHAUST_BURN_RATE_BPS).as_bps(),
             MAX_EXHAUST_BURN_RATE_BPS
         );
-        assert!(ExhaustBurnRate::try_new(MAX_EXHAUST_BURN_RATE_BPS).is_ok());
-        assert!(ExhaustBurnRate::try_new(MAX_EXHAUST_BURN_RATE_BPS + 1).is_err());
-        assert!(ExhaustBurnRate::try_from(u16::MAX).is_err());
-        assert!(ExhaustBurnRate::ZERO.is_zero());
     }
 
     #[test]
     #[should_panic(expected = "exhaust burn rate is above MAX_EXHAUST_BURN_RATE_BPS")]
-    fn a_burn_rate_above_the_ceiling_panics_when_it_is_not_caught_at_compile_time() {
+    fn a_burn_rate_above_the_ceiling_panics_where_const_evaluation_cannot_catch_it() {
         ExhaustBurnRate::new(MAX_EXHAUST_BURN_RATE_BPS + 1);
     }
 

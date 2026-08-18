@@ -34,8 +34,9 @@
 //!
 //! ## Storage Fees
 //!
-//! - **`per_byte_storage_cost`**: Cost per byte of data written to persistent storage (substates). Note: The actual
-//!   cost is reduced by a factor of 4 (cost × 0.25) to make storage more affordable.
+//! - **`per_byte_storage_cost`**: Cost per byte of data written to persistent storage (substates), divided by
+//!   `storage_cost_divisor`. Both shipped tables set that divisor to 1: storage is the only indefinite-liability
+//!   category, so the full byte cost stands until a rent or endowment model lands.
 //!
 //! - **`log_bytes_cost_divisor`**: Divides the per-byte storage rate when charging for a log message
 //!   (`per_byte_storage_cost × message_bytes / log_bytes_cost_divisor`). A log is retained in every validator's

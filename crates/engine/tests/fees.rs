@@ -95,6 +95,12 @@ fn a_log_is_charged_for_the_bytes_it_carries() {
         table.per_byte_storage_cost() * bytes as u64 / table.log_bytes_cost_divisor()
     );
     assert!(charged > 0, "a max-size log message was charged nothing");
+
+    // The division is per call, so a message shorter than the divisor rounds to nothing. What that
+    // forgoes over a transaction is bounded by `max_logs × log_bytes_cost_divisor` bytes.
+    let short = table.log_bytes_cost_divisor() as usize - 1;
+    let (with_short_log, _) = runtime_call_charge(short);
+    assert_eq!(with_short_log, without_log);
 }
 
 #[test]

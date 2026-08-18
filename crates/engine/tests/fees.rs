@@ -43,7 +43,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     test.disable_fees();
 
     // Check difference was refunded
-    let payment = result.finalize.fee_receipt;
+    let payment = result.finalize.fee_receipt.clone();
     let new_balance = test
         .read_only_state_store()
         .get_vaults_for_account(account)
@@ -348,7 +348,7 @@ fn fail_partial_paid_fees() {
 
     // What is charged is what the fee intent persisted, not what the abandoned instructions would
     // have. That is below the payment, so the commit is affordable and the rest is refunded.
-    let payment = result.finalize.fee_receipt;
+    let payment = &result.finalize.fee_receipt;
     let total_fees = payment.fee_breakdown().get_total();
     assert!(
         total_fees < FEE_PAID,
@@ -356,6 +356,14 @@ fn fail_partial_paid_fees() {
     );
     assert!(payment.is_paid_in_full());
     assert_eq!(payment.total_refunded(), FEE_PAID - total_fees);
+
+    // The fee intent's own cost is below what was paid, so it cannot tell a resubmission what to
+    // clear. The result keeps the figure the main intent was rejected for.
+    assert!(
+        result.finalize.total_fees_required > FEE_PAID,
+        "the transaction was rejected for underpayment, so what it required must exceed the {FEE_PAID} paid"
+    );
+    assert!(result.finalize.required_fees() > result.finalize.total_fees_required);
 
     let new_balance = test
         .read_only_state_store()
@@ -583,9 +591,9 @@ fn dangling_bucket_pay_fees() {
 //   run cost more than the dry run said.
 // - the fee amount's *digit count*, through the `std.vault.pay_fee` event the persisted receipt carries. Neutralized —
 //   priced at its widest, so it buys nothing.
-// - the *residual vault balance*'s width, since the finalization charges run before refunds. Live, but one-directional:
-//   a dry run holds `max_fee` at its lowest and so sees the widest residual, which makes every real submission the same
-//   or cheaper.
+// - the *residual vault balance*'s width, since the finalization charges run before refunds. Live, and opposed to the
+//   first: a wider `max_fee` leaves a narrower residual. Nothing narrows the `max_fee` a dry run meters at, so a
+//   submission can move either term in either direction and the allowance has to cover both.
 //
 // `try_execute` never commits, so every run below starts from identical state and the whole delta
 // is attributable to `max_fee`. Each test varies one of the three quantities and holds the other
@@ -792,12 +800,13 @@ fn a_template_publish_introduces_no_further_max_fee_sensitivity() {
 }
 
 /// The property a caller actually depends on, asserted as the promise itself rather than as a
-/// number: submitting what `required_fees` returned for the cheapest run must cover every other.
+/// number: what `required_fees` returns for *any* run must cover *every* other run.
 ///
-/// A dry run meters at the smallest `max_fee` it can, so the question is not whether the real run
-/// costs something different but whether it can cost *more*. The burn rate is varied because the
-/// burn is taken over the running total and so re-multiplies whatever the weight term contributes —
-/// a bound established with the burn disabled would not hold on a live network.
+/// A dry run meters at whatever `max_fee` the caller submitted, and the submission built from it
+/// uses a smaller one, so the estimate has to hold in both directions — asserting it only from the
+/// cheapest run would assume the very thing the allowance exists to cover. The burn rate is varied
+/// because the burn is taken over the running total and so re-multiplies both terms; a bound
+/// established with the burn disabled would not hold on a live network.
 #[test]
 fn required_fees_covers_a_real_run_at_any_max_fee() {
     // Spans every encoding width a fee above this transaction's cost can take, every residual
@@ -822,13 +831,17 @@ fn required_fees_covers_a_real_run_at_any_max_fee() {
         let build = state_transaction(&test, account, &key);
         let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
 
-        // The first entry is the smallest submittable max_fee, which is what a dry run meters at.
-        let estimate = receipts[0].required_fees();
+        let dearest = receipts
+            .iter()
+            .map(|r| r.total_fees_charged())
+            .max()
+            .expect("max_fees is not empty");
         for (max_fee, receipt) in MAX_FEES.iter().zip(&receipts) {
+            let estimate = receipt.required_fees();
             assert!(
-                receipt.total_fees_charged() <= estimate,
-                "at {rate} bps, max_fee {max_fee} costs {} against an estimate of {estimate}",
-                receipt.total_fees_charged()
+                dearest <= estimate,
+                "at {rate} bps, a dry run at max_fee {max_fee} estimates {estimate}, under the {dearest} that some \
+                 other max_fee costs"
             );
         }
     }

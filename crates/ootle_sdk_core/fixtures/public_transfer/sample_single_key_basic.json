@@ -3,7 +3,7 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.39.0",
-    "git_rev": "9f4833febee5c633a6fb2f0bd61dd1ce6d33c481",
+    "git_rev": "dee549eb268a89412bde31f685359207b7789ab3",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_public_transfer",
@@ -50,7 +50,7 @@
                 "CallMethod": {
                   "args": [
                     {
-                      "Literal": "821907d000"
+                      "Literal": "1907d0"
                     }
                   ],
                   "call": {
@@ -74,7 +74,7 @@
                       "Literal": "d8835820bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                     },
                     {
-                      "Literal": "821b002000000000303900"
+                      "Literal": "1b0020000000003039"
                     }
                   ],
                   "call": {

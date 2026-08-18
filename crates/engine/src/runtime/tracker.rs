@@ -70,6 +70,9 @@ pub struct FinalizedState<TStore> {
     outcome: FinalizeOutcome,
     /// Why the main intent was rejected, when this is a fee-intent commit.
     reason: Option<RejectReason>,
+    /// What committing the whole transaction was priced at, captured before the second charging
+    /// pass re-derives the charges over whichever state was chosen.
+    total_fees_required: u64,
 }
 
 impl<TStore> FinalizedState<TStore> {
@@ -380,6 +383,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         &mut self,
         failure: Option<RejectReason>,
     ) -> Result<FinalizedState<TStore>, RuntimeError> {
+        let total_fees_required = self.read_with(|state| state.fee_state().total_charges());
         let failure = failure.or_else(|| {
             self.read_with(|state| {
                 let fee_state = state.fee_state();
@@ -401,6 +405,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 state: self.take_working_state()?,
                 outcome: FinalizeOutcome::Commit,
                 reason: None,
+                total_fees_required,
             });
         };
 
@@ -416,6 +421,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
             state: checkpoint_state,
             outcome: FinalizeOutcome::FeeIntentCommit,
             reason: Some(reason),
+            total_fees_required,
         })
     }
 
@@ -424,6 +430,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
             mut state,
             outcome,
             reason,
+            total_fees_required,
         } = finalized;
 
         // Committing costs whatever the charges now say, and they have just been recomputed over
@@ -461,7 +468,8 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 Vec::new(),
                 TransactionResult::Reject(reason),
                 fee_receipt,
-            ));
+            )
+            .with_total_fees_required(total_fees_required));
         }
 
         // Resolve the transfers to the fee pool resource and vault refunds
@@ -495,7 +503,8 @@ impl<TStore: StateReader> StateTracker<TStore> {
             state.take_events(),
             result,
             fee_receipt,
-        ))
+        )
+        .with_total_fees_required(total_fees_required))
     }
 
     fn take_fee_checkpoint(&mut self) -> Option<WorkingState<TStore>> {

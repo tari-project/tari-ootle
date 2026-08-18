@@ -13,4 +13,13 @@ export type FinalizeResult = {
   execution_results: Array<InstructionResult>;
   result: TransactionResult;
   fee_receipt: FeeReceipt;
+  /**
+   * What committing the whole transaction was priced at, which is what the commit-or-reject
+   * decision was made against.
+   *
+   * Equal to the receipt's charged total on a full commit. When only the fee intent commits, the
+   * charges are re-derived over the fee checkpoint alone and so fall below what was paid; this keeps
+   * the figure the main intent was rejected for — the one a resubmission has to clear.
+   */
+  total_fees_required: bigint;
 };

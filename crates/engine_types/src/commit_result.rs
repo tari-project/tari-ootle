@@ -31,7 +31,7 @@ use tari_template_lib::types::{ComponentAddress, Hash32, ResourceAddress, Templa
 use crate::{
     Epoch,
     events::Event,
-    fees::FeeReceipt,
+    fees::{FEE_ESTIMATE_ALLOWANCE, FeeReceipt},
     instruction_result::InstructionResult,
     logs::LogEntry,
     resource::Resource,
@@ -182,6 +182,17 @@ pub struct FinalizeResult {
     pub result: TransactionResult,
     #[n(5)]
     pub fee_receipt: FeeReceipt,
+    /// What committing the whole transaction was priced at, which is what the commit-or-reject
+    /// decision was made against.
+    ///
+    /// Equal to `fee_receipt.total_fees_charged()` on a full commit. When only the fee intent
+    /// commits, the charges are re-derived over the fee checkpoint alone and so fall below what was
+    /// paid; this keeps the figure the main intent was rejected for — the one a resubmission has to
+    /// clear. Execution metadata rather than settled state, so it stays out of the persisted
+    /// receipt, whose every field is priced into the storage charge of each transaction.
+    #[n(6)]
+    #[serde(default)]
+    pub total_fees_required: u64,
 }
 
 impl FinalizeResult {
@@ -193,6 +204,7 @@ impl FinalizeResult {
         fee_receipt: FeeReceipt,
     ) -> Self {
         Self {
+            total_fees_required: fee_receipt.total_fees_charged(),
             transaction_hash,
             logs,
             events,
@@ -200,6 +212,18 @@ impl FinalizeResult {
             result,
             fee_receipt,
         }
+    }
+
+    /// Records what committing the whole transaction was priced at, when that differs from what the
+    /// receipt was ultimately charged.
+    pub fn with_total_fees_required(mut self, amount: u64) -> Self {
+        self.total_fees_required = amount.max(self.fee_receipt.total_fees_charged());
+        self
+    }
+
+    /// The minimum `max_fee` a resubmission of this transaction has to carry.
+    pub fn required_fees(&self) -> u64 {
+        self.total_fees_required.saturating_add(FEE_ESTIMATE_ALLOWANCE)
     }
 
     pub fn new_rejected(transaction_hash: Hash32, reason: RejectReason) -> Self {
@@ -210,6 +234,7 @@ impl FinalizeResult {
             execution_results: Vec::new(),
             result: TransactionResult::Reject(reason),
             fee_receipt: FeeReceipt::default(),
+            total_fees_required: 0,
         }
     }
 

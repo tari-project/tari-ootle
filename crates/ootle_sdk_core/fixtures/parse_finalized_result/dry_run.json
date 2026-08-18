@@ -3,7 +3,7 @@
   "schema_version": 1,
   "provenance": {
     "core_version": "0.39.0",
-    "git_rev": "9f4833febee5c633a6fb2f0bd61dd1ce6d33c481",
+    "git_rev": "dee549eb268a89412bde31f685359207b7789ab3",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "parse_finalized_result",
@@ -112,7 +112,7 @@
         ]
       },
       "epoch": 11,
-      "estimated_fee": 9007199254742006,
+      "estimated_fee": 9007199254742024,
       "events": [
         {
           "payload": [

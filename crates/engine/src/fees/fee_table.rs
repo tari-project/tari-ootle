@@ -10,13 +10,25 @@ const NARROWEST_FEE_LITERAL_BYTES: u64 = 1;
 /// rejects a payment above it — which encodes as a leading byte over eight payload bytes.
 const WIDEST_FEE_LITERAL_BYTES: u64 = 9;
 
+/// The span of encoded widths a `max_fee` can take.
+const FEE_LITERAL_BYTE_SPAN: u64 = WIDEST_FEE_LITERAL_BYTES - NARROWEST_FEE_LITERAL_BYTES;
+
 /// The most transaction-weight units the `max_fee` literal's encoded width can move a transaction.
 ///
 /// `calc_args_weight` prices an instruction's literals as `literal_bytes / LITERAL_BYTE_DIVISOR`, so
 /// widening the amount by `d` bytes lifts that quotient by at most `ceil(d / LITERAL_BYTE_DIVISOR)`,
 /// attained when the narrow encoding sits just above a multiple of the divisor.
-const MAX_FEE_LITERAL_WEIGHT_DRIFT: u64 =
-    (WIDEST_FEE_LITERAL_BYTES - NARROWEST_FEE_LITERAL_BYTES).div_ceil(LITERAL_BYTE_DIVISOR);
+const MAX_FEE_LITERAL_WEIGHT_DRIFT: u64 = FEE_LITERAL_BYTE_SPAN.div_ceil(LITERAL_BYTE_DIVISOR);
+
+/// The most bytes `max_fee` can move the storage tally.
+///
+/// The tally byte-counts the fee vault as it stands when finalization charges, which is before the
+/// unspent payment is returned — so it counts `balance - max_fee`, whose width moves with `max_fee`
+/// as surely as the literal's does. A payment must fit in `u64`
+/// (`FeeState::add_fee_payment_checked`), so `max_fee` can only shift that residual across encoding
+/// widths while the balance is itself in `u64` range; above it, every payment leaves a residual of
+/// the same width. The span is therefore the literal's.
+const MAX_FEE_RESIDUAL_BYTE_DRIFT: u64 = FEE_LITERAL_BYTE_SPAN;
 
 #[derive(Debug, Clone)]
 pub struct FeeTable {
@@ -87,16 +99,22 @@ impl FeeTable {
     /// The allowance a dry-run estimate must carry so that a real run of the same transaction at a
     /// different `max_fee` cannot cost more than the estimate.
     ///
-    /// The weight term is the fee literal's width drift priced at this table's weight cost. The burn
-    /// is taken over the running total, so it re-multiplies that term; the trailing `1` covers the
-    /// rounding boundary its floor division can land on.
+    /// Two charges read `max_fee` back, and they move in opposite directions, so both are counted.
+    /// The weight term is the fee literal's width drift at this table's weight cost. The storage
+    /// term is the fee vault's residual width drift at this table's byte cost, plus the rounding
+    /// boundary the storage divisor can land on. The burn re-multiplies their sum, being taken over
+    /// the running total, and the trailing `1` covers its own rounding boundary.
     ///
     /// `tari_engine_types::fees::FEE_ESTIMATE_ALLOWANCE` is the value this yields, restated where
     /// `FeeReceipt::required_fees` can reach it.
     pub const fn fee_estimate_allowance(&self, burn_rate_bps: u16) -> u64 {
         let weight_drift = MAX_FEE_LITERAL_WEIGHT_DRIFT.saturating_mul(self.per_transaction_weight_cost);
-        weight_drift
-            .saturating_add(weight_drift.saturating_mul(burn_rate_bps as u64) / 10_000)
+        let storage_drift = MAX_FEE_RESIDUAL_BYTE_DRIFT.saturating_mul(self.per_byte_storage_cost) /
+            non_zero(self.storage_cost_divisor) +
+            1;
+        let drift = weight_drift.saturating_add(storage_drift);
+        drift
+            .saturating_add(drift.saturating_mul(burn_rate_bps as u64) / 10_000)
             .saturating_add(1)
     }
 
@@ -157,8 +175,8 @@ impl FeeTable {
     }
 }
 
-fn non_zero(divisor: u64) -> u64 {
-    divisor.max(1)
+const fn non_zero(divisor: u64) -> u64 {
+    if divisor == 0 { 1 } else { divisor }
 }
 
 /// The WASM-execution fee rate extracted from a [`FeeTable`], plus the conversion from fees paid
@@ -222,19 +240,34 @@ mod tests {
         assert_eq!(MAX_FEE_LITERAL_WEIGHT_DRIFT, 3);
     }
 
-    #[test]
-    fn the_allowance_scales_with_the_weight_cost_and_the_burn() {
+    /// A table priced like the shipped ones: one microtari per weight unit and per stored byte.
+    fn shipped_like() -> FeeTable {
         let mut table = FeeTable::zero_rated();
         table.per_transaction_weight_cost = 1;
+        table.per_byte_storage_cost = 1;
+        table.storage_cost_divisor = 1;
+        table
+    }
 
-        // No burn: the weight drift, plus the rounding boundary.
-        assert_eq!(table.fee_estimate_allowance(0), 4);
-        // A full burn doubles the weight term.
-        assert_eq!(table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS), 7);
+    #[test]
+    fn the_allowance_covers_both_directions_max_fee_moves() {
+        let mut table = shipped_like();
 
-        // The weight cost multiplies the whole thing.
+        // Weight drift (3 units) + storage drift (8 bytes) + the storage rounding boundary.
+        assert_eq!(table.fee_estimate_allowance(0), 3 + 8 + 1 + 1);
+        // A full burn doubles all of it.
+        assert_eq!(table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS), 12 * 2 + 1);
+
+        // The storage divisor scales the residual term down.
+        table.storage_cost_divisor = 4;
+        assert_eq!(table.fee_estimate_allowance(0), 3 + 8 / 4 + 1 + 1);
+
+        // Each rate multiplies the whole drift.
+        table.storage_cost_divisor = 1;
         table.per_transaction_weight_cost = 2;
-        assert_eq!(table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS), 13);
+        assert_eq!(table.fee_estimate_allowance(0), 6 + 8 + 1 + 1);
+        table.per_byte_storage_cost = 2;
+        assert_eq!(table.fee_estimate_allowance(0), 6 + 16 + 1 + 1);
     }
 
     /// `FEE_ESTIMATE_ALLOWANCE` is stated in `tari_engine_types`, which cannot see a `FeeTable`. It
@@ -242,11 +275,9 @@ mod tests {
     /// against.
     #[test]
     fn the_restated_allowance_matches_the_derivation() {
-        let mut table = FeeTable::zero_rated();
-        table.per_transaction_weight_cost = 1;
         assert_eq!(
             FEE_ESTIMATE_ALLOWANCE,
-            table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS)
+            shipped_like().fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS)
         );
     }
 }

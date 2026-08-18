@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// The exhaust burn rate that [`FEE_ESTIMATE_ALLOWANCE`] is derived against, in basis points.
 ///
-/// The burn is taken over the running fee total, so it re-multiplies the one term that can make a
+/// The burn is taken over the running fee total, so it re-multiplies every term that can make a
 /// real run cost more than the dry run that estimated it. A network configured above this rate
 /// under-states `FeeReceipt::required_fees`, and every submission built from a dry run is then
 /// rejected as underpaid — `every_shipped_network_stays_within_the_burn_rate_ceiling` holds the
@@ -16,19 +16,22 @@ pub const MAX_EXHAUST_BURN_RATE_BPS: u16 = 10_000;
 /// The allowance a dry-run estimate carries on top of what it metered, so that a real run of the
 /// same transaction at a different `max_fee` can never cost more than the estimate.
 ///
-/// `max_fee` is itself an input to the cost, so the two runs meter differently. One term moves the
-/// cost *upward*: transaction weight prices the fee instruction's literal args by their encoded
-/// bytes, so a wider `max_fee` can push `literal_bytes / LITERAL_BYTE_DIVISOR` up by a bounded
-/// number of steps. The storage charge reads the fee vault's residual balance, which a dry run's
-/// minimal `max_fee` leaves at its widest, so a real submission sees the same or fewer bytes there.
-/// The exhaust burn reads nothing of its own but re-multiplies the weight term, being taken over
-/// the running total.
+/// `max_fee` is itself an input to the cost, so the two runs meter differently. Two charges read it
+/// back, and they move in opposite directions, so the allowance covers both. Transaction weight
+/// prices the fee instruction's literal args by their encoded bytes, so a wider `max_fee` pushes
+/// `literal_bytes / LITERAL_BYTE_DIVISOR` up by a bounded number of steps. The storage tally
+/// byte-counts the fee vault before the unspent payment is returned, so it counts
+/// `balance - max_fee`, and a wider `max_fee` narrows that. A dry run meters at whatever `max_fee`
+/// the caller submitted — nothing narrows it — so either direction is reachable between a dry run
+/// and the submission built from it. The exhaust burn reads nothing of its own but re-multiplies
+/// both, being taken over the running total.
 ///
 /// The value is derived rather than chosen: `FeeTable::fee_estimate_allowance` computes it from
-/// `per_transaction_weight_cost`, `LITERAL_BYTE_DIVISOR` and the burn rate, all of which live in
-/// crates downstream of this one. `fee_estimate_allowance_covers_every_shipped_network` asserts
-/// this value covers every shipped network at `MAX_EXHAUST_BURN_RATE_BPS`.
-pub const FEE_ESTIMATE_ALLOWANCE: u64 = 7;
+/// `per_transaction_weight_cost`, `per_byte_storage_cost`, `storage_cost_divisor`,
+/// `LITERAL_BYTE_DIVISOR` and the burn rate, all of which live in crates downstream of this one.
+/// `fee_estimate_allowance_covers_every_shipped_network` asserts this value covers every shipped
+/// network at `MAX_EXHAUST_BURN_RATE_BPS`.
+pub const FEE_ESTIMATE_ALLOWANCE: u64 = 25;
 
 #[derive(Debug, Clone, Default)]
 pub struct FeeReceiptBuilder {
@@ -138,13 +141,12 @@ impl FeeReceipt {
     /// input to the cost, so a real run meters slightly differently from the dry run that produced
     /// the estimate. The allowance covers the whole of that difference.
     ///
-    /// Two charges read `max_fee` back, and only one of them can read it *upwards*. The transaction
-    /// weight prices the fee instruction's literal args by their encoded bytes, so it steps whenever
-    /// the amount's width crosses a multiple of the literal divisor. The storage charge reads the
-    /// balance left in the fee vault, which a dry run's minimal `max_fee` already leaves at its
-    /// widest, so every real submission sees the same or fewer bytes there. The exhaust burn adds
-    /// no reading of its own but re-multiplies whatever the weight did, being taken over the running
-    /// total. [`FEE_ESTIMATE_ALLOWANCE`] bounds what remains.
+    /// Two charges read `max_fee` back, in opposite directions. The transaction weight prices the fee
+    /// instruction's literal args by their encoded bytes, so it steps whenever the amount's width
+    /// crosses a multiple of the literal divisor. The storage tally byte-counts the fee vault before
+    /// the unspent payment is returned, so a wider `max_fee` leaves a narrower residual there. The
+    /// exhaust burn adds no reading of its own but re-multiplies both, being taken over the running
+    /// total. [`FEE_ESTIMATE_ALLOWANCE`] bounds the pair.
     ///
     /// This is a floor, not a recommendation. Overpayment is returned to the paying vault, so a
     /// caller with a vault to refund to loses nothing by submitting above it — and one paying purely
@@ -318,7 +320,16 @@ impl FeeBreakdown {
     /// Charges accrued during execution accumulate with [`Self::add`], but the charges computed at
     /// finalization are absolute functions of the state being persisted. They are recomputed once
     /// that state is known, so they must be assignable rather than additive.
+    ///
+    /// A charge of zero leaves the source absent rather than recording a zero against it. The
+    /// breakdown is persisted inside every transaction receipt and rendered by every wallet, so a
+    /// source that never charged anything should not occupy a row. [`Self::get`] reads an absent
+    /// source as zero, so the two are indistinguishable to a reader.
     pub fn set(&mut self, source: FeeSource, amount: u64) {
+        if amount == 0 {
+            self.breakdown.shift_remove(&source);
+            return;
+        }
         match self.breakdown.entry(source) {
             Entry::Occupied(entry) => {
                 *entry.into_mut() = amount;
@@ -335,8 +346,13 @@ impl FeeBreakdown {
         self.breakdown.iter()
     }
 
+    /// Saturating, so a breakdown that somehow exceeds `u64` reports the ceiling rather than
+    /// wrapping to a total below the charges it is made of. Individual charges are checked as they
+    /// are computed, so reaching it means something upstream already went wrong.
     pub fn get_total(&self) -> u64 {
-        self.breakdown.values().sum()
+        self.breakdown
+            .values()
+            .fold(0u64, |acc, amount| acc.saturating_add(*amount))
     }
 
     pub fn get(&self, source: FeeSource) -> u64 {

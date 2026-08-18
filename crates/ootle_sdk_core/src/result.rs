@@ -363,6 +363,7 @@ mod tests {
             logs: vec![LogEntry::new(LogLevel::Info, "hello".to_string())],
             execution_results: Vec::new(),
             result,
+            total_fees_required: fee_receipt.total_fees_charged(),
             fee_receipt,
         };
 

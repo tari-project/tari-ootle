@@ -222,8 +222,14 @@ impl FinalizeResult {
     }
 
     /// The minimum `max_fee` a resubmission of this transaction has to carry.
+    ///
+    /// Falls back to what the receipt was charged. `total_fees_required` is additive on the wire, so
+    /// a payload from a peer that predates it decodes as zero — reading it raw would answer a fee
+    /// estimate with the allowance alone.
     pub fn required_fees(&self) -> u64 {
-        self.total_fees_required.saturating_add(FEE_ESTIMATE_ALLOWANCE)
+        self.total_fees_required
+            .max(self.fee_receipt.total_fees_charged())
+            .saturating_add(FEE_ESTIMATE_ALLOWANCE)
     }
 
     pub fn new_rejected(transaction_hash: Hash32, reason: RejectReason) -> Self {
@@ -548,5 +554,41 @@ impl From<&RejectReason> for AbortReason {
             RejectReason::InsufficientFeesPaid(_) => Self::InsufficientFeesPaid,
             RejectReason::FeePaymentInMainIntent => Self::FeePaymentInMainIntent,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::types::Hash32;
+
+    use super::*;
+    use crate::fees::{FeeBreakdown, FeeSource};
+
+    fn result_charged(amount: u64) -> FinalizeResult {
+        let mut breakdown = FeeBreakdown::default();
+        breakdown.add(FeeSource::Storage, amount);
+        FinalizeResult::new(
+            Hash32::from_array([0u8; Hash32::LENGTH]),
+            vec![],
+            vec![],
+            TransactionResult::Reject(RejectReason::ExecutionFailure("failed".to_string())),
+            FeeReceipt::builder().with_cost_breakdown(breakdown).build(),
+        )
+    }
+
+    /// `total_fees_required` is additive on the wire, so a payload from a peer that predates it
+    /// decodes as zero. An estimate built from it must still clear what the transaction cost.
+    #[test]
+    fn a_missing_required_total_falls_back_to_what_was_charged() {
+        let mut result = result_charged(5_000);
+        result.total_fees_required = 0;
+        assert!(result.required_fees() > 5_000);
+    }
+
+    /// When the two differ, the gating figure is the one a resubmission has to clear.
+    #[test]
+    fn required_fees_reports_the_larger_of_the_two() {
+        let result = result_charged(400).with_total_fees_required(9_000);
+        assert!(result.required_fees() > 9_000);
     }
 }

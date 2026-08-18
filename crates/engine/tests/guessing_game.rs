@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
     prelude::ComponentAddress,
     types::{NonFungibleAddress, NonFungibleId},
@@ -24,7 +24,7 @@ fn it_works() {
     // turned off by default. To turn them on use `test.enable_fees()`, you will then need to add fee instructions to
     // pay the fee.
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             // Allocate a new component address
             .allocate_component_address("guessing_game")
             // Construct the component by calling the `new` function of the template, passing the address allocation as an argument
@@ -52,7 +52,7 @@ fn it_works() {
     // Just to demonstrate, we'll test an "unhappy path": user 1 makes a bad guess, since our template requires guesses
     // between 0 and 10.
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(game_address, "guess", args![100, user1_account])
             .build_and_seal(&user1_secret),
         vec![],
@@ -66,7 +66,7 @@ fn it_works() {
 
     // Let's make a correct guess with user 1
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(game_address, "guess", args![5, user1_account])
             .build_and_seal(&user1_secret),
         vec![],
@@ -74,7 +74,7 @@ fn it_works() {
 
     // User 2 makes a correct guess
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(game_address, "guess", args![7, user2_account])
             .build_and_seal(&user2_secret),
         vec![],
@@ -82,7 +82,7 @@ fn it_works() {
 
     // User 3 makes a correct guess
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(game_address, "guess", args![3, user3_account])
             .build_and_seal(&user3_secret),
         vec![],
@@ -90,7 +90,7 @@ fn it_works() {
 
     // Now let's end the game and check the results.
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(game_address, "end_game_and_payout", args![])
             .build_and_seal(test.secret_key()),
         vec![],

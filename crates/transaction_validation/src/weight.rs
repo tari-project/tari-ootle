@@ -53,6 +53,7 @@ impl Validator<Transaction> for TransactionWeightValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
+    use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{
         Instruction,
         Network,
@@ -85,7 +86,7 @@ mod tests {
                     instructions,
                     IndexSet::new(),
                     None,
-                    None,
+                    Epoch(1),
                     false,
                 ),
                 vec![TransactionSignature::new(

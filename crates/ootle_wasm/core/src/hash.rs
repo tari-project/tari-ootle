@@ -47,6 +47,7 @@ mod tests {
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
         tari_utilities::ByteArray,
     };
+    use tari_engine_types::Epoch;
     use tari_ootle_transaction::UnsignedTransactionV1;
 
     use super::*;
@@ -58,7 +59,7 @@ mod tests {
         let public_key_bytes = public_key.as_bytes().to_vec();
         let seal_signer_bytes: RistrettoPublicKeyBytes = public_key.to_byte_type();
 
-        let tx = UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, None, false);
+        let tx = UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, Epoch(1), false);
 
         // Hash via our function
         let our_hash = hash_unsigned_transaction(&tx, &public_key_bytes).unwrap();
@@ -75,7 +76,7 @@ mod tests {
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let public_key_bytes = public_key.as_bytes().to_vec();
 
-        let tx = UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, None, false);
+        let tx = UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, Epoch(1), false);
         let json = serde_json::to_string(&tx).unwrap();
 
         let hash_from_struct = hash_unsigned_transaction(&tx, &public_key_bytes).unwrap();

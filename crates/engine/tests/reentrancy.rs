@@ -3,7 +3,7 @@
 
 use tari_engine::runtime::{LockError, LockState};
 use tari_engine_types::lock::LockFlag;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
     prelude::TARI_TOKEN,
     types::{ComponentAddress, constants::TARI},
@@ -19,7 +19,7 @@ fn it_prevents_reentrant_withdraw() {
     let (account, _, account_secret) = test.create_funded_account();
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(account, "withdraw", args![TARI_TOKEN, 1000 * TARI])
             .put_last_instruction_output_on_workspace("bucket")
             .call_function(template_addr, "with_bucket", args![Workspace("bucket")])
@@ -32,7 +32,7 @@ fn it_prevents_reentrant_withdraw() {
         .unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(reentrancy, "reentrant_withdraw", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -52,7 +52,7 @@ fn it_allows_multiple_immutable_access_to_component() {
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(reentrancy, "reentrant_access_immutable", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -66,7 +66,7 @@ fn it_prevents_read_access_to_mutating_component() {
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(reentrancy, "reentrant_access", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -87,7 +87,7 @@ fn it_prevents_multiple_mutable_access_to_component() {
     let reentrancy: ComponentAddress = test.call_function("Reentrancy", "new", args![], vec![]);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(reentrancy, "reentrant_access_mut", args![])
             .build_and_seal(test.secret_key()),
         vec![],

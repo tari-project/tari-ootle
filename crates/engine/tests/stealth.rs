@@ -16,7 +16,7 @@ use tari_engine_types::{
     resource_container::ResourceError,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{
     AccessRule,
     ComponentAddress,
@@ -54,7 +54,7 @@ fn setup(
     let template_addr = test.get_template_address(TEMPLATE_NAME);
     let initial_supply = transfer_data.statement.inputs_statement.revealed_amount;
 
-    let transaction = Transaction::builder_localnet()
+    let transaction = Transaction::builder_localnet(Epoch(1))
         .call_function(template_addr, "new", args![
             initial_supply,
             transfer_data.statement,
@@ -115,7 +115,7 @@ fn basic_transfer() {
         0,
     );
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
@@ -167,7 +167,7 @@ fn fee_intent_rejects_a_second_stealth_transfer() {
     let (first, second) = two_transfers(&mint);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 builder
                     .stealth_transfer(faucet_resx, first.statement)
@@ -195,7 +195,7 @@ fn fee_intent_counts_a_stealth_transfer_performed_from_wasm() {
     let (first, second) = two_transfers(&mint);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 builder.stealth_transfer(faucet_resx, first.statement).call_function(
                     template_addr,
@@ -222,7 +222,7 @@ fn main_intent_may_transfer_after_the_fee_intent_has() {
     let (first, second) = two_transfers(&mint);
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| builder.stealth_transfer(faucet_resx, first.statement))
             .stealth_transfer(faucet_resx, second.statement)
             .finish()
@@ -255,7 +255,7 @@ fn programmatic_transfer() {
         25,
     );
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "programmatic_transfer", args![transfer.statement])
             .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
@@ -292,7 +292,7 @@ fn transfer_with_revealed_outputs() {
         700,
     );
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -341,7 +341,7 @@ fn transfer_revealed_between_accounts() {
     );
     let transfer_from_alice_to_bob = stealth::generate_transfer_data(NO_INPUTS, 100u64, [25, 25, 25], 25);
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             .put_last_instruction_output_on_workspace("withdrawn_funds_from_stealth_transfer")
             .call_method(alice, "deposit", args![Workspace(
@@ -394,7 +394,7 @@ fn transfer_invalid_balance_in_statement() {
         2,
     );
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(alice, "deposit", args![Workspace("bucket")])
@@ -424,7 +424,7 @@ fn transfer_fails_if_transaction_is_not_signed_by_utxo_owner() {
     let transfer_from_faucet = stealth::generate_transfer_data([input], 0u64, [100], 0);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             // Missing signer
             // .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
@@ -467,7 +467,7 @@ fn transfer_invalid_range_proof_in_statement() {
     transfer_from_faucet.statement.outputs_statement.agg_range_proof = rp.try_into().unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(alice, "deposit", args![Workspace("bucket")])
@@ -486,38 +486,34 @@ fn many_outputs_in_one_transfer() {
     use std::{iter, time::Instant};
 
     use tari_engine_types::limits;
-    let outputs = [1000];
-    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
+    // The whole minted amount is spent into equal outputs, so it must divide exactly by the output count or the
+    // balance proof will not sum.
+    const VALUE_PER_OUTPUT: u64 = 125;
+    let max_outputs = limits::STEALTH_LIMITS.max_outputs;
+    let total = VALUE_PER_OUTPUT * u64::try_from(max_outputs).unwrap();
+    let mint = stealth::generate_mint_statement([total], 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let timer = Instant::now();
 
-    assert_eq!(
-        1000 % limits::STEALTH_LIMITS.max_outputs,
-        0,
-        "Balance proof will fail due to rounding. Adjust the test amount to be a multiple of the limit"
-    );
     let transfer_from_faucet = stealth::generate_transfer_data(
         [MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 1000,
+            value: total,
         }],
         0u64,
-        iter::repeat_n(
-            u64::try_from(1000 / limits::STEALTH_LIMITS.max_outputs).unwrap(),
-            limits::STEALTH_LIMITS.max_outputs,
-        ),
+        iter::repeat_n(VALUE_PER_OUTPUT, max_outputs),
         0,
     );
 
-    // Release mode: ± 23s on M1 Mac, 3.7s on Ryzen 5950x (single thread, total test time 6.1s) for 500 outputs. Current
-    // limit is 8 TODO: verification time (depending on hardware) of 2-10+ seconds is still a problem, determine
+    // Release mode: ± 23s on M1 Mac, 3.7s on Ryzen 5950x (single thread, total test time 6.1s) for 500 outputs.
+    // TODO: verification time (depending on hardware) of 2-10+ seconds is still a problem, determine
     // what the upper bound for utxos should be. Parts of the verification could be parallelized (helps, assuming
     // some minimum CPU spec for a VN). Note that generation in Debug mode took 16 minutes on Ryzen 5950x !
     eprintln!("Generated transfer in {:.2?}", timer.elapsed());
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
@@ -530,7 +526,7 @@ fn many_outputs_in_one_transfer() {
         .up_iter()
         .filter_map(|(_, substate)| substate.substate_value().as_utxo())
         .collect::<Vec<_>>();
-    assert_eq!(utxos.len(), 8);
+    assert_eq!(utxos.len(), max_outputs);
 }
 
 pub fn try_brute_force_stealth_balance<L>(
@@ -571,7 +567,7 @@ fn mint_with_view_key() {
         &view_key,
     );
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, withdraw_proof.statement)
             .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
@@ -631,7 +627,7 @@ fn freeze_then_attempt_spend() {
         .collect::<Vec<_>>();
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "freeze_utxos", args![utxos])
             .build_and_seal(test.secret_key()),
         vec![owner.clone()],
@@ -639,7 +635,7 @@ fn freeze_then_attempt_spend() {
 
     // Try and spend a frozen output
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement.clone())
             .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
@@ -651,7 +647,7 @@ fn freeze_then_attempt_spend() {
     assert_reject_reason(reason, ResourceError::InvalidSpend { details: String::new() });
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "unfreeze_utxos", args![utxos])
             .build_and_seal(test.secret_key()),
         vec![owner],
@@ -659,7 +655,7 @@ fn freeze_then_attempt_spend() {
 
     // Should be able to spend now
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
@@ -713,7 +709,7 @@ fn burn_then_attempt_spend() {
         .collect::<Vec<_>>();
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "burn_utxos", args![utxos_and_proofs.clone()])
             .build_and_seal(test.secret_key()),
         vec![owner.clone()],
@@ -721,7 +717,7 @@ fn burn_then_attempt_spend() {
 
     // Try and spend a burnt outputs
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement.clone())
             .build_and_seal(test.secret_key()),
         vec![],
@@ -769,7 +765,7 @@ fn burn_with_elgamal_value_proof_adjusts_supply() {
 
     let owner = test.owner_proof();
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        test.transaction()
             .call_method(faucet, "burn_utxos", args![vec![(utxo_id, proof)]])
             .build_and_seal(test.secret_key()),
         vec![owner],
@@ -814,7 +810,7 @@ fn burn_rejects_elgamal_value_proof_for_a_false_value() {
 
     let owner = test.owner_proof();
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        test.transaction()
             .call_method(faucet, "burn_utxos", args![vec![(utxo_id, proof)]])
             .build_and_seal(test.secret_key()),
         vec![owner],
@@ -852,7 +848,7 @@ fn transfer_denied_by_resource_withdraw_rule() {
     let template_addr = test.get_template_address(TEMPLATE_NAME);
     let initial_supply = mint.statement.inputs_statement.revealed_amount;
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template_addr, "new_withdraw_gated_by_signer", args![
                 initial_supply,
                 mint.statement.clone()
@@ -882,7 +878,7 @@ fn transfer_denied_by_resource_withdraw_rule() {
     // A non-issuer signer cannot authorise the transfer: the resource withdraw rule denies it.
     let (_attacker, _attacker_proof, attacker_sk) = test.create_empty_account();
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement.clone())
             .finish()
             .seal(&attacker_sk),
@@ -892,7 +888,7 @@ fn transfer_denied_by_resource_withdraw_rule() {
 
     // The issuer (the withdraw authority) can: the same transfer now succeeds.
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -953,7 +949,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
 
     // First try to spend with only 2 of the required 3 signatures
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement.clone())
             .finish()
             .add_signer(&test_pk, &sk2)
@@ -965,7 +961,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
     assert_access_denied_for_action(reason, ActionIdent::Native(NativeAction::StealthUtxoSpend));
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
             .add_signer(&test_pk, &sk2)
@@ -1011,7 +1007,7 @@ fn transfer_restricted_by_access_rules_component_scope() {
 
     // Create the new outputs with the component-bound spend condition
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, initial_transfer.statement.clone())
             .finish()
             .seal(test.secret_key()),
@@ -1047,7 +1043,7 @@ fn transfer_restricted_by_access_rules_component_scope() {
 
     // First try to spend in a template context
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(
                 test.get_template_address(TEMPLATE_NAME),
                 "static_programmatic_transfer",
@@ -1062,7 +1058,7 @@ fn transfer_restricted_by_access_rules_component_scope() {
 
     // Then, spend in the component context, which succeeds
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(component, "programmatic_transfer", args![transfer.statement])
             .finish()
             .seal(test.secret_key()),

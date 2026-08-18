@@ -35,7 +35,7 @@ use std::time::Duration;
 use anyhow::{Context, anyhow, bail};
 use clap::Parser;
 use tari_engine_types::component::derive_component_address_from_public_key;
-use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
+use tari_ootle_transaction::{Epoch, TransactionBuilder, UnsignedTransaction, args};
 use tari_ootle_wallet_sdk::models::EffectiveStatus;
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
@@ -225,7 +225,7 @@ fn build_transfer(
     max_fee: u64,
 ) -> UnsignedTransaction {
     let dest = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &dest_pk);
-    TransactionBuilder::new(network)
+    TransactionBuilder::new(network, Epoch(100))
         .create_account(dest_pk)
         .pay_fee_from_component(source, Amount::from_integer(max_fee))
         .call_method(source, "withdraw", args![TARI_TOKEN, Amount::from_integer(amount)])

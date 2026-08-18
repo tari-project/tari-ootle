@@ -13,7 +13,7 @@ use tari_engine_types::{
     published_template::{PublishedTemplateAddress, TemplateBlob},
     substate::{SubstateId, SubstateValue},
 };
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Epoch, Transaction};
 use tari_template_test_tooling::{
     TemplateTest,
     compile::compile_template,
@@ -32,7 +32,7 @@ fn publish_template_success() {
         PublishedTemplateAddress::from_author_and_binary_hash(&public_key.to_byte_type(), &expected_binary_hash);
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account_address, 200_000u64)
             .publish_template(template.into_code())
             .build_and_seal(&account_key),
@@ -63,7 +63,7 @@ fn publish_template_invalid_binary() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account_address, owner_proof, account_key, _) = test.create_funded_account_with_keypair();
     let result = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account_address, 200_000u64)
             // Main intent instruction #1
             .publish_template(vec![1u8, 2, 3])
@@ -85,7 +85,7 @@ fn publish_template_too_big_binary() {
     let random_wasm_binary = generate_random_binary(limits::ENGINE_LIMITS.max_template_binary_size_bytes + 1);
     let wasm_binary_size = random_wasm_binary.len();
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account_address, 200_000u64)
             // SAFETY: We are intentionally publishing an oversized binary to test size limits.
             .publish_template(unsafe { TemplateBlob::new_unchecked(random_wasm_binary) })
@@ -106,7 +106,7 @@ fn rejects_more_than_one_publish_template() {
 
     // The per-transaction publish-template cap is checked before any binary is validated, so these (invalid) binaries
     // never reach WASM validation: the transaction is rejected for carrying too many PublishTemplate instructions.
-    let mut builder = Transaction::builder_localnet().pay_fee_from_component(account_address, 200_000u64);
+    let mut builder = Transaction::builder_localnet(Epoch(1)).pay_fee_from_component(account_address, 200_000u64);
     for i in 0..=limits::MAX_PUBLISH_TEMPLATES_PER_TRANSACTION {
         builder = builder.publish_template(vec![i as u8]);
     }

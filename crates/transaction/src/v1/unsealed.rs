@@ -142,7 +142,7 @@ impl UnsealedTransactionV1 {
         self.transaction.min_epoch
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         self.transaction.max_epoch
     }
 

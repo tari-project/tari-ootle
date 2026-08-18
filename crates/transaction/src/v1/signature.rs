@@ -411,7 +411,7 @@ pub(crate) struct TransactionSignatureFields<'a> {
     instructions: &'a [Instruction],
     inputs: &'a IndexSet<SubstateRequirement>,
     min_epoch: Option<Epoch>,
-    max_epoch: Option<Epoch>,
+    max_epoch: Epoch,
     is_seal_signer_authorized: bool,
     dry_run: bool,
     nonce: u64,
@@ -483,7 +483,7 @@ mod tests {
             ],
             inputs,
             min_epoch: Some(Epoch(100)),
-            max_epoch: Some(Epoch(200)),
+            max_epoch: Epoch(200),
             is_seal_signer_authorized: false,
             dry_run: true,
             blobs: crate::Blobs::empty(),
@@ -576,13 +576,10 @@ mod tests {
         tx.min_epoch = None;
         assert_ne!(sig_msg(&signer, &tx), base_msg, "min_epoch (None)");
 
-        // max_epoch: value change / Some <-> None
+        // max_epoch
         let mut tx = base.clone();
-        tx.max_epoch = Some(Epoch(999));
+        tx.max_epoch = Epoch(999);
         assert_ne!(sig_msg(&signer, &tx), base_msg, "max_epoch (value)");
-        let mut tx = base.clone();
-        tx.max_epoch = None;
-        assert_ne!(sig_msg(&signer, &tx), base_msg, "max_epoch (None)");
 
         // is_seal_signer_authorized
         let mut tx = base.clone();
@@ -707,11 +704,8 @@ mod tests {
 
         // max_epoch
         let mut u = base_unsigned.clone();
-        u.max_epoch = Some(Epoch(999));
+        u.max_epoch = Epoch(999);
         assert_ne!(seal_msg(&with_body(u)), base_msg, "max_epoch (value)");
-        let mut u = base_unsigned.clone();
-        u.max_epoch = None;
-        assert_ne!(seal_msg(&with_body(u)), base_msg, "max_epoch (None)");
 
         // is_seal_signer_authorized
         let mut u = base_unsigned.clone();

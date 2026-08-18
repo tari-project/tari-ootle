@@ -8,7 +8,7 @@ use tari_engine::{
 };
 use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValue};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
     args::CallAction,
     types::{ComponentAddress, OwnerRule, VaultId},
@@ -36,7 +36,7 @@ fn create_component(test_mut: &mut TemplateTest) -> ComponentAddress {
         .collect::<Vec<_>>();
 
     test_mut.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(v1_template, "new", args![OwnerRule::OwnedBySigner, signers])
             .finish()
             .seal(test_mut.secret_key()),
@@ -69,7 +69,7 @@ fn it_migrates_to_a_new_template() {
     let v2_template = test.get_template_address("TemplateV2");
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .update_component_template_address_with_migrate(component, v2_template, "migrate_v1_to_v2", args![])
             .call_method(component, "assert_correct", args![])
             .finish()
@@ -91,7 +91,7 @@ fn it_migrates_to_a_new_template_with_args() {
     let v2_template = test.get_template_address("TemplateV2");
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .update_component_template_address_with_migrate(
                 component,
                 v2_template,
@@ -130,7 +130,7 @@ fn it_denies_migration_if_not_owner() {
     let (secret, _) = create_key_pair_from_seed(12);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .update_component_template_address_with_migrate(
                 component,
                 v2_template,
@@ -162,7 +162,7 @@ fn it_fails_when_a_migration_drops_a_vault() {
     let v2_template = test.get_template_address("TemplateV2");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .update_component_template_address_with_migrate(
                 component,
                 v2_template,
@@ -196,7 +196,7 @@ fn it_fails_when_a_migration_panics() {
     let v2_template = test.get_template_address("TemplateV2");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .update_component_template_address_with_migrate(component, v2_template, "faulty_migrate_panic", args![])
             .finish()
             .seal(test.secret_key()),
@@ -226,7 +226,7 @@ fn it_migrates_to_a_new_template_without_migration_call() {
     let v2_template = test.get_template_address("TemplateV2");
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .update_component_template(component, v2_template)
             .call_method(component, "assert_correct", args![])
             .finish()
@@ -248,7 +248,7 @@ fn it_fails_when_a_migration_attempts_a_cross_template_call() {
     let v2_template = test.get_template_address("TemplateV2");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .update_component_template_address_with_migrate(
                 component,
                 v2_template,
@@ -276,7 +276,7 @@ fn it_disallows_calling_the_migration_function_directly() {
     let (secret, _) = create_key_pair_from_seed(12);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(v2_template, "migrate_v1_to_v2", args![])
             .finish()
             .seal(&secret),

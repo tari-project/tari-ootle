@@ -45,6 +45,7 @@ impl Validator<Transaction> for TransactionNetworkValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
+    use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{
         Network,
         Transaction,
@@ -60,7 +61,7 @@ mod tests {
     fn tx(network_byte: u8) -> Transaction {
         Transaction::new(
             UnsealedTransactionV1::new(
-                UnsignedTransactionV1::new(network_byte, vec![], vec![], IndexSet::new(), None, None, false),
+                UnsignedTransactionV1::new(network_byte, vec![], vec![], IndexSet::new(), None, Epoch(1), false),
                 vec![TransactionSignature::new(
                     RistrettoPublicKeyBytes::zero(),
                     SchnorrSignatureBytes::zero(),

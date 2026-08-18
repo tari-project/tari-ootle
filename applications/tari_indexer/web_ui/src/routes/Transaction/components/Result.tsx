@@ -44,11 +44,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { saveAs } from "file-saver";
 import { useState } from "react";
 import { useGetTransaction, useGetTransactionResult } from "../../../api/hooks/useTransactions";
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
-} from "../../../Components/Accordion";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../../Components/Accordion";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import StatusChip from "../../../Components/StatusChip";
 import { DataTableCell } from "../../../Components/StyledComponents";
@@ -122,20 +118,15 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
   }
 
   const execResult: any =
-    data?.result && isFinalized(data.result)
-      ? data.result.Finalized.execution_result?.finalize?.result
-      : undefined;
+    data?.result && isFinalized(data.result) ? data.result.Finalized.execution_result?.finalize?.result : undefined;
 
   const rejected = data?.result && isRejected(data.result) ? data.result.Rejected : undefined;
 
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
-    setExpandedPanels((prev) =>
-      isExpanded ? [...prev, panel] : prev.filter((p) => p !== panel),
-    );
+    setExpandedPanels((prev) => (isExpanded ? [...prev, panel] : prev.filter((p) => p !== panel)));
   };
 
-  const expandAll = () =>
-    setExpandedPanels(["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"]);
+  const expandAll = () => setExpandedPanels(["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"]);
 
   const collapseAll = () => setExpandedPanels([]);
 
@@ -203,6 +194,18 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                       <TableRow>
                         <TableCell>Abort Details</TableCell>
                         <DataTableCell>{data.result.Finalized.abort_details}</DataTableCell>
+                      </TableRow>
+                    )}
+                    {transaction?.min_epoch != null && (
+                      <TableRow>
+                        <TableCell>Min Epoch</TableCell>
+                        <DataTableCell>{transaction.min_epoch.toString()}</DataTableCell>
+                      </TableRow>
+                    )}
+                    {transaction?.max_epoch != null && (
+                      <TableRow>
+                        <TableCell>Max Epoch</TableCell>
+                        <DataTableCell>{transaction.max_epoch.toString()}</DataTableCell>
                       </TableRow>
                     )}
                     <TableRow>
@@ -278,15 +281,10 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
               {/* Blobs */}
               <Accordion expanded={expandedPanels.includes("p10")} onChange={handleChange("p10")}>
                 <AccordionSummary>
-                  <Typography variant="h5">
-                    Blobs ({transaction?.blob_hashes?.length ?? 0})
-                  </Typography>
+                  <Typography variant="h5">Blobs ({transaction?.blob_hashes?.length ?? 0})</Typography>
                 </AccordionSummary>
                 <AccordionDetails>
-                  <BlobsContent
-                    hashes={transaction?.blob_hashes || []}
-                    sizes={transaction?.blob_sizes || []}
-                  />
+                  <BlobsContent hashes={transaction?.blob_hashes || []} sizes={transaction?.blob_sizes || []} />
                 </AccordionDetails>
               </Accordion>
 

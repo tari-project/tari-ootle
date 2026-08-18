@@ -150,9 +150,9 @@ export default function NFTList(props: NftListProps) {
   const DisplayNFTs = () => {
     return viewMode === "grid" ? (
       <Grid container spacing={3}>
-        {displayedNfts.map((nft: NonFungibleToken, i) => (
+        {displayedNfts.map((nft: NonFungibleToken) => (
           <NftCard
-            key={i}
+            key={nftKey(nft)}
             nft={nft}
             selected={selectedMap.has(nftKey(nft))}
             selectDisabled={isSelectDisabled(nft)}
@@ -173,9 +173,9 @@ export default function NFTList(props: NftListProps) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {displayedNfts.map((nft: NonFungibleToken, i) => (
+            {displayedNfts.map((nft: NonFungibleToken) => (
               <NftRow
-                key={i}
+                key={nftKey(nft)}
                 nft={nft}
                 selected={selectedMap.has(nftKey(nft))}
                 selectDisabled={isSelectDisabled(nft)}

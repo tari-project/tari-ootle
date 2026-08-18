@@ -139,6 +139,7 @@ mod tests {
         keys::{PublicKey, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
+    use tari_ootle_common_types::Epoch;
 
     use super::*;
     use crate::{
@@ -168,7 +169,7 @@ mod tests {
     }
 
     fn unsigned() -> UnsignedTransaction {
-        Transaction::builder(Network::LocalNet).build_unsigned()
+        Transaction::builder(Network::LocalNet, Epoch(1)).build_unsigned()
     }
 
     /// Several stealth inputs owned by the same address: one seals with its one-time key and the rest authorize

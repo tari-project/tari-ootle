@@ -577,7 +577,9 @@ mod tests {
     async fn the_derived_stealth_public_key_is_the_one_that_signs() {
         let provider = PrivateKeyProvider::random(Network::LocalNet);
         let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-        let unsigned = tari_ootle_transaction::Transaction::builder(Network::LocalNet).build_unsigned();
+        let unsigned =
+            tari_ootle_transaction::Transaction::builder(Network::LocalNet, tari_ootle_transaction::Epoch(1))
+                .build_unsigned();
 
         let derived = provider
             .stealth_public_key(&public_nonce)

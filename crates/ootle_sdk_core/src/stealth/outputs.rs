@@ -394,7 +394,7 @@ mod tests {
             revealed_input_amount: 0,
             revealed_output_amount: revealed_output,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         }

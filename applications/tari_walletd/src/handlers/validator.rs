@@ -144,7 +144,7 @@ pub async fn handle_claim_validator_fees(
     let max_fee = req.max_fee.max(1);
     let account_public_key = *account.address.account_public_key();
 
-    let builder = context.transaction_builder().with_dry_run(req.dry_run);
+    let builder = context.transaction_builder().await?.with_dry_run(req.dry_run);
 
     let builder = if req.output_to_revealed {
         let (first, rest) = fee_pool_addresses

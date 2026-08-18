@@ -15,7 +15,7 @@ use tari_engine_types::{
     confidential::ClaimBurnOutputData,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
+use tari_ootle_common_types::{Epoch, SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_crypto::{
     OutputWitness,
@@ -528,6 +528,7 @@ pub async fn handle_claim_burn(
         &account,
         proof_contents,
         max_fee,
+        context.transaction_max_epoch().await?,
         is_dry_run,
         proof_file_name,
     )
@@ -544,6 +545,7 @@ pub(crate) async fn execute_claim_burn(
     account: &AccountWithAddress,
     proof_contents: ClaimBurnProofContents,
     max_fee: u64,
+    max_epoch: Epoch,
     is_dry_run: bool,
     proof_file_name: Option<String>,
 ) -> Result<ClaimBurnResponse, anyhow::Error> {
@@ -667,7 +669,7 @@ pub(crate) async fn execute_claim_burn(
         encrypted_data: claimed_encrypted_data,
     };
 
-    let transaction = Transaction::builder(network.as_byte())
+    let transaction = Transaction::builder(network.as_byte(), max_epoch)
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
                 // Mint the UTXO
@@ -814,6 +816,7 @@ pub async fn handle_create_free_test_coins(
 
     let transaction = context
         .transaction_builder()
+        .await?
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
                 .create_account(*account.address.account_public_key())
@@ -937,7 +940,10 @@ pub async fn handle_transfer(
         .await
         .optional()?;
 
-    let builder = context.transaction_builder().create_account(req.destination_public_key);
+    let builder = context
+        .transaction_builder()
+        .await?
+        .create_account(req.destination_public_key);
 
     if let Some(ValidatorScanResult { id: address, substate }) = existing_dest_account {
         inputs.insert(address.into());
@@ -1101,6 +1107,7 @@ pub async fn handle_confidential_transfer(
     )])?;
 
     let transaction_service = context.transaction_service().clone();
+    let max_epoch = context.transaction_max_epoch().await?;
 
     // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
     // cause funds to remain locked indefinitely.
@@ -1117,6 +1124,7 @@ pub async fn handle_confidential_transfer(
         let transfer = sdk
             .confidential_transfer_api()
             .transfer(ConfidentialTransferParams {
+                max_epoch,
                 from_account: source_account_address,
                 input_selection: req.input_selection,
                 amount: req.amount,
@@ -1276,6 +1284,7 @@ pub async fn handle_stealth_transfer(
         .collect::<anyhow::Result<_>>()?;
 
     let params = StealthTransferParams {
+        max_epoch: context.transaction_max_epoch().await?,
         fee_params: req.fee_params,
         input_selection: req.input_selection,
         resource_address: req.resource_address,

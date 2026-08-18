@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, constants::STEALTH_TARI_RESOURCE_ADDRESS};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
 
@@ -19,7 +19,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     test.enable_fees();
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 1000u64)
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
@@ -53,7 +53,7 @@ fn deducts_fees_when_transaction_fails() {
     test.enable_fees();
 
     let result = test.execute_and_commit_on_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 1000u64)
             .call_function(test.get_template_address("State"), "this_doesnt_exist", args![])
             .build_and_seal(&private_key),
@@ -81,7 +81,7 @@ fn deposit_from_faucet_then_pay() {
     test.enable_fees();
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 builder
                     // Faucet deposits free coins into the account
@@ -120,7 +120,7 @@ fn another_account_pays_partially_for_fees() {
     const FAUCET_CAP: u64 = 100;
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             // Faucet pays a little
             .pay_fee_from_component(account_fee, Amount::from(FAUCET_CAP))
             // Account pays the rest
@@ -169,7 +169,7 @@ fn failed_fee_transaction() {
     test.enable_fees();
     let result = test
         .try_execute(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .with_fee_instructions_builder(|builder| {
                     builder
                         // This instruction will fail
@@ -211,7 +211,7 @@ fn fail_partial_paid_fees() {
     const FEE_PAID: u64 = 100;
 
     let result = test.execute_expect_commit(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             // Pay less fees than the cost of the main transaction
             .pay_fee_from_component(account, Amount::from(FEE_PAID))
             // These instructions should not be applied
@@ -261,7 +261,7 @@ fn fail_pay_negative_fee() {
     test.enable_fees();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| builder.call_method(account, "pay_fee", args![-100]))
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -286,7 +286,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
 
     let result = test
         .try_execute(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .with_fee_instructions_builder(|builder| {
                     (0u32..=0).fold(builder, |builder, i| {
                         builder.call_method(
@@ -366,7 +366,7 @@ fn fail_pay_too_little_no_fee_instruction() {
     test.enable_fees();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 builder
                     // These instructions should not be applied
@@ -407,7 +407,7 @@ fn failure_pay_fee_in_main_instructions() {
     test.enable_fees();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             // Pay in fee intent, enough to pass this step
             .pay_fee_from_component(account, 100u64)
             // Call pay_fee in main instructions (outside fee instructions) not permitted
@@ -431,7 +431,7 @@ fn dangling_bucket_pay_fees() {
     test.enable_fees();
 
     let result = test.execute_and_commit_on_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, Amount::from(500u64))
             .call_method(account, "withdraw", args![STEALTH_TARI_RESOURCE_ADDRESS, 10])
             .put_last_instruction_output_on_workspace("dangling_bucket")
@@ -471,7 +471,7 @@ fn template_load_fee_charged_once_per_template_per_transaction() {
 
     // Single State call — establishes the baseline TemplateLoad fee for {Account, State}.
     let single = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 1000u64)
             .call_method(state, "set", args![1u32])
             .build_and_seal(&private_key),
@@ -481,7 +481,7 @@ fn template_load_fee_charged_once_per_template_per_transaction() {
     // Five State calls — same template touched five extra times. Without dedup, TemplateLoad
     // would scale with call count; with dedup it must match the single-call baseline.
     let many = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 1000u64)
             .call_method(state, "set", args![1u32])
             .call_method(state, "set", args![2u32])

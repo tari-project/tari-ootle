@@ -7,7 +7,7 @@
 //! total is capped across calls.
 
 use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -27,7 +27,7 @@ fn per_transaction_budget_caps_total_across_calls() {
     test.enable_fees();
 
     let call = |rounds: u64, n: usize| {
-        let mut builder = Transaction::builder_localnet().pay_fee_from_component(account, 900_000_000u64);
+        let mut builder = Transaction::builder_localnet(Epoch(1)).pay_fee_from_component(account, 900_000_000u64);
         for _ in 0..n {
             builder = builder.call_function(addr, "bench_div_u64", args![rounds]);
         }

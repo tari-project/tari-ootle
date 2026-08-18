@@ -98,6 +98,16 @@ pub struct ConsensusConstants {
     /// totals in block headers. Use `exhaust_burn_rate` to resolve the rate for a given epoch rather than reading
     /// this field directly.
     pub exhaust_burn_rate_bps: u16,
+    /// The furthest ahead of the current epoch a transaction's `max_epoch` may be set. Every
+    /// transaction declares a mandatory `max_epoch`, so this caps how long any transaction can
+    /// remain sequenceable: a wallet can declare a transaction permanently dead once this many
+    /// epochs have passed, and an aborted attempt — which consensus deliberately allows to be
+    /// re-sequenced — cannot be retried beyond its window. This is a ceiling, not a default —
+    /// wallets stamp a much shorter window for ordinary traffic and only long-lived flows
+    /// (offline or multi-party signing) approach it. Enforced at mempool admission and in
+    /// consensus sequencing. CONSENSUS RULE: must be uniform network-wide, otherwise nodes
+    /// diverge on which transactions may be sequenced.
+    pub max_transaction_validity_epochs: u64,
     /// Number of base-layer blocks of leeway a voter is allowed when accepting `EndEpoch` proposals.
     /// If the voter's oracle has not yet crossed the next epoch boundary but its lagged scan height
     /// is within this many blocks of the boundary, the voter accepts `EndEpoch` from peers whose
@@ -143,6 +153,7 @@ impl ConsensusConstants {
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
+            max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 10,
         }
     }
@@ -183,6 +194,7 @@ impl ConsensusConstants {
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
+            max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 1,
         }
     }
@@ -223,6 +235,7 @@ impl ConsensusConstants {
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
+            max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 5,
         }
     }
@@ -263,6 +276,7 @@ impl ConsensusConstants {
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
             exhaust_burn_rate_bps: 500, // 5%
+            max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 5,
         }
     }
@@ -301,6 +315,23 @@ mod tests {
     };
 
     use super::*;
+
+    /// A consensus rule must be identical on every network, otherwise a transaction admitted on one
+    /// is refused on another and nodes diverge on which transactions may be sequenced.
+    #[test]
+    fn the_transaction_validity_ceiling_is_uniform_across_networks() {
+        let expected = ConsensusConstants::mainnet().max_transaction_validity_epochs;
+        for constants in [
+            ConsensusConstants::devnet(7),
+            ConsensusConstants::esmeralda(),
+            ConsensusConstants::testnet(),
+        ] {
+            assert_eq!(constants.max_transaction_validity_epochs, expected);
+        }
+        // A zero ceiling would admit only transactions expiring in the current epoch, leaving no
+        // room to submit one at all.
+        assert!(expected > 0);
+    }
 
     #[test]
     fn validation_budgets_always_admit_honest_proposals() {

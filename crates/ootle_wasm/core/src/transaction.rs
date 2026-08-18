@@ -60,12 +60,13 @@ mod tests {
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
         tari_utilities::ByteArray,
     };
+    use tari_engine_types::Epoch;
     use tari_ootle_transaction::{Transaction, UnsignedTransactionV1};
 
     use super::*;
 
     fn make_unsigned_tx() -> UnsignedTransactionV1 {
-        UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, None, false)
+        UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, Epoch(1), false)
     }
 
     #[test]

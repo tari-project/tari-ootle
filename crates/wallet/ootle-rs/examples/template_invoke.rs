@@ -31,13 +31,14 @@ use ootle_rs::{
     wallet::OotleWallet,
 };
 use tari_ootle_common_types::engine_types::published_template::PublishedTemplateAddress;
+use tari_ootle_transaction::Epoch;
 // ---------------------------------------------------------------------------
 // Step 1: Define the template interface
 //
 // The macro generates a single generic struct `StableCoin<'a, P, I>` parameterized
 // by an interface marker. Use the constructors to select the interface:
-//   - `StableCoin::for_component(addr, &provider)` — component methods (&self / &mut self)
-//   - `StableCoin::for_template(addr, &provider)`  — template functions (no self, e.g. constructors)
+//   - `StableCoin::for_component(addr, &provider, max_epoch)` — component methods (&self / &mut self)
+//   - `StableCoin::for_template(addr, &provider, max_epoch)`  — template functions (no self, e.g. constructors)
 //
 // The method signatures should match the template's public API. Argument types
 // must implement `serde::Serialize` for CBOR encoding.
@@ -109,8 +110,13 @@ async fn main() {
         .await
         .expect("Failed to connect to indexer");
 
+    // Every transaction declares the last epoch it may be sequenced in; past it the transaction can
+    // never land. Ten epochs is a comfortable window for an example — the network caps how far
+    // ahead this may be set.
+    let max_epoch = Epoch(provider.get_epoch().await.unwrap().as_u64() + 10);
+
     // Fund the account from faucet
-    let unsigned_tx = IFaucet::new(&provider)
+    let unsigned_tx = IFaucet::new(&provider, max_epoch)
         .take_faucet_funds()
         .pay_fee(500u64)
         .prepare()
@@ -133,7 +139,7 @@ async fn main() {
     // -----------------------------------------------------------------------
 
     let view_key = ootle_rs::template_types::crypto::RistrettoPublicKeyBytes::default();
-    let tpl = StableCoin::for_template(stable_coin_template.as_template_address(), &provider);
+    let tpl = StableCoin::for_template(stable_coin_template.as_template_address(), &provider, max_epoch);
     println!("Stable coin template: {}", tpl.template_address());
 
     let unsigned_tx = tpl
@@ -159,7 +165,7 @@ async fn main() {
     // exposes methods with &self / &mut self.
     // -----------------------------------------------------------------------
 
-    let coin = StableCoin::for_component(stable_coin_component, &provider);
+    let coin = StableCoin::for_component(stable_coin_component, &provider, max_epoch);
     println!("Stable coin component: {}", coin.component_address());
 
     // -- Example: Increase supply --
@@ -182,7 +188,7 @@ async fn main() {
     wait_for_tx(&pending_tx).await;
 
     // -- Example: Set fee configuration --
-    let coin = StableCoin::for_component(stable_coin_component, &provider);
+    let coin = StableCoin::for_component(stable_coin_component, &provider, max_epoch);
     let unsigned_tx = coin
         .set_config_transfer_fee_percentage(2u8)
         .pay_fee(1000u64)
@@ -201,7 +207,7 @@ async fn main() {
     // -- Example: Using the generic IComponent builder directly --
     // For one-off calls where defining a full interface isn't worth it,
     // you can use IComponent directly with string method names.
-    let unsigned_tx = IComponent::new(&provider)
+    let unsigned_tx = IComponent::new(&provider, max_epoch)
         .call_method(stable_coin_component, "decrease_supply", tari_ootle_transaction::args![
             Amount::new(500_000)
         ])
@@ -220,7 +226,7 @@ async fn main() {
 
     // -- Example: Chaining with workspace piping --
     // Withdraw returns a Bucket that can be piped to another method.
-    let coin = StableCoin::for_component(stable_coin_component, &provider);
+    let coin = StableCoin::for_component(stable_coin_component, &provider, max_epoch);
     let unsigned_tx = coin
         .withdraw(Amount::new(100_000))
         .put_last_instruction_output_on_workspace("bucket")

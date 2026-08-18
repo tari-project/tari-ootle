@@ -52,7 +52,7 @@ pub struct PrunedUnsignedTransactionV1 {
     #[n(4)]
     pub min_epoch: Option<Epoch>,
     #[n(5)]
-    pub max_epoch: Option<Epoch>,
+    pub max_epoch: Epoch,
     #[n(6)]
     pub is_seal_signer_authorized: bool,
     #[n(7)]
@@ -263,7 +263,7 @@ impl PrunedTransactionV1 {
         self.body.transaction.min_epoch
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         self.body.transaction.max_epoch
     }
 
@@ -383,7 +383,7 @@ mod tests {
             instructions: vec![Instruction::DropAllProofsInWorkspace],
             inputs,
             min_epoch: Some(Epoch(100)),
-            max_epoch: Some(Epoch(200)),
+            max_epoch: Epoch(200),
             is_seal_signer_authorized: false,
             dry_run: true,
             blobs,

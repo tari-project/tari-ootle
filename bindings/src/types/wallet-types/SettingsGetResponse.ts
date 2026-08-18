@@ -7,4 +7,6 @@ export type SettingsGetResponse = {
   network: NetworkInfo;
   advanced_ui_features: AdvancedUiFeatures;
   claimed_accounts: Array<string>;
+  current_epoch: number | null;
+  default_transaction_validity_epochs: number;
 };

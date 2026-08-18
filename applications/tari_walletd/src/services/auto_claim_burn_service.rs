@@ -31,6 +31,9 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::auto_claim_burn";
 const EPOCH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// Validity window for an unattended claim: a few epochs is ample for the submit itself, and a
+/// claim that does not land in that time is retried with a fresh window.
+const CLAIM_TRANSACTION_VALIDITY_EPOCHS: u64 = 3;
 /// Maximum retries for network/submission errors (indexer unreachable, tx service down).
 const MAX_RETRIES_NETWORK: u32 = 10;
 /// Maximum retries for file read/parse errors (file still being written on macOS).
@@ -340,7 +343,7 @@ impl AutoClaimBurnService {
             .collect();
 
         for file_name in ready {
-            match self.try_submit_claim(&file_name).await {
+            match self.try_submit_claim(&file_name, current_epoch).await {
                 Ok(tx_id) => {
                     info!(
                         target: LOG_TARGET,
@@ -429,7 +432,12 @@ impl AutoClaimBurnService {
             .with_context(|| format!("Failed to parse burn proof file: {}", path.display()))
     }
 
-    async fn try_submit_claim(&self, file_name: &str) -> Result<tari_ootle_transaction::TransactionId, ClaimError> {
+    async fn try_submit_claim(
+        &self,
+        file_name: &str,
+        current_epoch: Epoch,
+    ) -> Result<tari_ootle_transaction::TransactionId, ClaimError> {
+        let max_epoch = claim_max_epoch(current_epoch);
         let complete_proof = self
             .read_proof_file(file_name)
             .await
@@ -458,6 +466,7 @@ impl AutoClaimBurnService {
             &account,
             proof_contents.clone(),
             1,
+            max_epoch,
             true,
             Some(file_name.to_string()),
         )
@@ -500,6 +509,7 @@ impl AutoClaimBurnService {
             &account,
             proof_contents,
             required_fees,
+            max_epoch,
             false,
             Some(file_name.to_string()),
         )
@@ -542,6 +552,14 @@ impl PendingClaim {
 }
 
 /// Categorises errors to determine retry behaviour for auto-claims.
+/// The validity window stamped on claim transactions this service builds. Claims are submitted
+/// unattended, so the window only has to cover the submission itself. Derived from the epoch the
+/// caller already resolved: re-querying it here would turn a momentary indexer outage into a
+/// permanent claim failure.
+fn claim_max_epoch(current_epoch: Epoch) -> Epoch {
+    Epoch(current_epoch.as_u64().saturating_add(CLAIM_TRANSACTION_VALIDITY_EPOCHS))
+}
+
 enum ClaimError {
     /// A permanent error (account not in this wallet, invalid proof data). Remove from queue; the
     /// proof file remains in `burn_proof_dir` for the user to inspect and retry manually.

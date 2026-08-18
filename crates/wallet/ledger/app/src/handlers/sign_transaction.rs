@@ -193,7 +193,8 @@ fn capture_display(display: &mut TxDisplay, field: SigningField, data: &[u8]) ->
         SigningField::Inputs => display.input_count = read_u32(data)?,
         // Option<Epoch> borsh: 1-byte tag, then a u64 little-endian if present.
         SigningField::MinEpoch => display.min_epoch = read_option_u64(data)?,
-        SigningField::MaxEpoch => display.max_epoch = read_option_u64(data)?,
+        // Epoch borsh: a bare u64 little-endian — max_epoch is mandatory, so there is no tag.
+        SigningField::MaxEpoch => display.max_epoch = read_u64(data)?,
         _ => {},
     }
     Ok(())
@@ -206,6 +207,15 @@ fn read_u32(data: &[u8]) -> Result<u32, AppStatus> {
         .try_into()
         .map_err(|_| bad_request())?;
     Ok(u32::from_le_bytes(bytes))
+}
+
+fn read_u64(data: &[u8]) -> Result<u64, AppStatus> {
+    let bytes: [u8; 8] = data
+        .get(..8)
+        .ok_or_else(bad_request)?
+        .try_into()
+        .map_err(|_| bad_request())?;
+    Ok(u64::from_le_bytes(bytes))
 }
 
 fn read_option_u64(data: &[u8]) -> Result<Option<u64>, AppStatus> {
@@ -267,9 +277,7 @@ pub fn review_fields(review: &SignReview) -> Vec<(String, String)> {
     if let Some(epoch) = review.display.min_epoch {
         fields.push(("Min epoch".to_string(), epoch.to_string()));
     }
-    if let Some(epoch) = review.display.max_epoch {
-        fields.push(("Max epoch".to_string(), epoch.to_string()));
-    }
+    fields.push(("Max epoch".to_string(), review.display.max_epoch.to_string()));
     fields.push(("Tx digest".to_string(), to_hex(&review.message)));
     fields
 }

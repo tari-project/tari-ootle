@@ -4,7 +4,7 @@
 use ootle_byte_type::ToByteType;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress};
 use tari_template_test_tooling::TemplateTest;
 
@@ -24,7 +24,7 @@ fn airdrop() {
     let total_supply: Amount = test.call_method(airdrop, "total_supply", args![], vec![test.owner_proof()]);
     assert_eq!(total_supply, Amount::from(100u64));
 
-    let builder = Transaction::builder_localnet().then(|builder| {
+    let builder = Transaction::builder_localnet(Epoch(1)).then(|builder| {
         // Create 50 accounts
         (0..50).fold(builder, |builder, _| {
             let (_, owner_public_key, _) = test.create_owner_proof();
@@ -45,7 +45,7 @@ fn airdrop() {
     test.call_method::<()>(airdrop, "open_airdrop", args![], vec![test.owner_proof()]);
 
     test.build_and_execute(
-        Transaction::builder_localnet().then(|builder| {
+        Transaction::builder_localnet(Epoch(1)).then(|builder| {
             addresses.iter().fold(builder, |builder, addr| {
                 builder.call_method(airdrop, "add_recipient", args![addr])
             })
@@ -55,7 +55,7 @@ fn airdrop() {
     .unwrap_success();
 
     let result = test.build_and_execute(
-        Transaction::builder_localnet().then(|builder| {
+        Transaction::builder_localnet(Epoch(1)).then(|builder| {
             addresses.iter().fold(builder, |builder, addr| {
                 builder
                     .call_method(airdrop, "claim_any", args![addr])

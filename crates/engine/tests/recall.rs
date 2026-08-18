@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use ootle_byte_type::ToByteType;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleId, ResourceAddress, VaultId};
 use tari_template_test_tooling::{
     TemplateTest,
@@ -27,7 +27,7 @@ fn it_recalls_all_resource_types() {
     let value_proofs = value_proofs_for_commitment(1000u64, &mask);
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(recall_template, "new", args![initial_supply, value_proofs])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -43,7 +43,7 @@ fn it_recalls_all_resource_types() {
 
     let withdraw = generate_withdraw_proof(&mask, 10, Some(980), 10u64);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(recall_component, "withdraw_some", args![withdraw.proof])
             .put_last_instruction_output_on_workspace("buckets")
             .call_method(account, "deposit", args![Workspace("buckets.0")])
@@ -67,7 +67,7 @@ fn it_recalls_all_resource_types() {
         .to_byte_type();
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(recall_component, "recall_fungible", args![fungible_vault, 6])
             .call_method(recall_component, "recall_non_fungibles", args![non_fungible_vault, [
                 NonFungibleId::from_u32(1)

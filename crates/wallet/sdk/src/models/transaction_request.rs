@@ -155,7 +155,7 @@ mod tests {
     fn request(status: TransactionRequestStatus) -> TransactionRequestModel {
         TransactionRequestModel {
             id: 1,
-            unsigned_transaction: UnsignedTransaction::new(0u8),
+            unsigned_transaction: UnsignedTransaction::new(0u8, tari_ootle_common_types::Epoch(1)),
             seal_signer: KeyId::Derived {
                 key_branch: KeyBranch::Account,
                 index: 0u64,

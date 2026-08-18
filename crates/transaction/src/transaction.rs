@@ -54,12 +54,12 @@ impl Transaction {
     /// Creates a new transaction builder.
     /// NOTE: The network is set to LocalNet. Be sure to set the correct network using for_network.
     /// NOTE: this method will likely be deprecated in the future
-    pub fn builder_localnet() -> TransactionBuilder {
-        Self::builder(Network::LocalNet)
+    pub fn builder_localnet(max_epoch: Epoch) -> TransactionBuilder {
+        Self::builder(Network::LocalNet, max_epoch)
     }
 
-    pub fn builder<N: Into<u8>>(network: N) -> TransactionBuilder {
-        TransactionBuilder::new(network)
+    pub fn builder<N: Into<u8>>(network: N, max_epoch: Epoch) -> TransactionBuilder {
+        TransactionBuilder::new(network, max_epoch)
     }
 
     pub fn new(transaction: UnsealedTransaction, seal_signature: TransactionSealSignature) -> Self {
@@ -290,7 +290,7 @@ impl Transaction {
         }
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         match self {
             Self::V1(tx) => tx.max_epoch(),
         }
@@ -434,7 +434,7 @@ impl PrunedTransaction {
         }
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         match self {
             Self::V1(tx) => tx.max_epoch(),
         }
@@ -483,7 +483,7 @@ mod tests {
     use crate::{args, call_args};
 
     fn create_transaction() -> TransactionBuilder {
-        Transaction::builder(123u8)
+        Transaction::builder(123u8, Epoch(1))
             .create_account(Default::default())
             .call_method(ComponentAddress::from_array([1; 32]), "method", args![
                 1,

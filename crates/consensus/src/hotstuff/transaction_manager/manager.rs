@@ -11,6 +11,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
 };
 use tari_ootle_common_types::{
+    Epoch,
     LockIntent,
     SubstateRequirement,
     SubstateRequirementRef,
@@ -47,17 +48,42 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_ex
 #[derive(Debug, Clone)]
 pub struct ConsensusTransactionManager<TExecutor, TStateStore> {
     executor: TExecutor,
+    max_transaction_validity_epochs: u64,
     _store: PhantomData<TStateStore>,
 }
 
 impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
     ConsensusTransactionManager<TExecutor, TStateStore>
 {
-    pub fn new(executor: TExecutor) -> Self {
+    pub fn new(executor: TExecutor, max_transaction_validity_epochs: u64) -> Self {
         Self {
             executor,
+            max_transaction_validity_epochs,
             _store: PhantomData,
         }
+    }
+
+    /// The abort a transaction earns for declaring a window outside the epoch it was pinned to, or
+    /// `None` if the window is acceptable.
+    ///
+    /// Both rules are evaluated against the pinned epoch — agreed across shard groups before
+    /// execution — so every node reaches the same verdict regardless of how far its own view had
+    /// lagged when the transaction was admitted. An out-of-window transaction is therefore sequenced
+    /// as an abort, which all shard groups adopt, rather than being dropped by whichever group
+    /// happened to be behind.
+    fn window_abort_reason(&self, pinned_epoch: Epoch, max_epoch: Epoch) -> Option<AbortReason> {
+        if pinned_epoch > max_epoch {
+            return Some(AbortReason::EpochExpired);
+        }
+        let latest_permitted = Epoch(
+            pinned_epoch
+                .as_u64()
+                .saturating_add(self.max_transaction_validity_epochs),
+        );
+        if max_epoch > latest_permitted {
+            return Some(AbortReason::ValidityWindowTooLong);
+        }
+        None
     }
 
     pub fn prepare<TTx: StateStoreReadTransaction>(
@@ -220,22 +246,18 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         execution_epoch: LockedEpoch,
         pledged_transaction: PledgedTransaction,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
-        // Abort before execution if the execution epoch exceeds the transaction's max_epoch
-        if let Some(max_epoch) = pledged_transaction.transaction.transaction().max_epoch() &&
-            execution_epoch.epoch() > max_epoch
-        {
+        let max_epoch = pledged_transaction.transaction.transaction().max_epoch();
+        if let Some(reason) = self.window_abort_reason(execution_epoch.epoch(), max_epoch) {
             warn!(
                 target: LOG_TARGET,
-                "⏰ Transaction {} has expired: execution epoch {} exceeds max_epoch {}",
+                "⏰ Transaction {} is outside its validity window ({reason}): execution epoch {} against max_epoch {}",
                 pledged_transaction.transaction.id(),
                 execution_epoch,
                 max_epoch,
             );
             return Ok(TransactionExecution::abort(
                 pledged_transaction.transaction.id(),
-                RejectReason::Abort {
-                    reason: AbortReason::EpochExpired,
-                },
+                RejectReason::Abort { reason },
             ));
         }
 
@@ -269,19 +291,17 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         block: &LeafBlock,
         execution_locked_epoch: LockedEpoch,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
-        // Abort before execution if the execution epoch exceeds the transaction's max_epoch
-        if let Some(max_epoch) = transaction.transaction().max_epoch() &&
-            execution_locked_epoch.epoch() > max_epoch
-        {
+        let max_epoch = transaction.transaction().max_epoch();
+        if let Some(reason) = self.window_abort_reason(execution_locked_epoch.epoch(), max_epoch) {
             warn!(
                 target: LOG_TARGET,
-                "⏰ Transaction {} has expired: execution epoch {} exceeds max_epoch {}",
+                "⏰ Transaction {} is outside its validity window ({reason}): execution epoch {} against max_epoch {}",
                 transaction.id(),
                 execution_locked_epoch.epoch(),
                 max_epoch,
             );
             return Ok(TransactionExecution::abort(transaction.id(), RejectReason::Abort {
-                reason: AbortReason::EpochExpired,
+                reason,
             }));
         }
 

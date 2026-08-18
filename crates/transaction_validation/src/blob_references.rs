@@ -45,6 +45,7 @@ impl Validator<Transaction> for BlobReferenceValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
+    use tari_engine_types::Epoch;
     use tari_ootle_transaction::{
         Blob,
         Blobs,
@@ -86,7 +87,7 @@ mod tests {
             instructions,
             IndexSet::new(),
             None,
-            None,
+            Epoch(100),
             false,
         );
         unsigned.blobs = Blobs::from_vec(blobs);

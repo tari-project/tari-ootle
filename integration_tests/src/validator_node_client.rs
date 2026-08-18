@@ -25,7 +25,13 @@ use tari_validator_node_client::{
 };
 use tokio::time::{MissedTickBehavior, interval};
 
-use crate::{TariWorld, cucumber_log, helpers::get_component_from_namespace, template::RegisteredTemplate};
+use crate::{
+    TariWorld,
+    cucumber_log,
+    helpers::get_component_from_namespace,
+    template::RegisteredTemplate,
+    util::DEFAULT_TEST_MAX_EPOCH,
+};
 
 /// Creates a component by calling a template function
 pub async fn create_component(
@@ -51,7 +57,7 @@ pub async fn create_component(
     let secret_key = get_signing_key(world).await;
 
     // Build and sign the transaction (Network::LocalNet == 0u8)
-    let transaction = TransactionBuilder::new(Network::LocalNet)
+    let transaction = TransactionBuilder::new(Network::LocalNet, DEFAULT_TEST_MAX_EPOCH)
         .call_function(template_address, function_call, parsed_args)
         .with_inputs(vec![])
         .build_and_seal(&secret_key);
@@ -291,7 +297,7 @@ async fn call_method_inner(
     })?;
 
     // Build transaction
-    let transaction = TransactionBuilder::new(Network::LocalNet)
+    let transaction = TransactionBuilder::new(Network::LocalNet, DEFAULT_TEST_MAX_EPOCH)
         .call_method(component_address, method_call, vec![])
         .with_inputs(vec![component])
         .build_and_seal(&secret_key);

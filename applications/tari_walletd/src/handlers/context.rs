@@ -2,14 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use axum_extra::headers::authorization::Bearer;
 use dashmap::DashMap;
-use tari_ootle_transaction::{Transaction, TransactionBuilder};
-use tari_ootle_wallet_sdk::models::WalletEvent;
+use tari_ootle_transaction::{Epoch, Transaction, TransactionBuilder, UnsignedTransaction};
+use tari_ootle_wallet_sdk::{models::WalletEvent, network::WalletNetworkInterface};
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitorHandle,
     notify::Notify,
@@ -59,7 +59,15 @@ pub struct HandlerContext {
     /// throttle in `api_key_touch_last_used` stays as belt-and-braces
     /// against process restart and racing shim invocations.
     api_key_last_used_bumps: Arc<DashMap<i32, Instant>>,
+    /// Last epoch read from the network, with the time it was read. Every transaction build needs
+    /// the current epoch to stamp `max_epoch`; epochs turn over on the order of tens of minutes, so
+    /// a short cache keeps a burst of builds from making an indexer round-trip each.
+    cached_epoch: Arc<Mutex<Option<(Epoch, Instant)>>>,
 }
+
+/// How long a read of the current epoch is reused before the network is asked again. Well under an
+/// epoch, so the stamped window is never short by more than this.
+const EPOCH_CACHE_TTL: Duration = Duration::from_secs(30);
 
 impl HandlerContext {
     pub fn new(
@@ -83,6 +91,7 @@ impl HandlerContext {
             jwt_secret,
             shutdown_signal,
             api_key_last_used_bumps: Arc::new(DashMap::new()),
+            cached_epoch: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -286,6 +295,52 @@ impl HandlerContext {
         self.authenticator.webauthn()
     }
 
+    /// Discards the cached epoch, forcing the next read to go to the network.
+    ///
+    /// Must be called whenever the daemon is repointed at a different indexer: the cached value
+    /// describes the previous indexer's chain, and stamping a `max_epoch` derived from it onto a
+    /// transaction for a different chain yields a window that chain will not accept.
+    pub fn invalidate_epoch_cache(&self) {
+        *self.cached_epoch.lock().unwrap() = None;
+    }
+
+    /// The current epoch, re-read from the network at most every [`EPOCH_CACHE_TTL`].
+    pub async fn current_epoch(&self) -> Result<Epoch, anyhow::Error> {
+        if let Some((epoch, read_at)) = *self.cached_epoch.lock().unwrap() &&
+            read_at.elapsed() < EPOCH_CACHE_TTL
+        {
+            return Ok(epoch);
+        }
+
+        let epoch = self.wallet_sdk.get_network_interface().get_current_epoch().await?;
+        *self.cached_epoch.lock().unwrap() = Some((epoch, Instant::now()));
+        Ok(epoch)
+    }
+
+    /// The `max_epoch` this wallet stamps on transactions it builds: the current epoch plus the
+    /// configured validity window.
+    pub async fn transaction_max_epoch(&self) -> Result<Epoch, anyhow::Error> {
+        let current_epoch = self.current_epoch().await?;
+        Ok(Epoch(
+            current_epoch
+                .as_u64()
+                .saturating_add(self.config().default_transaction_validity_epochs),
+        ))
+    }
+
+    /// A builder seeded from a caller-supplied transaction.
+    ///
+    /// The caller has already chosen everything this would otherwise resolve — including its own
+    /// `max_epoch` — so unlike [`Self::transaction_builder`] this needs no epoch and makes no
+    /// network call. Submitting a pre-built transaction therefore does not depend on the indexer
+    /// being reachable.
+    pub fn transaction_builder_from_unsigned<T: Into<UnsignedTransaction>>(
+        &self,
+        transaction: T,
+    ) -> TransactionBuilder {
+        TransactionBuilder::from_unsigned(transaction)
+    }
+
     /// Returns a TransactionBuilder with the current network configured.
     ///
     /// The builder is stamped with a random nonce so that repeated identical intents (same
@@ -293,7 +348,13 @@ impl HandlerContext {
     /// caller-provided bytes replace the whole unsigned transaction via
     /// `with_unsigned_transaction`, which discards the stamp — the caller's bytes are preserved
     /// verbatim there.
-    pub fn transaction_builder(&self) -> TransactionBuilder {
-        Transaction::builder(self.config().network.as_byte()).with_nonce(rand::random())
+    ///
+    /// `max_epoch` is stamped `default_transaction_validity_epochs` ahead of the current epoch.
+    /// Building therefore depends on the network being reachable: without a current epoch there is
+    /// no way to choose a window the network will accept, so this fails rather than guessing.
+    /// Callers that want a different window override it with `with_max_epoch`.
+    pub async fn transaction_builder(&self) -> Result<TransactionBuilder, anyhow::Error> {
+        let max_epoch = self.transaction_max_epoch().await?;
+        Ok(Transaction::builder(self.config().network.as_byte(), max_epoch).with_nonce(rand::random()))
     }
 }

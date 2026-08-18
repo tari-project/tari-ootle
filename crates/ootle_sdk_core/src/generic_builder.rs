@@ -118,7 +118,8 @@ fn lower_intent(network: Network, intent: &GenericTransactionIntent) -> Result<T
     // The fee phase runs first and its workspace is dropped before the main phase, so each phase
     // tracks its own bound workspace labels (matching the engine's per-phase workspace).
     let fee_instructions = lower_fee_phase(network, intent)?;
-    let mut builder = TransactionBuilder::new(network.as_byte()).with_fee_instructions(fee_instructions);
+    let mut builder =
+        TransactionBuilder::new(network.as_byte(), Epoch(intent.max_epoch)).with_fee_instructions(fee_instructions);
 
     // Track the main-phase workspace labels bound so far (by a `PutLastInstructionOutputOnWorkspace`)
     // so a later `ArgValue::Workspace(label)` is validated before we ask the builder for its id — the
@@ -131,7 +132,6 @@ fn lower_intent(network: Network, intent: &GenericTransactionIntent) -> Result<T
 
     Ok(builder
         .with_min_epoch(intent.min_epoch.map(Epoch))
-        .with_max_epoch(intent.max_epoch.map(Epoch))
         .with_dry_run(intent.dry_run))
 }
 
@@ -139,7 +139,7 @@ fn lower_intent(network: Network, intent: &GenericTransactionIntent) -> Result<T
 /// fee payment. The fee payment is appended last so any account it pays from has been set up by the
 /// preceding fee instructions.
 fn lower_fee_phase(network: Network, intent: &GenericTransactionIntent) -> Result<Vec<Instruction>, OotleSdkError> {
-    let mut builder = TransactionBuilder::new(network.as_byte());
+    let mut builder = TransactionBuilder::new(network.as_byte(), Epoch(intent.max_epoch));
     let mut bound_labels: HashSet<String> = HashSet::new();
     for instr in &intent.fee_instructions {
         builder = lower_instruction(builder, intent, instr, &mut bound_labels)?;
@@ -581,7 +581,7 @@ mod tests {
             inputs,
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         }
     }
@@ -713,7 +713,7 @@ mod tests {
             inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let (partial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();
@@ -756,7 +756,7 @@ mod tests {
             inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let (partial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();
@@ -790,7 +790,7 @@ mod tests {
             inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let err = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap_err();
@@ -811,7 +811,7 @@ mod tests {
             inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let err = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap_err();
@@ -849,7 +849,7 @@ mod tests {
             // Mirror the generic path exactly: inputs are carried ONLY by `new_with_explicit_inputs`
             // (the generic `lower_intent` never calls `with_inputs`), so the builder emits just the
             // instructions and the explicit inputs are folded in at seal time.
-            let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte())
+            let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte(), Epoch(1))
                 .pay_fee_from_component(from_component(), Amount::new(2000))
                 .call_method(from_component(), "withdraw", args![resource(), Amount::new(1_000_000)])
                 .put_last_instruction_output_on_workspace("bucket")
@@ -950,7 +950,7 @@ mod tests {
             inputs: vec![InputRef::versioned(faucet_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         }
     }
@@ -1043,7 +1043,7 @@ mod tests {
             inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let wants = derive_wants(&intent).unwrap();
@@ -1094,7 +1094,7 @@ mod tests {
             inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let (partial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();
@@ -1130,7 +1130,7 @@ mod tests {
             inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let err = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap_err();
@@ -1159,7 +1159,7 @@ mod tests {
 
         // Auto-fill side: the two main instructions on the synchronous builder (no fee instruction, so
         // its inputs are exactly the component + the two literal-arg resources).
-        let auto_inputs: HashSet<String> = TransactionBuilder::new(Network::Esmeralda.as_byte())
+        let auto_inputs: HashSet<String> = TransactionBuilder::new(Network::Esmeralda.as_byte(), Epoch(1))
             .with_auto_fill_inputs()
             .call_method(foreign_component(), "do", args![arg_resource()])
             .call_function(ACCOUNT_TEMPLATE_ADDRESS, "make", args![resource()])
@@ -1188,7 +1188,7 @@ mod tests {
             inputs: vec![],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let (partial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();

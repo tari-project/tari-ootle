@@ -7,7 +7,7 @@
 //! retuned if the cost drifts.
 
 use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -34,7 +34,7 @@ fn busy_max_stays_under_the_metering_budget() {
 
     // Succeeds => the single busy_max() call did not exhaust its metering budget.
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 900_000_000u64)
             .call_function(addr, "busy_max", args![])
             .build_and_seal(&key),
@@ -72,7 +72,7 @@ fn busy_cost_is_linear_in_rounds() {
 
     let mut busy = |rounds: u64| {
         let result = test.execute_expect_success(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .pay_fee_from_component(account, 900_000_000u64)
                 .call_function(addr, "busy", args![rounds])
                 .build_and_seal(&key),
@@ -112,7 +112,7 @@ fn stacked_busy_max_is_rejected_by_per_transaction_budget() {
     // Fees are disabled here on purpose: the per-transaction budget is enforced independently of fee
     // charging, so the rejection must be the out-of-gas execution failure, not insufficient fees.
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(addr, "busy_max", args![])
             .call_function(addr, "busy_max", args![])
             .build_and_seal(test.secret_key()),

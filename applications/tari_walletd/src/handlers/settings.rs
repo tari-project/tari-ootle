@@ -35,6 +35,10 @@ pub async fn handle_get(
         .optional()?
         .unwrap_or_default();
 
+    // Deliberately not fatal: the indexer being down must not make settings unreadable, since this
+    // is where the indexer URL is corrected.
+    let current_epoch = context.current_epoch().await.ok();
+
     Ok(SettingsGetResponse {
         indexer_url,
         network: NetworkInfo {
@@ -43,6 +47,8 @@ pub async fn handle_get(
         },
         advanced_ui_features,
         claimed_accounts,
+        current_epoch,
+        default_transaction_validity_epochs: context.config().default_transaction_validity_epochs,
     })
 }
 
@@ -56,6 +62,8 @@ pub async fn handle_set(
     if let Some(indexer_url) = req.indexer_url {
         sdk.config_api().set(ConfigKey::IndexerUrl, &indexer_url)?;
         sdk.get_network_interface().set_endpoint(indexer_url);
+        // The cached epoch describes the indexer we just stopped using.
+        context.invalidate_epoch_cache();
     }
     if let Some(advanced_ui_features) = &req.advanced_ui_features {
         sdk.config_api()

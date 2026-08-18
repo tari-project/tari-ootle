@@ -169,7 +169,7 @@ fn sample_input() -> VectorInput {
         fee: BoundaryAmount::new(2000),
         inputs: vec![InputRef::versioned(component, 0)],
         min_epoch: Some(5),
-        max_epoch: Some(99),
+        max_epoch: 99,
         dry_run: false,
     };
 
@@ -221,7 +221,7 @@ fn single_key_basic_input() -> VectorInput {
         fee: BoundaryAmount::new(2500),
         inputs: vec![InputRef::versioned(component, 0)],
         min_epoch: Some(1),
-        max_epoch: Some(10),
+        max_epoch: 10,
         dry_run: false,
     };
 
@@ -357,7 +357,7 @@ fn resolve_single_key_basic_input() -> VectorInput {
         // No explicit inputs ⇒ the resolution path runs.
         inputs: vec![],
         min_epoch: Some(1),
-        max_epoch: Some(10),
+        max_epoch: 10,
         dry_run: false,
     };
 
@@ -676,7 +676,7 @@ fn stealth_intent(amount: u64, with_view: bool) -> ootle_sdk_core::types::stealt
         revealed_input_amount: 0,
         revealed_output_amount: 0,
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
         pay_fee_from_revealed: false,
     }
@@ -885,7 +885,7 @@ fn stealth_send_stealth_seal_seed() -> Fixture {
         revealed_input_amount: 0,
         revealed_output_amount: 0,
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
         pay_fee_from_revealed: false,
     };
@@ -914,7 +914,7 @@ fn stealth_send_account_key_seed() -> Fixture {
         revealed_input_amount: 1_000_000,
         revealed_output_amount: 0,
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
         pay_fee_from_revealed: false,
     };
@@ -943,7 +943,7 @@ fn stealth_send_revealed_output_single_seed() -> Fixture {
         revealed_input_amount: 1_500_000,
         revealed_output_amount: 500_000,
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
         pay_fee_from_revealed: false,
     };
@@ -975,7 +975,7 @@ fn stealth_send_revealed_output_multi_seed() -> Fixture {
         revealed_input_amount: 2_500_000,
         revealed_output_amount: 1_500_000,
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
         pay_fee_from_revealed: false,
     };
@@ -1941,7 +1941,7 @@ fn generic_transfer_intent() -> GenericTransactionIntent {
         inputs: generic_explicit_inputs(),
         extra_inputs: vec![],
         min_epoch: Some(1),
-        max_epoch: Some(10),
+        max_epoch: 10,
         dry_run: false,
     }
 }
@@ -1964,7 +1964,7 @@ fn generic_create_account_seed() -> Fixture {
         inputs: generic_explicit_inputs(),
         extra_inputs: vec![],
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
     };
     generic_build_fixture("generic_build/create_account", intent)
@@ -1986,7 +1986,7 @@ fn generic_call_function_seed() -> Fixture {
         inputs: generic_explicit_inputs(),
         extra_inputs: vec![],
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
     };
     generic_build_fixture("generic_build/call_function", intent)
@@ -2007,7 +2007,7 @@ fn generic_publish_template_seed() -> Fixture {
         inputs: generic_explicit_inputs(),
         extra_inputs: vec![],
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
     };
     generic_build_fixture("generic_build/publish_template", intent)
@@ -2040,7 +2040,7 @@ fn generic_workspace_pipe_seed() -> Fixture {
         inputs: generic_explicit_inputs(),
         extra_inputs: vec![],
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
     };
     generic_build_fixture("generic_build/workspace_pipe", intent)
@@ -2078,7 +2078,7 @@ fn generic_self_funding_faucet_seed() -> Fixture {
         inputs: generic_explicit_inputs(),
         extra_inputs: vec![],
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
     };
     generic_build_fixture("generic_build/self_funding_faucet", intent)
@@ -2111,7 +2111,7 @@ fn faucet_claim_seed() -> Fixture {
         recipient_public_key: generic_recipient_pk(),
         fee: BoundaryAmount::new(2000),
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: 1,
         dry_run: false,
     };
 
@@ -2161,7 +2161,7 @@ fn generic_seals_identically_to_hand_built() {
     // carried ONLY by `new_with_explicit_inputs` (the generic path also never calls `with_inputs`),
     // so the comparison is like-for-like.
     let explicit_input = generic_explicit_inputs()[0].to_internal().unwrap();
-    let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte())
+    let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte(), tari_ootle_common_types::Epoch(10))
         .pay_fee_from_component(generic_from_component(), Amount::new(2500))
         .call_method(generic_from_component(), "withdraw", args![
             generic_resource(),
@@ -2170,7 +2170,6 @@ fn generic_seals_identically_to_hand_built() {
         .put_last_instruction_output_on_workspace("bucket")
         .create_account(generic_recipient_pk().to_internal())
         .with_min_epoch(Some(tari_ootle_common_types::Epoch(1)))
-        .with_max_epoch(Some(tari_ootle_common_types::Epoch(10)))
         .build_unsigned();
     let partial = PartialTransaction::new_with_explicit_inputs(unsigned, vec![explicit_input]);
     let hand = match apply_fetched_substates(partial, &[]).unwrap() {
@@ -2284,7 +2283,7 @@ fn cosign_input() -> VectorInput {
         fee: BoundaryAmount::new(2500),
         inputs: vec![],
         min_epoch: Some(1),
-        max_epoch: Some(10),
+        max_epoch: 10,
         dry_run: false,
     };
     VectorInput {

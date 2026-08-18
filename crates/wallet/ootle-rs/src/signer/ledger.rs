@@ -264,7 +264,7 @@ mod tests {
         keys::{PublicKey, SecretKey},
         ristretto::RistrettoSecretKey,
     };
-    use tari_ootle_transaction::{Transaction as TransactionBuilderEntry, UnsealedTransactionV1};
+    use tari_ootle_transaction::{Epoch, Transaction as TransactionBuilderEntry, UnsealedTransactionV1};
 
     use super::*;
 
@@ -302,7 +302,7 @@ mod tests {
     #[tokio::test]
     async fn signing_a_transaction_from_another_network_is_rejected() {
         let signer = signer_on(Network::Igor);
-        let tx = TransactionBuilderEntry::builder(Network::LocalNet).build_unsigned();
+        let tx = TransactionBuilderEntry::builder(Network::LocalNet, Epoch(1)).build_unsigned();
         let nonce = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()));
 
         let err = signer

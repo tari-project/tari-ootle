@@ -37,6 +37,18 @@
 //! - **`per_byte_storage_cost`**: Cost per byte of data written to persistent storage (substates). Note: The actual
 //!   cost is reduced by a factor of 4 (cost × 0.25) to make storage more affordable.
 //!
+//! ## Template Publishing Fees
+//!
+//! A published template's binary is priced by its own model instead of the flat per-byte storage rate, since it is
+//! the largest single payload a caller can commit to permanent state:
+//!
+//! - `per_template_publish_cost` — flat, charged once per publish.
+//! - `template_size_premium_free_bytes` — priced at `per_byte_storage_cost`, no premium.
+//! - `per_template_size_premium_unit_cost × units²` — where `units = (size − free) / template_size_premium_unit_bytes`.
+//!
+//! The quadratic term is what makes oversized templates expensive; the flat term sets the floor, because a small
+//! template's size is dominated by fixed `template_lib` machinery rather than by anything its author wrote.
+//!
 //! ## Cryptographic Operation Fees
 //!
 //! - **`per_signature_verification_cost`**: Cost for each cryptographic signature verification performed during
@@ -81,14 +93,20 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     template_load_bytes_cost_divisor: 3000,
     // 1 µT per 1000 Wasmer points. Lower values make metering more aggressive.
     wasm_points_cost_divisor: 1000,
-    // First 30 KiB of a template binary are priced at the per-byte storage rate; beyond that the
-    // quadratic publish premium applies. Keeps small/typical templates as cheap as before.
-    template_size_premium_free_bytes: 30 * 1024,
+    // First 96 KiB of a template binary are priced at the per-byte storage rate; beyond that the
+    // quadratic publish premium applies. A published template carries ~25 KiB of fixed
+    // `template_lib` machinery before any author code, and a minimal component template optimised
+    // the way the publish path optimises it lands around 76 KiB, so the allowance sits just above
+    // the floor: the premium prices author content, not library overhead.
+    template_size_premium_free_bytes: 96 * 1024,
     // 1 KiB per premium unit.
     template_size_premium_unit_bytes: 1024,
-    // 100 µT per unit². e.g. a 64 KiB template (34 units over the free allowance) pays
-    // 34² × 100 ≈ 0.12 tTARI premium; a 512 KiB template pays ≈ 23.2 tTARI.
+    // 100 µT per unit². e.g. a 256 KiB template (160 units over the free allowance) pays
+    // 160² × 100 ≈ 2.6 tTARI premium; a 512 KiB template pays ≈ 17.3 tTARI.
     per_template_size_premium_unit_cost: 100,
+    // 250_000 µT flat per publish. The size premium alone cannot price a small template above the
+    // noise floor, since most of a small binary is library overhead rather than author content.
+    per_template_publish_cost: 250_000,
 };
 
 /// MainNet fee table - production values.
@@ -115,9 +133,10 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     storage_cost_divisor: 1,
     template_load_bytes_cost_divisor: 3000,
     wasm_points_cost_divisor: 1000,
-    template_size_premium_free_bytes: 30 * 1024,
+    template_size_premium_free_bytes: 96 * 1024,
     template_size_premium_unit_bytes: 1024,
     per_template_size_premium_unit_cost: 100,
+    per_template_publish_cost: 250_000,
 };
 
 /// Returns the appropriate fee table for the specified network.

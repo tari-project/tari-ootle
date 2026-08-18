@@ -29,6 +29,7 @@ pub fn abort_code(reason: &AbortReason) -> &'static str {
         AbortReason::InsufficientFeesPaid => "INSUFFICIENT_FEES_PAID",
         AbortReason::FeePaymentInMainIntent => "FEE_PAYMENT_IN_MAIN_INTENT",
         AbortReason::EpochExpired => "EPOCH_EXPIRED",
+        AbortReason::ValidityWindowTooLong => "VALIDITY_WINDOW_TOO_LONG",
     }
 }
 
@@ -255,6 +256,7 @@ mod tests {
         AbortReason::InsufficientFeesPaid,
         AbortReason::FeePaymentInMainIntent,
         AbortReason::EpochExpired,
+        AbortReason::ValidityWindowTooLong,
     ];
 
     #[test]
@@ -340,8 +342,7 @@ mod tests {
         }
     }
 
-    /// Each of the 9 canonical `AbortReason` variants (incl. `EpochExpired`) surfaces a non-empty,
-    /// unique stable code.
+    /// Each of the 10 canonical `AbortReason` variants surfaces a non-empty, unique stable code.
     #[test]
     fn abort_codes_are_non_empty_and_unique() {
         let mut seen = std::collections::HashSet::new();
@@ -350,8 +351,12 @@ mod tests {
             assert!(!code.is_empty(), "abort code for {reason:?} is empty");
             assert!(seen.insert(code), "duplicate abort code {code} for {reason:?}");
         }
-        assert_eq!(seen.len(), 9, "expected exactly 9 canonical abort codes");
+        assert_eq!(seen.len(), 10, "expected exactly 10 canonical abort codes");
         assert_eq!(abort_code(&AbortReason::EpochExpired), "EPOCH_EXPIRED");
+        assert_eq!(
+            abort_code(&AbortReason::ValidityWindowTooLong),
+            "VALIDITY_WINDOW_TOO_LONG"
+        );
     }
 
     /// The `Abort` arm surfaces the canonical abort sub-code while keeping its top-level `ABORT` code.

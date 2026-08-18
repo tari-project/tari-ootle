@@ -14,7 +14,8 @@ use std::{
 use anyhow::anyhow;
 use cli::Cli;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
-use tari_ootle_common_types::SubstateRequirement;
+use tari_indexer_client::rest_api_client::IndexerRestApiClient;
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::{Blob, Network};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
@@ -43,7 +44,10 @@ fn main() -> anyhow::Result<()> {
 
             let mut file = std::fs::File::create(&args.output_file)?;
 
-            let builder = get_transaction_builder(&args)?;
+            let max_epoch = resolve_max_epoch(&args)?;
+            println!("Transactions are valid until epoch {max_epoch}");
+
+            let builder = get_transaction_builder(&args, max_epoch)?;
             write_transactions(
                 args.num_transactions,
                 builder,
@@ -80,7 +84,34 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionBuilder> {
+/// The epoch the generated transactions expire in: either the operator's explicit choice, or the
+/// indexer's current epoch plus the requested window.
+///
+/// `max_epoch` is signed over, so it is fixed at generation time and cannot be refreshed when the
+/// file is submitted. A file whose window has passed by then is rejected transaction by transaction,
+/// which is why this reads the live epoch rather than making the operator supply a number.
+fn resolve_max_epoch(args: &WriteArgs) -> anyhow::Result<Epoch> {
+    if let Some(max_epoch) = args.max_epoch {
+        return Ok(Epoch(max_epoch));
+    }
+
+    let client = IndexerRestApiClient::connect(args.indexer_url.clone())?;
+    let stats = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(client.get_epoch_manager_stats())
+        .map_err(|e| {
+            anyhow!(
+                "Could not read the current epoch from indexer {}: {e}. Pass --max-epoch to choose the validity \
+                 window without an indexer.",
+                args.indexer_url
+            )
+        })?;
+
+    Ok(Epoch(stats.current_epoch.as_u64().saturating_add(args.validity_epochs)))
+}
+
+fn get_transaction_builder(args: &WriteArgs, max_epoch: Epoch) -> anyhow::Result<BoxedTransactionBuilder> {
     let network = args.network.unwrap_or(Network::LocalNet);
     match args.manifest.as_ref() {
         Some(manifest) => {
@@ -121,9 +152,10 @@ fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionB
                 inputs,
                 blobs,
                 args.random_signer,
+                max_epoch,
             )
         },
-        None => Ok(Box::new(free_coins::builder(network))),
+        None => Ok(Box::new(free_coins::builder(network, max_epoch))),
     }
 }
 

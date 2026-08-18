@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use tari_engine_types::indexed_value::IndexedWellKnownTypes;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{AccessRule, OwnerRule, constants::TARI_TOKEN, metadata};
 use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress};
 use tari_template_test_tooling::TemplateTest;
@@ -26,7 +26,7 @@ fn initial_contribution_and_redeem() {
 
     // ACT 1: Create liquidity pool and contribute liquidity
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("pool")
             .call_function(template_address, "create", args![
                 OwnerRule::OwnedBySigner,
@@ -80,7 +80,7 @@ fn initial_contribution_and_redeem() {
 
     // ACT 2: Redeem liquidity
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(user1, "withdraw", args![pool_unit_resx, pool_units.balance()])
             .put_last_instruction_output_on_workspace("redeem_pool_units")
             .call_method(pool_addr, "redeem", args![Workspace("redeem_pool_units")])
@@ -119,7 +119,7 @@ fn second_contribution_and_partial_redeem() {
 
     // ACT 1: create the pool with an initial 1000 TARI : 4000 stablecoin contribution (ratio 1:4, LP minted = 2000).
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("pool")
             .call_function(template_address, "create", args![
                 OwnerRule::OwnedBySigner,
@@ -159,7 +159,7 @@ fn second_contribution_and_partial_redeem() {
     // ACT 2: a deliberately non-proportional second contribution: 500 TARI but 4000 stablecoin. At the 1:4 reserve
     // ratio only 2000 stablecoin is needed to match the 500 TARI, so 2000 stablecoin must be returned as change.
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet_component, "take_free_coins_custom", args![4000])
             .put_last_instruction_output_on_workspace("faucet_coins")
             .call_method(user1, "withdraw", args![TARI_TOKEN, 500])
@@ -200,7 +200,7 @@ fn second_contribution_and_partial_redeem() {
 
     // ACT 3: redeem HALF the LP (1500 of 3000). Proportional payout = 750 TARI and 3000 stablecoin.
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(user1, "withdraw", args![lp_resx, 1500])
             .put_last_instruction_output_on_workspace("redeem_lp")
             .call_method(pool_addr, "redeem", args![Workspace("redeem_lp")])
@@ -242,7 +242,7 @@ fn bootstrap_contribution_after_seeding_reserve() {
     // ACT 1: create the pool owned by user1 (so user1 can call the owner-gated protected_* methods). With
     // `OwnerRule::OwnedBySigner` the owner is the seal signer, i.e. user1.
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("pool")
             .call_function(template_address, "create", args![
                 OwnerRule::OwnedBySigner,
@@ -265,7 +265,7 @@ fn bootstrap_contribution_after_seeding_reserve() {
 
     // ACT 2: owner seeds 1000 TARI into reserve A via protected_add_liquidity (no LP minted).
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(user1, "withdraw", args![TARI_TOKEN, 1000])
             .put_last_instruction_output_on_workspace("seed_a")
             .call_method(pool_addr, "protected_add_liquidity", args![Workspace("seed_a")])
@@ -276,7 +276,7 @@ fn bootstrap_contribution_after_seeding_reserve() {
     // ACT 3: bootstrap with a full contribution of 500 TARI + 2000 stablecoin. Total reserves become
     // (1000 + 500, 0 + 2000) = (1500, 2000) and LP minted = floor(sqrt(1500 * 2000)) = 1732.
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet_component, "take_free_coins_custom", args![2000])
             .put_last_instruction_output_on_workspace("faucet_coins")
             .call_method(user1, "withdraw", args![TARI_TOKEN, 500])
@@ -328,7 +328,7 @@ fn basic_constant_product_swap() {
 
     // ACT 1: Create liquidity pool and contribute liquidity
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("pool")
             .call_function(template_address, "create", args![
                 OwnerRule::OwnedBySigner,
@@ -374,7 +374,7 @@ fn basic_constant_product_swap() {
     // ACT 2: Swap to pay fees
     test.enable_fees();
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 // User2 would like to swap stablecoin for XTR to pay fees
                 builder
@@ -425,7 +425,7 @@ pub fn create_test_faucet_component<A: Into<Amount>>(
 ) -> (ComponentAddress, ResourceAddress) {
     let template_addr = test.get_template_address("TestFaucet");
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template_addr, "mint", args![initial_supply.into()])
             .build_and_seal(test.secret_key()),
         vec![],

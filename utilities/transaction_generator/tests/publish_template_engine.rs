@@ -17,7 +17,7 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{SubstateId, SubstateValue},
 };
-use tari_ootle_transaction::{Blob, Network};
+use tari_ootle_transaction::{Blob, Epoch, Network};
 use tari_template_test_tooling::{TemplateTest, compile::compile_template};
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::transaction_builders::manifest;
@@ -55,6 +55,7 @@ fn random_signer_publishes_same_binary_twice_without_duplicating() {
         Vec::new(),
         blob_inputs,
         true,
+        Epoch(1),
     )
     .unwrap();
 

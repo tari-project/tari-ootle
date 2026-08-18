@@ -73,7 +73,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
-        max_epoch: Option<Epoch>,
+        max_epoch: Epoch,
         transaction_weight: u64,
     ) -> Result<(), TransactionPoolError> {
         tx.transaction_pool_insert_new(
@@ -414,9 +414,8 @@ pub struct TransactionPoolRecord {
     #[n(10)]
     is_ready: bool,
     /// The maximum epoch for which this transaction is valid.
-    #[serde(default)]
     #[n(11)]
-    max_epoch: Option<Epoch>,
+    max_epoch: Epoch,
     /// Epoch to use when executing the transaction. This updates as foreign proposals are received
     /// until the transaction is executed.
     #[n(12)]
@@ -478,7 +477,7 @@ impl TransactionPoolRecord {
         local_decision: Option<Decision>,
         remote_decision: Option<Decision>,
         is_ready: bool,
-        max_epoch: Option<Epoch>,
+        max_epoch: Epoch,
         locked_epoch: Option<LockedEpoch>,
         last_updated: time::OffsetDateTime,
         last_updated_in_block: Option<BlockId>,
@@ -551,7 +550,7 @@ impl TransactionPoolRecord {
         self.remote_decision
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         self.max_epoch
     }
 
@@ -1063,7 +1062,7 @@ mod tests {
                 local_decision: None,
                 remote_decision: None,
                 is_ready: true,
-                max_epoch: None,
+                max_epoch: Epoch(1),
                 locked_epoch: None,
                 last_updated: time::OffsetDateTime::now_utc(),
                 last_updated_in_block: None,
@@ -1128,7 +1127,7 @@ mod tests {
                 local_decision: None,
                 remote_decision: None,
                 is_ready: false,
-                max_epoch: None,
+                max_epoch: Epoch(1),
                 locked_epoch: None,
                 last_updated: time::OffsetDateTime::now_utc(),
                 last_updated_in_block: None,

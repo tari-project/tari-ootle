@@ -54,7 +54,7 @@ use tari_template_lib_types::{
 };
 
 fn build_transaction(seed: u64) -> Transaction {
-    Transaction::builder_localnet()
+    Transaction::builder_localnet(Epoch(1))
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])

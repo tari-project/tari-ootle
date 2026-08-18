@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::ExecuteResult;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{
     ComponentAddress,
     Metadata,
@@ -72,7 +72,7 @@ fn mint_faucet_nft(
     metadata: Metadata,
 ) -> ExecuteResult {
     test.build_and_execute(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![1, metadata])
             .put_last_instruction_output_on_workspace("my_nft")
             .call_method(account, "deposit", args![Workspace("my_nft")]),

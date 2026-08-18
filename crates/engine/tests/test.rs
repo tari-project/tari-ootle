@@ -32,7 +32,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, all_builtin_templates};
 use tari_template_lib::{
     models::NonFungible,
@@ -293,7 +293,7 @@ fn test_engine_errors() {
 
     // check that public methods can still internally call private ones
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
             .build_and_seal(&Default::default()),
         vec![],
@@ -381,7 +381,7 @@ fn test_random() {
 fn test_errors_on_infinite_loop() {
     let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/infinity_loop"]);
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(test.get_template_address("InfinityLoopTest"), "infinity_loop", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -526,7 +526,7 @@ mod consensus {
         template_test.remove_virtual_substate(VirtualSubstateId::CurrentEpochHash);
 
         let reason = template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_function(
                     template_test.get_template_address("TestConsensus"),
                     "current_epoch_hash",
@@ -568,7 +568,7 @@ mod fungible {
 
         let owner_proof = test.owner_proof();
         let result = test.build_and_execute(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(faucet_component, "burn_coins", args![500])
                 .call_method(faucet_component, "total_supply", args![]),
             vec![owner_proof.clone()],
@@ -581,7 +581,7 @@ mod fungible {
         );
 
         let result = test.build_and_execute(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(faucet_component, "burn_coins", args![
                     initial_supply - Amount::from(500u64)
                 ])
@@ -596,7 +596,7 @@ mod fungible {
         );
 
         test.build_and_execute(
-            Transaction::builder_localnet().call_method(faucet_component, "burn_coins", args![1]),
+            Transaction::builder_localnet(Epoch(1)).call_method(faucet_component, "burn_coins", args![1]),
             vec![],
         )
         .expect_failure();
@@ -1020,7 +1020,7 @@ mod emoji_id {
         price: Amount,
         owner_proof: NonFungibleAddress,
     ) -> Result<FinalizeResult, String> {
-        let transaction = Transaction::builder_localnet()
+        let transaction = Transaction::builder_localnet(Epoch(1))
             .call_method(account_address, "withdraw", args![faucet_resource, price])
             .put_last_instruction_output_on_workspace("payment")
             .call_method(emoji_id_minter, "mint", args![emoji_id, Workspace("payment")])
@@ -1049,7 +1049,7 @@ mod emoji_id {
         let price = Amount::from(20u64);
         let result = test
             .build_and_execute(
-                Transaction::builder_localnet().call_function(emoji_id_template, "new", args![
+                Transaction::builder_localnet(Epoch(1)).call_function(emoji_id_template, "new", args![
                     TARI_TOKEN,
                     max_emoji_id_len,
                     price
@@ -1148,7 +1148,7 @@ mod tickets {
         let price = Amount::from(20u64);
         let event_description = "My music festival".to_string();
         let result = test.execute_expect_success(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_function(ticket_template, "new", args![initial_supply, price, event_description])
                 .build_and_seal(&secret),
             vec![owner_proof.clone()],
@@ -1168,7 +1168,7 @@ mod tickets {
 
         // buy a ticket
         test.execute_expect_success(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(account_address, "withdraw", args![TARI_TOKEN, 20])
                 .put_last_instruction_output_on_workspace("payment")
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])

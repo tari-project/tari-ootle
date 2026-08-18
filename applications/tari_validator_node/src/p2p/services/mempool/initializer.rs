@@ -23,6 +23,7 @@
 use log::*;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_networking::{GossipMessage, NetworkingHandle};
+use tari_ootle_common_types::Epoch;
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec};
 use tari_ootle_storage::StateStore;
 use tari_ootle_transaction::Transaction;
@@ -48,7 +49,7 @@ pub fn spawn<TValidator, TStateStore>(
     #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> (MempoolHandle, JoinHandle<anyhow::Result<()>>)
 where
-    TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError> + Send + Sync + 'static,
+    TValidator: Validator<Transaction, Context = Epoch, Error = TransactionValidationError> + Send + Sync + 'static,
     TStateStore: StateStore<Addr = PeerAddress> + Send + Sync + 'static,
 {
     // This channel only needs to be size 1, because each mempool request must wait for a reply and the mempool is

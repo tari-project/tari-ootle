@@ -22,7 +22,7 @@
 //!     key_provider::PrivateKeyProvider,
 //!     provider::ProviderBuilder,
 //!     wallet::OotleWallet,
-//!     Network, TransactionRequest,
+//!     Epoch, Network, TransactionRequest,
 //! };
 //! use tari_template_lib_types::constants::TARI_TOKEN;
 //!
@@ -39,8 +39,12 @@
 //!     .connect("http://127.0.0.1:12500")
 //!     .await?;
 //!
+//! // Every transaction declares the last epoch it may be sequenced in; past it the
+//! // transaction can never land. The network caps how far ahead this may be set.
+//! let max_epoch = Epoch(provider.get_epoch().await?.as_u64() + 10);
+//!
 //! // 3. Fund our account from the faucet
-//! let faucet_tx = IFaucet::new(&provider)
+//! let faucet_tx = IFaucet::new(&provider, max_epoch)
 //!     .pay_fee(1000u64)
 //!     .take_free_coins(500_000_000u64)
 //!     .prepare()
@@ -55,7 +59,7 @@
 //! // 4. Transfer tokens to a recipient
 //! let recipient = address!("otl_loc_10mc0v2lyy43kldl0ft4c2x5pe7j0ckduv8zej6jgr2z2g9m07fz7gl96ar5wwgu0qu0atmr5tl53ye7n38xr5u7ytlmudq0ruxcau0gge7rxk");
 //!
-//! let unsigned_tx = IAccount::new(&provider)
+//! let unsigned_tx = IAccount::new(&provider, max_epoch)
 //!     .pay_fee(1000u64)
 //!     .public_transfer(&recipient, TARI_TOKEN, 1_000_000u64)
 //!     .prepare()
@@ -157,7 +161,8 @@ mod types;
 // Re-export the address macro from the ootle_address crate
 pub use helpers::*;
 pub use tari_ootle_address::{Network, address};
-pub use tari_ootle_common_types::displayable;
+// Re-exported because every transaction builder takes a `max_epoch`, so callers need the type.
+pub use tari_ootle_common_types::{Epoch, displayable};
 pub use tari_ootle_wallet_crypto as crypto;
 pub use tari_template_lib_types as template_types;
 pub use types::*;

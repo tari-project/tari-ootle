@@ -9,7 +9,7 @@ macro_rules! resource_address {
 }
 
 pub mod _macro_exports {
-    pub use tari_ootle_common_types::{SubstateRequirement, engine_types::substate::SubstateId};
+    pub use tari_ootle_common_types::{Epoch, SubstateRequirement, engine_types::substate::SubstateId};
     pub use tari_ootle_transaction::{
         self as transaction,
         TransactionBuilder,
@@ -159,10 +159,11 @@ macro_rules! __ootle_template_inner {
             pub fn for_component(
                 component: $crate::macros::_macro_exports::ComponentAddress,
                 provider: &'a P,
+                max_epoch: $crate::macros::_macro_exports::Epoch,
             ) -> Self {
                 Self {
                     interface: $crate::macros::_macro_exports::ComponentInterface { component },
-                    builder: $crate::macros::_macro_exports::ComponentInvokeBuilder::new(provider),
+                    builder: $crate::macros::_macro_exports::ComponentInvokeBuilder::new(provider, max_epoch),
                 }
             }
 
@@ -222,10 +223,11 @@ macro_rules! __ootle_template_inner {
             pub fn for_template(
                 template: $crate::macros::_macro_exports::TemplateAddress,
                 provider: &'a P,
+                max_epoch: $crate::macros::_macro_exports::Epoch,
             ) -> Self {
                 Self {
                     interface: $crate::macros::_macro_exports::TemplateInterface { template },
-                    builder: $crate::macros::_macro_exports::ComponentInvokeBuilder::new(provider),
+                    builder: $crate::macros::_macro_exports::ComponentInvokeBuilder::new(provider, max_epoch),
                 }
             }
 
@@ -410,6 +412,7 @@ macro_rules! const_nonzero_u64 {
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_common_types::Epoch;
     use tari_template_lib_types::Amount;
 
     use crate::{Network, builtin_templates::component::TransactionBuildable};
@@ -496,13 +499,13 @@ mod tests {
         };
 
         let component = tari_template_lib_types::ComponentAddress::new([0u8; 32].into());
-        let coin = TestStableCoin::for_component(component, &provider);
+        let coin = TestStableCoin::for_component(component, &provider, Epoch(1));
 
         // Verify component_address accessor
         assert_eq!(coin.component_address(), component);
 
         // Verify typed methods return Self and can be chained
-        let coin = TestStableCoin::for_component(component, &provider);
+        let coin = TestStableCoin::for_component(component, &provider, Epoch(1));
         let coin = coin.increase_supply(Amount::new(1000));
         // Can chain another typed method — this is the key improvement
         let coin = coin.decrease_supply(Amount::new(500));
@@ -531,11 +534,11 @@ mod tests {
 
         // Chain: StableCoin.withdraw -> put on workspace -> Account.deposit (via then, since
         // workspace refs don't cross chain boundaries) -> chain an independent Account.withdraw
-        let coin = TestStableCoin::for_component(component_a, &provider);
+        let coin = TestStableCoin::for_component(component_a, &provider, Epoch(1));
         let _coin = coin
             .withdraw(Amount::new(1000))
             .put_last_instruction_output_on_workspace("bucket")
-            .chain(TestAccount::for_component(component_b, &provider).withdraw(Amount::new(500)))
+            .chain(TestAccount::for_component(component_b, &provider, Epoch(1)).withdraw(Amount::new(500)))
             .pay_fee(1000u64);
     }
 
@@ -549,13 +552,13 @@ mod tests {
         };
 
         let template = tari_template_lib_types::TemplateAddress::from_array([1u8; 32]);
-        let tpl = TestStableCoin::for_template(template, &provider);
+        let tpl = TestStableCoin::for_template(template, &provider, Epoch(1));
 
         // Verify template_address accessor
         assert_eq!(tpl.template_address(), template);
 
         // Verify template function returns Self and can chain shared methods
-        let tpl = TestStableCoin::for_template(template, &provider);
+        let tpl = TestStableCoin::for_template(template, &provider, Epoch(1));
         let _tpl = tpl.instantiate(Amount::new(1_000_000)).pay_fee(1000u64);
     }
 }

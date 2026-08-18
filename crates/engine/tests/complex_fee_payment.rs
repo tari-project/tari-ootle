@@ -11,7 +11,7 @@
 use tari_engine::fees::FeeTable;
 use tari_engine_types::{fees::FeeSource, limits::FREE_COMPUTE_GRACE_POINTS};
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, constants::TARI_TOKEN};
 use tari_template_test_tooling::TemplateTest;
 
@@ -64,7 +64,7 @@ fn fee_paid_via_amm_swap_fits_within_grace() {
     // A non-TARI resource the account holds and will swap for TARI to pay its fee.
     let (token_faucet, token) = create_faucet(&mut test, "SWAP");
     test.build_and_execute(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(token_faucet, "take_free_coins_custom", args![Amount::from(
                 1_000_000_000u64
             )])
@@ -77,7 +77,7 @@ fn fee_paid_via_amm_swap_fits_within_grace() {
     // A (TARI, token) pool, seeded with liquidity from the funded account.
     let pool = create_pool(&mut test, TARI_TOKEN, token);
     test.build_and_execute(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(account, "withdraw", args![TARI_TOKEN, Amount::from(POOL_LIQUIDITY)])
             .put_last_instruction_output_on_workspace("tari")
             .call_method(account, "withdraw", args![token, Amount::from(POOL_LIQUIDITY)])
@@ -99,7 +99,7 @@ fn fee_paid_via_amm_swap_fits_within_grace() {
 
     // The worst-case fee payment: source TARI by swapping `token` through the pool inside the fee
     // intent, then pay from the resulting bucket. Runs entirely on credit before `pay_fee`.
-    let tx = Transaction::builder_localnet()
+    let tx = Transaction::builder_localnet(Epoch(1))
         .with_fee_instructions_builder(|builder| {
             builder
                 .call_method(account, "withdraw", args![token, Amount::from(SWAP_INPUT)])

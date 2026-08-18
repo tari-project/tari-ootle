@@ -913,7 +913,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
         let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
 
-        let transaction = Transaction::builder(network.as_byte())
+        let transaction = Transaction::builder(network.as_byte(), params.max_epoch)
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
                 let fee_resource = params.fee_params.pay_fee_with_swap.as_ref().map(|swap| swap.input_resource).unwrap_or(TARI_TOKEN);
@@ -1069,7 +1069,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         let revealed_to_recipients = params.total_revealed_output_amount();
         let account_address = *owner_account.component_address();
 
-        let transaction = Transaction::builder(network.as_byte())
+        let transaction = Transaction::builder(network.as_byte(), params.max_epoch)
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
                 builder

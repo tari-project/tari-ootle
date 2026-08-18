@@ -49,6 +49,7 @@ impl Validator<Transaction> for SignatureLimitValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
+    use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{
         Network,
         TransactionSealSignature,
@@ -69,7 +70,7 @@ mod tests {
                     vec![],
                     IndexSet::new(),
                     None,
-                    None,
+                    Epoch(1),
                     false,
                 ),
                 (0..num_signatures)

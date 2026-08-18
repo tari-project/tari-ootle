@@ -190,7 +190,7 @@ fn build_unsigned_transaction(
     let fee = intent.fee.to_internal();
     let revealed_amount = intent.revealed_input_amount;
 
-    let mut builder = TransactionBuilder::new(network.as_byte());
+    let mut builder = TransactionBuilder::new(network.as_byte(), tari_ootle_common_types::Epoch(intent.max_epoch));
     builder = builder.pay_fee_from_component(from_component, fee);
 
     builder = if revealed_amount > 0 {
@@ -239,7 +239,6 @@ fn build_unsigned_transaction(
     // Epoch window + dry-run flag.
     builder = builder
         .with_min_epoch(intent.min_epoch.map(tari_ootle_common_types::Epoch))
-        .with_max_epoch(intent.max_epoch.map(tari_ootle_common_types::Epoch))
         .with_dry_run(intent.dry_run);
 
     // Attach the resolved input substates (the from-account component + its vault, resolved via the
@@ -386,7 +385,8 @@ fn seed_partial(
     // `build_unsigned_transaction` once the inputs/outputs statements exist (see
     // `assemble_resolved_stealth`). We only need the partial's resolver machinery + accumulated stealth
     // state + the stashed build context, so an empty unsigned suffices.
-    let unsigned = TransactionBuilder::new(network.as_byte()).build_unsigned();
+    let unsigned =
+        TransactionBuilder::new(network.as_byte(), tari_ootle_common_types::Epoch(intent.max_epoch)).build_unsigned();
     let ctx = StealthBuildCtx {
         intent: intent.clone(),
         entropy: entropy.clone(),
@@ -668,7 +668,7 @@ mod tests {
             revealed_input_amount: revealed_input,
             revealed_output_amount: 0,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         }
@@ -731,7 +731,7 @@ mod tests {
             revealed_input_amount: 500_000,
             revealed_output_amount: 500_000,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -817,7 +817,7 @@ mod tests {
             revealed_input_amount: 0,
             revealed_output_amount: 0,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -1017,7 +1017,7 @@ mod tests {
             revealed_input_amount: 0,
             revealed_output_amount: 0,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -1127,7 +1127,7 @@ mod tests {
             revealed_input_amount: 0,
             revealed_output_amount: 0,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: true,
         };
@@ -1217,7 +1217,7 @@ mod tests {
             revealed_input_amount: 0,
             revealed_output_amount: 0,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -1341,7 +1341,7 @@ mod tests {
             revealed_input_amount: 0,
             revealed_output_amount: 0,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -1427,7 +1427,7 @@ mod tests {
             revealed_input_amount: 1_500_000,
             revealed_output_amount: 500_000,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -1469,7 +1469,7 @@ mod tests {
             revealed_input_amount: 2_500_000,
             revealed_output_amount: 1_500_000,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -1518,7 +1518,7 @@ mod tests {
             revealed_input_amount: 1_500_000,
             revealed_output_amount: 500_000,
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
             pay_fee_from_revealed: false,
         };

@@ -220,7 +220,7 @@ impl TransactionV1 {
         self.body.min_epoch()
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         self.body.max_epoch()
     }
 
@@ -458,7 +458,7 @@ mod blob_validation_tests {
             instructions,
             inputs: indexmap::IndexSet::new(),
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: Epoch(1),
             is_seal_signer_authorized: true,
             dry_run: false,
             blobs,
@@ -616,7 +616,7 @@ mod transaction_id_tests {
             instructions: vec![Instruction::PutLastInstructionOutputOnWorkspace { key: 3 }],
             inputs: indexmap::IndexSet::new(),
             min_epoch: None,
-            max_epoch: Some(Epoch(10)),
+            max_epoch: Epoch(10),
             is_seal_signer_authorized: true,
             dry_run: false,
             blobs: Blobs::empty(),

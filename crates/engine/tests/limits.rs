@@ -5,7 +5,7 @@ use std::slice;
 
 use tari_engine::{runtime::LimitError, wasm::WasmExecutionError};
 use tari_engine_types::limits;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_abi::CallInfo;
 use tari_template_lib::types::bytes::Bytes;
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
@@ -24,7 +24,7 @@ fn max_call_size_limit() {
     let overhead = call_size - limits::ENGINE_LIMITS.max_call_size;
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(
                 template,
                 "new",
@@ -35,7 +35,7 @@ fn max_call_size_limit() {
     );
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(
                 template,
                 "new",
@@ -61,7 +61,7 @@ fn max_random_bytes_len_limit() {
     assert_eq!(bytes.len(), max_len as usize);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template, "request_random_bytes", args!(max_len + 1))
             .build_and_seal(test.secret_key()),
         vec![],

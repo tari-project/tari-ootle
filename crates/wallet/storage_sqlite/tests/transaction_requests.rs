@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_ootle_common_types::{Epoch, optional::IsNotFoundError};
 use tari_ootle_transaction::{TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     models::{KeyBranch, KeyId, TransactionRequestId, TransactionRequestStatus},
@@ -44,7 +44,7 @@ fn insert_request(db: &SqliteWalletStore) -> TransactionRequestId {
     let mut tx = db.create_write_tx().unwrap();
     let model = tx
         .transaction_request_insert(
-            &UnsignedTransaction::new(0u8),
+            &UnsignedTransaction::new(0u8, Epoch(1)),
             seal_signer(),
             &[],
             &[],
@@ -347,7 +347,7 @@ fn a_ttl_past_the_representable_expiry_is_an_error() {
 
     let err = tx
         .transaction_request_insert(
-            &UnsignedTransaction::new(0u8),
+            &UnsignedTransaction::new(0u8, Epoch(1)),
             seal_signer(),
             &[],
             &[],

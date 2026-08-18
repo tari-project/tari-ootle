@@ -9,6 +9,7 @@ use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
+    Epoch,
     SubstateRequirement,
     optional::{IsNotFoundError, Optional},
 };
@@ -429,7 +430,7 @@ where TSpec: WalletSdkSpec
         )?;
 
         let network = self.config_api.get_network()?;
-        let transaction = Transaction::builder(network.as_byte())
+        let transaction = Transaction::builder(network.as_byte(), params.max_epoch)
             .with_dry_run(params.is_dry_run)
             // TODO: we assume that from_account has TARI
             .pay_fee_from_component(*from_account.component_address(), max_fee)
@@ -537,6 +538,10 @@ pub struct ConfidentialTransferParams {
     /// A memo to include in the output, if any. This memo is encrypted in the output and can only be decrypted by the
     /// recipient
     pub memo: Option<Memo>,
+    /// The last epoch the built transaction may be sequenced in. Mandatory: every transaction
+    /// carries a bounded validity window, so the caller decides how long this one stays
+    /// submittable.
+    pub max_epoch: Epoch,
     /// Run as a dry run, no funds will be transferred if true
     pub is_dry_run: bool,
 }

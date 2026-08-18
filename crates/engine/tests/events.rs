@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::runtime::RuntimeError;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::Amount;
 use tari_template_test_tooling::{
@@ -43,7 +43,7 @@ fn cannot_use_standard_topic() {
     let (_, _, private_key) = template_test.create_funded_account();
     let invalid_topic = "std.mytopic";
     let reason = template_test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(event_emitter_template, "test_function", args![invalid_topic])
             .build_and_seal(&private_key),
         [].into(),
@@ -65,7 +65,7 @@ fn builtin_vault_events() {
     // transfer some tokens between accounts
     let amount = Amount::from(100u64);
     let result = test.build_and_execute(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(sender_address, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("foo_bucket")
             .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")]),

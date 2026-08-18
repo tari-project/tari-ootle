@@ -6,7 +6,7 @@ use tari_engine_types::{
     ValidatorFeePool,
     substate::{Substate, SubstateId},
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::ValidatorFeePoolAddress;
 use tari_template_test_tooling::TemplateTest;
 
@@ -31,7 +31,7 @@ fn test_claim_validator_fees_up_to() {
 
     // 1. Claim up to 60 TARI
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .claim_validator_fees_up_to(addr, 60u64)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -52,7 +52,7 @@ fn test_claim_validator_fees_up_to() {
 
     // 2. Claim all remaining (up to 1000)
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .claim_validator_fees_up_to(addr, 1000u64)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])

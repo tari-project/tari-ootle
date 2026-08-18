@@ -47,5 +47,5 @@ pub struct TxDisplay {
     pub instruction_count: u32,
     pub input_count: u32,
     pub min_epoch: Option<u64>,
-    pub max_epoch: Option<u64>,
+    pub max_epoch: u64,
 }

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_transaction::Network;
+use tari_ootle_transaction::{Epoch, Network};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::transaction_builders::manifest;
@@ -36,6 +36,7 @@ fn declares_account_arg_and_explicit_input_as_transaction_inputs() {
         extra_inputs,
         HashMap::new(),
         false,
+        Epoch(1),
     )
     .unwrap();
 

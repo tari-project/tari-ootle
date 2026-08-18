@@ -6,6 +6,7 @@ use std::{path::Path, str::FromStr, time::Duration};
 use log::info;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::commit_result::FinalizeResult;
+use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::{Network, Transaction, TransactionBuilder, TransactionId};
 use tari_ootle_wallet_sdk::{
     WalletSdk as Sdk,
@@ -13,6 +14,7 @@ use tari_ootle_wallet_sdk::{
     cipher_seed::CipherSeedRestore,
     local_key_store::LocalKeyStore,
     models::EpochBirthday,
+    network::WalletNetworkInterface,
 };
 use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
@@ -37,18 +39,27 @@ pub struct Runner {
     pub(crate) faucet_template: TemplateAddress,
     pub(crate) tariswap_template: TemplateAddress,
     pub(crate) stats: Stats,
+    /// Validity window shared by every transaction the bench builds, resolved once at startup. A
+    /// bench run is short relative to this, so a single window covers the whole run.
+    pub(crate) max_epoch: Epoch,
 }
+
+/// Epochs past the epoch at startup that bench transactions stay valid for.
+const BENCH_TRANSACTION_VALIDITY_EPOCHS: u64 = 10;
 
 impl Runner {
     pub async fn init(cli: CommonArgs) -> anyhow::Result<Self> {
         let sdk = initialize_wallet_sdk(&cli.db_path, cli.indexer_url.clone())?;
         let (faucet_template, tariswap_template) = get_templates(&cli).await?;
+        let current_epoch = sdk.get_network_interface().get_current_epoch().await?;
+        let max_epoch = Epoch(current_epoch.as_u64() + BENCH_TRANSACTION_VALIDITY_EPOCHS);
         Ok(Self {
             sdk,
             cli,
             faucet_template,
             tariswap_template,
             stats: Stats::default(),
+            max_epoch,
         })
     }
 
@@ -117,7 +128,7 @@ impl Runner {
     }
 
     pub fn new_transaction_builder(&self) -> TransactionBuilder {
-        Transaction::builder(self.cli.network)
+        Transaction::builder(self.cli.network, self.max_epoch)
     }
 }
 

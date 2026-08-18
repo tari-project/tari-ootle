@@ -36,6 +36,7 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine_types::Epoch;
 use tari_epoch_manager::{
     EpochManagerReader,
     service::{EpochManagerConfig, EpochManagerHandle},
@@ -89,8 +90,10 @@ use tari_ootle_transaction_validation::{
     TransactionNetworkValidator,
     TransactionSignatureValidator,
     TransactionValidationError,
+    TransactionValidityWindowValidator,
     TransactionWeightValidator,
     Validator,
+    WithContext,
 };
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
@@ -360,8 +363,9 @@ pub async fn spawn_services(
     );
     // The executor resolves the exhaust burn rate for each transaction's execution epoch.
     let transaction_executor = TariBlockTransactionExecutor::new(transaction_processor, consensus_constants.clone());
+
     let transaction_validator = TariBlockTransactionValidator::new(
-        create_mempool_transaction_validator(config.network, template_provider.clone()).boxed(),
+        create_node_transaction_validator(config.network, template_provider.clone(), &consensus_constants).boxed(),
         EpochRangeValidator::new().boxed(),
     );
 
@@ -397,7 +401,7 @@ pub async fn spawn_services(
 
     let (mempool, join_handle) = mempool::spawn(
         epoch_manager.clone(),
-        create_mempool_transaction_validator(config.network, template_provider.clone()),
+        create_mempool_transaction_validator(config.network, template_provider.clone(), &consensus_constants),
         state_store.clone(),
         consensus_handle.clone(),
         networking.clone(),
@@ -515,11 +519,16 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     Ok(handle)
 }
 
-pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
+/// Builds every validation a validator node applies without an epoch: the structural checks plus the
+/// node-local ones.
+///
+/// `TemplateExistsValidator` depends on lagging local state and can false-reject, so this chain is node-local
+/// rather than structural — `TemplateNotFound` is correspondingly not sender fault.
+pub fn create_node_transaction_validator<TProvider: TemplateProvider>(
     network: Network,
     template_manager: TProvider,
-) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
-    let max_transaction_weight = ConsensusConstants::from(network).max_transaction_weight;
+    constants: &ConsensusConstants,
+) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> + use<TProvider> {
     TransactionNetworkValidator::new(network)
         .and_then(TransactionDryRunValidator)
         .and_then(BasicValidations::new())
@@ -527,7 +536,7 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
         // fail at execution, and unreferenced blobs would never fail at all.
         .and_then(BlobReferenceValidator::new())
         // Cheap structural check — reject over-weight transactions before verifying signatures.
-        .and_then(TransactionWeightValidator::new(max_transaction_weight))
+        .and_then(TransactionWeightValidator::new(constants.max_transaction_weight))
         // Reject transactions whose aggregate stealth-transfer work exceeds the per-transaction caps before
         // verifying signatures or executing.
         .and_then(StealthTransactionLimitsValidator::new())
@@ -536,6 +545,22 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
         .and_then(SignatureLimitValidator::new())
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
+}
+
+pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
+    network: Network,
+    template_manager: TProvider,
+    constants: &ConsensusConstants,
+) -> impl Validator<Transaction, Context = Epoch, Error = TransactionValidationError> + use<TProvider> {
+    WithContext::<Epoch, Transaction, TransactionValidationError>::new()
+        .map_context(
+            |_| (),
+            create_node_transaction_validator(network, template_manager, constants),
+        )
+        .and_then(EpochRangeValidator::new())
+        .and_then(TransactionValidityWindowValidator::new(
+            constants.max_transaction_validity_epochs,
+        ))
 }
 
 async fn create_base_layer_client(

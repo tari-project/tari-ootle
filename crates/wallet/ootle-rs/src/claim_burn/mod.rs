@@ -46,7 +46,7 @@ use tari_crypto::{
 // Re-export the burn proof types so callers don't need to reach into `tari_ootle_common_types`.
 pub use tari_ootle_common_types::engine_types::confidential::{ClaimBurnOutputData, MinotariBurnClaimProof};
 use tari_ootle_common_types::engine_types::stealth::validate_transfer;
-use tari_ootle_transaction::{Transaction, UnsealedTransaction, UnsignedTransaction};
+use tari_ootle_transaction::{Epoch, Transaction, UnsealedTransaction, UnsignedTransaction};
 use tari_ootle_wallet_crypto::{StealthCryptoApi, memo::Memo};
 use tari_template_lib_types::{Amount, EncryptedData, constants::TARI_TOKEN};
 
@@ -70,6 +70,7 @@ pub struct ClaimBurn<'a, P> {
     claim_proof: MinotariBurnClaimProof,
     encrypted_data: EncryptedData,
     max_fee: Amount,
+    max_epoch: Epoch,
     recipient: Option<Address>,
     memo: Option<Memo>,
 }
@@ -79,12 +80,20 @@ impl<'a, P: Provider> ClaimBurn<'a, P> {
     ///
     /// `claim_proof` and `encrypted_data` are produced by the L1 (minotari) wallet for the burn
     /// output being claimed (the wallet daemon bundles them as `ClaimBurnProofContents`).
-    pub fn new(provider: &'a P, claim_proof: MinotariBurnClaimProof, encrypted_data: EncryptedData) -> Self {
+    /// `max_epoch` is the last epoch the claim transaction may be sequenced in. It is required:
+    /// every transaction carries a bounded validity window.
+    pub fn new(
+        provider: &'a P,
+        claim_proof: MinotariBurnClaimProof,
+        encrypted_data: EncryptedData,
+        max_epoch: Epoch,
+    ) -> Self {
         Self {
             provider,
             claim_proof,
             encrypted_data,
             max_fee: Amount::zero(),
+            max_epoch,
             recipient: None,
             memo: None,
         }
@@ -133,6 +142,7 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
             claim_proof,
             encrypted_data,
             max_fee,
+            max_epoch,
             recipient,
             memo,
         } = self;
@@ -214,7 +224,7 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
         // encrypted data here, so this is not strictly required, but it keeps the values consistent.
         let output_data = ClaimBurnOutputData { encrypted_data };
 
-        let unsigned_tx = Transaction::builder(network)
+        let unsigned_tx = Transaction::builder(network, max_epoch)
             .with_fee_instructions_builder(|builder| {
                 builder
                     // Mint the burned funds as a confidential UTXO.

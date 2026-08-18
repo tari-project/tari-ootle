@@ -30,8 +30,12 @@ pub struct UnsignedTransactionV1 {
     pub inputs: IndexSet<SubstateRequirement>,
     #[n(4)]
     pub min_epoch: Option<Epoch>,
+    /// The last epoch in which this transaction may be sequenced. Mandatory: every transaction has a
+    /// bounded lifetime, capped at `ConsensusConstants::max_transaction_validity_epochs` past the
+    /// current epoch, so a transaction's death is deterministic and an aborted attempt cannot be
+    /// retried indefinitely.
     #[n(5)]
-    pub max_epoch: Option<Epoch>,
+    pub max_epoch: Epoch,
     #[n(6)]
     pub is_seal_signer_authorized: bool,
     #[n(7)]
@@ -61,14 +65,14 @@ pub struct UnsignedTransactionV1 {
 }
 
 impl UnsignedTransactionV1 {
-    pub(crate) fn new_default<N: Into<u8>>(network: N) -> Self {
+    pub(crate) fn new_default<N: Into<u8>>(network: N, max_epoch: Epoch) -> Self {
         Self {
             network: network.into(),
             fee_instructions: vec![],
             instructions: vec![],
             inputs: IndexSet::new(),
             min_epoch: None,
-            max_epoch: None,
+            max_epoch,
             is_seal_signer_authorized: true,
             dry_run: false,
             blobs: Blobs::empty(),
@@ -82,7 +86,7 @@ impl UnsignedTransactionV1 {
         instructions: Vec<Instruction>,
         inputs: IndexSet<SubstateRequirement>,
         min_epoch: Option<Epoch>,
-        max_epoch: Option<Epoch>,
+        max_epoch: Epoch,
         dry_run: bool,
     ) -> Self {
         Self {
@@ -173,7 +177,7 @@ impl UnsignedTransactionV1 {
         self.min_epoch
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         self.max_epoch
     }
 

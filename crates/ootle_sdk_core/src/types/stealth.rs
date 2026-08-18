@@ -312,8 +312,9 @@ pub struct StealthTransferIntent {
     pub revealed_output_amount: u64,
     /// Optional earliest epoch.
     pub min_epoch: Option<u64>,
-    /// Optional latest epoch.
-    pub max_epoch: Option<u64>,
+    /// The last epoch this transaction is valid in. Mandatory: every transaction has a bounded
+    /// validity window, capped network-wide at `max_transaction_validity_epochs` past the current epoch.
+    pub max_epoch: u64,
     /// Dry-run flag.
     pub dry_run: bool,
     /// Pay the fee from the account's revealed (XTR) vault even when there is no revealed input.
@@ -648,7 +649,7 @@ mod tests {
             revealed_input_amount: 0,
             revealed_output_amount: 0,
             min_epoch: None,
-            max_epoch: Some(99),
+            max_epoch: 99,
             dry_run: false,
             pay_fee_from_revealed: false,
         };
@@ -753,7 +754,7 @@ mod tests {
                 revealed_input_amount: 0,
                 revealed_output_amount,
                 min_epoch: None,
-                max_epoch: None,
+                max_epoch: 1,
                 dry_run: false,
                 pay_fee_from_revealed: false,
             }

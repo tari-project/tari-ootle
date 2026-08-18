@@ -205,6 +205,18 @@ export default function TransactionDetails() {
                       {data.invalid_reason ? data.invalid_reason : renderResult(data?.result)}
                     </DataTableCell>
                   </TableRow>
+                  {transaction?.min_epoch != null && (
+                    <TableRow>
+                      <TableCell>Min Epoch</TableCell>
+                      <DataTableCell>{transaction.min_epoch.toString()}</DataTableCell>
+                    </TableRow>
+                  )}
+                  {transaction?.max_epoch != null && (
+                    <TableRow>
+                      <TableCell>Max Epoch</TableCell>
+                      <DataTableCell>{transaction.max_epoch.toString()}</DataTableCell>
+                    </TableRow>
+                  )}
                   <TableRow>
                     <TableCell>JSON</TableCell>
                     <DataTableCell>

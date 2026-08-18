@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
 const TEMPLATE_NAME: &str = "NoConcurrency";
@@ -13,7 +13,7 @@ fn it_panics_if_template_attempts_to_spawn_a_thread() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(
                 test.get_template_address(TEMPLATE_NAME),
                 "try_to_spawn_a_thread_static",

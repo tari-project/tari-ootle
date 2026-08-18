@@ -45,6 +45,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::hex::Hex,
 };
+use tari_ootle_transaction::Epoch;
 
 /// MicroTARI revealed from the claimed funds to pay the transaction fee.
 const MAX_FEE: u64 = 2000;
@@ -98,10 +99,15 @@ async fn main() {
         .connect(default_indexer_url(network))
         .await
         .expect("failed to connect to indexer");
+
+    // Every transaction declares the last epoch it may be sequenced in; past it the transaction can
+    // never land. Ten epochs is a comfortable window for an example — the network caps how far
+    // ahead this may be set.
+    let max_epoch = Epoch(provider.get_epoch().await.unwrap().as_u64() + 10);
     assert_eq!(provider.network(), network);
 
     // Build the claim transaction and the sealer that signs it with the derived stealth claim key.
-    let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, encrypted_data)
+    let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, encrypted_data, max_epoch)
         .with_max_fee(MAX_FEE)
         .with_memo_message("claimed via ootle-rs")
         .prepare()

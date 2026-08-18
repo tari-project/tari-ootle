@@ -102,9 +102,43 @@ pub struct WalletDaemonConfig {
     /// transactions when new burn proof files are detected, deferring each claim to the next epoch as required.
     #[serde(default = "return_default_auto_claim_burns")]
     pub auto_claim_burns: bool,
+    /// How many epochs ahead of the current epoch to stamp `max_epoch` on transactions this wallet
+    /// builds, when the caller does not supply one. Every transaction must declare the last epoch it
+    /// may be sequenced in; past it the transaction can never land, so this decides how long a built
+    /// transaction stays submittable. Must not exceed the network's `max_transaction_validity_epochs`
+    /// ceiling — the default is far below it, leaving the long windows to callers that ask for one
+    /// explicitly (e.g. offline or multi-party signing).
+    #[serde(default = "return_default_transaction_validity_epochs")]
+    pub default_transaction_validity_epochs: u64,
 }
 
 impl WalletDaemonConfig {
+    /// Rejects a configuration that cannot build a usable transaction.
+    ///
+    /// A zero window stamps `max_epoch == current_epoch`, so every transaction the daemon builds
+    /// must be sequenced within the epoch it was built in and one built near a boundary expires
+    /// before it can land. An oversized window is only warned about: it is the network's ceiling
+    /// that decides, and this process cannot read it.
+    pub fn validate(&self) -> Result<(), anyhow::Error> {
+        if self.default_transaction_validity_epochs == 0 {
+            return Err(anyhow::anyhow!(
+                "default_transaction_validity_epochs must be at least 1: a zero window expires transactions in the \
+                 epoch they are built in"
+            ));
+        }
+        if self.default_transaction_validity_epochs > IMPLAUSIBLE_TRANSACTION_VALIDITY_EPOCHS {
+            log::warn!(
+                target: LOG_TARGET,
+                "default_transaction_validity_epochs ({}) is beyond the transaction validity ceiling known to this \
+                 build ({}). If the network enforces that ceiling, every transaction this wallet builds will be \
+                 refused as out of range.",
+                self.default_transaction_validity_epochs,
+                IMPLAUSIBLE_TRANSACTION_VALIDITY_EPOCHS,
+            );
+        }
+        Ok(())
+    }
+
     pub fn get_burn_proof_dir(&self, network: Network) -> PathBuf {
         self.burn_proof_dir
             .clone()
@@ -115,6 +149,20 @@ impl WalletDaemonConfig {
 fn return_default_auto_claim_burns() -> bool {
     true
 }
+
+/// Three epochs is roughly an hour at the ~20 minute epoch target: long enough for an interactive
+/// approval flow, short enough that an abandoned transaction stops being submittable quickly.
+fn return_default_transaction_validity_epochs() -> u64 {
+    3
+}
+
+/// Mirrors `ConsensusConstants::max_transaction_validity_epochs`. The wallet binary does not carry
+/// the consensus crate, so the value is duplicated here and pinned to the real one by a test; it is
+/// used only to warn an operator that their configured window looks implausible, never as a hard
+/// limit, which would wrongly refuse to start against a network with a larger ceiling.
+const IMPLAUSIBLE_TRANSACTION_VALIDITY_EPOCHS: u64 = 2160;
+
+const LOG_TARGET: &str = "tari::ootle::wallet_daemon::config";
 
 fn return_default_transaction_request_ttl() -> Duration {
     Duration::from_secs(30 * 60)
@@ -153,6 +201,7 @@ impl Default for WalletDaemonConfig {
             burn_proof_dir: None,
             override_keyring_password: None,
             auto_claim_burns: true,
+            default_transaction_validity_epochs: return_default_transaction_validity_epochs(),
         }
     }
 }
@@ -213,5 +262,41 @@ impl FromStr for WalletDaemonAuth {
             "webauthn" => Ok(WalletDaemonAuth::WebAuthn),
             _ => Err(anyhow!("Invalid authentication method: {}", s)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_consensus::consensus_constants::ConsensusConstants;
+
+    use super::*;
+
+    /// The warning threshold is only useful while it tracks the rule it mirrors. If the consensus
+    /// ceiling is lowered and this is not, the wallet keeps accepting a window under which every
+    /// transaction it builds is unsequenceable.
+    #[test]
+    fn the_warning_threshold_tracks_the_consensus_ceiling() {
+        assert_eq!(
+            IMPLAUSIBLE_TRANSACTION_VALIDITY_EPOCHS,
+            ConsensusConstants::mainnet().max_transaction_validity_epochs
+        );
+    }
+
+    #[test]
+    fn a_zero_validity_window_is_refused() {
+        let config = WalletDaemonConfig {
+            default_transaction_validity_epochs: 0,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn a_window_at_the_ceiling_is_accepted() {
+        let config = WalletDaemonConfig {
+            default_transaction_validity_epochs: IMPLAUSIBLE_TRANSACTION_VALIDITY_EPOCHS,
+            ..Default::default()
+        };
+        config.validate().unwrap();
     }
 }

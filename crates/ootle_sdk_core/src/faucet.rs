@@ -49,9 +49,9 @@ pub struct FaucetClaimIntent {
     /// Optional earliest epoch this transaction is valid in.
     #[serde(default)]
     pub min_epoch: Option<u64>,
-    /// Optional latest epoch this transaction is valid in.
-    #[serde(default)]
-    pub max_epoch: Option<u64>,
+    /// The last epoch this transaction is valid in. Mandatory: every transaction has a bounded
+    /// validity window, capped network-wide at `max_transaction_validity_epochs` past the current epoch.
+    pub max_epoch: u64,
     /// Whether this is a dry run (e.g. fee estimation).
     #[serde(default)]
     pub dry_run: bool,
@@ -158,7 +158,7 @@ mod tests {
             recipient_public_key: recipient_pk(),
             fee: BoundaryAmount::new(2000),
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         }
     }

@@ -8,6 +8,7 @@ use std::time::Duration;
 use tari_consensus_types::Decision;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
+    Epoch,
     commit_result::{AbortReason, ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     fees::{FeeBreakdown, FeeReceipt, FeeSource},
     substate::SubstateDiff,
@@ -28,7 +29,7 @@ fn now() -> PrimitiveDateTime {
 }
 
 fn build_transaction() -> Transaction {
-    Transaction::builder_localnet()
+    Transaction::builder_localnet(Epoch(100))
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])

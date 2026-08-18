@@ -22,7 +22,9 @@ pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u
 // Note that the BP-plus implementation currently does not support bit lengths over 64
 const BP_BIT_LENGTH: usize = u64::BITS as usize;
 
-pub const MAX_LAZY_BP_AGG_FACTORS: usize = 8;
+/// Largest bulletproof aggregation factor a statement may use. Must be a power of two and must have a matching
+/// service below, since a proof over `n` commitments is verified at `n.next_power_of_two()`.
+pub const MAX_LAZY_BP_AGG_FACTORS: usize = 16;
 
 lazy_static! {
     /// Static reference to the default commitment factory. Each instance of CommitmentFactory requires a number of heap allocations.
@@ -36,6 +38,8 @@ lazy_static! {
         BulletproofsPlusService::init(BP_BIT_LENGTH, 4, ExtendedPedersenCommitmentFactory::default()).unwrap();
     static ref RANGE_PROOF_AGG_8_SERVICE: BulletproofsPlusService =
         BulletproofsPlusService::init(BP_BIT_LENGTH, 8, ExtendedPedersenCommitmentFactory::default()).unwrap();
+    static ref RANGE_PROOF_AGG_16_SERVICE: BulletproofsPlusService =
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 16, ExtendedPedersenCommitmentFactory::default()).unwrap();
 }
 
 pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
@@ -44,8 +48,9 @@ pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static Bul
         2 => &RANGE_PROOF_AGG_2_SERVICE,
         4 => &RANGE_PROOF_AGG_4_SERVICE,
         8 => &RANGE_PROOF_AGG_8_SERVICE,
+        16 => &RANGE_PROOF_AGG_16_SERVICE,
         _ => panic!(
-            "Unsupported BP aggregation factor {}. Expected 1/2/4 or 8",
+            "Unsupported BP aggregation factor {}. Expected 1/2/4/8 or 16",
             aggregation_factor
         ),
     }

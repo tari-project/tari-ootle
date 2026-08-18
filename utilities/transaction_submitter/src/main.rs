@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, fs::File, io::Write, time::Duration};
+use std::{cmp, fs::File, io::Write, path::Path, time::Duration};
 
 use anyhow::bail;
 use tari_indexer_client::{
@@ -97,6 +97,8 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
     if num_transactions == 0 {
         return Ok(Some(StressTestResultSummary::default()));
     }
+
+    check_validity_window(&clients[0], &args.transaction_file, args.skip_transactions.unwrap_or(0)).await?;
 
     let transactions = read_transactions(File::open(args.transaction_file)?, args.skip_transactions.unwrap_or(0))?;
 
@@ -388,6 +390,32 @@ impl Default for StressTestResultSummary {
             total_execution_time: Duration::from_secs(0),
         }
     }
+}
+
+/// Fails before submitting anything if the file's transactions can no longer be sequenced.
+///
+/// `max_epoch` is signed over, so it is fixed when the file is generated and the submitter cannot
+/// refresh it. Every transaction in a file is built the same way, so the first one answers for all
+/// of them — and checking once turns a run of N indistinguishable per-transaction rejections into a
+/// single actionable error.
+async fn check_validity_window(client: &IndexerClient, transaction_file: &Path, skip: u64) -> anyhow::Result<()> {
+    let transactions = read_transactions(File::open(transaction_file)?, skip)?;
+    let Ok(first) = transactions.recv() else {
+        return Ok(());
+    };
+
+    let current_epoch = client.client.get_epoch_manager_stats().await?.current_epoch;
+    let max_epoch = first.max_epoch();
+    if current_epoch > max_epoch {
+        bail!(
+            "The transactions in {} expired at epoch {max_epoch} and {} is now at epoch {current_epoch}. They can \
+             never be sequenced — regenerate the file.",
+            transaction_file.display(),
+            client.endpoint,
+        );
+    }
+
+    Ok(())
 }
 
 fn print_summary(summary: &StressTestResultSummary) {

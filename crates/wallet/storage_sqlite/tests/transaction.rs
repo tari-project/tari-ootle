@@ -19,7 +19,7 @@ use tari_template_lib_types::ComponentAddress;
 
 fn build_transaction() -> Transaction {
     let key = RistrettoSecretKey::from(123);
-    Transaction::builder_localnet()
+    Transaction::builder_localnet(Epoch(1))
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])
@@ -31,7 +31,7 @@ fn build_transaction() -> Transaction {
 /// transaction id, so multiple transactions can be inserted in one test.
 fn build_linked_transaction(seed: u64) -> Transaction {
     let key = RistrettoSecretKey::from(seed);
-    Transaction::builder_localnet()
+    Transaction::builder_localnet(Epoch(1))
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])

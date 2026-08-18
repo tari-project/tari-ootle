@@ -14,7 +14,11 @@ tari_ootle_common_types = { workspace = true }
 tari_crypto = { workspace = true }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 
+tari_indexer_client = { workspace = true, features = ["client"] }
+
 anyhow = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+url = { workspace = true }
 bytes = { workspace = true }
 tari_bor = { workspace = true }
 # if we set clap version 4 in the workspace it would break other crates

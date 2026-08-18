@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::indexed_value::IndexedValue;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::ComponentAddress;
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -15,7 +15,7 @@ fn it_can_call_a_method() {
     let template = test.get_template_address("NoStdCounter");
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("no_std_counter")
             .call_function(template, "with_address", args![Workspace("no_std_counter")])
             .call_method("no_std_counter", "increment", args![])
@@ -44,7 +44,7 @@ fn it_can_call_a_function() {
     let template = test.get_template_address("NoStdCounter");
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template, "simple", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -58,7 +58,7 @@ fn it_panics() {
     let template = test.get_template_address("NoStdCounter");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template, "panic_works", args![])
             .build_and_seal(test.secret_key()),
         vec![],

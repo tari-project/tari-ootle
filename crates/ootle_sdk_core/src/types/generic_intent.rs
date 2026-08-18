@@ -455,8 +455,9 @@ pub struct GenericTransactionIntent {
     pub extra_inputs: Vec<InputRef>,
     /// Optional earliest epoch this transaction is valid in.
     pub min_epoch: Option<u64>,
-    /// Optional latest epoch this transaction is valid in.
-    pub max_epoch: Option<u64>,
+    /// The last epoch this transaction is valid in. Mandatory: every transaction has a bounded
+    /// validity window, capped network-wide at `max_transaction_validity_epochs` past the current epoch.
+    pub max_epoch: u64,
     /// Whether this is a dry run.
     pub dry_run: bool,
 }
@@ -959,7 +960,7 @@ mod tests {
             inputs: vec![],
             extra_inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         assert_eq!(intent.validate_blob_indices().unwrap_err().code(), "VALIDATION");
@@ -1018,7 +1019,7 @@ mod tests {
             inputs: vec![InputRef::versioned(component_str(), 0)],
             extra_inputs: vec![],
             min_epoch: Some(1),
-            max_epoch: Some(10),
+            max_epoch: 10,
             dry_run: true,
         };
         let json = serde_json::to_string(&intent).unwrap();

@@ -83,10 +83,14 @@ pub async fn handle_submit_instruction(
     })?;
     let transaction = context
         .transaction_builder()
+        .await?
         .with_instructions(req.instructions)
         .pay_fee_from_component(*fee_account.component_address(), req.max_fee.max(1))
         .with_min_epoch(req.min_epoch.map(Epoch))
-        .with_max_epoch(req.max_epoch.map(Epoch))
+        .then(|b| match req.max_epoch {
+            Some(max_epoch) => b.with_max_epoch(Epoch(max_epoch)),
+            None => b,
+        })
         .with_inputs(req.inputs)
         .build_unsigned();
 
@@ -184,8 +188,7 @@ async fn submit_inner(
     // Signatures collected out of band are attached first; walletd's own
     // signatures are added on top and the seal signature commits to all of them.
     let mut transaction = context
-        .transaction_builder()
-        .with_unsigned_transaction(req.transaction)
+        .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_signatures(req.signatures);
 
@@ -379,8 +382,7 @@ pub async fn handle_detect_inputs(
         .collect::<Vec<_>>();
 
     let transaction = context
-        .transaction_builder()
-        .with_unsigned_transaction(req.transaction)
+        .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected)
         .build_unsigned();
 
@@ -430,8 +432,7 @@ async fn submit_dry_run_inner(
     };
 
     let mut transaction = context
-        .transaction_builder()
-        .with_unsigned_transaction(req.transaction)
+        .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
         .with_signatures(req.signatures);
@@ -513,6 +514,7 @@ pub async fn handle_submit_manifest(
 
     let mut transaction = context
         .transaction_builder()
+        .await?
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
             if instructions.fee_instructions.is_empty() {
@@ -761,6 +763,7 @@ pub async fn handle_publish_template(
 
     let builder = context
         .transaction_builder()
+        .await?
         .pay_fee_from_component(*fee_account.component_address(), max_fee);
     let builder = match metadata_hash {
         Some(hash) => builder.publish_template_with_metadata(wasm_binary, hash),

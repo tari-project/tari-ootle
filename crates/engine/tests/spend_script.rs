@@ -18,7 +18,7 @@ use tari_ootle_common_types::{
     crypto::create_key_pair_from_seed,
     substate_type::SubstateType,
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{
     AccessRule,
     Amount,
@@ -93,7 +93,7 @@ fn faucet_new_tx(test: &mut TemplateTest, mint: &StealthSecretTransferData) -> T
     test.enable_auto_add_proofs_from_signers();
     let faucet_template = test.get_template_address(FAUCET_TEMPLATE);
     let initial_supply = mint.statement.inputs_statement.revealed_amount;
-    Transaction::builder_localnet()
+    Transaction::builder_localnet(Epoch(1))
         .call_function(faucet_template, "new", args![
             initial_supply,
             mint.statement.clone(),
@@ -146,7 +146,7 @@ fn key_path_spend_authorised_by_signer_badge() {
 
     let transfer = spend_into(&mint, key_path(pk));
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -163,7 +163,7 @@ fn key_path_spend_rejected_without_signer_badge() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -185,7 +185,7 @@ fn script_path_access_rule_leaf_allows_spend() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -204,7 +204,7 @@ fn script_path_access_rule_leaf_denies_spend() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -248,7 +248,7 @@ fn multi_leaf_tree_spends_via_any_committed_leaf() {
     let transfer =
         stealth::generate_transfer_data([input], 0u64, [out(100, key_path(test.to_public_key_bytes()))], 0u64);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -287,7 +287,7 @@ fn revealing_a_leaf_not_in_the_tree_is_rejected() {
     let transfer =
         stealth::generate_transfer_data([input], 0u64, [out(100, key_path(test.to_public_key_bytes()))], 0u64);
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -310,7 +310,7 @@ fn timelock_allows_spend_at_or_after_unlock_epoch() {
     // Output is key-path; the timelock is on the input being spent.
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -329,7 +329,7 @@ fn timelock_rejects_spend_before_unlock_epoch() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -351,7 +351,7 @@ fn covenant_allows_output_that_preserves_condition() {
     // The output carries the same covenant condition (so the same condition_root) -> the covenant is satisfied.
     let transfer = spend_into(&mint, covenant);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -369,7 +369,7 @@ fn covenant_rejects_output_that_changes_condition() {
     // The output changes the condition to a key path (different condition_root) -> the covenant rejects the spend.
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -389,7 +389,7 @@ fn covenant_rejects_output_with_added_key_path() {
     // would be key-spendable next block, escaping the covenant, so preserving the root alone must not satisfy it.
     let transfer = spend_into(&mint, key_and_conditions(test.to_public_key_bytes(), vec![covenant]));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -409,7 +409,7 @@ fn covenant_rejects_spend_with_no_stealth_outputs() {
     // preserves the condition, so the spend is rejected.
     let transfer = stealth::generate_transfer_data([mint.input_spec_for(0, 100)], 0u64, NO_OUTPUTS, 100u64);
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -452,7 +452,7 @@ fn covenant_balance_allows_full_conservation() {
     // The full 100 units stay in the covenant -> conserved.
     let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -470,7 +470,7 @@ fn covenant_balance_rejects_value_leaving_partition() {
     // All 100 units go to a key-path output, leaving the covenant entirely -> rejected (allowance is zero).
     let transfer = spend_with_covenant(&mint, &covenant, vec![out(100, key_path(test.to_public_key_bytes()))]);
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -494,7 +494,7 @@ fn covenant_balance_allows_withdrawal_within_allowance() {
         out(30, key_path(test.to_public_key_bytes())),
     ]);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -517,7 +517,7 @@ fn covenant_balance_rejects_withdrawal_over_allowance() {
         out(40, key_path(test.to_public_key_bytes())),
     ]);
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -567,7 +567,7 @@ fn covenant_balance_verifies_each_partition_independently() {
         0u64,
     );
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -594,7 +594,7 @@ fn covenant_balance_rejects_understated_withdrawal() {
     transfer.statement.covenant_claims[0].revealed_amount = Amount::from_u64(30);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -620,7 +620,7 @@ fn covenant_balance_allowance_vault_persists_across_spends() {
     let spend1 = spend_with_covenant(&mint, &vault, vec![out(70, vault.clone()), out(30, recipient.clone())]);
     let vault_70 = spend1.output_masks[0].clone();
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, spend1.statement)
             .finish()
             .seal(test.secret_key()),
@@ -642,7 +642,7 @@ fn covenant_balance_allowance_vault_persists_across_spends() {
     );
     let vault_40 = spend2.output_masks[0].clone();
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, spend2.statement)
             .finish()
             .seal(test.secret_key()),
@@ -663,7 +663,7 @@ fn covenant_balance_allowance_vault_persists_across_spends() {
         0u64,
     );
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, over.statement)
             .finish()
             .seal(test.secret_key()),
@@ -682,7 +682,7 @@ fn always_reject_aborts_spend() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -701,7 +701,7 @@ fn read_only_sandbox_blocks_state_mutation() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -719,7 +719,7 @@ fn sandbox_denies_emit_event() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -743,7 +743,7 @@ fn sandbox_denies_cross_template_call() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -765,7 +765,7 @@ fn spend_script_exceeding_compute_budget_aborts() {
     // letting an expensive script stall execution.
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -809,7 +809,7 @@ fn signature_lock_allows_valid_signature() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -834,7 +834,7 @@ fn signature_lock_rejects_invalid_signature() {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -858,7 +858,7 @@ fn assert_spend_rejected(function: &str, args: Vec<Bytes>, expected: &str) {
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -930,11 +930,11 @@ fn script_path_witness_increases_transaction_weight() {
     );
     let key_spend = stealth::generate_transfer_data([MaskAndValue { mask, value: 100 }], 0u64, NO_OUTPUTS, 100u64);
 
-    let script_tx = Transaction::builder_localnet()
+    let script_tx = Transaction::builder_localnet(Epoch(1))
         .stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS, script_spend.statement)
         .finish()
         .seal(test.secret_key());
-    let key_tx = Transaction::builder_localnet()
+    let key_tx = Transaction::builder_localnet(Epoch(1))
         .stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS, key_spend.statement)
         .finish()
         .seal(test.secret_key());
@@ -963,7 +963,7 @@ fn all(conditions: Vec<SpendCondition>) -> SpendCondition {
 /// Submits a stealth transfer spending the minted UTXO and asserts success.
 fn submit_expect_success(test: &mut TemplateTest, resx: ResourceAddress, transfer: StealthSecretTransferData) {
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),
@@ -979,7 +979,7 @@ fn submit_expect_rejected(
     expected: &str,
 ) {
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx, transfer.statement)
             .finish()
             .seal(test.secret_key()),

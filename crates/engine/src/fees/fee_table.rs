@@ -40,6 +40,11 @@ pub struct FeeTable {
     /// (`per_template_size_premium_unit_cost × units²`, `units = excess_bytes /
     /// template_size_premium_unit_bytes`). Set to 0 to disable the publish premium.
     pub per_template_size_premium_unit_cost: u64,
+    /// Flat cost charged once per published template, independent of its size. A template's binary
+    /// is mostly fixed `template_lib` overhead rather than author content, so size alone cannot
+    /// price a small publish above the noise floor; this sets that floor. Set to 0 to charge for
+    /// size only.
+    pub per_template_publish_cost: u64,
 }
 
 impl FeeTable {
@@ -58,6 +63,7 @@ impl FeeTable {
             template_size_premium_free_bytes: 0,
             template_size_premium_unit_bytes: 1,
             per_template_size_premium_unit_cost: 0,
+            per_template_publish_cost: 0,
         }
     }
 
@@ -111,6 +117,10 @@ impl FeeTable {
 
     pub fn per_template_size_premium_unit_cost(&self) -> u64 {
         self.per_template_size_premium_unit_cost
+    }
+
+    pub fn per_template_publish_cost(&self) -> u64 {
+        self.per_template_publish_cost
     }
 }
 

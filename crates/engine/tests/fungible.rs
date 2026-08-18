@@ -3,7 +3,7 @@
 
 use ootle_byte_type::ToByteType;
 use tari_engine_types::{crypto::commit_amount, vault::Vault};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, ResourceType};
 use tari_template_test_tooling::{
     TemplateTest,
@@ -18,7 +18,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
     let template = test.get_template_address("Fungible");
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template, "with_supply", args![Amount::MAX])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -27,7 +27,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
     let component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
     let all_to_confidential = generate_withdraw_proof_with_inputs(&[], u64::MAX, u64::MAX, None, 0);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(component, "convert", args![all_to_confidential.proof])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -53,7 +53,7 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
     let template = test.get_template_address("Fungible");
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template, "with_supply", args![i64::MAX])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -62,7 +62,7 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
     let component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(component, "fungible_mint_more", args![i64::MAX])
             .call_method(component, "fungible_mint_more", args![i64::MAX])
             .build_and_seal(test.secret_key()),
@@ -83,12 +83,12 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_confidential_tokens() 
 
     let all_to_confidential = generate_withdraw_proof_with_inputs(&[], u64::MAX, u64::MAX, None, 0);
     test.execute_expect_success(
-        Transaction::builder_localnet().build_and_seal(test.secret_key()),
+        Transaction::builder_localnet(Epoch(1)).build_and_seal(test.secret_key()),
         vec![],
     );
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("fungible")
             .call_function(template, "with_address_and_supply", args![
                 Workspace("fungible"),
@@ -105,7 +105,7 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_confidential_tokens() 
     let (more_supply2, _mask, _) = generate_confidential_output_statement(u64::MAX, None);
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(component, "confidential_mint_more", args![more_supply1])
             .call_method(component, "confidential_mint_more", args![more_supply2])
             .build_and_seal(test.secret_key()),

@@ -52,7 +52,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_common_types::engine_types::transaction_receipt::TransactionReceipt;
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Epoch, Transaction};
 
 /// 1 TARI expressed in microTARI.
 const ONE_TARI: u64 = 1_000_000;
@@ -75,6 +75,10 @@ async fn main() {
         .unwrap();
 
     let current_epoch = provider.get_epoch().await.unwrap().as_u64();
+    // Every transaction declares the last epoch it may be sequenced in; past it the transaction can
+    // never land. Ten epochs is a comfortable window for an example — the network caps how far
+    // ahead this may be set.
+    let max_epoch = Epoch(provider.get_epoch().await.unwrap().as_u64() + 10);
     println!("Current epoch: {current_epoch}");
 
     let mut rng = rand::rng();
@@ -130,7 +134,7 @@ async fn main() {
 
     let swap_commitment = *lock_transfer.stealth_outputs()[0].commitment();
 
-    let lock_tx = IFaucet::new(&provider)
+    let lock_tx = IFaucet::new(&provider, max_epoch)
         .take_faucet_funds()
         .into_stealth_transfer(lock_transfer)
         .and_pay_fee_from_revealed_output()
@@ -168,7 +172,7 @@ async fn main() {
         .await
         .unwrap();
 
-    let claim_tx = Transaction::builder(provider.network())
+    let claim_tx = Transaction::builder(provider.network(), max_epoch)
         .with_fee_instructions_builder(|builder| {
             builder
                 .stealth_transfer(tari_token, claim_transfer)

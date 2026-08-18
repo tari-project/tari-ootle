@@ -119,6 +119,7 @@ pub async fn handle_mint_faucet(
     let fee = req.max_fee.unwrap_or(3000);
     let transaction = context
         .transaction_builder()
+        .await?
         .pay_fee_from_component(account.component_address, fee)
         .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
             req.number_to_mint,
@@ -274,7 +275,7 @@ pub async fn handle_transfer(
     );
 
     // TODO: this can be simplified
-    let mut builder = context.transaction_builder();
+    let mut builder = context.transaction_builder().await?;
     // collect all instructions
     let non_fungible_api = sdk.non_fungible_api();
 
@@ -389,7 +390,7 @@ pub async fn handle_transfer(
         .transaction_service()
         .submit_transaction_with_opts(
             transaction,
-            Some(TransactionContext::with_accounts(linked_accounts)),
+            Some(TransactionContext::with_accounts(linked_accounts.clone())),
             None,
         )
         .await?;
@@ -411,6 +412,19 @@ pub async fn handle_transfer(
         finalized.transaction_id,
         finalized.final_fee
     );
+
+    // `wait_for_result` returns on the finalize event that the account monitor also consumes to update the
+    // local vault and NFT records, so those records are not yet current here. Refreshing each account the
+    // transfer touched serialises behind the monitor's work, so a caller that re-reads `nfts.list` or the
+    // account balances on return sees the post-transfer state.
+    for account_address in linked_accounts {
+        if let Err(err) = context.account_monitor().refresh_account(account_address).await {
+            warn!(
+                target: LOG_TARGET,
+                "Failed to refresh account {} after NFT transfer {}: {}", account_address, tx_id, err
+            );
+        }
+    }
 
     Ok(TransferNftResponse {
         transaction_id: tx_id,

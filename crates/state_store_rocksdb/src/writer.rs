@@ -859,7 +859,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
-        max_epoch: Option<Epoch>,
+        max_epoch: Epoch,
         transaction_weight: u64,
     ) -> Result<(), StorageError> {
         let value = TransactionPoolRecord::load(

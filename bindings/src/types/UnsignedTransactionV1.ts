@@ -13,7 +13,7 @@ export type UnsignedTransactionV1 = {
    */
   inputs: Array<SubstateRequirement>;
   min_epoch: Epoch | null;
-  max_epoch: Epoch | null;
+  max_epoch: Epoch;
   is_seal_signer_authorized: boolean;
   dry_run: boolean;
   /**

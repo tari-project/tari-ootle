@@ -498,6 +498,10 @@ pub enum AbortReason {
     FeePaymentInMainIntent,
     #[n(8)]
     EpochExpired,
+    /// The transaction's `max_epoch` is further ahead of the epoch it was pinned to than the network
+    /// permits. Evaluated against the pinned epoch, so every shard group reaches the same verdict.
+    #[n(9)]
+    ValidityWindowTooLong,
 }
 
 impl Display for AbortReason {

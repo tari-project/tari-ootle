@@ -157,7 +157,14 @@ pub const MAX_PUBLISH_TEMPLATES_PER_TRANSACTION: usize = 1;
 pub struct StealthLimits {
     /// Maximum stealth inputs in a single transfer statement.
     pub max_inputs: usize,
-    /// Maximum stealth outputs in a single transfer statement.
+    /// Maximum stealth outputs in a single transfer statement. Bounded by
+    /// [`crate::crypto::MAX_LAZY_BP_AGG_FACTORS`], the largest aggregated range proof the engine can verify.
+    ///
+    /// A statement's outputs share one aggregated bulletproof, so verification cost per output falls as the
+    /// statement grows while the proof itself grows only logarithmically. Splitting the same outputs across
+    /// statements instead pays [`NativeExecutionPoints::PER_STATEMENT`] and an extra change output each time, so
+    /// this cap shapes a transaction rather than bounding its cost —
+    /// [`StealthLimits::max_total_outputs_per_transaction`] does that.
     pub max_outputs: usize,
     /// Maximum number of conditions in a single `SpendCondition` conjunction (TIP-0006). A revealed leaf is
     /// evaluated in full at spend time, and a builtin predicate (e.g. a covenant balance proof or a hashlock) runs
@@ -206,7 +213,7 @@ pub struct StealthLimits {
 /// rule enforced uniformly during execution, not just a mempool heuristic.
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
-    max_outputs: 8,
+    max_outputs: 16,
     max_conditions_per_conjunction: 16,
     max_witness_data_len: 4096,
     max_inclusion_proof_len: 32,

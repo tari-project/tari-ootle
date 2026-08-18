@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use tari_ootle_common_types::{SubstateRequirement, engine_types::substate::SubstateId};
+use tari_ootle_common_types::{Epoch, SubstateRequirement, engine_types::substate::SubstateId};
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, builder::named_args::NamedArg};
 use tari_template_lib_types::{
     Amount,
@@ -181,10 +181,12 @@ impl<'a, P: Provider> TransactionBuildable for ComponentInvokeBuilder<'a, P> {
 }
 
 impl<'a, P: Provider> ComponentInvokeBuilder<'a, P> {
-    pub fn new(provider: &'a P) -> Self {
+    /// `max_epoch` is the last epoch the built transaction may be sequenced in. It is required:
+    /// every transaction carries a bounded validity window.
+    pub fn new(provider: &'a P, max_epoch: Epoch) -> Self {
         let network = provider.network();
         Self {
-            builder: TransactionBuilder::new(network).with_auto_fill_inputs(),
+            builder: TransactionBuilder::new(network, max_epoch).with_auto_fill_inputs(),
             provider,
             want_list: HashSet::new(),
         }

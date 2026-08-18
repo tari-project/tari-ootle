@@ -667,6 +667,7 @@ impl TestBuilder {
                     missed_proposal_suspend_threshold: 5,
                     missed_proposal_evict_threshold: 10,
                     missed_proposal_recovery_threshold: 5,
+                    max_transaction_validity_epochs: 100,
                     // Keep the weight budget effectively unbounded in tests so behaviour stays
                     // count-limited (as before) unless a test specifically exercises the weight budget.
                     max_block_weight: 1_000_000,

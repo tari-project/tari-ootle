@@ -126,7 +126,7 @@ mod tests {
             ],
             inputs,
             min_epoch: Some(Epoch(100)),
-            max_epoch: Some(Epoch(200)),
+            max_epoch: Epoch(200),
             is_seal_signer_authorized: false,
             dry_run: true,
             blobs: Blobs::from_vec(vec![Blob::from(vec![1, 2, 3])]),
@@ -235,7 +235,7 @@ mod tests {
             .collect();
         assert_ne!(commitment_of(u), base_commitment, "inputs (version changed)");
 
-        // min_epoch / max_epoch: value change and Some <-> None
+        // min_epoch: value change and Some <-> None; max_epoch: value change
         let mut u = base.clone();
         u.min_epoch = Some(Epoch(101));
         assert_ne!(commitment_of(u), base_commitment, "min_epoch (value)");
@@ -243,11 +243,8 @@ mod tests {
         u.min_epoch = None;
         assert_ne!(commitment_of(u), base_commitment, "min_epoch (None)");
         let mut u = base.clone();
-        u.max_epoch = Some(Epoch(999));
+        u.max_epoch = Epoch(999);
         assert_ne!(commitment_of(u), base_commitment, "max_epoch (value)");
-        let mut u = base.clone();
-        u.max_epoch = None;
-        assert_ne!(commitment_of(u), base_commitment, "max_epoch (None)");
 
         // is_seal_signer_authorized
         let mut u = base.clone();

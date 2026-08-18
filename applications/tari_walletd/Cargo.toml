@@ -93,6 +93,9 @@ dbus-secret-service-keyring-store = { workspace = true, features = ["crypto-rust
 windows-native-keyring-store = { workspace = true }
 
 [dev-dependencies]
+# Test-only, so the wallet binary does not carry the consensus engine: lets the config guard
+# assert against the real network ceiling rather than drifting from a hand-copied number.
+tari_consensus = { workspace = true }
 tari_utilities = { workspace = true }
 
 [package.metadata.cargo-machete]

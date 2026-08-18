@@ -3,7 +3,7 @@
 
 use tari_engine::runtime::TransactionCommitError;
 use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedValue};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{ComponentAddress, ResourceAddress};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason, xtr_faucet_component};
@@ -15,7 +15,7 @@ fn it_allocates_addresses_in_template_code() {
     let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(test.get_template_address("AddressAllocationTest"), "create", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -67,7 +67,7 @@ fn it_fails_if_address_allocation_is_not_used() {
     let template_addr = test.get_template_address("AddressAllocationTest");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template_addr, "drop_component_allocation", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -75,7 +75,7 @@ fn it_fails_if_address_allocation_is_not_used() {
 
     assert_reject_reason(reason, TransactionCommitError::DanglingAddressAllocations { count: 1 });
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_function(template_addr, "drop_resource_allocation", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -89,7 +89,7 @@ fn it_fails_if_instruction_allocated_addresses_are_not_used() {
     let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("my_addr")
             .allocate_resource_address("my_res")
             .build_and_seal(test.secret_key()),
@@ -106,7 +106,7 @@ fn it_allocates_an_address_using_instructions() {
     let template_addr = test.get_template_address("AddressAllocationTest");
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("my_addr")
             .allocate_resource_address("my_res")
             .call_function(template_addr, "get_component_allocation_address", args![Workspace(
@@ -155,7 +155,7 @@ fn it_allows_calls_to_component_using_the_allocated_address() {
     let template_addr = test.get_template_address("AddressAllocationTest");
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("my_addr")
             .allocate_resource_address("my_res")
             .call_function(template_addr, "create_from_allocations", args![
@@ -185,7 +185,7 @@ fn it_allows_calls_to_component_using_a_component_on_the_workspace() {
         derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &test.to_public_key_bytes());
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .create_account(test.to_public_key_bytes())
             // Put the created account address on the workspace, and
             .put_last_instruction_output_on_workspace("account")

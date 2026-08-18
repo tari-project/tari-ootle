@@ -31,8 +31,8 @@ pub enum UnsignedTransaction {
 }
 
 impl UnsignedTransaction {
-    pub fn new<N: Into<u8>>(network: N) -> Self {
-        Self::V1(UnsignedTransactionV1::new_default(network))
+    pub fn new<N: Into<u8>>(network: N, max_epoch: Epoch) -> Self {
+        Self::V1(UnsignedTransactionV1::new_default(network, max_epoch))
     }
 
     pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
@@ -128,7 +128,7 @@ impl UnsignedTransaction {
         }
     }
 
-    pub fn max_epoch(&self) -> Option<Epoch> {
+    pub fn max_epoch(&self) -> Epoch {
         match self {
             Self::V1(tx) => tx.max_epoch(),
         }
@@ -158,7 +158,7 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn set_max_epoch(&mut self, max_epoch: Option<Epoch>) -> &mut Self {
+    pub fn set_max_epoch(&mut self, max_epoch: Epoch) -> &mut Self {
         match self {
             Self::V1(tx) => tx.max_epoch = max_epoch,
         }

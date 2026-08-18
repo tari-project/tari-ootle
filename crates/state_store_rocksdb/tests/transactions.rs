@@ -86,11 +86,11 @@ mod confirm_all_transitions {
         block1.as_locked().set(&mut tx).unwrap();
         block1.as_leaf().set(&mut tx).unwrap();
 
-        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, None, 0)
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, Epoch(1), 0)
             .unwrap();
-        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false, None, 0)
+        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false, Epoch(1), 0)
             .unwrap();
-        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false, None, 0)
+        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false, Epoch(1), 0)
             .unwrap();
         let block_id = *block1.id();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
@@ -191,7 +191,7 @@ mod confirm_all_transitions {
         block1.as_locked().set(&mut tx).unwrap();
         block1.as_leaf().set(&mut tx).unwrap();
 
-        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, None, 0)
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, Epoch(1), 0)
             .unwrap();
 
         // Base record has no pending update yet.
@@ -230,21 +230,21 @@ mod transaction_operations {
 
         // transactions_insert
         let tx1 = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx2).unwrap();
         let unexisting_tx = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(2)))
                 .build_and_seal(&PrivateKey::default()),
@@ -267,7 +267,7 @@ mod transaction_operations {
 
         // transactions_update
         let updated_tx = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(3)))
                 .build_and_seal(&PrivateKey::default()),
@@ -308,14 +308,14 @@ mod transaction_execution_operations {
 
         // insert some transactions
         let tx1 = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
                 .build_and_seal(&PrivateKey::default()),
@@ -408,8 +408,16 @@ mod transaction_execution_operations {
         assert!(all.is_empty());
 
         // transactions_finalize_all
-        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
-            .unwrap();
+        tx.transaction_pool_insert_new(
+            *tx1.id(),
+            Decision::Commit,
+            &Evidence::empty(),
+            true,
+            false,
+            Epoch(1),
+            0,
+        )
+        .unwrap();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
         assert_eq!(transactions.len(), 1);
         tx.transactions_finalize_all(Epoch(1), transactions.iter()).unwrap();
@@ -446,7 +454,7 @@ mod transaction_execution_operations {
         let mut tx = db.create_write_tx().unwrap();
 
         let tx1 = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
@@ -505,7 +513,7 @@ mod finalized_transaction_gc {
 
     fn insert_transaction(tx: &mut impl StateStoreWriteTransaction) -> TransactionRecord {
         let rec = TransactionRecord::new(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
@@ -527,8 +535,16 @@ mod finalized_transaction_gc {
         commit_chain(&mut tx, &chain);
 
         let tx1 = insert_transaction(&mut tx);
-        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
-            .unwrap();
+        tx.transaction_pool_insert_new(
+            *tx1.id(),
+            Decision::Commit,
+            &Evidence::empty(),
+            true,
+            false,
+            Epoch(1),
+            0,
+        )
+        .unwrap();
         let pool = tx.transaction_pool_get_all(1000).unwrap();
         tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
         assert!(tx.transactions_exists(tx1.id()).unwrap());
@@ -561,8 +577,16 @@ mod finalized_transaction_gc {
         commit_chain(&mut tx, &chain);
 
         let tx1 = insert_transaction(&mut tx);
-        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
-            .unwrap();
+        tx.transaction_pool_insert_new(
+            *tx1.id(),
+            Decision::Commit,
+            &Evidence::empty(),
+            true,
+            false,
+            Epoch(1),
+            0,
+        )
+        .unwrap();
         let pool = tx.transaction_pool_get_all(1000).unwrap();
         tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
 
@@ -591,8 +615,16 @@ mod finalized_transaction_gc {
         commit_chain(&mut tx, &chain);
 
         let tx1 = insert_transaction(&mut tx);
-        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false, None, 0)
-            .unwrap();
+        tx.transaction_pool_insert_new(
+            *tx1.id(),
+            Decision::Commit,
+            &Evidence::empty(),
+            true,
+            false,
+            Epoch(1),
+            0,
+        )
+        .unwrap();
         let pool = tx.transaction_pool_get_all(1000).unwrap();
 
         // Finalized in epoch 1, then finalized again in epoch 5: the index entry moves.
@@ -670,8 +702,16 @@ mod get_many_ready_weight_budget {
         block1.as_leaf().set(&mut tx).unwrap();
 
         for (atom, weight) in atoms.iter().zip(weights) {
-            tx.transaction_pool_insert_new(atom.id, atom.decision, &Evidence::empty(), true, false, None, *weight)
-                .unwrap();
+            tx.transaction_pool_insert_new(
+                atom.id,
+                atom.decision,
+                &Evidence::empty(),
+                true,
+                false,
+                Epoch(1),
+                *weight,
+            )
+            .unwrap();
         }
         let block_id = *block1.id();
         tx.commit().unwrap();

@@ -449,7 +449,10 @@ pub async fn submit_manifest_with_signing_keys(
         .pay_fee_from_component(account.component_address, 5000u64)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
-        .with_max_epoch(max_epoch)
+        .then(|b| match max_epoch {
+            Some(max_epoch) => b.with_max_epoch(max_epoch),
+            None => b,
+        })
         .with_inputs(inputs.into_iter().map(|i| i.into_unversioned()))
         .build_unsigned();
 
@@ -538,7 +541,10 @@ pub async fn submit_manifest(
         .pay_fee_from_component(account.component_address, 5000u64)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
-        .with_max_epoch(max_epoch)
+        .then(|b| match max_epoch {
+            Some(max_epoch) => b.with_max_epoch(max_epoch),
+            None => b,
+        })
         .with_inputs(inputs)
         .build_unsigned();
 
@@ -655,7 +661,10 @@ pub async fn create_component(
         .pay_fee_from_component(account.component_address, 5000u64)
         .call_function(template_address, function_call, args)
         .with_min_epoch(min_epoch)
-        .with_max_epoch(max_epoch)
+        .then(|b| match max_epoch {
+            Some(max_epoch) => b.with_max_epoch(max_epoch),
+            None => b,
+        })
         .build_unsigned();
 
     let transaction_submit_req = TransactionSubmitRequest {

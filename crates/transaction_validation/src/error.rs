@@ -32,6 +32,15 @@ pub enum TransactionValidationError {
     CurrentEpochLessThanMinimum { current_epoch: Epoch, min_epoch: Epoch },
     #[error("Current epoch ({current_epoch}) is greater than maximum epoch ({max_epoch}) required for transaction")]
     CurrentEpochGreaterThanMaximum { current_epoch: Epoch, max_epoch: Epoch },
+    #[error(
+        "Maximum epoch ({max_epoch}) is more than {max_validity_epochs} epochs beyond the current epoch \
+         ({current_epoch})"
+    )]
+    MaxEpochTooFarAhead {
+        current_epoch: Epoch,
+        max_epoch: Epoch,
+        max_validity_epochs: u64,
+    },
     #[error("Invalid transaction signature")]
     InvalidSignature,
     #[error("Transaction {transaction_id} has no main signer")]
@@ -115,6 +124,23 @@ impl TransactionValidationError {
             Self::CurrentEpochLessThanMinimum { .. } |
             Self::CurrentEpochGreaterThanMaximum { .. } => false,
 
+            // A window near the ceiling is a disagreement about the current epoch, not misbehaviour:
+            // a node whose view lags computes a lower ceiling and would otherwise graylist an honest
+            // peer whose transaction every node ahead of it accepts. Beyond twice the ceiling no
+            // epoch view reconciles the value — the sender is at fault on any honest reading, and
+            // saying so is what stops a flood of unbounded windows costing every node full
+            // structural and signature validation for free.
+            Self::MaxEpochTooFarAhead {
+                current_epoch,
+                max_epoch,
+                max_validity_epochs,
+            } => {
+                let beyond_any_lag = current_epoch
+                    .as_u64()
+                    .saturating_add(max_validity_epochs.saturating_mul(2));
+                max_epoch.as_u64() > beyond_any_lag
+            },
+
             // Properties of the transaction itself, on which every node agrees.
             Self::NoFeeInstructions { .. } |
             Self::InvalidSignature |
@@ -163,10 +189,47 @@ mod tests {
                 current_epoch: Epoch(3),
                 max_epoch: Epoch(2),
             },
+            // Just past the ceiling: reconciled by our own view lagging a few epochs.
+            TransactionValidationError::MaxEpochTooFarAhead {
+                current_epoch: Epoch(1),
+                max_epoch: Epoch(12),
+                max_validity_epochs: 10,
+            },
         ];
         for err in node_local {
             assert!(!err.is_sender_fault(), "must not penalise the sender for: {err}");
         }
+    }
+
+    /// A window no epoch view reconciles is misbehaviour, and must cost the sender: otherwise a
+    /// flood of unbounded windows extracts full structural and signature validation from every node
+    /// for free.
+    #[test]
+    fn a_window_beyond_any_plausible_lag_is_blamed_on_the_sender() {
+        let err = TransactionValidationError::MaxEpochTooFarAhead {
+            current_epoch: Epoch(1),
+            max_epoch: Epoch(u64::MAX),
+            max_validity_epochs: 10,
+        };
+        assert!(err.is_sender_fault(), "must penalise the sender for: {err}");
+    }
+
+    /// The boundary between the two: twice the ceiling is still forgiven, one past it is not.
+    #[test]
+    fn the_sender_fault_boundary_is_twice_the_ceiling() {
+        let at_boundary = TransactionValidationError::MaxEpochTooFarAhead {
+            current_epoch: Epoch(1),
+            max_epoch: Epoch(21),
+            max_validity_epochs: 10,
+        };
+        assert!(!at_boundary.is_sender_fault());
+
+        let past_boundary = TransactionValidationError::MaxEpochTooFarAhead {
+            current_epoch: Epoch(1),
+            max_epoch: Epoch(22),
+            max_validity_epochs: 10,
+        };
+        assert!(past_boundary.is_sender_fault());
     }
 
     /// Properties of the transaction itself: every honest node reaches the same verdict, so the

@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{
     Amount,
@@ -73,10 +73,12 @@ impl<'a, P: Provider> UnsignedTransactionBuilder for FaucetInvokeBuilder<'a, P> 
 }
 
 impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
-    pub fn new(provider: &'a P) -> Self {
+    /// `max_epoch` is the last epoch the built transaction may be sequenced in. It is required:
+    /// every transaction carries a bounded validity window.
+    pub fn new(provider: &'a P, max_epoch: Epoch) -> Self {
         let network = provider.network();
         Self {
-            builder: TransactionBuilder::new(network).with_auto_fill_inputs(),
+            builder: TransactionBuilder::new(network, max_epoch).with_auto_fill_inputs(),
             provider,
             want_list: HashSet::new(),
             account_workspace_name: None,

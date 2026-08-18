@@ -96,8 +96,9 @@ pub struct PublicTransferIntent {
     pub inputs: Vec<InputRef>,
     /// Optional earliest epoch this transaction is valid in.
     pub min_epoch: Option<u64>,
-    /// Optional latest epoch this transaction is valid in.
-    pub max_epoch: Option<u64>,
+    /// The last epoch this transaction is valid in. Mandatory: every transaction has a bounded
+    /// validity window, capped network-wide at `max_transaction_validity_epochs` past the current epoch.
+    pub max_epoch: u64,
     /// Whether this is a dry run. The core sets `is_seal_signer_authorized` itself — it is
     /// intentionally **not** part of the intent.
     pub dry_run: bool,
@@ -159,7 +160,7 @@ mod tests {
                 InputRef::unversioned(resource_str()),
             ],
             min_epoch: Some(10),
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let reqs = intent.inputs_to_internal().unwrap();
@@ -180,7 +181,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![InputRef::unversioned(resource_str())],
             min_epoch: None,
-            max_epoch: Some(99),
+            max_epoch: 99,
             dry_run: true,
         };
         let json = serde_json::to_string(&intent).unwrap();

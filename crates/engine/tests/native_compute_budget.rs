@@ -18,7 +18,7 @@ use tari_engine_types::{
     limits::{FREE_COMPUTE_GRACE_POINTS, MAX_NATIVE_POINTS_PER_TRANSACTION, NativeExecutionPoints, STEALTH_LIMITS},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{ComponentAddress, NonFungibleAddress, ResourceAddress};
 use tari_template_test_tooling::{
     TemplateTest,
@@ -90,7 +90,7 @@ fn setup_faucet(
     let template_addr = test.get_template_address(TEMPLATE_NAME);
     let initial_supply = transfer_data.statement.inputs_statement.revealed_amount;
 
-    let transaction = Transaction::builder_localnet()
+    let transaction = Transaction::builder_localnet(Epoch(1))
         .call_function(template_addr, "new", args![
             initial_supply,
             transfer_data.statement,
@@ -136,7 +136,7 @@ fn unpaid_native_verification_traps_before_the_crypto_runs() {
     garbage.statement.outputs_statement.agg_range_proof = rp.try_into().unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| builder.stealth_transfer(faucet_resx, garbage.statement))
             .build_and_seal(test.secret_key()),
         vec![],
@@ -196,7 +196,7 @@ fn in_flight_wasm_counts_toward_the_native_allowance() {
 
     // Calibrate points-per-round with a paid transaction.
     let points_for = |test: &mut TemplateTest, rounds: u64| -> u64 {
-        let tx = Transaction::builder_localnet()
+        let tx = Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 100_000_000u64)
             .call_method(faucet, "burn_compute", args![rounds])
             .build_and_seal(&key);
@@ -222,7 +222,7 @@ fn in_flight_wasm_counts_toward_the_native_allowance() {
     // Runs in the fee intent, which is where the credit applies — the main instructions are funded by
     // the payment alone and would trap on the WASM grind long before the native charge.
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 builder.call_method(faucet, "burn_compute_then_transfer", args![rounds, transfer.statement])
             })
@@ -260,7 +260,7 @@ fn paid_native_verification_is_charged() {
     let mask_badge =
         NonFungibleAddress::from_public_key(RistrettoPublicKey::from_secret_key(&mint.output_masks[0]).to_byte_type());
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 900_000_000u64)
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
@@ -316,7 +316,7 @@ fn view_key_surcharge_is_charged_per_output() {
     let mask_badge =
         NonFungibleAddress::from_public_key(RistrettoPublicKey::from_secret_key(&mint.output_masks[0]).to_byte_type());
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account, 900_000_000u64)
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()

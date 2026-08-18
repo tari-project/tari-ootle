@@ -289,7 +289,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         }
     }

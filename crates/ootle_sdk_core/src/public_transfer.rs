@@ -100,7 +100,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![InputRef::versioned(component_str(), 0)],
             min_epoch: Some(5),
-            max_epoch: Some(99),
+            max_epoch: 99,
             dry_run: false,
         }
     }

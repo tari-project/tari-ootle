@@ -8,7 +8,7 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::{Blob, Network, Transaction};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
@@ -25,6 +25,7 @@ pub fn builder<P: AsRef<Path>>(
     extra_inputs: Vec<SubstateRequirement>,
     blob_inputs: HashMap<String, Blob>,
     random_signer: bool,
+    max_epoch: Epoch,
 ) -> anyhow::Result<BoxedTransactionBuilder> {
     let contents = fs::read_to_string(manifest)?;
     // Every substate referenced by the transaction must be declared as an input, otherwise the
@@ -47,7 +48,7 @@ pub fn builder<P: AsRef<Path>>(
     let blobs = instructions.blobs;
 
     Ok(Box::new(move |_| {
-        let mut builder = Transaction::builder(network.as_byte())
+        let mut builder = Transaction::builder(network.as_byte(), max_epoch)
             .with_fee_instructions(fee_instructions.clone())
             .with_instructions(main_instructions.clone());
         for (i, blob) in blobs.iter().enumerate() {

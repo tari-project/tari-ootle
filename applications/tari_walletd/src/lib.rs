@@ -84,6 +84,8 @@ pub async fn run_tari_ootle_walletd(
     // Uncomment to enable tokio tracing via tokio-console
     // console_subscriber::init();
 
+    config.ootle_wallet_daemon.validate()?;
+
     let wallet_store = init_wallet_store(&config)?;
     let mut wallet_sdk: WalletSdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
 

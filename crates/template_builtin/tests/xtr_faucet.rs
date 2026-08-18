@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -39,7 +39,7 @@ fn second_claim_by_same_signer_is_rejected() {
 
     // Second claim: same signing key → same claim-receipt NFT ID → DuplicateNonFungibleId
     let reject_reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![account])
             .build_and_seal(&secret_key),
         vec![],

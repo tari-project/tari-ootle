@@ -11,7 +11,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_ootle_transaction::{Blob, Instruction, Network};
+use tari_ootle_transaction::{Blob, Epoch, Instruction, Network};
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::transaction_builders::manifest;
 
@@ -46,6 +46,7 @@ fn random_signer_makes_each_publish_address_distinct() {
         Vec::new(),
         blob_inputs(),
         true,
+        Epoch(1),
     )
     .unwrap();
 
@@ -113,6 +114,7 @@ fn without_random_signer_a_single_signer_seals() {
         Vec::new(),
         blob_inputs(),
         false,
+        Epoch(1),
     )
     .unwrap();
 

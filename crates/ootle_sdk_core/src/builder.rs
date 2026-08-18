@@ -87,8 +87,12 @@ pub(crate) fn resolve_transfer_recipe(intent: &PublicTransferIntent) -> Result<T
 ///
 /// Both the explicit-input and want-list resolution paths build on this single recipe so the
 /// instruction sequence and bucket label stay identical between them.
-pub(crate) fn build_transfer_recipe_builder(network: Network, recipe: &TransferRecipe) -> TransactionBuilder {
-    let mut builder = TransactionBuilder::new(network.as_byte());
+pub(crate) fn build_transfer_recipe_builder(
+    network: Network,
+    recipe: &TransferRecipe,
+    max_epoch: Epoch,
+) -> TransactionBuilder {
+    let mut builder = TransactionBuilder::new(network.as_byte(), max_epoch);
 
     // Fee first.
     builder = builder.pay_fee_from_component(recipe.from_component, recipe.fee);
@@ -108,7 +112,6 @@ pub(crate) fn apply_epoch_and_dry_run(
 ) -> TransactionBuilder {
     builder
         .with_min_epoch(intent.min_epoch.map(Epoch))
-        .with_max_epoch(intent.max_epoch.map(Epoch))
         .with_dry_run(intent.dry_run)
 }
 
@@ -122,7 +125,7 @@ pub fn build_public_transfer_unsigned(
     intent: &PublicTransferIntent,
 ) -> Result<UnsignedTransaction, OotleSdkError> {
     let recipe = resolve_transfer_recipe(intent)?;
-    let mut builder = build_transfer_recipe_builder(network, &recipe);
+    let mut builder = build_transfer_recipe_builder(network, &recipe, Epoch(intent.max_epoch));
 
     // Attach the caller-supplied explicit inputs.
     let inputs = intent.inputs_to_internal()?;
@@ -162,7 +165,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![InputRef::versioned(component_str(), 0)],
             min_epoch: Some(5),
-            max_epoch: Some(99),
+            max_epoch: 99,
             dry_run: false,
         }
     }
@@ -179,7 +182,7 @@ mod tests {
 
         // Epochs + dry-run threaded through.
         assert_eq!(unsigned.min_epoch(), Some(Epoch(5)));
-        assert_eq!(unsigned.max_epoch(), Some(Epoch(99)));
+        assert_eq!(unsigned.max_epoch(), Epoch(99));
 
         // The explicit input was added.
         assert!(unsigned.inputs().iter().any(|i| i.version() == Some(0)));

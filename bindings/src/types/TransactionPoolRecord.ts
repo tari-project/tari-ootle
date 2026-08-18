@@ -22,7 +22,7 @@ export type TransactionPoolRecord = {
   /**
    * The maximum epoch for which this transaction is valid.
    */
-  max_epoch: Epoch | null;
+  max_epoch: Epoch;
   /**
    * Epoch to use when executing the transaction. This updates as foreign proposals are received
    * until the transaction is executed.

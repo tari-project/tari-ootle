@@ -5,7 +5,7 @@ use std::vec;
 
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::runtime::{AssertError, RuntimeError};
-use tari_ootle_transaction::{Assertion, CheckOrd, Instruction, Transaction, args, args::WorkspaceOffsetId};
+use tari_ootle_transaction::{Assertion, CheckOrd, Epoch, Instruction, Transaction, args, args::WorkspaceOffsetId};
 use tari_template_lib::types::{
     ComponentAddress,
     NonFungibleAddress,
@@ -52,7 +52,7 @@ mod assert_bucket_contains {
         let mut test: AssertTest = setup();
 
         test.template_test.execute_expect_success(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(test.account, "withdraw", args![test.faucet_resource, 1000u64])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_at_least("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
@@ -72,7 +72,7 @@ mod assert_bucket_contains {
         let invalid_resource_address = NFT_FAUCET_RESOURCE_ADDRESS;
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(test.account, "withdraw", args![test.faucet_resource, 1000u64])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_at_least("faucet_bucket", invalid_resource_address, FAUCET_WITHDRAWAL_AMOUNT)
@@ -98,7 +98,7 @@ mod assert_bucket_contains {
         let min_amount = FAUCET_WITHDRAWAL_AMOUNT + 1;
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(test.account, "withdraw", args![test.faucet_resource, 1000u64])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 // Passes
@@ -127,7 +127,7 @@ mod assert_bucket_contains {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(test.account, "withdraw", args![test.faucet_resource, 1000u64])
                 // we are going to assert a workspace value that is NOT a bucket
                 .call_method(test.account, "get_balances", args![])
@@ -151,7 +151,7 @@ mod assert_bucket_contains {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(test.account, "withdraw", args![test.faucet_resource, 1000u64])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 // we are going to assert a key that does not exist in the workspace
@@ -184,7 +184,7 @@ mod assert_is_not_null {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 // we are going to assert a key that does not exist in the workspace
                 // assert_bucket_contains would panic if called with a non-existing key
                 .add_instruction(Instruction::Assert {
@@ -207,7 +207,7 @@ mod assert_is_not_null {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(test.account, "withdraw", args![test.faucet_resource, 1000u64])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_workspace_item_is_not_null("faucet_bucket")
@@ -232,7 +232,7 @@ mod assert_bucket_contains_non_fungibles {
         let mut test: AssertTest = setup();
 
         test.template_test.execute_expect_success(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
@@ -270,7 +270,7 @@ mod assert_bucket_contains_non_fungibles {
 
         // Take some tokens from the faucet to get a bucket with non-fungibles
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(test.account, "withdraw", args![test.faucet_resource, 1000u64])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_all("faucet_bucket", test.faucet_resource, vec![])
@@ -290,7 +290,7 @@ mod assert_bucket_contains_non_fungibles {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_all("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
@@ -313,7 +313,7 @@ mod assert_bucket_contains_non_fungibles {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_any("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
@@ -335,7 +335,7 @@ mod assert_bucket_contains_non_fungibles {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_none_of("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![
@@ -358,7 +358,7 @@ mod assert_bucket_contains_non_fungibles {
         let mut test: AssertTest = setup();
 
         let reason = test.template_test.execute_expect_failure(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![5, tari_bor::Value::Null])
                 .put_last_instruction_output_on_workspace("faucet_bucket")
                 .assert_bucket_contains_non_fungibles_not_any_of("faucet_bucket", NFT_FAUCET_RESOURCE_ADDRESS, vec![

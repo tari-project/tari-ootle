@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 use tari_ootle_transaction::Network;
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -21,6 +22,9 @@ impl Cli {
 }
 
 #[derive(Subcommand, Debug)]
+// The write arguments dominate the enum's size. It is parsed once at startup, so boxing it to even
+// the variants out would only add an indirection.
+#[allow(clippy::large_enum_variant)]
 pub enum SubCommand {
     Write(WriteArgs),
     Read(ReadArgs),
@@ -67,6 +71,21 @@ pub struct WriteArgs {
     pub signer_secret_key: Option<String>,
     #[clap(long, short = 't')]
     pub network: Option<Network>,
+    /// The last epoch the generated transactions are valid in.
+    ///
+    /// Every transaction carries a mandatory validity window and `max_epoch` is part of what each
+    /// transaction is signed over, so it is fixed when the file is written and cannot be refreshed at
+    /// submit time. Leave this unset to resolve it from `--indexer-url` as
+    /// `current_epoch + --validity-epochs`, which is what you want unless generating offline.
+    #[clap(long)]
+    pub max_epoch: Option<u64>,
+    /// Indexer to read the current epoch from when `--max-epoch` is not given.
+    #[clap(long, default_value = "http://127.0.0.1:12500")]
+    pub indexer_url: Url,
+    /// How many epochs past the current epoch the generated transactions stay valid for. Ignored
+    /// when `--max-epoch` is given. Must not exceed the network's `max_transaction_validity_epochs`.
+    #[clap(long, default_value_t = 100)]
+    pub validity_epochs: u64,
 }
 #[derive(Args, Debug)]
 pub struct ReadArgs {

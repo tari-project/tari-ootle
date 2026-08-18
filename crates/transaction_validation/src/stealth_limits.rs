@@ -128,6 +128,7 @@ impl StealthTransactionLimitsValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
+    use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{
         Network,
         ResourceAddressRef,
@@ -203,7 +204,7 @@ mod tests {
                     transfer_instructions(main_statements),
                     IndexSet::new(),
                     None,
-                    None,
+                    Epoch(1),
                     false,
                 ),
                 vec![TransactionSignature::new(
@@ -219,10 +220,16 @@ mod tests {
     #[test]
     fn accepts_transaction_at_the_caps() {
         let limits = STEALTH_LIMITS;
-        // Distribute the total input/output caps across transfers so every transfer also respects the per-transfer
-        // limits: 32 transfers of (32 inputs, 8 outputs) = 1024 inputs and 256 outputs (both exactly on the cap),
-        // padded with empty transfers up to the 64-transfer cap.
-        let mut statements = (0..32).map(|_| statement(32, limits.max_outputs)).collect::<Vec<_>>();
+        // Distribute the total input/output caps evenly across transfers so the transaction sits exactly on both
+        // totals while every transfer also respects the per-transfer limits, padded with empty transfers up to the
+        // transfer cap.
+        const N: usize = 32;
+        let inputs_each = limits.max_total_inputs_per_transaction / N;
+        let outputs_each = limits.max_total_outputs_per_transaction / N;
+        assert!(inputs_each <= limits.max_inputs && outputs_each <= limits.max_outputs);
+        assert_eq!(inputs_each * N, limits.max_total_inputs_per_transaction);
+        assert_eq!(outputs_each * N, limits.max_total_outputs_per_transaction);
+        let mut statements = (0..N).map(|_| statement(inputs_each, outputs_each)).collect::<Vec<_>>();
         statements.extend((statements.len()..limits.max_transfers_per_transaction).map(|_| statement(0, 0)));
         let tx = tx_with_stealth_transfers(statements);
         StealthTransactionLimitsValidator::new().validate(&(), &tx).unwrap();

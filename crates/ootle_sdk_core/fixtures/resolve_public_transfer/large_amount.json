@@ -2,8 +2,8 @@
   "name": "resolve_public_transfer/large_amount",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.37.0",
-    "git_rev": "be2591689b664cddf465a7540277d41b09ecfd0d",
+    "core_version": "0.39.0",
+    "git_rev": "9f4833febee5c633a6fb2f0bd61dd1ce6d33c481",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "resolve_and_encode_public_transfer",

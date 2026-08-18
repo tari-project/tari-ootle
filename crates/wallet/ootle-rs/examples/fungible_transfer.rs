@@ -15,6 +15,7 @@ use ootle_rs::{
     transaction::TransactionSigner,
     wallet::OotleWallet,
 };
+use tari_ootle_transaction::Epoch;
 
 #[tokio::main]
 async fn main() {
@@ -58,9 +59,13 @@ async fn main() {
     // Get the latest block number.
     let latest_epoch = provider.get_epoch().await.unwrap();
     println!("Latest epoch: {latest_epoch}");
+    // Every transaction declares the last epoch it may be sequenced in; past it the transaction can
+    // never land. Ten epochs is a comfortable window for an example — the network caps how far
+    // ahead this may be set.
+    let max_epoch = Epoch(provider.get_epoch().await.unwrap().as_u64() + 10);
 
     // First let's transfer some faucet TARI to our account to have funds for fees and transfers.
-    let unsigned_tx = IFaucet::new(&provider)
+    let unsigned_tx = IFaucet::new(&provider, max_epoch)
         .take_faucet_funds()
         // NOTE that pay fee must be called after the faucet funds are taken because fees are paid from the faucet funds
         .pay_fee(500u64)
@@ -87,7 +92,7 @@ async fn main() {
     // Send some TARI to another address. You can replace TARI_TOKEN with any other fungible token resource address.
     let tari_token = TARI_TOKEN; // resource_address!("resource_deadbeaf");
 
-    let unsigned_tx = IAccount::new(&provider)
+    let unsigned_tx = IAccount::new(&provider, max_epoch)
         .pay_fee(1000u64)
         // Multiple transfers in a single transaction
         .public_transfer(&recipient1, tari_token, 2 * TARI)

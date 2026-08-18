@@ -113,10 +113,13 @@ export default function Layout() {
   const setAdvancedUiFeatures = useSettingsStore((s) => s.setAdvancedUiFeatures);
 
   useEffect(() => {
+    if (!loggedIn) {
+      return;
+    }
     settingsGet().then((res) => {
       setAdvancedUiFeatures(res.advanced_ui_features);
     });
-  }, [setAdvancedUiFeatures]);
+  }, [loggedIn, setAdvancedUiFeatures]);
 
   const handleClose = () => {
     setPopup({ visible: false });

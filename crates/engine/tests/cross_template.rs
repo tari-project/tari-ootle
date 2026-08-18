@@ -7,7 +7,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
     limits,
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, TemplateAddress};
 use tari_template_test_tooling::{
     TemplateTest,
@@ -90,7 +90,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
     let initial_supply = Amount::from(1_000_000_000_000u64);
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("faucet_address")
             .call_function(faucet_template, "mint_with_opts", args![
                 initial_supply,
@@ -134,7 +134,7 @@ fn it_allows_function_to_method_calls() {
 
     // create a new cross_template component, this time using a constructor that gets information from a method call
     let res = test.template_test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .allocate_component_address("component_1")
             .call_function(test.cross_call_template, "new_from_component", args![
                 Workspace("component_1"),
@@ -227,7 +227,7 @@ fn it_fails_on_invalid_calls() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(
                     components.cross_template_component,
                     "call_method_that_does_not_exist",
@@ -262,7 +262,7 @@ fn it_does_not_propagate_permissions() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(components.cross_template_component, "malicious_withdraw", args![
                     victim_account,
                     fungible_resource,
@@ -336,7 +336,7 @@ fn it_fails_when_surpassing_recursion_limit_with_many_nested_components() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder_localnet()
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(last_composability_component, "get_nested_value", args![])
                 .build_and_seal(&private_key),
             vec![],
@@ -357,7 +357,7 @@ fn it_fails_when_surpassing_recursion_limit() {
     let components = initialize_composability(&mut test);
 
     test.template_test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(components.cross_template_component, "recursion", args![
                 // -1 to account for the initial call
                 max_call_depth - 1
@@ -366,7 +366,7 @@ fn it_fails_when_surpassing_recursion_limit() {
         vec![],
     );
     let reason = test.template_test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(components.cross_template_component, "recursion", args![max_call_depth])
             .build_and_seal(&private_key),
         vec![],

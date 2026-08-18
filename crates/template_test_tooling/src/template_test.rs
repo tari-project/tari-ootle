@@ -249,9 +249,10 @@ impl TemplateTest {
                 storage_cost_divisor: 1,
                 template_load_bytes_cost_divisor: 3000,
                 wasm_points_cost_divisor: 1000,
-                template_size_premium_free_bytes: 30 * 1024,
+                template_size_premium_free_bytes: 96 * 1024,
                 template_size_premium_unit_bytes: 1024,
                 per_template_size_premium_unit_cost: 100,
+                per_template_publish_cost: 250_000,
             },
             key_seed: 1,
             auto_add_proofs_from_signers: true,
@@ -796,7 +797,7 @@ impl TemplateTest {
     pub fn transaction(&self) -> TransactionBuilder<MainIntent> {
         let seq = self.transaction_seq.get();
         self.transaction_seq.set(seq + 1);
-        Transaction::builder(Network::LocalNet).with_max_epoch(Some(Epoch(seq)))
+        Transaction::builder(Network::LocalNet, Epoch(seq))
     }
 
     /// Executes a transaction. Panics if the transaction is not finalized (fee transaction fails). Does not panic if

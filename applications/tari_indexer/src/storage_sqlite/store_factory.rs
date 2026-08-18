@@ -333,7 +333,7 @@ mod tests {
 
         let (_dir, store) = temp_store().await;
 
-        let transaction = Transaction::builder_localnet().build_and_seal(&PrivateKey::from(123u64));
+        let transaction = Transaction::builder_localnet(Epoch(1)).build_and_seal(&PrivateKey::from(123u64));
         let tx_id = transaction.calculate_id();
         store
             .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction))

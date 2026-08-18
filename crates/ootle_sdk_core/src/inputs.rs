@@ -451,7 +451,7 @@ pub fn build_public_transfer_unsigned_with_wants(
     intent: &PublicTransferIntent,
 ) -> Result<(PartialTransaction, WantList), OotleSdkError> {
     let recipe = resolve_transfer_recipe(intent)?;
-    let builder = build_transfer_recipe_builder(network, &recipe);
+    let builder = build_transfer_recipe_builder(network, &recipe, tari_ootle_common_types::Epoch(intent.max_epoch));
     let builder = apply_epoch_and_dry_run(builder, intent);
     let unsigned = builder.build_unsigned();
 
@@ -960,7 +960,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         }
     }

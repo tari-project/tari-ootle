@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_ootle_common_types::Epoch;
 use tari_template_lib_types::TemplateAddress;
 
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
 
 #[test]
 fn it_converts_workspace_names_to_ids() {
-    let transaction = Transaction::builder_localnet()
+    let transaction = Transaction::builder_localnet(Epoch(1))
         .put_last_instruction_output_on_workspace("thing1")
         .allocate_resource_address("thing2")
         .allocate_component_address("thing3")
@@ -65,12 +66,12 @@ fn merge_remaps_blob_ids_and_appends_blobs() {
     let address = TemplateAddress::from_array([7; 32]);
 
     // First builder owns one blob `a` referenced by an arg.
-    let a = Transaction::builder_localnet()
+    let a = Transaction::builder_localnet(Epoch(1))
         .add_blob("a", vec![1u8, 2, 3])
         .call_function(address, "f", args![Blob("a")]);
 
     // Second builder owns its own blob `b`.
-    let b = Transaction::builder_localnet()
+    let b = Transaction::builder_localnet(Epoch(1))
         .add_blob("b", vec![4u8, 5])
         .call_function(address, "g", args![Blob("b")]);
 
@@ -99,8 +100,8 @@ fn merge_remaps_blob_ids_and_appends_blobs() {
 #[test]
 #[should_panic(expected = "blob name 'a' collides during merge")]
 fn merge_rejects_colliding_blob_names() {
-    let a = Transaction::builder_localnet().add_blob("a", vec![1u8]);
-    let b = Transaction::builder_localnet().add_blob("a", vec![2u8]);
+    let a = Transaction::builder_localnet(Epoch(1)).add_blob("a", vec![1u8]);
+    let b = Transaction::builder_localnet(Epoch(1)).add_blob("a", vec![2u8]);
     let _unused = a.merge(b);
 }
 
@@ -108,8 +109,8 @@ fn merge_rejects_colliding_blob_names() {
 fn merge_remaps_publish_template_blob_index() {
     // `self` already has a blob, so the merged builder's auto-added template blob index 0
     // becomes index 1 after merge.
-    let a = Transaction::builder_localnet().add_blob("filler", vec![0u8; 4]);
-    let b = Transaction::builder_localnet().publish_template(vec![9u8, 9, 9]);
+    let a = Transaction::builder_localnet(Epoch(1)).add_blob("filler", vec![0u8; 4]);
+    let b = Transaction::builder_localnet(Epoch(1)).publish_template(vec![9u8, 9, 9]);
 
     let merged = a.merge(b).build_unsigned();
 

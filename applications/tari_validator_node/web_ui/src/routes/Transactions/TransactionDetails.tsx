@@ -190,6 +190,16 @@ export default function TransactionDetails() {
                             <TableCell>Total Fees</TableCell>
                             <DataTableCell>{fee?.toString()}</DataTableCell>
                           </TableRow>
+                          {transaction?.min_epoch != null && (
+                            <TableRow>
+                              <TableCell>Min Epoch</TableCell>
+                              <DataTableCell>{transaction.min_epoch.toString()}</DataTableCell>
+                            </TableRow>
+                          )}
+                          <TableRow>
+                            <TableCell>Max Epoch</TableCell>
+                            <DataTableCell>{transaction?.max_epoch?.toString()}</DataTableCell>
+                          </TableRow>
                           {final_decision && (
                             <TableRow>
                               <TableCell>Status</TableCell>

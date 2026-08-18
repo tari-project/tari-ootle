@@ -11,7 +11,7 @@
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::fees::FeeTable;
 use tari_engine_types::{commit_result::RejectReason, fees::FeeSource, limits::FREE_COMPUTE_GRACE_POINTS};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{ComponentAddress, NonFungibleAddress, TemplateAddress};
 use tari_template_test_tooling::TemplateTest;
 
@@ -50,7 +50,7 @@ fn setup() -> Harness {
 
     let per_round = {
         let mut points = |rounds: u64| -> u64 {
-            let tx = Transaction::builder_localnet()
+            let tx = Transaction::builder_localnet(Epoch(1))
                 .pay_fee_from_component(account, 900_000_000u64)
                 .call_function(bench, "bench_div_u64", args![rounds])
                 .build_and_seal(&key);
@@ -101,7 +101,7 @@ fn underpaid_compute_is_capped_at_what_the_payment_funds() {
     } = setup();
 
     let rounds = ABOVE_GRACE_POINTS / per_round;
-    let tx = Transaction::builder_localnet()
+    let tx = Transaction::builder_localnet(Epoch(1))
         .pay_fee_from_component(account, FEE_PAYMENT)
         .call_function(bench, "bench_div_u64", args![rounds])
         .build_and_seal(&key);
@@ -153,7 +153,7 @@ fn grace_does_not_extend_past_the_fee_checkpoint() {
     } = setup();
 
     let rounds = BELOW_GRACE_POINTS / per_round;
-    let tx = Transaction::builder_localnet()
+    let tx = Transaction::builder_localnet(Epoch(1))
         .pay_fee_from_component(account, FEE_PAYMENT)
         .call_function(bench, "bench_div_u64", args![rounds])
         .build_and_seal(&key);
@@ -179,7 +179,7 @@ fn paying_more_raises_the_compute_allowance() {
     // Sized from the call's point cost (1 fee unit per point) plus margin for the fixed charges,
     // so it keeps funding the call as the grace constant moves.
     let fee_payment = ABOVE_GRACE_POINTS + 10_000_000;
-    let tx = Transaction::builder_localnet()
+    let tx = Transaction::builder_localnet(Epoch(1))
         .pay_fee_from_component(account, fee_payment)
         .call_function(bench, "bench_div_u64", args![rounds])
         .build_and_seal(&key);
@@ -201,7 +201,7 @@ fn fee_intent_may_spend_compute_within_grace_before_paying() {
     } = setup();
 
     let rounds = BELOW_GRACE_POINTS / per_round;
-    let tx = Transaction::builder_localnet()
+    let tx = Transaction::builder_localnet(Epoch(1))
         .with_fee_instructions_builder(|builder| {
             builder
                 .call_function(bench, "bench_div_u64", args![rounds])
@@ -227,7 +227,7 @@ fn fee_intent_cannot_exceed_grace_compute() {
     } = setup();
 
     let rounds = ABOVE_GRACE_POINTS / per_round;
-    let tx = Transaction::builder_localnet()
+    let tx = Transaction::builder_localnet(Epoch(1))
         .with_fee_instructions_builder(|builder| {
             builder
                 .call_function(bench, "bench_div_u64", args![rounds])

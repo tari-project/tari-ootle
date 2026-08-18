@@ -131,7 +131,7 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![InputRef::versioned(component, 0)],
             min_epoch: None,
-            max_epoch: None,
+            max_epoch: 1,
             dry_run: false,
         };
         let keys = PublicTransferKeys::new(SecretKeyBytes::from_array(scalar_bytes(11)));

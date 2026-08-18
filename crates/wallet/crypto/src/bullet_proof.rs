@@ -68,3 +68,57 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a OutputWitne
     RangeProofBytes::try_from(output_range_proof)
         .map_err(|e| RangeProofError::ProofConstructionError { reason: e.to_string() })
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_crypto::{keys::SecretKey, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+    use tari_engine_types::crypto::range_proof::validate_bullet_proof;
+    use tari_template_lib_types::{
+        EncryptedData,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        stealth::UnspentOutput,
+    };
+
+    use super::*;
+
+    fn witness(amount: u64) -> OutputWitness {
+        OutputWitness {
+            amount,
+            mask: RistrettoSecretKey::random(&mut rand::rng()),
+            sender_public_nonce: RistrettoPublicKey::default(),
+            minimum_value_promise: 0,
+            encrypted_data: EncryptedData::empty(),
+            resource_view_key: None,
+        }
+    }
+
+    fn to_output(witness: &OutputWitness) -> UnspentOutput {
+        UnspentOutput {
+            commitment: PedersenCommitmentBytes::from_bytes(witness.to_commitment().as_bytes()).unwrap(),
+            sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: witness.minimum_value_promise,
+            viewable_balance_proof: None,
+        }
+    }
+
+    /// Prover and verifier pad independently to `n.next_power_of_two()`, so every count up to the cap must agree on
+    /// the aggregation factor and have a service backing it.
+    #[test]
+    fn proves_and_verifies_at_every_supported_output_count() {
+        for n in 1..=MAX_LAZY_BP_AGG_FACTORS {
+            let witnesses = (0..n).map(|i| witness(1000 + i as u64)).collect::<Vec<_>>();
+            let proof = generate_extended_bullet_proof(&witnesses).unwrap();
+            let outputs = witnesses.iter().map(to_output).collect::<Vec<_>>();
+            validate_bullet_proof(&proof, outputs.iter()).unwrap_or_else(|e| panic!("n={n}: {e}"));
+        }
+    }
+
+    #[test]
+    fn rejects_more_outputs_than_the_cap() {
+        let witnesses = (0..=MAX_LAZY_BP_AGG_FACTORS)
+            .map(|i| witness(1000 + i as u64))
+            .collect::<Vec<_>>();
+        generate_extended_bullet_proof(&witnesses).unwrap_err();
+    }
+}

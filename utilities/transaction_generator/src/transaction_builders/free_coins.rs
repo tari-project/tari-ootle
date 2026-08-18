@@ -3,7 +3,7 @@
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_transaction::{Network, Transaction, args};
 use tari_template_lib_types::constants::{
     TARI_TOKEN,
@@ -12,12 +12,12 @@ use tari_template_lib_types::constants::{
     XTR_FAUCET_VAULT_ADDRESS,
 };
 
-pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
+pub fn builder(network: Network, max_epoch: Epoch) -> impl Fn(u64) -> Transaction {
     move |_: u64| -> Transaction {
         let (signer_secret_key, signer_public_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
         let signer_public_key = signer_public_key.to_byte_type();
 
-        Transaction::builder(network.as_byte())
+        Transaction::builder(network.as_byte(), max_epoch)
             .with_fee_instructions_builder(|builder| {
                 builder
                     .create_account(signer_public_key)

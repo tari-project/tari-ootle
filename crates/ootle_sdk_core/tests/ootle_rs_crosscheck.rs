@@ -82,7 +82,7 @@ fn build_unsigned_via_shared_builder(network: u8, intent: &PublicTransferIntent)
     };
 
     // --- ootle-rs recipe, verbatim (account.rs). ---
-    let mut builder = TransactionBuilder::new(network);
+    let mut builder = TransactionBuilder::new(network, tari_ootle_common_types::Epoch(intent.max_epoch));
 
     // `pay_fee` → pay_fee_from_component on the from-component.
     builder = builder.pay_fee_from_component(from_component, fee);
@@ -102,7 +102,6 @@ fn build_unsigned_via_shared_builder(network: u8, intent: &PublicTransferIntent)
 
     builder = builder
         .with_min_epoch(intent.min_epoch.map(tari_ootle_common_types::Epoch))
-        .with_max_epoch(intent.max_epoch.map(tari_ootle_common_types::Epoch))
         .with_dry_run(intent.dry_run);
 
     builder.build_unsigned()

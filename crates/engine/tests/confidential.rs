@@ -16,7 +16,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
     models::Account,
     types::{
@@ -120,7 +120,7 @@ fn minting_a_commitment_without_a_value_proof_is_rejected() {
     let commitment = commit_amount(&mint_mask, Amount::from(42u64)).unwrap().to_byte_type();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        test.transaction()
             .call_method(faucet, "mint_more", args![mint_proof, ValueProofs::new()])
             .build_and_seal(test.secret_key()),
         vec![owner],
@@ -144,7 +144,7 @@ fn mint_more_later() {
 
     let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0u64);
     template_test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
@@ -495,7 +495,7 @@ fn mint_and_transfer_revealed() {
     let withdraw = generate_withdraw_proof_with_inputs(&[], 123u64, 100, None, 23);
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "take_free_coins", args![withdraw.proof])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user_account, "deposit", args![Workspace("b")])
@@ -515,7 +515,7 @@ fn mint_revealed_with_invalid_proof() {
     let (mut test, faucet, _faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "mint_revealed_with_bad_range_proof", args![123])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -559,7 +559,7 @@ fn mint_with_view_key() {
 
     let withdraw_proof = generate_withdraw_proof_with_view_key(&mask, 100, 55, Some(100 - 55), 0u64, view_key);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
@@ -612,7 +612,7 @@ fn freeze_then_attempt_spend() {
 
     let owner = test.owner_proof();
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "freeze_confidential_outputs", args![vec![commitment]])
             .build_and_seal(test.secret_key()),
         vec![owner.clone()],
@@ -622,7 +622,7 @@ fn freeze_then_attempt_spend() {
     let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0u64);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof.clone()])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
@@ -635,14 +635,14 @@ fn freeze_then_attempt_spend() {
     });
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "unfreeze_confidential_outputs", args![vec![commitment]])
             .build_and_seal(test.secret_key()),
         vec![owner],
     );
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
@@ -665,7 +665,7 @@ fn unfreeze_and_spend_in_one_transaction_downs_the_output() {
 
     let owner = test.owner_proof();
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "freeze_confidential_outputs", args![vec![commitment]])
             .build_and_seal(test.secret_key()),
         vec![owner.clone()],
@@ -675,7 +675,7 @@ fn unfreeze_and_spend_in_one_transaction_downs_the_output() {
     let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0u64);
 
     let result = test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "unfreeze_confidential_outputs", args![vec![commitment]])
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
@@ -708,7 +708,7 @@ fn minting_a_duplicate_commitment_is_rejected() {
     let (mint_proof, mint_mask, mint_value_proofs) = mint_statement(42, None);
     let owner = test.owner_proof();
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "mint_more", args![
                 mint_proof.clone(),
                 mint_value_proofs.clone()
@@ -720,7 +720,7 @@ fn minting_a_duplicate_commitment_is_rejected() {
     let commitment = commit_amount(&mint_mask, Amount::from(42u64)).unwrap().to_byte_type();
     let address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "mint_more", args![mint_proof, mint_value_proofs])
             .build_and_seal(test.secret_key()),
         vec![owner],
@@ -743,13 +743,13 @@ fn a_transaction_over_the_withdraw_cap_is_rejected() {
     // Revealed funds make each withdraw a revealed-only confidential withdraw: no commitments are needed
     // and the per-withdraw work is trivial, so only the per-transaction cap is exercised.
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "mint_revealed", args![Amount::new(max_withdraws as u128 + 1)])
             .build_and_seal(test.secret_key()),
         vec![owner.clone()],
     );
 
-    let mut builder = Transaction::builder_localnet();
+    let mut builder = Transaction::builder_localnet(Epoch(1));
     for _ in 0..=max_withdraws {
         builder = builder.call_method(faucet, "take_free_coins", args![
             ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1))
@@ -784,7 +784,7 @@ fn minting_and_burning_a_commitment_tracks_total_supply() {
     // Move the whole 500 out of the commitment and into revealed funds.
     let reveal_proof = generate_reveal_proof(&mask, 500);
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        test.transaction()
             .call_method(faucet, "take_free_coins", args![reveal_proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_function(utilities, "burn_bucket", args![Workspace("coins")])
@@ -809,7 +809,7 @@ fn burning_a_bucket_holding_commitments_without_a_value_proof_is_rejected() {
         .unwrap()
         .to_byte_type();
     let reason = test.execute_expect_failure(
-        Transaction::builder_localnet()
+        test.transaction()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_function(utilities, "burn_bucket", args![Workspace("coins")])
@@ -846,7 +846,7 @@ fn burning_a_bucket_holding_commitments_with_value_proofs_decreases_total_supply
     )]);
 
     test.execute_expect_success(
-        Transaction::builder_localnet()
+        test.transaction()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_function(utilities, "burn_bucket_with_value_proofs", args![

@@ -6,6 +6,7 @@ use ootle_network::Network;
 use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
 use tari_ootle_address::OotleAddress;
+use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo, stealth::validated_condition_root};
 use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress};
 
@@ -27,6 +28,10 @@ pub struct StealthTransferParams {
     pub resource_address: ResourceAddress,
     /// Fee to lock for the transaction
     pub max_fee: u64,
+    /// The last epoch the built transaction may be sequenced in. Mandatory: every transaction
+    /// carries a bounded validity window, so the caller decides how long this one stays
+    /// submittable.
+    pub max_epoch: Epoch,
     /// Run as a dry run, no funds will be transferred if true
     pub is_dry_run: bool,
 }
@@ -257,6 +262,7 @@ mod tests {
     /// A single output of `blinded_amount` blinded plus `revealed_amount` revealed, paying to `pay_to`.
     fn params_paying_to(blinded_amount: u64, revealed_amount: u64, pay_to: PayTo) -> StealthTransferParams {
         StealthTransferParams {
+            max_epoch: Epoch(1),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferConfidential),
             input_selection: UtxoInputSelection::PreferConfidential,
             outputs: vec![TransferOutput {

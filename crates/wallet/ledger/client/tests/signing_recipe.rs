@@ -33,6 +33,7 @@ use rand::Rng;
 use tari_ootle_transaction::{
     Blob,
     Blobs,
+    Epoch,
     Instruction,
     PreimageSegment,
     TransactionSealSignature,
@@ -178,7 +179,7 @@ fn sample_unsigned() -> UnsignedTransactionV1 {
         ],
         inputs: IndexSet::new(),
         min_epoch: None,
-        max_epoch: None,
+        max_epoch: Epoch(1),
         is_seal_signer_authorized: false,
         dry_run: true,
         blobs,

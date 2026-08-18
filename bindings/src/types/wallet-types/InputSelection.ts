@@ -3,4 +3,7 @@ import type { Amount } from "../Amount";
 import type { UtxoAddress } from "../UtxoAddress";
 import type { UtxoInputSelection } from "../UtxoInputSelection";
 
-export type InputSelection = { "FromBucket": { revealed_amount: Amount, } } | { "Selection": UtxoInputSelection } | { "Specific": { utxo_addresses: Array<UtxoAddress>, } };
+export type InputSelection =
+  | { FromBucket: { revealed_amount: Amount } }
+  | { Selection: UtxoInputSelection }
+  | { Specific: { utxo_addresses: Array<UtxoAddress> } };

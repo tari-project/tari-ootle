@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::fmt;
+
 use indexmap::{IndexMap, map::Entry};
 use serde::{Deserialize, Serialize};
 
@@ -9,9 +11,66 @@ use serde::{Deserialize, Serialize};
 /// The burn is taken over the running fee total, so it re-multiplies every term that can make a
 /// real run cost more than the dry run that estimated it. A network configured above this rate
 /// under-states `FeeReceipt::required_fees`, and every submission built from a dry run is then
-/// rejected as underpaid — `every_shipped_network_stays_within_the_burn_rate_ceiling` holds the
-/// shipped networks to it.
+/// rejected as underpaid — [`ExhaustBurnRate`] holds every configured rate to it.
 pub const MAX_EXHAUST_BURN_RATE_BPS: u16 = 10_000;
+
+/// An exhaust burn rate in basis points, at or below [`MAX_EXHAUST_BURN_RATE_BPS`].
+///
+/// The ceiling is a fee-estimation invariant rather than a policy preference: it is the rate
+/// [`FEE_ESTIMATE_ALLOWANCE`] is derived against, so a network burning above it under-states what
+/// a dry run reports as required. A rate reaches consensus only through this type, so no such
+/// network can be configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ExhaustBurnRate(u16);
+
+impl ExhaustBurnRate {
+    /// No fees are burned.
+    pub const ZERO: Self = Self(0);
+
+    /// Panics if `bps` is above [`MAX_EXHAUST_BURN_RATE_BPS`]. In a const context — where the
+    /// shipped network constants are evaluated — that panic is a compile error.
+    pub const fn new(bps: u16) -> Self {
+        assert!(
+            bps <= MAX_EXHAUST_BURN_RATE_BPS,
+            "exhaust burn rate is above MAX_EXHAUST_BURN_RATE_BPS"
+        );
+        Self(bps)
+    }
+
+    /// Validates a rate that is only known at runtime, such as one read from configuration.
+    pub const fn try_new(bps: u16) -> Result<Self, ExhaustBurnRateOutOfRange> {
+        if bps > MAX_EXHAUST_BURN_RATE_BPS {
+            return Err(ExhaustBurnRateOutOfRange(bps));
+        }
+        Ok(Self(bps))
+    }
+
+    pub const fn as_bps(self) -> u16 {
+        self.0
+    }
+
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl TryFrom<u16> for ExhaustBurnRate {
+    type Error = ExhaustBurnRateOutOfRange;
+
+    fn try_from(bps: u16) -> Result<Self, Self::Error> {
+        Self::try_new(bps)
+    }
+}
+
+impl fmt::Display for ExhaustBurnRate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} bps", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("exhaust burn rate of {0} bps is above the maximum of {MAX_EXHAUST_BURN_RATE_BPS} bps")]
+pub struct ExhaustBurnRateOutOfRange(u16);
 
 /// The allowance a dry-run estimate carries on top of what it metered, so that a real run of the
 /// same transaction at a different `max_fee` can never cost more than the estimate.
@@ -375,6 +434,24 @@ pub struct FeeCostBreakdown {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_burn_rate_cannot_be_built_above_the_ceiling() {
+        assert_eq!(
+            ExhaustBurnRate::new(MAX_EXHAUST_BURN_RATE_BPS).as_bps(),
+            MAX_EXHAUST_BURN_RATE_BPS
+        );
+        assert!(ExhaustBurnRate::try_new(MAX_EXHAUST_BURN_RATE_BPS).is_ok());
+        assert!(ExhaustBurnRate::try_new(MAX_EXHAUST_BURN_RATE_BPS + 1).is_err());
+        assert!(ExhaustBurnRate::try_from(u16::MAX).is_err());
+        assert!(ExhaustBurnRate::ZERO.is_zero());
+    }
+
+    #[test]
+    #[should_panic(expected = "exhaust burn rate is above MAX_EXHAUST_BURN_RATE_BPS")]
+    fn a_burn_rate_above_the_ceiling_panics_when_it_is_not_caught_at_compile_time() {
+        ExhaustBurnRate::new(MAX_EXHAUST_BURN_RATE_BPS + 1);
+    }
 
     #[test]
     fn fee_source_all_is_exhaustive() {

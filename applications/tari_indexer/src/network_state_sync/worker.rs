@@ -196,7 +196,7 @@ impl NetworkWideStateSync {
         match ReadOnlyStore::new(self.store.clone()).get_tari_economics().await {
             Ok(economics) => {
                 let current_epoch = self.epoch_manager.get_current_epoch();
-                let target_burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch);
+                let target_burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch).as_bps();
                 self.metrics.update(&economics, target_burn_rate_bps);
             },
             Err(err) => {

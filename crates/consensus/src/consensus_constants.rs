@@ -22,6 +22,7 @@
 
 use std::{env, time::Duration};
 
+use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{Epoch, NumPreshards};
 use tari_ootle_transaction::Network;
 
@@ -93,11 +94,11 @@ pub struct ConsensusConstants {
     /// honest proposals are never rejected.
     /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on block validity.
     pub max_block_validation_execution_points: u64,
-    /// The exhaust burn rate in basis points, charged to the fee payer on top of the execution fee and burned. 0
-    /// means no fees are burned. CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on the burn
-    /// totals in block headers. Use `exhaust_burn_rate` to resolve the rate for a given epoch rather than reading
-    /// this field directly.
-    pub exhaust_burn_rate_bps: u16,
+    /// The exhaust burn rate, charged to the fee payer on top of the execution fee and burned.
+    /// `ExhaustBurnRate::ZERO` means no fees are burned. CONSENSUS RULE: must be uniform network-wide, otherwise
+    /// nodes diverge on the burn totals in block headers. Use `exhaust_burn_rate` to resolve the rate for a given
+    /// epoch rather than reading this field directly.
+    pub exhaust_burn_rate: ExhaustBurnRate,
     /// The furthest ahead of the current epoch a transaction's `max_epoch` may be set. Every
     /// transaction declares a mandatory `max_epoch`, so this caps how long any transaction can
     /// remain sequenceable: a wallet can declare a transaction permanently dead once this many
@@ -152,7 +153,7 @@ impl ConsensusConstants {
             // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
-            exhaust_burn_rate_bps: 500, // 5%
+            exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
             max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 10,
         }
@@ -193,7 +194,7 @@ impl ConsensusConstants {
             // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
-            exhaust_burn_rate_bps: 500, // 5%
+            exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
             max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 1,
         }
@@ -234,7 +235,7 @@ impl ConsensusConstants {
             // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
-            exhaust_burn_rate_bps: 500, // 5%
+            exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
             max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 5,
         }
@@ -275,19 +276,28 @@ impl ConsensusConstants {
             // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
             // proposals are never rejected.
             max_block_validation_execution_points: 7_100_000_000,
-            exhaust_burn_rate_bps: 500, // 5%
+            exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
             max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 5,
         }
     }
 
-    /// Resolves the exhaust burn rate (in basis points) in effect at the given epoch. The rate is currently a
+    /// Resolves the exhaust burn rate in effect at the given epoch. The rate is currently a
     /// network-wide constant; the epoch parameter is the seam through which a future epoch-varying rate is
     /// introduced without touching call sites.
-    pub fn exhaust_burn_rate(&self, _epoch: Epoch) -> u16 {
-        self.exhaust_burn_rate_bps
+    pub fn exhaust_burn_rate(&self, _epoch: Epoch) -> ExhaustBurnRate {
+        self.exhaust_burn_rate
     }
 }
+
+/// Const-evaluates every shipped network, so a rate above `MAX_EXHAUST_BURN_RATE_BPS` fails the
+/// build rather than reaching a network.
+const _: () = {
+    ConsensusConstants::mainnet();
+    ConsensusConstants::devnet(1);
+    ConsensusConstants::esmeralda();
+    ConsensusConstants::testnet();
+};
 
 impl From<Network> for ConsensusConstants {
     fn from(network: Network) -> Self {
@@ -308,29 +318,6 @@ impl From<Network> for ConsensusConstants {
 
 #[cfg(test)]
 mod tests {
-    use tari_engine_types::fees::MAX_EXHAUST_BURN_RATE_BPS;
-
-    /// `FeeReceipt::required_fees` is derived against `MAX_EXHAUST_BURN_RATE_BPS`. A network that
-    /// burns faster than that makes every dry-run estimate too low to submit with.
-    #[test]
-    fn every_shipped_network_stays_within_the_burn_rate_ceiling() {
-        for network in [
-            Network::MainNet,
-            Network::StageNet,
-            Network::NextNet,
-            Network::Igor,
-            Network::Esmeralda,
-            Network::LocalNet,
-        ] {
-            let constants = super::ConsensusConstants::from(network);
-            assert!(
-                constants.exhaust_burn_rate_bps <= MAX_EXHAUST_BURN_RATE_BPS,
-                "{network} burns at {} bps, above the {MAX_EXHAUST_BURN_RATE_BPS} bps the fee estimate assumes",
-                constants.exhaust_burn_rate_bps
-            );
-        }
-    }
-
     use tari_engine_types::limits::{
         ENGINE_LIMITS,
         MAX_NATIVE_POINTS_PER_TRANSACTION,

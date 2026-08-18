@@ -104,7 +104,7 @@ impl DryRunTransactionProcessor {
 
         // Estimate the burn at the rate in effect for the current epoch.
         let current_epoch = self.epoch_manager.current_epoch().await?;
-        let burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch);
+        let burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch).as_bps();
 
         let mut state_store = new_memory_store();
         state_store.set_many(found_substates)?;

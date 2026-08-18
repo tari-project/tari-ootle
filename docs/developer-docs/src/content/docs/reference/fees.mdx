@@ -269,7 +269,7 @@ The charges computed in these passes:
 | `TemplatePublish` | flat `per_template_publish_cost` + first `template_size_premium_free_bytes` at the storage rate + `units² × per_template_size_premium_unit_cost` |
 | `WasmExecution` | `(total points / wasm_points_cost_divisor) × per_wasm_point_cost` |
 | `NativeExecution` | same rate, over the accumulated native points |
-| `ExhaustBurn` | `total of all charges above × exhaust_burn_rate_bps / 10_000` |
+| `ExhaustBurn` | `total of all charges above × exhaust_burn_rate / 10_000` |
 
 <Aside type="note">
   WASM and native points are divided **once, over the transaction total**, not per call. Dividing per
@@ -307,8 +307,10 @@ header.
 
 ## The exhaust burn
 
-`exhaust_burn_rate_bps` is a consensus constant — 500 bps (5%) on mainnet — and every validator must
-use the same value or nodes diverge on block headers.
+`exhaust_burn_rate` is a consensus constant — 500 bps (5%) on mainnet — and every validator must
+use the same value or nodes diverge on block headers. It is an `ExhaustBurnRate`, which cannot hold a
+rate above `MAX_EXHAUST_BURN_RATE_BPS` (10 000 bps): that is the rate the dry-run allowance is
+derived against, so a network burning faster would under-state what every estimate reports.
 
 The exhaust burn is charged **on top of** the accrued fee, not deducted from it. Two consequences
 follow, and both show up as rules elsewhere on this page:

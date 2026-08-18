@@ -88,7 +88,7 @@ where
 
         // Resolve the exhaust burn rate for the epoch this transaction executes in, so the payer is charged the
         // rate in effect at execution time.
-        let burn_rate_bps = self.consensus_constants.exhaust_burn_rate(execute_epoch);
+        let burn_rate_bps = self.consensus_constants.exhaust_burn_rate(execute_epoch).as_bps();
 
         // Execute the transaction and get the result
         let exec_output = self

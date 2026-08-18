@@ -18,7 +18,7 @@ use tari_consensus::{
 };
 use tari_consensus_types::{BlockId, Decision};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{fees::ExhaustBurnRate, substate::SubstateId};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -683,7 +683,7 @@ impl TestBuilder {
                     // lower these explicitly and opt out via `allow_wasm_budget_deferrals`.
                     max_block_execution_points: 4_500_000_000,
                     max_block_validation_execution_points: 5_000_000_000,
-                    exhaust_burn_rate_bps: 500,
+                    exhaust_burn_rate: ExhaustBurnRate::new(500),
                     epoch_end_spread_blocks: 0,
                 },
                 state_tree_cleanup_interval: Duration::from_secs(1000),

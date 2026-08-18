@@ -3483,16 +3483,24 @@ where
             .build()
     }
 
+    fn required_fee_payment(&self) -> u64 {
+        self.tracker.required_fee_payment()
+    }
+
     fn checkpoint_fee_intent(&mut self) -> Result<(), RuntimeError> {
         // Price the state the fee intent ended on before testing what was paid against it. This is
         // the state a transaction that cannot afford its main intent falls back to committing, so a
         // payment that cannot cover it cannot commit anything at all — better established here,
         // before the main instructions run, than after they have consumed compute nobody pays for.
         self.invoke_modules_on_fee_checkpoint()?;
-        if !self.tracker.is_fee_state_dry_run() && self.tracker.total_fee_payments() < self.tracker.total_fee_charges()
+        // Against what the payment can spend on charges, not against the payment itself: the burn is
+        // taken over whatever the charges come to, so a payment that exactly matches them cannot
+        // also cover the burn on top.
+        if !self.tracker.is_fee_state_dry_run() &&
+            self.tracker.spendable_fee_payments() < self.tracker.total_fee_charges()
         {
             return Err(RuntimeError::InsufficientFeesPaid {
-                required_fee: self.tracker.total_fee_charges(),
+                required_fee: self.tracker.required_fee_payment(),
                 fees_paid: self.tracker.total_fee_payments(),
             });
         }

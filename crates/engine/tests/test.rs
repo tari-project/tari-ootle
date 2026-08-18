@@ -111,12 +111,7 @@ fn test_state() {
 
     // constructor
     let component_address1: ComponentAddress = template_test.call_function("State", "new", args![], vec![]);
-    template_test.assert_calls(&[
-        "workspace_invoke",
-        "component_invoke",
-        "set_last_instruction_output",
-        "finalize",
-    ]);
+    template_test.assert_calls(&["workspace_invoke", "component_invoke", "set_last_instruction_output"]);
 
     let component_address2: ComponentAddress = template_test.call_function("State", "new", args![], vec![]);
     assert_ne!(component_address1, component_address2);

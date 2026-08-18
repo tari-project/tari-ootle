@@ -36,6 +36,12 @@ pub trait RuntimeModule<TStore>: Send + Sync {
     /// state a transaction that cannot pay for its main intent will fall back to committing.
     /// Pricing it here is what lets the paid-in-full check that follows, and the compute allowance
     /// that follows it, both account for what that fallback costs.
+    ///
+    /// It bounds the shortfall rather than eliminating it. Charges the main intent accrues after the
+    /// last allowance was computed — a template load, the host calls made inside the final
+    /// invocation — are not reserved against, so a payment sitting just above what the checkpoint
+    /// required can still fall short by that much at finalization. Closing the remainder means
+    /// refusing a charge that the payment cannot cover, at the point it is charged.
     fn on_fee_checkpoint(&self, _state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
         Ok(())
     }

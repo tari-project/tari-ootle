@@ -258,16 +258,28 @@ fn a_fee_intent_commit_is_not_charged_for_the_state_it_abandons() {
 /// was done and never paid for — repeatably, with the same funds each time.
 #[test]
 fn compute_cannot_consume_what_the_fee_intent_commit_needs() {
+    for burn_rate_bps in [0, 500, 10_000] {
+        spend_the_whole_allowance_and_still_pay(burn_rate_bps);
+    }
+}
+
+fn spend_the_whole_allowance_and_still_pay(burn_rate_bps: u16) {
+    const MAX_FEE: u64 = 100_000;
+
     let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/infinity_loop"]);
     let (account, owner_token, key) = test.create_funded_account();
     test.enable_fees();
+
+    // Run at a burn too, since the burn is taken over the charges rather than deducted from the
+    // payment: an allowance computed against the raw payment leaves nothing to pay it with.
+    test.set_burn_rate_bps(burn_rate_bps);
 
     // A loop that never returns: it runs until the compute allowance stops it, whatever that
     // allowance is, so the transaction always spends every point it is given.
     let template = test.get_template_address("InfinityLoopTest");
     let result = test.execute_expect_commit(
         test.transaction()
-            .pay_fee_from_component(account, 100_000u64)
+            .pay_fee_from_component(account, MAX_FEE)
             .call_function(template, "infinity_loop", args![])
             .build_and_seal(&key),
         vec![owner_token],
@@ -277,15 +289,24 @@ fn compute_cannot_consume_what_the_fee_intent_commit_needs() {
     // covers it, so the fees are collected.
     assert!(
         matches!(result.finalize.result, TransactionResult::AcceptFeeRejectRest(..)),
-        "expected a fee-intent commit, got {:?}",
+        "expected a fee-intent commit at {burn_rate_bps} bps, got {:?}",
         result.finalize.result
     );
     let receipt = &result.finalize.fee_receipt;
-    assert!(
-        receipt.total_fees_paid() > 0,
-        "the transaction burned its allowance and paid nothing for it"
+    assert!(receipt.is_paid_in_full(), "at {burn_rate_bps} bps");
+    assert_eq!(
+        receipt.total_fees_charged(),
+        receipt.total_fees_paid(),
+        "at {burn_rate_bps} bps the transaction should spend the payment down to the microtari"
     );
-    assert!(receipt.is_paid_in_full());
+    // The burn's rounding leaves a few microtari of the payment unspent, so this is "nearly all of
+    // it" rather than exactly all: what matters is that the allowance is sized against the payment
+    // and not beyond it.
+    assert!(
+        receipt.total_fees_paid() > MAX_FEE - 100,
+        "at {burn_rate_bps} bps only {} of {MAX_FEE} was spent",
+        receipt.total_fees_paid()
+    );
 }
 
 /// A fee-intent commit persists real state, so it happens only when the payment covers what that

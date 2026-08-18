@@ -277,6 +277,10 @@ pub trait RuntimeInterface {
     /// what it would have cost.
     fn metered_fee_receipt(&self) -> FeeReceipt;
 
+    /// The payment those charges require, inclusive of the exhaust burn taken over them — the figure
+    /// a rejected payer has to raise their fee to.
+    fn required_fee_payment(&self) -> u64;
+
     /// The maximum Wasmer metering points the transaction may consume given the fees paid so far,
     /// used by `WasmProcess::invoke` to cap each call's allowance so unpaid compute cannot exceed
     /// the grace. `None` means no payment-funded bound applies (only the per-transaction hard cap).

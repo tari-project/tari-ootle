@@ -2,4 +2,10 @@
 import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 
-export type AbridgedTransactionKernel = { version: number, fee: number | bigint | string, lock_height: number | bigint | string, excess: PedersenCommitmentBytes, excess_sig: SchnorrSignatureBytes, };
+export type AbridgedTransactionKernel = {
+  version: number;
+  fee: number | bigint | string;
+  lock_height: number | bigint | string;
+  excess: PedersenCommitmentBytes;
+  excess_sig: SchnorrSignatureBytes;
+};

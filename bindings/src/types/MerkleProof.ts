@@ -8,4 +8,4 @@ import type { Hash32 } from "./Hash32";
  * (no hashing), so it lives beside the spend witness in the WASM-safe crate while the hashing stays native in
  * `tari_engine_types`.
  */
-export type MerkleProof = { siblings: Array<Hash32>, };
+export type MerkleProof = { siblings: Array<Hash32> };

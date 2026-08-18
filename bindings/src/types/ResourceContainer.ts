@@ -7,4 +7,22 @@ import type { ResourceAddress } from "./ResourceAddress";
 /**
  * Instances of a single resource kept in Buckets and Vaults
  */
-export type ResourceContainer = { "Fungible": { address: ResourceAddress, amount: Amount, locked_amount: Amount, } } | { "NonFungible": { address: ResourceAddress, token_ids: Array<NonFungibleId>, locked_token_ids: Array<NonFungibleId>, } } | { "Confidential": { address: ResourceAddress, commitments: Array<PedersenCommitmentBytes>, revealed_amount: Amount, locked_commitments: Array<PedersenCommitmentBytes>, locked_revealed_amount: Amount, } } | { "Stealth": { address: ResourceAddress, revealed_amount: Amount, locked_amount: Amount, } };
+export type ResourceContainer =
+  | { Fungible: { address: ResourceAddress; amount: Amount; locked_amount: Amount } }
+  | {
+      NonFungible: {
+        address: ResourceAddress;
+        token_ids: Array<NonFungibleId>;
+        locked_token_ids: Array<NonFungibleId>;
+      };
+    }
+  | {
+      Confidential: {
+        address: ResourceAddress;
+        commitments: Array<PedersenCommitmentBytes>;
+        revealed_amount: Amount;
+        locked_commitments: Array<PedersenCommitmentBytes>;
+        locked_revealed_amount: Amount;
+      };
+    }
+  | { Stealth: { address: ResourceAddress; revealed_amount: Amount; locked_amount: Amount } };

@@ -8,4 +8,4 @@ import type { OutputBody } from "./OutputBody";
  * [`crate::utxo::Utxo`], which carries its own spend authorization), so no per-output spend key is held here.
  * Spending or burning downs this substate; the only in-place mutation is freezing.
  */
-export type ConfidentialOutput = { output: OutputBody, is_frozen: boolean, };
+export type ConfidentialOutput = { output: OutputBody; is_frozen: boolean };

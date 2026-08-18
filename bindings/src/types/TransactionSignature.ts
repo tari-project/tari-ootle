@@ -2,4 +2,4 @@
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 
-export type TransactionSignature = { public_key: RistrettoPublicKeyBytes, signature: SchnorrSignatureBytes, };
+export type TransactionSignature = { public_key: RistrettoPublicKeyBytes; signature: SchnorrSignatureBytes };

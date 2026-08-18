@@ -11,4 +11,4 @@ import type { SpendCondition } from "./SpendCondition";
  * engine never assumes which path the spender picks. This type is pure data — no hashing — so it is safe to compile
  * into a template; the engine recomputes the Merkle root natively.
  */
-export type SpendWitness = "KeyPath" | { "ScriptPath": { leaf: SpendCondition, proof: MerkleProof, data: Bytes, } };
+export type SpendWitness = "KeyPath" | { ScriptPath: { leaf: SpendCondition; proof: MerkleProof; data: Bytes } };

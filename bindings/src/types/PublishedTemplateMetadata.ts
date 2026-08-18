@@ -5,24 +5,25 @@ import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 /**
  * Lightweight template metadata that can be exchanged without transmitting the full WASM binary.
  */
-export type PublishedTemplateMetadata = { 
-/**
- * Human-readable template name extracted from the WASM ABI.
- */
-template_name: string, 
-/**
- * Author's public key.
- */
-author_public_key: RistrettoPublicKeyBytes, 
-/**
- * SHA-256 hash of the WASM binary.
- */
-binary_hash: Hash32, 
-/**
- * Epoch at which the template was published.
- */
-at_epoch: bigint, 
-/**
- * The author-provided off-chain metadata hash
- */
-metadata_hash: string | null, };
+export type PublishedTemplateMetadata = {
+  /**
+   * Human-readable template name extracted from the WASM ABI.
+   */
+  template_name: string;
+  /**
+   * Author's public key.
+   */
+  author_public_key: RistrettoPublicKeyBytes;
+  /**
+   * SHA-256 hash of the WASM binary.
+   */
+  binary_hash: Hash32;
+  /**
+   * Epoch at which the template was published.
+   */
+  at_epoch: bigint;
+  /**
+   * The author-provided off-chain metadata hash
+   */
+  metadata_hash: string | null;
+};

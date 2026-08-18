@@ -7,6 +7,16 @@ export type SettingsGetResponse = {
   network: NetworkInfo;
   advanced_ui_features: AdvancedUiFeatures;
   claimed_accounts: Array<string>;
+  /**
+   * The network's current epoch, as the wallet daemon sees it. Callers that build transactions
+   * themselves need it to choose a `max_epoch` the network will accept. `None` when the indexer
+   * is unreachable — settings must stay readable while the network is down, not least so the
+   * caller can see and correct the indexer URL.
+   */
   current_epoch: number | null;
+  /**
+   * How many epochs past `current_epoch` the wallet daemon stamps `max_epoch` when a caller does
+   * not choose one.
+   */
   default_transaction_validity_epochs: number;
 };

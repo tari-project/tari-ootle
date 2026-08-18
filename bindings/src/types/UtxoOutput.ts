@@ -3,4 +3,4 @@ import type { OutputBody } from "./OutputBody";
 import type { SpendAuthorization } from "./SpendAuthorization";
 import type { UtxoTag } from "./UtxoTag";
 
-export type UtxoOutput = { output: OutputBody, auth: SpendAuthorization, tag: UtxoTag, };
+export type UtxoOutput = { output: OutputBody; auth: SpendAuthorization; tag: UtxoTag };

@@ -16,12 +16,15 @@ import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
  *
  * Withdrawals can be revealed only, confidential only, or a mix of both.
  */
-export type ConfidentialWithdrawProof = { inputs: Array<PedersenCommitmentBytes>, 
-/**
- * The amount to withdraw from revealed funds i.e. the revealed funds as inputs
- */
-input_revealed_amount: Amount, output_proof: ConfidentialOutputStatement, 
-/**
- * Balance proof
- */
-balance_proof: SchnorrSignatureBytes, };
+export type ConfidentialWithdrawProof = {
+  inputs: Array<PedersenCommitmentBytes>;
+  /**
+   * The amount to withdraw from revealed funds i.e. the revealed funds as inputs
+   */
+  input_revealed_amount: Amount;
+  output_proof: ConfidentialOutputStatement;
+  /**
+   * Balance proof
+   */
+  balance_proof: SchnorrSignatureBytes;
+};

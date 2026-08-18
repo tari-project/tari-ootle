@@ -3,25 +3,33 @@ import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { Scalar32Bytes } from "./Scalar32Bytes";
 import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 
-export type ValueKnowledgeProof = { "Commitment": { 
-/**
- * Signed by C - v.H, where C is the commitment being proven and v is the claimed value
- * Proving knowledge of the opening to C, and that the commitment C = m.G + v.H
- */
-mask_knowledge_proof: SchnorrSignatureBytes, } } | { "ElgamalEncrypted": { 
-/**
- * Chaum-Pedersen (DLEQ) proof of knowledge of the view private key `p` such that `P = p.G` (the resource
- * view key) and `E - v.G = p.R`, where `(E, R)` is the UTXO's viewable balance and `v` is the claimed value.
- * Binding both equations to a single scalar forces `v` to equal the value encrypted for the view key.
- *
- * `K_g = k.G` for the proof nonce `k`
- */
-public_nonce_g: RistrettoPublicKeyBytes, 
-/**
- * `K_r = k.R`
- */
-public_nonce_r: RistrettoPublicKeyBytes, 
-/**
- * `s = k + e.p` for the Fiat-Shamir challenge `e`
- */
-s_p: Scalar32Bytes, } };
+export type ValueKnowledgeProof =
+  | {
+      Commitment: {
+        /**
+         * Signed by C - v.H, where C is the commitment being proven and v is the claimed value
+         * Proving knowledge of the opening to C, and that the commitment C = m.G + v.H
+         */
+        mask_knowledge_proof: SchnorrSignatureBytes;
+      };
+    }
+  | {
+      ElgamalEncrypted: {
+        /**
+         * Chaum-Pedersen (DLEQ) proof of knowledge of the view private key `p` such that `P = p.G` (the resource
+         * view key) and `E - v.G = p.R`, where `(E, R)` is the UTXO's viewable balance and `v` is the claimed value.
+         * Binding both equations to a single scalar forces `v` to equal the value encrypted for the view key.
+         *
+         * `K_g = k.G` for the proof nonce `k`
+         */
+        public_nonce_g: RistrettoPublicKeyBytes;
+        /**
+         * `K_r = k.R`
+         */
+        public_nonce_r: RistrettoPublicKeyBytes;
+        /**
+         * `s = k + e.p` for the Fiat-Shamir challenge `e`
+         */
+        s_p: Scalar32Bytes;
+      };
+    };

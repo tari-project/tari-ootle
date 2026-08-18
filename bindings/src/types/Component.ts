@@ -2,4 +2,4 @@
 import type { ComponentBody } from "./ComponentBody";
 import type { ComponentHeader } from "./ComponentHeader";
 
-export type Component = { header: ComponentHeader, body: ComponentBody, };
+export type Component = { header: ComponentHeader; body: ComponentBody };

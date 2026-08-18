@@ -5,4 +5,21 @@ import type { UpdateRule } from "./UpdateRule";
 /**
  * Information needed to specify access rules to a resource
  */
-export type ResourceAccessRules = { mint: AccessRule, mint_updater: UpdateRule, burn: AccessRule, burn_updater: UpdateRule, recall: AccessRule, recall_updater: UpdateRule, withdraw: AccessRule, withdraw_updater: UpdateRule, deposit: AccessRule, deposit_updater: UpdateRule, update_nft_data: AccessRule, nft_data_updater: UpdateRule, freeze: AccessRule, freeze_updater: UpdateRule, update_metadata: AccessRule, metadata_updater: UpdateRule, };
+export type ResourceAccessRules = {
+  mint: AccessRule;
+  mint_updater: UpdateRule;
+  burn: AccessRule;
+  burn_updater: UpdateRule;
+  recall: AccessRule;
+  recall_updater: UpdateRule;
+  withdraw: AccessRule;
+  withdraw_updater: UpdateRule;
+  deposit: AccessRule;
+  deposit_updater: UpdateRule;
+  update_nft_data: AccessRule;
+  nft_data_updater: UpdateRule;
+  freeze: AccessRule;
+  freeze_updater: UpdateRule;
+  update_metadata: AccessRule;
+  metadata_updater: UpdateRule;
+};

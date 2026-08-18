@@ -3,4 +3,4 @@ import type { Hash32 } from "./Hash32";
 import type { Metadata } from "./Metadata";
 import type { SubstateId } from "./SubstateId";
 
-export type Event = { substate_id: SubstateId | null, template_address: Hash32, topic: string, payload: Metadata, };
+export type Event = { substate_id: SubstateId | null; template_address: Hash32; topic: string; payload: Metadata };

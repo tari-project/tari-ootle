@@ -2,33 +2,34 @@
 import type { Epoch } from "./Epoch";
 import type { FinalizeResult } from "./FinalizeResult";
 
-export type ExecuteResult = { 
-/**
- * The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
- */
-finalize: FinalizeResult, 
-/**
- * The time taken to execute the transaction (excluding finalization).
- */
-execution_time: {secs: number, nanos: number}, 
-/**
- * The epoch during which the transaction was executed. This may be None if consensus aborted before being able to
- * lock to an epoch.
- */
-execute_epoch: Epoch | null, 
-/**
- * Total WASM metering points consumed by the transaction across all calls, including failed/aborted execution.
- * Metering is deterministic, so every validator computes the identical value for the same transaction and
- * pledged state. Defaults to 0 when decoding executions persisted before this field existed.
- */
-wasm_execution_points: bigint, 
-/**
- * Total native-verification points (stealth transfers, confidential withdraws, burn claims) charged to the
- * transaction, priced in WASM-point equivalents by [`NativeExecutionPoints`]. Deterministic for the same
- * reason as [`Self::wasm_execution_points`] — the price is a pure function of the declared statement — so
- * every validator computes the identical value. Defaults to 0 when decoding executions persisted before this
- * field existed.
- *
- * [`NativeExecutionPoints`]: crate::limits::NativeExecutionPoints
- */
-native_execution_points: bigint, };
+export type ExecuteResult = {
+  /**
+   * The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
+   */
+  finalize: FinalizeResult;
+  /**
+   * The time taken to execute the transaction (excluding finalization).
+   */
+  execution_time: { secs: number; nanos: number };
+  /**
+   * The epoch during which the transaction was executed. This may be None if consensus aborted before being able to
+   * lock to an epoch.
+   */
+  execute_epoch: Epoch | null;
+  /**
+   * Total WASM metering points consumed by the transaction across all calls, including failed/aborted execution.
+   * Metering is deterministic, so every validator computes the identical value for the same transaction and
+   * pledged state. Defaults to 0 when decoding executions persisted before this field existed.
+   */
+  wasm_execution_points: bigint;
+  /**
+   * Total native-verification points (stealth transfers, confidential withdraws, burn claims) charged to the
+   * transaction, priced in WASM-point equivalents by [`NativeExecutionPoints`]. Deterministic for the same
+   * reason as [`Self::wasm_execution_points`] — the price is a pure function of the declared statement — so
+   * every validator computes the identical value. Defaults to 0 when decoding executions persisted before this
+   * field existed.
+   *
+   * [`NativeExecutionPoints`]: crate::limits::NativeExecutionPoints
+   */
+  native_execution_points: bigint;
+};

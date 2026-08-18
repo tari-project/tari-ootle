@@ -4,4 +4,7 @@ import type { RequireRule } from "./RequireRule";
 /**
  * An enum that represents the possible ways to restrict access to components or resources
  */
-export type RestrictedAccessRule = { "Require": RequireRule } | { "AnyOf": Array<RestrictedAccessRule> } | { "AllOf": Array<RestrictedAccessRule> };
+export type RestrictedAccessRule =
+  | { Require: RequireRule }
+  | { AnyOf: Array<RestrictedAccessRule> }
+  | { AllOf: Array<RestrictedAccessRule> };

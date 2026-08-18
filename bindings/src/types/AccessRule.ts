@@ -4,4 +4,4 @@ import type { RestrictedAccessRule } from "./RestrictedAccessRule";
 /**
  * Represents the types of possible access control rules over a component method or resource
  */
-export type AccessRule = "AllowAll" | "DenyAll" | { "Restricted": RestrictedAccessRule };
+export type AccessRule = "AllowAll" | "DenyAll" | { Restricted: RestrictedAccessRule };

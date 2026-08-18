@@ -14,4 +14,7 @@ import type { HashAlg } from "./HashAlg";
  * ([`SpendWitness::ScriptPath`](super::SpendWitness::ScriptPath)) as its complete raw input — see
  * [`BuiltinPredicate::consumes_data`] and the sole-consumer rule it implies.
  */
-export type BuiltinPredicate = { "AfterEpoch": number | bigint | string } | { "BeforeEpoch": number | bigint | string } | { "HashLock": { hash: Hash32, alg: HashAlg, } };
+export type BuiltinPredicate =
+  | { AfterEpoch: number | bigint | string }
+  | { BeforeEpoch: number | bigint | string }
+  | { HashLock: { hash: Hash32; alg: HashAlg } };

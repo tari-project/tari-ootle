@@ -8,4 +8,7 @@ import type { Hash32 } from "./Hash32";
  * variant introspects the transfer's outputs natively, with canonical semantics in trusted core code. The set is a
  * curated standard library of common value-routing constraints; anything bespoke is a [`TemplateFunction`] instead.
  */
-export type Covenant = "OutputPreservesCondition" | { "OutputTo": { condition_root: Hash32, min_value: number | bigint | string, } } | { "BalancePreserved": number | bigint | string };
+export type Covenant =
+  | "OutputPreservesCondition"
+  | { OutputTo: { condition_root: Hash32; min_value: number | bigint | string } }
+  | { BalancePreserved: number | bigint | string };

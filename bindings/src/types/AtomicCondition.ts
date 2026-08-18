@@ -8,4 +8,8 @@ import type { TemplateFunction } from "./TemplateFunction";
  * One conjunct of a [`SpendCondition`] leaf. Atoms are not self-referential — composition lives in the enclosing
  * conjunction (AND) and the condition tree (OR), never inside an atom — so the type carries no recursion to bound.
  */
-export type AtomicCondition = { "AccessRule": AccessRule } | { "TemplateFunction": TemplateFunction } | { "Builtin": BuiltinPredicate } | { "Covenant": Covenant };
+export type AtomicCondition =
+  | { AccessRule: AccessRule }
+  | { TemplateFunction: TemplateFunction }
+  | { Builtin: BuiltinPredicate }
+  | { Covenant: Covenant };

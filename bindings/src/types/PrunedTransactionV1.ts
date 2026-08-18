@@ -9,4 +9,4 @@ import type { TransactionSealSignature } from "./TransactionSealSignature";
  * blobs and drops the payloads) or via deserialization of bytes previously written by the
  * storage layer.
  */
-export type PrunedTransactionV1 = { body: PrunedUnsealedTransactionV1, seal_signature: TransactionSealSignature, };
+export type PrunedTransactionV1 = { body: PrunedUnsealedTransactionV1; seal_signature: TransactionSealSignature };

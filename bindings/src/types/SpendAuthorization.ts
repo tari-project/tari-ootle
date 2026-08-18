@@ -14,4 +14,7 @@ import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
  *   revealing one leaf plus an inclusion proof.
  * - **KeyAndScript** — either path is admissible; the per-input `SpendWitness` selects which.
  */
-export type SpendAuthorization = { "Key": RistrettoPublicKeyBytes } | { "Script": Hash32 } | { "KeyAndScript": { spend_key: RistrettoPublicKeyBytes, condition_root: Hash32, } };
+export type SpendAuthorization =
+  | { Key: RistrettoPublicKeyBytes }
+  | { Script: Hash32 }
+  | { KeyAndScript: { spend_key: RistrettoPublicKeyBytes; condition_root: Hash32 } };

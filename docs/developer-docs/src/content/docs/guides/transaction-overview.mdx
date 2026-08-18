@@ -75,9 +75,11 @@ The workspace is not persisted — it disappears when the transaction finishes.
 
 ## Fees
 
-Every transaction must pay fees to validators. Fee instructions are a separate sequence that runs **before** the main instructions. They lock up a maximum amount of tTARI (the native token) from a specified account or bucket.
+Every transaction must pay fees to validators. Fee instructions are a separate sequence that runs **before** the main instructions. They lock up a maximum amount of TARI (the native token) from a specified account or bucket.
 
 After execution, any unused portion of the locked fees is refunded. If the main instructions fail, a partial fee is still charged for the work done by validators up to that point.
+
+For the full picture — what each stage charges, which checks gate it, and how to estimate a fee — see the [Fees reference](/reference/fees/).
 
 ---
 

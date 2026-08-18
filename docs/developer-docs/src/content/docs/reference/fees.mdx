@@ -1,0 +1,395 @@
+---
+title: Fees
+description: How the Ootle engine charges a transaction — the fee intent, the fee checkpoint, the main intent, finalisation, and every rule and check applied along the way.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Every transaction pays validators for the work it causes: bytes written to permanent state, compute
+executed, cryptography verified, and the bandwidth its own body consumes. Fees are always paid in
+**TARI**, and every amount on this page is in **microtari (µT)** — 1 TARI = 1,000,000 µT.
+
+A transaction is executed in two halves. The **fee intent** (the `fee_instructions`) runs first and
+its only job is to source and hand over a payment. The **main intent** (the `instructions`) runs
+second and does the actual work. Between them sits the **fee checkpoint**, which is both a gate and a
+savepoint: if the main intent later fails, the transaction falls back to the state the fee intent
+ended on, and the validator is still paid for the work it did.
+
+---
+
+## The lifecycle of a fee
+
+<svg viewBox="0 0 860 1000" xmlns="http://www.w3.org/2000/svg" style="max-width:860px;width:100%;font-family:system-ui,sans-serif">
+  {/* Background */}
+  <rect width="860" height="1000" rx="12" fill="#0d1117"/>
+
+  <defs>
+    <marker id="feeArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#484f58"/>
+    </marker>
+    <marker id="feeArrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f85149"/>
+    </marker>
+    <marker id="feeArrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3fb950"/>
+    </marker>
+  </defs>
+
+  <text x="430" y="34" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">How a transaction is charged, top to bottom</text>
+
+  {/* A — submission */}
+  <rect x="24" y="52" width="520" height="56" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="44" y="78" fill="#e6edf3" font-size="14" font-weight="bold">Transaction submitted</text>
+  <text x="44" y="98" fill="#8b949e" font-size="12">fee instructions · main instructions · inputs · max_fee</text>
+  <line x1="284" y1="108" x2="284" y2="146" stroke="#484f58" stroke-width="2" marker-end="url(#feeArrow)"/>
+  <text x="300" y="132" fill="#a371f7" font-size="12">charge: Initial + TransactionWeight</text>
+
+  {/* B — fee intent */}
+  <rect x="24" y="148" width="520" height="110" rx="8" fill="#1c2333" stroke="#388bfd"/>
+  <text x="44" y="174" fill="#388bfd" font-size="14" font-weight="bold">1 · Fee intent</text>
+  <text x="44" y="196" fill="#8b949e" font-size="12">The fee instructions run: withdraw, claim a Minotari burn, swap, reveal.</text>
+  <text x="44" y="214" fill="#8b949e" font-size="12">Charges accrue per host call, template load and signature check.</text>
+  <text x="44" y="232" fill="#8b949e" font-size="12">Compute allowance = what is paid so far + 32M free grace points.</text>
+  <text x="44" y="250" fill="#8b949e" font-size="12">pay_fee records a payment — TARI only, and never zero.</text>
+  <line x1="284" y1="258" x2="284" y2="290" stroke="#484f58" stroke-width="2" marker-end="url(#feeArrow)"/>
+
+  {/* C — fee checkpoint */}
+  <rect x="24" y="292" width="520" height="118" rx="8" fill="#1c2333" stroke="#f0883e"/>
+  <text x="44" y="318" fill="#f0883e" font-size="14" font-weight="bold">2 · Fee checkpoint</text>
+  <text x="44" y="340" fill="#8b949e" font-size="12">on_fee_checkpoint prices the state the fee intent would persist.</text>
+  <text x="44" y="358" fill="#f0883e" font-size="12">CHECK  spendable(payments) &#x2265; charges so far?</text>
+  <text x="44" y="376" fill="#8b949e" font-size="12">The state is snapshotted; the workspace is cleared and proofs dropped.</text>
+  <text x="44" y="394" fill="#8b949e" font-size="12">This snapshot is the fallback the transaction can still commit.</text>
+  <line x1="544" y1="351" x2="576" y2="351" stroke="#f85149" stroke-width="2" marker-end="url(#feeArrowRed)"/>
+
+  {/* R1 */}
+  <rect x="580" y="320" width="256" height="66" rx="8" fill="#161b22" stroke="#f85149" stroke-dasharray="4,3"/>
+  <text x="598" y="344" fill="#f85149" font-size="13" font-weight="bold">Rejected</text>
+  <text x="598" y="362" fill="#8b949e" font-size="11">InsufficientFeesPaid.</text>
+  <text x="598" y="378" fill="#8b949e" font-size="11">Nothing written, nothing taken.</text>
+
+  <line x1="284" y1="410" x2="284" y2="442" stroke="#484f58" stroke-width="2" marker-end="url(#feeArrow)"/>
+
+  {/* D — main intent */}
+  <rect x="24" y="444" width="520" height="110" rx="8" fill="#1c2333" stroke="#388bfd"/>
+  <text x="44" y="470" fill="#388bfd" font-size="14" font-weight="bold">3 · Main intent</text>
+  <text x="44" y="492" fill="#8b949e" font-size="12">The main instructions run against the checkpointed state.</text>
+  <text x="44" y="510" fill="#8b949e" font-size="12">Compute allowance = the part of the payment the charges have not spent.</text>
+  <text x="44" y="528" fill="#8b949e" font-size="12">The grace credit is gone; a further pay_fee is rejected here.</text>
+  <text x="44" y="546" fill="#8b949e" font-size="12">Charges keep accruing per host call and per verification.</text>
+  <line x1="544" y1="499" x2="576" y2="499" stroke="#f0883e" stroke-width="2" marker-end="url(#feeArrow)"/>
+
+  {/* R2 */}
+  <rect x="580" y="470" width="256" height="64" rx="8" fill="#161b22" stroke="#f0883e" stroke-dasharray="4,3"/>
+  <text x="598" y="494" fill="#f0883e" font-size="13" font-weight="bold">Instruction failure</text>
+  <text x="598" y="512" fill="#8b949e" font-size="11">Fall back to the checkpoint;</text>
+  <text x="598" y="528" fill="#8b949e" font-size="11">charges so far are kept.</text>
+
+  <line x1="284" y1="554" x2="284" y2="586" stroke="#484f58" stroke-width="2" marker-end="url(#feeArrow)"/>
+  <line x1="708" y1="534" x2="708" y2="600" stroke="#484f58" stroke-width="2" stroke-dasharray="4,3"/>
+  <line x1="708" y1="600" x2="548" y2="600" stroke="#484f58" stroke-width="2" marker-end="url(#feeArrow)"/>
+
+  {/* E — finalisation */}
+  <rect x="24" y="588" width="520" height="140" rx="8" fill="#1c2333" stroke="#a371f7"/>
+  <text x="44" y="614" fill="#a371f7" font-size="14" font-weight="bold">4 · Finalisation</text>
+  <text x="44" y="636" fill="#8b949e" font-size="12">Pass 1 — on_before_finalize prices the state execution ended on.</text>
+  <text x="44" y="654" fill="#8b949e" font-size="12">Select what to persist: the whole transaction, or the fee intent alone.</text>
+  <text x="44" y="672" fill="#8b949e" font-size="12">Pass 2 — on_before_persist re-prices whichever state was chosen.</text>
+  <text x="44" y="690" fill="#a371f7" font-size="12">Storage · SubstateCreate · TemplatePublish · Wasm/Native · ExhaustBurn</text>
+  <text x="44" y="712" fill="#f0883e" font-size="12">CHECK  payments &#x2265; the recomputed charges?</text>
+  <line x1="544" y1="664" x2="576" y2="664" stroke="#f85149" stroke-width="2" marker-end="url(#feeArrowRed)"/>
+
+  {/* R3 */}
+  <rect x="580" y="626" width="256" height="76" rx="8" fill="#161b22" stroke="#f85149" stroke-dasharray="4,3"/>
+  <text x="598" y="652" fill="#f85149" font-size="13" font-weight="bold">Rejected</text>
+  <text x="598" y="670" fill="#8b949e" font-size="11">Nothing persisted or taken;</text>
+  <text x="598" y="688" fill="#8b949e" font-size="11">the receipt carries the retry fee.</text>
+
+  <line x1="284" y1="728" x2="284" y2="760" stroke="#484f58" stroke-width="2" marker-end="url(#feeArrow)"/>
+
+  {/* F — settlement */}
+  <rect x="24" y="762" width="520" height="110" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="44" y="788" fill="#e6edf3" font-size="14" font-weight="bold">Settlement</text>
+  <text x="44" y="810" fill="#8b949e" font-size="12">Charges collected; the unspent payment is refunded to its vault.</text>
+  <text x="44" y="828" fill="#8b949e" font-size="12">Unrefundable overpayment is kept and split with the exhaust burn.</text>
+  <text x="44" y="846" fill="#8b949e" font-size="12">The exhaust burn is destroyed; leaders are paid the pre-burn fee.</text>
+  <text x="44" y="864" fill="#8b949e" font-size="12">The transaction receipt is up&#x2019;d into the substate diff.</text>
+
+  <line x1="284" y1="872" x2="284" y2="904" stroke="#3fb950" stroke-width="2" marker-end="url(#feeArrowGreen)"/>
+
+  {/* G — outcome */}
+  <rect x="24" y="906" width="520" height="56" rx="8" fill="#161b22" stroke="#3fb950"/>
+  <text x="284" y="930" text-anchor="middle" fill="#3fb950" font-size="13" font-weight="bold">Accept &#x2014; full commit</text>
+  <text x="284" y="950" text-anchor="middle" fill="#8b949e" font-size="12">or AcceptFeeRejectRest &#x2014; the fee intent alone commits</text>
+</svg>
+
+---
+
+## Before anything executes
+
+These are checked at ingress or at the very start of execution, before a single fee is metered:
+
+| Rule | Where | Limit |
+|---|---|---|
+| Transaction weight ceiling | mempool admission | `max_transaction_weight` (1,000,000) |
+| Transaction validity window | mempool + consensus | `max_epoch` at most `max_transaction_validity_epochs` (2160) ahead |
+| At most one template publish | execution | `MAX_PUBLISH_TEMPLATES_PER_TRANSACTION` = 1 |
+| Fees are payable only in TARI | execution | any other resource is an `InvalidArgument` |
+
+The first charges land as soon as the runtime initialises, before any instruction runs:
+
+- **`Initial`** — a flat cost per transaction. Currently `0` on every shipped network.
+- **`TransactionWeight`** — the transaction's weight × `per_transaction_weight_cost`. Weight is a
+  static size/IO measure: instruction literals (bytes ÷ 3), blobs, 15 per input and 5 per signer. It
+  prices what the network must gossip, store and validate regardless of what execution does.
+
+---
+
+## Stage 1 — the fee intent
+
+The fee instructions exist to *source* a payment and hand it to the engine. Anything is allowed here:
+withdrawing from an account, claiming a Minotari burn, swapping through an AMM, revealing a stealth
+UTXO.
+
+**How a payment is made**
+
+| Builder call | Under the hood | Refundable? |
+|---|---|---|
+| `.pay_fee_from_component(account, max_fee)` | calls `pay_fee` on the component, which pays from its TARI vault | Yes — surplus returns to that vault |
+| `.pay_fee_from_bucket("bucket")` | consumes a workspace bucket outright | **No** — there is no vault to refund to |
+
+Rules and checks applied to a payment:
+
+- The resource must be `TARI`; anything else is rejected.
+- The amount must be greater than zero and must not overflow `u64` when added to the running total.
+- The paying vault must not be frozen for withdrawals, and the resource's `Withdraw` access rule must
+  pass.
+- A stealth-funded fee intent may perform at most **one** stealth transfer
+  (`STEALTH_LIMITS.max_fee_intent_transfers`), counted whether it comes from a `StealthTransfer`
+  instruction or from a template calling `ResourceManager::stealth_transfer`.
+
+**Charges that accrue while the fee intent runs**
+
+- `RuntimeCall` — a flat `per_module_call_cost` for every engine host call.
+- `TemplateLoad` — `(bytes_loaded / 3000) × per_template_load_cost_unit`, charged **once per template
+  per transaction**; repeat calls into an already-loaded template are free.
+- `SignatureVerification` — `per_signature_verification_cost` per signature verified.
+- Metering points accumulate for WASM and native crypto, but are not priced until finalisation.
+
+**Compute on credit.** A transaction cannot pay before it has sourced its funds, so the fee intent
+runs with a credit of `FREE_COMPUTE_GRACE_POINTS` (32,000,000 points) on top of whatever its payments
+already fund. That is roughly 3× the most expensive legitimate fee-sourcing flow. Exhaust it without
+paying and execution traps out of gas — it is the hard bound on free compute a non-paying transaction
+can extract from a validator.
+
+---
+
+## Stage 2 — the fee checkpoint
+
+The checkpoint is where "can this transaction afford to exist?" is answered. It runs after the last
+fee instruction and before the first main instruction, and it does four things in order:
+
+1. **Validate the intent is finalisable.** Dangling buckets or undropped proofs fail here, exactly as
+   they would at the end of a transaction.
+2. **Price the fee intent's state** (`on_fee_checkpoint`). This is the state a failing transaction
+   falls back to committing, so it is priced *before* the main intent spends any compute: `Storage`,
+   `SubstateCreate` and `TemplatePublish` are computed over the substates the fee intent mutated,
+   plus the transaction receipt it would produce.
+3. **Test the payment.** The check is `spendable(payments) ≥ total charges`, not
+   `payments ≥ charges` — the exhaust burn is taken *on top of* the charges, so a payment that
+   exactly matches them cannot also cover the exhaust burn. A shortfall rejects the transaction
+   outright: nothing is written and no fee is taken.
+4. **Snapshot and reset.** The working state is cloned as the fallback; the workspace is cleared and
+   its proofs dropped, so the main intent starts with a clean workspace.
+
+<Aside type="caution">
+  After the checkpoint, `pay_fee` is a hard error (`FeePaymentInMainIntent`). Everything the main
+  intent spends must already have been paid for.
+</Aside>
+
+---
+
+## Stage 3 — the main intent
+
+The main instructions run against the post-checkpoint state and keep accruing `RuntimeCall`,
+`TemplateLoad` and `SignatureVerification` charges as before. What changes is the compute budget.
+
+**Compute is funded by what the payment has left.** The allowance is:
+
+```
+allowance = points_funded_by( spendable(payments) − charges_so_far )
+```
+
+The free grace credit is gone — sourcing the fee was its only purpose, and that is done. Funding
+compute from the *unspent* part of the payment (rather than from the whole of it) is what keeps a
+transaction from spending its entire payment on execution and then being unable to afford even its
+own fee-intent fallback, which would settle as a rejection that collects nothing.
+
+Three ceilings apply on top of each other:
+
+| Bound | Value | Effect when hit |
+|---|---|---|
+| Payment-funded allowance | derived, see above | out-of-gas reported as `InsufficientFeesForCompute` |
+| `MAX_WASM_POINTS_PER_TRANSACTION` | 100,000,000 | out-of-gas, hard cap |
+| `MAX_NATIVE_POINTS_PER_TRANSACTION` | 2,400,000,000 | `MaxNativeExecutionPointsExceeded` |
+
+Native verification (stealth transfers, confidential withdrawals, Minotari burn claims) is
+**pre-charged** against the same allowance before the cryptography runs, so a transaction that cannot afford it traps
+without the validator having done the work. WASM is metered by Wasmer: each invocation's meter is
+capped to the smaller of the remaining hard cap and the remaining paid allowance, so work cannot be
+split across instructions or nested calls to get a fresh budget each time.
+
+If an instruction fails, execution rolls back to the fee checkpoint. The fee state carries across the
+rollback — every charge metered before the failure is still owed.
+
+---
+
+## Stage 4 — finalisation
+
+Finalisation is a **two-pass** charge, because the receipt's cost depends on which state is persisted,
+and which state is persisted depends on the cost.
+
+**Pass 1 — `on_before_finalize`.** Price the state execution actually ended on. This is what the
+commit-or-reject decision is made against, and it is the figure reported as `total_fees_required` — the
+number a resubmission has to clear.
+
+**Selection.** If the main intent failed, *or* the payment does not cover the charges from pass 1, the
+state to persist becomes the fee checkpoint instead of the working state — an
+`AcceptFeeRejectRest` outcome.
+
+**Pass 2 — `on_before_persist`.** Re-price the state that was actually chosen; the second result
+supersedes pass 1's. This pass is skipped on a full commit, where the two states are the same.
+
+The charges computed in these passes:
+
+| Source | Formula |
+|---|---|
+| `Storage` | `(bytes of persisted substates + receipt bytes) × per_byte_storage_cost / storage_cost_divisor` |
+| `SubstateCreate` | `(newly created substates + 1 for the receipt) × per_substate_create_cost` |
+| `TemplatePublish` | flat `per_template_publish_cost` + first `template_size_premium_free_bytes` at the storage rate + `units² × per_template_size_premium_unit_cost` |
+| `WasmExecution` | `(total points / wasm_points_cost_divisor) × per_wasm_point_cost` |
+| `NativeExecution` | same rate, over the accumulated native points |
+| `ExhaustBurn` | `total of all charges above × exhaust_burn_rate_bps / 10_000` |
+
+<Aside type="note">
+  WASM and native points are divided **once, over the transaction total**, not per call. Dividing per
+  call would let a transaction split work into sub-divisor chunks and pay zero for each.
+</Aside>
+
+**The final check.** After pass 2, `payments ≥ charges` is tested one last time. A fee-intent commit
+still persists real state — substates and a receipt carrying every event the intent emitted — so a
+payment that cannot cover *that* commits nothing at all. The transaction is rejected, nothing is
+taken, and the receipt reports the charges as metered against no payment so the payer knows what to
+retry with. Only a fee-intent commit can fail here — a full commit's charges were tested against the
+payment to reach this point.
+
+---
+
+## Settlement
+
+Once the charges are final:
+
+1. **Non-refundable payments are collected in full** — bucket payments have no return vault, so the
+   whole amount is taken even if it exceeds the charges. The excess is recorded as
+   `total_fee_overcharge`.
+2. **Refundable payments are drawn down** only to the amount still owed.
+3. **Whatever is left of a refundable payment goes back to its vault.**
+4. **The overcharge is split** as though it were a payment inclusive of its own exhaust burn: the
+   burn share moves into `ExhaustBurn`, the rest is kept by the network.
+5. **The transaction receipt is written** into the substate diff, carrying the fee receipt, the
+   events, the diff summary and the outcome.
+
+Fees flow onward as two separate quantities: leaders are paid `pre_burn_fees_paid` (the total paid
+*minus* the exhaust burn) in full, and the exhaust burn is destroyed and carried in the block
+header.
+
+---
+
+## The exhaust burn
+
+`exhaust_burn_rate_bps` is a consensus constant — 500 bps (5%) on mainnet — and every validator must
+use the same value or nodes diverge on block headers.
+
+The exhaust burn is charged **on top of** the accrued fee, not deducted from it. Two consequences
+follow, and both show up as rules elsewhere on this page:
+
+- A payment of `P` can only cover charges of `P / (1 + rate)`. That is the `spendable()` function used
+  at the checkpoint and by the compute allowance.
+- The payment a set of charges requires is `ceil(charges × (1 + rate))`, rounded up. That is the
+  figure a rejected payer is told to retry with.
+
+---
+
+## What a transaction is charged for
+
+Rates below are the current testnet values (mainnet placeholders are identical and still to be
+finalised).
+
+| Source | When | Testnet rate |
+|---|---|---|
+| `Initial` | runtime init | 0 |
+| `TransactionWeight` | runtime init | 1 µT per weight unit |
+| `RuntimeCall` | every engine host call | 1 µT |
+| `TemplateLoad` | first load of each template | 10 µT per 3 KB |
+| `SignatureVerification` | per signature | 10 µT |
+| `Storage` | finalisation | 1 µT per byte |
+| `SubstateCreate` | finalisation | 25 µT per new substate |
+| `TemplatePublish` | finalisation | 250,000 µT flat; first 96 KiB at the storage rate; 100 µT × units² per KiB beyond |
+| `WasmExecution` | finalisation | 1 µT per 1000 metering points |
+| `NativeExecution` | finalisation | 1 µT per 1000 point-equivalents |
+| `ExhaustBurn` | finalisation | 5% of the total |
+
+A source that charges nothing is omitted from the breakdown entirely rather than recorded as a zero.
+
+---
+
+## Estimating what to submit
+
+Submit a transaction as a **dry run** and the engine meters it exactly as it would for real, but never
+aborts for insufficient payment. Read `FinalizeResult::required_fees()` from the result and use it as
+the `max_fee`.
+
+That figure is `total_fees_required + FEE_ESTIMATE_ALLOWANCE` (25 µT). The allowance exists because
+`max_fee` is itself an input to the cost, so the real run meters *slightly* differently from the dry
+run that estimated it:
+
+- Transaction weight prices the fee instruction's literals by their encoded bytes, so a wider
+  `max_fee` costs marginally more weight.
+- The storage tally byte-counts the fee vault *before* the unspent payment is returned, so a wider
+  `max_fee` leaves a narrower residual there and costs marginally less.
+- The exhaust burn re-multiplies both.
+
+The allowance bounds the pair in both directions at any exhaust burn rate up to
+`MAX_EXHAUST_BURN_RATE_BPS`.
+
+<Aside type="tip">
+  `required_fees()` is a floor, not a recommendation. Overpayment returns to the paying vault, so a
+  caller paying from an account loses nothing by submitting above it. A caller paying from a bucket
+  has no refund path and should sit closer to the floor.
+</Aside>
+
+Note that `FeeReceipt::required_fees()` reads only what *that receipt* was charged — on an
+`AcceptFeeRejectRest` outcome that is the fee intent's own cost, not what the transaction needed. Use
+`FinalizeResult::required_fees()` when telling a caller what to resubmit with.
+
+---
+
+## Outcomes
+
+| Outcome | State persisted | Fee taken |
+|---|---|---|
+| `Accept` | the full transaction | charges in full, surplus refunded |
+| `AcceptFeeRejectRest` | the fee checkpoint only | charges in full, surplus refunded |
+| `Reject` at the fee checkpoint | none | none |
+| `Reject` at finalisation | none | none; the receipt reports what a commit would have cost |
+
+In both accepting cases, `FinalizeResult::total_fees_required` tells you what committing the *whole*
+transaction was priced at, which is the number a retry has to clear — on an `AcceptFeeRejectRest` that
+is higher than the receipt's own total.
+
+---
+
+## See also
+
+- [Transaction Overview](/guides/transaction-overview/) — how fee instructions fit into a transaction
+- [Stealth Transfers](/guides/stealth-resources/) — paying a fee from a stealth UTXO

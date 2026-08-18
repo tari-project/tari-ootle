@@ -433,69 +433,78 @@ pub enum WellKnownTariValue {
 impl FromTagAndValue for WellKnownTariValue {
     type Error = IndexedValueError;
 
-    fn try_from_tag_and_value(tag: u64, value: &tari_bor::Value) -> Result<Self, Self::Error>
+    fn try_from_tag_and_value(tag: u64, value: &tari_bor::Value) -> Result<Option<Self>, Self::Error>
     where Self: Sized {
-        let tag = BinaryTag::from_u64(tag).ok_or(IndexedValueError::InvalidTag(tag))?;
+        // Standard CBOR tags share the value tree with Tari's: an `Amount` above `u64::MAX` encodes
+        // as a bignum, tag 2. Those carry no substate reference, so they are not this type's to
+        // claim.
+        let Some(tag) = BinaryTag::from_u64(tag) else {
+            return Ok(None);
+        };
         match tag {
             BinaryTag::ComponentAddress => {
                 let component_address: ObjectKey = value.decoded()?;
-                Ok(Self::ComponentAddress(component_address.into()))
+                Ok(Some(Self::ComponentAddress(component_address.into())))
             },
             BinaryTag::BucketId => {
                 let bucket_id: u32 = value.decoded()?;
-                Ok(Self::BucketId(bucket_id.into()))
+                Ok(Some(Self::BucketId(bucket_id.into())))
             },
             BinaryTag::ResourceAddress => {
                 let resource_address: ObjectKey = value.decoded()?;
-                Ok(Self::ResourceAddress(resource_address.into()))
+                Ok(Some(Self::ResourceAddress(resource_address.into())))
             },
             BinaryTag::TransactionReceipt => {
                 let tx_receipt_hash: Hash32 = value.decoded()?;
-                Ok(Self::TransactionReceiptAddress(tx_receipt_hash.into()))
+                Ok(Some(Self::TransactionReceiptAddress(tx_receipt_hash.into())))
             },
             BinaryTag::NonFungibleAddress => {
                 let non_fungible_address: NonFungibleAddressContents = value.decoded()?;
-                Ok(Self::NonFungibleAddress(non_fungible_address.into()))
+                Ok(Some(Self::NonFungibleAddress(non_fungible_address.into())))
             },
             BinaryTag::Metadata => {
                 let metadata: BTreeMap<String, String> = value.decoded()?;
-                Ok(Self::Metadata(metadata.into()))
+                Ok(Some(Self::Metadata(metadata.into())))
             },
             BinaryTag::VaultId => {
                 let vault_id: ObjectKey = value.decoded()?;
-                Ok(Self::VaultId(vault_id.into()))
+                Ok(Some(Self::VaultId(vault_id.into())))
             },
             BinaryTag::ProofId => {
                 let value: u32 = value.decoded()?;
-                Ok(Self::ProofId(value.into()))
+                Ok(Some(Self::ProofId(value.into())))
             },
             BinaryTag::ClaimedOutputTombstoneAddress => {
                 let value: ObjectKey = value.decoded()?;
-                Ok(Self::ClaimedOutputTombstoneAddress(value.into()))
+                Ok(Some(Self::ClaimedOutputTombstoneAddress(value.into())))
             },
             BinaryTag::TemplateAddress => {
                 let value: Hash32 = value.decoded()?;
-                Ok(Self::PublishedTemplateAddress(value.into()))
+                Ok(Some(Self::PublishedTemplateAddress(value.into())))
             },
             BinaryTag::ValidatorNodeFeePool => {
                 let value: [u8; 32] = value.decoded()?;
-                Ok(Self::ValidatorNodeFeePool(value.into()))
+                Ok(Some(Self::ValidatorNodeFeePool(value.into())))
             },
             BinaryTag::AllocatedComponentAddress => {
                 let value = value.decoded()?;
-                Ok(Self::ComponentAddressAllocation(ComponentAddressAllocation::new(value)))
+                Ok(Some(Self::ComponentAddressAllocation(ComponentAddressAllocation::new(
+                    value,
+                ))))
             },
             BinaryTag::AllocatedResourceAddress => {
                 let value = value.decoded()?;
-                Ok(Self::ResourceAddressAllocation(ResourceAddressAllocation::new(value)))
+                Ok(Some(Self::ResourceAddressAllocation(ResourceAddressAllocation::new(
+                    value,
+                ))))
             },
             BinaryTag::Utxo => {
                 let value: UtxoAddressContents = value.decoded()?;
-                Ok(Self::Utxo(value.into()))
+                Ok(Some(Self::Utxo(value.into())))
             },
             BinaryTag::ConfidentialOutput => {
                 let value: ConfidentialOutputAddressContents = value.decoded()?;
-                Ok(Self::ConfidentialOutput(value.into()))
+                Ok(Some(Self::ConfidentialOutput(value.into())))
             },
         }
     }
@@ -601,8 +610,6 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
 pub enum IndexedValueError {
     #[error("Bor error: {0}")]
     BorError(#[from] BorError),
-    #[error("Invalid tag: {0}")]
-    InvalidTag(u64),
     #[error("{0}")]
     Custom(String),
 }
@@ -754,6 +761,35 @@ mod tests {
         // TestStruct.sub_structs = #[n(5)], Vec index 1, then SubStruct.buckets = #[n(0)]
         let buckets: Vec<BucketId> = indexed.get_value("$.5.1.0").unwrap().unwrap();
         assert_eq!(buckets, vec![1.into(), 2.into()]);
+    }
+
+    /// An `Amount` above `u64::MAX` encodes as a CBOR bignum, which is a tagged value the indexer
+    /// has no claim on. It must walk past it rather than reject the whole value.
+    #[test]
+    fn a_standard_cbor_tag_is_walked_past() {
+        use tari_template_lib::types::Amount;
+
+        let huge = Amount::new(u128::from(u64::MAX) + 1);
+        let value = tari_bor::to_value(&huge).unwrap();
+        assert!(
+            matches!(value, tari_bor::Value::Tag(2, _)),
+            "the test needs a bignum to be meaningful: {value:?}"
+        );
+
+        let indexed = IndexedValue::from_value(value).unwrap();
+        assert!(indexed.component_addresses().is_empty());
+    }
+
+    /// Walking past an unclaimed tag must still descend into it, or a substate reference nested
+    /// under one would go unlocked.
+    #[test]
+    fn a_reference_under_an_unclaimed_tag_is_still_found() {
+        let addr = ComponentAddress::new(new_object_key());
+        // Tag 42 is not a `BinaryTag`, so nothing claims it.
+        let value = tari_bor::Value::Tag(42, Box::new(tari_bor::to_value(&addr).unwrap()));
+
+        let indexed = IndexedValue::from_value(value).unwrap();
+        assert!(indexed.component_addresses().contains(&addr));
     }
 
     #[test]

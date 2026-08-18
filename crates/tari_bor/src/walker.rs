@@ -33,8 +33,11 @@ where
     match value {
         Value::Integer(_) | Value::Bytes(_) | Value::Float(_) | Value::Text(_) | Value::Bool(_) | Value::Null => {},
         Value::Tag(tag, val) => {
-            let val = T::try_from_tag_and_value(*tag, val)?;
-            let flow = visitor.visit(val)?;
+            // A tag the visitor does not claim still wraps a value that may contain ones it does.
+            let Some(claimed) = T::try_from_tag_and_value(*tag, val)? else {
+                return walk_all_depth(val, visitor, max_depth, depth + 1);
+            };
+            let flow = visitor.visit(claimed)?;
             return Ok(flow);
         },
         Value::Array(values) => {
@@ -76,6 +79,8 @@ impl<F: FnMut(T) -> Result<ControlFlow<()>, E>, T, E> ValueVisitor<T> for F {
 pub trait FromTagAndValue {
     type Error;
 
-    fn try_from_tag_and_value(tag: u64, value: &Value) -> Result<Self, Self::Error>
+    /// `None` when `tag` is not one this type represents — a standard CBOR tag, say — leaving the
+    /// walker to descend into the tagged value rather than fail on it.
+    fn try_from_tag_and_value(tag: u64, value: &Value) -> Result<Option<Self>, Self::Error>
     where Self: Sized;
 }

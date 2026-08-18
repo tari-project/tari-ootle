@@ -122,26 +122,29 @@ impl WasmProcess {
         Ok(AllocPtr::new(ptr.offset(), len))
     }
 
-    /// Calls the template's `tari_alloc`, rejecting the invocation if it called the engine.
+    /// Calls the template's `tari_alloc`, failing the call if it called the engine.
     fn alloc_checked<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
         let result = self.env.alloc(store, len);
-        self.take_rejected_engine_call()?;
+        self.take_refused_engine_call()?;
         result
     }
 
-    /// Calls the template's `tari_free`, rejecting the invocation if it called the engine.
+    /// Calls the template's `tari_free`, failing the call if it called the engine.
     fn free_checked<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
         let result = self.env.free(store, ptr);
-        self.take_rejected_engine_call()?;
+        self.take_refused_engine_call()?;
         result
     }
 
     /// Reports an engine call `tari_engine_entrypoint` refused. It can only signal a refusal by
-    /// returning a null pointer, which a template is free to ignore, so the recorded error is what
-    /// actually fails the invocation.
-    fn take_rejected_engine_call(&self) -> Result<(), WasmExecutionError> {
-        match self.env.take_last_engine_error() {
-            Some(err) => Err(WasmExecutionError::RuntimeError(err)),
+    /// returning a null pointer, which a template is free to ignore, so the recorded refusal is
+    /// what actually fails the call. It takes precedence over any error the alloc or free itself
+    /// returned, being the cause of it.
+    fn take_refused_engine_call(&self) -> Result<(), WasmExecutionError> {
+        match self.env.take_refused_engine_call() {
+            Some(op) => Err(WasmExecutionError::RuntimeError(
+                RuntimeError::EngineCallOutsideInvocation { op },
+            )),
             None => Ok(()),
         }
     }
@@ -177,9 +180,9 @@ impl WasmProcess {
         // run `tari_alloc`/`tari_free`, which happens outside any invocation: an engine call made
         // from there would mutate state and emit effects that no invocation is metered or charged
         // for. `WasmProcess::alloc_checked`/`free_checked` turn the null returned here into the
-        // recorded error, so a template that ignores the null cannot proceed either.
-        if !env_mut.has_invocation_in_flight() {
-            env_mut.set_last_engine_error(RuntimeError::EngineCallOutsideInvocation { op });
+        // recorded refusal, so a template that ignores the null cannot proceed either.
+        if !env_mut.is_in_template_invocation() {
+            env_mut.set_refused_engine_call(op);
             return WasmPtr::null();
         }
 
@@ -431,8 +434,12 @@ impl Invokable<Store> for WasmProcess {
         // nested cross-template call budgets), not only after the call returns.
         self.env.begin_metered_invocation(self.instance.clone(), points_before);
 
-        // Call the contract entrypoint
+        // Call the contract entrypoint. Engine calls are admitted for exactly this window: the
+        // `tari_alloc` above and the `tari_free` below run template code too, but outside any
+        // invocation the engine could meter, charge or attribute effects to.
+        self.env.enter_template_invocation();
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
+        self.env.exit_template_invocation();
 
         let remaining_after_call = get_remaining_points(store, &self.instance);
         let exhausted = matches!(remaining_after_call, MeteringPoints::Exhausted);

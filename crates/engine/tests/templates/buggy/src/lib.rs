@@ -21,9 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #![allow(non_snake_case)]
 
-// `engine_call_in_free` supplies its own `tari_alloc`/`tari_free` pair, so it must not link
-// `tari_template_abi`: that crate exports `tari_free` under the same `#[no_mangle]` symbol.
-#[cfg(not(feature = "engine_call_in_free"))]
+// The `engine_call_outside_invocation` variants supply their own `tari_alloc`/`tari_free` pair, so
+// they must not link `tari_template_abi`: that crate exports `tari_free` under the same
+// `#[no_mangle]` symbol.
+#[cfg(not(any(feature = "engine_call_in_alloc", feature = "engine_call_in_free")))]
 pub use tari_template_abi::tari_alloc;
 
 #[global_allocator]
@@ -46,6 +47,7 @@ pub static _ABI_TEMPLATE_DEF: [u8; 4] = [4, 0, 0, 0];
     feature = "return_empty_abi",
     feature = "return_null_abi",
     feature = "no_template_def",
+    feature = "engine_call_in_alloc",
     feature = "engine_call_in_free"
 )))]
 #[unsafe(no_mangle)]
@@ -53,7 +55,7 @@ pub static _ABI_TEMPLATE_DEF: [u8; 16] = [
     16, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 128,
 ];
 
-#[cfg(not(feature = "engine_call_in_free"))]
+#[cfg(not(any(feature = "engine_call_in_alloc", feature = "engine_call_in_free")))]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn Buggy_main(_call_info: *mut u8, _call_info_len: usize) -> *mut u8 {
     core::ptr::null_mut()
@@ -72,18 +74,20 @@ pub extern "C" fn i_shouldnt_be_here() -> *mut u8 {
     core::ptr::null_mut()
 }
 
-/// A template whose `tari_free` re-enters the engine.
+/// A template that re-enters the engine from `tari_alloc` or `tari_free`.
 ///
-/// The engine calls `tari_free` on the pointer a template function returns, which runs template
-/// code outside any invocation. The engine call made from there must be refused, and refusing it
-/// must fail the transaction even though this template ignores the null pointer it gets back.
+/// The engine drives both of those itself — `tari_alloc` to stage the `CallInfo` before the
+/// invocation, `tari_free` on the pointer the template function returned after it — so they run
+/// template code outside any invocation. An engine call made from either must be refused, and
+/// refusing it must fail the transaction even though this template ignores the null pointer it
+/// gets back.
 ///
 /// The memory layout mirrors `tari_template_abi`: an allocation is `[usize length prefix][payload]`
 /// and the pointer handed to the engine points at the payload. It is reimplemented here rather
-/// than reused so this variant does not link `tari_template_abi`, whose `tari_free` would collide
+/// than reused so these variants do not link `tari_template_abi`, whose `tari_free` would collide
 /// with the one below.
-#[cfg(feature = "engine_call_in_free")]
-mod engine_call_in_free {
+#[cfg(any(feature = "engine_call_in_alloc", feature = "engine_call_in_free"))]
+mod engine_call_outside_invocation {
     use std::alloc::{Layout, alloc, dealloc};
 
     use super::tari_engine;
@@ -95,15 +99,16 @@ mod engine_call_in_free {
     /// abi_version: 0, functions: [FunctionDef { name: "main", arguments: [], output: Type::Unit,
     /// is_mut: false, is_migration: false }] })`, with the 4-byte little-endian length prefix that
     /// `encode_for_wasm_embedding` adds. The one declared function makes the template callable, so
-    /// the engine reaches the `tari_free` of the return pointer.
+    /// the engine drives the `tari_alloc` of the `CallInfo` and the `tari_free` of the returned
+    /// pointer.
     #[unsafe(no_mangle)]
     pub static _ABI_TEMPLATE_DEF: [u8; 28] = [
         28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105,
         110, 128, 130, 0, 128, 244, 244,
     ];
 
-    /// Hard-coded minicbor encoding of `EmitLogArg { message: "free", level: LogLevel::Info }`.
-    const EMIT_LOG_ARG: [u8; 9] = [130, 100, 102, 114, 101, 101, 130, 2, 128];
+    /// Hard-coded minicbor encoding of `EmitLogArg { message: "call", level: LogLevel::Info }`.
+    const EMIT_LOG_ARG: [u8; 9] = [130, 100, 99, 97, 108, 108, 130, 2, 128];
 
     /// `EngineOp::EmitLog`
     const OP_EMIT_LOG: i32 = 0x00;
@@ -113,6 +118,8 @@ mod engine_call_in_free {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn tari_alloc(size: usize) -> *mut u8 {
+        #[cfg(feature = "engine_call_in_alloc")]
+        call_engine();
         internal_alloc(size)
     }
 
@@ -120,15 +127,22 @@ mod engine_call_in_free {
     /// `ptr` must point at the payload of an allocation made by [`tari_alloc`].
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn tari_free(ptr: *mut u8) {
-        let response = unsafe { tari_engine(OP_EMIT_LOG, EMIT_LOG_ARG.as_ptr(), EMIT_LOG_ARG.len()) };
-        // Release the engine's response directly: routing it back through `tari_free` would recurse
-        // without bound, which says nothing about what the engine does with one re-entrant call.
-        if !response.is_null() {
-            unsafe { internal_free(response) };
-        }
+        #[cfg(feature = "engine_call_in_free")]
+        call_engine();
 
         if !ptr.is_null() {
             unsafe { internal_free(ptr) };
+        }
+    }
+
+    /// Calls the engine and discards whatever comes back, including a null pointer signalling that
+    /// the engine refused the call. Any response is released directly rather than through
+    /// `tari_free`, which would recurse without bound and say nothing about what the engine does
+    /// with one re-entrant call.
+    fn call_engine() {
+        let response = unsafe { tari_engine(OP_EMIT_LOG, EMIT_LOG_ARG.as_ptr(), EMIT_LOG_ARG.len()) };
+        if !response.is_null() {
+            unsafe { internal_free(response) };
         }
     }
 

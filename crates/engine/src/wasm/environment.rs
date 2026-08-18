@@ -22,10 +22,15 @@
 
 use std::{
     fmt::{Debug, Formatter},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc,
+        Mutex,
+        MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
-use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, TemplateDef, WASM_PTR_SIZE};
+use tari_template_abi::{ABI_TEMPLATE_DEF_GLOBAL_NAME, EngineOp, TemplateDef, WASM_PTR_SIZE};
 use wasmer::{
     AsStoreMut,
     AsStoreRef,
@@ -55,6 +60,8 @@ pub struct WasmEnv<T> {
     last_panic: Arc<Mutex<Option<String>>>,
     last_engine_error: Arc<Mutex<Option<RuntimeError>>>,
     invocation_meter: Arc<Mutex<Option<InvocationMeter>>>,
+    in_template_invocation: Arc<AtomicBool>,
+    refused_engine_call: Arc<Mutex<Option<EngineOp>>>,
 }
 
 /// Per-invocation view of the Wasmer meter, letting host calls read the in-flight consumption of
@@ -77,7 +84,50 @@ impl<T> WasmEnv<T> {
             last_panic: Arc::new(Mutex::new(None)),
             last_engine_error: Arc::new(Mutex::new(None)),
             invocation_meter: Arc::new(Mutex::new(None)),
+            in_template_invocation: Arc::new(AtomicBool::new(false)),
+            refused_engine_call: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Marks template code as running inside a function invocation, which is the only context
+    /// permitted to call the engine.
+    ///
+    /// This is deliberately its own state rather than a reading of [`Self::invocation_meter`]. The
+    /// metering window is a billing concern and may legitimately be widened — for instance to
+    /// charge the `tari_alloc`/`tari_free` the engine drives around a call — whereas this window
+    /// must stay closed around the template function itself. Deriving one from the other would let
+    /// such a change silently re-admit engine calls from `tari_alloc`/`tari_free`.
+    ///
+    /// One invocation is in flight per process at a time; cross-template calls run in their own
+    /// process with their own [`WasmEnv`].
+    pub(super) fn enter_template_invocation(&self) {
+        self.in_template_invocation.store(true, Ordering::Relaxed);
+    }
+
+    /// Marks the template function invocation as finished. Template code the engine drives after
+    /// this point — `tari_free` on the returned pointer — may no longer call the engine.
+    pub(super) fn exit_template_invocation(&self) {
+        self.in_template_invocation.store(false, Ordering::Relaxed);
+    }
+
+    pub(super) fn is_in_template_invocation(&self) -> bool {
+        self.in_template_invocation.load(Ordering::Relaxed)
+    }
+
+    /// Records that an engine call was refused for being made outside a template function
+    /// invocation. Kept apart from [`Self::last_engine_error`], which carries failures of calls
+    /// that were dispatched: a refusal must fail the transaction even when the template ignores
+    /// the null pointer it is handed, so the host reads it back unambiguously.
+    pub(super) fn set_refused_engine_call(&self, op: EngineOp) {
+        *self.refused_engine_call_mut() = Some(op);
+    }
+
+    pub(super) fn take_refused_engine_call(&self) -> Option<EngineOp> {
+        self.refused_engine_call_mut().take()
+    }
+
+    fn refused_engine_call_mut(&self) -> MutexGuard<'_, Option<EngineOp>> {
+        self.refused_engine_call.lock().expect("refused_engine_call poisoned")
     }
 
     /// Begins metering an invocation that starts with `start_points` on the Wasmer meter. One
@@ -115,13 +165,6 @@ impl<T> WasmEnv<T> {
         }
         meter.synced = consumed;
         Some(delta)
-    }
-
-    /// Whether an invocation is in flight. WASM runs outside one when the engine calls the
-    /// template's `tari_alloc`/`tari_free` to move data across the boundary; work done there is
-    /// attributable to no invocation and so cannot be metered or charged.
-    pub(super) fn has_invocation_in_flight(&self) -> bool {
-        self.invocation_meter_mut().is_some()
     }
 
     fn invocation_meter_mut(&self) -> MutexGuard<'_, Option<InvocationMeter>> {

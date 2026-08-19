@@ -161,21 +161,29 @@ impl<T> WasmEnv<T> {
     }
 
     pub(super) fn alloc<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
-        let ptr = self.get_mem_alloc_func()?.call(store, len)?;
-        if ptr.offset() == 0 {
+        let ptr = self.mem_alloc_func()?.call(store, len)?;
+        if ptr.is_null() {
             return Err(WasmExecutionError::MemoryAllocationFailed);
         }
 
         Ok(ptr)
     }
 
-    pub(super) fn free<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
-        let mem_free = self
-            .mem_free
-            .as_ref()
-            .ok_or_else(|| WasmExecutionError::MissingAbiFunction { function: "tari_free" })?;
-        mem_free.call(store, ptr)?;
-        Ok(())
+    /// Hands out the template's `tari_alloc` as an owned handle, for callers that must let go of
+    /// their borrow of this environment before calling it. `tari_alloc` is template code, and
+    /// template code can call `tari_engine`, which takes its own `&mut` to this environment.
+    pub(super) fn mem_alloc_func(&self) -> Result<WasmAllocFn, WasmExecutionError> {
+        self.mem_alloc
+            .clone()
+            .ok_or(WasmExecutionError::MissingAbiFunction { function: "tari_alloc" })
+    }
+
+    /// Hands out the template's `tari_free` as an owned handle, under the same borrowing rule as
+    /// [`Self::mem_alloc_func`].
+    pub(super) fn mem_free_func(&self) -> Result<WasmFreeFn, WasmExecutionError> {
+        self.mem_free
+            .clone()
+            .ok_or(WasmExecutionError::MissingAbiFunction { function: "tari_free" })
     }
 
     pub(super) fn take_last_panic_message(&mut self) -> Option<String> {
@@ -317,12 +325,6 @@ impl<T> WasmEnv<T> {
 
     pub fn state_mut(&mut self) -> &mut T {
         &mut self.state
-    }
-
-    fn get_mem_alloc_func(&self) -> Result<&TypedFunction<u32, WasmPtr<u8>>, WasmExecutionError> {
-        self.mem_alloc
-            .as_ref()
-            .ok_or_else(|| WasmExecutionError::MissingAbiFunction { function: "tari_alloc" })
     }
 
     fn get_memory(&self) -> Result<&Memory, WasmExecutionError> {

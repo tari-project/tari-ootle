@@ -113,9 +113,6 @@ impl WasmProcess {
         let len = u32::try_from(alloc_size).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
 
         let ptr = self.alloc_checked(store, len)?;
-        if ptr.is_null() {
-            return Err(WasmExecutionError::MemoryAllocationFailed);
-        }
         let mut fn_env = self.env_mut(store);
         let (env, mut store) = fn_env.data_and_store_mut();
         let mut writer = env.memory_writer(&mut store, ptr)?;
@@ -132,21 +129,29 @@ impl WasmProcess {
     }
 
     /// Calls the template's `tari_alloc`, failing the call if it called the engine.
+    ///
+    /// The environment is left unborrowed for the duration of the call. `tari_alloc` is template
+    /// code, and a template that calls `tari_engine` from it has the engine take its own `&mut` to
+    /// the same environment to record the refusal — so a borrow held across the call would alias.
     fn alloc_checked<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
-        let mut fn_env = self.env_mut(store);
-        let (env, mut store) = fn_env.data_and_store_mut();
-        let result = env.alloc(&mut store, len);
-        take_refused_engine_call(env)?;
-        result
+        let alloc_fn = self.fn_env.as_ref(store).mem_alloc_func()?;
+        let result = alloc_fn.call(store, len);
+        take_refused_engine_call(self.fn_env.as_mut(store))?;
+        let ptr = result?;
+        if ptr.is_null() {
+            return Err(WasmExecutionError::MemoryAllocationFailed);
+        }
+        Ok(ptr)
     }
 
-    /// Calls the template's `tari_free`, failing the call if it called the engine.
+    /// Calls the template's `tari_free`, failing the call if it called the engine. Borrows the
+    /// environment under the same rule as [`Self::alloc_checked`].
     fn free_checked<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
-        let mut fn_env = self.env_mut(store);
-        let (env, mut store) = fn_env.data_and_store_mut();
-        let result = env.free(&mut store, ptr);
-        take_refused_engine_call(env)?;
-        result
+        let free_fn = self.fn_env.as_ref(store).mem_free_func()?;
+        let result = free_fn.call(store, ptr);
+        take_refused_engine_call(self.fn_env.as_mut(store))?;
+        result?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -444,7 +449,8 @@ impl Invokable<Store> for WasmProcess {
 
         // Call the contract entrypoint. Engine calls are admitted for exactly this window: the
         // `tari_alloc` above and the `tari_free` below run template code too, but outside any
-        // invocation the engine could meter, charge or attribute effects to.
+        // invocation the engine could meter, charge or attribute effects to. Nothing may return
+        // early between the two calls below, or the window is left open over the free.
         self.fn_env.as_mut(store).enter_template_invocation();
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
         self.fn_env.as_mut(store).exit_template_invocation();

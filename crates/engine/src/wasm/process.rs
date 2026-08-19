@@ -44,11 +44,22 @@ use tari_template_lib::{
     },
     types::{LogLevel, engine_args::SignatureInvokeArg},
 };
-use wasmer::{AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr, imports};
+use wasmer::{
+    AsStoreMut,
+    AsStoreRef,
+    Function,
+    FunctionEnv,
+    FunctionEnvMut,
+    Instance,
+    Store,
+    StoreMut,
+    WasmPtr,
+    imports,
+};
 use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points, set_remaining_points};
 
 use crate::{
-    runtime::{ComputeFunding, Runtime, RuntimeError},
+    runtime::{ComputeAllowance, ComputeFunding, Runtime, RuntimeError},
     traits::Invokable,
     wasm::{
         LoadedWasmTemplate,
@@ -113,7 +124,7 @@ impl WasmProcess {
         let len = u32::try_from(alloc_size).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
 
         let ptr = self.alloc_checked(store, len)?;
-        let mut fn_env = self.env_mut(store);
+        let mut fn_env = self.env_and_store(store);
         let (env, mut store) = fn_env.data_and_store_mut();
         let mut writer = env.memory_writer(&mut store, ptr)?;
         callback(&mut writer)?;
@@ -121,10 +132,17 @@ impl WasmProcess {
         Ok(AllocPtr::new(ptr.offset(), len))
     }
 
-    /// Borrows the environment together with a store handle, as host calls receive them. Driving
-    /// `tari_alloc`/`tari_free` needs both at once: the exported function is read from the
-    /// environment and called against the store.
-    fn env_mut<'a, S: AsStoreMut>(&self, store: &'a mut S) -> FunctionEnvMut<'a, WasmEnv<Runtime>> {
+    fn env<'a, S: AsStoreRef>(&self, store: &'a S) -> &'a WasmEnv<Runtime> {
+        self.fn_env.as_ref(store)
+    }
+
+    fn env_mut<'a, S: AsStoreMut>(&self, store: &'a mut S) -> &'a mut WasmEnv<Runtime> {
+        self.fn_env.as_mut(store)
+    }
+
+    /// Borrows the environment together with a store handle, as host calls receive them. Reading
+    /// or writing the instance's memory needs both at once.
+    fn env_and_store<'a, S: AsStoreMut>(&self, store: &'a mut S) -> FunctionEnvMut<'a, WasmEnv<Runtime>> {
         self.fn_env.clone().into_mut(store)
     }
 
@@ -134,9 +152,9 @@ impl WasmProcess {
     /// code, and a template that calls `tari_engine` from it has the engine take its own `&mut` to
     /// the same environment to record the refusal — so a borrow held across the call would alias.
     fn alloc_checked<S: AsStoreMut>(&self, store: &mut S, len: u32) -> Result<WasmPtr<u8>, WasmExecutionError> {
-        let alloc_fn = self.fn_env.as_ref(store).mem_alloc_func()?;
+        let alloc_fn = self.env(store).mem_alloc_func()?;
         let result = alloc_fn.call(store, len);
-        take_refused_engine_call(self.fn_env.as_mut(store))?;
+        take_refused_engine_call(self.env_mut(store))?;
         let ptr = result?;
         if ptr.is_null() {
             return Err(WasmExecutionError::MemoryAllocationFailed);
@@ -147,11 +165,58 @@ impl WasmProcess {
     /// Calls the template's `tari_free`, failing the call if it called the engine. Borrows the
     /// environment under the same rule as [`Self::alloc_checked`].
     fn free_checked<S: AsStoreMut>(&self, store: &mut S, ptr: WasmPtr<u8>) -> Result<(), WasmExecutionError> {
-        let free_fn = self.fn_env.as_ref(store).mem_free_func()?;
+        let free_fn = self.env(store).mem_free_func()?;
         let result = free_fn.call(store, ptr);
-        take_refused_engine_call(self.fn_env.as_mut(store))?;
+        take_refused_engine_call(self.env_mut(store))?;
         result?;
         Ok(())
+    }
+
+    /// Works out how much compute this invocation may run, and what bounds it.
+    ///
+    /// The Wasmer meter starts each store at the per-call ceiling (set when the engine compiles the
+    /// module, see `wasm::module::create_engine`). Lowering it to what remains of the
+    /// transaction-wide budget stops a transaction from exceeding
+    /// `MAX_WASM_POINTS_PER_TRANSACTION` by spreading work across many instructions or nested
+    /// cross-template calls, each of which would otherwise get a fresh per-call budget. When the
+    /// budget is already spent the allowance is zero and the call traps out-of-gas on its first
+    /// metered op.
+    ///
+    /// It is capped again by the compute the transaction is authorized to run: the fee intent's
+    /// flat credit, or past the checkpoint what the fees paid can cover. That bounds the compute an
+    /// under-paying transaction can extract — it traps out-of-gas once it exhausts the allowance
+    /// rather than running up to the per-transaction hard cap. The allowance is shared with native
+    /// verification (which pre-charges its point cost), so it is reduced by the combined
+    /// consumption; the hard cap bounds WASM work only.
+    fn metering_allowance(&self, store: &mut Store) -> MeteringAllowance {
+        let per_call_cap = match get_remaining_points(store, &self.instance) {
+            MeteringPoints::Remaining(n) => n,
+            MeteringPoints::Exhausted => 0,
+        };
+        let interface = self.env(store).state().interface();
+        let consumed = interface.wasm_points_consumed();
+        let native_consumed = interface.native_points_consumed();
+        let budget_remaining = limits::MAX_WASM_POINTS_PER_TRANSACTION.saturating_sub(consumed);
+        let allowance_remaining = interface.compute_allowance().map(|allowance| {
+            let remaining = allowance
+                .points
+                .saturating_sub(consumed.saturating_add(native_consumed));
+            (allowance, remaining)
+        });
+
+        MeteringAllowance {
+            consumed,
+            points_before: match allowance_remaining {
+                Some((_, remaining)) => per_call_cap.min(budget_remaining).min(remaining),
+                None => per_call_cap.min(budget_remaining),
+            },
+            // Kept when the allowance — rather than the per-transaction hard cap — is what bounds
+            // this call, so an out-of-gas trap is reported against whatever authorized it rather
+            // than as a hit cap.
+            binding_allowance: allowance_remaining
+                .filter(|(_, remaining)| *remaining < budget_remaining && *remaining <= per_call_cap)
+                .map(|(allowance, _)| allowance),
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -397,63 +462,25 @@ impl Invokable<Store> for WasmProcess {
             Ok(())
         })?;
 
-        // Cap this invocation's metering allowance to whatever remains of the transaction-wide
-        // budget. A fresh store starts at the per-call ceiling (set when the engine compiles the
-        // module, see `wasm::module::create_engine`); lowering it to `budget - already_consumed`
-        // stops a transaction from exceeding `MAX_WASM_POINTS_PER_TRANSACTION` by spreading work
-        // across many instructions or nested cross-template calls, each of which would otherwise get
-        // a fresh per-call budget. When the budget is already spent the allowance is zero and the
-        // call traps out-of-gas on its first metered op.
-        let per_call_cap = match get_remaining_points(store, &self.instance) {
-            MeteringPoints::Remaining(n) => n,
-            MeteringPoints::Exhausted => 0,
-        };
-        let consumed = self.fn_env.as_ref(store).state().interface().wasm_points_consumed();
-        let budget_remaining = limits::MAX_WASM_POINTS_PER_TRANSACTION.saturating_sub(consumed);
-        // Cap further to the compute the transaction is authorized to run: the fee intent's flat
-        // credit, or past the checkpoint what the fees paid can cover. This bounds the compute an
-        // under-paying transaction can extract: it traps out-of-gas once it exhausts the allowance
-        // rather than running up to the per-transaction hard cap. The allowance is shared with
-        // native verification (which pre-charges its point cost), so it is reduced by the combined
-        // consumption; the hard cap above bounds WASM work only.
-        let native_consumed = self.fn_env.as_ref(store).state().interface().native_points_consumed();
-        let allowance_remaining = self
-            .fn_env
-            .as_ref(store)
-            .state()
-            .interface()
-            .compute_allowance()
-            .map(|allowance| {
-                let remaining = allowance
-                    .points
-                    .saturating_sub(consumed.saturating_add(native_consumed));
-                (allowance, remaining)
-            });
-        let points_before = match allowance_remaining {
-            Some((_, remaining)) => per_call_cap.min(budget_remaining).min(remaining),
-            None => per_call_cap.min(budget_remaining),
-        };
-        // The allowance, kept when it — rather than the per-transaction hard cap — is what bounds
-        // this call, so an out-of-gas trap here is reported against whatever authorized it rather
-        // than as a hit cap.
-        let binding_allowance = allowance_remaining
-            .filter(|(_, remaining)| *remaining < budget_remaining && *remaining <= per_call_cap)
-            .map(|(allowance, _)| allowance);
+        let MeteringAllowance {
+            consumed,
+            points_before,
+            binding_allowance,
+        } = self.metering_allowance(store);
         set_remaining_points(store, &self.instance, points_before);
         // Expose the in-flight meter to host calls: consumption inside this invocation must be
         // visible to budget/allowance checks made mid-call (native verification pre-charges,
         // nested cross-template call budgets), not only after the call returns.
-        self.fn_env
-            .as_mut(store)
+        self.env_mut(store)
             .begin_metered_invocation(self.instance.clone(), points_before);
 
         // Call the contract entrypoint. Engine calls are admitted for exactly this window: the
         // `tari_alloc` above and the `tari_free` below run template code too, but outside any
         // invocation the engine could meter, charge or attribute effects to. Nothing may return
         // early between the two calls below, or the window is left open over the free.
-        self.fn_env.as_mut(store).enter_template_invocation();
+        self.env_mut(store).enter_template_invocation();
         let res = func.call(store, call_info_ptr.as_wasm_ptr(), call_info_ptr.len());
-        self.fn_env.as_mut(store).exit_template_invocation();
+        self.env_mut(store).exit_template_invocation();
 
         let remaining_after_call = get_remaining_points(store, &self.instance);
         let exhausted = matches!(remaining_after_call, MeteringPoints::Exhausted);
@@ -464,10 +491,9 @@ impl Invokable<Store> for WasmProcess {
             MeteringPoints::Exhausted => points_before,
         };
         // Record only the tail not already synced to the transaction total by mid-call host calls.
-        let already_synced = self.fn_env.as_mut(store).end_metered_invocation();
+        let already_synced = self.env_mut(store).end_metered_invocation();
         // Charging happens before we return the result so fees are recorded even on failure paths.
-        self.fn_env
-            .as_mut(store)
+        self.env_mut(store)
             .state_mut()
             .interface_mut()
             .record_wasm_execution(points_consumed.saturating_sub(already_synced))?;
@@ -477,7 +503,7 @@ impl Invokable<Store> for WasmProcess {
                 // Read response from memory
                 // SAFETY: WasmProcess is not used concurrently
                 let value = unsafe {
-                    let mut fn_env = self.env_mut(store);
+                    let mut fn_env = self.env_and_store(store);
                     let (env, mut store) = fn_env.data_and_store_mut();
                     env.with_memory_embedded_len(&mut store, return_ptr.offset(), IndexedValue::from_raw)??
                 };
@@ -485,13 +511,8 @@ impl Invokable<Store> for WasmProcess {
                 // Free allocated memory containing the result
                 self.free_checked(store, return_ptr)?;
 
-                self.fn_env
-                    .as_ref(store)
-                    .state()
-                    .interface()
-                    .validate_return_value(&value)?;
-                self.fn_env
-                    .as_mut(store)
+                self.env(store).state().interface().validate_return_value(&value)?;
+                self.env_mut(store)
                     .state_mut()
                     .interface_mut()
                     .set_last_instruction_output(value.clone())?;
@@ -502,10 +523,10 @@ impl Invokable<Store> for WasmProcess {
                 })
             },
             Err(err) => {
-                if let Some(err) = self.fn_env.as_mut(store).take_last_engine_error() {
+                if let Some(err) = self.env_mut(store).take_last_engine_error() {
                     return Err(WasmExecutionError::RuntimeError(err));
                 }
-                if let Some(message) = self.fn_env.as_mut(store).take_last_panic_message() {
+                if let Some(message) = self.env_mut(store).take_last_panic_message() {
                     return Err(WasmExecutionError::Panic {
                         message,
                         runtime_error: err,
@@ -532,6 +553,16 @@ impl Invokable<Store> for WasmProcess {
             },
         }
     }
+}
+
+/// What one invocation may spend on the Wasmer meter, and what bounds it.
+struct MeteringAllowance {
+    /// WASM points the transaction has consumed before this invocation.
+    consumed: u64,
+    /// Points to set on the meter for this invocation.
+    points_before: u64,
+    /// Set when the authorized compute, not the per-transaction hard cap, is the binding limit.
+    binding_allowance: Option<ComputeAllowance>,
 }
 
 /// Reports an engine call `tari_engine_entrypoint` refused. It can only signal a refusal by

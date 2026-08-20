@@ -23,7 +23,15 @@
 use log::*;
 use tari_bor::{ByteCounter, decode_exact, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
-use tari_template_abi::{CallInfo, EngineOp, FunctionDef, TemplateDef, func_hasher::hash_function_name, version};
+use tari_template_abi::{
+    CallInfo,
+    EngineOp,
+    FunctionDef,
+    TemplateDef,
+    diagnostics::expand_panic_message,
+    func_hasher::hash_function_name,
+    version,
+};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -543,7 +551,7 @@ impl Invokable<Store> for WasmProcess {
             Err(err) => {
                 if let Some(message) = self.env_mut(store).take_last_panic_message() {
                     return Err(WasmExecutionError::Panic {
-                        message,
+                        message: expand_panic_message(func_def, message),
                         runtime_error: err,
                     });
                 }

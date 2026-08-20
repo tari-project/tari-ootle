@@ -23,9 +23,9 @@
 use std::collections::HashMap;
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{ToTokens, format_ident, quote};
+use quote::{format_ident, quote};
 use syn::{Block, Expr, ExprBlock, ExprField, Result, Stmt, TypePath, TypeTuple, parse_quote, token::Brace};
-use tari_template_abi::{FunctionIdent, func_hasher::hash_function_name};
+use tari_template_abi::{FunctionIdent, diagnostics::PanicDiagnostic, func_hasher::hash_function_name};
 
 use crate::template::ast::{FunctionAst, TemplateAst, TypeAst};
 
@@ -107,10 +107,10 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
     let template_mod_name = format_ident!("{}_template", template_ident);
     let mut args: Vec<Expr> = vec![];
     let mut stmts = vec![];
-    let func_name = &ast.name;
-
-    let error_failed_decode_component =
-        format!("failed to decode component instance for function '{}': {{}}", func_name);
+    // The engine renders these markers into their full text from the template definition, so the
+    // published binary carries neither the function name nor the argument type. See
+    // `tari_template_abi::diagnostics`.
+    let error_failed_decode_component = PanicDiagnostic::ComponentDecode.panic_format_string();
 
     let mut is_mutable_call = false;
 
@@ -147,10 +147,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
             },
             // non-self argument
             TypeAst::Typed { type_path, .. } => {
-                let error_failed_decode_arg = format!(
-                    "failed to decode argument at position {i} ({}) for function '{func_name}': {{}}",
-                    type_path.to_token_stream(),
-                );
+                let error_failed_decode_arg = PanicDiagnostic::ArgDecode { index: i }.panic_format_string();
                 if i == 0 && ast.is_migration {
                     stmts.extend([
                         parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
@@ -178,12 +175,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
                 }
             },
             TypeAst::Tuple { type_tuple, .. } => {
-                let error_failed_decode_arg = format!(
-                    "failed to decode tuple argument at position {} ({}) for function '{}': {{}}",
-                    i,
-                    type_tuple.to_token_stream(),
-                    func_name
-                );
+                let error_failed_decode_arg = PanicDiagnostic::ArgDecode { index: i }.panic_format_string();
                 args.push(parse_quote! { #arg_ident });
                 stmts.extend([
                     parse_quote! { let next_arg = call_info.next_arg_unchecked(); },

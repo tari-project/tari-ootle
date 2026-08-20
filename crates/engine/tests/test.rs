@@ -372,10 +372,7 @@ fn test_tuples() {
     let module = template_test.get_module("Tuple");
     // the "new" constructor returns a tuple (Component, String)
     let fn_new = module.find_func_by_name("new").unwrap();
-    assert_eq!(
-        fn_new.output.to_string(),
-        "Tuple<Other { name: \"Component<Tuple>\" },String>"
-    );
+    assert_eq!(fn_new.output.to_string(), "Tuple<Component<Tuple>,String>");
     // the "get" method returns a tuple (String, u32)
     let fn_get = module.find_func_by_name("get").unwrap();
     assert_eq!(fn_get.output.to_string(), "Tuple<String,U32>");
@@ -470,6 +467,23 @@ mod errors {
             },
             reason => panic!("Unexpected transaction reject reason: {}", reason),
         }
+    }
+
+    #[test]
+    fn invalid_tuple_arg() {
+        let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/tuples"]);
+        let (component, _): (ComponentAddress, String) = test.call_function("Tuple", "new", args![], vec![]);
+
+        let reason = test.execute_expect_failure(
+            test.transaction()
+                .call_method(component, "set", args!["this isn't a tuple"])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert_reject_reason(
+            reason,
+            "Panic! failed to decode tuple argument at position 1 (Tuple<String,U32>) for function 'set'",
+        )
     }
 
     #[test]

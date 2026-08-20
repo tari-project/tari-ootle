@@ -33,6 +33,8 @@ pub use abi::*;
 mod call_info;
 pub use call_info::*;
 
+pub mod diagnostics;
+
 mod ops;
 pub use ops::*;
 

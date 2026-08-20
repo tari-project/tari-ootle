@@ -22,6 +22,7 @@ tari_bor = { path = "../crates/tari_bor", default-features = true }
 tari_engine = { path = "../crates/engine" }
 tari_engine_types = { path = "../crates/engine_types" }
 tari_ootle_transaction = { path = "../crates/transaction" }
+tari_template_abi = { path = "../crates/template_abi" }
 tari_template_lib_types = { path = "../crates/template_lib_types" }
 tari_transaction_manifest = { path = "../crates/transaction_manifest" }
 
@@ -53,6 +54,13 @@ bench = false
 [[bin]]
 name = "wasm_validate_code"
 path = "fuzz_targets/wasm_validate_code.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "panic_diagnostic_expand"
+path = "fuzz_targets/panic_diagnostic_expand.rs"
 test = false
 doc = false
 bench = false

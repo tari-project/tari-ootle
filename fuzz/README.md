@@ -26,6 +26,7 @@ rustup toolchain install nightly  # cargo fuzz uses nightly by default
 | `transaction_decode` | `tari_bor` collection adapters: `with_capacity(n)` from the CBOR length header | `-rss_limit_mb=512 -malloc_limit_mb=64` |
 | `substate_id_from_str` | address/substate string parsing → `hex.rs` (regression guard for the multibyte-UTF-8 hex panic) | — |
 | `wasm_validate_code` | `WasmModule::validate_code` (wasmer compile + custom-section/ABI decode) | `-rss_limit_mb=2048 -timeout=25` |
+| `panic_diagnostic_expand` | `diagnostics::expand_panic_message` — the template-chosen panic message the engine re-renders | — |
 
 ### Not fuzzed: manifest parsing
 

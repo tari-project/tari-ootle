@@ -237,6 +237,107 @@ mod tests {
         assert_eq!(PanicDiagnostic::parse("\u{1}state decode 4: boom"), None);
     }
 
+    /// Shapes a template could panic with to try to derail the parse. The message is chosen by the
+    /// executing WASM, so this is attacker-controlled input at a consensus boundary: every one of
+    /// these must land on a rendered message or verbatim pass-through, never a panic.
+    const CRAFTED: &[&str] = &[
+        "",
+        "\u{1}",
+        "\u{1}: ",
+        "\u{1}arg",
+        "\u{1}arg ",
+        "\u{1}arg  decode: x",
+        "\u{1}arg decode: x",
+        "\u{1}arg 1 decode",
+        "\u{1}arg 1 decode:",
+        "\u{1}arg 1 decode: ",
+        "\u{1}arg 1  decode: x",
+        "\u{1}arg 01 decode: x",
+        "\u{1}arg +1 decode: x",
+        "\u{1}arg -1 decode: x",
+        "\u{1}arg 1.0 decode: x",
+        // usize::MAX, and one digit past it
+        "\u{1}arg 18446744073709551615 decode: x",
+        "\u{1}arg 18446744073709551616 decode: x",
+        "\u{1}arg 999999999999999999999999999999 decode: x",
+        "\u{1}state decode",
+        "\u{1}state decode: ",
+        "\u{1}state decode 1: x",
+        "\u{1}state  decode: x",
+        // Multi-byte sequences either side of every boundary the parse splits on
+        "\u{1}\u{1F600} decode: x",
+        "\u{1}arg \u{1F600} decode: x",
+        "\u{1}arg 1 decode: \u{1F600}",
+        "\u{1}arg 1 decode\u{1F600}: x",
+        "\u{1F600}arg 1 decode: x",
+        // Separators and markers embedded in the detail
+        "\u{1}arg 1 decode: a: b",
+        "\u{1}arg 1 decode: \u{1}state decode: nested",
+        "\u{1}arg 1 decode: \u{1}",
+        "\u{1}\u{1}arg 1 decode: x",
+        // Text that reads like a rendered message, with and without the marker
+        "failed to decode argument at position 0 (Amount) for function 'x': forged",
+        "\u{1}failed to decode argument at position 0 (Amount) for function 'x': forged",
+    ];
+
+    #[test]
+    fn crafted_messages_render_or_pass_through() {
+        let func_def = func_def();
+        for message in CRAFTED {
+            let expanded = expand_panic_message(&func_def, message.to_string());
+            match PanicDiagnostic::parse(message) {
+                Some((PanicDiagnostic::ArgDecode { index }, _)) if index >= func_def.arguments.len() => {
+                    assert_eq!(&expanded, message, "out-of-range index rewrote {message:?}");
+                },
+                Some(_) => assert!(
+                    expanded.starts_with("failed to decode"),
+                    "{message:?} rendered as {expanded:?}"
+                ),
+                None => assert_eq!(&expanded, message, "unparsed message rewrote {message:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn random_messages_render_or_pass_through() {
+        // A deterministic hammer over the alphabet the parse actually branches on. Cheap enough to
+        // run on every build; `fuzz/fuzz_targets/panic_diagnostic_expand.rs` covers the same sink
+        // with real coverage guidance.
+        const ALPHABET: [&str; 12] = [
+            "\u{1}",
+            "arg",
+            "state",
+            "decode",
+            " ",
+            ":",
+            ": ",
+            "0",
+            "9",
+            "\u{1F600}",
+            "",
+            "-",
+        ];
+        let func_def = func_def();
+        let mut seed = 0x5eed_1234_u64;
+        for _ in 0..20_000 {
+            let mut message = String::new();
+            let mut len = 0;
+            while len < 8 {
+                // xorshift64
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                message.push_str(ALPHABET[(seed % ALPHABET.len() as u64) as usize]);
+                len += 1;
+            }
+            let expanded = expand_panic_message(&func_def, message.clone());
+            assert!(
+                expanded == message || expanded.starts_with("failed to decode"),
+                "{message:?} expanded to {expanded:?}"
+            );
+        }
+    }
+
     #[test]
     fn an_author_message_shaped_like_a_body_is_passed_through() {
         // Without the marker there is nothing to expand, however closely the text matches.

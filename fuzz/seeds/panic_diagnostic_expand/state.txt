@@ -1,1 +1,1 @@
-state decode: end of input bytes
+C: end of input bytes

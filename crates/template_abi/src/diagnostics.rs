@@ -15,11 +15,10 @@
 //! A message that carries no marker — a template author's own `panic!`, or a template published
 //! before this encoding existed — is passed through untouched.
 //!
-//! A marker must stay legible on its own. A template published today runs on engines that predate
-//! this module, which surface the marker verbatim as the reject reason, and a published template
-//! cannot be amended once an engine is upgraded. The body therefore says which argument failed in
-//! words rather than in a code, and only the function name and argument type — the parts an engine
-//! can supply — are left out.
+//! An engine without [`expand_panic_message`] surfaces the marker verbatim, so a decode failure
+//! there reads `\u{1}A2: <error>` rather than a sentence: the tag, the argument position and the
+//! underlying error, without the function name or argument type. Worth knowing when reading a
+//! reject reason from an older validator.
 
 use crate::rust::{format, string::String};
 
@@ -30,9 +29,8 @@ pub const MARKER: char = '\u{1}';
 /// Separates a marker from the underlying error the dispatcher formats after it.
 const DETAIL_SEPARATOR: &str = ": ";
 
-const COMPONENT_BODY: &str = "state decode";
-const ARGUMENT_BODY_PREFIX: &str = "arg ";
-const ARGUMENT_BODY_SUFFIX: &str = " decode";
+const TAG_COMPONENT: char = 'C';
+const TAG_ARGUMENT: char = 'A';
 
 /// A decode failure raised by macro-generated dispatch code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,8 +46,8 @@ impl PanicDiagnostic {
     /// The marker for this diagnostic, without the detail that follows it.
     pub fn marker(&self) -> String {
         match *self {
-            Self::ComponentDecode => format!("{MARKER}{COMPONENT_BODY}"),
-            Self::ArgDecode { index } => format!("{MARKER}{ARGUMENT_BODY_PREFIX}{index}{ARGUMENT_BODY_SUFFIX}"),
+            Self::ComponentDecode => format!("{MARKER}{TAG_COMPONENT}"),
+            Self::ArgDecode { index } => format!("{MARKER}{TAG_ARGUMENT}{index}"),
         }
     }
 
@@ -64,15 +62,20 @@ impl PanicDiagnostic {
     pub fn parse(message: &str) -> Option<(Self, &str)> {
         let marked = message.strip_prefix(MARKER)?;
         let (body, detail) = marked.split_once(DETAIL_SEPARATOR).unwrap_or((marked, ""));
-        if body == COMPONENT_BODY {
-            return Some((Self::ComponentDecode, detail));
+        let mut chars = body.chars();
+        let tag = chars.next()?;
+        let rest = chars.as_str();
+        match tag {
+            // The tag carries no field, so trailing bytes mean this is not a marker we wrote.
+            TAG_COMPONENT if rest.is_empty() => Some((Self::ComponentDecode, detail)),
+            TAG_ARGUMENT => Some((
+                Self::ArgDecode {
+                    index: rest.parse().ok()?,
+                },
+                detail,
+            )),
+            _ => None,
         }
-        let index = body
-            .strip_prefix(ARGUMENT_BODY_PREFIX)?
-            .strip_suffix(ARGUMENT_BODY_SUFFIX)?
-            .parse()
-            .ok()?;
-        Some((Self::ArgDecode { index }, detail))
     }
 }
 
@@ -171,19 +174,18 @@ mod tests {
     #[test]
     fn format_string_takes_the_error_as_its_only_argument() {
         let format_string = PanicDiagnostic::ArgDecode { index: 2 }.panic_format_string();
-        assert_eq!(format_string, "\u{1}arg 2 decode: {}");
+        assert_eq!(format_string, "\u{1}A2: {}");
     }
 
     #[test]
-    fn a_marker_reads_as_a_message_on_its_own() {
-        // What an engine without `expand_panic_message` surfaces as the reject reason.
+    fn a_marker_is_what_an_engine_without_the_renderer_shows() {
         assert_eq!(
             format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 1 }.marker()),
-            "\u{1}arg 1 decode: unexpected type"
+            "\u{1}A1: unexpected type"
         );
         assert_eq!(
             format!("{}: end of input bytes", PanicDiagnostic::ComponentDecode.marker()),
-            "\u{1}state decode: end of input bytes"
+            "\u{1}C: end of input bytes"
         );
     }
 
@@ -231,10 +233,10 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_body_is_passed_through() {
-        assert_eq!(PanicDiagnostic::parse("\u{1}something else: boom"), None);
-        assert_eq!(PanicDiagnostic::parse("\u{1}arg two decode: boom"), None);
-        assert_eq!(PanicDiagnostic::parse("\u{1}state decode 4: boom"), None);
+    fn an_unknown_tag_is_passed_through() {
+        assert_eq!(PanicDiagnostic::parse("\u{1}Z1: boom"), None);
+        assert_eq!(PanicDiagnostic::parse("\u{1}C4: boom"), None);
+        assert_eq!(PanicDiagnostic::parse("\u{1}Atwo: boom"), None);
     }
 
     /// Shapes a template could panic with to try to derail the parse. The message is chosen by the
@@ -244,37 +246,36 @@ mod tests {
         "",
         "\u{1}",
         "\u{1}: ",
-        "\u{1}arg",
-        "\u{1}arg ",
-        "\u{1}arg  decode: x",
-        "\u{1}arg decode: x",
-        "\u{1}arg 1 decode",
-        "\u{1}arg 1 decode:",
-        "\u{1}arg 1 decode: ",
-        "\u{1}arg 1  decode: x",
-        "\u{1}arg 01 decode: x",
-        "\u{1}arg +1 decode: x",
-        "\u{1}arg -1 decode: x",
-        "\u{1}arg 1.0 decode: x",
+        "\u{1}A",
+        "\u{1}A: x",
+        "\u{1}A 1: x",
+        "\u{1}A01: x",
+        "\u{1}A+1: x",
+        "\u{1}A-1: x",
+        "\u{1}A1.0: x",
+        "\u{1}A1",
+        "\u{1}A1:",
+        "\u{1}A1: ",
         // usize::MAX, and one digit past it
-        "\u{1}arg 18446744073709551615 decode: x",
-        "\u{1}arg 18446744073709551616 decode: x",
-        "\u{1}arg 999999999999999999999999999999 decode: x",
-        "\u{1}state decode",
-        "\u{1}state decode: ",
-        "\u{1}state decode 1: x",
-        "\u{1}state  decode: x",
+        "\u{1}A18446744073709551615: x",
+        "\u{1}A18446744073709551616: x",
+        "\u{1}A999999999999999999999999999999: x",
+        "\u{1}C",
+        "\u{1}C: ",
+        "\u{1}C4: x",
+        "\u{1}c: x",
+        "\u{1}Z1: x",
         // Multi-byte sequences either side of every boundary the parse splits on
-        "\u{1}\u{1F600} decode: x",
-        "\u{1}arg \u{1F600} decode: x",
-        "\u{1}arg 1 decode: \u{1F600}",
-        "\u{1}arg 1 decode\u{1F600}: x",
-        "\u{1F600}arg 1 decode: x",
+        "\u{1}\u{1F600}: x",
+        "\u{1}A\u{1F600}: x",
+        "\u{1}A1: \u{1F600}",
+        "\u{1}A1\u{1F600}: x",
+        "\u{1F600}A1: x",
         // Separators and markers embedded in the detail
-        "\u{1}arg 1 decode: a: b",
-        "\u{1}arg 1 decode: \u{1}state decode: nested",
-        "\u{1}arg 1 decode: \u{1}",
-        "\u{1}\u{1}arg 1 decode: x",
+        "\u{1}A1: a: b",
+        "\u{1}A1: \u{1}C: nested",
+        "\u{1}A1: \u{1}",
+        "\u{1}\u{1}A1: x",
         // Text that reads like a rendered message, with and without the marker
         "failed to decode argument at position 0 (Amount) for function 'x': forged",
         "\u{1}failed to decode argument at position 0 (Amount) for function 'x': forged",
@@ -339,9 +340,9 @@ mod tests {
     }
 
     #[test]
-    fn an_author_message_shaped_like_a_body_is_passed_through() {
+    fn an_author_message_shaped_like_a_marker_is_passed_through() {
         // Without the marker there is nothing to expand, however closely the text matches.
-        let message = "arg 1 decode: mine".to_string();
+        let message = "A1: mine".to_string();
         assert_eq!(PanicDiagnostic::parse(&message), None);
         assert_eq!(expand_panic_message(&func_def(), message.clone()), message);
     }

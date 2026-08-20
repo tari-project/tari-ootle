@@ -10,9 +10,12 @@ import { Aside } from "@astrojs/starlight/components";
 
 In this guide, you will:
 - Understand the privacy properties of stealth transfers: what is hidden and what is not.
-- Learn the structure of a stealth transfer: inputs, outputs, revealed vs confidential funds.
+- Learn the structure of a stealth transfer statement: inputs, outputs, revealed vs confidential funds, and the
+  proofs that bind them together.
 - Understand how stealth addresses protect receiver identity.
-- Learn about spend conditions: `Signed` (public key) vs `AccessRule` (multisig, component-scoped, etc.).
+- Understand how an output is authorized for spending: the **key path** (a one-time key) and the **script path** (a
+  committed condition tree, or MAST).
+- Learn what a condition-tree leaf can hold: access rules, timelocks, hashlocks, covenants and WASM spend scripts.
 - Learn about encrypted data and memos attached to outputs.
 - See how to execute stealth transfers programmatically in WASM templates.
 - Walk through a complete stealth transfer example using `ootle-rs`.
@@ -41,96 +44,111 @@ The native tTARI (testnet) / $TARI (mainnet) token is a stealth resource. Any cu
 
 ## Anatomy of a Stealth Transfer
 
-A stealth transfer consists of **inputs** (funds being spent) and **outputs** (funds being created).
-Each side can contain both _confidential_ and _revealed_ components.
+A stealth transfer is carried in a **`StealthTransferStatement`**. It has an **inputs statement** (funds being
+spent), an **outputs statement** (funds being created), and the proofs that bind the two together. Each side can
+contain both _confidential_ and _revealed_ components.
 
-<svg viewBox="0 0 820 520" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%;font-family:system-ui,sans-serif">
+<svg viewBox="0 0 820 566" xmlns="http://www.w3.org/2000/svg" style="max-width:820px;width:100%;font-family:system-ui,sans-serif">
   {/* Background */}
-  <rect width="820" height="520" rx="12" fill="#0d1117"/>
+  <rect width="820" height="566" rx="12" fill="#0d1117"/>
 
   {/* Title */}
-  <text x="410" y="36" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">Structure of a Stealth Transfer</text>
+  <text x="410" y="34" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">Structure of a StealthTransferStatement</text>
+
+  {/* Statement frame */}
+  <rect x="16" y="48" width="788" height="468" rx="10" fill="#10151c" stroke="#484f58" stroke-width="1"/>
 
   {/* Inputs Section */}
-  <rect x="20" y="56" width="370" height="410" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
-  <text x="205" y="82" text-anchor="middle" fill="#8b949e" font-size="13" font-weight="bold">INPUTS</text>
+  <rect x="32" y="82" width="370" height="346" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="217" y="106" text-anchor="middle" fill="#8b949e" font-size="13" font-weight="bold">INPUTS (inputs_statement)</text>
 
-  {/* Stealth Input 1 */}
-  <rect x="40" y="100" width="330" height="80" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="55" y="122" fill="#388bfd" font-size="12" font-weight="bold">Stealth Input (UTXO)</text>
-  <text x="55" y="142" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
-  <text x="55" y="160" fill="#8b949e" font-size="11">Requires signature from UTXO owner</text>
-  <circle cx="350" cy="140" r="8" fill="#388bfd" opacity="0.3"/>
-  <text x="350" y="144" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+  {/* Stealth Input 1 — key path */}
+  <rect x="48" y="118" width="338" height="80" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="62" y="139" fill="#388bfd" font-size="12" font-weight="bold">Stealth Input (UTXO)</text>
+  <text x="62" y="158" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="62" y="176" fill="#8b949e" font-size="11">Witness: KeyPath &#x2014; signature from spend_key</text>
+  <circle cx="366" cy="152" r="8" fill="#388bfd" opacity="0.3"/>
+  <text x="366" y="156" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
 
-  {/* Stealth Input 2 */}
-  <rect x="40" y="192" width="330" height="80" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="55" y="214" fill="#388bfd" font-size="12" font-weight="bold">Stealth Input (UTXO)</text>
-  <text x="55" y="234" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
-  <text x="55" y="252" fill="#8b949e" font-size="11">Requires signature from UTXO owner</text>
-  <circle cx="350" cy="232" r="8" fill="#388bfd" opacity="0.3"/>
-  <text x="350" y="236" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+  {/* Stealth Input 2 — script path */}
+  <rect x="48" y="206" width="338" height="80" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="62" y="227" fill="#388bfd" font-size="12" font-weight="bold">Stealth Input (UTXO)</text>
+  <text x="62" y="246" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="62" y="264" fill="#8b949e" font-size="11">Witness: ScriptPath &#x2014; leaf + inclusion proof</text>
+  <circle cx="366" cy="240" r="8" fill="#a371f7" opacity="0.3"/>
+  <text x="366" y="244" text-anchor="middle" fill="#a371f7" font-size="9">&#x1f333;</text>
 
   {/* Revealed Input */}
-  <rect x="40" y="284" width="330" height="70" rx="6" fill="#1c2333" stroke="#f0883e" stroke-width="1"/>
-  <text x="55" y="306" fill="#f0883e" font-size="12" font-weight="bold">Revealed Input (from Bucket) — optional</text>
-  <text x="55" y="326" fill="#8b949e" font-size="11">Public amount (e.g. from vault withdrawal)</text>
-  <circle cx="350" cy="316" r="8" fill="#f0883e" opacity="0.3"/>
-  <text x="350" y="320" text-anchor="middle" fill="#f0883e" font-size="9">&#x1f441;</text>
+  <rect x="48" y="294" width="338" height="64" rx="6" fill="#1c2333" stroke="#f0883e" stroke-width="1"/>
+  <text x="62" y="315" fill="#f0883e" font-size="12" font-weight="bold">revealed_amount &#x2014; optional</text>
+  <text x="62" y="334" fill="#8b949e" font-size="11">Public amount taken from a Bucket</text>
+  <circle cx="366" cy="326" r="8" fill="#f0883e" opacity="0.3"/>
+  <text x="366" y="330" text-anchor="middle" fill="#f0883e" font-size="9">&#x1f441;</text>
 
-  {/* Balance Proof */}
-  <rect x="40" y="368" width="330" height="46" rx="6" fill="#1c2333" stroke="#a371f7" stroke-width="1"/>
-  <text x="205" y="396" text-anchor="middle" fill="#a371f7" font-size="12" font-weight="bold">Balance Proof: &#x2211;inputs == &#x2211;outputs</text>
+  {/* Witness note */}
+  <rect x="48" y="366" width="338" height="46" rx="6" fill="#12171f" stroke="#30363d" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="217" y="385" text-anchor="middle" fill="#8b949e" font-size="11">Each input carries a SpendWitness selecting</text>
+  <text x="217" y="401" text-anchor="middle" fill="#8b949e" font-size="11">which authorisation path it exercises.</text>
 
   {/* Arrow */}
-  <line x1="400" y1="260" x2="430" y2="260" stroke="#484f58" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="402" y1="255" x2="418" y2="255" stroke="#484f58" stroke-width="2" marker-end="url(#arrow)"/>
   <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#484f58"/></marker></defs>
 
   {/* Outputs Section */}
-  <rect x="440" y="56" width="360" height="410" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
-  <text x="620" y="82" text-anchor="middle" fill="#8b949e" font-size="13" font-weight="bold">OUTPUTS</text>
+  <rect x="418" y="82" width="370" height="346" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="603" y="106" text-anchor="middle" fill="#8b949e" font-size="13" font-weight="bold">OUTPUTS (outputs_statement)</text>
 
   {/* Stealth Output 1 */}
-  <rect x="460" y="100" width="320" height="100" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="475" y="122" fill="#388bfd" font-size="12" font-weight="bold">Stealth Output (new UTXO)</text>
-  <text x="475" y="142" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
-  <text x="475" y="159" fill="#8b949e" font-size="11">Stealth address (one-time key)</text>
-  <text x="475" y="176" fill="#8b949e" font-size="11">Encrypted data: value + mask + memo</text>
-  <circle cx="760" cy="140" r="8" fill="#388bfd" opacity="0.3"/>
-  <text x="760" y="144" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+  <rect x="434" y="118" width="338" height="88" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="448" y="139" fill="#388bfd" font-size="12" font-weight="bold">Stealth Output (new UTXO)</text>
+  <text x="448" y="158" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="448" y="175" fill="#8b949e" font-size="11">Auth: spend_key and/or condition_root</text>
+  <text x="448" y="192" fill="#8b949e" font-size="11">Encrypted data: value + mask + memo</text>
+  <circle cx="752" cy="152" r="8" fill="#388bfd" opacity="0.3"/>
+  <text x="752" y="156" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
 
   {/* Stealth Output 2 (change) */}
-  <rect x="460" y="212" width="320" height="100" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="475" y="234" fill="#388bfd" font-size="12" font-weight="bold">Stealth Output (change)</text>
-  <text x="475" y="254" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
-  <text x="475" y="271" fill="#8b949e" font-size="11">Stealth address (back to sender)</text>
-  <text x="475" y="288" fill="#8b949e" font-size="11">Encrypted data: value + mask</text>
-  <circle cx="760" cy="252" r="8" fill="#388bfd" opacity="0.3"/>
-  <text x="760" y="256" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
+  <rect x="434" y="214" width="338" height="80" rx="6" fill="#1c2333" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="448" y="235" fill="#388bfd" font-size="12" font-weight="bold">Stealth Output (change)</text>
+  <text x="448" y="254" fill="#8b949e" font-size="11">Commitment: C = mask.G + value.H</text>
+  <text x="448" y="272" fill="#8b949e" font-size="11">Auth: one-time spend_key back to sender</text>
+  <circle cx="752" cy="248" r="8" fill="#388bfd" opacity="0.3"/>
+  <text x="752" y="252" text-anchor="middle" fill="#388bfd" font-size="9">&#x1f512;</text>
 
   {/* Revealed Output */}
-  <rect x="460" y="324" width="320" height="70" rx="6" fill="#1c2333" stroke="#f0883e" stroke-width="1"/>
-  <text x="475" y="346" fill="#f0883e" font-size="12" font-weight="bold">Revealed Output &#x2192; Bucket — optional</text>
-  <text x="475" y="366" fill="#8b949e" font-size="11">Public amount returned as a Bucket</text>
-  <circle cx="760" cy="356" r="8" fill="#f0883e" opacity="0.3"/>
-  <text x="760" y="360" text-anchor="middle" fill="#f0883e" font-size="9">&#x1f441;</text>
+  <rect x="434" y="302" width="338" height="56" rx="6" fill="#1c2333" stroke="#f0883e" stroke-width="1"/>
+  <text x="448" y="323" fill="#f0883e" font-size="12" font-weight="bold">revealed_output_amount &#x2192; Bucket</text>
+  <text x="448" y="342" fill="#8b949e" font-size="11">Public amount returned as a Bucket &#x2014; optional</text>
+  <circle cx="752" cy="330" r="8" fill="#f0883e" opacity="0.3"/>
+  <text x="752" y="334" text-anchor="middle" fill="#f0883e" font-size="9">&#x1f441;</text>
 
   {/* Range Proof */}
-  <rect x="460" y="406" width="320" height="46" rx="6" fill="#1c2333" stroke="#a371f7" stroke-width="1"/>
-  <text x="620" y="434" text-anchor="middle" fill="#a371f7" font-size="12" font-weight="bold">Aggregated Range Proof (Bulletproofs)</text>
+  <rect x="434" y="366" width="338" height="46" rx="6" fill="#1c2333" stroke="#a371f7" stroke-width="1"/>
+  <text x="603" y="385" text-anchor="middle" fill="#a371f7" font-size="12" font-weight="bold">Aggregated Range Proof (Bulletproofs)</text>
+  <text x="603" y="401" text-anchor="middle" fill="#8b949e" font-size="11">agg_range_proof &#x2014; covers all outputs above</text>
+
+  {/* Statement-level proofs */}
+  <rect x="32" y="436" width="756" height="70" rx="6" fill="#1c2333" stroke="#a371f7" stroke-width="1"/>
+  <text x="410" y="458" text-anchor="middle" fill="#a371f7" font-size="12" font-weight="bold">balance_proof &#x2014; &#x2211;inputs == &#x2211;outputs</text>
+  <text x="410" y="478" text-anchor="middle" fill="#8b949e" font-size="11">Signed over the whole statement, not carried by either side.</text>
+  <text x="410" y="495" text-anchor="middle" fill="#8b949e" font-size="11">Plus covenant_claims: one sub-balance proof per covenant-gated input partition.</text>
 
   {/* Legend */}
-  <rect x="20" y="480" width="780" height="30" rx="6" fill="#161b22"/>
-  <rect x="36" y="489" width="12" height="12" rx="2" fill="none" stroke="#388bfd" stroke-width="1" stroke-dasharray="3,2"/>
-  <text x="54" y="500" fill="#8b949e" font-size="11">Confidential (hidden)</text>
-  <rect x="196" y="489" width="12" height="12" rx="2" fill="none" stroke="#f0883e" stroke-width="1"/>
-  <text x="214" y="500" fill="#8b949e" font-size="11">Revealed (public)</text>
-  <rect x="340" y="489" width="12" height="12" rx="2" fill="none" stroke="#a371f7" stroke-width="1"/>
-  <text x="358" y="500" fill="#8b949e" font-size="11">Zero-knowledge proof</text>
+  <rect x="16" y="524" width="788" height="30" rx="6" fill="#161b22"/>
+  <rect x="32" y="533" width="12" height="12" rx="2" fill="none" stroke="#388bfd" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="50" y="544" fill="#8b949e" font-size="11">Confidential (hidden)</text>
+  <rect x="192" y="533" width="12" height="12" rx="2" fill="none" stroke="#f0883e" stroke-width="1"/>
+  <text x="210" y="544" fill="#8b949e" font-size="11">Revealed (public)</text>
+  <rect x="336" y="533" width="12" height="12" rx="2" fill="none" stroke="#a371f7" stroke-width="1"/>
+  <text x="354" y="544" fill="#8b949e" font-size="11">Zero-knowledge proof</text>
 </svg>
 
-The engine enforces that the sum of all inputs (confidential + revealed) equals the sum of all outputs (confidential + revealed).
-This is proven cryptographically via a **balance proof** without revealing any individual amounts.
+The engine enforces that the sum of all inputs (confidential + revealed) equals the sum of all outputs (confidential
++ revealed). This is proven cryptographically by the statement's **balance proof** without revealing any individual
+amounts. The balance proof sits at the statement level rather than on either side, because it is a claim about both
+at once; it is `None` only when the transfer is revealed-only, with no stealth inputs and no stealth outputs. The
+**aggregated range proof** does belong to the outputs statement: it covers exactly the output commitments, proving
+each value lies in `[minimum_value_promise, 2^64)`.
 
 ---
 
@@ -194,7 +212,8 @@ StealthTransfer::new(tari_token, &provider)
 A common pattern is to place the revealed output bucket on the workspace and use it to pay fees:
 
 ```rust
-let unsigned_tx = Transaction::builder(network)
+// `max_epoch` is the last epoch the transaction may be sequenced in.
+let unsigned_tx = Transaction::builder(network, max_epoch)
     .with_fee_instructions_builder(|builder| {
         builder
             .stealth_transfer(tari_token, transfer)
@@ -222,96 +241,287 @@ secret and derive the spending key.
 This means:
 - Each output has a **unique** address that cannot be linked to the recipient's real public key by an outside observer.
 - The recipient scans new outputs by trying to derive the stealth key using their private key. If it matches the
-  output's spend condition, the output belongs to them.
+  output's `spend_key`, the output belongs to them.
 - The sender cannot spend the output after sending it (they don't know **k**).
 
 ---
 
-## Spend Conditions
+## Spend Authorization
 
-Every stealth UTXO has a **spend condition** that determines what authorization is required to spend it.
-When a stealth input is consumed in a transfer, the engine validates the spend condition before allowing the spend.
+Every stealth output commits, at creation time, to how it may later be spent. That commitment is its
+**`SpendAuthorization`**, and it takes one of three shapes:
 
-There are two variants:
+| Variant | Committed in the output | Spent via |
+|---|---|---|
+| `Key(spend_key)` | A one-time stealth public key | **Key path** &mdash; a signature from `spend_key` |
+| `Script(condition_root)` | A 32-byte Merkle root over a set of spend conditions | **Script path** &mdash; revealing one committed condition |
+| `KeyAndScript { spend_key, condition_root }` | Both | Either path; the spender chooses |
 
-### `Signed` — Public Key Authorization
+It is an enum rather than a pair of optional fields so that the unspendable state &mdash; no key *and* no conditions &mdash;
+cannot be represented at all.
 
-The default and most common spend condition. The UTXO can only be spent by proving ownership of a specific
-public key via a transaction signature:
+Spending is **witness-driven**: each spent input carries a `SpendWitness` that says which path the spender is taking.
+The committed authorization only decides which witnesses are *admissible*; the engine never assumes a path.
 
 ```rust
-SpendCondition::Signed(public_key)
+pub enum SpendWitness {
+    /// Signature from the output's `spend_key`, supplied in the transaction envelope.
+    KeyPath,
+    /// One committed condition leaf, its inclusion proof, and an optional witness blob.
+    ScriptPath { leaf: SpendCondition, proof: MerkleProof, data: Bytes },
+}
 ```
 
-This is typically the **one-time stealth public key** derived during the stealth address exchange (see above).
-Only the recipient — who can derive the corresponding private key — can produce a valid signature.
+### Key Path
 
-At validation time, the engine checks that the transaction's authorization scope contains a proof (badge) matching
-`NonFungibleAddress::from_public_key(pk)`. If the signature is missing, the transaction fails with
+The default and by far the most common path. The one-time stealth public key derived during the stealth address
+exchange (see above) authorizes the spend: only the recipient can derive the matching private key.
+
+At validation time the engine checks that the transaction's authorization scope contains a badge matching
+`NonFungibleAddress::from_public_key(spend_key)`. If the signature is missing the transaction fails with
 `RequiredSignatureMissingForStealthUtxo`.
 
-### `AccessRule` — Rule-Based Authorization
+### Script Path &mdash; Condition Trees (MAST)
 
-Instead of requiring a specific signature, the UTXO can be gated by an **access rule**. This enables
-advanced spending policies such as multisig, component-scoped access, or resource-gated spending:
+A **condition tree** is a Merklized set of *alternative* spend conditions &mdash; a MAST. The output stores only the
+root. To spend, the spender reveals exactly **one** leaf plus an inclusion proof; the engine recomputes the root,
+checks it against the committed value, and only then evaluates that leaf.
 
-```rust
-SpendCondition::AccessRule(rule)
-```
+This is what makes broad spending policies cheap and private:
 
-Access rules support the same constructs used elsewhere in Ootle:
+- **Only the path actually taken appears on-chain.** The alternatives that were not exercised stay hidden &mdash; an
+  observer never learns that a refund branch or a co-signer branch existed.
+- **Breadth is nearly free.** An inclusion proof is logarithmic in the number of leaves, so a tree with many
+  alternatives costs a spender little more than one with two.
+- **The root is a function of the *set*.** Leaf hashes are sorted and must be unique, so authoring order does not
+  change the root.
+- **Proofs carry no direction bits.** A branch hashes its two children in lexicographic byte order, so a proof is a
+  bare list of sibling hashes. Leaves and branches hash under distinct domains, so an internal node can never be
+  reinterpreted as a leaf.
 
-| Rule | Description |
+Tree construction and verification are native &mdash; a template never builds or verifies a tree.
+
+### Leaves: a Conjunction of Atomic Conditions
+
+One leaf is a `SpendCondition`: a flat, non-empty **AND** of `AtomicCondition`s. There is no OR combinator inside a
+leaf, because the tree *is* the OR &mdash; each leaf is an alternative spend path. Atoms cannot nest other atoms, so a
+leaf has no recursion to bound.
+
+| Atom | Gates the spend on |
 |---|---|
-| `allow_all` | Anyone can spend the UTXO (no authorization required) |
-| `deny_all` | The UTXO can never be spent |
-| `public_key(pk)` | Equivalent to `Signed(pk)` but expressed as an access rule |
-| `resource(addr)` | Requires a proof of a specific resource token |
-| `non_fungible(nf)` | Requires a proof of a specific non-fungible token |
-| `component(addr)` | Only spendable within a call to a specific component |
-| `template(addr)` | Only spendable within a call to a specific template |
-| `any_of(...)` | Any one of the listed rules must be satisfied |
-| `all_of(...)` | All of the listed rules must be satisfied |
-| `m_of_n(m, ...)` | At least **m** of **n** listed requirements must be satisfied |
+| `AccessRule(rule)` | A native access rule evaluated against the transaction's auth scope (signer badges, resource proofs, component scope, `m_of_n`, …) |
+| `Builtin(predicate)` | A native, consensus-fixed **local** predicate: a timelock or a hashlock |
+| `Covenant(covenant)` | A native, consensus-fixed constraint on the *spending transfer's* outputs and value flow |
+| `TemplateFunction(tf)` | A stateless WASM predicate &mdash; a **spend script** &mdash; committed as `{template, function, args}` |
 
-For example, a 2-of-3 multisig spend condition:
+#### Builtin Predicates
 
-```rust
-use tari_template_lib::rule;
+Builtins need no deployed template and are evaluated natively, so their semantics live in trusted core code.
 
-let spend_condition = SpendCondition::AccessRule(
-    rule!(m_of_n(2, public_key(pk1), public_key(pk2), public_key(pk3)))
-);
-```
+| Predicate | Admits the spend when |
+|---|---|
+| `AfterEpoch(n)` | The current epoch is at or after `n` |
+| `BeforeEpoch(n)` | The current epoch is strictly before `n` |
+| `HashLock { hash, alg }` | The witness `data` blob is a preimage whose `alg` digest equals `hash` |
 
-Or a UTXO that can only be spent by a specific component:
+`alg` is `Blake2b256` or `Sha256`. The preimage is hashed with **no domain separation**, so the same secret can unlock
+an HTLC on an external chain (e.g. Bitcoin's `SHA256`).
 
-```rust
-let spend_condition = SpendCondition::AccessRule(
-    rule!(component(my_component_address))
-);
-```
-
-<Aside type="note">
-When using `AccessRule` spend conditions, the UTXO owner is no longer hidden behind a one-time stealth key.
-The access rule itself is stored on-chain and may reveal information about who can spend the output.
-Consider the privacy trade-off when choosing between `Signed` and `AccessRule`.
+<Aside type="caution">
+A bare hashlock is satisfiable by *anyone* who learns the preimage. Bind the claim to a key by ANDing an `AccessRule`
+atom into the same leaf &mdash; the standard HTLC construction.
 </Aside>
 
-### Setting the Spend Condition with `ootle-rs`
+#### Covenants
 
-By default, stealth outputs use `Signed` with the one-time stealth public key derived for the recipient.
-To use an access rule instead, set `pay_to` on the output:
+Where a builtin gates an input on a local fact, a covenant constrains the transaction the input is spent into &mdash; so
+conditions propagate forward.
+
+| Covenant | Requires |
+|---|---|
+| `OutputPreservesCondition` | At least one stealth output, and every stealth output re-locked under exactly this `condition_root` |
+| `OutputTo { condition_root, min_value }` | At least one stealth output locked under `condition_root` promising at least `min_value` |
+| `BalancePreserved(max_revealed)` | The partition's committed value is conserved into outputs carrying its `condition_root`, save for an exact cleartext outflow of at most `max_revealed` (zero admits no escape) |
+
+A **partition** is every input and output of the transfer sharing the invoking input's `condition_root`. Partitions are
+keyed by root equality, so distinct UTXOs committing the same tree form one partition with one shared allowance. Bind a
+per-UTXO identity (e.g. a vault nonce) into the leaf's arguments when they must be separate covenants.
+
+`BalancePreserved` is proven by a `CovenantBalanceClaim` &mdash; a sub-balance proof carried in the statement's
+`covenant_claims`, one per covenant-gated partition. The confidential balance is never revealed.
+
+<Aside type="note">
+An output that commits the same root but *also* carries a key path (`KeyAndScript`) does **not** satisfy
+`OutputPreservesCondition` or `OutputTo`: it could be key-spent in the next block, escaping the covenant. Only a pure
+`Script` authorization keeps value under the covenant.
+</Aside>
+
+#### Witness Data
+
+A script-path witness may carry a `data` blob the revealed leaf interprets &mdash; a hashlock preimage, a signature, or a
+CBOR structure a spend script decodes. It is **not** committed in `condition_root` (only the leaf is), so it cannot
+change *which* predicate runs, only satisfy one.
+
+Because a data-consuming builtin such as `HashLock` reads the whole blob as raw bytes, it must be the sole `data`
+consumer in its leaf. The engine rejects a leaf with more than one data-consuming builtin, or one that mixes a
+data-consuming builtin with a `TemplateFunction`.
+
+#### Limits
+
+Breadth in the tree is free, but evaluating one revealed leaf is native work, so the spend-time surface is bounded:
+
+| Limit | Value |
+|---|---|
+| Atoms per leaf (`max_conditions_per_conjunction`) | 16 |
+| Witness `data` size (`max_witness_data_len`) | 4096 bytes |
+| Inclusion proof siblings (`max_inclusion_proof_len`) | 32 (a tree of up to 2^32 leaves) |
+
+The tree's total leaf count is not bounded &mdash; it is not a spend-time cost.
+
+### Creating a Script-Gated Output with `ootle-rs`
+
+By default a stealth output is key-path only. `PayTo` chooses otherwise:
+
+| `PayTo` variant | Produces |
+|---|---|
+| `StealthPublicKey` (default) | `Key(spend_key)` &mdash; the one-time stealth key |
+| `AccessRule(rule)` | `Script(root)` over a single access-rule leaf |
+| `TemplateFunction(tf)` | `Script(root)` over a single spend-script leaf |
+| `Conditions(vec![...])` | `Script(root)` over a full multi-leaf tree |
+
+`Output` has conveniences for the last two:
 
 ```rust
-use ootle_rs::{crypto::pay_to::PayTo, stealth::Output};
-use tari_template_lib::rule;
+use ootle_rs::{
+    crypto::pay_to::PayTo,
+    stealth::Output,
+    template_types::{rule, stealth::{AtomicCondition, BuiltinPredicate, HashAlg, SpendCondition}},
+};
 
-let output = Output::new(recipient, tari_token, amount)
+// Single access-rule leaf: 2-of-3 multisig.
+let multisig = Output::new(recipient.clone(), tari_token, amount)
     .with_pay_to(PayTo::AccessRule(
         rule!(m_of_n(2, public_key(pk1), public_key(pk2), public_key(pk3)))
     ));
+
+// A two-leaf HTLC tree: claim before the deadline with the preimage, or refund to the funder after it.
+let claim = SpendCondition::all([
+    AtomicCondition::Builtin(BuiltinPredicate::HashLock { hash, alg: HashAlg::Sha256 }),
+    AtomicCondition::Builtin(BuiltinPredicate::BeforeEpoch(deadline)),
+]);
+let refund = SpendCondition::all([
+    AtomicCondition::Builtin(BuiltinPredicate::AfterEpoch(deadline)),
+    AtomicCondition::AccessRule(rule!(public_key(funder_pk))),
+]);
+let conditions = vec![claim, refund];
+
+let htlc = Output::new(recipient, tari_token, amount)
+    .with_spend_conditions(conditions.clone());
 ```
+
+The value is still encrypted to the destination address, so the recipient can discover and decrypt the output as
+usual &mdash; only the *spending* rule changes.
+
+### Spending via the Script Path
+
+Build the witness from the same set of leaves the output committed to, revealing the one you intend to satisfy, then
+attach it to the input:
+
+```rust
+use ootle_rs::{
+    crypto::stealth::script_path_witness_with_data,
+    template_types::{bytes::Bytes, stealth::StealthInput},
+};
+
+// Reveal the `claim` leaf with its inclusion proof, supplying the preimage as the witness data
+// the hashlock consumes. Use `script_path_witness` when the leaf consumes no data.
+let (witness, _root) = script_path_witness_with_data(
+    &conditions,
+    &conditions[0],
+    Bytes::from_vec(preimage.to_vec()),
+)?;
+
+let (transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
+    .spend_stealth_input(owner_address, StealthInput::with_witness(commitment, witness))
+    .to_revealed_output(FEE)
+    .to_stealth_output(Output::new(recipient, tari_token, amount))
+    .prepare()
+    .await?;
+```
+
+<Aside type="note">
+The full runnable HTLC example is at `crates/wallet/ootle-rs/examples/stealth_spend_conditions.rs`.
+`examples/adaptor_claim.rs` shows the same machinery driving one leg of a cross-chain atomic swap, using an
+adaptor signature against a 2-of-2 `AccessRule` leaf.
+</Aside>
+
+### Spend Scripts
+
+A `TemplateFunction` leaf runs arbitrary WASM as the spend predicate. A spend script is an ordinary template function
+with `is_mut == false` whose **last parameter is a `SpendContext`**. It authorizes the spend by returning normally and
+rejects it by **panicking** &mdash; the same convention as a resource `AuthHook`, and, like a failed Bitcoin script, a
+deliberate rejection is indistinguishable from a bug or an out-of-gas abort.
+
+```rust
+#[template]
+mod spend_scripts {
+    use super::*;
+
+    pub struct SpendScripts {}
+
+    impl SpendScripts {
+        /// Absolute timelock: rejects until `unlock_epoch`.
+        pub fn timelock(unlock_epoch: u64, ctx: SpendContext) {
+            ctx.require_timelock(unlock_epoch);
+        }
+
+        /// Recursive covenant: every output must carry this same spend condition.
+        pub fn preserve_covenant(ctx: SpendContext) {
+            ctx.require_output_preserves_condition();
+        }
+
+        /// Witness-data lock: authorizes only if the spend-supplied data matches the committed bytes.
+        pub fn require_witness_data(expected: Vec<u8>, ctx: SpendContext) {
+            assert!(ctx.data() == expected, "unexpected witness data");
+        }
+    }
+}
+```
+
+The leading parameters are **committed** in the condition &mdash; `{template, function, args}` are all part of the leaf
+hash, so a spender cannot substitute a different predicate or different arguments. Templates are immutable substates,
+so the referenced code cannot change after the output is created. `SpendContext` is injected by the engine.
+
+`SpendContext` exposes a read-only view of the spending transfer. Confidential values are never revealed &mdash; only
+what the balance proof already operates on:
+
+| Accessor | Returns |
+|---|---|
+| `inputs()` / `outputs()` | Commitments; outputs also expose `minimum_value_promise`, `auth` and tag |
+| `current_input()` | Index, commitment and committed `condition_root` of the input being authorized |
+| `revealed_input_amount()` / `revealed_output_amount()` | The transfer's public amounts |
+| `current_epoch()` | The epoch, fixed for the duration of execution |
+| `data()` | The raw witness `data` blob for this input |
+
+Plus assertion helpers that mirror the native covenants: `require_timelock`, `require_output_preserves_condition`,
+`require_output_to`, `require_balance_preserved`, `require_balance_preserved_with_allowance`.
+
+<Aside type="caution">
+Spend scripts run in a read-only sandbox on a metered budget: no state writes, no events, no cross-template calls.
+Prefer a builtin or a covenant where one fits &mdash; they need no deployed template and are evaluated natively.
+</Aside>
+
+### Privacy Trade-off
+
+A key-path spend reveals nothing about the spending policy. A script-path spend publishes the leaf it exercises, and
+that leaf may say a great deal &mdash; which keys can sign, which component is involved, what the deadline was.
+
+Two rules of thumb:
+
+- Make the common case the key path (or the leaf you expect to take), so the branches that reveal the most are the
+  ones that are rarely taken.
+- Put **one-time** keys in leaves, derived unlinkably from the output's nonce, rather than account keys. The revealed
+  leaf then exposes a key nobody can tie back to an identity.
 
 ---
 
@@ -578,7 +788,7 @@ use ootle_rs::{
     template_types::{UtxoAddress, constants::{TARI, TARI_TOKEN}},
     wallet::OotleWallet,
 };
-use tari_ootle_transaction::Transaction;
+use tari_ootle_transaction::{Epoch, Transaction};
 
 const NETWORK: Network = Network::LocalNet;
 
@@ -590,6 +800,9 @@ let mut provider = ProviderBuilder::new()
     .wallet(wallet)
     .connect(default_indexer_url(NETWORK))
     .await?;
+
+// Every transaction declares the last epoch it may be sequenced in; past it, it can never land.
+let max_epoch = Epoch(provider.get_epoch().await?.as_u64() + 10);
 ```
 
 ### Step 2: Receive Funds from a Faucet (revealed input -> stealth output)
@@ -612,8 +825,10 @@ let (faucet_transfer, required_signers) = StealthTransfer::new(tari_token, &prov
 let my_utxos = faucet_transfer.stealth_outputs().to_vec();
 
 // Build the transaction using the faucet template helper.
-let unsigned_tx = IFaucet::new(&provider)
-    .take_faucet_funds_stealth(faucet_transfer, true)
+let unsigned_tx = IFaucet::new(&provider, max_epoch)
+    .take_faucet_funds()
+    .into_stealth_transfer(faucet_transfer)
+    .and_pay_fee_from_revealed_output()
     .prepare()
     .await?;
 
@@ -650,7 +865,7 @@ let (transfer, required_signers) = StealthTransfer::new(tari_token, &provider)
     .await?;
 
 // Build the transaction, placing the revealed output on the workspace for fees.
-let unsigned_tx = Transaction::builder(provider.network())
+let unsigned_tx = Transaction::builder(provider.network(), max_epoch)
     .with_fee_instructions_builder(|builder| {
         builder
             .stealth_transfer(tari_token, transfer)
@@ -683,9 +898,18 @@ one-time stealth addresses, and encrypted payloads to hide transaction amounts a
 
 Key takeaways:
 - **Confidential amounts** are hidden in Pedersen commitments; only the sender and recipient know the value.
+- **The balance proof belongs to the statement**, not to its inputs or outputs: it proves `∑inputs == ∑outputs` across
+  both sides at once. The aggregated range proof is the outputs statement's own.
 - **Stealth addresses** are unique per output, unlinkable to the recipient's real public key.
+- **Spending is witness-driven**: an output commits a `spend_key`, a `condition_root`, or both, and each spent input
+  declares which path it takes.
+- **Condition trees (MAST)** commit a set of alternative spend paths; a spend reveals exactly one leaf plus a
+  logarithmic inclusion proof, and the unused branches stay hidden.
+- **A leaf is an AND** of access rules, builtin timelocks and hashlocks, covenants, or WASM spend scripts; the tree
+  itself supplies the OR.
 - **Revealed funds** are public and primarily used for fees; they bridge between the confidential and public layers.
 - **Revealed outputs produce a `Bucket`** that can be used in subsequent instructions (e.g. fee payment).
 - **Encrypted memos** allow private communication between sender and recipient.
-- **Privacy is not absolute**: signing transactions, revealed amounts, change patterns, and component interactions
-  can all leak information. Design transactions carefully to minimize exposure.
+- **Privacy is not absolute**: signing transactions, revealed amounts, change patterns, component interactions, and
+  the condition leaf a script-path spend reveals can all leak information. Design transactions carefully to minimize
+  exposure.

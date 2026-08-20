@@ -14,6 +14,12 @@
 //!
 //! A message that carries no marker — a template author's own `panic!`, or a template published
 //! before this encoding existed — is passed through untouched.
+//!
+//! A marker must stay legible on its own. A template published today runs on engines that predate
+//! this module, which surface the marker verbatim as the reject reason, and a published template
+//! cannot be amended once an engine is upgraded. The body therefore says which argument failed in
+//! words rather than in a code, and only the function name and argument type — the parts an engine
+//! can supply — are left out.
 
 use crate::rust::{format, string::String};
 
@@ -24,8 +30,9 @@ pub const MARKER: char = '\u{1}';
 /// Separates a marker from the underlying error the dispatcher formats after it.
 const DETAIL_SEPARATOR: &str = ": ";
 
-const TAG_COMPONENT: char = 'C';
-const TAG_ARGUMENT: char = 'A';
+const COMPONENT_BODY: &str = "state decode";
+const ARGUMENT_BODY_PREFIX: &str = "arg ";
+const ARGUMENT_BODY_SUFFIX: &str = " decode";
 
 /// A decode failure raised by macro-generated dispatch code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,8 +48,8 @@ impl PanicDiagnostic {
     /// The marker for this diagnostic, without the detail that follows it.
     pub fn marker(&self) -> String {
         match *self {
-            Self::ComponentDecode => format!("{MARKER}{TAG_COMPONENT}"),
-            Self::ArgDecode { index } => format!("{MARKER}{TAG_ARGUMENT}{index}"),
+            Self::ComponentDecode => format!("{MARKER}{COMPONENT_BODY}"),
+            Self::ArgDecode { index } => format!("{MARKER}{ARGUMENT_BODY_PREFIX}{index}{ARGUMENT_BODY_SUFFIX}"),
         }
     }
 
@@ -56,20 +63,16 @@ impl PanicDiagnostic {
     /// for a message that carries no marker.
     pub fn parse(message: &str) -> Option<(Self, &str)> {
         let marked = message.strip_prefix(MARKER)?;
-        let (head, detail) = marked.split_once(DETAIL_SEPARATOR).unwrap_or((marked, ""));
-        let mut chars = head.chars();
-        let diagnostic = match chars.next()? {
-            TAG_COMPONENT => Self::ComponentDecode,
-            TAG_ARGUMENT => Self::ArgDecode {
-                index: chars.as_str().parse().ok()?,
-            },
-            _ => return None,
-        };
-        // A tag that carries trailing bytes it has no field for is not one we wrote.
-        if matches!(diagnostic, Self::ComponentDecode) && !chars.as_str().is_empty() {
-            return None;
+        let (body, detail) = marked.split_once(DETAIL_SEPARATOR).unwrap_or((marked, ""));
+        if body == COMPONENT_BODY {
+            return Some((Self::ComponentDecode, detail));
         }
-        Some((diagnostic, detail))
+        let index = body
+            .strip_prefix(ARGUMENT_BODY_PREFIX)?
+            .strip_suffix(ARGUMENT_BODY_SUFFIX)?
+            .parse()
+            .ok()?;
+        Some((Self::ArgDecode { index }, detail))
     }
 }
 
@@ -168,7 +171,20 @@ mod tests {
     #[test]
     fn format_string_takes_the_error_as_its_only_argument() {
         let format_string = PanicDiagnostic::ArgDecode { index: 2 }.panic_format_string();
-        assert_eq!(format_string, "\u{1}A2: {}");
+        assert_eq!(format_string, "\u{1}arg 2 decode: {}");
+    }
+
+    #[test]
+    fn a_marker_reads_as_a_message_on_its_own() {
+        // What an engine without `expand_panic_message` surfaces as the reject reason.
+        assert_eq!(
+            format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 1 }.marker()),
+            "\u{1}arg 1 decode: unexpected type"
+        );
+        assert_eq!(
+            format!("{}: end of input bytes", PanicDiagnostic::ComponentDecode.marker()),
+            "\u{1}state decode: end of input bytes"
+        );
     }
 
     #[test]
@@ -215,9 +231,18 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_tag_is_passed_through() {
-        assert_eq!(PanicDiagnostic::parse("\u{1}Z1: boom"), None);
-        assert_eq!(PanicDiagnostic::parse("\u{1}C4: boom"), None);
+    fn an_unknown_body_is_passed_through() {
+        assert_eq!(PanicDiagnostic::parse("\u{1}something else: boom"), None);
+        assert_eq!(PanicDiagnostic::parse("\u{1}arg two decode: boom"), None);
+        assert_eq!(PanicDiagnostic::parse("\u{1}state decode 4: boom"), None);
+    }
+
+    #[test]
+    fn an_author_message_shaped_like_a_body_is_passed_through() {
+        // Without the marker there is nothing to expand, however closely the text matches.
+        let message = "arg 1 decode: mine".to_string();
+        assert_eq!(PanicDiagnostic::parse(&message), None);
+        assert_eq!(expand_panic_message(&func_def(), message.clone()), message);
     }
 
     #[test]

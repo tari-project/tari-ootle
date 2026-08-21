@@ -66,7 +66,9 @@ where
     let input_ptr = encoded_input.as_mut_ptr();
     let result_ptr = unsafe { tari_engine(op.as_i32(), input_ptr, len) };
     if result_ptr.is_null() {
-        panic!("ENGCALL_NULL op {}", op.as_i32());
+        // Terse by design: the engine identifies the refused call on its own side, and a formatted
+        // panic pulls `core::fmt::Arguments` into every published template.
+        panic!("ENGCALL_NULL");
     }
     // SAFETY: The pointer returned by `tari_engine` is valid and points to a length-prefixed block of memory allocated
     // by `tari_alloc`.

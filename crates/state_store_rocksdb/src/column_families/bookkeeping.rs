@@ -70,6 +70,14 @@ impl BookKeepingKey {
     }
 }
 
+/// The database schema version that this build expects a database to be at.
+///
+/// The migration steps that bring a database up to this version live in the validator node, but the constant lives
+/// here because it describes the on-disk schema rather than any one binary. Tools that write to a database directly
+/// must check the stored [`DatabaseMigrationVersion`] against it first: writing through the current key encodings to a
+/// database still at an older version silently misses the rows that a pending migration has yet to rewrite.
+pub const CURRENT_SCHEMA_VERSION: u64 = 2;
+
 pub struct DatabaseMigrationVersion;
 
 impl Cf for DatabaseMigrationVersion {

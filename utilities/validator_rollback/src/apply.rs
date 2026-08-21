@@ -9,14 +9,19 @@ use std::{
 
 use anyhow::{Context, anyhow, bail};
 use clap::Args as ClapArgs;
-use tari_ootle_common_types::{Epoch, ShardGroup, shard::Shard};
+use tari_ootle_common_types::{Epoch, ShardGroup, optional::Optional, shard::Shard};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     consensus_models::{EpochCheckpoint, RollbackHistoryEntry},
 };
-use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+use tari_state_store_rocksdb::{
+    DatabaseOptions,
+    RocksDbStateStore,
+    codecs::ByteColumn,
+    column_families::bookkeeping::{CURRENT_SCHEMA_VERSION, DatabaseMigrationVersion},
+};
 
 use crate::{
     audit::AuditWriter,
@@ -106,6 +111,39 @@ pub struct ApplyOutcome {
 
 /// Run the rollback flow with explicit options. Returns a summary of what the audit
 /// footer recorded so callers can assert on impact.
+/// Refuses to operate on a database whose schema version is not the one this build encodes.
+///
+/// The rollback primitives write through the current key encodings. Against an older database those encodings do not
+/// match what is on disk, so a cascade silently misses the rows a pending migration has yet to rewrite - leaving
+/// orphans that the migration then promotes into live entries referring to rolled-back blocks. Against a newer
+/// database the encodings are simply unknown to this build.
+fn check_schema_version(store: &RocksDbStateStore<PeerAddress>) -> anyhow::Result<()> {
+    let version = store.with_read_tx(|tx| -> anyhow::Result<_> {
+        let version = tx
+            .db()
+            .cf(DatabaseMigrationVersion)?
+            .get(&ByteColumn, "check_schema_version")
+            .optional()?;
+        Ok(version)
+    })?;
+
+    match version {
+        Some(version) if version == CURRENT_SCHEMA_VERSION => Ok(()),
+        Some(version) if version < CURRENT_SCHEMA_VERSION => bail!(
+            "State db is at schema version {version} but this tool writes version {CURRENT_SCHEMA_VERSION}. Start the \
+             validator once to migrate the database, stop it again, then re-run the rollback."
+        ),
+        Some(version) => bail!(
+            "State db is at schema version {version}, which is newer than the {CURRENT_SCHEMA_VERSION} this tool \
+             understands. Use a rollback tool built from the same release as the validator."
+        ),
+        None => bail!(
+            "State db has no schema version recorded, so it has never been bootstrapped by a validator. There is \
+             nothing to roll back."
+        ),
+    }
+}
+
 pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     let target_epoch = Epoch(opts.target_epoch);
     let now_unix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
@@ -119,6 +157,8 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     // after we snapshot would produce a stale audit.
     let store: RocksDbStateStore<PeerAddress> = RocksDbStateStore::open(&opts.state_db, DatabaseOptions::default())
         .with_context(|| format!("opening state db at {:?}", opts.state_db))?;
+
+    check_schema_version(&store)?;
 
     // Resolve the checkpoint for target_epoch.
     let (checkpoint, shard_group) = locate_checkpoint(&store, target_epoch, opts.shard_group)?;

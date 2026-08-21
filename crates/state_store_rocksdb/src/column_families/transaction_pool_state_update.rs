@@ -122,6 +122,25 @@ pub struct TransactionPoolStateUpdateDebugHistoryCf;
 impl Cf for TransactionPoolStateUpdateDebugHistoryCf {
     type Key = (Epoch, NodeHeight, TransactionId);
     type KeyCodec = (EpochCodec, NumberCodec<NodeHeight>, BytesCodec);
+    type Prefix = TransactionPoolStateUpdateDebugHistoryPrefix;
+    type Value = TransactionPoolStateUpdateData;
+    type ValueCodec = DefaultCodec<TransactionPoolStateUpdateData>;
+
+    fn name() -> &'static str {
+        cf_names::DIAGNOSTICS
+    }
+}
+
+/// The [`TransactionPoolStateUpdateDebugHistoryCf`] key shape from before the table carried its prefix.
+///
+/// These keys lead with a big-endian [`Epoch`], so they sort below every prefixed table sharing the column family.
+/// Exists so the migration that rewrites them can address them; remove it once no supported database can still be at a
+/// version that predates that migration.
+pub struct LegacyUnprefixedDebugHistoryCf;
+
+impl Cf for LegacyUnprefixedDebugHistoryCf {
+    type Key = (Epoch, NodeHeight, TransactionId);
+    type KeyCodec = (EpochCodec, NumberCodec<NodeHeight>, BytesCodec);
     type Prefix = ();
     type Value = TransactionPoolStateUpdateData;
     type ValueCodec = DefaultCodec<TransactionPoolStateUpdateData>;

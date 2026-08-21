@@ -14,7 +14,7 @@
 //! To take the schema from version `N` to `N + 1`:
 //!
 //! 1. Add `v{N+1}.rs` with `pub fn migrate(...) -> ...` performing the upgrade, and declare it here with `mod v{N+1};`.
-//! 2. Bump [`CURRENT_VERSION`] to `N + 1`.
+//! 2. Bump `CURRENT_SCHEMA_VERSION` (in the state store, beside `DatabaseMigrationVersion`) to `N + 1`.
 //! 3. Add the arm that applies it to the step loop in [`migrate`], keyed by the version it upgrades *from*:
 //!
 //! ```ignore
@@ -34,7 +34,9 @@
 //! substate to both the store and the state tree. (Note that, unlike genesis, adding state-tree
 //! entries to a live chain shifts its state root, so such a migration is itself consensus-affecting.)
 
+mod common;
 mod v1;
+mod v2;
 
 use std::time::Instant;
 
@@ -44,7 +46,9 @@ use tari_ootle_common_types::{NodeAddressable, optional::Optional};
 use tari_ootle_transaction::Network;
 use tari_state_store_rocksdb::{
     codecs::ByteColumn,
-    column_families::bookkeeping::DatabaseMigrationVersion,
+    // The version constant lives in the state store because it describes the on-disk schema, and tools that write to
+    // a database directly must check it before doing so. Bump it there and apply the upgrade in `migrate`.
+    column_families::bookkeeping::{CURRENT_SCHEMA_VERSION as CURRENT_VERSION, DatabaseMigrationVersion},
     writer::RocksDbStateStoreWriteTransaction,
 };
 
@@ -52,12 +56,16 @@ use crate::genesis_state::create_genesis_state;
 
 const LOG_TARGET: &str = "tari::validator::migrations";
 
-/// The on-disk state schema version stamped onto a freshly bootstrapped database.
-///
-/// Bump this and apply the upgrade in [`migrate`] whenever the persisted state must change for
-/// already-running nodes. It was reset to 0 with the genesis-in-state-tree testnet reset, and is at 1
-/// for the substate lock index prefix ([`v1`]).
-const CURRENT_VERSION: u64 = 1;
+#[cfg(test)]
+mod test_helpers {
+    use tari_ootle_p2p::PeerAddress;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+    /// Opens a store with the production options, so migrations run against the same prefix extractor as a real node.
+    pub fn open_store(tmp: &tempfile::TempDir) -> RocksDbStateStore<PeerAddress> {
+        RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap()
+    }
+}
 
 pub fn migrate<TAddr: NodeAddressable + 'static>(
     tx: &mut RocksDbStateStoreWriteTransaction<'_, TAddr>,
@@ -91,6 +99,7 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
             while version < CURRENT_VERSION {
                 match version {
                     0 => v1::migrate(tx)?,
+                    1 => v2::migrate(tx)?,
                     other => unreachable!("no migration defined for database version {other}"),
                 }
                 version += 1;

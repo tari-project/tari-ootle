@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::substate::{Substate, hash_substate};
-use tari_ootle_common_types::VersionedSubstateId;
+use tari_ootle_common_types::{VersionedSubstateId, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
@@ -15,6 +15,7 @@ use helpers::{
     build_substate_record,
     build_substate_value,
     commit_chain,
+    create_block_with_qc,
     create_chain,
     create_random_substate_id,
     create_rocksdb,
@@ -94,6 +95,96 @@ fn block_diffs_operations(db: impl StateStore) {
     tx.block_diffs_remove(&block_id9).unwrap();
     let res = tx.block_diffs_get(&block_id9).unwrap();
     assert_eq!(res.changes().len(), 0);
+
+    tx.rollback().unwrap();
+}
+
+#[test]
+fn block_diffs_are_scoped_to_the_queried_branch() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let chain = create_chain(10);
+    commit_chain(&mut tx, &chain);
+
+    // chain[8] is the last block shared by both branches: chain[9] extends it and `fork` is a sibling of chain[9].
+    let fork_point = chain[8].as_leaf();
+    let fork = create_block_with_qc(&fork_point);
+    fork.insert(&mut tx).unwrap();
+    tx.proposal_certificates_save(fork.justify()).unwrap();
+
+    let substate_id = create_random_substate_id();
+    let versioned_substate_id = VersionedSubstateId::new(substate_id.clone(), 0);
+    let value = build_substate_value(None);
+    tx.block_diffs_insert(fork.id(), &[
+        SubstateChange::Down {
+            id: versioned_substate_id.clone(),
+            shard: fork.shard_group().start(),
+        },
+        SubstateChange::Up {
+            id: substate_id.clone(),
+            shard: fork.shard_group().start(),
+            substate: Box::new(Substate::new(1, value)),
+        },
+    ])
+    .unwrap();
+
+    // The changes only exist on the forked-out branch, so they must not be visible from chain[9].
+    assert!(
+        tx.block_diffs_get_last_change_for_substate(chain[9].id(), &substate_id)
+            .optional()
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        tx.block_diffs_get_change_for_versioned_substate(chain[9].id(), &versioned_substate_id)
+            .optional()
+            .unwrap()
+            .is_none()
+    );
+
+    // ...and they are visible from the branch that contains them.
+    let change = tx
+        .block_diffs_get_last_change_for_substate(fork.id(), &substate_id)
+        .unwrap();
+    assert_eq!(change.versioned_substate_id().version(), 1);
+    assert!(change.is_up());
+
+    tx.rollback().unwrap();
+}
+
+#[test]
+fn block_diffs_last_change_prefers_the_down_of_a_version() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let chain = create_chain(10);
+    commit_chain(&mut tx, &chain);
+
+    let substate_id = create_random_substate_id();
+    let versioned_substate_id = VersionedSubstateId::new(substate_id.clone(), 0);
+    let value = build_substate_value(None);
+    tx.block_diffs_insert(chain[8].id(), &[SubstateChange::Up {
+        id: substate_id.clone(),
+        shard: chain[8].shard_group().start(),
+        substate: Box::new(Substate::new(0, value)),
+    }])
+    .unwrap();
+    tx.block_diffs_insert(chain[9].id(), &[SubstateChange::Down {
+        id: versioned_substate_id.clone(),
+        shard: chain[9].shard_group().start(),
+    }])
+    .unwrap();
+
+    let change = tx
+        .block_diffs_get_last_change_for_substate(chain[9].id(), &substate_id)
+        .unwrap();
+    assert!(!change.is_up(), "Expected the DOWN of version 0 but got {change}");
+
+    let change = tx
+        .block_diffs_get_change_for_versioned_substate(chain[9].id(), &versioned_substate_id)
+        .unwrap();
+    assert!(!change.is_up(), "Expected the DOWN of version 0 but got {change}");
 
     tx.rollback().unwrap();
 }

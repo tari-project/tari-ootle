@@ -1096,7 +1096,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let mut max_change = None::<BlockDiffKey>;
         for result in iter {
             let key = result?;
-            if max_change.as_ref().is_none_or(|c| c.version < key.version) && applicable_blocks.contains(block_id) {
+            if !applicable_blocks.contains(&key.block_id) {
+                continue;
+            }
+            if max_change
+                .as_ref()
+                .is_none_or(|c| block_diff_change_order(c) < block_diff_change_order(&key))
+            {
                 max_change = Some(key);
             }
         }
@@ -1130,18 +1136,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let query = self.db().cf(block_diff::BySubstateIdQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::default(), versioned.substate_id());
 
+        let mut last_change = None::<BlockDiffKey>;
         for result in iter {
             let key = result?;
-            if versioned.version() == key.version && applicable_blocks.contains(block_id) {
-                let change = cf.get(&key, OPERATION)?;
-                return Ok(change);
+            if versioned.version() != key.version || !applicable_blocks.contains(&key.block_id) {
+                continue;
+            }
+            if last_change
+                .as_ref()
+                .is_none_or(|c| block_diff_change_order(c) < block_diff_change_order(&key))
+            {
+                last_change = Some(key);
             }
         }
 
-        Err(StorageError::NotFound {
+        let key = last_change.ok_or_else(|| StorageError::NotFound {
             item: "SubstateChange",
             key: format!("{versioned} in {block_id}"),
-        })
+        })?;
+
+        let change = cf.get(&key, OPERATION)?;
+        Ok(change)
     }
 
     fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &PcId) -> Result<ProposalCertificate, StorageError> {
@@ -2081,4 +2096,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
         Ok(count)
     }
+}
+
+/// Orders two changes for the same substate within a branch. A substate version is only ever DOWNed after it is UPed,
+/// so a DOWN supersedes the UP of the same version.
+fn block_diff_change_order(key: &BlockDiffKey) -> (u32, bool) {
+    (key.version, !key.is_up)
 }

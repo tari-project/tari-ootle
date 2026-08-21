@@ -1639,21 +1639,29 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             }
         }
 
-        // In the committed chain?
+        // In the committed chain? This index is ordered by (substate_id, transaction_id, block_id, height), not by
+        // height, so scan every committed lock for the substate and keep the one from the highest block (the latest).
         let commit_block = self.get_commit_block()?;
         let query = self.db().cf(substate_locks::BySubstateIdQuery)?;
-        let mut iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
-        let key = iter
-            .find_map(|r| match r {
-                Ok(key) if key.block_height <= commit_block.height => Some(Ok(key)),
-                Ok(_) => None,
-                Err(err) => Some(Err(err)),
-            })
-            .transpose()?
-            .ok_or_else(|| StorageError::NotFound {
-                item: "SubstateLock",
-                key: format!("for substate {substate_id} in block {leaf_block}"),
-            })?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
+        let mut latest: Option<substate_locks::SubstateLockKey> = None;
+        for result in iter {
+            let key = result?;
+            if key.block_height > commit_block.height {
+                continue;
+            }
+            let is_later = match &latest {
+                Some(prev) => prev.block_height < key.block_height,
+                None => true,
+            };
+            if is_later {
+                latest = Some(key);
+            }
+        }
+        let key = latest.ok_or_else(|| StorageError::NotFound {
+            item: "SubstateLock",
+            key: format!("for substate {substate_id} in block {leaf_block}"),
+        })?;
 
         let lock = cf.get(&key, OPERATION)?;
         Ok(lock)

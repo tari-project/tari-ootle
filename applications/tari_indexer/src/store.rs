@@ -269,6 +269,10 @@ pub trait IndexerStoreWriteTransaction {
     fn set_transaction_rejected(&mut self, transaction_id: TransactionId, reason: &str) -> Result<(), StorageError>;
     /// Clear a previous rejection, e.g. when the same transaction is later resubmitted successfully.
     fn clear_transaction_rejection(&mut self, transaction_id: TransactionId) -> Result<(), StorageError>;
+    /// Deletes up to `limit` transactions created before `cutoff`, oldest first, returning the number
+    /// deleted. Transaction receipts are keyed independently of this table and are never removed here,
+    /// so a pruned transaction still resolves to its receipt-backed outcome.
+    fn prune_transactions_before(&mut self, cutoff: PrimitiveDateTime, limit: usize) -> Result<usize, StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
     fn upsert_template_catalogue(
         &mut self,

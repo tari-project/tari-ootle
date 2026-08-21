@@ -362,6 +362,32 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
+    fn prune_transactions_before(&mut self, cutoff: PrimitiveDateTime, limit: usize) -> Result<usize, StorageError> {
+        const OPERATION: &str = "prune_transactions_before";
+        use crate::storage_sqlite::schema::transactions;
+
+        // Select then delete by id rather than issuing one open-ended range delete: SQLite holds a
+        // single database-wide write lock for the duration of a statement, so an unbounded delete
+        // over a large backlog would stall every other writer until it completes.
+        let ids = transactions::table
+            .select(transactions::id)
+            .filter(transactions::created_at.lt(cutoff))
+            .order_by(transactions::id.asc())
+            .limit(limit as i64)
+            .load::<i32>(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let num_deleted = diesel::delete(transactions::table.filter(transactions::id.eq_any(ids)))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(num_deleted)
+    }
+
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {
         const OPERATION: &str = "insert_or_ignore_epoch_checkpoint";
         use crate::storage_sqlite::schema::epoch_checkpoints;

@@ -129,6 +129,18 @@ pub struct IndexerConfig {
     /// round trips on hot substates. Requests for a specific version are unaffected.
     #[serde(default = "default_latest_substate_cache_ttl", with = "serializers::seconds")]
     pub latest_substate_cache_ttl: Duration,
+    /// How long a transaction submitted through this indexer is retained before it is pruned.
+    /// `None` (the default) retains them forever. Only the submitted transaction body and its
+    /// locally recorded rejection reason are pruned; transaction receipts synced from the network
+    /// are retained regardless, so a pruned transaction still resolves to its receipt-backed
+    /// outcome. Set this well above the longest a client may take to poll for a result: once
+    /// pruned, a transaction no longer appears in the recent-transactions listing or single
+    /// transaction lookup, and a mempool rejection reason recorded for it is lost.
+    #[serde(default, with = "serializers::optional_seconds")]
+    pub transaction_retention: Option<Duration>,
+    /// How often the transaction pruner runs. Only used when `transaction_retention` is set.
+    #[serde(default = "default_transaction_prune_interval", with = "serializers::seconds")]
+    pub transaction_prune_interval: Duration,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
     /// Template addresses to watch for component creation/update events.
@@ -154,6 +166,10 @@ fn default_latest_substate_cache_ttl() -> Duration {
     Duration::from_secs(2)
 }
 
+fn default_transaction_prune_interval() -> Duration {
+    Duration::from_secs(60 * 60)
+}
+
 fn default_watched_templates() -> Vec<TemplateAddress> {
     vec![tari_template_builtin::LIQUIDITY_POOL_TEMPLATE_ADDRESS]
 }
@@ -176,6 +192,8 @@ impl Default for IndexerConfig {
             sidechain_id: None,
             dry_run_cache_ttl: Duration::from_secs(10),
             latest_substate_cache_ttl: default_latest_substate_cache_ttl(),
+            transaction_retention: None,
+            transaction_prune_interval: default_transaction_prune_interval(),
             event_filters: vec![],
             watched_templates: default_watched_templates(),
             verify_substate_proofs: default_verify_substate_proofs(),

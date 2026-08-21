@@ -24,6 +24,7 @@ use std::{collections::HashSet, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{Context, anyhow};
 use libp2p::identity;
+use log::info;
 use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
@@ -84,7 +85,10 @@ use crate::{
     substate_manager::SubstateManager,
     template_manager::TemplateManager,
     transaction_manager::TransactionManager,
+    transaction_pruner::TransactionPruner,
 };
+
+const LOG_TARGET: &str = "tari::indexer::bootstrap";
 
 #[allow(clippy::too_many_lines)]
 pub async fn spawn_services(
@@ -283,6 +287,17 @@ pub async fn spawn_services(
         // The processor resolves the exhaust burn rate for the current epoch on each dry-run estimate.
         consensus_constants.clone(),
     )?;
+
+    if let Some(retention) = config.indexer.transaction_retention {
+        info!(
+            target: LOG_TARGET,
+            "🧹 Pruning transactions older than {:.0?} every {:.0?}",
+            retention,
+            config.indexer.transaction_prune_interval,
+        );
+        TransactionPruner::new(store.clone(), retention, config.indexer.transaction_prune_interval)
+            .spawn(shutdown.clone());
+    }
 
     let transaction_manager = TransactionManager::new(
         network_client.clone(),

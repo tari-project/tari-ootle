@@ -48,6 +48,7 @@ mod substate_file_cache;
 mod substate_manager;
 mod template_manager;
 mod transaction_manager;
+mod transaction_pruner;
 
 use std::{convert::Infallible, fs, future, future::Future};
 

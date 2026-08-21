@@ -33,6 +33,18 @@
 #block_scanning_interval=10
 #state_scanning_interval=60
 
+# How long, in seconds, a transaction submitted through this indexer is retained before it is pruned.
+# Unset (the default) retains them forever. Only the submitted transaction body and its locally recorded
+# mempool rejection reason are pruned; transaction receipts synced from the network are retained
+# regardless, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above
+# the longest a client may take to poll for a result — once pruned, a transaction no longer appears in
+# the recent-transactions listing or single transaction lookup.
+#transaction_retention = 604800
+
+# How often, in seconds, the transaction pruner runs. Only used when transaction_retention is set.
+# (default = 3600)
+#transaction_prune_interval = 3600
+
 [indexer.p2p]
 #enable_mdns = true
 # Run a rendezvous server on this node so other nodes can use it for peer discovery. This is the SERVER side only - the

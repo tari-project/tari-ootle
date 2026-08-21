@@ -65,6 +65,17 @@ Main indexer application settings.
 # State scanning interval in seconds (default: 60)
 #state_scanning_interval = 60
 
+# How long a transaction submitted through this indexer is retained, in seconds.
+# Unset (the default) retains transactions forever. Only the submitted transaction body and its
+# locally recorded mempool rejection reason are pruned; transaction receipts synced from the network
+# are retained regardless, so a pruned transaction still resolves to its receipt-backed outcome.
+# Set this well above the longest a client may take to poll for a result: once pruned, a transaction
+# no longer appears in the recent-transactions listing or single transaction lookup.
+#transaction_retention = 604800
+
+# How often the transaction pruner runs, in seconds. Only used when transaction_retention is set.
+#transaction_prune_interval = 3600
+
 # Sidechain ID to listen on (optional, hex string)
 #sidechain_id = "a1b2c3d4e5f6..."
 

@@ -380,4 +380,87 @@ mod tests {
             .unwrap();
         assert_eq!(entry.summary.as_ref().unwrap().total_fees_paid, 123);
     }
+
+    #[tokio::test]
+    async fn prune_transactions_removes_only_aged_rows_and_keeps_receipts() {
+        use std::ops::DerefMut;
+
+        use diesel::{ExpressionMethods, QueryDsl};
+        use tari_common_types::types::PrivateKey;
+        use tari_engine_types::{
+            fees::FeeReceiptBuilder,
+            transaction_receipt::{FinalizeOutcome, TransactionReceipt},
+        };
+        use tari_ootle_storage::time::{Duration as TimeDuration, OffsetDateTime, PrimitiveDateTime};
+        use tari_ootle_transaction::Transaction;
+
+        use crate::{storage_sqlite::serialization::serialize_hex, store::IndexerStoreWriteTransaction};
+
+        let (_dir, store) = temp_store().await;
+
+        let mut ids = Vec::new();
+        for i in 0..3u64 {
+            let transaction = Transaction::builder_localnet(Epoch(1)).build_and_seal(&PrivateKey::from(i));
+            ids.push(transaction.calculate_id());
+            store
+                .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction))
+                .await
+                .unwrap();
+        }
+
+        // A receipt for the transaction that is about to be pruned: it must survive.
+        let receipt = TransactionReceipt {
+            outcome: FinalizeOutcome::FeeIntentCommit,
+            diff_summary: Default::default(),
+            fee_withdrawals: [].into(),
+            events: [].into(),
+            fee_receipt: FeeReceiptBuilder::default().with_total_fees_paid(123).build(),
+            epoch: Epoch(1),
+            intent_commitment: Default::default(),
+        };
+        let receipt_address = ids[0].into_receipt_address();
+        store
+            .with_write_tx(move |tx| tx.batch_insert_transaction_receipts([(receipt_address, receipt)], &[]))
+            .await
+            .unwrap();
+
+        // Age the first two rows past the cutoff, leaving the third current.
+        let aged = ids[..2].iter().map(serialize_hex).collect::<Vec<_>>();
+        store
+            .with_write_tx(move |tx| {
+                use crate::storage_sqlite::schema::transactions;
+                diesel::update(transactions::table.filter(transactions::transaction_id.eq_any(aged)))
+                    .set(transactions::created_at.eq(now_offset_by(-TimeDuration::hours(2))))
+                    .execute(tx.deref_mut().connection())
+                    .map(|_| ())
+                    .map_err(|e| StorageError::general("age transactions", e))
+            })
+            .await
+            .unwrap();
+
+        let cutoff = now_offset_by(-TimeDuration::hours(1));
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 2);
+
+        let remaining = store
+            .with_read_tx(move |tx| tx.list_recent_transactions(None, 10))
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].transaction_id, ids[2]);
+
+        // The receipt of the pruned transaction is untouched.
+        store
+            .with_read_tx(move |tx| tx.get_transaction_receipt(&receipt_address))
+            .await
+            .unwrap();
+
+        fn now_offset_by(offset: TimeDuration) -> PrimitiveDateTime {
+            let at = OffsetDateTime::now_utc() + offset;
+            PrimitiveDateTime::new(at.date(), at.time())
+        }
+    }
 }

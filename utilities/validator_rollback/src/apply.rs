@@ -109,8 +109,6 @@ pub struct ApplyOutcome {
     pub dry_run: bool,
 }
 
-/// Run the rollback flow with explicit options. Returns a summary of what the audit
-/// footer recorded so callers can assert on impact.
 /// Refuses to operate on a database whose schema version is not the one this build encodes.
 ///
 /// The rollback primitives write through the current key encodings. Against an older database those encodings do not
@@ -144,6 +142,8 @@ fn check_schema_version(store: &RocksDbStateStore<PeerAddress>) -> anyhow::Resul
     }
 }
 
+/// Run the rollback flow with explicit options. Returns a summary of what the audit
+/// footer recorded so callers can assert on impact.
 pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     let target_epoch = Epoch(opts.target_epoch);
     let now_unix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();

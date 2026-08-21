@@ -135,10 +135,14 @@ pub struct IndexerConfig {
     /// are retained regardless, so a pruned transaction still resolves to its receipt-backed
     /// outcome. Set this well above the longest a client may take to poll for a result: once
     /// pruned, a transaction no longer appears in the recent-transactions listing or single
-    /// transaction lookup, and a mempool rejection reason recorded for it is lost.
+    /// transaction lookup, and a mempool rejection reason recorded for it is lost. Pruning bounds
+    /// database growth but does not return disk to the filesystem: SQLite reuses the freed pages
+    /// rather than shrinking the file.
     #[serde(default, with = "serializers::optional_seconds")]
     pub transaction_retention: Option<Duration>,
-    /// How often the transaction pruner runs. Only used when `transaction_retention` is set.
+    /// How long the transaction pruner idles between passes once it has nothing left to prune. While
+    /// a backlog remains it drains in back-to-back batches rather than waiting out this interval.
+    /// Only used when `transaction_retention` is set.
     #[serde(default = "default_transaction_prune_interval", with = "serializers::seconds")]
     pub transaction_prune_interval: Duration,
     /// The event filtering configuration

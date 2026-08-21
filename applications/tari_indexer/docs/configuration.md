@@ -71,9 +71,13 @@ Main indexer application settings.
 # are retained regardless, so a pruned transaction still resolves to its receipt-backed outcome.
 # Set this well above the longest a client may take to poll for a result: once pruned, a transaction
 # no longer appears in the recent-transactions listing or single transaction lookup.
+# Pruning bounds database growth but does not return disk to the filesystem: SQLite reuses the freed
+# pages rather than shrinking the file.
 #transaction_retention = 604800
 
-# How often the transaction pruner runs, in seconds. Only used when transaction_retention is set.
+# How long the transaction pruner idles between passes once it has nothing left to prune, in seconds.
+# While a backlog remains it drains in back-to-back batches rather than waiting out this interval.
+# Only used when transaction_retention is set.
 #transaction_prune_interval = 3600
 
 # Sidechain ID to listen on (optional, hex string)

@@ -70,7 +70,7 @@ use crate::{
         },
         serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
-    store::IndexerStoreReadTransaction,
+    store::{IndexerStoreReadTransaction, TransactionRejectionStatus},
     substate_manager::SubstateResponse,
 };
 
@@ -446,16 +446,24 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     ) -> Result<Vec<TransactionEntry>, StorageError> {
         use crate::storage_sqlite::schema::{transaction_receipts, transactions};
 
-        let start_id = if let Some(last_id) = last_transaction_id {
-            transactions::table
-                .select(transactions::id)
-                .filter(transactions::transaction_id.eq(serialize_hex(last_id)))
-                .first::<i32>(self.connection())
-                .map_err(|e| StorageError::QueryError {
-                    reason: format!("list_recent_transactions: {e}"),
-                })?
-        } else {
-            i32::MAX
+        let start_id = match last_transaction_id {
+            // The cursor row can be pruned between two pages of a backwards walk, in which case
+            // there is nothing older left to return.
+            Some(last_id) => {
+                let Some(id) = transactions::table
+                    .select(transactions::id)
+                    .filter(transactions::transaction_id.eq(serialize_hex(last_id)))
+                    .first::<i32>(self.connection())
+                    .optional()
+                    .map_err(|e| StorageError::QueryError {
+                        reason: format!("list_recent_transactions: {e}"),
+                    })?
+                else {
+                    return Ok(vec![]);
+                };
+                id
+            },
+            None => i32::MAX,
         };
 
         let rows = transactions::table
@@ -542,10 +550,10 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         .transpose()
     }
 
-    fn get_transaction_rejection(
+    fn get_transaction_rejection_status(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<Option<(String, PrimitiveDateTime)>, StorageError> {
+    ) -> Result<TransactionRejectionStatus, StorageError> {
         use crate::storage_sqlite::schema::transactions;
 
         let row = transactions::table
@@ -554,10 +562,17 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .first::<(Option<String>, Option<PrimitiveDateTime>)>(self.connection())
             .optional()
             .map_err(|e| StorageError::QueryError {
-                reason: format!("get_transaction_rejection: {e}"),
+                reason: format!("get_transaction_rejection_status: {e}"),
             })?;
 
-        Ok(row.and_then(|(reason, rejected_at)| reason.zip(rejected_at)))
+        let Some((reason, rejected_at)) = row else {
+            return Ok(TransactionRejectionStatus::NotStored);
+        };
+
+        match reason.zip(rejected_at) {
+            Some((details, rejected_at)) => Ok(TransactionRejectionStatus::Rejected { details, rejected_at }),
+            None => Ok(TransactionRejectionStatus::NotRejected),
+        }
     }
 
     fn list_transaction_receipts(

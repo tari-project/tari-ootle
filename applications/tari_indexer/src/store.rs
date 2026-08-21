@@ -136,12 +136,14 @@ pub trait IndexerStoreReadTransaction {
     /// was not submitted through this indexer.
     fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<Option<TransactionEntry>, StorageError>;
 
-    /// Fetch the mempool rejection reason and time for a transaction submitted through this indexer.
-    /// Returns `None` if the transaction is unknown or was not rejected.
-    fn get_transaction_rejection(
+    /// Fetch the locally recorded rejection state of a transaction. Distinguishing "no row" from
+    /// "row without a rejection" matters to callers that write a rejection: an `UPDATE` against a
+    /// row that does not exist succeeds while changing nothing, so a caller that cannot tell the
+    /// two apart would repeat that write on every read.
+    fn get_transaction_rejection_status(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<Option<(String, PrimitiveDateTime)>, StorageError>;
+    ) -> Result<TransactionRejectionStatus, StorageError>;
 
     // -------------------------------- Transaction Receipts -------------------------------- //
     fn list_transaction_receipts(
@@ -292,6 +294,21 @@ pub trait IndexerStoreWriteTransaction {
     /// `(epoch, shard_group)` (a bounded ring) so reads landing on a validator slightly behind the
     /// indexer's last probe still hit a trusted root. Idempotent on `(epoch, shard_group, root)`.
     fn upsert_verified_state_root(&mut self, root: &VerifiedStateRoot) -> Result<(), StorageError>;
+}
+
+/// The locally recorded rejection state of a transaction.
+#[derive(Debug, Clone)]
+pub enum TransactionRejectionStatus {
+    /// No row is stored for this transaction: it was never submitted through this indexer, or it has
+    /// aged past the configured retention window and been pruned.
+    NotStored,
+    /// A row is stored, with no rejection recorded against it.
+    NotRejected,
+    /// A row is stored with a recorded rejection.
+    Rejected {
+        details: String,
+        rejected_at: PrimitiveDateTime,
+    },
 }
 
 /// An event that was inserted into the database, with its assigned auto-increment ID.

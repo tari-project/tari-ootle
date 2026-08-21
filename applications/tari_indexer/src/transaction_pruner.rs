@@ -19,8 +19,9 @@ const LOG_TARGET: &str = "tari::indexer::transaction_pruner";
 /// database-wide write lock, so a large backlog is cleared over several passes rather than one stall.
 const BATCH_SIZE: usize = 500;
 
-/// Passes per run. Caps the work a single tick can do; whatever remains is picked up on the next tick.
-const MAX_BATCHES_PER_RUN: usize = 20;
+/// `tokio::time::interval` panics on a zero period, which would kill the pruner task, so a
+/// configured interval is raised to this floor.
+const MIN_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Periodically deletes transactions submitted through this indexer once they age past the retention
 /// window. Transaction receipts synced from the network are keyed independently and are untouched.
@@ -35,7 +36,7 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
         Self {
             store,
             retention,
-            interval,
+            interval: interval.max(MIN_INTERVAL),
         }
     }
 
@@ -43,6 +44,7 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
         task::spawn(async move {
             let mut interval = time::interval(self.interval);
             interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+            let mut num_pruned = 0;
 
             loop {
                 tokio::select! {
@@ -53,15 +55,32 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
                     // The first tick resolves immediately, clearing whatever aged out while the
                     // indexer was down.
                     _ = interval.tick() => {
-                        match self.prune().await {
-                            Ok(0) => {
-                                debug!(target: LOG_TARGET, "🧹 No transactions to prune.");
-                            },
-                            Ok(num_pruned) => {
-                                info!(target: LOG_TARGET, "🧹 Pruned {num_pruned} transaction(s) older than {:.0?}", self.retention);
+                        match self.prune_batch().await {
+                            Ok(deleted) => {
+                                num_pruned += deleted;
+                                if deleted == BATCH_SIZE {
+                                    // A full batch means more rows are already past the cutoff. Waiting a
+                                    // whole interval per batch would cap the drain rate at a fixed number
+                                    // of rows per interval, under which a busy indexer still grows without
+                                    // bound. Returning through `select!` between batches keeps shutdown
+                                    // responsive and lets other writers take the lock.
+                                    interval.reset_immediately();
+                                } else {
+                                    if num_pruned > 0 {
+                                        info!(
+                                            target: LOG_TARGET,
+                                            "🧹 Pruned {num_pruned} transaction(s) older than {:.0?}",
+                                            self.retention,
+                                        );
+                                    } else {
+                                        debug!(target: LOG_TARGET, "🧹 No transactions to prune.");
+                                    }
+                                    num_pruned = 0;
+                                }
                             },
                             Err(err) => {
                                 error!(target: LOG_TARGET, "⚠️ Transaction pruning failed: {err}");
+                                num_pruned = 0;
                             },
                         }
                     },
@@ -70,20 +89,11 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
         })
     }
 
-    async fn prune(&self) -> Result<usize, StorageError> {
+    async fn prune_batch(&self) -> Result<usize, StorageError> {
         let cutoff = cutoff_from(OffsetDateTime::now_utc(), self.retention);
-        let mut num_pruned = 0;
-        for _ in 0..MAX_BATCHES_PER_RUN {
-            let deleted = self
-                .store
-                .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, BATCH_SIZE))
-                .await?;
-            num_pruned += deleted;
-            if deleted < BATCH_SIZE {
-                break;
-            }
-        }
-        Ok(num_pruned)
+        self.store
+            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, BATCH_SIZE))
+            .await
     }
 }
 

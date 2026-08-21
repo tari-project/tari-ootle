@@ -31,7 +31,7 @@ use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClie
 
 use crate::{
     network_client::TariNetworkClient,
-    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
+    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction, TransactionRejectionStatus},
     transaction_manager::error::TransactionManagerError,
 };
 
@@ -129,12 +129,13 @@ where
                 if finalized.final_decision.is_abort() {
                     // Record the abort only once. Re-recording it on every read would needlessly
                     // take SQLite's single write lock and contend with other writers under load.
-                    let already_recorded = self
+                    // A pruned transaction has no row to annotate, and the write would update
+                    // nothing while still taking that lock on every read, so it is skipped too.
+                    let status = self
                         .store
-                        .with_read_tx(move |tx| tx.get_transaction_rejection(transaction_id))
-                        .await?
-                        .is_some();
-                    if !already_recorded {
+                        .with_read_tx(move |tx| tx.get_transaction_rejection_status(transaction_id))
+                        .await?;
+                    if matches!(status, TransactionRejectionStatus::NotRejected) {
                         let details = finalized
                             .abort_details
                             .clone()
@@ -159,11 +160,11 @@ where
             // (in which case the committee reports it as pending forever). Prefer a locally recorded
             // rejection over those outcomes.
             other => {
-                let rejection = self
+                let status = self
                     .store
-                    .with_read_tx(move |tx| tx.get_transaction_rejection(transaction_id))
+                    .with_read_tx(move |tx| tx.get_transaction_rejection_status(transaction_id))
                     .await?;
-                if let Some((details, rejected_at)) = rejection {
+                if let TransactionRejectionStatus::Rejected { details, rejected_at } = status {
                     return Ok(IndexerTransactionFinalizedResult::Rejected {
                         details,
                         rejected_time: rejected_at,

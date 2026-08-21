@@ -369,10 +369,15 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         // Select then delete by id rather than issuing one open-ended range delete: SQLite holds a
         // single database-wide write lock for the duration of a statement, so an unbounded delete
         // over a large backlog would stall every other writer until it completes.
+        //
+        // Ordering by `created_at` — the column the filter is on — is what lets SQLite serve the
+        // select from `transactions_created_at_idx` as a covering index. Ordering by any other
+        // column makes it a full table scan on every call, including the common call that finds
+        // nothing to prune.
         let ids = transactions::table
             .select(transactions::id)
             .filter(transactions::created_at.lt(cutoff))
-            .order_by(transactions::id.asc())
+            .order_by(transactions::created_at.asc())
             .limit(limit as i64)
             .load::<i32>(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;

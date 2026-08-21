@@ -463,4 +463,129 @@ mod tests {
             PrimitiveDateTime::new(at.date(), at.time())
         }
     }
+
+    /// The prune select must be servable from `transactions_created_at_idx`. Ordering it by any
+    /// column other than the one it filters on silently degrades it to a full table scan that runs
+    /// under the database-wide write lock, including on the common call that prunes nothing.
+    #[tokio::test]
+    async fn prune_select_is_served_by_the_created_at_index() {
+        #[derive(diesel::QueryableByName)]
+        struct QueryPlanRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            detail: String,
+        }
+
+        let (_dir, store) = temp_store().await;
+        let plan = store
+            .with_read_tx(|tx| {
+                sql_query(
+                    "explain query plan select id from transactions where created_at < '2026-01-01 00:00:00' order by \
+                     created_at asc limit 500",
+                )
+                .load::<QueryPlanRow>(tx.connection())
+                .map_err(|e| StorageError::general("explain query plan", e))
+            })
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.detail)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            plan.contains("transactions_created_at_idx"),
+            "prune select does not use the created_at index: {plan}"
+        );
+        assert!(
+            !plan.contains("SCAN transactions"),
+            "prune select falls back to a scan: {plan}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejection_status_distinguishes_a_pruned_row_from_an_unrejected_one() {
+        use tari_common_types::types::PrivateKey;
+        use tari_ootle_transaction::Transaction;
+
+        use crate::store::{IndexerStoreWriteTransaction, TransactionRejectionStatus};
+
+        let (_dir, store) = temp_store().await;
+
+        let transaction = Transaction::builder_localnet(Epoch(1)).build_and_seal(&PrivateKey::from(7u64));
+        let tx_id = transaction.calculate_id();
+
+        // Never submitted here.
+        let status = store
+            .with_read_tx(move |tx| tx.get_transaction_rejection_status(tx_id))
+            .await
+            .unwrap();
+        assert!(matches!(status, TransactionRejectionStatus::NotStored));
+
+        store
+            .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction))
+            .await
+            .unwrap();
+        let status = store
+            .with_read_tx(move |tx| tx.get_transaction_rejection_status(tx_id))
+            .await
+            .unwrap();
+        assert!(matches!(status, TransactionRejectionStatus::NotRejected));
+
+        store
+            .with_write_tx(move |tx| tx.set_transaction_rejected(tx_id, "nope"))
+            .await
+            .unwrap();
+        let status = store
+            .with_read_tx(move |tx| tx.get_transaction_rejection_status(tx_id))
+            .await
+            .unwrap();
+        assert!(matches!(status, TransactionRejectionStatus::Rejected { details, .. } if details == "nope"));
+
+        // Pruned rows report as unstored, so callers do not re-issue the rejection write forever.
+        let cutoff = {
+            let at = tari_ootle_storage::time::OffsetDateTime::now_utc() + tari_ootle_storage::time::Duration::hours(1);
+            tari_ootle_storage::time::PrimitiveDateTime::new(at.date(), at.time())
+        };
+        store
+            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, 100))
+            .await
+            .unwrap();
+        let status = store
+            .with_read_tx(move |tx| tx.get_transaction_rejection_status(tx_id))
+            .await
+            .unwrap();
+        assert!(matches!(status, TransactionRejectionStatus::NotStored));
+    }
+
+    #[tokio::test]
+    async fn recent_transactions_returns_an_empty_page_when_the_cursor_was_pruned() {
+        use tari_common_types::types::PrivateKey;
+        use tari_ootle_transaction::Transaction;
+
+        use crate::store::IndexerStoreWriteTransaction;
+
+        let (_dir, store) = temp_store().await;
+
+        let transaction = Transaction::builder_localnet(Epoch(1)).build_and_seal(&PrivateKey::from(11u64));
+        let cursor = transaction.calculate_id();
+        store
+            .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction))
+            .await
+            .unwrap();
+
+        let cutoff = {
+            let at = tari_ootle_storage::time::OffsetDateTime::now_utc() + tari_ootle_storage::time::Duration::hours(1);
+            tari_ootle_storage::time::PrimitiveDateTime::new(at.date(), at.time())
+        };
+        store
+            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, 100))
+            .await
+            .unwrap();
+
+        let page = store
+            .with_read_tx(move |tx| tx.list_recent_transactions(Some(cursor), 10))
+            .await
+            .unwrap();
+        assert!(page.is_empty());
+    }
 }

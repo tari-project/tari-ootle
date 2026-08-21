@@ -26,6 +26,8 @@ impl TimeoutVote {
 }
 
 impl Vote for TimeoutVote {
+    type AggregationKey = ();
+
     fn epoch(&self) -> Epoch {
         self.epoch
     }
@@ -37,6 +39,8 @@ impl Vote for TimeoutVote {
     fn decision(&self) -> QuorumDecision {
         QuorumDecision::Accept
     }
+
+    fn aggregation_key(&self) {}
 }
 
 impl ToSignatureMessage for TimeoutVote {

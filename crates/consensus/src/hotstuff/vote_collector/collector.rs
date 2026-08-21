@@ -41,10 +41,11 @@ impl<V: Vote + Display> VoteCollector<V> {
         access_mut.clear_votes_before(current_epoch, current_height);
         let epoch = vote.epoch();
         let height = vote.height();
+        let agg_key = vote.aggregation_key();
         let vote_display = vote.to_string();
         access_mut.save_vote(vote)?;
 
-        let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, committee);
+        let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, &agg_key, committee);
 
         let quorum_threshold = committee.quorum_threshold();
         let Some(quorum_decision) = threshold_decision.decision else {
@@ -82,7 +83,7 @@ impl<V: Vote + Display> VoteCollector<V> {
             quorum_threshold
         );
 
-        let votes = access_mut.take_votes_with_decision(epoch, height, quorum_decision);
+        let votes = access_mut.take_votes_with_decision(epoch, height, &agg_key, quorum_decision);
 
         Ok(votes.map(|v| (v, quorum_decision)))
     }
@@ -163,12 +164,18 @@ impl<V: Vote + Display> VoteStoreInner<V> {
         &mut self,
         epoch: Epoch,
         height: NodeHeight,
+        agg_key: &V::AggregationKey,
         decision: QuorumDecision,
     ) -> Option<Vec<V>> {
         let epoch_height = (epoch, height);
-        // Take all votes, discarding any other votes for this epoch/height that do not match the decision
+        // Once a block is decided at this height, votes for any losing fork at the same height can be dropped too.
         let votes = self.store.remove(&epoch_height)?;
-        Some(votes.into_values().filter(|vote| vote.decision() == decision).collect())
+        Some(
+            votes
+                .into_values()
+                .filter(|vote| vote.decision() == decision && vote.aggregation_key() == *agg_key)
+                .collect(),
+        )
     }
 
     fn votes_for_key_iter(&self, epoch: Epoch, height: NodeHeight) -> Option<impl Iterator<Item = &V>> {
@@ -181,6 +188,7 @@ impl<V: Vote + Display> VoteStoreInner<V> {
         &self,
         epoch: Epoch,
         height: NodeHeight,
+        agg_key: &V::AggregationKey,
         committee: &Committee<TAddr>,
     ) -> ThresholdDecision {
         let Some(votes_iter) = self.votes_for_key_iter(epoch, height) else {
@@ -199,7 +207,7 @@ impl<V: Vote + Display> VoteStoreInner<V> {
         };
         let mut count_accept = VotePower::zero();
         let mut count_reject = VotePower::zero();
-        for vote in votes_iter {
+        for vote in votes_iter.filter(|vote| vote.aggregation_key() == *agg_key) {
             let power = committee.get_power_by_public_key(vote.public_key()).unwrap_or_default();
             match vote.decision() {
                 QuorumDecision::Accept => count_accept += power,
@@ -259,6 +267,7 @@ pub struct VoteEquivocationDetected<V: Vote> {
 mod tests {
     use tari_common_types::types::FixedHash;
     use tari_consensus_types::{SignedMessage, ToSignatureMessage};
+    use tari_ootle_common_types::committee::CommitteeMember;
     use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 
     use super::*;
@@ -266,10 +275,12 @@ mod tests {
     const ZERO_SIG: SchnorrSignatureBytes = SchnorrSignatureBytes::zero();
     const ZERO_PUBKEY: RistrettoPublicKeyBytes = RistrettoPublicKeyBytes::zero();
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     struct TestVote {
         epoch: Epoch,
         height: NodeHeight,
+        block_id: FixedHash,
+        decision: QuorumDecision,
         sig: SchnorrSignatureBytes,
         public_key: RistrettoPublicKeyBytes,
     }
@@ -297,6 +308,8 @@ mod tests {
     }
 
     impl Vote for TestVote {
+        type AggregationKey = FixedHash;
+
         fn epoch(&self) -> Epoch {
             self.epoch
         }
@@ -306,8 +319,29 @@ mod tests {
         }
 
         fn decision(&self) -> QuorumDecision {
-            QuorumDecision::Accept
+            self.decision
         }
+
+        fn aggregation_key(&self) -> FixedHash {
+            self.block_id
+        }
+    }
+
+    fn pubkey(byte: u8) -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from_bytes(&[byte; 32]).unwrap()
+    }
+
+    fn committee(public_keys: &[RistrettoPublicKeyBytes]) -> Committee<RistrettoPublicKeyBytes> {
+        Committee::new(
+            public_keys
+                .iter()
+                .map(|pk| CommitteeMember {
+                    address: *pk,
+                    public_key: *pk,
+                    vote_power: VotePower::of(1),
+                })
+                .collect(),
+        )
     }
 
     #[test]
@@ -316,6 +350,8 @@ mod tests {
         let vote = TestVote {
             epoch: Epoch(1),
             height: NodeHeight(1),
+            block_id: FixedHash::zero(),
+            decision: QuorumDecision::Accept,
             sig: ZERO_SIG,
             public_key: ZERO_PUBKEY,
         };
@@ -330,6 +366,8 @@ mod tests {
         let vote = TestVote {
             epoch: Epoch(1),
             height: NodeHeight(1),
+            block_id: FixedHash::zero(),
+            decision: QuorumDecision::Accept,
             sig: ZERO_SIG,
             public_key: ZERO_PUBKEY,
         };
@@ -343,11 +381,59 @@ mod tests {
         let vote = TestVote {
             epoch: Epoch(1),
             height: NodeHeight(1),
+            block_id: FixedHash::zero(),
+            decision: QuorumDecision::Accept,
             public_key: ZERO_PUBKEY,
             sig: SchnorrSignatureBytes::new([1u8; 32].into(), Scalar32Bytes::zero()),
         };
 
         // Try to save the a different vote from the same public key and epoch/height - should error
         store.save_vote(vote).unwrap_err();
+    }
+
+    #[test]
+    fn a_foreign_block_vote_does_not_count_towards_a_block_quorum() {
+        let mut store = VoteStoreInner::<TestVote>::new();
+        let epoch = Epoch(1);
+        let height = NodeHeight(1);
+
+        let block_a = FixedHash::new([0xAu8; 32]);
+        let block_phantom = FixedHash::new([0xBu8; 32]);
+
+        let honest1 = pubkey(1);
+        let honest2 = pubkey(2);
+        let byzantine = pubkey(3);
+        let absent = pubkey(4);
+
+        // n = 4, quorum_threshold = 3
+        let committee = committee(&[honest1, honest2, byzantine, absent]);
+        assert_eq!(committee.quorum_threshold(), VotePower::of(3));
+
+        let mk = |pk, block_id| TestVote {
+            epoch,
+            height,
+            block_id,
+            decision: QuorumDecision::Accept,
+            sig: ZERO_SIG,
+            public_key: pk,
+        };
+
+        // Two honest Accept votes for block A plus one Byzantine Accept vote for a phantom block, all at the same
+        // (epoch, height).
+        store.save_vote(mk(honest1, block_a)).unwrap();
+        store.save_vote(mk(honest2, block_a)).unwrap();
+        store.save_vote(mk(byzantine, block_phantom)).unwrap();
+
+        // Block A only has 2 of the required 3 power and does not reach a quorum.
+        let decision_a = store.calculate_threshold_decision(epoch, height, &block_a, &committee);
+        assert_eq!(decision_a.decision, None);
+        assert_eq!(decision_a.total_power, VotePower::of(2));
+
+        // The Byzantine phantom-block vote never folds into block A's votes.
+        let votes_a = store
+            .take_votes_with_decision(epoch, height, &block_a, QuorumDecision::Accept)
+            .unwrap();
+        assert_eq!(votes_a.len(), 2);
+        assert!(votes_a.iter().all(|v| v.block_id == block_a));
     }
 }

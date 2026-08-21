@@ -32,6 +32,8 @@ pub struct ProposalVote {
 }
 
 impl Vote for ProposalVote {
+    type AggregationKey = BlockId;
+
     fn epoch(&self) -> Epoch {
         self.epoch
     }
@@ -42,6 +44,10 @@ impl Vote for ProposalVote {
 
     fn decision(&self) -> QuorumDecision {
         self.decision
+    }
+
+    fn aggregation_key(&self) -> BlockId {
+        self.block_id
     }
 }
 

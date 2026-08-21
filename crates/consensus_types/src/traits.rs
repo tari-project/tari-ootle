@@ -16,7 +16,12 @@ pub trait SignedMessage: ToSignatureMessage {
 }
 
 pub trait Vote: SignedMessage {
+    /// Identifies which votes aggregate together within an (epoch, height) bucket.
+    /// Proposal votes aggregate per voted block; timeout votes aggregate per (epoch, height).
+    type AggregationKey: PartialEq;
+
     fn epoch(&self) -> Epoch;
     fn height(&self) -> NodeHeight;
     fn decision(&self) -> QuorumDecision;
+    fn aggregation_key(&self) -> Self::AggregationKey;
 }

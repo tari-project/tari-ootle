@@ -56,17 +56,6 @@ use crate::genesis_state::create_genesis_state;
 
 const LOG_TARGET: &str = "tari::validator::migrations";
 
-#[cfg(test)]
-mod test_helpers {
-    use tari_ootle_p2p::PeerAddress;
-    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
-
-    /// Opens a store with the production options, so migrations run against the same prefix extractor as a real node.
-    pub fn open_store(tmp: &tempfile::TempDir) -> RocksDbStateStore<PeerAddress> {
-        RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap()
-    }
-}
-
 pub fn migrate<TAddr: NodeAddressable + 'static>(
     tx: &mut RocksDbStateStoreWriteTransaction<'_, TAddr>,
     network: Network,
@@ -124,4 +113,15 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test_helpers {
+    use tari_ootle_p2p::PeerAddress;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+    /// Opens a store with the production options, so migrations run against the same prefix extractor as a real node.
+    pub fn open_store(tmp: &tempfile::TempDir) -> RocksDbStateStore<PeerAddress> {
+        RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap()
+    }
 }

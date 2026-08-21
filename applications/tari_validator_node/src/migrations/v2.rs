@@ -87,7 +87,7 @@ mod tests {
             })
             .unwrap();
 
-        store.with_write_tx(|tx| migrate(tx)).unwrap();
+        store.with_write_tx(migrate).unwrap();
 
         store
             .with_write_tx(|tx| {

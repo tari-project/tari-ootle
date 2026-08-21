@@ -88,7 +88,7 @@ mod tests {
             })
             .unwrap();
 
-        store.with_write_tx(|tx| migrate(tx)).unwrap();
+        store.with_write_tx(migrate).unwrap();
 
         store
             .with_write_tx(|tx| {
@@ -125,7 +125,7 @@ mod tests {
             })
             .unwrap();
 
-        store.with_write_tx(|tx| migrate(tx)).unwrap();
+        store.with_write_tx(migrate).unwrap();
 
         store
             .with_write_tx(|tx| {
@@ -163,9 +163,9 @@ mod tests {
             })
             .unwrap();
 
-        store.with_write_tx(|tx| migrate(tx)).unwrap();
+        store.with_write_tx(migrate).unwrap();
         // A second run has nothing left below the bound to rewrite, so the entry keeps its single prefix.
-        store.with_write_tx(|tx| migrate(tx)).unwrap();
+        store.with_write_tx(migrate).unwrap();
 
         store
             .with_write_tx(|tx| {

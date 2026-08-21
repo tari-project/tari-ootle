@@ -48,6 +48,7 @@ use crate::{
         VaultInvokeArg,
         VaultWithdrawArg,
     },
+    error_variants::ERR_ENGINE_DECODE_FAIL,
     models::{Bucket, NonFungible, Proof, ProofAuth},
     resource::ResourceManager,
     types::Amount,
@@ -165,7 +166,7 @@ impl Vault {
             args: invoke_args![VaultWithdrawArg::Fungible { amount: amount.into() }],
         });
 
-        resp.decode().expect("failed to decode Bucket")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Withdraw a single non-fungible token from the vault into a new bucket.
@@ -185,7 +186,7 @@ impl Vault {
             }],
         });
 
-        resp.decode().expect("failed to decode Bucket")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Withdraws confidential resources from the vault into a new bucket.
@@ -207,7 +208,7 @@ impl Vault {
             args: invoke_args![VaultWithdrawArg::Confidential { proof: Box::new(proof) }],
         });
 
-        resp.decode().expect("failed to decode Bucket")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Withdraws all fungible, non-fungible and revealed confidential amounts from the vault into a new bucket.
@@ -229,7 +230,7 @@ impl Vault {
             args: invoke_args![],
         });
 
-        resp.decode().expect("failed to decode Amount")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Returns how many tokens are locked (unspendable) in this vault.
@@ -240,7 +241,7 @@ impl Vault {
             args: invoke_args![],
         });
 
-        resp.decode().expect("failed to decode Amount")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Returns how many confidential outputs this vault holds.
@@ -252,7 +253,7 @@ impl Vault {
             args: invoke_args![],
         });
 
-        resp.decode().expect("failed to decode commitment count")
+        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Returns the IDs of all the non-fungibles contained in this vault.

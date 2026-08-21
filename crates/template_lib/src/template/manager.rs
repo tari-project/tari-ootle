@@ -23,7 +23,10 @@ use minicbor::Decode;
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
 use tari_template_lib_types::{TemplateAddress, bytes::Bytes};
 
-use crate::args::{CallAction, CallFunctionArg, CallInvokeArg, InvokeResult};
+use crate::{
+    args::{CallAction, CallFunctionArg, CallInvokeArg, InvokeResult},
+    error_variants::ERR_ENGINE_DECODE_FAIL,
+};
 
 /// Utility to allow template code to call functions from other templates (i.e., composability)
 #[derive(Debug)]
@@ -53,9 +56,7 @@ impl TemplateManager {
             args: invoke_args![arg],
         });
 
-        result
-            .decode()
-            .expect("failed to decode template function call result from engine")
+        result.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Calls a function in the template. The invoked function must return a unit type or a panic will occur.

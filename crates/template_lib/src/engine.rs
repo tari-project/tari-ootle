@@ -28,6 +28,7 @@ use tari_template_lib_types::{ComponentAddress, LogLevel, OwnerRule, access_rule
 use crate::{
     args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg, EmitLogArg, InvokeResult},
     component::ComponentManager,
+    error_variants::ERR_ENGINE_DECODE_FAIL,
     models::ComponentAddressAllocation,
 };
 
@@ -64,7 +65,7 @@ impl TariEngine {
             }],
         });
 
-        result.decode().expect("failed to decode component address")
+        result.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     pub fn emit_log<T: Into<String>>(&self, level: LogLevel, msg: T) {

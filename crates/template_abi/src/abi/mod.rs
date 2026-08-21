@@ -66,13 +66,13 @@ where
     let input_ptr = encoded_input.as_mut_ptr();
     let result_ptr = unsafe { tari_engine(op.as_i32(), input_ptr, len) };
     if result_ptr.is_null() {
-        panic!("ENGCALL_NULL op {:?}", op);
+        panic!("ENGCALL_NULL op {}", op.as_i32());
     }
     // SAFETY: The pointer returned by `tari_engine` is valid and points to a length-prefixed block of memory allocated
     // by `tari_alloc`.
     let owned = unsafe { OwnedData::owned_from_ptr(result_ptr) };
     // Decode the output data, skipping the length prefix
-    decode_exact(owned.data()).unwrap_or_else(|e| panic!("DECODEFAIL op {:?} input len: {}: {}", op, len, e))
+    decode_exact(owned.data()).unwrap_or_else(|e| panic!("DECODEFAIL op {} input len: {}: {}", op.as_i32(), len, e))
 }
 
 /// Takes ownership of a length-prefixed block of memory allocated by `tari_alloc` and provides access to the data.

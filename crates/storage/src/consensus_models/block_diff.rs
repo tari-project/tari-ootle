@@ -74,6 +74,9 @@ impl BlockDiff {
         tx.block_diffs_remove(&self.block_id)
     }
 
+    /// Returns the last change to `substate_id` recorded by the branch ending at `block_id`, or `NotFound` if the
+    /// branch contains no change for it. Changes recorded by blocks outside that branch are never returned, and a
+    /// DOWN supersedes the UP of the same version.
     pub fn get_last_change_for_substate<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         block_id: &BlockId,
@@ -82,6 +85,9 @@ impl BlockDiff {
         tx.block_diffs_get_last_change_for_substate(block_id, substate_id)
     }
 
+    /// Returns the last change to the given substate version recorded by the branch ending at `block_id`, or
+    /// `NotFound` if the branch contains no change for it. Selection follows the same rules as
+    /// [`Self::get_last_change_for_substate`], restricted to the requested version.
     pub fn get_for_versioned_substate<'a, TTx: StateStoreReadTransaction, T: Into<VersionedSubstateIdRef<'a>>>(
         tx: &TTx,
         block_id: &BlockId,

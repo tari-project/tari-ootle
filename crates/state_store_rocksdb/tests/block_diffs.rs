@@ -150,6 +150,12 @@ fn block_diffs_are_scoped_to_the_queried_branch() {
     assert_eq!(change.versioned_substate_id().version(), 1);
     assert!(change.is_up());
 
+    let change = tx
+        .block_diffs_get_change_for_versioned_substate(fork.id(), &versioned_substate_id)
+        .unwrap();
+    assert_eq!(change.versioned_substate_id().version(), 0);
+    assert!(!change.is_up());
+
     tx.rollback().unwrap();
 }
 

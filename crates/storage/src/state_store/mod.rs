@@ -204,11 +204,20 @@ pub trait StateStoreReadTransaction: Sized {
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError>;
 
+    /// Returns the last change to `substate_id` recorded by the branch ending at `block_id`, or `NotFound` if the
+    /// branch contains no change for it.
+    ///
+    /// Implementations must only consider changes recorded by blocks in that branch: a change from a forked-out
+    /// sibling or any other subtree must never be returned. A substate version is only ever DOWNed after it is UPed,
+    /// so where a branch both UPs and DOWNs the same version, the DOWN is the last change.
     fn block_diffs_get_last_change_for_substate(
         &self,
         block_id: &BlockId,
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError>;
+    /// Returns the last change to the given substate version recorded by the branch ending at `block_id`, or
+    /// `NotFound` if the branch contains no change for it. Selection follows the same rules as
+    /// [`Self::block_diffs_get_last_change_for_substate`], restricted to the requested version.
     fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
         block_id: &BlockId,

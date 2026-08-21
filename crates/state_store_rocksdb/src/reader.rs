@@ -349,6 +349,44 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
         Ok(blocks)
     }
 
+    /// Returns the key of the last change to `substate_id` on the branch ending at `end_block`, or `None` if the
+    /// branch contains no change for it. If `version` is given, only changes to that version are considered.
+    ///
+    /// Changes recorded by blocks that are not in the branch (forked-out siblings, other subtrees) are never
+    /// considered. A substate version is only ever DOWNed after it is UPed, so a DOWN supersedes the UP of the same
+    /// version.
+    fn block_diffs_select_last_change(
+        &self,
+        end_block: &BlockId,
+        substate_id: &SubstateId,
+        version: Option<u32>,
+    ) -> Result<Option<BlockDiffKey>, RocksDbStorageError> {
+        let applicable_blocks = self.get_pending_chain_until(end_block)?;
+
+        let query = self.db().cf(block_diff::BySubstateIdQuery)?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
+
+        let mut last_change = None::<BlockDiffKey>;
+        for result in iter {
+            let key = result?;
+            if version.is_some_and(|v| v != key.version) || !applicable_blocks.contains(&key.block_id) {
+                continue;
+            }
+            // A DOWN is the last change a version can have, so with the version fixed there is nothing left to find.
+            if version.is_some() && !key.is_up {
+                return Ok(Some(key));
+            }
+            if last_change
+                .as_ref()
+                .is_none_or(|c| block_diff_change_order(c) < block_diff_change_order(&key))
+            {
+                last_change = Some(key);
+            }
+        }
+
+        Ok(last_change)
+    }
+
     pub fn get_commit_block(&self) -> Result<CommitBlock, RocksDbStorageError> {
         let cf = self.db().cf(CommitBlockCf)?;
         let value = cf.get_by_default_key("get_commit_block")?;
@@ -1087,32 +1125,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             });
         }
 
-        let applicable_blocks = self.get_pending_chain_until(block_id)?;
+        let key = self
+            .block_diffs_select_last_change(block_id, substate_id, None)?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "SubstateChange",
+                key: format!("{substate_id} in {block_id}"),
+            })?;
 
-        let cf = self.db().cf(BlockDiffCf)?;
-        let query = self.db().cf(block_diff::BySubstateIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
-
-        let mut max_change = None::<BlockDiffKey>;
-        for result in iter {
-            let key = result?;
-            if !applicable_blocks.contains(&key.block_id) {
-                continue;
-            }
-            if max_change
-                .as_ref()
-                .is_none_or(|c| block_diff_change_order(c) < block_diff_change_order(&key))
-            {
-                max_change = Some(key);
-            }
-        }
-
-        let key = max_change.ok_or_else(|| StorageError::NotFound {
-            item: "SubstateChange",
-            key: format!("{substate_id} in {block_id}"),
-        })?;
-
-        let change = cf.get(&key, OPERATION)?;
+        let change = self.db().cf(BlockDiffCf)?.get(&key, OPERATION)?;
         Ok(change)
     }
 
@@ -1130,32 +1150,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
         let versioned = substate_id.into();
 
-        let applicable_blocks = self.get_pending_chain_until(block_id)?;
+        let key = self
+            .block_diffs_select_last_change(block_id, versioned.substate_id(), Some(versioned.version()))?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "SubstateChange",
+                key: format!("{versioned} in {block_id}"),
+            })?;
 
-        let cf = self.db().cf(BlockDiffCf)?;
-        let query = self.db().cf(block_diff::BySubstateIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::default(), versioned.substate_id());
-
-        let mut last_change = None::<BlockDiffKey>;
-        for result in iter {
-            let key = result?;
-            if versioned.version() != key.version || !applicable_blocks.contains(&key.block_id) {
-                continue;
-            }
-            if last_change
-                .as_ref()
-                .is_none_or(|c| block_diff_change_order(c) < block_diff_change_order(&key))
-            {
-                last_change = Some(key);
-            }
-        }
-
-        let key = last_change.ok_or_else(|| StorageError::NotFound {
-            item: "SubstateChange",
-            key: format!("{versioned} in {block_id}"),
-        })?;
-
-        let change = cf.get(&key, OPERATION)?;
+        let change = self.db().cf(BlockDiffCf)?.get(&key, OPERATION)?;
         Ok(change)
     }
 

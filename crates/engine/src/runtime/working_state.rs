@@ -1175,6 +1175,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let current_template = self.current_template().ok().copied();
         self.address_allocations
             .insert(id, AllocatedAddress::new(address.into(), current_template));
+        self.current_call_scope_mut()?.add_address_allocation_to_scope(id);
         Ok(id)
     }
 
@@ -1201,16 +1202,23 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn use_allocated_address(&mut self, id: AddressAllocationId) -> Result<AllocatedAddress, RuntimeError> {
+        if !self.current_call_scope()?.is_address_allocation_in_scope(id) {
+            return Err(RuntimeError::AddressAllocationNotInScope { id });
+        }
         let alloc_addr = self
             .address_allocations
             .remove(&id)
             .ok_or(RuntimeError::AddressAllocationNotFound { id })?;
+        self.current_call_scope_mut()?.remove_address_allocation_from_scope(id);
         self.used_address_allocations
             .insert(id, alloc_addr.substate_id().clone());
         Ok(alloc_addr)
     }
 
     pub fn get_allocated_address(&self, id: AddressAllocationId) -> Result<&AllocatedAddress, RuntimeError> {
+        if !self.current_call_scope()?.is_address_allocation_in_scope(id) {
+            return Err(RuntimeError::AddressAllocationNotInScope { id });
+        }
         self.address_allocations
             .get(&id)
             .ok_or(RuntimeError::AddressAllocationNotFound { id })
@@ -1773,7 +1781,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
             }
         }
-        // TODO: should we scope address allocations?
+        for allocation in value.component_address_allocations() {
+            if !scope.is_address_allocation_in_scope(allocation.id()) {
+                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
+            }
+        }
+        for allocation in value.resource_address_allocations() {
+            if !scope.is_address_allocation_in_scope(allocation.id()) {
+                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
+            }
+        }
 
         Ok(())
     }

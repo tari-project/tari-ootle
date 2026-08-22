@@ -407,6 +407,18 @@ impl FromIterator<IndexedWellKnownTypes> for IndexedWellKnownTypes {
             indexed
                 .unclaimed_confidential_output_address
                 .extend(value.unclaimed_confidential_output_address);
+            indexed
+                .published_template_addresses
+                .extend(value.published_template_addresses);
+            indexed.validator_node_fee_pools.extend(value.validator_node_fee_pools);
+            indexed.utxos.extend(value.utxos);
+            indexed
+                .component_address_allocations
+                .extend(value.component_address_allocations);
+            indexed
+                .resource_address_allocations
+                .extend(value.resource_address_allocations);
+            indexed.confidential_outputs.extend(value.confidential_outputs);
         }
         indexed
     }

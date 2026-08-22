@@ -6,7 +6,7 @@ use std::fmt::Display;
 use indexmap::IndexSet;
 use tari_engine_types::{indexed_value::IndexedWellKnownTypes, lock::LockId, substate::SubstateId};
 use tari_template_lib::{
-    models::{BucketId, ProofId},
+    models::{AddressAllocationId, BucketId, ProofId},
     types::{
         EntityId,
         TemplateAddress,
@@ -28,6 +28,7 @@ pub struct CallScope {
     component_lock: Option<LockedSubstate>,
     lock_scope: IndexSet<LockId>,
     bucket_scope: IndexSet<BucketId>,
+    address_allocation_scope: IndexSet<AddressAllocationId>,
     auth_scope: AuthorizationScope,
 }
 
@@ -41,6 +42,7 @@ impl CallScope {
             component_lock: None,
             lock_scope: IndexSet::new(),
             bucket_scope: IndexSet::new(),
+            address_allocation_scope: IndexSet::new(),
             auth_scope: AuthorizationScope::empty(),
         }
     }
@@ -100,6 +102,18 @@ impl CallScope {
 
     pub fn remove_bucket_from_scope(&mut self, bucket_id: BucketId) -> bool {
         self.bucket_scope.swap_remove(&bucket_id)
+    }
+
+    pub fn is_address_allocation_in_scope(&self, id: AddressAllocationId) -> bool {
+        self.address_allocation_scope.contains(&id)
+    }
+
+    pub fn add_address_allocation_to_scope(&mut self, id: AddressAllocationId) {
+        self.address_allocation_scope.insert(id);
+    }
+
+    pub fn remove_address_allocation_from_scope(&mut self, id: AddressAllocationId) -> bool {
+        self.address_allocation_scope.swap_remove(&id)
     }
 
     pub fn add_proof_to_scope(&mut self, proof_id: ProofId) {
@@ -194,6 +208,7 @@ impl CallScope {
             self.orphans.swap_remove(owned);
         }
         self.bucket_scope.extend(child.bucket_scope);
+        self.address_allocation_scope.extend(child.address_allocation_scope);
         self.auth_scope.update_from_child(child.auth_scope);
     }
 
@@ -221,6 +236,12 @@ impl CallScope {
         }
         for proof_id in values.proof_ids() {
             self.add_proof_to_scope(*proof_id);
+        }
+        for allocation in values.component_address_allocations() {
+            self.add_address_allocation_to_scope(allocation.id());
+        }
+        for allocation in values.resource_address_allocations() {
+            self.add_address_allocation_to_scope(allocation.id());
         }
     }
 }
@@ -270,6 +291,12 @@ impl Display for CallScope {
             writeln!(f, "Buckets:")?;
             for bucket in &self.bucket_scope {
                 writeln!(f, "  {}", bucket)?;
+            }
+        }
+        if !self.address_allocation_scope.is_empty() {
+            writeln!(f, "Address allocations:")?;
+            for id in &self.address_allocation_scope {
+                writeln!(f, "  {}", id)?;
             }
         }
         Ok(())

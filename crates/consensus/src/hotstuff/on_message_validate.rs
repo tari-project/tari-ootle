@@ -126,6 +126,16 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     message: HotstuffMessage::MissingTransactionsResponse(msg),
                 })
             },
+            HotstuffMessage::MissingTransactionsRequest(msg) => {
+                if msg.transactions.len() > 1000 {
+                    warn!(target: LOG_TARGET, "⚠️Peer requested more than the maximum amount of transactions. Discarding message");
+                    return Ok(MessageValidationResult::Discard);
+                }
+                Ok(MessageValidationResult::Ready {
+                    from,
+                    message: HotstuffMessage::MissingTransactionsRequest(msg),
+                })
+            },
             msg @ HotstuffMessage::NewView(_) |
             msg @ HotstuffMessage::Vote(_) |
             msg @ HotstuffMessage::CatchUpSyncRequest(_) |

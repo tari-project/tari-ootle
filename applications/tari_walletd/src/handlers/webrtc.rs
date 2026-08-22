@@ -28,7 +28,7 @@ pub fn handle_start(
     addresses: (SocketAddr, SocketAddr),
 ) -> JrpcResult {
     let answer_id = value.get_answer_id();
-    context.authorize(token, &[Permission::Webrtc]).map_err(|e| {
+    let granted = context.authorize(token, &[Permission::Webrtc]).map_err(|e| {
         JsonRpcResponse::error(
             answer_id.clone(),
             JsonRpcError::new(
@@ -39,16 +39,24 @@ pub fn handle_start(
         )
     })?;
     let webrtc_start_request = value.parse_params::<WebRtcStartRequest>()?;
-    let permissions = serde_json::from_value::<Permissions>(webrtc_start_request.permissions).map_err(|e| {
-        JsonRpcResponse::error(
-            answer_id.clone(),
-            JsonRpcError::new(
-                JsonRpcErrorReason::InvalidRequest,
-                e.to_string(),
-                serde_json::Value::Null,
-            ),
-        )
-    })?;
+    let requested_permissions =
+        serde_json::from_value::<Permissions>(webrtc_start_request.permissions).map_err(|e| {
+            JsonRpcResponse::error(
+                answer_id.clone(),
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidRequest,
+                    e.to_string(),
+                    serde_json::Value::Null,
+                ),
+            )
+        })?;
+    // The session token must never carry more than the caller's own grant, so drop anything
+    // requested that the caller isn't already authorised for instead of trusting it verbatim.
+    let permissions: Permissions = requested_permissions
+        .into_vec()
+        .into_iter()
+        .filter(|p| granted.satisfies(p))
+        .collect();
     let jwt = context.jwt_api();
     let claim = jwt.generate_auth_claims(permissions).map_err(|e| {
         JsonRpcResponse::error(

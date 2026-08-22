@@ -2549,6 +2549,24 @@ where
                     return Err(RuntimeError::FeePaymentInMainIntent);
                 }
 
+                // Account and charge for the statement's verification cost up front, exactly like the canonical
+                // `stealth_transfer` path does — this is the same free-compute-credit fee intent, so it must be
+                // capped and billed here too, not just on the `StealthTransfer` instruction route.
+                if let Some(ref statement) = arg.statement {
+                    self.tracker.account_fee_intent_stealth_transfer()?;
+                    let has_view_key = self.tracker.write_with(|state| {
+                        let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
+                        let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
+                        state.unlock_substate(resource_lock)?;
+                        Ok::<_, RuntimeError>(has_view_key)
+                    })?;
+                    self.tracker
+                        .charge_native_execution(tari_engine_types::stealth::transfer_native_points(
+                            statement,
+                            has_view_key,
+                        ))?;
+                }
+
                 // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate as
                 // `stealth_transfer`, so a rejection leaves the inputs unspent. Fees are always paid in TARI.
                 if let Some(ref statement) = arg.statement {

@@ -32,6 +32,7 @@ fn missing_transactions_operations(db: impl StateStore) {
     genesis.insert(&mut tx).unwrap();
 
     let atom1 = create_tx_atom();
+    let atom2 = create_tx_atom();
     let block1 = Block::create(
         network,
         *genesis.id(),
@@ -55,19 +56,22 @@ fn missing_transactions_operations(db: impl StateStore) {
     .unwrap();
 
     // missing_transactions_insert
-    let missing_transaction_ids = vec![&atom1.id];
+    let missing_transaction_ids = vec![&atom1.id, &atom2.id];
     tx.parked_block_insert(&block1, &[], missing_transaction_ids).unwrap();
 
-    // blocks_get_pending_transactions
-    // let res = tx.blocks_get_pending_transactions(block1.id()).unwrap();
-    // assert_eq!(res.len(), 1);
-    // assert_eq!(res[0], atom1.id);
-
-    // missing_transactions_remove
-    tx.parked_block_remove_missing_transaction(block1.height(), atom1.id())
+    // The block stays parked while it is still waiting on atom2
+    let unparked = tx
+        .parked_block_remove_missing_transaction(block1.height(), atom1.id())
         .unwrap();
-    // let res = tx.blocks_get_pending_transactions(block1.id()).unwrap();
-    // assert_eq!(res.len(), 0);
+    assert!(unparked.is_none());
+
+    // The last missing transaction unparks the block
+    let (unparked, foreign_proposals) = tx
+        .parked_block_remove_missing_transaction(block1.height(), atom2.id())
+        .unwrap()
+        .expect("block should be unparked once no transactions are missing");
+    assert_eq!(unparked.id(), block1.id());
+    assert!(foreign_proposals.is_empty());
 
     tx.rollback().unwrap();
 }

@@ -127,3 +127,26 @@ fn foreign_proposals_rocksdb() {
 
     tx.rollback().unwrap();
 }
+
+#[test]
+fn epoch_cleanup_prunes_foreign_proposals() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let network = Network::LocalNet;
+    let zero_block = Block::zero_block(network, NumPreshards::P64);
+    tx.blocks_insert(&zero_block).unwrap();
+
+    let old_proposal = create_foreign_proposal(*zero_block.id(), Epoch(1));
+    tx.foreign_proposals_save(&old_proposal).unwrap();
+    let current_proposal = create_foreign_proposal(*zero_block.id(), Epoch(5));
+    tx.foreign_proposals_save(&current_proposal).unwrap();
+
+    // The default epoch history length is 1, so this prunes epoch 1
+    tx.epoch_cleanup(Epoch(2)).unwrap();
+
+    assert!(!tx.foreign_proposals_exists(old_proposal.block_id()).unwrap());
+    assert!(tx.foreign_proposals_exists(current_proposal.block_id()).unwrap());
+
+    tx.rollback().unwrap();
+}

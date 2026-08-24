@@ -53,7 +53,7 @@ pub fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
     .into_iter()
 }
 
-fn build_default_store_opts() -> rocksdb::Options {
+pub(crate) fn build_default_store_opts() -> rocksdb::Options {
     let mut opts = rocksdb::Options::default();
     // Don't error if the DB exists
     opts.set_error_if_exists(false);

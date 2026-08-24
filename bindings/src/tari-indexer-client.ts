@@ -4,6 +4,7 @@
 export * from "./types/tari-indexer-client/IndexerSubmitTransactionResponse";
 export * from "./types/tari-indexer-client/GetTransactionReceiptResponse";
 export * from "./types/tari-indexer-client/GetNetworkInfoResponse";
+export * from "./types/tari-indexer-client/GetIndexerInfoResponse";
 export * from "./types/tari-indexer-client/WatchedSubstateItem";
 export * from "./types/tari-indexer-client/GetUtxoUpdatesRequest";
 export * from "./types/tari-indexer-client/WatchedTemplateItem";

@@ -22,6 +22,16 @@ pub struct EventFilter {
 }
 
 impl EventFilter {
+    /// True when no field is set, so the filter admits every event. A filter list containing one of
+    /// these indexes the whole network, the same as configuring no filters at all.
+    pub fn is_match_all(&self) -> bool {
+        self.topic.is_none() &&
+            self.entity_id.is_none() &&
+            self.substate_id.is_none() &&
+            self.template_address.is_none() &&
+            self.resource_address.is_none()
+    }
+
     pub fn matches(&self, event: &Event) -> bool {
         if self
             .topic

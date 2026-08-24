@@ -666,6 +666,43 @@ pub struct GetNetworkInfoResponse {
     pub epoch: Epoch,
 }
 
+/// The configuration of a single indexer node, as far as it affects what its API returns. Every field
+/// is local to the node answering the request: two indexers on the same network can disagree on all of
+/// them, so a client that cares must ask the node it is talking to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetIndexerInfoResponse {
+    /// The indexer's build version.
+    pub version: String,
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub network: Network,
+    pub network_byte: u8,
+    /// The sidechain this indexer follows, if it is configured for one.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub sidechain_id: Option<RistrettoPublicKeyBytes>,
+    /// The current epoch, so a client can resolve the epoch-denominated fields below against a clock
+    /// without a second request.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub current_epoch: Epoch,
+    /// How many epochs past its terminal epoch this indexer retains a transaction submitted through it
+    /// before pruning the record. `None` means transactions are retained indefinitely. Transaction
+    /// receipts are retained regardless of this setting. A client paginating transaction history hits
+    /// this floor rather than the start of the chain.
+    pub transaction_retention_epochs: Option<u64>,
+    /// Whether substates served by this indexer are verified against a shard group committee proof
+    /// before being returned. When false, values are served as fetched from a single validator and
+    /// carry no proof of correctness.
+    pub verify_substate_proofs: bool,
+    /// How long this indexer may serve a cached substate as the latest version of that substate, in
+    /// seconds. A read of the latest version may be up to this stale; reads of a specific version are
+    /// unaffected.
+    pub latest_substate_cache_ttl_secs: u64,
+    /// Whether this indexer stores every event on the network. When false it is configured with event
+    /// filters, so event queries answer over a subset and absence is not proof an event did not occur.
+    pub indexes_all_events: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]

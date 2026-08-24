@@ -9,7 +9,12 @@ use axum::{
 use serde_json::json;
 use tari_epoch_manager::EpochManagerReader;
 use tari_epoch_oracles::store::StoreKey;
-use tari_indexer_client::types::{GetEpochManagerStatsResponse, GetIdentityResponse, IndexerReadyResponse};
+use tari_indexer_client::types::{
+    GetEpochManagerStatsResponse,
+    GetIdentityResponse,
+    GetIndexerInfoResponse,
+    IndexerReadyResponse,
+};
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -35,6 +40,35 @@ pub async fn get_identity(Extension(context): Extension<HandlerContext>) -> Hand
         public_addresses: info.listen_addrs.iter().map(|addr| addr.to_string()).collect(),
     };
     Ok(context.apply_cache_control(Json(response), 1000))
+}
+
+#[utoipa::path(
+    get,
+    path = "/info",
+    description = "Get this indexer's own configuration, as far as it affects what its API returns. Every field is \
+                   local to the node answering the request - two indexers on the same network can disagree on all of \
+                   them.",
+    responses(
+        (status = 200, description = "Indexer configuration", body = GetIndexerInfoResponse),
+    ),
+)]
+pub async fn get_info(Extension(context): Extension<HandlerContext>) -> HandlerResult<Response> {
+    let config = context.published_config();
+    let network = context.network();
+
+    let response = GetIndexerInfoResponse {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        network,
+        network_byte: network.as_byte(),
+        sidechain_id: config.sidechain_id,
+        current_epoch: context.epoch_manager().get_current_epoch(),
+        transaction_retention_epochs: config.transaction_retention_epochs,
+        verify_substate_proofs: config.verify_substate_proofs,
+        latest_substate_cache_ttl_secs: config.latest_substate_cache_ttl.as_secs(),
+        indexes_all_events: config.indexes_all_events,
+    };
+    // Only `current_epoch` changes at runtime; the rest is fixed for the life of the process.
+    Ok(context.apply_cache_control(Json(response), 30))
 }
 
 #[utoipa::path(

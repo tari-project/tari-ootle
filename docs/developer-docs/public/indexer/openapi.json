@@ -10,7 +10,7 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.37.0"
+    "version": "0.39.2"
   },
   "paths": {
     "/epoch-checkpoints": {
@@ -174,6 +174,27 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/info": {
+      "get": {
+        "tags": [
+          "handlers::misc"
+        ],
+        "description": "Get this indexer's own configuration, as far as it affects what its API returns. Every field is local to the node answering the request - two indexers on the same network can disagree on all of them.",
+        "operationId": "get_info",
+        "responses": {
+          "200": {
+            "description": "Indexer configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetIndexerInfoResponse"
                 }
               }
             }
@@ -1429,6 +1450,69 @@
           },
           "public_key": {
             "type": "string"
+          }
+        }
+      },
+      "GetIndexerInfoResponse": {
+        "type": "object",
+        "description": "The configuration of a single indexer node, as far as it affects what its API returns. Every field\nis local to the node answering the request: two indexers on the same network can disagree on all of\nthem, so a client that cares must ask the node it is talking to.",
+        "required": [
+          "version",
+          "network",
+          "network_byte",
+          "current_epoch",
+          "verify_substate_proofs",
+          "latest_substate_cache_ttl_secs",
+          "indexes_all_events"
+        ],
+        "properties": {
+          "current_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The current epoch, so a client can resolve the epoch-denominated fields below against a clock\nwithout a second request.",
+            "minimum": 0
+          },
+          "indexes_all_events": {
+            "type": "boolean",
+            "description": "Whether this indexer stores every event on the network. When false it is configured with event\nfilters, so event queries answer over a subset and absence is not proof an event did not occur."
+          },
+          "latest_substate_cache_ttl_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long this indexer may serve a cached substate as the latest version of that substate, in\nseconds. A read of the latest version may be up to this stale; reads of a specific version are\nunaffected.",
+            "minimum": 0
+          },
+          "network": {
+            "type": "string"
+          },
+          "network_byte": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "sidechain_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The sidechain this indexer follows, if it is configured for one."
+          },
+          "transaction_retention_epochs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many epochs past its terminal epoch this indexer retains a transaction submitted through it\nbefore pruning the record. `None` means transactions are retained indefinitely. Transaction\nreceipts are retained regardless of this setting. A client paginating transaction history hits\nthis floor rather than the start of the chain.",
+            "minimum": 0
+          },
+          "verify_substate_proofs": {
+            "type": "boolean",
+            "description": "Whether substates served by this indexer are verified against a shard group committee proof\nbefore being returned. When false, values are served as fetched from a single validator and\ncarry no proof of correctness."
+          },
+          "version": {
+            "type": "string",
+            "description": "The indexer's build version."
           }
         }
       },

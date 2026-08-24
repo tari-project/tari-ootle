@@ -44,6 +44,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
 #[derive(OpenApi)]
 #[openapi(paths(
     handlers::misc::get_identity,
+    handlers::misc::get_info,
     handlers::misc::wait_until_ready,
     handlers::misc::get_epoch_manager_stats,
     handlers::network::get,
@@ -142,6 +143,7 @@ impl Server {
             .route("/health", get(handlers::misc::health))
             .route("/ready", get(handlers::misc::ready))
             .route("/identity", get(handlers::misc::get_identity))
+            .route("/info", get(handlers::misc::get_info))
             .route("/wait-until-ready", get(handlers::misc::wait_until_ready))
             .route("/epoch-manager/stats", get(handlers::misc::get_epoch_manager_stats))
             .route("/network", get(handlers::network::get))

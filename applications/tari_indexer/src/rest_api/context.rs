@@ -21,6 +21,7 @@ use tokio::sync::broadcast;
 
 use crate::{
     bootstrap::Services,
+    config::PublishedIndexerConfig,
     dry_run::processor::DryRunTransactionProcessor,
     network_state_sync::ValidatorStatusMonitor,
     notify::Subscriber,
@@ -43,6 +44,7 @@ impl HandlerContext {
             inner: Arc::new(InnerContext {
                 cache_control_enabled: true,
                 network: services.network,
+                published_config: services.published_config.clone(),
                 read_only_store: ReadOnlyStore::new(services.store.clone()),
                 global_db: services.global_db.clone(),
                 epoch_manager: services.epoch_manager.clone(),
@@ -66,6 +68,10 @@ impl HandlerContext {
 
     pub fn network(&self) -> Network {
         self.inner.network
+    }
+
+    pub fn published_config(&self) -> &PublishedIndexerConfig {
+        &self.inner.published_config
     }
 
     pub fn epoch_manager(&self) -> &EpochManagerHandle<PeerAddress> {
@@ -140,6 +146,7 @@ impl HandlerContext {
 struct InnerContext {
     cache_control_enabled: bool,
     network: Network,
+    published_config: PublishedIndexerConfig,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     networking: NetworkingHandle<TariMessagingSpec>,

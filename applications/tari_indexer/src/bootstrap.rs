@@ -74,6 +74,7 @@ use crate::{
     IndexerEpochManagerSpec,
     Noop,
     base_layer::verify_correct_network,
+    config::PublishedIndexerConfig,
     dry_run::processor::DryRunTransactionProcessor,
     network_client::TariNetworkClient,
     network_state_sync,
@@ -316,6 +317,7 @@ pub async fn spawn_services(
     save_identities(config, &keypair)?;
     Ok(Services {
         network: config.network,
+        published_config: PublishedIndexerConfig::from(&config.indexer),
         keypair,
         networking,
         epoch_manager,
@@ -335,6 +337,7 @@ pub async fn spawn_services(
 
 pub struct Services {
     pub network: Network,
+    pub published_config: PublishedIndexerConfig,
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,

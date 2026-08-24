@@ -23,6 +23,7 @@
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
+use ootle_byte_type::ToByteType;
 use serde::{Deserialize, Serialize};
 use tari_common::{
     ConfigurationError,
@@ -36,7 +37,7 @@ use tari_ootle_app_utilities::{
     p2p_config::{P2pConfig, PeerSeedsConfig},
 };
 use tari_ootle_transaction::Network;
-use tari_template_lib_types::TemplateAddress;
+use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{network_state_sync::EventFilter, rest_api::RefillRate};
 
@@ -178,6 +179,31 @@ fn default_latest_substate_cache_ttl() -> Duration {
     Duration::from_secs(2)
 }
 
+/// The subset of an indexer's configuration that is published over its API, as it affects what
+/// clients see. Built once at startup: the API must expose exactly these values and nothing else
+/// from `IndexerConfig`, which also holds local paths and listen addresses.
+#[derive(Debug, Clone)]
+pub struct PublishedIndexerConfig {
+    pub sidechain_id: Option<RistrettoPublicKeyBytes>,
+    pub transaction_retention_epochs: Option<u64>,
+    pub verify_substate_proofs: bool,
+    pub latest_substate_cache_ttl: Duration,
+    pub indexes_all_events: bool,
+}
+
+impl From<&IndexerConfig> for PublishedIndexerConfig {
+    fn from(config: &IndexerConfig) -> Self {
+        Self {
+            sidechain_id: config.sidechain_id.as_ref().map(|pk| pk.to_byte_type()),
+            transaction_retention_epochs: config.transaction_retention_epochs,
+            verify_substate_proofs: config.verify_substate_proofs,
+            latest_substate_cache_ttl: config.latest_substate_cache_ttl,
+            indexes_all_events: config.event_filters.is_empty() ||
+                config.event_filters.iter().any(EventFilter::is_match_all),
+        }
+    }
+}
+
 fn default_transaction_prune_interval() -> Duration {
     Duration::from_secs(60 * 60)
 }
@@ -263,5 +289,56 @@ impl Default for IndexerRateLimitsConfig {
             sse_max_connections_per_ip: 5,
             trust_proxy_headers: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_event_filters_indexes_every_event() {
+        let config = IndexerConfig::default();
+        assert!(config.event_filters.is_empty());
+        assert!(PublishedIndexerConfig::from(&config).indexes_all_events);
+    }
+
+    /// The shipped config template declares one `[[indexer.event_filters]]` section with no fields,
+    /// which matches every event. That must not read as a filtered indexer.
+    #[test]
+    fn an_empty_filter_indexes_every_event() {
+        let config = IndexerConfig {
+            event_filters: vec![EventFilter::default()],
+            ..Default::default()
+        };
+        assert!(PublishedIndexerConfig::from(&config).indexes_all_events);
+    }
+
+    #[test]
+    fn a_filter_that_narrows_events_is_reported_as_filtered() {
+        let config = IndexerConfig {
+            event_filters: vec![EventFilter {
+                topic: Some("std.vault.deposit".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(!PublishedIndexerConfig::from(&config).indexes_all_events);
+    }
+
+    /// A match-all filter alongside narrower ones still admits everything.
+    #[test]
+    fn a_match_all_filter_wins_over_narrower_ones() {
+        let config = IndexerConfig {
+            event_filters: vec![
+                EventFilter {
+                    topic: Some("std.vault.deposit".into()),
+                    ..Default::default()
+                },
+                EventFilter::default(),
+            ],
+            ..Default::default()
+        };
+        assert!(PublishedIndexerConfig::from(&config).indexes_all_events);
     }
 }

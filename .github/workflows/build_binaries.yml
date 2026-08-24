@@ -775,7 +775,7 @@ jobs:
           draft: true
           allowUpdates: true
           updateOnlyUnreleased: true
-          replacesArtifacts: true
+          replacesArtifacts: false
           omitDraftDuringUpdate: true
           omitBodyDuringUpdate: true
           omitNameDuringUpdate: true
@@ -1080,7 +1080,7 @@ jobs:
           draft: true
           allowUpdates: true
           updateOnlyUnreleased: true
-          replacesArtifacts: true
+          replacesArtifacts: false
           omitDraftDuringUpdate: true
           omitBodyDuringUpdate: true
           omitNameDuringUpdate: true

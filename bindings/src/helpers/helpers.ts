@@ -73,6 +73,10 @@ export function shortenSubstateId(
 }
 
 export function shortenString(string: string, start: number = 8, end: number = 8) {
+  // The number 3 is from the characters for ellipsis
+  if (string.length < start + end + 3) {
+    return string;
+  }
   return string.substring(0, start) + "..." + string.slice(-end);
 }
 

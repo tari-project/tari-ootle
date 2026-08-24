@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine::runtime::TransactionCommitError;
+use tari_engine::runtime::{RuntimeError, TransactionCommitError};
 use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedValue};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -196,4 +196,61 @@ fn it_allows_calls_to_component_using_a_component_on_the_workspace() {
     );
 
     let _account = test.read_only_state_store().get_account(expected_account_addr).unwrap();
+}
+
+#[test]
+fn it_scopes_address_allocations() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
+
+    let template_addr = test.get_template_address("AddressAllocationTest");
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .allocate_component_address("my_addr") // Allocates 0
+            // We pass in the allocation ids as numbers to prevent them explicitly coming into scope. e.g. like a malicious contract attempting to guess the id
+            .call_function(template_addr, "attempt_access_to_component_alloc_addr", args![0])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::AddressAllocationNotInScope { id: 0 });
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .allocate_resource_address("my_res") // Allocates 0
+            .call_function(template_addr, "attempt_access_to_resource_alloc_addr", args![0])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(reason, RuntimeError::AddressAllocationNotInScope { id: 0 });
+
+    // Cross template call - fails because the allocation was not brought into scope
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .allocate_component_address("my_addr")
+            .allocate_resource_address("my_res")
+            .call_function(template_addr, "cross_template_call_with_ids", args![
+                template_addr,
+                0,
+                1
+            ])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::AddressAllocationNotInScope { id: 0 });
+
+    // Cross template call - succeeds because the allocations where passed into scope
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .allocate_component_address("my_addr")
+            .allocate_resource_address("my_res")
+            .call_function(template_addr, "cross_template_call_with_allocs", args![
+                template_addr,
+                Workspace("my_addr"),
+                Workspace("my_res")
+            ])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
 }

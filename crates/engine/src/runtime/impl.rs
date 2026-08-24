@@ -3681,7 +3681,7 @@ where
         self.invoke_modules_on_runtime_call("builtin_template_invoke")?;
 
         let address = match action {
-            BuiltinTemplateAction::GetTemplateAddress { bultin } => match bultin {
+            BuiltinTemplateAction::GetTemplateAddress { builtin: bultin } => match bultin {
                 BuiltinTemplate::Account => ACCOUNT_TEMPLATE_ADDRESS,
                 BuiltinTemplate::AccountNft => NFT_FAUCET_TEMPLATE_ADDRESS,
             },

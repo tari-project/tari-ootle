@@ -921,7 +921,7 @@ pub enum BuiltinTemplateAction {
     #[n(0)]
     GetTemplateAddress {
         #[n(0)]
-        bultin: BuiltinTemplate,
+        builtin: BuiltinTemplate,
     },
 }
 

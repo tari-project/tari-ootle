@@ -5,6 +5,8 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
+    use tari_template_lib::models::AddressAllocationId;
+
     use super::*;
 
     pub struct AddressAllocationTest {
@@ -71,6 +73,35 @@ mod template {
 
         pub fn drop_component_allocation() {
             let _allocation = CallerContext::allocate_component_address(None);
+        }
+
+        pub fn cross_template_call_with_ids(
+            template_addr: TemplateAddress,
+            comp_alloc: AddressAllocationId,
+            resource_alloc: AddressAllocationId,
+        ) -> Component<Self> {
+            let comp_alloc = ComponentAddressAllocation::new(comp_alloc);
+            let resource_alloc = ResourceAddressAllocation::new(resource_alloc);
+            // Will fail, because the allocs are not in scope
+            Self::cross_template_call_with_allocs(template_addr, comp_alloc, resource_alloc)
+        }
+
+        pub fn cross_template_call_with_allocs(
+            template_addr: TemplateAddress,
+            comp_alloc: ComponentAddressAllocation,
+            resource_alloc: ResourceAddressAllocation,
+        ) -> Component<Self> {
+            TemplateManager::get(template_addr).call("create_from_allocations", args![comp_alloc, resource_alloc])
+        }
+
+        pub fn attempt_access_to_component_alloc_addr(comp_alloc: AddressAllocationId) {
+            let comp_alloc = ComponentAddressAllocation::new(comp_alloc);
+            comp_alloc.get_address();
+        }
+
+        pub fn attempt_access_to_resource_alloc_addr(resource: AddressAllocationId) {
+            let resource_alloc = ResourceAddressAllocation::new(resource);
+            resource_alloc.get_address();
         }
     }
 }

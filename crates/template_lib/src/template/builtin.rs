@@ -39,7 +39,7 @@ pub enum BuiltinTemplate {
 impl BuiltinTemplate {
     pub fn address(self) -> TemplateAddress {
         let resp: InvokeResult = call_engine(EngineOp::BuiltinTemplateInvoke, &BuiltinTemplateInvokeArg {
-            action: BuiltinTemplateAction::GetTemplateAddress { bultin: self },
+            action: BuiltinTemplateAction::GetTemplateAddress { builtin: self },
         });
 
         resp.decode().expect("Failed to decode TemplateAddress")

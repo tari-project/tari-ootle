@@ -422,6 +422,36 @@ mod tests {
             .unwrap();
     }
 
+    /// A transaction that never commits gets no receipt — mempool rejection and a consensus abort that
+    /// commits nothing both leave one — so its `max_epoch` stays its retention key. Without that
+    /// fallback these rows, the ones retention exists to bound, would never age out.
+    #[tokio::test]
+    async fn a_transaction_that_never_commits_is_retained_on_its_max_epoch() {
+        let (_dir, store) = temp_store().await;
+
+        let ids = insert_transactions(&store, &[Epoch(5), Epoch(20)]).await;
+        for id in &ids {
+            let id = *id;
+            store
+                .with_write_tx(move |tx| tx.set_transaction_rejected(id, "rejected by mempool validation"))
+                .await
+                .unwrap();
+        }
+
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 1);
+
+        let remaining = store
+            .with_read_tx(move |tx| tx.list_recent_transactions(None, 10))
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].transaction_id, ids[1]);
+    }
+
     /// A committed transaction is retained from the epoch it committed in, not from the last epoch it
     /// could have been sequenced in — a wide `max_epoch` must not hold its record open.
     #[tokio::test]

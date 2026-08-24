@@ -11,19 +11,20 @@ use tempfile::TempDir;
 
 use crate::{
     cf_api::DbContext,
-    codecs::{BlockIdCodec, BytesCodec, EpochCodec, NumberCodec, UnitCodec},
+    codecs::{BlockIdCodec, BytesCodec, EpochCodec, NumberCodec, Prefixed, UnitCodec},
     traits::{Cf, QueryCf},
 };
 
 pub fn create_rocksdb(cf_names: impl IntoIterator<Item = &'static str>) -> (TransactionDB<SingleThreaded>, TempDir) {
     let temp_dir = tempfile::Builder::new().disable_cleanup(false).tempdir().unwrap();
     let path = temp_dir.path().join("rocksdb");
-    let mut db_opts = rocksdb::Options::default();
-    db_opts.set_error_if_exists(false);
-    db_opts.create_if_missing(true);
-    db_opts.create_missing_column_families(true);
+    // Use the production options so that tests exercise the prefix extractor and memtable prefix bloom
+    let db_opts = crate::store::build_default_store_opts();
     let tx_opts = rocksdb::TransactionDBOptions::default();
-    let db = TransactionDB::open_cf(&db_opts, &tx_opts, path, cf_names)
+    let cf_descriptors = cf_names
+        .into_iter()
+        .map(|name| rocksdb::ColumnFamilyDescriptor::new(name, db_opts.clone()));
+    let db = TransactionDB::open_cf_descriptors(&db_opts, &tx_opts, path, cf_descriptors)
         .map_err(|e| StorageError::ConnectionError {
             reason: e.into_string(),
         })
@@ -91,6 +92,69 @@ pub struct ByEpochQuery;
 
 impl QueryCf for ByEpochQuery {
     type Cf = EpochHeightBlock;
+    type Key = Epoch;
+    type KeyCodec = EpochCodec;
+}
+
+/// Two logical tables that share one physical column family, separated only by their key prefix byte.
+const SHARED_CF: &str = "shared_prefixed";
+
+pub struct LowerPrefix;
+
+impl Prefixed for LowerPrefix {
+    fn prefix() -> Option<u8> {
+        Some(1)
+    }
+}
+
+pub struct UpperPrefix;
+
+impl Prefixed for UpperPrefix {
+    fn prefix() -> Option<u8> {
+        Some(2)
+    }
+}
+
+pub struct LowerEpochBlockCf;
+
+impl Cf for LowerEpochBlockCf {
+    type Key = (Epoch, BlockId);
+    type KeyCodec = (EpochCodec, BlockIdCodec);
+    type Prefix = LowerPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        SHARED_CF
+    }
+}
+
+pub struct LowerByEpochQuery;
+
+impl QueryCf for LowerByEpochQuery {
+    type Cf = LowerEpochBlockCf;
+    type Key = Epoch;
+    type KeyCodec = EpochCodec;
+}
+
+pub struct UpperEpochBlockCf;
+
+impl Cf for UpperEpochBlockCf {
+    type Key = (Epoch, BlockId);
+    type KeyCodec = (EpochCodec, BlockIdCodec);
+    type Prefix = UpperPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        SHARED_CF
+    }
+}
+
+pub struct UpperByEpochQuery;
+
+impl QueryCf for UpperByEpochQuery {
+    type Cf = UpperEpochBlockCf;
     type Key = Epoch;
     type KeyCodec = EpochCodec;
 }
@@ -174,4 +238,75 @@ fn it_iterates_over_epoch_heights_ordering() {
         assert_eq!(epoch, Epoch(0));
         assert_eq!(height, NodeHeight(i));
     }
+}
+
+fn seed_shared_prefixed_cf(ctx: &DbContext<'_, Transaction<'_, TransactionDB<SingleThreaded>>>) {
+    const OP: &str = "seed_shared_prefixed_cf";
+    let lower = ctx.cf(LowerEpochBlockCf).unwrap();
+    let upper = ctx.cf(UpperEpochBlockCf).unwrap();
+    for i in 0..5u64 {
+        lower.put(&(Epoch(i), block_id_from_seed(i)), &(), OP).unwrap();
+        upper.put(&(Epoch(i), block_id_from_seed(i)), &(), OP).unwrap();
+    }
+}
+
+#[test]
+fn end_range_iterator_does_not_read_the_preceding_prefix() {
+    let (db, _tmp) = create_rocksdb([SHARED_CF]);
+    let tx = db.transaction();
+    let ctx = ctx(&db, &tx);
+    seed_shared_prefixed_cf(&ctx);
+
+    let query = ctx.cf(UpperByEpochQuery).unwrap();
+
+    let epochs = query
+        .query_end_range_iterator(Ordering::Ascending, &Epoch(3))
+        .map(|res| res.map(|((epoch, _), ())| epoch))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(epochs, vec![Epoch(0), Epoch(1), Epoch(2)]);
+
+    let epochs = query
+        .query_end_range_key_iterator(Ordering::Descending, &Epoch(3))
+        .map(|res| res.map(|(epoch, _)| epoch))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(epochs, vec![Epoch(2), Epoch(1), Epoch(0)]);
+}
+
+#[test]
+fn start_range_iterator_does_not_read_the_following_prefix() {
+    let (db, _tmp) = create_rocksdb([SHARED_CF]);
+    let tx = db.transaction();
+    let ctx = ctx(&db, &tx);
+    seed_shared_prefixed_cf(&ctx);
+
+    let query = ctx.cf(LowerByEpochQuery).unwrap();
+
+    let epochs = query
+        .query_start_range_iterator(Ordering::Ascending, &Epoch(3))
+        .map(|res| res.map(|((epoch, _), ())| epoch))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(epochs, vec![Epoch(3), Epoch(4)]);
+
+    let epochs = query
+        .query_start_range_key_iterator(Ordering::Descending, &Epoch(3))
+        .map(|res| res.map(|(epoch, _)| epoch))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(epochs, vec![Epoch(4), Epoch(3)]);
+}
+
+#[test]
+fn query_last_does_not_read_the_following_prefix() {
+    const OP: &str = "query_last_does_not_read_the_following_prefix";
+    let (db, _tmp) = create_rocksdb([SHARED_CF]);
+    let tx = db.transaction();
+    let ctx = ctx(&db, &tx);
+    seed_shared_prefixed_cf(&ctx);
+
+    let ((epoch, block_id), ()) = ctx.cf(LowerByEpochQuery).unwrap().query_last(OP).unwrap();
+    assert_eq!(epoch, Epoch(4));
+    assert_eq!(block_id, block_id_from_seed(4));
 }

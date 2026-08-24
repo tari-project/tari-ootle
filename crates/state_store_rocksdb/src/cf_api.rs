@@ -484,40 +484,25 @@ impl<'db, TQuery: QueryCf, DB: RocksReader> CfContext<'db, DB, TQuery> {
         })
     }
 
+    /// Returns an iterator over the keys in the column family that are greater than or equal to the start key.
     pub fn query_start_range_key_iterator(
         &self,
         ordering: Ordering,
         start_key: &TQuery::Key,
-    ) -> Box<dyn Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + 'db> {
+    ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + 'db {
         let key = self.encode_key(start_key);
-        // If this is 0xFF then we'll read to the end (no end bound)
-        match TQuery::Cf::key_prefix().and_then(|p| p.checked_add(1)) {
-            Some(next_prefix) => {
-                let end = EncodeVec::new_from_array([next_prefix]);
-                let iter = self
-                    .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, <TQuery::Cf as Cf>::Key, UnitCodec, ()>(
-                        ordering,
-                        key..end,
-                    );
-                Box::new(iter.map(|res| {
-                    let (k, _) = res?;
-                    Ok::<_, RocksDbStorageError>(k)
-                }))
-            },
-            None => {
-                let iter = self
-                    .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, <TQuery::Cf as Cf>::Key, UnitCodec, ()>(
-                        ordering,
-                        key..,
-                    );
-                Box::new(iter.map(|res| {
-                    let (k, _) = res?;
-                    Ok::<_, RocksDbStorageError>(k)
-                }))
-            },
-        }
+        let iter = self
+            .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, <TQuery::Cf as Cf>::Key, UnitCodec, ()>(
+                ordering,
+                TableBounds::for_cf::<TQuery::Cf>(Some(key), None),
+            );
+        iter.map(|res| {
+            let (k, _) = res?;
+            Ok::<_, RocksDbStorageError>(k)
+        })
     }
 
+    /// Returns an iterator over the key/values in the column family that are greater than or equal to the start key.
     pub fn query_start_range_iterator(
         &self,
         ordering: Ordering,
@@ -530,7 +515,7 @@ impl<'db, TQuery: QueryCf, DB: RocksReader> CfContext<'db, DB, TQuery> {
                 <TQuery::Cf as Cf>::Key,
                 <TQuery::Cf as Cf>::ValueCodec,
                 <TQuery::Cf as Cf>::Value
-            >(ordering, key..)
+            >(ordering, TableBounds::for_cf::<TQuery::Cf>(Some(key), None))
     }
 
     /// Returns a decoded key value iterator over the range of keys (exclusive).
@@ -575,13 +560,10 @@ impl<'db, TQuery: QueryCf, DB: RocksReader> CfContext<'db, DB, TQuery> {
         end_key: &TQuery::Key,
     ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + 'db {
         let key = self.encode_key(end_key);
-        let start = TQuery::Cf::key_prefix()
-            .map(|b| EncodeVec::new_from_array([b]))
-            .unwrap_or_else(EncodeVec::empty);
         let iter = self
             .range_iterator_with_codecs::<PrefixedCodec<TQuery::Cf>, <TQuery::Cf as Cf>::Key, UnitCodec, ()>(
                 ordering,
-                start..key,
+                TableBounds::for_cf::<TQuery::Cf>(None, Some(key)),
             );
         iter.map(|res| {
             let (k, _) = res?;
@@ -601,21 +583,22 @@ impl<'db, TQuery: QueryCf, DB: RocksReader> CfContext<'db, DB, TQuery> {
             <TQuery::Cf as Cf>::Key,
             <TQuery::Cf as Cf>::ValueCodec,
             <TQuery::Cf as Cf>::Value,
-        >(ordering, ..key)
+        >(ordering, TableBounds::for_cf::<TQuery::Cf>(None, Some(key)))
     }
 
+    /// Returns the last key/value in the logical table.
     pub fn query_last(&self, operation: &'static str) -> Result<QueryCfKv<TQuery>, RocksDbStorageError> {
-        let mut iter = self.db.iterator_cf(self.handle, IteratorMode::End);
-        let result = iter.next().ok_or_else(|| RocksDbStorageError::QueryError {
+        let mut iter = self.range_iterator_with_codecs::<
+            PrefixedCodec<TQuery::Cf>,
+            <TQuery::Cf as Cf>::Key,
+            <TQuery::Cf as Cf>::ValueCodec,
+            <TQuery::Cf as Cf>::Value,
+        >(Ordering::Descending, TableBounds::for_cf::<TQuery::Cf>(None, None));
+
+        iter.next().transpose()?.ok_or_else(|| RocksDbStorageError::QueryError {
             operation,
             details: format!("No values in TQuery {}", TQuery::name()),
-        })?;
-        let key_codec = TQuery::make_cf_key_codec();
-        let value_codec = TQuery::make_cf_value_codec();
-        let (key, value) = result.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
-        let key = key_codec.decode_exact(&key)?;
-        let value = value_codec.decode_exact(&value)?;
-        Ok((key, value))
+        })
     }
 }
 
@@ -685,6 +668,32 @@ fn create_prefixed_read_opts<P: Into<Vec<u8>>>(prefix: P, mode: IteratorMode) ->
         opts.set_total_order_seek(true);
     }
     opts
+}
+
+/// Iterate bounds for a single logical table. Logical tables share a physical column family and are separated only by
+/// the leading key prefix byte, so a bound the caller leaves open is closed at the extent of the table's prefix.
+struct TableBounds {
+    start: Option<Vec<u8>>,
+    end: Option<Vec<u8>>,
+}
+
+impl TableBounds {
+    fn for_cf<CF: Cf>(start: Option<EncodeVec>, end: Option<EncodeVec>) -> Self {
+        let prefix = CF::key_prefix();
+        Self {
+            start: start.map(Into::into).or_else(|| prefix.map(|p| vec![p])),
+            // A prefix of 0xFF is the last table in the column family, so it has no upper bound.
+            end: end
+                .map(Into::into)
+                .or_else(|| prefix.and_then(|p| p.checked_add(1)).map(|p| vec![p])),
+        }
+    }
+}
+
+impl IterateBounds for TableBounds {
+    fn into_bounds(self) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+        (self.start, self.end)
+    }
 }
 
 fn range_opts<CF: Cf>(range: impl IterateBounds, mode: IteratorMode) -> rocksdb::ReadOptions {

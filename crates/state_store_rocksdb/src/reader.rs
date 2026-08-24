@@ -988,7 +988,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         // NOTE: this only fetches for current epoch
         let ordering = ordering.unwrap_or(Ordering::Ascending);
         let iter: Box<dyn Iterator<Item = Result<_, _>>> = if ordering.is_ascending() {
-            query.query_start_range_key_iterator(ordering, &(locked.epoch, NodeHeight(offset)))
+            Box::new(query.query_start_range_key_iterator(ordering, &(locked.epoch, NodeHeight(offset))))
         } else {
             let leaf_block = self.db().cf(LeafBlockCf)?.get_by_default_key(OPERATION)?;
             Box::new(query.query_end_range_key_iterator(

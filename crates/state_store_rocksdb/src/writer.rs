@@ -1064,10 +1064,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         {
             let query = self.db().cf(missing_transactions::ByBlockIdQuery)?;
-            let mut iter = query.prefix_range_key_iterator(Ordering::default(), &block_id);
+            let mut iter = query.query_prefix_range_key_iterator(Ordering::default(), &block_id);
 
             // Are there more missing transactions for this block?
-            if iter.next().is_some() {
+            if iter.next().transpose()?.is_some() {
                 return Ok(None);
             }
         }

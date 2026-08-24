@@ -129,20 +129,28 @@ pub struct IndexerConfig {
     /// round trips on hot substates. Requests for a specific version are unaffected.
     #[serde(default = "default_latest_substate_cache_ttl", with = "serializers::seconds")]
     pub latest_substate_cache_ttl: Duration,
-    /// How long a transaction submitted through this indexer is retained before it is pruned.
-    /// `None` (the default) retains them forever. Only the submitted transaction body and its
-    /// locally recorded rejection reason are pruned; transaction receipts synced from the network
-    /// are retained regardless, so a pruned transaction still resolves to its receipt-backed
-    /// outcome. Set this well above the longest a client may take to poll for a result: once
-    /// pruned, a transaction no longer appears in the recent-transactions listing or single
-    /// transaction lookup, and a mempool rejection reason recorded for it is lost. Pruning bounds
-    /// database growth but does not return disk to the filesystem: SQLite reuses the freed pages
-    /// rather than shrinking the file.
-    #[serde(default, with = "serializers::optional_seconds")]
-    pub transaction_retention: Option<Duration>,
+    /// How many epochs past its terminal epoch a transaction submitted through this indexer is
+    /// retained before it is pruned. A transaction's terminal epoch is the epoch it committed in
+    /// once its receipt has been indexed, and its `max_epoch` — the last epoch it could still be
+    /// sequenced in — until then, so a transaction that is never sequenced ages out on the same
+    /// schedule as one that commits. `None` (the default) retains transactions forever, and `0`
+    /// keeps only those that can still commit or committed in the current epoch.
+    ///
+    /// Only the submitted transaction body and its locally recorded rejection reason are pruned;
+    /// transaction receipts synced from the network are retained regardless, so a pruned transaction
+    /// still resolves to its receipt-backed outcome. Set this well above the longest a client may
+    /// take to poll for a result: once pruned, a transaction no longer appears in the
+    /// recent-transactions listing or single transaction lookup, and a mempool rejection reason
+    /// recorded for it is lost. Transactions stored before this indexer recorded a terminal epoch
+    /// carry epoch 0, so the first pass after enabling this prunes that entire backlog.
+    ///
+    /// Pruning bounds database growth but does not return disk to the filesystem: SQLite reuses the
+    /// freed pages rather than shrinking the file.
+    #[serde(default)]
+    pub transaction_retention_epochs: Option<u64>,
     /// How long the transaction pruner idles between passes once it has nothing left to prune. While
     /// a backlog remains it drains in back-to-back batches rather than waiting out this interval.
-    /// Only used when `transaction_retention` is set.
+    /// Only used when `transaction_retention_epochs` is set.
     #[serde(default = "default_transaction_prune_interval", with = "serializers::seconds")]
     pub transaction_prune_interval: Duration,
     /// The event filtering configuration
@@ -196,7 +204,7 @@ impl Default for IndexerConfig {
             sidechain_id: None,
             dry_run_cache_ttl: Duration::from_secs(10),
             latest_substate_cache_ttl: default_latest_substate_cache_ttl(),
-            transaction_retention: None,
+            transaction_retention_epochs: None,
             transaction_prune_interval: default_transaction_prune_interval(),
             event_filters: vec![],
             watched_templates: default_watched_templates(),

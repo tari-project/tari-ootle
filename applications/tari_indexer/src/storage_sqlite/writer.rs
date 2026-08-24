@@ -255,7 +255,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         event_filters: &[EventFilter],
     ) -> Result<Vec<InsertedEvent>, StorageError> {
         const OPERATION: &str = "batch_insert_transaction_receipts";
-        use crate::storage_sqlite::schema::{events, transaction_receipts};
+        use crate::storage_sqlite::schema::{events, transaction_receipts, transactions};
 
         let mut inserted_events = Vec::new();
 
@@ -270,6 +270,14 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     transaction_receipts::outcome.eq(receipt.outcome.to_string()),
                     transaction_receipts::total_fees_paid.eq(receipt.fee_receipt.total_fees_paid() as i64),
                 ))
+                .execute(self.connection())
+                .map_err(|e| StorageError::general(OPERATION, e))?;
+
+            // The receipt carries the epoch the transaction committed in, which supersedes the
+            // max_epoch recorded at submission as the retention key. Most synced receipts belong to
+            // transactions submitted elsewhere and match no local row.
+            diesel::update(transactions::table.filter(transactions::transaction_id.eq(&receipt_addr_hex)))
+                .set(transactions::retention_epoch.eq(receipt.epoch.as_u64() as i64))
                 .execute(self.connection())
                 .map_err(|e| StorageError::general(OPERATION, e))?;
 
@@ -317,6 +325,9 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .values((
                 transactions::transaction_id.eq(serialize_hex(transaction.calculate_id())),
                 transactions::body.eq(serialize_json(transaction).unwrap()),
+                // Until a receipt supplies a commit epoch, `max_epoch` is the retention key: past it
+                // the transaction can no longer be sequenced, so it will never reach a terminal state.
+                transactions::retention_epoch.eq(transaction.max_epoch().as_u64() as i64),
             ))
             .on_conflict_do_nothing()
             .execute(self.connection())
@@ -362,22 +373,22 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn prune_transactions_before(&mut self, cutoff: PrimitiveDateTime, limit: usize) -> Result<usize, StorageError> {
-        const OPERATION: &str = "prune_transactions_before";
+    fn prune_transactions_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError> {
+        const OPERATION: &str = "prune_transactions_before_epoch";
         use crate::storage_sqlite::schema::transactions;
 
         // Select then delete by id rather than issuing one open-ended range delete: SQLite holds a
         // single database-wide write lock for the duration of a statement, so an unbounded delete
         // over a large backlog would stall every other writer until it completes.
         //
-        // Ordering by `created_at` — the column the filter is on — is what lets SQLite serve the
-        // select from `transactions_created_at_idx` as a covering index. Ordering by any other
-        // column makes it a full table scan on every call, including the common call that finds
-        // nothing to prune.
+        // Ordering by `retention_epoch` — the column the filter is on — is what lets SQLite serve
+        // the select from `transactions_retention_epoch_idx` as a covering index. Ordering by any
+        // other column makes it a full table scan on every call, including the common call that
+        // finds nothing to prune.
         let ids = transactions::table
             .select(transactions::id)
-            .filter(transactions::created_at.lt(cutoff))
-            .order_by(transactions::created_at.asc())
+            .filter(transactions::retention_epoch.lt(cutoff.as_u64() as i64))
+            .order_by(transactions::retention_epoch.asc())
             .limit(limit as i64)
             .load::<i32>(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;

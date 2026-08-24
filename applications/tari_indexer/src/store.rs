@@ -274,7 +274,7 @@ pub trait IndexerStoreWriteTransaction {
     /// Deletes up to `limit` transactions created before `cutoff`, oldest first, returning the number
     /// deleted. Transaction receipts are keyed independently of this table and are never removed here,
     /// so a pruned transaction still resolves to its receipt-backed outcome.
-    fn prune_transactions_before(&mut self, cutoff: PrimitiveDateTime, limit: usize) -> Result<usize, StorageError>;
+    fn prune_transactions_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
     fn upsert_template_catalogue(
         &mut self,

@@ -156,12 +156,17 @@ fn apply_pragmas(conn: &mut SqliteConnection) -> Result<(), diesel::result::Erro
 #[cfg(test)]
 mod tests {
     use tari_common_types::types::FixedHash;
+    use tari_engine_types::{
+        fees::FeeReceiptBuilder,
+        transaction_receipt::{FinalizeOutcome, TransactionReceipt},
+    };
     use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
+    use tari_ootle_transaction::{Transaction, TransactionId};
 
     use super::*;
     use crate::{
         storage_sqlite::models::VerifiedStateRoot,
-        store::{IndexerStoreReadTransaction, IndexerStoreReader},
+        store::{IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
     };
 
     fn shard_group() -> ShardGroup {
@@ -383,64 +388,22 @@ mod tests {
 
     #[tokio::test]
     async fn prune_transactions_removes_only_aged_rows_and_keeps_receipts() {
-        use std::ops::DerefMut;
-
-        use diesel::{ExpressionMethods, QueryDsl};
-        use tari_common_types::types::PrivateKey;
-        use tari_engine_types::{
-            fees::FeeReceiptBuilder,
-            transaction_receipt::{FinalizeOutcome, TransactionReceipt},
-        };
-        use tari_ootle_storage::time::{Duration as TimeDuration, OffsetDateTime, PrimitiveDateTime};
-        use tari_ootle_transaction::Transaction;
-
-        use crate::{storage_sqlite::serialization::serialize_hex, store::IndexerStoreWriteTransaction};
-
         let (_dir, store) = temp_store().await;
 
-        let mut ids = Vec::new();
-        for i in 0..3u64 {
-            let transaction = Transaction::builder_localnet(Epoch(1)).build_and_seal(&PrivateKey::from(i));
-            ids.push(transaction.calculate_id());
-            store
-                .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction))
-                .await
-                .unwrap();
-        }
+        // A transaction's retention epoch is its max_epoch until a receipt supplies a commit epoch.
+        let ids = insert_transactions(&store, &[Epoch(5), Epoch(6), Epoch(20)]).await;
 
-        // A receipt for the transaction that is about to be pruned: it must survive.
-        let receipt = TransactionReceipt {
-            outcome: FinalizeOutcome::FeeIntentCommit,
-            diff_summary: Default::default(),
-            fee_withdrawals: [].into(),
-            events: [].into(),
-            fee_receipt: FeeReceiptBuilder::default().with_total_fees_paid(123).build(),
-            epoch: Epoch(1),
-            intent_commitment: Default::default(),
-        };
+        // A receipt for a transaction that is about to be pruned: it must survive.
         let receipt_address = ids[0].into_receipt_address();
         store
-            .with_write_tx(move |tx| tx.batch_insert_transaction_receipts([(receipt_address, receipt)], &[]))
-            .await
-            .unwrap();
-
-        // Age the first two rows past the cutoff, leaving the third current.
-        let aged = ids[..2].iter().map(serialize_hex).collect::<Vec<_>>();
-        store
             .with_write_tx(move |tx| {
-                use crate::storage_sqlite::schema::transactions;
-                diesel::update(transactions::table.filter(transactions::transaction_id.eq_any(aged)))
-                    .set(transactions::created_at.eq(now_offset_by(-TimeDuration::hours(2))))
-                    .execute(tx.deref_mut().connection())
-                    .map(|_| ())
-                    .map_err(|e| StorageError::general("age transactions", e))
+                tx.batch_insert_transaction_receipts([(receipt_address, receipt_at(Epoch(5)))], &[])
             })
             .await
             .unwrap();
 
-        let cutoff = now_offset_by(-TimeDuration::hours(1));
         let num_pruned = store
-            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, 100))
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(Epoch(10), 100))
             .await
             .unwrap();
         assert_eq!(num_pruned, 2);
@@ -457,18 +420,43 @@ mod tests {
             .with_read_tx(move |tx| tx.get_transaction_receipt(&receipt_address))
             .await
             .unwrap();
-
-        fn now_offset_by(offset: TimeDuration) -> PrimitiveDateTime {
-            let at = OffsetDateTime::now_utc() + offset;
-            PrimitiveDateTime::new(at.date(), at.time())
-        }
     }
 
-    /// The prune select must be servable from `transactions_created_at_idx`. Ordering it by any
+    /// A committed transaction is retained from the epoch it committed in, not from the last epoch it
+    /// could have been sequenced in — a wide `max_epoch` must not hold its record open.
+    #[tokio::test]
+    async fn indexing_a_receipt_moves_retention_to_the_commit_epoch() {
+        let (_dir, store) = temp_store().await;
+
+        let ids = insert_transactions(&store, &[Epoch(100)]).await;
+        let receipt_address = ids[0].into_receipt_address();
+
+        // On its max_epoch alone this transaction is far from the cutoff.
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 0);
+
+        store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_transaction_receipts([(receipt_address, receipt_at(Epoch(2)))], &[])
+            })
+            .await
+            .unwrap();
+
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 1);
+    }
+
+    /// The prune select must be servable from `transactions_retention_epoch_idx`. Ordering it by any
     /// column other than the one it filters on silently degrades it to a full table scan that runs
     /// under the database-wide write lock, including on the common call that prunes nothing.
     #[tokio::test]
-    async fn prune_select_is_served_by_the_created_at_index() {
+    async fn prune_select_is_served_by_the_retention_epoch_index() {
         #[derive(diesel::QueryableByName)]
         struct QueryPlanRow {
             #[diesel(sql_type = diesel::sql_types::Text)]
@@ -479,8 +467,8 @@ mod tests {
         let plan = store
             .with_read_tx(|tx| {
                 sql_query(
-                    "explain query plan select id from transactions where created_at < '2026-01-01 00:00:00' order by \
-                     created_at asc limit 500",
+                    "explain query plan select id from transactions where retention_epoch < 100 order by \
+                     retention_epoch asc limit 500",
                 )
                 .load::<QueryPlanRow>(tx.connection())
                 .map_err(|e| StorageError::general("explain query plan", e))
@@ -493,8 +481,8 @@ mod tests {
             .join("\n");
 
         assert!(
-            plan.contains("transactions_created_at_idx"),
-            "prune select does not use the created_at index: {plan}"
+            plan.contains("transactions_retention_epoch_idx"),
+            "prune select does not use the retention epoch index: {plan}"
         );
         assert!(
             !plan.contains("SCAN transactions"),
@@ -542,12 +530,8 @@ mod tests {
         assert!(matches!(status, TransactionRejectionStatus::Rejected { details, .. } if details == "nope"));
 
         // Pruned rows report as unstored, so callers do not re-issue the rejection write forever.
-        let cutoff = {
-            let at = tari_ootle_storage::time::OffsetDateTime::now_utc() + tari_ootle_storage::time::Duration::hours(1);
-            tari_ootle_storage::time::PrimitiveDateTime::new(at.date(), at.time())
-        };
         store
-            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, 100))
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(Epoch(10), 100))
             .await
             .unwrap();
         let status = store
@@ -573,12 +557,8 @@ mod tests {
             .await
             .unwrap();
 
-        let cutoff = {
-            let at = tari_ootle_storage::time::OffsetDateTime::now_utc() + tari_ootle_storage::time::Duration::hours(1);
-            tari_ootle_storage::time::PrimitiveDateTime::new(at.date(), at.time())
-        };
         store
-            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, 100))
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(Epoch(10), 100))
             .await
             .unwrap();
 
@@ -587,5 +567,31 @@ mod tests {
             .await
             .unwrap();
         assert!(page.is_empty());
+    }
+    async fn insert_transactions(store: &SqliteIndexerStore, max_epochs: &[Epoch]) -> Vec<TransactionId> {
+        use tari_common_types::types::PrivateKey;
+
+        let mut ids = Vec::new();
+        for (i, max_epoch) in max_epochs.iter().enumerate() {
+            let transaction = Transaction::builder_localnet(*max_epoch).build_and_seal(&PrivateKey::from(i as u64));
+            ids.push(transaction.calculate_id());
+            store
+                .with_write_tx(move |tx| tx.insert_or_ignore_transaction(&transaction))
+                .await
+                .unwrap();
+        }
+        ids
+    }
+
+    fn receipt_at(epoch: Epoch) -> TransactionReceipt {
+        TransactionReceipt {
+            outcome: FinalizeOutcome::FeeIntentCommit,
+            diff_summary: Default::default(),
+            fee_withdrawals: [].into(),
+            events: [].into(),
+            fee_receipt: FeeReceiptBuilder::default().with_total_fees_paid(123).build(),
+            epoch,
+            intent_commitment: Default::default(),
+        }
     }
 }

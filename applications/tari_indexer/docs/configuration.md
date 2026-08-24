@@ -65,19 +65,24 @@ Main indexer application settings.
 # State scanning interval in seconds (default: 60)
 #state_scanning_interval = 60
 
-# How long a transaction submitted through this indexer is retained, in seconds.
-# Unset (the default) retains transactions forever. Only the submitted transaction body and its
-# locally recorded mempool rejection reason are pruned; transaction receipts synced from the network
-# are retained regardless, so a pruned transaction still resolves to its receipt-backed outcome.
-# Set this well above the longest a client may take to poll for a result: once pruned, a transaction
-# no longer appears in the recent-transactions listing or single transaction lookup.
+# How many epochs past its terminal epoch a transaction submitted through this indexer is retained.
+# A transaction's terminal epoch is the epoch it committed in once its receipt has been indexed, and
+# its max_epoch (the last epoch it could still be sequenced in) until then, so a transaction that is
+# never sequenced ages out on the same schedule as one that commits. Unset (the default) retains
+# transactions forever; 0 keeps only those that can still commit or committed in the current epoch.
+# Only the submitted transaction body and its locally recorded mempool rejection reason are pruned;
+# transaction receipts synced from the network are retained regardless, so a pruned transaction still
+# resolves to its receipt-backed outcome. Set this well above the longest a client may take to poll
+# for a result: once pruned, a transaction no longer appears in the recent-transactions listing or
+# single transaction lookup. Transactions stored before this indexer recorded a terminal epoch carry
+# epoch 0, so the first pass after enabling this prunes that entire backlog.
 # Pruning bounds database growth but does not return disk to the filesystem: SQLite reuses the freed
 # pages rather than shrinking the file.
-#transaction_retention = 604800
+#transaction_retention_epochs = 100
 
 # How long the transaction pruner idles between passes once it has nothing left to prune, in seconds.
 # While a backlog remains it drains in back-to-back batches rather than waiting out this interval.
-# Only used when transaction_retention is set.
+# Only used when transaction_retention_epochs is set.
 #transaction_prune_interval = 3600
 
 # Sidechain ID to listen on (optional, hex string)

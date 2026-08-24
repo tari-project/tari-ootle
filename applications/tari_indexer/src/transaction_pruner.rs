@@ -4,10 +4,10 @@
 use std::time::Duration;
 
 use log::*;
-use tari_ootle_storage::{
-    StorageError,
-    time::{Duration as TimeDuration, OffsetDateTime, PrimitiveDateTime},
-};
+use tari_epoch_manager::service::EpochManagerHandle;
+use tari_ootle_common_types::Epoch;
+use tari_ootle_p2p::PeerAddress;
+use tari_ootle_storage::StorageError;
 use tari_shutdown::ShutdownSignal;
 use tokio::{task, time};
 
@@ -23,19 +23,27 @@ const BATCH_SIZE: usize = 500;
 /// configured interval is raised to this floor.
 const MIN_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Periodically deletes transactions submitted through this indexer once they age past the retention
-/// window. Transaction receipts synced from the network are keyed independently and are untouched.
+/// Periodically deletes transactions submitted through this indexer once their retention epoch falls
+/// more than `retention_epochs` behind the current epoch. Transaction receipts synced from the
+/// network are keyed independently and are untouched.
 pub struct TransactionPruner<TStore> {
     store: TStore,
-    retention: Duration,
+    epoch_manager: EpochManagerHandle<PeerAddress>,
+    retention_epochs: u64,
     interval: Duration,
 }
 
 impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
-    pub fn new(store: TStore, retention: Duration, interval: Duration) -> Self {
+    pub fn new(
+        store: TStore,
+        epoch_manager: EpochManagerHandle<PeerAddress>,
+        retention_epochs: u64,
+        interval: Duration,
+    ) -> Self {
         Self {
             store,
-            retention,
+            epoch_manager,
+            retention_epochs,
             interval: interval.max(MIN_INTERVAL),
         }
     }
@@ -69,8 +77,8 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
                                     if num_pruned > 0 {
                                         info!(
                                             target: LOG_TARGET,
-                                            "🧹 Pruned {num_pruned} transaction(s) older than {:.0?}",
-                                            self.retention,
+                                            "🧹 Pruned {num_pruned} transaction(s) more than {} epoch(s) behind",
+                                            self.retention_epochs,
                                         );
                                     } else {
                                         debug!(target: LOG_TARGET, "🧹 No transactions to prune.");
@@ -90,40 +98,44 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
     }
 
     async fn prune_batch(&self) -> Result<usize, StorageError> {
-        let cutoff = cutoff_from(OffsetDateTime::now_utc(), self.retention);
+        let current_epoch = self.epoch_manager.get_current_epoch();
+        // The epoch manager reports zero until its initial scan completes. Pruning against it would
+        // measure every transaction against an epoch the network has long passed.
+        if current_epoch.is_zero() {
+            return Ok(0);
+        }
+
+        let cutoff = cutoff_from(current_epoch, self.retention_epochs);
         self.store
-            .with_write_tx(move |tx| tx.prune_transactions_before(cutoff, BATCH_SIZE))
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(cutoff, BATCH_SIZE))
             .await
     }
 }
 
-/// `created_at` is written by SQLite's `current_timestamp`, which is UTC, so the cutoff is the UTC
-/// wall clock less the retention window. A retention window so large that it underflows yields the
-/// UNIX epoch, which predates every row and therefore prunes nothing.
-fn cutoff_from(now: OffsetDateTime, retention: Duration) -> PrimitiveDateTime {
-    let retention = TimeDuration::try_from(retention).unwrap_or(TimeDuration::MAX);
-    let cutoff = now.checked_sub(retention).unwrap_or(OffsetDateTime::UNIX_EPOCH);
-    PrimitiveDateTime::new(cutoff.date(), cutoff.time())
+/// A transaction is retained while its retention epoch is within `retention_epochs` of the current
+/// epoch, so the cutoff — the first epoch still retained — is `current - retention_epochs`. With a
+/// window of zero that is the current epoch itself, which prunes everything that can no longer
+/// commit.
+fn cutoff_from(current_epoch: Epoch, retention_epochs: u64) -> Epoch {
+    current_epoch.saturating_sub(Epoch(retention_epochs))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn at_unix_secs(secs: i64) -> OffsetDateTime {
-        OffsetDateTime::from_unix_timestamp(secs).unwrap()
+    #[test]
+    fn cutoff_is_the_oldest_retained_epoch() {
+        assert_eq!(cutoff_from(Epoch(100), 10), Epoch(90));
     }
 
     #[test]
-    fn cutoff_subtracts_the_retention_window() {
-        let now = at_unix_secs(1_800_000_000);
-        let cutoff = cutoff_from(now, Duration::from_secs(2 * 60 * 60));
-        assert_eq!(cutoff.assume_utc(), at_unix_secs(1_800_000_000 - 2 * 60 * 60));
+    fn a_zero_window_retains_only_the_current_epoch() {
+        assert_eq!(cutoff_from(Epoch(100), 0), Epoch(100));
     }
 
     #[test]
-    fn cutoff_saturates_instead_of_overflowing() {
-        let cutoff = cutoff_from(at_unix_secs(1_800_000_000), Duration::MAX);
-        assert_eq!(cutoff.assume_utc(), OffsetDateTime::UNIX_EPOCH);
+    fn cutoff_saturates_instead_of_underflowing() {
+        assert_eq!(cutoff_from(Epoch(3), 10), Epoch::zero());
     }
 }

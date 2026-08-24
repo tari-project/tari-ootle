@@ -288,15 +288,20 @@ pub async fn spawn_services(
         consensus_constants.clone(),
     )?;
 
-    if let Some(retention) = config.indexer.transaction_retention {
+    if let Some(retention_epochs) = config.indexer.transaction_retention_epochs {
         info!(
             target: LOG_TARGET,
-            "🧹 Pruning transactions older than {:.0?} every {:.0?}",
-            retention,
+            "🧹 Pruning transactions more than {} epoch(s) behind, checked every {:.0?}",
+            retention_epochs,
             config.indexer.transaction_prune_interval,
         );
-        TransactionPruner::new(store.clone(), retention, config.indexer.transaction_prune_interval)
-            .spawn(shutdown.clone());
+        TransactionPruner::new(
+            store.clone(),
+            epoch_manager.clone(),
+            retention_epochs,
+            config.indexer.transaction_prune_interval,
+        )
+        .spawn(shutdown.clone());
     }
 
     let transaction_manager = TransactionManager::new(

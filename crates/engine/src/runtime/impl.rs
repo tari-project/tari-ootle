@@ -2549,9 +2549,8 @@ where
                     return Err(RuntimeError::FeePaymentInMainIntent);
                 }
 
-                // Account and charge for the statement's verification cost up front, exactly like the canonical
-                // `stealth_transfer` path does — this is the same free-compute-credit fee intent, so it must be
-                // capped and billed here too, not just on the `StealthTransfer` instruction route.
+                // Charge for the statement's verification cost, exactly like the
+                // `stealth_transfer` method does.
                 if let Some(ref statement) = arg.statement {
                     self.tracker.account_fee_intent_stealth_transfer()?;
                     let has_view_key = self.tracker.write_with(|state| {
@@ -2561,10 +2560,7 @@ where
                         Ok::<_, RuntimeError>(has_view_key)
                     })?;
                     self.tracker
-                        .charge_native_execution(tari_engine_types::stealth::transfer_native_points(
-                            statement,
-                            has_view_key,
-                        ))?;
+                        .charge_native_execution(stealth::transfer_native_points(statement, has_view_key))?;
                 }
 
                 // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate as

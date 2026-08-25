@@ -1,0 +1,260 @@
+---
+title: Testing Your Template
+description: Write template tests that create accounts, override the epoch, read component state directly and assert on rejected transactions.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import { basePath } from '../../../helpers/path';
+
+### Covered in this guide
+
+In this guide, you will:
+- Set up a test and create funded accounts to call your component with.
+- Tell transaction signers apart from authorization proofs, and pass proofs only where they are needed.
+- Override the current epoch and epoch hash for templates that read them.
+- Read component state directly between transactions.
+- Assert on the error message of a transaction you expect to be rejected.
+
+`tari_template_test_tooling` compiles your template to WASM and runs transactions against it with the
+same engine the network uses, so a passing test means the engine accepted the transaction, not that a
+mock did. A template crate created with `cargo generate` already declares it; add it yourself if
+yours does not have it:
+
+```toml
+[dev-dependencies]
+tari_template_test_tooling = "0.39"
+```
+
+<Aside type="tip">
+  Template tests spend most of their time in the WASM JIT unless you optimize it in debug builds. The
+  <a href={basePath("/guides/build-a-guessing-game/#speeding-up-template-tests")}>guessing game guide</a>
+  has the `Cargo.toml` profile settings that make these tests roughly 10x faster.
+</Aside>
+
+The examples below are the tests in
+[`crates/engine/tests/testing_tutorial.rs`](https://github.com/tari-project/tari-ootle/blob/development/crates/engine/tests/testing_tutorial.rs),
+which run in this repository's CI against the
+[guessing game template](https://github.com/tari-project/tari-ootle/blob/development/crates/engine/tests/templates/guessing_game/src/lib.rs).
+They load the template by path — `TemplateTest::new(CRATE_PATH, ["tests/templates/guessing_game"])` —
+because the template lives elsewhere in this repository. In your own template crate the template *is*
+the crate, so you use `TemplateTest::my_crate()` instead, and everything else on this page stays the
+same.
+
+## Basic setup and creating accounts
+
+`create_funded_account` generates a fresh key pair, publishes an account component for it and funds
+it from the built-in XTR faucet, all in one call. It returns the account address, an ownership proof
+and the secret key you seal that account's transactions with:
+
+```rust title="crates/engine/tests/testing_tutorial.rs"
+let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/guessing_game"]);
+let template = test.get_template_address("GuessingGame");
+
+// Creates a fresh key pair, publishes an account component for it and funds it from the
+// built-in XTR faucet.
+let (player, _player_proof, player_key) = test.create_funded_account();
+
+let vaults = test.read_only_state_store().get_vaults_for_account(player).unwrap();
+assert_eq!(
+    vaults[&TARI_TOKEN].balance(),
+    Amount::from(TemplateTest::FUNDED_ACCOUNT_INITIAL_BALANCE)
+);
+```
+
+Use `create_empty_account` when a test needs an account that holds nothing.
+
+<Aside type="note">
+  Fees are off by default in `TemplateTest`, so a transaction does not need a fee payment
+  instruction. Call `test.enable_fees()` when the behaviour you are testing depends on fees.
+</Aside>
+
+### Signers are not proofs
+
+Two different things authorize a transaction, and mixing them up is the most common source of
+confusing test failures:
+
+- The **signer** is the secret key you pass to `build_and_seal`. It identifies who submitted the
+  transaction, and it is what a template sees in `CallerContext::transaction_signer_public_key()`.
+- An **ownership proof** is a badge presented for the transaction's duration, which is what
+  <a href={basePath("/guides/authorization-and-access/")}>access rules</a> are checked against.
+
+When the `proofs` argument is empty, the harness derives the proofs from the transaction's signers,
+so a method that only requires the caller's own badge needs nothing extra:
+
+```rust title="crates/engine/tests/testing_tutorial.rs"
+// `start_game` is owner-restricted, so the transaction is sealed by the key that owns the
+// component - the harness's own key, which created it in the same transaction.
+test.execute_expect_success(
+    test.transaction()
+        .allocate_component_address("game")
+        .call_function(template, "new", args![Workspace("game")])
+        .call_method("game", "start_game", args![NonFungibleId::from_string("💎")])
+        .build_and_seal(test.secret_key()),
+    vec![],
+);
+let (game, _) = test
+    .read_only_state_store()
+    .get_components_by_template_address(template)
+    .unwrap()
+    .remove(0);
+
+// The player seals this one with their own key. `guess` is declared `rule![allow_all]`, so no
+// ownership proof is required: with an empty `proofs` argument the harness derives the proofs
+// from the transaction signers.
+test.execute_expect_success(
+    test.transaction()
+        .call_method(game, "guess", args![5u8, player])
+        .build_and_seal(&player_key),
+    vec![],
+);
+```
+
+Pass proofs explicitly only when the transaction genuinely presents a badge its signer does not hold
+— an admin badge held by another account, for instance. Adding `test.owner_proof()` to every call
+because it is available hides the authorization bug you are trying to catch: the test passes whether
+or not your access rules are correct.
+
+## Overriding the epoch and epoch hash
+
+Templates read consensus values through `Consensus::current_epoch()` and
+`Consensus::current_epoch_hash()`. Both are *virtual substates*: values the engine injects into an
+execution rather than reading from the state store. `TemplateTest` seeds them with epoch `0` and a
+zero hash, and `set_virtual_substate` replaces either one for every transaction that follows.
+
+The repository's own consensus tests in
+[`crates/engine/tests/test.rs`](https://github.com/tari-project/tari-ootle/blob/development/crates/engine/tests/test.rs)
+(module `consensus`) show both. The template being called here is a
+[fixture](https://github.com/tari-project/tari-ootle/blob/development/crates/engine/tests/templates/consensus/src/lib.rs)
+whose functions return the two values unchanged, so the assertion observes exactly what the engine
+gave the template:
+
+```rust title="crates/engine/tests/test.rs"
+let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/consensus"]);
+
+// the default value for a current epoch in the mocks is 0
+let result: u64 = template_test.call_function("TestConsensus", "current_epoch", args![], vec![]);
+assert_eq!(result, 0);
+
+// set the value of current epoch to "1" and call the template function again to check that it reads the new
+// value
+template_test.set_virtual_substate(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(1));
+let result: u64 = template_test.call_function("TestConsensus", "current_epoch", args![], vec![]);
+assert_eq!(result, 1);
+```
+
+The epoch hash is overridden the same way, with `VirtualSubstateId::CurrentEpochHash`:
+
+```rust title="crates/engine/tests/test.rs"
+let injected_hash = [0xABu8; 32];
+template_test.set_virtual_substate(
+    VirtualSubstateId::CurrentEpochHash,
+    VirtualSubstate::CurrentEpochHash(injected_hash.into()),
+);
+
+let result: Hash32 = template_test.call_function("TestConsensus", "current_epoch_hash", args![], vec![]);
+assert_eq!(result.as_slice(), injected_hash);
+```
+
+To do this for your own template, replace the fixture parts: the template name and the function or
+method you call, the return type you decode into, and — if the value is stored rather than returned
+— the state path you read it back from. What must not change is the shape of the check: the
+behaviour you assert on has to be one that actually reads the epoch or the hash. Overriding the
+epoch proves nothing about a method that never calls `Consensus`.
+
+Two related calls are worth knowing:
+
+- `test.current_epoch()` returns the epoch the harness is executing in, which is also the epoch that
+  `test.transaction()` stamps onto the transactions it builds.
+- `remove_virtual_substate` deletes the value entirely. A template that then reads it is rejected
+  with `Virtual substate not found: Virtual(CurrentEpochHash)`, which is what the repository's
+  `test_epoch_hash_not_available_without_injection` test asserts.
+
+## Examining component state directly
+
+`extract_component_value` reads a single value out of a component's state between transactions.
+State is encoded field by field, so a path segment is the *index* of the field in your template
+struct, not its name:
+
+```rust title="crates/engine/tests/testing_tutorial.rs"
+// Component state is encoded field by field, so a path segment is the *index* of the field in
+// the template struct. `GuessingGame` declares `prize_vault`, `guesses`, `round_number`, so
+// `$.2` is the round counter that `start_game` incremented.
+let round_number: u32 = test.extract_component_value(game, "$.2");
+assert_eq!(round_number, 1);
+
+// The store also answers typed questions about a component. `start_game` minted the prize NFT
+// into the component's vault, so that vault now holds exactly one token.
+let vaults = test.read_only_state_store().get_vaults_for_component(game).unwrap();
+let prize_vault = vaults.values().next().expect("the game holds a prize vault");
+assert_eq!(prize_vault.balance(), Amount::from(1u64));
+```
+
+The index is the one thing you must translate when adapting this to your own template: `$.0` is your
+struct's first field, `$.2` its third, and reordering your fields changes the paths. The type you
+decode into has to match the field's own type, and `extract_component_value` panics if the path is
+missing or the value does not decode — which is what you want in a test.
+
+For anything the path syntax cannot express, `test.read_only_state_store()` gives you the store
+itself: `get_component`, `get_vaults_for_component`, `get_account`, `get_vault` and `get_resource`
+all return typed values. `test.print_state()` dumps everything when you are working out what a
+transaction actually did.
+
+## Asserting on a rejected transaction
+
+`execute_expect_failure` panics if the transaction *succeeds* and otherwise hands you the
+`RejectReason`. `assert_reject_reason` then checks that the reason contains the message you expect,
+so a `panic!` or a failed `assert!` in your template is assertable verbatim:
+
+```rust title="crates/engine/tests/testing_tutorial.rs"
+// A guess that the template accepts is recorded in `guesses`. Establishing that first is what
+// makes the rejection below meaningful: this is the observable a committed `guess` changes.
+let before_any_guess = test.read_only_state_store().get_component(game).unwrap();
+test.execute_expect_success(
+    test.transaction()
+        .call_method(game, "guess", args![5u8, player])
+        .build_and_seal(&player_key),
+    vec![],
+);
+let after_valid_guess = test.read_only_state_store().get_component(game).unwrap();
+assert_ne!(
+    after_valid_guess.state(),
+    before_any_guess.state(),
+    "an accepted guess must be visible in the component state"
+);
+
+// The template asserts `guess <= 10`, and the panic message reaches the test verbatim.
+let reason = test.execute_expect_failure(
+    test.transaction()
+        .call_method(game, "guess", args![100u8, cheat])
+        .build_and_seal(&cheat_key),
+    vec![],
+);
+assert_reject_reason(reason, "Panic! Guess must be from 0 to 10");
+
+// A rejected transaction commits nothing: the same state the accepted guess produced.
+let after_rejection = test.read_only_state_store().get_component(game).unwrap();
+assert_eq!(
+    after_rejection.state(),
+    after_valid_guess.state(),
+    "a rejected transaction must not commit state"
+);
+```
+
+Two things make this a real test rather than a green tick:
+
+- **The rejection is for the reason you meant.** A transaction rejected because it was sealed by the
+  wrong key, or because the caller had no funds, also satisfies `execute_expect_failure`. Asserting
+  on the message is what distinguishes "my rule fired" from "the setup was broken".
+- **The state comparison is against something that would have changed.** The accepted guess above
+  proves that `guess` writes to the component; comparing that same state after the rejection is
+  therefore evidence that nothing committed. Comparing a field the method never touches proves
+  nothing at all.
+
+For access-rule failures, `tari_template_test_tooling::support::assert_error` also provides
+`assert_access_denied_for_action` and `assert_insufficient_funds_for_action`, which spell out the
+engine error rather than a template panic.
+
+### Next steps
+
+- Learn how to <a href={basePath("/guides/publishing-templates/")}>publish your template</a> to the Tari Ootle.
+- Read up on <a href={basePath("/guides/authorization-and-access/")}>authorization and access rules</a> to know which proofs your methods actually require.

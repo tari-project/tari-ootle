@@ -442,9 +442,11 @@ You can use the `tari_template_test_tooling` crate as a `dev-dependency`. This c
 a harness that compiles your template to WASM and allows you to create transactions that call into
 your template/component using the same execution engine that runs on the Tari L2 network.
 
-Writing tests is out of scope for this guide, but the [full annotated code example](#full-annotated-code)
-includes a test that creates a new game, simulates some players making guesses, and then ends the game
-to check that the prize is awarded correctly.
+The <a href={basePath("/guides/testing-templates/")}>Testing Your Template</a> guide walks through
+creating accounts, overriding the epoch, reading component state directly and asserting on rejected
+transactions. The [full annotated code example](#full-annotated-code) below also includes a test that
+creates a new game, simulates some players making guesses, and then ends the game to check that the
+prize is awarded correctly.
 
 To run your tests, simply run `cargo test` in your template crate directory.
 The test harness will compile your template to WASM and run the tests against it.

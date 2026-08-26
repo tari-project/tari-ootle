@@ -14,6 +14,7 @@ use tari_engine_types::{
     commit_result::RejectReason,
     limits::{FREE_COMPUTE_GRACE_POINTS, MAX_WASM_POINTS_PER_TRANSACTION},
 };
+use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{ComponentAddress, NonFungibleAddress, TemplateAddress, bytes::Bytes};
 use tari_template_test_tooling::TemplateTest;
@@ -109,6 +110,77 @@ fn groth16_verify_fits_the_budget() {
     );
 }
 
+/// The flow a contract actually uses: the verifying key lives in component state and a caller
+/// supplies only a proof and the statement it attests to. Distinct from the static paths above,
+/// which take the key as an argument — here the key is trusted state the caller cannot substitute.
+#[test]
+fn groth16_verifies_against_a_component_held_key() {
+    let mut h = setup();
+    let f = groth16::fixture(INPUTS);
+
+    let create = h
+        .test
+        .transaction()
+        .call_function(h.template, "new", args![f.pvk_uncompressed.clone()])
+        .build_and_seal(&h.key);
+    h.test.execute_expect_success(create, vec![]);
+    let component = h
+        .test
+        .get_previous_output_address(SubstateType::Component)
+        .as_component_address()
+        .unwrap();
+
+    let verified = h.test.call_method::<bool>(
+        component,
+        "verify_stateful",
+        args![f.proof_uncompressed.clone(), f.inputs.clone()],
+        vec![],
+    );
+    assert!(verified, "a valid proof must verify against the component's key");
+
+    let verified = h.test.call_method::<bool>(
+        component,
+        "verify_stateful",
+        args![f.proof_uncompressed.clone(), f.wrong_inputs.clone()],
+        vec![],
+    );
+    assert!(
+        !verified,
+        "the component's key must not verify a statement the proof does not attest to"
+    );
+}
+
+/// A caller may supply the verifying key itself, in either encoding. Both accept a valid proof and
+/// both fit the budget — compression trades bytes on the wire for point decompression, and
+/// supplying an unprepared key trades a stored 34 KiB prepared key for a pairing per call.
+#[test]
+fn groth16_verifies_from_a_caller_supplied_key() {
+    let mut h = setup();
+    let f = groth16::fixture(INPUTS);
+
+    for (func, vk, proof) in [
+        ("verify_uncompressed", &f.vk_uncompressed, &f.proof_uncompressed),
+        ("verify_compressed", &f.vk_compressed, &f.proof_compressed),
+    ] {
+        let tx = h
+            .test
+            .transaction()
+            .call_function(h.template, func, args![vk.clone(), proof.clone(), f.inputs.clone()])
+            .build_and_seal(&h.key);
+        let result = h.test.execute_expect_success(tx, vec![]);
+
+        assert!(
+            result.finalize.execution_results[0].decode::<bool>().unwrap(),
+            "{func} must verify a valid proof",
+        );
+        assert!(
+            result.wasm_execution_points < MAX_WASM_POINTS_PER_TRANSACTION,
+            "{func} cost {} points, over the {MAX_WASM_POINTS_PER_TRANSACTION} budget",
+            result.wasm_execution_points,
+        );
+    }
+}
+
 /// Public inputs the proof does not attest to are rejected, and rejection is not cheaper than
 /// acceptance — both run the same pairing check, so a caller learns nothing from the cost.
 #[test]
@@ -167,15 +239,17 @@ fn stacked_verifies_exhaust_the_transaction_budget() {
     // Sized off the bound rather than the measured cost, so the count is guaranteed to overrun the
     // budget however the real per-verify cost drifts within it.
     let count = (MAX_WASM_POINTS_PER_TRANSACTION / MIN_EXPECTED_POINTS + 1) as usize;
-    let mut builder = h.test.transaction();
-    for _ in 0..count {
-        builder = builder.call_function(h.template, "verify_prepared", args![
-            f.pvk_uncompressed.clone(),
-            f.proof_uncompressed.clone(),
-            f.inputs.clone()
-        ]);
-    }
-    let tx = builder.build_and_seal(&h.key);
+    let tx = h
+        .test
+        .transaction()
+        .fold(0..count, |builder, _| {
+            builder.call_function(h.template, "verify_prepared", args![
+                f.pvk_uncompressed.clone(),
+                f.proof_uncompressed.clone(),
+                f.inputs.clone()
+            ])
+        })
+        .build_and_seal(&h.key);
 
     let reason = h.test.execute_expect_failure(tx, vec![]);
     assert!(

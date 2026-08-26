@@ -10,7 +10,7 @@ import { basePath } from '../../../helpers/path';
 
 In this guide, you will:
 - Set up a test and create funded accounts to call your component with.
-- Tell transaction signers apart from authorization proofs, and pass proofs only where they are needed.
+- Set up the badges a transaction starts with, and tell them apart from real runtime proofs.
 - Override the current epoch and epoch hash for templates that read them.
 - Read component state directly between transactions.
 - Assert on the error message of a transaction you expect to be rejected.
@@ -68,18 +68,21 @@ Use `create_empty_account` when a test needs an account that holds nothing.
   instruction. Call `test.enable_fees()` when the behaviour you are testing depends on fees.
 </Aside>
 
-### Signers are not proofs
+### Proofs are the transaction's initial auth scope
 
-Two different things authorize a transaction, and mixing them up is the most common source of
-confusing test failures:
+The `proofs` argument to `execute_expect_success` and `execute_expect_failure` supplies the
+transaction's **initial authorization scope**: a set of *virtual badges*, each a
+`NonFungibleAddress`, that are in scope from the moment execution starts and that
+<a href={basePath("/guides/authorization-and-access/")}>access rules</a> are checked against.
 
-- The **signer** is the secret key you pass to `build_and_seal`. It identifies who submitted the
-  transaction, and it is what a template sees in `CallerContext::transaction_signer_public_key()`.
-- An **ownership proof** is a badge presented for the transaction's duration, which is what
-  <a href={basePath("/guides/authorization-and-access/")}>access rules</a> are checked against.
+On the network that scope has exactly one source: the engine derives one badge per transaction
+signer from the signer's public key, and puts **nothing else** there. No other NFT ever lands in a
+real transaction's initial scope — a badge you merely hold in a vault is not a virtual badge, and is
+presented by creating a real `Proof` from that vault instead. The harness's `proofs` vector is the
+only thing that can put a non-signer NFT into an initial scope at all.
 
-When the `proofs` argument is empty, the harness derives the proofs from the transaction's signers,
-so a method that only requires the caller's own badge needs nothing extra:
+`TemplateTest` mirrors production when you leave the vector empty: it derives exactly the same signer
+badges, which is what you want whenever authorization is not what you are testing.
 
 ```rust title="crates/engine/tests/testing_tutorial.rs"
 // `start_game` is owner-restricted, so the transaction is sealed by the key that owns the
@@ -109,10 +112,54 @@ test.execute_expect_success(
 );
 ```
 
-Pass proofs explicitly only when the transaction genuinely presents a badge its signer does not hold
-— an admin badge held by another account, for instance. Adding `test.owner_proof()` to every call
-because it is available hides the authorization bug you are trying to catch: the test passes whether
-or not your access rules are correct.
+A non-empty vector **replaces** those derived signer badges rather than adding to them — the harness
+auto-derives only while the argument is empty — and
+`test.disable_auto_add_proofs_from_signers()` switches the derivation off altogether. So reach for
+the override to *take something away*, not to add something: it is how you run a transaction with a
+required badge deliberately missing and assert that the method is denied. Adding an extra NFT to the
+vector instead builds a scope the network cannot produce, and misrepresents a vault-held badge as
+something it never is on-chain. If you do pass a list and the signer's own authorization is meant to
+stay, include that signer's badge explicitly — `test.owner_proof()` for transactions sealed with
+`test.secret_key()`, or the proof each of `create_funded_account` and `create_empty_account` returns
+alongside the key it generates — otherwise it is silently dropped.
+
+To exercise a badge that lives in a vault, do what a real transaction does rather than reaching for
+the vector: call `create_proof_for_resource` on the account holding it, pass the resulting `Proof` to
+the code that needs it, and have that code authorize with it — `Proof::authorize`, `try_authorize` or
+`authorize_with`. Authorizing adds the proof to the *current* call frame's scope, and access rules
+match a held proof just as readily as a virtual badge.
+
+That difference in reach is the last thing worth knowing: virtual badges are in scope for the
+**top-level call only**. A component reached through another template starts from an empty badge set,
+so a method that passes when called directly can be denied across a template boundary.
+`it_permits_cross_template_calls_using_proofs` in
+[`crates/engine/tests/access_rules.rs`](https://github.com/tari-project/tari-ootle/blob/development/crates/engine/tests/access_rules.rs)
+shows the denial, with the account's own badge in scope the whole time — the cross-template call
+itself is a plain `ComponentManager::get(address).call(...)` inside the `CrossTemplate` fixture:
+
+```rust title="crates/engine/tests/access_rules.rs"
+// Try to take tokens without proof. Even though I'm the owner of the resource, the scope does not carry over
+// when cross-template calls are made.
+let reason = test.execute_expect_failure(
+    Transaction::builder_localnet(Epoch(1))
+        .call_function(cross_call_template, "call_component_with_args", args![
+            component_address,
+            "take_tokens",
+            invoke_args![10],
+        ])
+        .put_last_instruction_output_on_workspace("tokens")
+        .call_method(owner_account, "deposit", args![Workspace("tokens")])
+        .drop_all_proofs_in_workspace()
+        .build_and_seal(&owner_key),
+    vec![owner_proof.clone()],
+);
+
+assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
+```
+
+The rest of that test then does it the working way: mint the badge, deposit it into the account,
+create a `Proof` for its resource, and pass that proof across the boundary for the callee to
+authorize with.
 
 ## Overriding the epoch and epoch hash
 

@@ -149,14 +149,16 @@ impl ConsensusConstants {
         // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
         // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
         max_transaction_weight: 1_000_000,
-        // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
-        // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
-        // of the metering costs on x86-class hardware.
+        // ~18 max-compute transactions (`MAX_WASM_POINTS_PER_TRANSACTION` each) — ~536ms of serial
+        // execution at the calibrated ~8.4M points/ms, ~5% of the block time, leaving the rest for
+        // consensus, storage and slower validator hardware. The transaction count is a floor the
+        // per-transaction ceiling is sized against, asserted by
+        // `a_block_admits_enough_max_compute_transactions`.
         max_block_execution_points: 4_500_000_000,
         // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
         // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
         // proposals are never rejected.
-        max_block_validation_execution_points: 7_100_000_000,
+        max_block_validation_execution_points: 7_250_000_000,
         exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
         max_transaction_validity_epochs: 2160,
         epoch_end_spread_blocks: 5,
@@ -187,14 +189,16 @@ impl ConsensusConstants {
         // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
         // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
         max_transaction_weight: 1_000_000,
-        // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
-        // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
-        // of the metering costs on x86-class hardware.
+        // ~18 max-compute transactions (`MAX_WASM_POINTS_PER_TRANSACTION` each) — ~536ms of serial
+        // execution at the calibrated ~8.4M points/ms, ~5% of the block time, leaving the rest for
+        // consensus, storage and slower validator hardware. The transaction count is a floor the
+        // per-transaction ceiling is sized against, asserted by
+        // `a_block_admits_enough_max_compute_transactions`.
         max_block_execution_points: 4_500_000_000,
         // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
         // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
         // proposals are never rejected.
-        max_block_validation_execution_points: 7_100_000_000,
+        max_block_validation_execution_points: 7_250_000_000,
         exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
         max_transaction_validity_epochs: 2160,
         epoch_end_spread_blocks: 10,
@@ -225,14 +229,16 @@ impl ConsensusConstants {
         // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
         // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
         max_transaction_weight: 1_000_000,
-        // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
-        // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
-        // of the metering costs on x86-class hardware.
+        // ~18 max-compute transactions (`MAX_WASM_POINTS_PER_TRANSACTION` each) — ~536ms of serial
+        // execution at the calibrated ~8.4M points/ms, ~5% of the block time, leaving the rest for
+        // consensus, storage and slower validator hardware. The transaction count is a floor the
+        // per-transaction ceiling is sized against, asserted by
+        // `a_block_admits_enough_max_compute_transactions`.
         max_block_execution_points: 4_500_000_000,
         // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
         // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
         // proposals are never rejected.
-        max_block_validation_execution_points: 7_100_000_000,
+        max_block_validation_execution_points: 7_250_000_000,
         exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
         max_transaction_validity_epochs: 2160,
         epoch_end_spread_blocks: 5,
@@ -277,14 +283,16 @@ impl ConsensusConstants {
             // (binary bytes / 3) — with ~2x headroom, while bounding any single transaction's
             // size/execution cost at ingress. A mempool admission bound, not a consensus rule.
             max_transaction_weight: 1_000_000,
-            // ~45 max-compute transactions (100M points each, ~33ms on ~3GHz x86) — ~1.5s of serial WASM
-            // execution with ~3x headroom for slower validator hardware. Provisional pending re-measurement
-            // of the metering costs on x86-class hardware.
+            // ~18 max-compute transactions (`MAX_WASM_POINTS_PER_TRANSACTION` each) — ~536ms of serial
+            // execution at the calibrated ~8.4M points/ms, ~5% of the block time, leaving the rest for
+            // consensus, storage and slower validator hardware. The transaction count is a floor the
+            // per-transaction ceiling is sized against, asserted by
+            // `a_block_admits_enough_max_compute_transactions`.
             max_block_execution_points: 4_500_000_000,
             // Proposal budget + the largest single-transaction overshoot the per-transaction ceilings allow
             // (`MAX_WASM_POINTS_PER_TRANSACTION` + `MAX_NATIVE_POINTS_PER_TRANSACTION`) + margin, so honest
             // proposals are never rejected.
-            max_block_validation_execution_points: 7_100_000_000,
+            max_block_validation_execution_points: 7_250_000_000,
             exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
             max_transaction_validity_epochs: 2160,
             epoch_end_spread_blocks: 1,
@@ -329,6 +337,7 @@ mod tests {
         ENGINE_LIMITS,
         MAX_NATIVE_POINTS_PER_TRANSACTION,
         MAX_WASM_POINTS_PER_TRANSACTION,
+        MIN_MAX_COMPUTE_TRANSACTIONS_PER_BLOCK,
     };
 
     use super::*;
@@ -367,6 +376,28 @@ mod tests {
                     constants.max_block_execution_points +
                         MAX_WASM_POINTS_PER_TRANSACTION +
                         MAX_NATIVE_POINTS_PER_TRANSACTION
+            );
+        }
+    }
+
+    /// The per-transaction compute ceiling is a fraction of the block's, not an independent knob:
+    /// raising it lets one transaction claim a larger share of a block, and past some point a leader
+    /// packing max-compute transactions starves the block of everything else. This fixes how far
+    /// that can go, so the two constants cannot drift apart silently.
+    #[test]
+    fn a_block_admits_enough_max_compute_transactions() {
+        for constants in [
+            ConsensusConstants::mainnet(),
+            ConsensusConstants::devnet(7),
+            ConsensusConstants::esmeralda(),
+            ConsensusConstants::testnet(),
+        ] {
+            let admitted = constants.max_block_execution_points / MAX_WASM_POINTS_PER_TRANSACTION;
+            assert!(
+                admitted >= MIN_MAX_COMPUTE_TRANSACTIONS_PER_BLOCK,
+                "a block admits only {admitted} max-compute transactions, below the floor of \
+                 {MIN_MAX_COMPUTE_TRANSACTIONS_PER_BLOCK}: either the per-transaction ceiling has outgrown the block \
+                 budget, or the floor needs revisiting",
             );
         }
     }

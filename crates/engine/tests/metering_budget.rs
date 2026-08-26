@@ -6,7 +6,7 @@
 //! could run for far longer than any single call by stacking instructions. These tests prove the
 //! total is capped across calls.
 
-use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
+use tari_engine_types::{commit_result::RejectReason, limits::MAX_WASM_POINTS_PER_TRANSACTION};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
 
@@ -19,11 +19,6 @@ fn per_transaction_budget_caps_total_across_calls() {
     let addr = test.get_template_address("MeteringBench");
     let (account, owner, key) = test.create_funded_account();
 
-    // 1 fee unit == 1 metering point so the WasmExecution charge is the exact point count.
-    let mut fee_table = test.fee_table().clone();
-    fee_table.per_wasm_point_cost = 1;
-    fee_table.wasm_points_cost_divisor = 1;
-    test.set_fee_table(fee_table);
     test.enable_fees();
 
     let call = |rounds: u64, n: usize| {
@@ -36,20 +31,14 @@ fn per_transaction_budget_caps_total_across_calls() {
 
     // Calibrate points per round so we can size a call to a known fraction of the budget.
     let mut points = |rounds: u64| -> u64 {
-        let result = test.execute_expect_success(call(rounds, 1), vec![owner.clone()]);
-        result
-            .finalize
-            .fee_receipt
-            .fee_breakdown()
-            .iter()
-            .find_map(|(s, a)| (*s == FeeSource::WasmExecution).then_some(*a))
-            .expect("WasmExecution charge present")
+        test.execute_expect_success(call(rounds, 1), vec![owner.clone()])
+            .wasm_execution_points
     };
     let per_round = (points(20_000) - points(10_000)) / 10_000;
 
-    // Size one call to ~65M points: comfortably under the 100M budget on its own, but two such
-    // calls in a single transaction sum to ~130M and must exceed it.
-    let rounds = 65_000_000 / per_round;
+    // Size one call to ~65% of the budget: comfortably under it on its own, but two such calls in a
+    // single transaction sum to ~130% and must exceed it.
+    let rounds = MAX_WASM_POINTS_PER_TRANSACTION * 65 / 100 / per_round;
 
     // One call stays under the budget and succeeds.
     test.execute_expect_success(call(rounds, 1), vec![owner.clone()]);

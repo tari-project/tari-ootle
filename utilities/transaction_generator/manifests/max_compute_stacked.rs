@@ -4,7 +4,7 @@
 // Stacks several `busy_max()` calls into a single transaction to exercise the per-transaction
 // metering budget (`MAX_WASM_POINTS_PER_TRANSACTION`, see crates/engine/src/wasm/process.rs).
 //
-// Each `busy_max()` consumes ~88M of the 100M per-transaction budget, so the SECOND call runs out of
+// Each `busy_max()` consumes ~218M of the 250M per-transaction budget, so the SECOND call runs out of
 // gas and the transaction is REJECTED with an execution failure — even though, on a fresh per-call
 // budget, every call would have succeeded. This is the "stack many heavy calls in one transaction"
 // attack the per-transaction budget is meant to block; expect these transactions to show as
@@ -19,13 +19,14 @@
 //     --input vault_<hex> \
 //     --signer <account_owner_secret_key_hex>
 //
-// The fee covers the ~100M points the transaction burns before tripping the budget, so it is
-// rejected for running out of gas rather than for underpaying fees.
+// The fee covers the ~250M points the transaction burns before tripping the budget, so it is
+// rejected for running out of gas rather than for underpaying fees — the payment also bounds the
+// compute allowance, so underpaying here would change the failure mode.
 use MaxCompute;
 
 fn fee_main() {
     let account = arg!["account"];
-    account.pay_fee(200_000);
+    account.pay_fee(400_000);
 }
 
 fn main() {

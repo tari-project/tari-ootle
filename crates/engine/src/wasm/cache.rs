@@ -52,12 +52,15 @@ const LOG_TARGET: &str = "tari::engine::wasm::cache";
 /// undefined behaviour at worst):
 ///
 /// - [`crate::wasm::WasmModule::create_engine`] config (compiler flags, features bitset, middleware list, tunables).
+/// - [`tari_engine_types::limits::MAX_WASM_POINTS_PER_CALL`], which the metering middleware bakes into the artifact as
+///   the initial remaining-points global. `WasmProcess::metering_allowance` reads it back with `get_remaining_points`,
+///   so a node serving a stale artifact meters against the old cap and diverges from one that compiled fresh.
 /// - The `wasmer` crate version (the serialized artifact format is internal to wasmer and not part of any stable wire
 ///   spec).
 ///
 /// On a bump, old cache files become orphans (different filename suffix)
 /// and the next compile-from-source rewrites under the new key.
-pub const ENGINE_FINGERPRINT: &str = "v2";
+pub const ENGINE_FINGERPRINT: &str = "v3";
 
 /// 8-byte LE length prefix at the head of each cache file holding the original
 /// WASM source byte count. `wasmer::Module::serialize` doesn't preserve this

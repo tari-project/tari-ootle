@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 //! A template designed to consume as much execution time as possible per call without tripping the
-//! Wasmer metering limit (currently 100_000_000 points per `_main` invocation, see
-//! `tari_engine::wasm::module`). It is used to stress test transaction execution and consensus
-//! throughput under worst-case CPU load.
+//! Wasmer metering limit (`tari_engine_types::limits::MAX_WASM_POINTS_PER_CALL`, applied per `_main`
+//! invocation by `tari_engine::wasm::module`). It is used to stress test transaction execution and
+//! consensus throughput under worst-case CPU load.
 //!
 //! The hot loop is a fully serial chain of 64-bit integer divisions. Division is the cheapest
 //! operation to meter (1 point, the same as an add) yet one of the most expensive to actually
@@ -24,11 +24,13 @@ const DIVISIONS_PER_ROUND: u32 = 8;
 /// each divide keeps hitting the hardware slow path.
 const MIX: u64 = 0x9E37_79B9_7F4A_7C17;
 
-/// Number of outer rounds that lands just under the 100M metering budget. Calibrated empirically
-/// (see `tests/max_compute.rs` in the `transaction_generator` crate): with division re-costed to 30
-/// points (see `wasm/metering.rs`) the measured cost is ~358 points per round, so this targets ~88M
-/// points and leaves ~12% head-room under the 100M cap for compiler/metering drift.
-const MAX_ROUNDS: u64 = 245_000;
+/// Number of outer rounds that lands just under the per-call metering budget
+/// (`MAX_WASM_POINTS_PER_CALL`, 250M). Calibrated empirically (see `tests/max_compute.rs` in the
+/// `transaction_generator` crate): with division re-costed to 30 points (see `wasm/metering.rs`) the
+/// measured cost is ~358 points per round, so this targets ~218M points and leaves ~13% head-room
+/// under the cap for compiler/metering drift. Retune whenever that budget moves — the template's
+/// whole purpose is to sit just below it.
+const MAX_ROUNDS: u64 = 610_000;
 
 #[template]
 mod max_compute {

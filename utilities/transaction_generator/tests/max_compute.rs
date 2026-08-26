@@ -6,15 +6,17 @@
 //! these tests prove it succeeds, pin how close to the limit it runs, and let `MAX_ROUNDS` be
 //! retuned if the cost drifts.
 
-use tari_engine_types::{commit_result::RejectReason, fees::FeeSource};
+use tari_engine_types::{commit_result::RejectReason, fees::FeeSource, limits::MAX_WASM_POINTS_PER_CALL};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 const MAX_COMPUTE: &str = "templates/max_compute";
 
-/// The per-call Wasmer metering budget (see `tari_engine::wasm::module::create_engine`).
-const METERING_LIMIT: u64 = 100_000_000;
+/// The per-call Wasmer metering budget (see `tari_engine::wasm::module::create_engine`). Read from
+/// the engine rather than restated, so a change to the budget shows up here as a retune of
+/// `MAX_ROUNDS` rather than as a silently stale bound.
+const METERING_LIMIT: u64 = MAX_WASM_POINTS_PER_CALL;
 
 /// `busy_max()` must run as much metered work as possible without exhausting its budget: if a
 /// toolchain change pushed the cost over the cap the call would fail with an out-of-gas trap, so
@@ -111,6 +113,7 @@ fn stacked_busy_max_is_rejected_by_per_transaction_budget() {
 
     // Fees are disabled here on purpose: the per-transaction budget is enforced independently of fee
     // charging, so the rejection must be the out-of-gas execution failure, not insufficient fees.
+    test.disable_fees();
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
             .call_function(addr, "busy_max", args![])

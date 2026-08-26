@@ -22,7 +22,7 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
 /// Maximum Wasmer metering points a single template invocation may consume. Enforced by the
 /// metering middleware compiled into the engine (see `tari_engine::wasm::module::create_engine`):
 /// exceeding it traps the call with an out-of-gas error.
-pub const MAX_WASM_POINTS_PER_CALL: u64 = 100_000_000;
+pub const MAX_WASM_POINTS_PER_CALL: u64 = 250_000_000;
 
 /// Maximum Wasmer metering points a whole transaction may consume, summed across every template
 /// invocation it makes (top-level instructions and nested cross-template calls). Each invocation
@@ -31,7 +31,35 @@ pub const MAX_WASM_POINTS_PER_CALL: u64 = 100_000_000;
 /// in `WasmProcess::invoke` by capping each call's allowance to the budget remaining for the
 /// transaction. Kept equal to the per-call cap: a transaction gets one compute budget, shared across
 /// all its calls. The aggregate across a *block* still needs a separate per-block budget.
-pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 100_000_000;
+///
+/// ~30ms of validator CPU at the rate [`NativeExecutionPoints`] is calibrated against (~8.4M
+/// points/ms). Two bounds meet here.
+///
+/// From below, a template must be able to carry cryptography heavy enough to be worth writing in
+/// WASM at all. A Groth16/BN254 verification costs ~96M points at one public input and ~176M at
+/// sixteen (`cargo run -p tari_engine --release --example zk_points_calibrate`), so this admits one
+/// with room for the contract logic around it. A transaction may already spend
+/// [`MAX_NATIVE_POINTS_PER_TRANSACTION`] (~286ms) on native verification, so a WASM ceiling far
+/// below that is an asymmetry with nothing behind it — both are real CPU on every replica and both
+/// are priced identically.
+///
+/// From above, no single transaction should be able to claim an outsized share of a block. This is
+/// a fraction of `max_block_execution_points`, so a block always admits at least
+/// `MIN_MAX_COMPUTE_TRANSACTIONS_PER_BLOCK` transactions running flat out — raising it further
+/// trades that granularity away, and buys nothing: the next tier of proving system (PLONK, FRI)
+/// does not fit in WASM at any ceiling the block budget could support.
+pub const MAX_WASM_POINTS_PER_TRANSACTION: u64 = 250_000_000;
+
+/// The granularity floor [`MAX_WASM_POINTS_PER_TRANSACTION`] is sized against:
+/// `max_block_execution_points` must admit at least this many transactions each running the WASM
+/// ceiling flat out, so a leader packing max-compute transactions cannot starve a block of
+/// everything else. Asserted against the shipped consensus constants in `tari_consensus`.
+///
+/// Scoped to the WASM ceiling, which is what it bounds. A transaction's native verification is
+/// governed separately by [`MAX_NATIVE_POINTS_PER_TRANSACTION`] and the structural caps in
+/// [`STEALTH_LIMITS`] and [`CONFIDENTIAL_LIMITS`]; that ceiling is large enough that a block of
+/// native-heavy transactions admits far fewer than this many.
+pub const MIN_MAX_COMPUTE_TRANSACTIONS_PER_BLOCK: u64 = 18;
 
 /// Maximum native-verification points (priced by [`NativeExecutionPoints`]) a whole transaction may consume. The
 /// native counterpart of [`MAX_WASM_POINTS_PER_TRANSACTION`], enforced in `StateTracker::charge_native_execution`.

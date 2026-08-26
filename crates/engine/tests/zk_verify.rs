@@ -138,6 +138,15 @@ fn groth16_verifies_against_a_component_held_key() {
     );
     assert!(verified, "a valid proof must verify against the component's key");
 
+    // Loading the key from state rather than taking it as an argument must not change what the
+    // verification costs — the same decode and the same pairing check, off the same bytes.
+    let points = h.test.last_execution_points().total();
+    assert!(
+        (MIN_EXPECTED_POINTS..MAX_EXPECTED_POINTS).contains(&points),
+        "verifying against a component-held key cost {points} points, outside the \
+         {MIN_EXPECTED_POINTS}..{MAX_EXPECTED_POINTS} band the static paths sit in",
+    );
+
     let verified = h.test.call_method::<bool>(
         component,
         "verify_stateful",

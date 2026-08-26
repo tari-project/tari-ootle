@@ -108,6 +108,7 @@ pub struct TemplateTest {
     secret_key: RistrettoSecretKey,
     public_key: RistrettoPublicKey,
     last_outputs: HashSet<SubstateId>,
+    last_execution_points: ExecutionPoints,
     name_to_template: HashMap<String, TemplateAddress>,
     state_store: MemoryStateStore,
     enable_fees: bool,
@@ -123,6 +124,27 @@ pub struct TemplateTest {
     /// nonce keeps their bodies distinct, and keeps them reproducible across runs the way a random
     /// nonce would not.
     transaction_seq: Cell<u64>,
+}
+
+/// The metering points a transaction consumed, split the way the engine charges them.
+///
+/// Both halves are real CPU on every validator and are priced identically, so a test reasoning
+/// about what a transaction costs a validator wants [`Self::total`]; the split matters only when a
+/// test is attributing cost to WASM execution or to native crypto specifically.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExecutionPoints {
+    /// Wasmer metering points, bounded per transaction by `limits::MAX_WASM_POINTS_PER_TRANSACTION`.
+    pub wasm: u64,
+    /// Native verification points (stealth transfers, confidential withdraws, burn claims), priced
+    /// by `limits::NativeExecutionPoints` and bounded by `limits::MAX_NATIVE_POINTS_PER_TRANSACTION`.
+    pub native: u64,
+}
+
+impl ExecutionPoints {
+    /// Every point the transaction cost a validator, WASM and native alike.
+    pub fn total(&self) -> u64 {
+        self.wasm.saturating_add(self.native)
+    }
 }
 
 impl TemplateTest {
@@ -238,6 +260,7 @@ impl TemplateTest {
             last_outputs: HashSet::new(),
             state_store: MemoryStateStore::new(),
             virtual_substates,
+            last_execution_points: ExecutionPoints::default(),
             transaction_seq: Cell::new(0),
             enable_fees: false,
             dry_run: false,
@@ -430,6 +453,17 @@ impl TemplateTest {
             .find(|addr| ty.matches(addr))
             .cloned()
             .unwrap_or_else(|| panic!("No output of type {:?}", ty))
+    }
+
+    /// The execution points the most recently executed transaction consumed, whether it was
+    /// accepted or rejected.
+    ///
+    /// [`ExecuteResult`] already carries these, but the convenience callers — [`Self::call_function`],
+    /// [`Self::call_method`] — return only the decoded value, so this is how a test reads the cost of
+    /// a call it made through them. Zero if no transaction has executed yet, or if the last one
+    /// failed before producing a result.
+    pub fn last_execution_points(&self) -> ExecutionPoints {
+        self.last_execution_points
     }
 
     fn commit_diff(&mut self, diff: &SubstateDiff) {
@@ -771,7 +805,13 @@ impl TemplateTest {
         let tx_id = wrapped_transaction.to_id();
         eprintln!("START Transaction id = \"{}\"", tx_id);
 
-        let result = processor.execute(wrapped_transaction)?;
+        let result = processor.execute(wrapped_transaction).inspect_err(|_| {
+            self.last_execution_points = ExecutionPoints::default();
+        })?;
+        self.last_execution_points = ExecutionPoints {
+            wasm: result.wasm_execution_points,
+            native: result.native_execution_points,
+        };
 
         if self.enable_fees {
             let fee = &result.finalize.fee_receipt;

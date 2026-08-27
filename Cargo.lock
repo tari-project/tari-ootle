@@ -13051,7 +13051,6 @@ dependencies = [
  "log",
  "log4rs",
  "mime_guess",
- "ootle-network",
  "ootle_byte_type",
  "prometheus-client",
  "rand 0.10.1",

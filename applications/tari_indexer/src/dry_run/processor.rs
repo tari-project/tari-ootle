@@ -23,6 +23,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use log::info;
+use ootle_network::Network;
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine::{fees::FeeTable, state_store::new_memory_store, traits::ClaimProofVerifier};
 use tari_engine_types::{
@@ -50,6 +51,7 @@ const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 
 #[derive(Clone)]
 pub struct DryRunTransactionProcessor {
+    network: Network,
     fee_table: FeeTable,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     template_provider: DryRunTemplateProvider,
@@ -60,6 +62,7 @@ pub struct DryRunTransactionProcessor {
 
 impl DryRunTransactionProcessor {
     pub fn new(
+        network: Network,
         fee_table: FeeTable,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         substate_manager: SubstateManager,
@@ -70,6 +73,7 @@ impl DryRunTransactionProcessor {
         let handle = Handle::try_current().map_err(std::io::Error::other)?;
         let template_provider = build_dry_run_template_provider(handle, substate_manager.clone(), wasm_cache_dir)?;
         Ok(Self {
+            network,
             fee_table,
             epoch_manager,
             template_provider,
@@ -111,6 +115,7 @@ impl DryRunTransactionProcessor {
 
         // execute the payload in the WASM engine and return the result
         let processor = TariTransactionProcessor::new(
+            self.network,
             self.template_provider.clone(),
             self.fee_table.clone(),
             true,

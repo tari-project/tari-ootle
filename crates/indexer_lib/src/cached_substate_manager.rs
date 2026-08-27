@@ -28,6 +28,7 @@ use std::{
 
 use async_trait::async_trait;
 use log::*;
+use ootle_network::Network;
 use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::EpochManagerReader;
@@ -97,6 +98,7 @@ pub struct SubstateLookupResult {
 
 #[derive(Debug, Clone)]
 pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
+    network: Network,
     committee_provider: TEpochManager,
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
@@ -127,12 +129,14 @@ where
     TSubstateCache: SubstateCache,
 {
     pub fn new(
+        network: Network,
         committee_provider: TEpochManager,
         validator_node_client_factory: TVnClient,
         substate_cache: TSubstateCache,
         substate_versions: Arc<SubstateVersionTracker>,
     ) -> Self {
         Self {
+            network,
             committee_provider,
             validator_node_client_factory,
             substate_cache,
@@ -555,6 +559,7 @@ where
                 substate_id,
                 version,
                 value,
+                self.network,
                 Epoch(proof.proof_epoch),
                 root,
             )
@@ -579,6 +584,7 @@ where
             substate_id,
             version,
             value,
+            self.network,
             Epoch(proof.proof_epoch),
             committee.quorum_threshold(),
             |pk| Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero)),

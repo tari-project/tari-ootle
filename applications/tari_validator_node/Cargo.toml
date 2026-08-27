@@ -22,6 +22,7 @@ tari_crypto = { workspace = true }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
 tari_validator_node_rpc = { workspace = true }
 tari_ootle_app_utilities = { workspace = true, features = ["epoch_oracle", "p2p"] }
+ootle-network = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_p2p = { workspace = true }
 tari_engine = { workspace = true, features = ["wasm-cache"] }

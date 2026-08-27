@@ -21,6 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
+use ootle_network::Network;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::{Component, ComponentBody, ComponentHeader},
@@ -144,6 +145,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         transaction_weight: TransactionWeight,
         wasm_metering_rate: WasmMeteringRate,
         burn_rate_bps: u16,
+        network: Network,
         dry_run: bool,
     ) -> Self {
         Self {
@@ -154,6 +156,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 transaction_hash,
                 intent_commitment,
                 burn_rate_bps,
+                network,
                 dry_run,
             )),
             fee_checkpoint: None,

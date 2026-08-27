@@ -50,7 +50,7 @@ fn rewind_deletes_upped_records_and_restores_downed() {
         r
     };
     db.with_write_tx(|tx| {
-        let mut batch = SubstateUpdateBatch::new(Epoch(1));
+        let mut batch = SubstateUpdateBatch::new(helpers::NETWORK, Epoch(1));
         batch.with_transition(shard, 3).push(SubstateTransition::Down {
             id: a_v0.to_versioned_substate_id(),
         });

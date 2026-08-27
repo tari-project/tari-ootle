@@ -24,7 +24,6 @@ use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
-    ProtocolVersion,
     ShardGroup,
     VersionedSubstateId,
     displayable::Displayable,
@@ -306,17 +305,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         let next_epoch = starting_epoch + Epoch(1);
-        let required_schema = ProtocolVersion::at(next_epoch);
-        if required_schema > ProtocolVersion::MAX_SUPPORTED {
-            error!(
-                target: LOG_TARGET,
-                "🛑 Binary does not support schema {} required at epoch {}. Upgrade required.",
-                required_schema,
-                next_epoch,
-            );
-            return Err(HotStuffError::UnsupportedProtocolVersion { epoch: next_epoch });
-        }
-
         if !self
             .epoch_manager
             .is_this_validator_registered_for_epoch(next_epoch)
@@ -758,16 +746,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 registered_shard_group,
                 activated_at,
             } => {
-                let required_schema = ProtocolVersion::at(epoch);
-                if required_schema > ProtocolVersion::MAX_SUPPORTED {
-                    error!(
-                        target: LOG_TARGET,
-                        "🛑 Binary does not support schema {} required at epoch {}. Upgrade required.",
-                        required_schema,
-                        epoch,
-                    );
-                    return Err(HotStuffError::UnsupportedProtocolVersion { epoch });
-                }
                 if registered_shard_group.is_none() {
                     let current_epoch = self.pacemaker.current_view().get_epoch();
                     if current_epoch < epoch {

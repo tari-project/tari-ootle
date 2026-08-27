@@ -57,6 +57,9 @@ use tari_template_lib::types::{
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::TempDir;
 
+/// Every helper builds records for one network; the schema activation schedule is per network.
+pub const NETWORK: Network = Network::LocalNet;
+
 pub const fn num_preshards() -> NumPreshards {
     NumPreshards::P256
 }
@@ -118,7 +121,7 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32, state_versi
     SubstateRecord {
         substate_id: substate_id.clone(),
         version,
-        state_hash: hash_substate(&value, version, at_epoch),
+        state_hash: hash_substate(NETWORK, &value, version, at_epoch),
         substate_value: Some(value),
         created: SubstateCreated {
             at_epoch,
@@ -150,7 +153,7 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
 
 pub fn create_substate_update_batch<'a, I>(epoch: Epoch, changes: I) -> SubstateUpdateBatch
 where I: IntoIterator<Item = &'a SubstateRecord> {
-    let mut batch = SubstateUpdateBatch::new(epoch);
+    let mut batch = SubstateUpdateBatch::new(NETWORK, epoch);
     for substate in changes {
         if let Some(destroyed) = &substate.destroyed {
             batch
@@ -244,7 +247,7 @@ pub fn gen_substates(
     (0..n).map(move |_| {
         let substate_id = random_substate_id_for_shard(shard);
         let value = substate_value_for_entity(substate_id.to_object_key().as_entity_id());
-        SubstateRecord::new(substate_id, substate_version, value, SubstateCreated {
+        SubstateRecord::new(NETWORK, substate_id, substate_version, value, SubstateCreated {
             at_epoch: epoch,
             in_shard: shard,
             at_state_version: state_version,
@@ -262,7 +265,7 @@ pub fn gen_substates_for_shards(
         let substate_id = substate_id_seed(i);
         let value = substate_value_for_entity(substate_id.to_object_key().as_entity_id());
         let shard = VersionedSubstateIdRef::new(&substate_id, substate_version).to_shard(num_preshards());
-        SubstateRecord::new(substate_id, substate_version, value, SubstateCreated {
+        SubstateRecord::new(NETWORK, substate_id, substate_version, value, SubstateCreated {
             at_epoch: epoch,
             in_shard: shard,
             at_state_version: state_version,

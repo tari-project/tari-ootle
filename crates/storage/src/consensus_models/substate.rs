@@ -4,6 +4,7 @@
 use std::{collections::HashSet, fmt, fmt::Display};
 
 use minicbor::{CborLen, Decode, Encode};
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::LeafBlock;
 use tari_engine_types::{
@@ -51,6 +52,7 @@ pub struct SubstateRecord {
 
 impl SubstateRecord {
     pub fn new<V: Into<SubstateValueOrHash>>(
+        network: Network,
         substate_id: SubstateId,
         version: u32,
         value: V,
@@ -60,7 +62,7 @@ impl SubstateRecord {
         Self {
             substate_id,
             version,
-            state_hash: value.to_value_hash(version, created.at_epoch),
+            state_hash: value.to_value_hash(network, version, created.at_epoch),
             substate_value: value.into_value(),
             created,
             destroyed: None,
@@ -350,9 +352,9 @@ impl SubstateValueOrHash {
         }
     }
 
-    pub fn to_value_hash(&self, version: u32, epoch: Epoch) -> Hash32 {
+    pub fn to_value_hash(&self, network: Network, version: u32, epoch: Epoch) -> Hash32 {
         match &self {
-            SubstateValueOrHash::Value(v) => hash_substate(v, version, epoch),
+            SubstateValueOrHash::Value(v) => hash_substate(network, v, version, epoch),
             SubstateValueOrHash::Hash(hash) => *hash,
         }
     }
@@ -388,8 +390,8 @@ impl SubstateData {
         VersionedSubstateIdRef::new(&self.substate_id, self.version)
     }
 
-    pub fn to_value_hash(&self, epoch: Epoch) -> Hash32 {
-        self.value.to_value_hash(self.version, epoch)
+    pub fn to_value_hash(&self, network: Network, epoch: Epoch) -> Hash32 {
+        self.value.to_value_hash(network, self.version, epoch)
     }
 
     pub fn substate_id(&self) -> &SubstateId {
@@ -451,13 +453,13 @@ impl SubstateUpdateProof {
         }
     }
 
-    pub fn to_tree_change(&self, epoch: Epoch) -> SubstateTreeChange {
+    pub fn to_tree_change(&self, network: Network, epoch: Epoch) -> SubstateTreeChange {
         match self {
             Self::Create(create) => {
                 let id = create.substate.as_versioned_substate_id_ref();
                 SubstateTreeChange::Up {
                     id: id.to_owned(),
-                    value_hash: create.substate.to_value_hash(epoch),
+                    value_hash: create.substate.to_value_hash(network, epoch),
                 }
             },
             Self::Destroy(destroy) => SubstateTreeChange::Down {

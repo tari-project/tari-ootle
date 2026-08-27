@@ -9,6 +9,7 @@ use std::{
 
 use futures::StreamExt;
 use log::*;
+use ootle_network::Network;
 #[cfg(feature = "metrics")]
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine_types::{
@@ -69,6 +70,7 @@ const LOG_TARGET: &str = "tari::indexer::network_state_sync::worker";
 
 #[derive(Clone)]
 pub struct NetworkWideStateSync {
+    network: Network,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     networking: NetworkingHandle<TariMessagingSpec>,
     store: SqliteIndexerStore,
@@ -86,6 +88,7 @@ pub struct NetworkWideStateSync {
 
 impl NetworkWideStateSync {
     pub fn new(
+        network: Network,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
@@ -98,6 +101,7 @@ impl NetworkWideStateSync {
         #[cfg(feature = "metrics")] consensus_constants: ConsensusConstants,
     ) -> Self {
         Self {
+            network,
             epoch_manager,
             networking,
             store: storage,
@@ -682,6 +686,7 @@ impl NetworkWideStateSync {
             sync_plan_mut.add_state_sync_progress(shard, state_version, msg_epoch);
             let sync_progress_snapshot = sync_plan_mut.sync_progress().clone();
 
+            let network = self.network;
             let event_filters = self.config.event_filters.clone();
             let watched_templates = self.config.watched_templates.clone();
             let xtr_claimed_snapshot = xtr_claimed;
@@ -694,7 +699,7 @@ impl NetworkWideStateSync {
                 .with_write_tx(move |tx| -> Result<Vec<InsertedEvent>, StorageError> {
                     debug!(target: LOG_TARGET, "✅ Committing {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", updates_len);
                     // TODO: this is not currently used. Consider removing.
-                    tx.batch_insert_substate_transitions(shard, state_version, updates)?;
+                    tx.batch_insert_substate_transitions(network, shard, state_version, updates)?;
                     debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_len);
                     tx.batch_insert_utxo_updates(msg_epoch, utxos)?;
                     for substate_data in validator_fee_pools {

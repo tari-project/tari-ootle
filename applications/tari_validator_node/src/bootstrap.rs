@@ -352,6 +352,7 @@ pub async fn spawn_services(
     // Transaction executor
     let fee_table = get_fee_table_by_network(config.network);
     let transaction_processor = TariTransactionProcessor::new(
+        config.network,
         template_provider.clone(),
         fee_table.clone(),
         false,

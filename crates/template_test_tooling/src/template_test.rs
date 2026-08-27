@@ -791,6 +791,7 @@ impl TemplateTest {
             Arc::new(AlwaysPassesProofVerifier),
             wasm_metering_rate,
             self.burn_rate_bps,
+            Network::LocalNet,
             self.dry_run,
         );
 

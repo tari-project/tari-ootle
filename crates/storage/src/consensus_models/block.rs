@@ -678,7 +678,7 @@ impl Block {
                 }
             })
             // Group by shard
-            .try_fold(SubstateUpdateBatch::new(self.epoch()), |mut batch, change| {
+            .try_fold(SubstateUpdateBatch::new(self.network(), self.epoch()), |mut batch, change| {
                 let Some(state_version) =
                     version_updates
                         .get(&change.shard())

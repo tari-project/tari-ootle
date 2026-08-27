@@ -27,6 +27,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::{
@@ -121,6 +122,7 @@ pub struct SubstateManager {
 
 impl SubstateManager {
     pub fn new(
+        network: Network,
         substate_store: SqliteIndexerStore,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         validator_node_client_factory: TariValidatorNodeRpcClientFactory,
@@ -134,6 +136,7 @@ impl SubstateManager {
             store: substate_store.clone(),
         });
         let cached_substates = CachedSubstateManager::new(
+            network,
             epoch_manager.clone(),
             validator_node_client_factory.clone(),
             substate_cache,

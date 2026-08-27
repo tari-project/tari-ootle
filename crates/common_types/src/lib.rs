@@ -19,7 +19,6 @@ mod node_addressable;
 mod node_height;
 mod num_preshards;
 pub mod optional;
-mod protocol_version;
 pub mod response_status;
 pub mod services;
 pub mod shard;
@@ -43,7 +42,6 @@ pub use lock_intent::*;
 pub use node_addressable::*;
 pub use node_height::NodeHeight;
 pub use num_preshards::*;
-pub use protocol_version::*;
 pub use shard_group::*;
 pub use shard_state_versions::*;
 pub use state_version::*;
@@ -51,7 +49,7 @@ pub use substate_address::*;
 // Re-export
 pub use tari_engine_types as engine_types;
 // Exported here for backwards compatibility
-pub use tari_engine_types::Epoch;
+pub use tari_engine_types::{Epoch, ProtocolVersion};
 pub use validator_metadata::*;
 pub use versioned_substate_id::*;
 pub use vote_power::*;

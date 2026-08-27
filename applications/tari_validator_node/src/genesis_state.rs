@@ -93,7 +93,7 @@ where
         substates.extend(nft_faucet_substates());
     }
 
-    commit_genesis_substates(tx, num_preshards, substates)?;
+    commit_genesis_substates(tx, network, num_preshards, substates)?;
 
     Ok(())
 }
@@ -182,6 +182,7 @@ fn nft_faucet_substates() -> Vec<(SubstateId, SubstateValue)> {
 /// TARI resource have no inclusion proof and verified reads fail with a leaf-key mismatch.
 fn commit_genesis_substates<TTx>(
     tx: &mut TTx,
+    network: Network,
     num_preshards: NumPreshards,
     substates: Vec<(SubstateId, SubstateValue)>,
 ) -> Result<(), StorageError>
@@ -189,12 +190,12 @@ where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
-    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+    let mut batch = SubstateUpdateBatch::new(network, Epoch::zero());
     let mut tree_changes: HashMap<Shard, Vec<SubstateTreeChange>> = HashMap::new();
 
     for (substate_id, value) in substates {
         let shard = VersionedSubstateIdRef::new(&substate_id, 0).to_shard(num_preshards);
-        let value_hash = hash_substate(&value, 0, Epoch::zero());
+        let value_hash = hash_substate(network, &value, 0, Epoch::zero());
 
         batch
             .with_transition(shard, GENESIS_STATE_VERSION)

@@ -23,6 +23,7 @@ use tari_ootle_storage::{
     StorageError,
     consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch, TransactionPool},
 };
+use tari_ootle_transaction::Network;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -243,7 +244,7 @@ where
 {
     let substate_id = substate_id.into();
     let shard = VersionedSubstateIdRef::new(&substate_id, 0).to_shard(TEST_NUM_PRESHARDS);
-    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+    let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
     batch.with_transition(shard, 0).push(SubstateTransition::Up {
         id: substate_id,
         version: 0,

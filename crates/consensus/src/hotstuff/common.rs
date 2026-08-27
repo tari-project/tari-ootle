@@ -240,6 +240,7 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     shard_group: ShardGroup,
     pending_tree_diffs: HashMap<Shard, Vec<PendingShardStateTreeDiff>>,
     changes: I,
+    network: Network,
     epoch: Epoch,
 ) -> Result<(FixedHash, IndexMap<Shard, PendingShardStateTreeDiff>), StateTreeError> {
     let mut change_map = IndexMap::new();
@@ -249,7 +250,7 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
         change_map
             .entry(ch.shard())
             .or_insert_with(Vec::new)
-            .push(ch.to_tree_change(epoch));
+            .push(ch.to_tree_change(network, epoch));
     });
     let mut sharded_tree = ShardedStateTree::new(tx).with_pending_diffs(pending_tree_diffs);
     let root_hash = sharded_tree.put_substate_tree_changes(shard_group, change_map)?;

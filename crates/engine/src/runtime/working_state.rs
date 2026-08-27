@@ -10,6 +10,7 @@ use std::{
 use indexmap::{IndexMap, IndexSet};
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, ToByteType};
+use ootle_network::Network;
 use tari_bor::encoded_len;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
@@ -136,6 +137,8 @@ impl<TStore: StateReader> ChargeableState<'_, TStore> {
 
 #[derive(Debug, Clone)]
 pub(super) struct WorkingState<TStore> {
+    /// Selects the substate schema version for the execution epoch, which is scheduled per network.
+    network: Network,
     transaction_hash: Hash32,
     /// Commitment to the executing transaction's intent, recorded verbatim in the transaction
     /// receipt.
@@ -180,12 +183,14 @@ impl<TStore: StateReader> WorkingState<TStore> {
         transaction_hash: Hash32,
         intent_commitment: Hash32,
         burn_rate_bps: u16,
+        network: Network,
         dry_run: bool,
     ) -> Self {
         let mut fee_state = FeeState::new();
         fee_state.set_burn_rate_bps(burn_rate_bps);
         fee_state.set_dry_run(dry_run);
         Self {
+            network,
             transaction_hash,
             intent_commitment,
             events: Vec::new(),
@@ -1403,7 +1408,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let epoch = self.get_current_epoch()?;
         Ok(TransactionReceipt {
             outcome,
-            diff_summary: DiffSummary::from_diff(diff, epoch),
+            diff_summary: DiffSummary::from_diff(self.network, diff, epoch),
             fee_withdrawals: diff.validator_fee_withdrawals().to_vec().into_boxed_slice(),
             events: self.events.clone().into_boxed_slice(),
             fee_receipt,

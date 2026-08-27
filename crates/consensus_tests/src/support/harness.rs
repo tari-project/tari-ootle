@@ -188,16 +188,22 @@ impl Test {
             .map(|id| {
                 let value = make_test_component(id.substate_id().as_component_address().unwrap().entity_id());
                 let shard = id.to_shard(TEST_NUM_PRESHARDS);
-                SubstateRecord::new(id.substate_id().clone(), id.version(), value, SubstateCreated {
-                    at_epoch: Epoch::zero(),
-                    in_shard: shard,
-                    at_state_version: 0,
-                })
+                SubstateRecord::new(
+                    Network::LocalNet,
+                    id.substate_id().clone(),
+                    id.version(),
+                    value,
+                    SubstateCreated {
+                        at_epoch: Epoch::zero(),
+                        in_shard: shard,
+                        at_state_version: 0,
+                    },
+                )
             })
             .collect::<Vec<_>>();
 
         self.validators.values().filter(|vn| dest.is_for_vn(vn)).for_each(|v| {
-            let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+            let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
             for substate in &substates {
                 let shard = substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS);
                 if v.shard_group.contains(&shard) {

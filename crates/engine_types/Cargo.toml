@@ -31,6 +31,7 @@ rand = { workspace = true }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+ootle-network = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 

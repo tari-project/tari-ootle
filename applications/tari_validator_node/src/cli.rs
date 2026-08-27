@@ -37,6 +37,7 @@ use url::Url;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Cli {
     #[clap(flatten)]
     pub common: CommonCliArgs,
@@ -73,6 +74,10 @@ pub struct Cli {
     /// Intended for local development and recovery; do not use against a network where this node is actually behind.
     #[clap(long)]
     pub skip_sync: bool,
+    /// Start even when this binary schedules a schema activation at an epoch the node has already
+    /// passed. Diverges from the network; intended only for a node whose state is being discarded.
+    #[clap(long)]
+    pub allow_past_protocol_activation: bool,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -134,6 +139,12 @@ impl ConfigOverrideProvider for Cli {
         }
         if self.disable_mdns {
             overrides.push(("validator_node.p2p.enable_mdns".to_string(), "false".to_string()));
+        }
+        if self.allow_past_protocol_activation {
+            overrides.push((
+                "validator_node.allow_past_protocol_activation".to_string(),
+                "true".to_string(),
+            ));
         }
         if self.skip_sync {
             overrides.push(("validator_node.consensus.skip_sync".to_string(), "true".to_string()));

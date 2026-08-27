@@ -111,6 +111,11 @@ pub struct ValidatorNodeConfig {
     pub layer_one_transaction_path: PathBuf,
     /// Consensus configuration
     pub consensus: ConsensusConfig,
+    /// Start even when the binary schedules a schema activation at an epoch this node has already
+    /// passed. Doing so re-hashes committed state and diverges from the network, so this exists only
+    /// for a deliberate re-bootstrap of a node whose state is being discarded anyway.
+    #[serde(default)]
+    pub allow_past_protocol_activation: bool,
     /// Maximum total size of inbound transaction gossip awaiting mempool validation. The mempool
     /// drains this queue serially, so it absorbs bursts that arrive faster than validation; once it
     /// is full, further messages are dropped rather than queued without limit. Sized in bytes
@@ -200,6 +205,7 @@ impl Default for ValidatorNodeConfig {
             keep_transaction_history: false,
             layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
             consensus: ConsensusConfig::default(),
+            allow_past_protocol_activation: false,
             max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),
             max_consensus_gossip_queue_bytes: default_max_consensus_gossip_queue_bytes(),
             max_consensus_messaging_queue_bytes: default_max_consensus_messaging_queue_bytes(),

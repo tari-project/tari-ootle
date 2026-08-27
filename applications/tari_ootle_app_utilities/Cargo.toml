@@ -14,6 +14,7 @@ tari_ootle_common_types = { workspace = true }
 tari_engine = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_epoch_oracles = { workspace = true, optional = true }
+ootle-network = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }

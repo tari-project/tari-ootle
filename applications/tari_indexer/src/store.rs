@@ -8,6 +8,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use ootle_network::Network;
 use serde::{Serialize, de::DeserializeOwned};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::{
@@ -260,6 +261,7 @@ pub trait IndexerStoreWriteTransaction {
     fn key_value_set<K: AsRef<str>, V: Serialize>(&mut self, key: K, value: V) -> Result<(), StorageError>;
     fn batch_insert_substate_transitions<I: IntoIterator<Item = (Epoch, SubstateUpdateProof)>>(
         &mut self,
+        network: Network,
         shard: Shard,
         state_version: StateVersion,
         updates: I,

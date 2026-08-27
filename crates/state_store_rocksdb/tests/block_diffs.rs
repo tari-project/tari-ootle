@@ -84,8 +84,8 @@ fn block_diffs_operations(db: impl StateStore) {
             assert_eq!(substate.version(), version + 1);
             let at_epoch = Epoch::zero();
             assert_eq!(
-                substate.to_value_hash(at_epoch),
-                hash_substate(&value2, version + 1, at_epoch)
+                substate.to_value_hash(helpers::NETWORK, at_epoch),
+                hash_substate(helpers::NETWORK, &value2, version + 1, at_epoch)
             );
         },
         SubstateChange::Down { .. } => panic!("Expected SubstateChange::Up but got {change}"),

@@ -7,6 +7,7 @@ use tari_consensus::hotstuff::HotStuffError;
 use tari_consensus_types::Decision;
 use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::SubstateValueFilterFlags};
+use tari_ootle_transaction::Network;
 use tari_state_tree::{
     SPARSE_MERKLE_PLACEHOLDER_HASH,
     key_mapper::SpreadPrefixKeyMapper,
@@ -113,9 +114,11 @@ async fn check_state_transitions() {
 
                 let mut store = MemoryTreeStore::new();
                 let mut tree = tari_state_tree::StateTree::<_, SpreadPrefixKeyMapper>::new(&mut store);
-                let values = all_transitions
-                    .iter()
-                    .flat_map(|t| t.updates.iter().map(move |u| u.to_tree_change(t.epoch)));
+                let values = all_transitions.iter().flat_map(|t| {
+                    t.updates
+                        .iter()
+                        .map(move |u| u.to_tree_change(Network::LocalNet, t.epoch))
+                });
                 let root = tree.put_substate_changes(None, 1, values).unwrap();
                 assert_eq!(root, shard_root, "Shard {} root hash mismatch", shard);
             }

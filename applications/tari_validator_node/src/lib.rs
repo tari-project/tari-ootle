@@ -43,6 +43,7 @@ mod p2p;
 use std::{fs, io, iter, process, time::Instant};
 
 use log::*;
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
@@ -50,9 +51,9 @@ use tari_engine_types::crypto::{MAX_LAZY_BP_AGG_FACTORS, get_commitment_factory,
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
-use tari_ootle_common_types::SubstateAddress;
+use tari_ootle_common_types::{Epoch, ProtocolVersion, SubstateAddress};
 use tari_ootle_p2p::PeerAddress;
-use tari_ootle_storage::global::{DbFactory, GlobalDb};
+use tari_ootle_storage::global::{DbFactory, GlobalDb, MetadataKey};
 use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::Shutdown;
 use tokio::task;
@@ -90,6 +91,46 @@ pub struct ShardKey {
     substate_address: Option<SubstateAddress>,
 }
 
+/// Refuses to start when this binary schedules a schema activation at an epoch the node has already
+/// passed, and otherwise records the schedule it started with.
+///
+/// The failure this catches is a deployment mistake, not a runtime condition: a binary whose newest
+/// activation epoch is already behind the network re-hashes every substate created since that epoch,
+/// which surfaces only as failed state syncs, unverifiable substate proofs and silent divergence from
+/// peers. See [`ProtocolVersion::check_activation_schedule`].
+fn record_protocol_activation_schedule(
+    network: Network,
+    global_db: &GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
+    allow_past_activation: bool,
+) -> Result<(), anyhow::Error> {
+    let mut tx = global_db.create_transaction()?;
+    let mut metadata = global_db.metadata(&mut tx);
+    let recorded: Option<Epoch> = metadata.get_metadata(MetadataKey::ProtocolNewestActivationEpoch.as_key_bytes())?;
+    let last_known_epoch: Option<Epoch> =
+        metadata.get_metadata(MetadataKey::EpochManagerCurrentEpoch.as_key_bytes())?;
+
+    let newest = match ProtocolVersion::check_activation_schedule(network, recorded, last_known_epoch) {
+        Ok(newest) => newest,
+        Err(err) if allow_past_activation => {
+            warn!(target: LOG_TARGET, "⚠️ {err} Continuing because allow_past_protocol_activation is set.");
+            Some(err.activation)
+        },
+        Err(err) => {
+            error!(target: LOG_TARGET, "🛑 {err}");
+            return Err(err.into());
+        },
+    };
+
+    if newest != recorded &&
+        let Some(newest) = newest
+    {
+        info!(target: LOG_TARGET, "Recording protocol schema activation at epoch {newest}");
+        metadata.set_metadata(MetadataKey::ProtocolNewestActivationEpoch.as_key_bytes(), &newest)?;
+    }
+    global_db.commit(tx)?;
+    Ok(())
+}
+
 pub async fn run_validator_node(
     keypair: RistrettoKeypair,
     config: ApplicationConfig,
@@ -104,6 +145,12 @@ pub async fn run_validator_node(
     let global_db = db_factory
         .get_or_create_global_db()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
+
+    record_protocol_activation_schedule(
+        config.network,
+        &global_db,
+        config.validator_node.allow_past_protocol_activation,
+    )?;
 
     info!(
         target: LOG_TARGET,

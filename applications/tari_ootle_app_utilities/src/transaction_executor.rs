@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use ootle_network::Network;
 use tari_engine::{
     executables::Executable,
     fees::{FeeModule, FeeTable, WasmMeteringRate},
@@ -85,6 +86,7 @@ impl ExecutionOutput {
 
 #[derive(Clone)]
 pub struct TariTransactionProcessor<TStore, TTemplateProvider> {
+    network: Network,
     template_provider: Arc<TTemplateProvider>,
     modules: ModulesCollection<TStore>,
     dry_run: bool,
@@ -94,6 +96,7 @@ pub struct TariTransactionProcessor<TStore, TTemplateProvider> {
 
 impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<TStore, TTemplateProvider> {
     pub fn new(
+        network: Network,
         template_provider: TTemplateProvider,
         fee_table: FeeTable,
         dry_run: bool,
@@ -104,6 +107,7 @@ impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<
         // state per-execution, so the module list is built once and shared.
         let modules = vec![Box::new(FeeModule::new(0, fee_table)) as Box<dyn RuntimeModule<TStore>>];
         Self {
+            network,
             template_provider: Arc::new(template_provider),
             modules: Arc::from(modules),
             dry_run,
@@ -145,6 +149,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             self.claim_burn_proof_verifier.clone(),
             self.wasm_metering_rate,
             burn_rate_bps,
+            self.network,
             self.dry_run,
         );
         let result = processor.execute(transaction.clone())?;

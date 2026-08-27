@@ -1,6 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_network::Network;
 use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue, hash_substate};
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, VersionedSubstateId, VotePower, shard::Shard};
@@ -90,6 +91,7 @@ pub fn verify_substate_value_proof(
     substate_id: &SubstateId,
     version: u32,
     value: Option<&SubstateValue>,
+    network: Network,
     proof_epoch: Epoch,
     quorum_threshold: VotePower,
     check_vn: impl Fn(&RistrettoPublicKeyBytes) -> Result<VotePower, SidechainProofValidationError>,
@@ -101,6 +103,7 @@ pub fn verify_substate_value_proof(
         substate_id,
         version,
         value,
+        network,
         proof_epoch,
         verified_tip.state_merkle_root,
     )?;
@@ -123,6 +126,7 @@ pub fn verify_substate_value_proof_against_root(
     substate_id: &SubstateId,
     version: u32,
     value: Option<&SubstateValue>,
+    network: Network,
     proof_epoch: Epoch,
     trusted_root: FixedHash,
 ) -> Result<(), SubstateProofVerifyError> {
@@ -136,7 +140,7 @@ pub fn verify_substate_value_proof_against_root(
         Some(value) => {
             // Bind the returned value to the committed leaf by re-deriving its value hash, so a
             // validator cannot swap the value while presenting a proof for the real committed leaf.
-            let value_hash = TreeHash::new(hash_substate(value, version, proof_epoch).into_array());
+            let value_hash = TreeHash::new(hash_substate(network, value, version, proof_epoch).into_array());
             value_proof.verify_inclusion(&group_root, &versioned_id, &value_hash)?;
         },
         None => {

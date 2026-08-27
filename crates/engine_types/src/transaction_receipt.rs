@@ -3,6 +3,7 @@
 
 use std::{fmt, fmt::Display, str::FromStr};
 
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_bor::adapters::boxed_slice;
 use tari_template_lib::types::Hash32;
@@ -204,14 +205,14 @@ pub struct DiffSummary {
 }
 
 impl DiffSummary {
-    pub fn from_diff(diff: &SubstateDiff, epoch: Epoch) -> Self {
+    pub fn from_diff(network: Network, diff: &SubstateDiff, epoch: Epoch) -> Self {
         Self {
             upped: diff
                 .up_iter()
                 .map(|(id, s)| UpSubstate {
                     substate_id: id.clone(),
                     version: s.version(),
-                    value_hash: hash_substate(s.substate_value(), s.version(), epoch),
+                    value_hash: hash_substate(network, s.substate_value(), s.version(), epoch),
                 })
                 .collect(),
         }

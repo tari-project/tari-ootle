@@ -4,6 +4,7 @@
 use std::fmt::Display;
 
 use minicbor::{CborLen, Decode, Encode};
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{
@@ -119,11 +120,11 @@ impl SubstateChange {
         }
     }
 
-    pub fn to_tree_change(&self, epoch: Epoch) -> SubstateTreeChange {
+    pub fn to_tree_change(&self, network: Network, epoch: Epoch) -> SubstateTreeChange {
         match self {
             SubstateChange::Up { id, substate, .. } => SubstateTreeChange::Up {
                 id: VersionedSubstateId::new(id.clone(), substate.version()),
-                value_hash: substate.to_value_hash(epoch),
+                value_hash: substate.to_value_hash(network, epoch),
             },
             SubstateChange::Down { id, .. } => SubstateTreeChange::Down { id: id.clone() },
         }

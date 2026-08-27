@@ -9,6 +9,7 @@ use std::{
 use anyhow::anyhow;
 use futures::StreamExt;
 use log::*;
+use ootle_network::Network;
 use tari_consensus::{
     check_quorum_certificate_signatures,
     traits::{ConsensusSpec, SyncManager, SyncStatus},
@@ -66,6 +67,7 @@ use crate::{error::RpcStateSyncError, stats::StateSyncStats};
 const LOG_TARGET: &str = "tari::ootle::rpc_state_sync";
 
 pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
+    network: Network,
     epoch_manager: TConsensusSpec::EpochManager,
     state_store: TConsensusSpec::StateStore,
     client_factory: TariValidatorNodeRpcClientFactory,
@@ -79,12 +81,14 @@ impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
 where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 {
     pub fn new(
+        network: Network,
         epoch_manager: TConsensusSpec::EpochManager,
         state_store: TConsensusSpec::StateStore,
         client_factory: TariValidatorNodeRpcClientFactory,
         signer_service: TConsensusSpec::SignerService,
     ) -> Self {
         Self {
+            network,
             epoch_manager,
             state_store,
             client_factory,
@@ -314,7 +318,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             info!(target: LOG_TARGET, "🛜 Buffering {} state update(s) (state version: v{})", updates_for_state_version.len(), state_version);
             for result in updates_for_state_version {
                 let update = result?;
-                let tree_change = extract_tree_change(&update, msg_epoch)?;
+                let tree_change = extract_tree_change(self.network, &update, msg_epoch)?;
 
                 debug!(target: LOG_TARGET, "🛜 -> state update (v{}) {}", state_version, update);
                 tree_changes.push(tree_change);
@@ -418,7 +422,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         state_version: Version,
         updates: I,
     ) -> Result<(), StorageError> {
-        let mut batch = SubstateUpdateBatch::new(epoch);
+        let mut batch = SubstateUpdateBatch::new(self.network, epoch);
 
         batch
             .with_transition(shard, state_version)
@@ -1050,13 +1054,17 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 }
 
-fn extract_tree_change(update: &SubstateUpdateProof, epoch: Epoch) -> Result<SubstateTreeChange, RpcStateSyncError> {
+fn extract_tree_change(
+    network: Network,
+    update: &SubstateUpdateProof,
+    epoch: Epoch,
+) -> Result<SubstateTreeChange, RpcStateSyncError> {
     match update {
         SubstateUpdateProof::Create(create) => {
             let id = create.substate.as_versioned_substate_id_ref();
             Ok(SubstateTreeChange::Up {
                 id: id.to_owned(),
-                value_hash: create.substate.to_value_hash(epoch),
+                value_hash: create.substate.to_value_hash(network, epoch),
             })
         },
         SubstateUpdateProof::Destroy(destroy) => Ok(SubstateTreeChange::Down {

@@ -28,6 +28,7 @@ use std::{
 };
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_bor::{BorError, decode, decode_exact, encode};
 use tari_template_lib::types::{
@@ -106,8 +107,8 @@ impl Substate {
         decode(bytes)
     }
 
-    pub fn to_value_hash(&self, epoch: Epoch) -> Hash32 {
-        hash_substate(self.substate_value(), self.version, epoch)
+    pub fn to_value_hash(&self, network: Network, epoch: Epoch) -> Hash32 {
+        hash_substate(network, self.substate_value(), self.version, epoch)
     }
 
     pub fn previous_version(&self) -> Option<u32> {
@@ -116,10 +117,10 @@ impl Substate {
 }
 
 /// Hashes a substate into its canonical value hash. The `epoch` argument binds the schema version
-/// (derived from epoch via `ProtocolVersion::at`) into the hash preimage, so substates produced
-/// under different schema versions can never collide in the JMT.
-pub fn hash_substate(substate: &SubstateValue, version: u32, epoch: Epoch) -> Hash32 {
-    let proto_version = ProtocolVersion::at(epoch);
+/// (derived from `network` and epoch via `ProtocolVersion::at`) into the hash preimage, so substates
+/// produced under different schema versions can never collide in the JMT.
+pub fn hash_substate(network: Network, substate: &SubstateValue, version: u32, epoch: Epoch) -> Hash32 {
+    let proto_version = ProtocolVersion::at(network, epoch);
     substate_value_hasher32()
         .chain(&substate.as_hash_message(proto_version))
         .chain(&version)
@@ -1108,6 +1109,8 @@ mod tests {
         use super::*;
         use crate::confidential::ClaimedOutputTombstone;
 
+        const NETWORK: Network = Network::LocalNet;
+
         fn sample_value() -> SubstateValue {
             SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 })
         }
@@ -1115,21 +1118,27 @@ mod tests {
         #[test]
         fn different_epochs_yield_different_hashes() {
             let v = sample_value();
-            let h0 = hash_substate(&v, 0, Epoch::zero());
-            let h1 = hash_substate(&v, 0, Epoch(1));
+            let h0 = hash_substate(NETWORK, &v, 0, Epoch::zero());
+            let h1 = hash_substate(NETWORK, &v, 0, Epoch(1));
             assert_ne!(h0, h1, "epoch must bind into the hash preimage");
         }
 
         #[test]
         fn same_epoch_same_inputs_stable() {
             let v = sample_value();
-            assert_eq!(hash_substate(&v, 0, Epoch(42)), hash_substate(&v, 0, Epoch(42)));
+            assert_eq!(
+                hash_substate(NETWORK, &v, 0, Epoch(42)),
+                hash_substate(NETWORK, &v, 0, Epoch(42))
+            );
         }
 
         #[test]
         fn version_still_binds() {
             let v = sample_value();
-            assert_ne!(hash_substate(&v, 0, Epoch::zero()), hash_substate(&v, 1, Epoch::zero()));
+            assert_ne!(
+                hash_substate(NETWORK, &v, 0, Epoch::zero()),
+                hash_substate(NETWORK, &v, 1, Epoch::zero())
+            );
         }
     }
 }

@@ -132,7 +132,7 @@ fn basic_operations() {
     let shard = versioned_substate_id.to_shard(num_preshards());
     let epoch = Epoch::zero();
 
-    let mut batch = SubstateUpdateBatch::new(epoch);
+    let mut batch = SubstateUpdateBatch::new(helpers::NETWORK, epoch);
     batch
         .with_transition(shard, 2)
         .push(tari_ootle_storage::consensus_models::SubstateTransition::Down {
@@ -202,7 +202,7 @@ fn substate_head_iter() {
     }
     tx.state_tree_shard_versions_set(SHARD, 2).unwrap();
 
-    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+    let mut batch = SubstateUpdateBatch::new(helpers::NETWORK, Epoch::zero());
 
     for s in substates_to_update {
         // Mark the old substate as destroyed

@@ -224,7 +224,7 @@ fn substate_is_down_is_classified_as_a_skippable_lock_failure() {
 fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateId {
     let id = new_substate_id(seed);
     let value = new_substate_value(seed);
-    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+    let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
     batch.with_transition(Shard::first(), 0).push(SubstateTransition::Up {
         id: id.clone(),
         version,

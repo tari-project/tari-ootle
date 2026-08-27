@@ -252,6 +252,7 @@ pub async fn spawn_services(
     let substate_versions = Arc::new(SubstateVersionTracker::new());
 
     network_state_sync::NetworkWideStateSync::new(
+        config.network,
         epoch_manager.clone(),
         networking.clone(),
         store.clone(),
@@ -275,6 +276,7 @@ pub async fn spawn_services(
     let substate_cache_dir = config.to_data_dir().join("substate_cache");
     let substate_cache = SubstateFileCache::new(substate_cache_dir).context("Failed to create substate cache")?;
     let substate_manager = SubstateManager::new(
+        config.network,
         store.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
@@ -317,6 +319,7 @@ pub async fn spawn_services(
         .with_substate_proof_verification(false);
     let fee_table = get_fee_table_by_network(config.network);
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
+        config.network,
         fee_table.clone(),
         epoch_manager.clone(),
         dry_run_substate_manager,

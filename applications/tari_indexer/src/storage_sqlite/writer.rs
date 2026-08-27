@@ -8,6 +8,7 @@ use std::{
 
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
+use ootle_network::Network;
 use serde::Serialize;
 use tari_engine_types::{
     published_template::PublishedTemplateMetadata,
@@ -97,6 +98,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
 
     fn batch_insert_substate_transitions<I: IntoIterator<Item = (Epoch, SubstateUpdateProof)>>(
         &mut self,
+        network: Network,
         shard: Shard,
         state_version: StateVersion,
         updates: I,
@@ -117,9 +119,9 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                             substate_transitions::substate_type.eq(SubstateType::from(proof.substate_id()).to_string()),
                             substate_transitions::version.eq(proof.version() as i32),
                             substate_transitions::is_up.eq(proof.is_create()),
-                            substate_transitions::value_hash.eq(proof
-                                .as_create()
-                                .map(|v| serialize_hex(v.substate.value.to_value_hash(proof.version(), epoch)))),
+                            substate_transitions::value_hash.eq(proof.as_create().map(|v| {
+                                serialize_hex(v.substate.value.to_value_hash(network, proof.version(), epoch))
+                            })),
                         )
                     })
                     .collect::<Vec<_>>(),

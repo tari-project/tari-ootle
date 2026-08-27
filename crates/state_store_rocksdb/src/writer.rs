@@ -1275,11 +1275,17 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                             version,
                             substate_or_hash,
                         } => {
-                            let rec = SubstateRecord::new(id, version, substate_or_hash, SubstateCreated {
-                                at_epoch: update_batch.epoch,
-                                in_shard: shard,
-                                at_state_version: state_version,
-                            });
+                            let rec = SubstateRecord::new(
+                                update_batch.network,
+                                id,
+                                version,
+                                substate_or_hash,
+                                SubstateCreated {
+                                    at_epoch: update_batch.epoch,
+                                    in_shard: shard,
+                                    at_state_version: state_version,
+                                },
+                            );
 
                             let address = rec.to_substate_address();
                             cf.put(&address, &rec, OPERATION)?;

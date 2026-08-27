@@ -6,6 +6,7 @@ mod common;
 use std::{hint::black_box, iter, sync::Arc};
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use ootle_network::Network;
 use tari_engine::{
     executables::{Executable, Instructions, WeightedExecutable},
     fees::WasmMeteringRate,
@@ -97,6 +98,7 @@ fn setup(shared: &SharedState) -> BenchTxProcessor {
         shared.claim_burn_proof_verifier.clone(),
         WasmMeteringRate::unmetered(),
         0,
+        Network::LocalNet,
         false,
     )
 }

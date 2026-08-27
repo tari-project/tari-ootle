@@ -23,6 +23,7 @@
 use std::{sync::Arc, time::Instant};
 
 use log::*;
+use ootle_network::Network;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason},
     component::{Component, derive_component_address_from_public_key},
@@ -104,6 +105,8 @@ pub struct TransactionProcessor<TStore, TTemplateProvider> {
     wasm_metering_rate: WasmMeteringRate,
     /// The exhaust burn rate in basis points, resolved for the execution epoch and seeded onto the fee state.
     burn_rate_bps: u16,
+    /// Selects the substate schema version for the execution epoch, which is scheduled per network.
+    network: Network,
     dry_run: bool,
 }
 
@@ -122,6 +125,7 @@ where
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
         wasm_metering_rate: WasmMeteringRate,
         burn_rate_bps: u16,
+        network: Network,
         dry_run: bool,
     ) -> Self {
         Self {
@@ -133,6 +137,7 @@ where
             claim_burn_proof_verifier,
             wasm_metering_rate,
             burn_rate_bps,
+            network,
             dry_run,
         }
     }
@@ -151,6 +156,7 @@ where
             claim_burn_proof_verifier,
             wasm_metering_rate,
             burn_rate_bps,
+            network,
             dry_run,
         } = self;
 
@@ -181,6 +187,7 @@ where
             transaction_weight,
             wasm_metering_rate,
             burn_rate_bps,
+            network,
             dry_run,
         );
 

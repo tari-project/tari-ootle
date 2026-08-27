@@ -125,6 +125,11 @@ pub struct IndexerConfig {
     /// A shorter TTL reduces the chance of stale fee estimates.
     #[serde(with = "serializers::seconds")]
     pub dry_run_cache_ttl: Duration,
+    /// Start even when the binary's schema activation schedule disagrees with the one this node has
+    /// already run under. Doing so re-hashes committed state and breaks the substate proofs this
+    /// indexer serves, so this exists only for a node whose state is being discarded.
+    #[serde(default)]
+    pub allow_past_protocol_activation: bool,
     /// How long a cached substate may be served as the latest version of that substate. Raising it
     /// trades a wider window for handing out an already-spent input version against fewer validator
     /// round trips on hot substates. Requests for a specific version are unaffected.
@@ -339,6 +344,7 @@ impl Default for IndexerConfig {
             state_scanning_interval: Duration::from_secs(60),
             sidechain_id: None,
             dry_run_cache_ttl: Duration::from_secs(10),
+            allow_past_protocol_activation: false,
             latest_substate_cache_ttl: default_latest_substate_cache_ttl(),
             transaction_retention_epochs: default_transaction_retention_epochs(),
             index_gossiped_transactions: default_index_gossiped_transactions(),

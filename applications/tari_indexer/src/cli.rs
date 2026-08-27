@@ -42,6 +42,12 @@ pub struct Cli {
     #[clap(flatten)]
     pub common: CommonCliArgs,
 
+    /// Start even when this binary's schema activation schedule disagrees with the one the node has
+    /// already run under. Diverges from the network; intended only for a node whose state is being
+    /// discarded.
+    #[clap(long)]
+    pub allow_past_protocol_activation: bool,
+
     #[clap(long, short = 'a', multiple_values = true)]
     pub address: Vec<SubstateId>,
 
@@ -89,6 +95,9 @@ impl ConfigOverrideProvider for Cli {
         let mut overrides = self.common.get_config_property_overrides(network);
         overrides.push(("network".to_string(), network.to_string()));
         overrides.push(("indexer.override_from".to_string(), network.to_string()));
+        if self.allow_past_protocol_activation {
+            overrides.push(("indexer.allow_past_protocol_activation".to_string(), "true".to_string()));
+        }
         overrides.push(("epoch_oracle.override_from".to_string(), network.to_string()));
         overrides.push(("p2p.override_from".to_string(), network.to_string()));
         overrides.push(("p2p.seeds.override_from".to_string(), network.to_string()));

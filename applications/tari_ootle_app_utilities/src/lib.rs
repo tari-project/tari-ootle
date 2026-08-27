@@ -31,6 +31,7 @@ pub mod identity_management;
 pub mod keypair;
 #[cfg(feature = "p2p")]
 pub mod p2p_config;
+pub mod protocol_activation;
 #[cfg(feature = "p2p")]
 pub mod seed_peer;
 pub mod shared_consts;

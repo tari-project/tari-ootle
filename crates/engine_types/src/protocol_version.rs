@@ -49,71 +49,108 @@ impl ProtocolVersion {
         self as u32
     }
 
-    /// The newest activation after genesis on `network`, if its schedule has one beyond the genesis
-    /// schema.
-    pub fn newest_scheduled_activation(network: Network) -> Option<(Epoch, Self)> {
-        Self::activations(network)[1..].last().copied()
+    /// Every activation after genesis on `network`. Genesis is the schema a network starts under, so
+    /// it is never something a node can have "reached" or failed to honour.
+    fn scheduled_activations(network: Network) -> &'static [(Epoch, Self)] {
+        Self::activations(network).get(1..).unwrap_or_default()
     }
 
-    /// Guards against starting a binary that introduces a schema activation at an epoch this node has
-    /// already run past.
+    /// The newest activation after genesis on `network`, if its schedule has one.
+    pub fn newest_scheduled_activation(network: Network) -> Option<(Epoch, Self)> {
+        Self::scheduled_activations(network).last().copied()
+    }
+
+    /// The epochs at which `network` schedules an activation after genesis, in ascending order. This
+    /// is what [`Self::check_activation_schedule`] compares against and returns.
+    pub fn scheduled_activation_epochs(network: Network) -> Vec<Epoch> {
+        Self::scheduled_activations(network).iter().map(|(at, _)| *at).collect()
+    }
+
+    /// Guards against starting a binary whose activation schedule disagrees with the one this node
+    /// has already run under.
     ///
-    /// `hash_substate` selects the schema from the epoch a substate was *created* at, so an activation
-    /// landing on epochs that already hold committed substates silently re-hashes them: state sync
-    /// recomputes roots that no longer match the quorum-signed ones, substate proofs fail to verify, and
-    /// upgraded nodes diverge from the rest rather than stopping. None of that surfaces as an error at
-    /// the point it goes wrong, which is why it is caught here instead.
+    /// `hash_substate` selects the schema from the epoch a substate was *created* at, so the set of
+    /// activations at or before the epoch a node has reached determines how every substate it holds
+    /// was hashed. A binary that disagrees with the node's own history about that set silently
+    /// re-hashes committed state: state sync recomputes roots that no longer match the quorum-signed
+    /// ones, substate proofs stop verifying, and the node diverges from the network rather than
+    /// stopping. None of that surfaces as an error at the point it goes wrong, which is why it is
+    /// caught here instead.
     ///
-    /// `recorded` is the newest activation this node last started with and `last_known_epoch` the epoch
-    /// it last observed, both read from the global metadata store. The comparison is against the
-    /// *schedule*, not the epoch alone, so restarting after a correctly scheduled activation is not a
-    /// finding. A node with no epoch history has no state to invalidate and always passes.
+    /// `recorded` is the schedule this node last started with and `last_known_epoch` the epoch it
+    /// last observed, both read from the global metadata store. Comparing whole schedules rather
+    /// than only their newest entry is what catches a skipped release — a binary that adds an
+    /// activation the node has already run past *behind* one that is still ahead of it. A node with
+    /// no epoch history has no state to invalidate and always passes.
     ///
-    /// Returns the activation to record for the next start.
+    /// Returns the schedule to record for the next start.
     pub fn check_activation_schedule(
         network: Network,
-        recorded: Option<Epoch>,
+        recorded: &[Epoch],
         last_known_epoch: Option<Epoch>,
-    ) -> Result<Option<Epoch>, PastActivationError> {
-        Self::check_schedule(
-            Self::newest_scheduled_activation(network).map(|(epoch, _)| epoch),
-            recorded,
-            last_known_epoch,
-        )
+    ) -> Result<Vec<Epoch>, ActivationScheduleError> {
+        Self::check_schedule(Self::scheduled_activations(network), recorded, last_known_epoch)
     }
 
     /// [`Self::check_activation_schedule`] against an explicit schedule, so the rule can be exercised
-    /// for schedules other than the one this binary is compiled with.
+    /// for schedules other than the ones this binary is compiled with.
     fn check_schedule(
-        newest: Option<Epoch>,
-        recorded: Option<Epoch>,
+        scheduled: &[(Epoch, Self)],
+        recorded: &[Epoch],
         last_known_epoch: Option<Epoch>,
-    ) -> Result<Option<Epoch>, PastActivationError> {
-        if newest == recorded {
-            return Ok(recorded);
-        }
-        if let (Some(activation), Some(last_known_epoch)) = (newest, last_known_epoch) &&
-            activation <= last_known_epoch
+    ) -> Result<Vec<Epoch>, ActivationScheduleError> {
+        let to_record = || scheduled.iter().map(|(at, _)| *at).collect();
+
+        let Some(last_known_epoch) = last_known_epoch else {
+            return Ok(to_record());
+        };
+
+        // An activation this binary schedules at or before the epoch the node reached, that the node
+        // never ran under: the epochs between it and now were hashed under the superseded schema.
+        if let Some((activation, _)) = scheduled
+            .iter()
+            .rev()
+            .find(|(at, _)| *at <= last_known_epoch && !recorded.contains(at))
         {
-            return Err(PastActivationError {
-                activation,
+            return Err(ActivationScheduleError::Passed {
+                activation: *activation,
                 last_known_epoch,
             });
         }
-        Ok(newest)
+
+        // The mirror image: an activation the node has already honoured that this binary drops, which
+        // rolls its hashing back to a schema the network has left behind.
+        if let Some(activation) = recorded
+            .iter()
+            .rev()
+            .find(|at| **at <= last_known_epoch && !scheduled.iter().any(|(s, _)| s == *at))
+        {
+            return Err(ActivationScheduleError::RolledBack {
+                activation: *activation,
+                last_known_epoch,
+            });
+        }
+
+        Ok(to_record())
     }
 }
 
-/// This binary schedules a schema activation at an epoch the node has already passed. See
+/// This binary's activation schedule disagrees with the one the node has already run under. See
 /// [`ProtocolVersion::check_activation_schedule`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "Protocol schema activates at epoch {activation}, which this node has already passed (last known epoch \
-     {last_known_epoch}). Starting would re-hash committed state and diverge from the network."
-)]
-pub struct PastActivationError {
-    pub activation: Epoch,
-    pub last_known_epoch: Epoch,
+pub enum ActivationScheduleError {
+    #[error(
+        "Protocol schema activates at epoch {activation}, which this node has already passed (last known epoch \
+         {last_known_epoch}) without running under it. Starting would re-hash committed state and diverge from the \
+         network."
+    )]
+    Passed { activation: Epoch, last_known_epoch: Epoch },
+    #[error(
+        "This binary drops the protocol schema activation at epoch {activation}, which this node has already run \
+         under (last known epoch {last_known_epoch}). Starting would hash new state under a superseded schema and \
+         diverge from the network."
+    )]
+    RolledBack { activation: Epoch, last_known_epoch: Epoch },
 }
 
 impl Display for ProtocolVersion {
@@ -126,25 +163,24 @@ impl Display for ProtocolVersion {
 mod tests {
     use super::*;
 
-    const NETWORKS: [Network; 6] = [
-        Network::MainNet,
-        Network::StageNet,
-        Network::NextNet,
-        Network::Igor,
-        Network::Esmeralda,
-        Network::LocalNet,
-    ];
+    /// Derived from `Network`'s byte encoding rather than listed, so a new variant is covered without
+    /// anyone remembering to add it here.
+    fn all_networks() -> Vec<Network> {
+        (u8::MIN..=u8::MAX)
+            .filter_map(|byte| Network::try_from(byte).ok())
+            .collect()
+    }
 
     #[test]
     fn every_network_starts_at_v0() {
-        for network in NETWORKS {
+        for network in all_networks() {
             assert_eq!(ProtocolVersion::at(network, Epoch(0)), ProtocolVersion::V0, "{network}");
         }
     }
 
     #[test]
     fn far_future_resolves_to_the_newest_activation() {
-        for network in NETWORKS {
+        for network in all_networks() {
             let (_, newest) = *ProtocolVersion::activations(network).last().unwrap();
             assert_eq!(ProtocolVersion::at(network, Epoch(u64::MAX)), newest, "{network}");
         }
@@ -152,54 +188,24 @@ mod tests {
 
     #[test]
     fn genesis_is_never_a_scheduled_activation() {
-        // Genesis is the schema every network starts under, so no node can have run past it.
-        for network in NETWORKS {
-            let genesis = ProtocolVersion::activations(network)[0];
-            assert_eq!(genesis, (Epoch(0), ProtocolVersion::V0), "{network}");
+        for network in all_networks() {
+            assert_eq!(
+                ProtocolVersion::activations(network)[0],
+                (Epoch(0), ProtocolVersion::V0),
+                "{network}"
+            );
+            assert!(
+                !ProtocolVersion::scheduled_activations(network)
+                    .iter()
+                    .any(|(at, _)| at.is_zero()),
+                "{network}"
+            );
         }
     }
 
     #[test]
-    fn an_unchanged_schedule_is_not_rechecked() {
-        // The recorded activation is behind the node's epoch, which is the normal state of affairs
-        // after an activation has been honoured.
-        assert_eq!(
-            ProtocolVersion::check_schedule(Some(Epoch(100)), Some(Epoch(100)), Some(Epoch(900))),
-            Ok(Some(Epoch(100)))
-        );
-    }
-
-    #[test]
-    fn a_new_activation_ahead_of_the_node_is_recorded() {
-        assert_eq!(
-            ProtocolVersion::check_schedule(Some(Epoch(1000)), None, Some(Epoch(900))),
-            Ok(Some(Epoch(1000)))
-        );
-    }
-
-    #[test]
-    fn a_new_activation_the_node_has_passed_is_rejected() {
-        assert_eq!(
-            ProtocolVersion::check_schedule(Some(Epoch(900)), None, Some(Epoch(900))),
-            Err(PastActivationError {
-                activation: Epoch(900),
-                last_known_epoch: Epoch(900),
-            })
-        );
-        assert!(ProtocolVersion::check_schedule(Some(Epoch(100)), None, Some(Epoch(900))).is_err());
-    }
-
-    #[test]
-    fn a_node_with_no_epoch_history_has_no_state_to_invalidate() {
-        assert_eq!(
-            ProtocolVersion::check_schedule(Some(Epoch(1)), None, None),
-            Ok(Some(Epoch(1)))
-        );
-    }
-
-    #[test]
     fn monotonic_across_activations() {
-        for network in NETWORKS {
+        for network in all_networks() {
             let mut prev: Option<Epoch> = None;
             for (at, _) in ProtocolVersion::activations(network) {
                 if let Some(p) = prev {
@@ -207,6 +213,100 @@ mod tests {
                 }
                 prev = Some(*at);
             }
+        }
+    }
+
+    mod check_schedule {
+        use super::*;
+
+        fn schedule(epochs: &[u64]) -> Vec<(Epoch, ProtocolVersion)> {
+            epochs.iter().map(|e| (Epoch(*e), ProtocolVersion::V0)).collect()
+        }
+
+        fn recorded(epochs: &[u64]) -> Vec<Epoch> {
+            epochs.iter().copied().map(Epoch).collect()
+        }
+
+        fn check(
+            scheduled: &[u64],
+            already_recorded: &[u64],
+            last_known_epoch: Option<u64>,
+        ) -> Result<Vec<Epoch>, ActivationScheduleError> {
+            ProtocolVersion::check_schedule(
+                &schedule(scheduled),
+                &recorded(already_recorded),
+                last_known_epoch.map(Epoch),
+            )
+        }
+
+        #[test]
+        fn a_node_with_no_epoch_history_has_no_state_to_invalidate() {
+            assert_eq!(check(&[1000], &[], None), Ok(recorded(&[1000])));
+        }
+
+        #[test]
+        fn an_activation_ahead_of_the_node_is_recorded() {
+            assert_eq!(check(&[1000], &[], Some(900)), Ok(recorded(&[1000])));
+        }
+
+        #[test]
+        fn an_unchanged_schedule_is_not_rechecked() {
+            assert_eq!(check(&[1000], &[1000], Some(1100)), Ok(recorded(&[1000])));
+        }
+
+        #[test]
+        fn an_activation_the_node_reached_without_running_under_it_is_rejected() {
+            assert_eq!(
+                check(&[900], &[], Some(900)),
+                Err(ActivationScheduleError::Passed {
+                    activation: Epoch(900),
+                    last_known_epoch: Epoch(900),
+                })
+            );
+        }
+
+        #[test]
+        fn a_skipped_release_is_rejected() {
+            // The node ran a binary that scheduled nothing, straight to one scheduling 1000 and 1200,
+            // at an epoch between the two. Only the newest activation is ahead of it; 1000 is not.
+            assert_eq!(
+                check(&[1000, 1200], &[], Some(1100)),
+                Err(ActivationScheduleError::Passed {
+                    activation: Epoch(1000),
+                    last_known_epoch: Epoch(1100),
+                })
+            );
+        }
+
+        #[test]
+        fn an_activation_inserted_behind_an_unchanged_newest_entry_is_rejected() {
+            // The newest entry is untouched and still ahead of the node, so nothing about it is
+            // suspicious; the inserted 1000 is what the node has already run past.
+            assert_eq!(
+                check(&[1000, 1200], &[1200], Some(1100)),
+                Err(ActivationScheduleError::Passed {
+                    activation: Epoch(1000),
+                    last_known_epoch: Epoch(1100),
+                })
+            );
+        }
+
+        #[test]
+        fn dropping_an_activation_the_node_has_run_under_is_rejected() {
+            assert_eq!(
+                check(&[], &[1000], Some(1100)),
+                Err(ActivationScheduleError::RolledBack {
+                    activation: Epoch(1000),
+                    last_known_epoch: Epoch(1100),
+                })
+            );
+        }
+
+        #[test]
+        fn dropping_an_activation_that_has_not_fired_is_allowed() {
+            // Rescheduling a fork that has not happened yet is the supported way to abort one.
+            assert_eq!(check(&[], &[1200], Some(1100)), Ok(recorded(&[])));
+            assert_eq!(check(&[1300], &[1200], Some(1100)), Ok(recorded(&[1300])));
         }
     }
 }

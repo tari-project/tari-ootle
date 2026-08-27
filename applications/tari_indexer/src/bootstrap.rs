@@ -68,6 +68,7 @@ use tari_ootle_app_utilities::{
     fee_tables::get_fee_table_by_network,
     identity_management,
     keypair::RistrettoKeypair,
+    protocol_activation::check_and_record_activation_schedule,
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
 };
@@ -205,6 +206,12 @@ pub async fn spawn_services(
         // TODO: We happen to know that the testnet faucet mints u64::MAX tXTR. This is hacky.
         hack_xtr_initial_supply(&store).await?;
     }
+
+    check_and_record_activation_schedule(
+        config.network,
+        &global_db,
+        config.indexer.allow_past_protocol_activation,
+    )?;
 
     // Epoch event oracle
     let epoch_event_oracle = create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;

@@ -24,6 +24,7 @@ use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
+    ProtocolVersion,
     ShardGroup,
     VersionedSubstateId,
     displayable::Displayable,
@@ -152,8 +153,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     ) -> Self {
         let (tx_missing_transactions, rx_missing_transactions) = mpsc::unbounded_channel();
         let pacemaker = PaceMaker::new(config.consensus_constants.pacemaker_block_time);
-        let proposal_vote_collector =
-            ProposalVoteCollector::new(state_store.clone(), epoch_manager.clone(), signing_service.clone());
+        let proposal_vote_collector = ProposalVoteCollector::new(
+            config.network,
+            state_store.clone(),
+            epoch_manager.clone(),
+            signing_service.clone(),
+        );
         let timeout_vote_collector =
             TimeoutVoteCollector::new(state_store.clone(), epoch_manager.clone(), signing_service.clone());
         let transaction_manager = ConsensusTransactionManager::new(
@@ -169,6 +174,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             rx_missing_transactions,
 
             on_inbound_message: OnInboundMessage::new(
+                config.network,
                 inbound_messaging,
                 epoch_manager.clone(),
                 signing_service.clone(),
@@ -1521,6 +1527,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             let mut genesis = Block::genesis(
                 self.config.network,
+                ProtocolVersion::at(self.config.network, epoch),
                 epoch,
                 epoch_hash,
                 shard_group,

@@ -152,24 +152,24 @@ ootle-wasm-core = { path = "crates/ootle_wasm/core", version = "0.40" }
 ootle_sdk_core = { path = "crates/ootle_sdk_core", version = "0.40" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = { version = "5.6.0", default-features = false }
-minotari_app_utilities = "5.6.0"
-minotari_node_grpc_client = "5.6.0"
-minotari_wallet_grpc_client = "5.6.0"
-tari_common = "5.6.0"
-tari_common_sqlite = "5.6.0"
-tari_common_types = "5.6.0"
-tari_jellyfish = "5.6.0"
-tari_metrics = "5.6.0"
-tari_mmr = "5.6.0"
-tari_node_components = "5.6.0"
-tari_shutdown = "5.6.0"
-tari_sidechain = "5.6.0"
-tari_transaction_components = "5.6.0"
+minotari_app_grpc = { version = "5.7.0-pre.3", default-features = false }
+minotari_app_utilities = "5.7.0-pre.3"
+minotari_node_grpc_client = "5.7.0-pre.3"
+minotari_wallet_grpc_client = "5.7.0-pre.3"
+tari_common = "5.7.0-pre.3"
+tari_common_sqlite = "5.7.0-pre.3"
+tari_common_types = "5.7.0-pre.3"
+tari_jellyfish = "5.7.0-pre.3"
+tari_metrics = "5.7.0-pre.3"
+tari_mmr = "5.7.0-pre.3"
+tari_node_components = "5.7.0-pre.3"
+tari_shutdown = "5.7.0-pre.3"
+tari_sidechain = "5.7.0-pre.3"
+tari_transaction_components = "5.7.0-pre.3"
 
 tari_crypto = "0.23"
 tari_utilities = "0.10"
-tari_hashing = "5.6.0"
+tari_hashing = "5.7.0-pre.3"
 
 ## Ledger
 ootle_ledger_common = { path = "crates/wallet/ledger/common", version = "0.2.0" }
@@ -388,3 +388,30 @@ opt-level = 1
 #tari_sidechain = { path = "../tari/base_layer/sidechain" }
 #tari_jellyfish = { path = "../tari/infrastructure/jellyfish" }
 
+
+# LOCAL ONLY - drop this commit before merge.
+# Points the base-layer crates at a local tari checkout so the block header protocol version
+# (tari-project/tari#7983) and the proposal-vote signature change (tari-project/tari#7982) can be
+# exercised on swarm before they are released.
+[patch.crates-io]
+minotari_app_grpc = { path = "../tari/applications/minotari_app_grpc" }
+minotari_app_utilities = { path = "../tari/applications/minotari_app_utilities" }
+minotari_node_grpc_client = { path = "../tari/clients/rust/base_node_grpc_client" }
+minotari_wallet_grpc_client = { path = "../tari/clients/rust/wallet_grpc_client" }
+tari_common = { path = "../tari/common" }
+tari_common_sqlite = { path = "../tari/common_sqlite" }
+tari_common_types = { path = "../tari/base_layer/common_types" }
+tari_hashing = { path = "../tari/hashing" }
+tari_jellyfish = { path = "../tari/infrastructure/jellyfish" }
+tari_metrics = { path = "../tari/infrastructure/metrics" }
+tari_mmr = { path = "../tari/base_layer/mmr" }
+tari_node_components = { path = "../tari/base_layer/node_components" }
+tari_shutdown = { path = "../tari/infrastructure/shutdown" }
+tari_sidechain = { path = "../tari/base_layer/sidechain" }
+tari_transaction_components = { path = "../tari/base_layer/transaction_components" }
+minotari_console_wallet = { path = "../tari/applications/minotari_console_wallet" }
+minotari_node = { path = "../tari/applications/minotari_node" }
+minotari_wallet = { path = "../tari/base_layer/wallet" }
+tari_comms = { path = "../tari/comms/core" }
+tari_comms_dht = { path = "../tari/comms/dht" }
+tari_p2p = { path = "../tari/base_layer/p2p" }

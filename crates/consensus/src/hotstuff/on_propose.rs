@@ -19,6 +19,7 @@ use tari_ootle_common_types::{
     Epoch,
     ExtraData,
     NodeHeight,
+    ProtocolVersion,
     committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
@@ -617,6 +618,7 @@ where TConsensusSpec: ConsensusSpec
 
         let mut header = BlockHeader::create_unsigned(
             self.config.network,
+            ProtocolVersion::at(self.config.network, epoch),
             *parent_block.block_id(),
             high_qc_id,
             next_height,

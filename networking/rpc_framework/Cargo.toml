@@ -27,6 +27,9 @@ tracing = { workspace = true }
 libp2p = { workspace = true }
 libp2p-substream = { workspace = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "rt-multi-thread"] }
+
 [build-dependencies]
 proto_builder = { workspace = true }
 

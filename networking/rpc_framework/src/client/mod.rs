@@ -239,6 +239,17 @@ impl<TClient> RpcClientBuilder<TClient> {
         self
     }
 
+    /// Asks the server to emit an empty keepalive frame every `interval` while a streaming response
+    /// has nothing to send, so that an idle stream stays distinguishable from a dead peer. The
+    /// server MAY serve a longer interval than requested, and a server that does not support
+    /// keepalives simply ends an idle stream at the deadline as it otherwise would.
+    ///
+    /// Default: no keepalives
+    pub fn with_keepalive_interval(mut self, interval: Duration) -> Self {
+        self.config.keepalive_interval = Some(interval);
+        self
+    }
+
     /// Set the length of time that the client will wait for a response in the RPC handshake before returning a timeout
     /// error.
     /// Default: 15 seconds
@@ -278,6 +289,7 @@ where TClient: From<RpcClient> + NamedProtocolService
 pub struct RpcClientConfig {
     pub deadline: Option<Duration>,
     pub deadline_grace_period: Duration,
+    pub keepalive_interval: Option<Duration>,
     pub handshake_timeout: Duration,
 }
 
@@ -298,6 +310,7 @@ impl Default for RpcClientConfig {
         Self {
             deadline: Some(Duration::from_secs(120)),
             deadline_grace_period: Duration::from_secs(60),
+            keepalive_interval: None,
             handshake_timeout: Duration::from_secs(90),
         }
     }
@@ -628,6 +641,7 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             request_id: u32::from(request_id),
             method,
             deadline: self.config.deadline.map(|t| t.as_secs()).unwrap_or(0),
+            keepalive_interval: self.config.keepalive_interval.map(|t| t.as_secs()).unwrap_or(0),
             flags: 0,
             payload: request.message.to_vec(),
         };
@@ -773,8 +787,7 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
                     }
                     break;
                 },
-                Err(err @ RpcError::ResponseIdDidNotMatchRequest { .. }) |
-                Err(err @ RpcError::UnexpectedAckResponse) => {
+                Err(err @ RpcError::ResponseIdDidNotMatchRequest { .. }) => {
                     warn!(target: LOG_TARGET, "{}", err);
                     // Ignore the response, this can happen when there is excessive latency. The server sends back a
                     // reply before the deadline but it is only received after the client has timed
@@ -808,6 +821,16 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
         let mut num_ignored = 0;
         let resp = loop {
             match reader.read_response().await {
+                Ok(resp) if resp.is_keepalive() => {
+                    trace!(
+                        target: LOG_TARGET,
+                        "(peer: {}, {}) Keepalive received for request {}",
+                        peer_id,
+                        protocol_name,
+                        request_id
+                    );
+                    continue;
+                },
                 Ok(resp) => {
                     trace!(
                         target: LOG_TARGET,
@@ -946,18 +969,6 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
             });
         }
 
-        // let flags =
-        //     RpcMessageFlags::from_bits(u8::try_from(resp.flags).map_err(|_| {
-        //         RpcStatus::protocol_error(&format!("invalid message flag: must be less than {}", u8::MAX))
-        //     })?)
-        //     .ok_or(RpcStatus::protocol_error(&format!(
-        //         "invalid message flag, does not match any flags ({})",
-        //         resp.flags
-        //     )))?;
-        // if flags.contains(RpcMessageFlags::ACK) {
-        //     return Err(RpcError::UnexpectedAckResponse);
-        // }
-
         Ok(())
     }
 
@@ -974,5 +985,94 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
             Ok(None) => Err(RpcError::ServerClosedRequest),
             Err(_) => Err(RpcError::ReplyTimeout),
         }
+    }
+}
+
+#[cfg(test)]
+mod keepalive_tests {
+    use tokio::io::DuplexStream;
+    use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
+
+    use super::*;
+    use crate::{
+        Handshake,
+        RPC_MAX_FRAME_SIZE,
+        RpcStatusCode,
+        framing,
+        message::{RpcMessageFlags, RpcResponse},
+    };
+
+    const PROTOCOL: &str = "/test/keepalive/1.0";
+
+    async fn send_response(framed: &mut CanonicalFraming<Compat<DuplexStream>>, resp: RpcResponse) {
+        framed.send(resp.to_proto().encode_to_vec().into()).await.unwrap();
+    }
+
+    /// Replies to one streaming request with `num_keepalives` empty keepalive frames, then a single
+    /// message closing the stream.
+    async fn serve_keepalives_then_message(
+        substream: DuplexStream,
+        num_keepalives: usize,
+        message: Bytes,
+    ) -> proto::RpcRequest {
+        let mut framed = framing::canonical(substream.compat(), RPC_MAX_FRAME_SIZE);
+        Handshake::new(&mut framed).perform_server_handshake().await.unwrap();
+
+        let frame = framed.next().await.unwrap().unwrap();
+        let request = proto::RpcRequest::decode(frame.freeze()).unwrap();
+
+        for _ in 0..num_keepalives {
+            send_response(&mut framed, RpcResponse::keepalive(request.request_id)).await;
+        }
+        send_response(&mut framed, RpcResponse {
+            request_id: request.request_id,
+            status: RpcStatusCode::Ok,
+            flags: RpcMessageFlags::empty(),
+            payload: message,
+        })
+        .await;
+        // The streaming protocol terminates with an empty FIN frame.
+        send_response(&mut framed, RpcResponse {
+            request_id: request.request_id,
+            status: RpcStatusCode::Ok,
+            flags: RpcMessageFlags::FIN,
+            payload: Bytes::new(),
+        })
+        .await;
+
+        request
+    }
+
+    #[tokio::test]
+    async fn keepalive_frames_are_not_delivered_as_stream_messages() {
+        let (server, client) = tokio::io::duplex(RPC_MAX_FRAME_SIZE);
+        let reply = proto::RpcSession {
+            supported_versions: vec![7],
+        };
+        let server = tokio::spawn(serve_keepalives_then_message(server, 3, reply.encode_to_vec().into()));
+
+        let config = RpcClientConfig {
+            keepalive_interval: Some(Duration::from_secs(11)),
+            ..Default::default()
+        };
+        let mut rpc_client = RpcClient::connect(
+            config,
+            PeerId::random(),
+            framing::canonical(client.compat(), RPC_MAX_FRAME_SIZE),
+            StreamProtocol::new(PROTOCOL),
+        )
+        .await
+        .unwrap();
+
+        let stream = rpc_client
+            .server_streaming::<_, _, proto::RpcSession>(proto::RpcSession::default(), 1u32)
+            .await
+            .unwrap();
+        let received = stream.collect::<Vec<_>>().await;
+
+        let request = server.await.unwrap();
+        assert_eq!(request.keepalive_interval, 11);
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].as_ref().unwrap().supported_versions, vec![7]);
     }
 }

@@ -54,8 +54,6 @@ pub enum RpcError {
     ReplyTimeout,
     #[error("Received an invalid ping response")]
     InvalidPingResponse,
-    #[error("Unexpected ACK response. This is likely because of a previous ACK timeout")]
-    UnexpectedAckResponse,
     #[error("Remote peer attempted to send more than {expected} payload chunks")]
     RemotePeerExceededMaxChunkCount { expected: usize },
     #[error("Request body was too large. Expected <= {expected} but got {got}")]
@@ -78,7 +76,6 @@ impl RpcError {
             RpcError::HandshakeError(RpcHandshakeError::Rejected(_)) |
             RpcError::HandshakeError(RpcHandshakeError::TimedOut) |
             RpcError::ServerClosedRequest |
-            RpcError::UnexpectedAckResponse |
             RpcError::ResponseIdDidNotMatchRequest { .. } => true,
 
             // Some of these may be caused by the server, but not with 100% certainty

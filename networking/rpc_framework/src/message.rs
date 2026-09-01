@@ -171,6 +171,15 @@ impl proto::RpcRequest {
         Duration::from_secs(self.deadline)
     }
 
+    /// The interval at which the client wants keepalive frames while a streaming response is idle,
+    /// or `None` if it does not want them.
+    pub fn keepalive_interval(&self) -> Option<Duration> {
+        match self.keepalive_interval {
+            0 => None,
+            secs => Some(Duration::from_secs(secs)),
+        }
+    }
+
     pub fn flags(&self) -> Result<RpcMessageFlags, String> {
         RpcMessageFlags::from_bits(
             u8::try_from(self.flags).map_err(|_| format!("invalid message flag: must be less than {}", u8::MAX))?,
@@ -186,9 +195,10 @@ impl fmt::Display for proto::RpcRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "RequestID={}, Deadline={:.0?}, Flags={:?}, Message={} byte(s)",
+            "RequestID={}, Deadline={:.0?}, Keepalive={:.0?}, Flags={:?}, Message={} byte(s)",
             self.request_id,
             self.deadline(),
+            self.keepalive_interval(),
             self.flags(),
             self.payload.len()
         )
@@ -211,6 +221,18 @@ impl RpcResponse {
             status: self.status as u32,
             flags: self.flags.bits().into(),
             payload: self.payload.to_vec(),
+        }
+    }
+
+    /// An empty ACK-flagged frame proving the substream is alive while a streaming response has
+    /// nothing to send. It carries no payload and does not advance the stream, so a recipient must
+    /// discard it rather than deliver it as a message.
+    pub fn keepalive(request_id: u32) -> RpcResponse {
+        RpcResponse {
+            request_id,
+            status: RpcStatusCode::Ok,
+            flags: RpcMessageFlags::ACK,
+            payload: Bytes::new(),
         }
     }
 
@@ -253,6 +275,13 @@ impl proto::RpcResponse {
 
     pub fn is_fin(&self) -> bool {
         u8::try_from(self.flags).unwrap() & RpcMessageFlags::FIN.bits() != 0
+    }
+
+    /// True if this is a keepalive frame: ACK-flagged and not terminating the stream.
+    pub fn is_keepalive(&self) -> bool {
+        self.flags()
+            .map(|flags| flags.is_ack() && !flags.is_fin())
+            .unwrap_or(false)
     }
 }
 

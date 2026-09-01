@@ -13,10 +13,14 @@ message RpcRequest {
     uint32 request_id = 1;
     // The method identifier. The matching method for a given value is defined by each service.
     uint32 method = 2;
-    // Message flags. Currently this is not used for requests.
+    // Message flags. FIN ends the session, ACK requests a liveness pong.
     uint32 flags = 3;
     // The length of time in seconds that a client is willing to wait for a response
     uint64 deadline = 4;
+    // The interval in seconds at which the client wants the server to emit empty ACK-flagged
+    // responses while a streaming response has nothing to send. Zero means no keepalives, in which
+    // case a stream that produces nothing for `deadline` is simply ended.
+    uint64 keepalive_interval = 5;
 
     // The message payload
     bytes payload = 10;
@@ -28,7 +32,8 @@ message RpcResponse {
     uint32 request_id = 1;
     // The status of the response. A non-zero status indicates an error.
     uint32 status = 2;
-    // Message flags. Currently only used to indicate if a stream of messages has completed.
+    // Message flags. Indicates whether a stream of messages has completed (FIN), or that this is an
+    // empty keepalive frame that carries no payload and does not advance the stream (ACK).
     uint32 flags = 3;
 
     // The message payload. If the status is non-zero, this contains additional error details.

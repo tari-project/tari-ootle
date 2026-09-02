@@ -13,7 +13,7 @@ message RpcRequest {
     uint32 request_id = 1;
     // The method identifier. The matching method for a given value is defined by each service.
     uint32 method = 2;
-    // Message flags. FIN ends the session, ACK requests a liveness pong.
+    // Message flags. FIN abandons the request without a response, ACK requests a liveness pong.
     uint32 flags = 3;
     // The length of time in seconds that a client is willing to wait for a response
     uint64 deadline = 4;

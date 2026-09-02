@@ -244,6 +244,10 @@ impl<TClient> RpcClientBuilder<TClient> {
     /// server MAY serve a longer interval than requested, and a server that does not support
     /// keepalives simply ends an idle stream at the deadline as it otherwise would.
     ///
+    /// The interval is carried on the wire in whole seconds and rounds down, with a floor of one
+    /// second. A client that has asked for keepalives also rejects an ACK frame it did not ask for,
+    /// so this is what enables tolerating them at all.
+    ///
     /// Default: no keepalives
     pub fn with_keepalive_interval(mut self, interval: Duration) -> Self {
         self.config.keepalive_interval = Some(interval);
@@ -641,7 +645,7 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             request_id: u32::from(request_id),
             method,
             deadline: self.config.deadline.map(|t| t.as_secs()).unwrap_or(0),
-            keepalive_interval: self.config.keepalive_interval.map(|t| t.as_secs()).unwrap_or(0),
+            keepalive_interval: self.config.keepalive_interval.map(|t| t.as_secs().max(1)).unwrap_or(0),
             flags: 0,
             payload: request.message.to_vec(),
         };
@@ -758,6 +762,16 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
                     self.request_rx.close();
                     break;
                 },
+                Err(err @ RpcError::UnexpectedAckResponse) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Request {} (method={}) received an unsolicited keepalive: {}", request_id, method, err
+                    );
+                    if !response_tx.is_closed() {
+                        let _result = response_tx.send(Err(RpcStatus::protocol_error(err.to_string()))).await;
+                    }
+                    break;
+                },
                 Err(err) => {
                     return Err(err);
                 },
@@ -821,16 +835,6 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
         let mut num_ignored = 0;
         let resp = loop {
             match reader.read_response().await {
-                Ok(resp) if resp.is_keepalive() => {
-                    trace!(
-                        target: LOG_TARGET,
-                        "(peer: {}, {}) Keepalive received for request {}",
-                        peer_id,
-                        protocol_name,
-                        request_id
-                    );
-                    continue;
-                },
                 Ok(resp) => {
                     trace!(
                         target: LOG_TARGET,
@@ -938,7 +942,19 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
 
     pub async fn read_response(&mut self) -> Result<proto::RpcResponse, RpcError> {
         let timer = Instant::now();
-        let resp = self.next().await?;
+        let resp = loop {
+            let resp = self.next().await?;
+            if resp.is_keepalive() {
+                // A keepalive carries neither payload nor stream position, so its request id is not
+                // policed: one left over from an abandoned request is as harmless as one for this
+                // request, and counting it as a mismatch would spend the leniency budget below.
+                if self.config.keepalive_interval.is_none() {
+                    return Err(RpcError::UnexpectedAckResponse);
+                }
+                continue;
+            }
+            break resp;
+        };
         self.time_to_first_msg = Some(timer.elapsed());
         self.check_response(&resp)?;
         self.bytes_read = resp.payload.len();
@@ -951,9 +967,15 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
         Ok(resp)
     }
 
+    /// Reads the pong for a ping. Frames left over from an abandoned request carry the same ACK
+    /// flag, so only one addressed to this request answers the ping.
     pub async fn read_ack(&mut self) -> Result<proto::RpcResponse, RpcError> {
-        let resp = self.next().await?;
-        Ok(resp)
+        loop {
+            let resp = self.next().await?;
+            if self.check_response(&resp).is_ok() {
+                return Ok(resp);
+            }
+        }
     }
 
     fn check_response(&self, resp: &proto::RpcResponse) -> Result<(), RpcError> {
@@ -1008,37 +1030,50 @@ mod keepalive_tests {
         framed.send(resp.to_proto().encode_to_vec().into()).await.unwrap();
     }
 
-    /// Replies to one streaming request with `num_keepalives` empty keepalive frames, then a single
-    /// message closing the stream.
-    async fn serve_keepalives_then_message(
-        substream: DuplexStream,
-        num_keepalives: usize,
-        message: Bytes,
-    ) -> proto::RpcRequest {
-        let mut framed = framing::canonical(substream.compat(), RPC_MAX_FRAME_SIZE);
-        Handshake::new(&mut framed).perform_server_handshake().await.unwrap();
-
+    async fn read_request(framed: &mut CanonicalFraming<Compat<DuplexStream>>) -> proto::RpcRequest {
+        Handshake::new(framed).perform_server_handshake().await.unwrap();
         let frame = framed.next().await.unwrap().unwrap();
-        let request = proto::RpcRequest::decode(frame.freeze()).unwrap();
+        proto::RpcRequest::decode(frame.freeze()).unwrap()
+    }
 
-        for _ in 0..num_keepalives {
-            send_response(&mut framed, RpcResponse::keepalive(request.request_id)).await;
-        }
-        send_response(&mut framed, RpcResponse {
-            request_id: request.request_id,
+    /// Sends a stream of exactly one message. The streaming protocol terminates with an empty FIN
+    /// frame, which is not delivered to a consumer.
+    async fn send_message(framed: &mut CanonicalFraming<Compat<DuplexStream>>, request_id: u32, message: Bytes) {
+        send_response(framed, RpcResponse {
+            request_id,
             status: RpcStatusCode::Ok,
             flags: RpcMessageFlags::empty(),
             payload: message,
         })
         .await;
-        // The streaming protocol terminates with an empty FIN frame.
-        send_response(&mut framed, RpcResponse {
-            request_id: request.request_id,
+        send_response(framed, RpcResponse {
+            request_id,
             status: RpcStatusCode::Ok,
             flags: RpcMessageFlags::FIN,
             payload: Bytes::new(),
         })
         .await;
+    }
+
+    /// Replies to one streaming request with `num_keepalives` empty keepalive frames bearing
+    /// `keepalive_id`, then a single message closing the stream.
+    async fn serve_keepalives_then_message(
+        substream: DuplexStream,
+        num_keepalives: usize,
+        keepalive_id: Option<u32>,
+        message: Bytes,
+    ) -> proto::RpcRequest {
+        let mut framed = framing::canonical(substream.compat(), RPC_MAX_FRAME_SIZE);
+        let request = read_request(&mut framed).await;
+
+        for _ in 0..num_keepalives {
+            send_response(
+                &mut framed,
+                RpcResponse::keepalive(keepalive_id.unwrap_or(request.request_id)),
+            )
+            .await;
+        }
+        send_message(&mut framed, request.request_id, message).await;
 
         request
     }
@@ -1049,7 +1084,12 @@ mod keepalive_tests {
         let reply = proto::RpcSession {
             supported_versions: vec![7],
         };
-        let server = tokio::spawn(serve_keepalives_then_message(server, 3, reply.encode_to_vec().into()));
+        let server = tokio::spawn(serve_keepalives_then_message(
+            server,
+            3,
+            None,
+            reply.encode_to_vec().into(),
+        ));
 
         let config = RpcClientConfig {
             keepalive_interval: Some(Duration::from_secs(11)),
@@ -1074,5 +1114,130 @@ mod keepalive_tests {
         assert_eq!(request.keepalive_interval, 11);
         assert_eq!(received.len(), 1);
         assert_eq!(received[0].as_ref().unwrap().supported_versions, vec![7]);
+    }
+
+    #[tokio::test]
+    async fn keepalives_left_over_from_an_abandoned_request_do_not_end_the_session() {
+        let (server, client) = tokio::io::duplex(RPC_MAX_FRAME_SIZE);
+        let reply = proto::RpcSession {
+            supported_versions: vec![7],
+        };
+        let message: Bytes = reply.encode_to_vec().into();
+        let server = tokio::spawn(async move {
+            let mut framed = framing::canonical(server.compat(), RPC_MAX_FRAME_SIZE);
+            // The first request is answered after one more keepalive than MAX_ALLOWED_IGNORED, all
+            // of them bearing an id the client is no longer waiting on.
+            let first = read_request(&mut framed).await;
+            for _ in 0..21 {
+                send_response(&mut framed, RpcResponse::keepalive(9999)).await;
+            }
+            send_message(&mut framed, first.request_id, message.clone()).await;
+
+            // A second request only gets served if the session survived those frames.
+            let frame = framed.next().await.unwrap().unwrap();
+            let second = proto::RpcRequest::decode(frame.freeze()).unwrap();
+            send_message(&mut framed, second.request_id, message).await;
+            first
+        });
+
+        let config = RpcClientConfig {
+            keepalive_interval: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let mut rpc_client = RpcClient::connect(
+            config,
+            PeerId::random(),
+            framing::canonical(client.compat(), RPC_MAX_FRAME_SIZE),
+            StreamProtocol::new(PROTOCOL),
+        )
+        .await
+        .unwrap();
+
+        let stream = rpc_client
+            .server_streaming::<_, _, proto::RpcSession>(proto::RpcSession::default(), 1u32)
+            .await
+            .unwrap();
+        let received = stream.collect::<Vec<_>>().await;
+
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].as_ref().unwrap().supported_versions, vec![7]);
+
+        let second = rpc_client
+            .server_streaming::<_, _, proto::RpcSession>(proto::RpcSession::default(), 1u32)
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+
+        server.await.unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].as_ref().unwrap().supported_versions, vec![7]);
+    }
+
+    #[tokio::test]
+    async fn a_keepalive_that_was_never_asked_for_is_a_protocol_error() {
+        let (server, client) = tokio::io::duplex(RPC_MAX_FRAME_SIZE);
+        let reply = proto::RpcSession {
+            supported_versions: vec![7],
+        };
+        let server = tokio::spawn(serve_keepalives_then_message(
+            server,
+            1,
+            None,
+            reply.encode_to_vec().into(),
+        ));
+
+        let mut rpc_client = RpcClient::connect(
+            RpcClientConfig::default(),
+            PeerId::random(),
+            framing::canonical(client.compat(), RPC_MAX_FRAME_SIZE),
+            StreamProtocol::new(PROTOCOL),
+        )
+        .await
+        .unwrap();
+
+        let stream = rpc_client
+            .server_streaming::<_, _, proto::RpcSession>(proto::RpcSession::default(), 1u32)
+            .await
+            .unwrap();
+        let received = stream.collect::<Vec<_>>().await;
+
+        let request = server.await.unwrap();
+        assert_eq!(request.keepalive_interval, 0);
+        assert_eq!(received.len(), 1);
+        assert_eq!(
+            received[0].as_ref().unwrap_err().as_status_code(),
+            RpcStatusCode::ProtocolError
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stale_keepalive_is_not_mistaken_for_a_pong() {
+        let (server, client) = tokio::io::duplex(RPC_MAX_FRAME_SIZE);
+        let server = tokio::spawn(async move {
+            let mut framed = framing::canonical(server.compat(), RPC_MAX_FRAME_SIZE);
+            let ping = read_request(&mut framed).await;
+            send_response(&mut framed, RpcResponse::keepalive(9999)).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            send_response(&mut framed, RpcResponse::keepalive(ping.request_id)).await;
+        });
+
+        let mut rpc_client = RpcClient::connect(
+            RpcClientConfig::default(),
+            PeerId::random(),
+            framing::canonical(client.compat(), RPC_MAX_FRAME_SIZE),
+            StreamProtocol::new(PROTOCOL),
+        )
+        .await
+        .unwrap();
+
+        let latency = rpc_client.ping().await.unwrap();
+
+        server.await.unwrap();
+        assert!(
+            latency >= Duration::from_millis(150),
+            "ping was answered by the stale keepalive ({:.0?})",
+            latency
+        );
     }
 }

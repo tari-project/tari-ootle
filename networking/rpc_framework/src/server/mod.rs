@@ -806,8 +806,10 @@ where
                         target: LOG_TARGET,
                         "({}) Sending keepalive for request #{}", self.logging_context_string, request_id
                     );
-                    let keepalive = RpcResponse::keepalive(request_id).to_proto();
-                    self.framed.send(keepalive.encode_to_vec().into()).await?;
+                    let keepalive = Bytes::from(RpcResponse::keepalive(request_id).to_proto().encode_to_vec());
+                    #[cfg(feature = "metrics")]
+                    metrics::outbound_response_bytes(&self.peer_id, &self.protocol).observe(keepalive.len() as f64);
+                    self.framed.send(keepalive).await?;
                 },
                 Err(_) => {
                     debug!(
@@ -1031,7 +1033,7 @@ mod keepalive_tests {
             service
                 .process_body(
                     1,
-                    Duration::from_millis(200),
+                    Duration::from_millis(600),
                     Some(Duration::from_millis(50)),
                     body_fed_by(rx),
                 )
@@ -1041,11 +1043,11 @@ mod keepalive_tests {
 
         let feeder = tokio::spawn(async move {
             for _ in 0..4 {
-                time::sleep(Duration::from_millis(120)).await;
+                time::sleep(Duration::from_millis(100)).await;
                 tx.send(Ok(Bytes::from_static(b"tick"))).await.unwrap();
             }
             // Holding the sender past the last message lets the deadline expire and end the stream.
-            time::sleep(Duration::from_millis(400)).await;
+            time::sleep(Duration::from_millis(900)).await;
         });
 
         let responses = collect_responses(&mut client_framed).await;

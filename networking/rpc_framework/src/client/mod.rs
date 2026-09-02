@@ -767,9 +767,7 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
                         target: LOG_TARGET,
                         "Request {} (method={}) received an unsolicited keepalive: {}", request_id, method, err
                     );
-                    if !response_tx.is_closed() {
-                        let _result = response_tx.send(Err(RpcStatus::protocol_error(err.to_string()))).await;
-                    }
+                    let _result = response_tx.send(Err(RpcStatus::protocol_error(err.to_string()))).await;
                     break;
                 },
                 Err(err) => {
@@ -968,13 +966,24 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
     }
 
     /// Reads the pong for a ping. Frames left over from an abandoned request carry the same ACK
-    /// flag, so only one addressed to this request answers the ping.
+    /// flag, so only one addressed to this request answers the ping. Skipping the others is bounded
+    /// by a single timeout over the whole read, because each frame restarts the per-frame one.
     pub async fn read_ack(&mut self) -> Result<proto::RpcResponse, RpcError> {
-        loop {
-            let resp = self.next().await?;
-            if self.check_response(&resp).is_ok() {
-                return Ok(resp);
+        let timeout = self.config.timeout_with_grace_period();
+        let read_pong = async {
+            loop {
+                let resp = self.next().await?;
+                if self.check_response(&resp).is_ok() {
+                    return Ok(resp);
+                }
             }
+        };
+
+        match timeout {
+            Some(timeout) => time::timeout(timeout, read_pong)
+                .await
+                .map_err(|_| RpcError::ReplyTimeout)?,
+            None => read_pong.await,
         }
     }
 
@@ -1209,6 +1218,41 @@ mod keepalive_tests {
             received[0].as_ref().unwrap_err().as_status_code(),
             RpcStatusCode::ProtocolError
         );
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_never_answers_a_ping_cannot_hold_it_open() {
+        let (server, client) = tokio::io::duplex(RPC_MAX_FRAME_SIZE);
+        let server = tokio::spawn(async move {
+            let mut framed = framing::canonical(server.compat(), RPC_MAX_FRAME_SIZE);
+            read_request(&mut framed).await;
+            // Frames the ping must skip, arriving faster than the read timeout they each restart.
+            loop {
+                send_response(&mut framed, RpcResponse::keepalive(9999)).await;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        });
+
+        let config = RpcClientConfig {
+            deadline: Some(Duration::from_millis(100)),
+            deadline_grace_period: Duration::from_millis(100),
+            ..Default::default()
+        };
+        let mut rpc_client = RpcClient::connect(
+            config,
+            PeerId::random(),
+            framing::canonical(client.compat(), RPC_MAX_FRAME_SIZE),
+            StreamProtocol::new(PROTOCOL),
+        )
+        .await
+        .unwrap();
+
+        let result = tokio::time::timeout(Duration::from_secs(5), rpc_client.ping())
+            .await
+            .expect("ping was held open by frames it was skipping");
+        assert!(result.is_err());
+
+        server.abort();
     }
 
     #[tokio::test]

@@ -290,6 +290,9 @@ async fn check_account_balance_via_daemon(
     // This also refreshes the wallet vaults
     let current_balance =
         wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, TARI_TOKEN).await;
+    world
+        .last_checked_balances
+        .insert(account_name.clone(), current_balance);
     match least_or_most.to_lowercase().as_str() {
         "least" => {
             if current_balance < amount {
@@ -311,6 +314,40 @@ async fn check_account_balance_via_daemon(
         },
 
         _ => panic!("Expected 'at least', 'at most' or 'exactly', got {}", least_or_most),
+    }
+}
+
+#[when(regex = r"I check the balance of (\S+) on wallet daemon (\S+) increased by at most (\d+) since the last check")]
+async fn check_account_balance_increase_via_daemon(
+    world: &mut TariWorld,
+    step: &Step,
+    account_name: String,
+    wallet_daemon_name: String,
+    max_increase: u64,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let previous = *world
+        .last_checked_balances
+        .get(&account_name)
+        .unwrap_or_else(|| panic!("Balance of {} has not been checked before this step", account_name));
+    let current_balance =
+        wallet_daemon_client::get_balance(world, &account_name, &wallet_daemon_name, TARI_TOKEN).await;
+    world
+        .last_checked_balances
+        .insert(account_name.clone(), current_balance);
+    let increase = current_balance - previous;
+    if increase > Amount::from(max_increase) {
+        cucumber_log!(
+            "Expected balance to increase by at most {} but it went from {} to {} ({})",
+            max_increase,
+            previous,
+            current_balance,
+            increase
+        );
+        panic!(
+            "Expected balance to increase by at most {} but it went from {} to {} ({})",
+            max_increase, previous, current_balance, increase
+        );
     }
 }
 

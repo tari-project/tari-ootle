@@ -68,6 +68,7 @@ Feature: Claim Fees
     # Fees that were run up are minimum 550000, in reality just over 600k (asserting this would be brittle though)
     When I check the balance of VN_FEES on wallet daemon WALLET_D the amount is at least 550000
 
-    # Claim fees again, will succeed due to the fee from the previous claim but will only be a relatively small amount (so not 1_000_000)
+    # Claim fees again: succeeds because the previous claim itself paid a fee into the pool, but that is all it
+    # can collect, so the balance moves by at most the claim's max fee (50000)
     When I claim fees for validator VN into account VN_FEES using the wallet daemon WALLET_D
-    When I check the balance of VN_FEES on wallet daemon WALLET_D the amount is at most 900000
+    When I check the balance of VN_FEES on wallet daemon WALLET_D increased by at most 50000 since the last check

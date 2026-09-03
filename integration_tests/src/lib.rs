@@ -47,6 +47,7 @@ use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::Network;
 use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_sidechain::EvictionProof;
+use tari_template_lib_types::Amount;
 use tari_transaction_components::{
     consensus::ConsensusManager,
     key_manager::{KeyManager, TariKeyId, TransactionKeyManagerInterface},
@@ -96,6 +97,9 @@ pub struct TariWorld {
     /// spawns rather than configuring them one by one.
     pub consensus_constants_file: Option<PathBuf>,
     pub claim_proofs: HashMap<String, CucumberClaimProof>,
+    /// The TARI balance each account had when a scenario last checked it, so a later step can
+    /// assert how much a balance moved rather than where it landed.
+    pub last_checked_balances: HashMap<String, Amount>,
     pub substate_ids: IndexMap<String, SubstateId>,
     pub num_databases_saved: usize,
     pub key_manager: KeyManager,
@@ -133,6 +137,7 @@ impl TariWorld {
             current_scenario_name: None,
             consensus_constants_file: None,
             claim_proofs: HashMap::new(),
+            last_checked_balances: HashMap::new(),
             substate_ids: IndexMap::new(),
             num_databases_saved: 0,
             key_manager: KeyManager::new_random().unwrap(),

@@ -13,7 +13,7 @@
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::fees::FeeTable;
 use tari_engine_types::{
-    fees::{ExhaustBurnRate, FeeRates, FeeReceipt},
+    fees::{FeeRates, FeeReceipt},
     stealth::{MergedStealthTransferShape, persisted_utxo_bytes},
 };
 use tari_ootle_transaction::{Epoch, Transaction};
@@ -33,8 +33,8 @@ use tari_template_test_tooling::{
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 /// The burn every shipped network is configured with. Applied here rather than left at the harness
-/// default of zero, so the estimate is checked against the multiplier a real network puts over every
-/// other charge.
+/// default of zero, so the estimate is checked against a network that splits what it collects: the
+/// burn is a share of the payment, so it must move nothing the estimate prices.
 const BURN_RATE_BPS: u16 = 500;
 
 /// Enough TARI behind each transfer that a shape's fee is never the binding constraint on it.
@@ -72,8 +72,8 @@ fn setup() -> Harness {
 
 /// The rates the harness is executing at, as the estimator takes them. Both sides pricing from one
 /// table is the point: what is under test is the formula, not the numbers it is fed.
-fn rates(harness: &Harness, burn_rate_bps: u16) -> FeeRates {
-    harness.test.fee_table().to_rates(ExhaustBurnRate::new(burn_rate_bps))
+fn rates(harness: &Harness) -> FeeRates {
+    harness.test.fee_table().to_rates()
 }
 
 /// Moves `count × UTXO_VALUE` of the account's TARI into stealth UTXOs, so a later transfer has
@@ -127,7 +127,7 @@ fn estimate_then_execute(
         minted,
         num_inputs,
         num_outputs,
-        shape.estimate_fee(&rates(harness, BURN_RATE_BPS)),
+        shape.estimate_fee(&rates(harness)),
     );
     assert_eq!(
         shape_of(&settled, num_inputs, num_outputs),
@@ -308,7 +308,7 @@ fn revealing_under_the_charge_is_rejected() {
 
     // Half the estimate is under the charge whatever the estimate's margin, which MAX_OVERSHOOT
     // bounds to a few microtari.
-    let too_little = shape.estimate_fee(&rates(&harness, BURN_RATE_BPS)) / 2;
+    let too_little = shape.estimate_fee(&rates(&harness)) / 2;
     let result = harness
         .test
         .try_execute(build(&harness, &minted, 1, 1, too_little).transaction, vec![])

@@ -36,14 +36,14 @@ impl NetworkStateMetrics {
             ),
             fee_volume: Gauge::default().register_at(
                 "fee_volume_microtari",
-                "Total pre-burn execution fees F (microTARI), summed from transaction receipts. On an existing \
+                "Total fees paid by transaction payers (microTARI), summed from transaction receipts. On an existing \
                  indexer db this accumulates from the upgrade sync frontier (go-forward only)",
                 registry,
             ),
             receipt_exhaust_burned: Gauge::default().register_at(
                 "receipt_exhaust_burned_microtari",
                 "Total exhaust burned (microTARI) summed from the same receipts as fee_volume; receipt_exhaust_burned \
-                 / fee_volume is the exact realized rate. Trails exhaust_burned when receipts are unobserved \
+                 / fee_volume is the exact realized burn share. Trails exhaust_burned when receipts are unobserved \
                  (pruned/lagging)",
                 registry,
             ),

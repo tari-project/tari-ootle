@@ -4,20 +4,19 @@
 use indexmap::{IndexMap, map::Entry};
 use serde::{Deserialize, Serialize};
 
-/// The exhaust burn rate that [`FEE_ESTIMATE_ALLOWANCE`] is derived against, in basis points.
+/// The highest exhaust burn rate a network can be configured with, in basis points: the whole of
+/// what a transaction paid.
 ///
-/// The burn is taken over the running fee total, so it re-multiplies every term that can make a
-/// real run cost more than the dry run that estimated it. A network configured above this rate
-/// under-states `FeeReceipt::required_fees`, and every submission built from a dry run is then
-/// rejected as underpaid — [`ExhaustBurnRate`] holds every configured rate to it.
+/// The burn is a share of the fees collected, so a rate is meaningful only up to `10_000` — every
+/// microtari paid is burned and leaders receive nothing. The user's price is the fee table alone
+/// whatever the rate; the rate only splits what was collected between leaders and the burn.
 pub const MAX_EXHAUST_BURN_RATE_BPS: u16 = 10_000;
 
 /// An exhaust burn rate in basis points, at or below [`MAX_EXHAUST_BURN_RATE_BPS`].
 ///
-/// The ceiling is a fee-estimation invariant rather than a policy preference: it is the rate
-/// [`FEE_ESTIMATE_ALLOWANCE`] is derived against, so a network burning above it under-states what
-/// a dry run reports as required. A rate reaches consensus only through this type, so no such
-/// network can be configured.
+/// The share of the fees a transaction paid that is burned rather than paid to leaders. A rate
+/// reaches consensus only through this type, so no network can be configured to burn more than
+/// was collected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExhaustBurnRate(u16);
 
@@ -47,15 +46,14 @@ impl ExhaustBurnRate {
 /// byte-counts the fee vault before the unspent payment is returned, so it counts
 /// `balance - max_fee`, and a wider `max_fee` narrows that. A dry run meters at whatever `max_fee`
 /// the caller submitted — nothing narrows it — so either direction is reachable between a dry run
-/// and the submission built from it. The exhaust burn reads nothing of its own but re-multiplies
-/// both, being taken over the running total.
+/// and the submission built from it.
 ///
 /// The value is derived rather than chosen: `FeeTable::fee_estimate_allowance` computes it from
-/// `per_transaction_weight_cost`, `per_byte_storage_cost`, `storage_cost_divisor`,
-/// `LITERAL_BYTE_DIVISOR` and the burn rate, all of which live in crates downstream of this one.
+/// `per_transaction_weight_cost`, `per_byte_storage_cost`, `storage_cost_divisor` and
+/// `LITERAL_BYTE_DIVISOR`, all of which live in crates downstream of this one.
 /// `fee_estimate_allowance_covers_every_shipped_network` asserts this value covers every shipped
-/// network at `MAX_EXHAUST_BURN_RATE_BPS`.
-pub const FEE_ESTIMATE_ALLOWANCE: u64 = 25;
+/// network.
+pub const FEE_ESTIMATE_ALLOWANCE: u64 = 12;
 
 /// The rates a transaction's fee charges are computed from, as a fee estimator needs them.
 ///
@@ -78,7 +76,6 @@ pub struct FeeRates {
     pub storage_cost_divisor: u64,
     /// Must be non-zero; a zero divisor reads as `1`, matching `FeeTable`.
     pub wasm_points_cost_divisor: u64,
-    pub exhaust_burn_rate: ExhaustBurnRate,
 }
 
 impl FeeRates {
@@ -108,12 +105,6 @@ impl FeeRates {
     pub fn execution_cost(&self, points: u64) -> u64 {
         (points / non_zero(self.wasm_points_cost_divisor)).saturating_mul(self.per_wasm_point_cost)
     }
-
-    /// The exhaust burn taken over `base_fees`, which is the total of every other charge.
-    pub fn exhaust_burn(&self, base_fees: u64) -> u64 {
-        let burn = u128::from(base_fees) * u128::from(self.exhaust_burn_rate.as_bps()) / 10_000;
-        u64::try_from(burn).unwrap_or(u64::MAX)
-    }
 }
 
 const fn non_zero(divisor: u64) -> u64 {
@@ -131,6 +122,8 @@ pub struct FeeReceiptBuilder {
     pub total_fee_overcharge: u64,
     /// Breakdown of fee costs
     pub cost_breakdown: FeeBreakdown,
+    /// The share of `total_fees_paid` that is burned rather than paid to leaders
+    pub exhaust_burn: u64,
 }
 
 impl FeeReceiptBuilder {
@@ -154,12 +147,18 @@ impl FeeReceiptBuilder {
         self
     }
 
+    pub fn with_exhaust_burn(mut self, amount: u64) -> Self {
+        self.exhaust_burn = amount;
+        self
+    }
+
     pub fn build(self) -> FeeReceipt {
         FeeReceipt {
             total_fee_payment: self.total_fee_payment,
             total_fees_paid: self.total_fees_paid,
             total_fee_overcharge: self.total_fee_overcharge,
             cost_breakdown: self.cost_breakdown,
+            exhaust_burn: self.exhaust_burn,
         }
     }
 }
@@ -182,6 +181,12 @@ pub struct FeeReceipt {
     /// Breakdown of fee costs
     #[n(3)]
     cost_breakdown: FeeBreakdown,
+    /// The share of `total_fees_paid` that is burned rather than paid to leaders: `⌊paid × rate / 10_000⌋` at
+    /// the exhaust burn rate in force for the execution epoch. Settled over what was collected, so it is never
+    /// charged to the payer and never appears in `cost_breakdown`.
+    #[n(4)]
+    #[cbor(default)]
+    exhaust_burn: u64,
 }
 
 impl FeeReceipt {
@@ -202,6 +207,7 @@ impl FeeReceipt {
             total_fees_paid: u64::MAX,
             total_fee_overcharge: u64::MAX,
             cost_breakdown,
+            exhaust_burn: u64::MAX,
         }
     }
 
@@ -231,9 +237,8 @@ impl FeeReceipt {
     /// Two charges read `max_fee` back, in opposite directions. The transaction weight prices the fee
     /// instruction's literal args by their encoded bytes, so it steps whenever the amount's width
     /// crosses a multiple of the literal divisor. The storage tally byte-counts the fee vault before
-    /// the unspent payment is returned, so a wider `max_fee` leaves a narrower residual there. The
-    /// exhaust burn adds no reading of its own but re-multiplies both, being taken over the running
-    /// total. [`FEE_ESTIMATE_ALLOWANCE`] bounds the pair.
+    /// the unspent payment is returned, so a wider `max_fee` leaves a narrower residual there.
+    /// [`FEE_ESTIMATE_ALLOWANCE`] bounds the pair.
     ///
     /// This is a floor, not a recommendation. Overpayment is returned to the paying vault, so a
     /// caller with a vault to refund to loses nothing by submitting above it — and one paying purely
@@ -286,15 +291,14 @@ impl FeeReceipt {
         self.total_fee_overcharge
     }
 
-    /// The exhaust burn charged on top of the execution fee.
-    pub fn exhaust_burn_charged(&self) -> u64 {
-        self.cost_breakdown.get(FeeSource::ExhaustBurn)
+    /// The share of `total_fees_paid` that is burned rather than paid to leaders.
+    pub fn exhaust_burn(&self) -> u64 {
+        self.exhaust_burn
     }
 
-    /// The total amount of fees paid after refunds, excluding the exhaust burn. This is the execution cost `F` that
-    /// flows to leaders in full; the burn portion is destroyed.
+    /// The share of `total_fees_paid` that flows to leaders: what was collected less the exhaust burn.
     pub fn pre_burn_fees_paid(&self) -> u64 {
-        self.total_fees_paid().saturating_sub(self.exhaust_burn_charged())
+        self.total_fees_paid().saturating_sub(self.exhaust_burn())
     }
 }
 
@@ -350,7 +354,9 @@ pub enum FeeSource {
     /// templates.
     #[n(8)]
     TemplatePublish = 8,
-    /// Exhaust burn, charged on top of the execution fee and destroyed rather than paid to leaders.
+    /// Never charged. The burn is a share of what was paid, recorded on `FeeReceipt::exhaust_burn`
+    /// rather than charged to the payer. The variant remains so receipts persisted before the share
+    /// model still decode; it can go at the next testnet reset.
     #[n(9)]
     ExhaustBurn = 9,
     /// Native verification metering (stealth transfers, confidential withdraws, burn claims),
@@ -513,6 +519,7 @@ mod tests {
             .with_total_fees_paid(u64::MAX)
             .with_total_fee_overcharge(u64::MAX)
             .with_cost_breakdown(breakdown)
+            .with_exhaust_burn(u64::MAX)
             .build();
 
         assert!(minicbor::len(&realistic) <= widest);

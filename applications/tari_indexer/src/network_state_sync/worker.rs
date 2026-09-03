@@ -1134,13 +1134,12 @@ fn extend_bufs_from_substate_update(
                 },
                 Some(SubstateValue::TransactionReceipt(receipt)) => {
                     if let Some(address) = update.substate_id().as_transaction_receipt_address() {
-                        // Accumulate the realized-rate pair from the same receipt: `burn` is the exhaust
-                        // surcharge and `F` (fees minus burn) is the base it was charged on, so
-                        // `burn / F` recovers the rate independent of the header-sourced burn total.
+                        // Accumulate the realized-share pair from the same receipt: what the payer spent
+                        // and the burn taken out of it, so `burn / paid` recovers the share independent
+                        // of the header-sourced burn total.
                         let fee_receipt = receipt.fee_receipt();
-                        let burn = fee_receipt.exhaust_burn_charged();
-                        *xtr_receipt_burn_mut += Amount::from(burn);
-                        *xtr_fees_mut += Amount::from(fee_receipt.total_fees_charged().saturating_sub(burn));
+                        *xtr_receipt_burn_mut += Amount::from(fee_receipt.exhaust_burn());
+                        *xtr_fees_mut += Amount::from(fee_receipt.total_fees_paid());
 
                         notify.notify(TransactionFinalizedEvent {
                             transaction_id: TransactionId::from_receipt_address(address),

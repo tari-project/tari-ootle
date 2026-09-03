@@ -317,8 +317,8 @@ fn spend_the_whole_allowance_and_still_pay(burn_rate_bps: u16) {
     let (account, owner_token, key) = test.create_funded_account();
     test.enable_fees();
 
-    // Run at a burn too, since the burn is taken over the charges rather than deducted from the
-    // payment: an allowance computed against the raw payment leaves nothing to pay it with.
+    // Run at a burn too: the burn is a share of what is paid, so it must not narrow what the
+    // payment can fund nor leave any of it uncollected.
     test.set_burn_rate_bps(burn_rate_bps);
 
     // A loop that never returns: it runs until the compute allowance stops it, whatever that
@@ -346,13 +346,24 @@ fn spend_the_whole_allowance_and_still_pay(burn_rate_bps: u16) {
         receipt.total_fees_paid(),
         "at {burn_rate_bps} bps the transaction should spend the payment down to the microtari"
     );
-    // The burn's rounding leaves a few microtari of the payment unspent, so this is "nearly all of
-    // it" rather than exactly all: what matters is that the allowance is sized against the payment
-    // and not beyond it.
+    // The allowance is sized against the payment and not beyond it, so the loop spends the payment
+    // to the last microtari the metering divisor can resolve.
     assert!(
         receipt.total_fees_paid() > MAX_FEE - 100,
         "at {burn_rate_bps} bps only {} of {MAX_FEE} was spent",
         receipt.total_fees_paid()
+    );
+    // The burn is taken out of what was paid, not added to it.
+    let expected_burn = u128::from(receipt.total_fees_paid()) * u128::from(burn_rate_bps) / 10_000;
+    assert_eq!(
+        u128::from(receipt.exhaust_burn()),
+        expected_burn,
+        "at {burn_rate_bps} bps"
+    );
+    assert_eq!(
+        receipt.pre_burn_fees_paid() + receipt.exhaust_burn(),
+        receipt.total_fees_paid(),
+        "at {burn_rate_bps} bps"
     );
 }
 
@@ -912,13 +923,11 @@ fn a_template_publish_introduces_no_further_max_fee_sensitivity() {
 /// A dry run meters at whatever `max_fee` the caller submitted, and the submission built from it
 /// uses a smaller one, so the estimate has to hold in both directions — asserting it only from the
 /// cheapest run would assume the very thing the allowance exists to cover. The burn rate is varied
-/// because the burn is taken over the running total and so re-multiplies both terms; a bound
-/// established with the burn disabled would not hold on a live network.
+/// to show that it does not enter the price: the burn is a share of what is paid, not a charge.
 #[test]
 fn required_fees_covers_a_real_run_at_any_max_fee() {
     // Spans every encoding width a fee above this transaction's cost can take, every residual
     // width, and digit counts from four to nine.
-    // The smallest entry must still cover the transaction at a 100% burn, which roughly doubles it.
     const MAX_FEES: [u64; 8] = [
         2_000,
         65_535,
@@ -1024,32 +1033,36 @@ fn the_pay_fee_event_records_max_fee_in_decimal() {
     );
 }
 
-/// The exhaust burn adds no mechanism of its own but re-multiplies the others, being taken over the
-/// running total. At a 100% rate the compounding is exact: the total moves by twice the movement of
-/// the charges beneath it.
+/// The burn is settled over what was paid, so the rate moves nothing the payer is charged: the
+/// same transaction meters the same at any rate, and the receipt's burn is the share of the payment.
 #[test]
-fn the_exhaust_burn_compounds_the_drift() {
-    const FULL_RATE_BPS: u16 = 10_000;
-    // Four bytes of residual width apart, so the drift beneath the burn is unambiguously non-zero.
+fn the_exhaust_burn_does_not_move_the_charges() {
     const MAX_FEES: [u64; 2] = [65_536, FUNDED - 10];
 
-    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let (account, owner_token, key) = test.create_funded_account();
-    test.enable_fees();
-    test.set_burn_rate_bps(FULL_RATE_BPS);
-    let build = state_transaction(&test, account, &key);
-    let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
+    let mut charged_at_rate = Vec::new();
+    for rate in [0u16, 500, 10_000] {
+        let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+        let (account, owner_token, key) = test.create_funded_account();
+        test.enable_fees();
+        test.set_burn_rate_bps(rate);
+        let build = state_transaction(&test, account, &key);
+        let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
 
-    let pre_burn = |r: &FeeReceipt| r.total_fees_charged() - r.fee_breakdown().get(FeeSource::ExhaustBurn);
-    let pre_burn_delta = pre_burn(&receipts[1]).abs_diff(pre_burn(&receipts[0]));
-    assert!(pre_burn_delta > 0, "the chosen max_fees must move the pre-burn charges");
-    assert_eq!(
-        receipts[1]
-            .total_fees_charged()
-            .abs_diff(receipts[0].total_fees_charged()),
-        pre_burn_delta * 2,
-        "a 100% burn doubles whatever the max_fee-sensitive charges contribute"
-    );
+        for receipt in &receipts {
+            assert_eq!(
+                receipt.fee_breakdown().get(FeeSource::ExhaustBurn),
+                0,
+                "at {rate} bps the burn must not be charged"
+            );
+            let expected_burn = u128::from(receipt.total_fees_paid()) * u128::from(rate) / 10_000;
+            assert_eq!(u128::from(receipt.exhaust_burn()), expected_burn, "at {rate} bps");
+        }
+        charged_at_rate.push(receipts.iter().map(|r| r.total_fees_charged()).collect::<Vec<_>>());
+    }
+
+    for charged in &charged_at_rate[1..] {
+        assert_eq!(charged, &charged_at_rate[0], "the rate must not move what is charged");
+    }
 }
 
 #[test]

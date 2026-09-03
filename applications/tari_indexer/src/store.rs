@@ -403,10 +403,10 @@ pub struct XtrEconomics {
     pub total_claimed: Amount,
     /// Total exhaust burned, sourced from checkpoint headers. Authoritative and complete since genesis.
     pub total_exhaust_burned: Amount,
-    /// Total pre-burn execution fees `F`, summed from transaction receipts.
+    /// Total fees paid by transaction payers, summed from transaction receipts.
     pub fee_volume: Amount,
     /// Total exhaust burned, summed from the same transaction receipts as `fee_volume` (so their ratio is
-    /// the exact realized rate).
+    /// the exact realized burn share).
     pub receipt_exhaust_burned: Amount,
     /// Number of transaction receipts the indexer has stored.
     pub transaction_receipt_count: u64,

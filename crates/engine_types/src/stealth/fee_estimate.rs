@@ -82,8 +82,8 @@ impl MergedStealthTransferShape {
     /// An upper bound, in microtari, on what the engine charges a transaction of this shape.
     ///
     /// Sums the charges the engine takes over a shape — transaction weight, host calls, native
-    /// verification, persisted storage and substate creation — and applies the exhaust burn over
-    /// their total, the same order [`crate::fees::FeeSource`] is accumulated in.
+    /// verification, persisted storage and substate creation. The exhaust burn is a share of what
+    /// is paid, not a charge, so it does not enter the price.
     pub fn estimate_fee(&self, rates: &FeeRates) -> u64 {
         let weight_cost = self
             .transaction_weight
@@ -101,13 +101,11 @@ impl MergedStealthTransferShape {
             .saturating_add(1)
             .saturating_mul(rates.per_substate_create_cost());
 
-        let base = weight_cost
+        weight_cost
             .saturating_add(runtime_call_cost)
             .saturating_add(native_cost)
             .saturating_add(storage_cost)
-            .saturating_add(create_cost);
-
-        base.saturating_add(rates.exhaust_burn(base))
+            .saturating_add(create_cost)
     }
 
     /// An upper bound on the bytes of permanent state this shape persists: the UTXOs it creates and
@@ -177,10 +175,10 @@ fn encoded_len<T: minicbor::Encode<()>>(value: &T) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{fees::ExhaustBurnRate, limits::NativeExecutionPoints as P};
+    use crate::limits::NativeExecutionPoints as P;
 
     /// Priced like the shipped tables, so the terms are legible in microtari.
-    fn rates(burn_bps: u16) -> FeeRates {
+    fn rates() -> FeeRates {
         FeeRates {
             per_transaction_weight_cost: 1,
             per_module_call_cost: 1,
@@ -189,7 +187,6 @@ mod tests {
             per_wasm_point_cost: 1,
             storage_cost_divisor: 1,
             wasm_points_cost_divisor: 1000,
-            exhaust_burn_rate: ExhaustBurnRate::new(burn_bps),
         }
     }
 
@@ -208,8 +205,8 @@ mod tests {
 
     #[test]
     fn an_output_costs_its_verification_its_storage_and_its_slot() {
-        let one = shape(1, 1).estimate_fee(&rates(0));
-        let two = shape(1, 2).estimate_fee(&rates(0));
+        let one = shape(1, 1).estimate_fee(&rates());
+        let two = shape(1, 2).estimate_fee(&rates());
 
         let native = P::PER_OUTPUT / 1000;
         let slot = 25;
@@ -223,10 +220,10 @@ mod tests {
     /// occupies a new slot for good. Nothing about the estimate should suggest otherwise.
     #[test]
     fn an_input_costs_only_its_verification() {
-        let extra_input = shape(2, 1).estimate_fee(&rates(0)) - shape(1, 1).estimate_fee(&rates(0));
+        let extra_input = shape(2, 1).estimate_fee(&rates()) - shape(1, 1).estimate_fee(&rates());
         assert_eq!(extra_input, P::PER_INPUT / 1000);
 
-        let extra_output = shape(1, 2).estimate_fee(&rates(0)) - shape(1, 1).estimate_fee(&rates(0));
+        let extra_output = shape(1, 2).estimate_fee(&rates()) - shape(1, 1).estimate_fee(&rates());
         assert!(extra_output > extra_input);
     }
 
@@ -240,7 +237,7 @@ mod tests {
         // The bytes a viewable balance adds are already in `persisted_output_bytes`, so what the
         // flag itself buys is the ElGamal proof verification on each output.
         assert_eq!(
-            viewable.estimate_fee(&rates(0)) - plain.estimate_fee(&rates(0)),
+            viewable.estimate_fee(&rates()) - plain.estimate_fee(&rates()),
             2 * P::PER_OUTPUT_VIEWABLE_SURCHARGE / 1000
         );
     }
@@ -252,14 +249,7 @@ mod tests {
             persisted_output_bytes: plain.persisted_output_bytes + 100,
             ..plain
         };
-        assert_eq!(with_memo.estimate_fee(&rates(0)) - plain.estimate_fee(&rates(0)), 100);
-    }
-
-    #[test]
-    fn the_burn_is_taken_over_every_other_charge() {
-        let base = shape(1, 2).estimate_fee(&rates(0));
-        assert_eq!(shape(1, 2).estimate_fee(&rates(10_000)), base * 2);
-        assert_eq!(shape(1, 2).estimate_fee(&rates(5_000)), base + base / 2);
+        assert_eq!(with_memo.estimate_fee(&rates()) - plain.estimate_fee(&rates()), 100);
     }
 
     /// The estimate has to move with the shape monotonically, or a settling loop that raises its fee
@@ -269,7 +259,7 @@ mod tests {
         let mut previous = 0;
         for num_outputs in 1..=8 {
             for num_inputs in 0..=8 {
-                let estimate = shape(num_inputs, num_outputs).estimate_fee(&rates(500));
+                let estimate = shape(num_inputs, num_outputs).estimate_fee(&rates());
                 assert!(estimate > 0);
                 if num_inputs == 0 {
                     assert!(estimate > previous, "adding an output must not price lower");

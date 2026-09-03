@@ -66,9 +66,15 @@
 //! 1. **On Initialize**: Transaction weight costs
 //! 2. **During Execution**: Module calls, template loads, signature verifications
 //! 3. **Before Finalize**: Storage costs, WASM execution costs
+//!
+//! # Exhaust Burn
+//!
+//! The fee table is the whole of the user's price. The exhaust burn (`ConsensusConstants::exhaust_burn_rate`)
+//! is a share of what a transaction paid, split off at settlement between leaders and the burn, so it neither
+//! raises what a transaction is charged nor enters a fee estimate.
 
 use tari_engine::fees::FeeTable;
-use tari_engine_types::fees::{ExhaustBurnRate, FeeRates};
+use tari_engine_types::fees::FeeRates;
 use tari_ootle_transaction::Network;
 
 /// Testnet fee table with low, development-friendly fees.
@@ -182,36 +188,18 @@ pub const fn get_fee_table_by_network(network: Network) -> &'static FeeTable {
     }
 }
 
-/// The exhaust burn rate in force on `network`, in basis points.
-///
-/// Restated rather than read from `ConsensusConstants::exhaust_burn_rate`, which lives in
-/// `tari_consensus` — a crate that carries the whole consensus engine, and one a wallet must not
-/// link just to price a transaction. `the_burn_rate_matches_consensus_across_epochs` holds the
-/// restatement to the constant it mirrors.
-pub const fn exhaust_burn_rate_by_network(network: Network) -> ExhaustBurnRate {
-    match network {
-        Network::LocalNet |
-        Network::Igor |
-        Network::Esmeralda |
-        Network::StageNet |
-        Network::NextNet |
-        Network::MainNet => ExhaustBurnRate::new(500),
-    }
-}
-
-/// The rates a static estimate of a transaction's cost on `network` is computed from: the network's
-/// fee table paired with the exhaust burn taken over everything the table charges.
+/// The rates a static estimate of a transaction's cost on `network` is computed from.
 pub fn fee_rates_by_network(network: Network) -> FeeRates {
-    get_fee_table_by_network(network).to_rates(exhaust_burn_rate_by_network(network))
+    get_fee_table_by_network(network).to_rates()
 }
 
 #[cfg(test)]
 mod tests {
-    use tari_engine_types::fees::{FEE_ESTIMATE_ALLOWANCE, MAX_EXHAUST_BURN_RATE_BPS};
+    use tari_engine_types::fees::FEE_ESTIMATE_ALLOWANCE;
 
     use super::*;
 
-    /// Every shipped network, so a rate added for one of them cannot slip past the check below.
+    /// Every shipped network, so a table added for one of them cannot slip past the check below.
     const NETWORKS: [Network; 6] = [
         Network::MainNet,
         Network::StageNet,
@@ -221,35 +209,13 @@ mod tests {
         Network::LocalNet,
     ];
 
-    /// An estimate priced under the burn a network actually charges comes in under what that network
-    /// costs, and a submission built from it is rejected as underpaid — with the revealed fee
-    /// unrecoverable.
-    ///
-    /// The rate does not vary by epoch today; if it starts to, the restatement needs an epoch of its
-    /// own rather than a looser assertion here, since `exhaust_burn_rate_by_network` takes only a
-    /// `Network`. The epochs below are sampled, not swept — enough to catch a rate that splits at
-    /// one of them, not a proof that none exists.
-    #[test]
-    fn the_burn_rate_matches_consensus_across_epochs() {
-        for network in NETWORKS {
-            let consensus = tari_consensus::consensus_constants::ConsensusConstants::from(network);
-            for epoch in [0, 1, 2, 100, 10_000, 1_000_000, u64::MAX] {
-                assert_eq!(
-                    exhaust_burn_rate_by_network(network),
-                    consensus.exhaust_burn_rate(tari_ootle_common_types::Epoch(epoch)),
-                    "{network} at epoch {epoch}"
-                );
-            }
-        }
-    }
-
     /// `FEE_ESTIMATE_ALLOWANCE` is restated in `tari_engine_types`, which cannot see a `FeeTable`.
-    /// Every shipped table must come in under it at the highest burn the estimate is derived
-    /// against, or a dry run under-states what a real submission costs.
+    /// Every shipped table must come in under it, or a dry run under-states what a real submission
+    /// costs.
     #[test]
     fn fee_estimate_allowance_covers_every_shipped_network() {
         for network in NETWORKS {
-            let derived = get_fee_table_by_network(network).fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS);
+            let derived = get_fee_table_by_network(network).fee_estimate_allowance();
             assert!(
                 derived <= FEE_ESTIMATE_ALLOWANCE,
                 "{network} needs an allowance of {derived}, above the restated {FEE_ESTIMATE_ALLOWANCE}"

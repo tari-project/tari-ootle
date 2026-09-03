@@ -67,8 +67,8 @@ impl TransactionExecution {
             return 0;
         }
 
-        // The atom's transaction fee excludes the exhaust burn: leaders are paid this amount in full and the burn
-        // is carried separately (see [Self::exhaust_burn]).
+        // The atom's transaction fee is the leader's share of what was paid; the burn share is carried
+        // separately (see [Self::exhaust_burn]).
         self.result.finalize.fee_receipt.pre_burn_fees_paid()
     }
 
@@ -79,7 +79,7 @@ impl TransactionExecution {
             return 0;
         }
 
-        self.result.finalize.fee_receipt.exhaust_burn_charged()
+        self.result.finalize.fee_receipt.exhaust_burn()
     }
 
     pub fn resolved_inputs(&self) -> &[VersionedSubstateIdLockIntent] {

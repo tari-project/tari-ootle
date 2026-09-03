@@ -64,23 +64,6 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::state_tracker";
 
-/// The part of a fee payment that charges can actually consume.
-///
-/// The exhaust burn is taken over the charges rather than deducted from the payment, so a payment of
-/// `P` covers charges of at most `P / (1 + rate)`. Rounds down, so the figure never over-states what
-/// is available.
-fn spendable_on_charges(payments: u64, burn_rate_bps: u16) -> u64 {
-    // Never exceeds `payments`, so the cast back is lossless.
-    (u128::from(payments) * 10_000 / (10_000 + u128::from(burn_rate_bps))) as u64
-}
-
-/// The payment that `charges` require, inclusive of the exhaust burn taken over them. The inverse of
-/// [`spendable_on_charges`], rounded up so the figure always covers rather than just reaching.
-fn payment_covering_charges(charges: u64, burn_rate_bps: u16) -> u64 {
-    let scaled = (u128::from(charges) * (10_000 + u128::from(burn_rate_bps))).div_ceil(10_000);
-    u64::try_from(scaled).unwrap_or(u64::MAX)
-}
-
 /// The state finalization will persist, detached from the tracker and awaiting fee settlement.
 #[derive(Debug)]
 pub struct FinalizedState<TStore> {
@@ -192,9 +175,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     ///
     /// That payment-funded figure is measured against the charges *standing when it is asked*.
     /// Anything charged after the last call — a host call inside the final invocation — is outside
-    /// it, so it bounds the unpaid work rather than reducing it to zero. The exhaust burn is taken
-    /// over whatever the charges come to, so the charges themselves can only spend the payment net
-    /// of it.
+    /// it, so it bounds the unpaid work rather than reducing it to zero.
     pub fn compute_allowance(&self) -> Option<ComputeAllowance> {
         let rate = self.wasm_metering_rate;
         let is_fee_intent = self.fee_checkpoint.is_none();
@@ -217,8 +198,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
             if fee_state.is_dry_run() {
                 return None;
             }
-            let unspent = spendable_on_charges(fee_state.total_payments(), fee_state.burn_rate_bps())
-                .saturating_sub(fee_state.total_charges());
+            let unspent = fee_state.total_payments().saturating_sub(fee_state.total_charges());
             Some(ComputeAllowance {
                 // `prices_execution` above is the only case that yields no figure, so nothing here
                 // may widen the allowance by failing to produce one.
@@ -389,10 +369,6 @@ impl<TStore: StateReader> StateTracker<TStore> {
             debug!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
             state.fee_state_mut().add_charge(source, amount);
         })
-    }
-
-    pub fn fee_burn_rate_bps(&self) -> u16 {
-        self.read_with(|state| state.fee_state().burn_rate_bps())
     }
 
     pub fn accumulate_wasm_points(&mut self, points: u64) {
@@ -619,23 +595,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| state.fee_state().total_payments())
     }
 
-    /// What the fee payments can still cover once the exhaust burn taken over the charges is set
-    /// aside. Charges are compared against this rather than against the raw payment, since the burn
-    /// is charged on top of them rather than deducted from what was paid.
-    pub fn spendable_fee_payments(&self) -> u64 {
-        self.read_with(|state| {
-            let fee_state = state.fee_state();
-            spendable_on_charges(fee_state.total_payments(), fee_state.burn_rate_bps())
-        })
-    }
-
-    /// The payment the charges metered so far require, inclusive of the exhaust burn taken over them.
-    /// This is the figure a rejected payer has to raise their fee to.
+    /// The payment the charges metered so far require. This is the figure a rejected payer has to
+    /// raise their fee to.
     pub fn required_fee_payment(&self) -> u64 {
-        self.read_with(|state| {
-            let fee_state = state.fee_state();
-            payment_covering_charges(fee_state.total_charges(), fee_state.burn_rate_bps())
-        })
+        self.read_with(|state| state.fee_state().total_charges())
     }
 
     /// A copy of the charges metered so far.

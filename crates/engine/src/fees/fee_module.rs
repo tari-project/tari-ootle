@@ -126,7 +126,7 @@ impl FeeModule {
     }
 
     /// Charges everything that is a function of the state being persisted, plus the metering of WASM
-    /// and native execution and the exhaust burn over the resulting total.
+    /// and native execution.
     ///
     /// Every charge here is *assigned*, not accumulated, so that running this again against a
     /// different state replaces the result rather than doubling it. That is what lets a transaction
@@ -157,14 +157,6 @@ impl FeeModule {
         let fee_state = state.fee_state_mut();
         fee_state.set_charge(FeeSource::WasmExecution, wasm_cost);
         fee_state.set_charge(FeeSource::NativeExecution, native_cost);
-
-        // Exhaust burn: charged on top of the execution fee accrued so far, so leaders receive the execution fee in
-        // full and the burn amount is destroyed separately. The rate is seeded onto the fee state at execution time
-        // for the execution epoch. Zeroed first so that the total it is taken over never includes a burn from an
-        // earlier pass over a different state.
-        fee_state.set_charge(FeeSource::ExhaustBurn, 0);
-        let burn = calculate_burn_amount(fee_state.total_charges(), fee_state.burn_rate_bps())?;
-        fee_state.set_charge(FeeSource::ExhaustBurn, burn);
 
         Ok(())
     }
@@ -276,29 +268,9 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
     }
 }
 
-fn calculate_burn_amount(base_fees: u64, rate_bps: u16) -> Result<u64, RuntimeModuleError> {
-    let burn = u128::from(base_fees) * u128::from(rate_bps) / 10_000;
-    u64::try_from(burn)
-        .map_err(|_| RuntimeModuleError::Overflow("Overflow calculating exhaust burn amount".to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn burn_is_a_floor_divided_percentage_of_base_fees() {
-        assert_eq!(calculate_burn_amount(0, 500).unwrap(), 0);
-        assert_eq!(calculate_burn_amount(100, 0).unwrap(), 0);
-        assert_eq!(calculate_burn_amount(100, 500).unwrap(), 5);
-        assert_eq!(calculate_burn_amount(105, 500).unwrap(), 5);
-        assert_eq!(calculate_burn_amount(u64::MAX, 10_000).unwrap(), u64::MAX);
-        // A rate above 100% on a large base overflows u64 and is reported rather than silently truncated.
-        assert!(matches!(
-            calculate_burn_amount(u64::MAX, 10_001),
-            Err(RuntimeModuleError::Overflow(_))
-        ));
-    }
 
     fn fee_table() -> FeeTable {
         FeeTable {

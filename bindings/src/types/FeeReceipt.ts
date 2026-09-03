@@ -19,4 +19,10 @@ export type FeeReceipt = {
    * Breakdown of fee costs
    */
   cost_breakdown: FeeBreakdown;
+  /**
+   * The share of `total_fees_paid` that is burned rather than paid to leaders: `⌊paid × rate / 10_000⌋` at
+   * the exhaust burn rate in force for the execution epoch. Settled over what was collected, so it is never
+   * charged to the payer and never appears in `cost_breakdown`.
+   */
+  exhaust_burn: bigint;
 };

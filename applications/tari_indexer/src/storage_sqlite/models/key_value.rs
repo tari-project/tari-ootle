@@ -47,12 +47,12 @@ pub enum Key {
     /// The total accumulated amount of TARI that has been claimed.
     /// type: Amount
     TariAccumulatedClaimed,
-    /// The total accumulated pre-burn execution fees (`F`), summed from transaction receipts as
-    /// `total_fees_charged - exhaust_burn_charged`. Paired with `TariAccumulatedReceiptExhaustBurn` (same
-    /// receipt source) it yields the realized burn rate `burn / F`.
+    /// The total accumulated fees paid by transaction payers, summed from transaction receipts as
+    /// `total_fees_paid`. Paired with `TariAccumulatedReceiptExhaustBurn` (same receipt source) it yields the
+    /// realized burn share `burn / paid`.
     /// type: Amount
     TariAccumulatedFees,
-    /// The total accumulated exhaust burn summed from transaction receipts (`exhaust_burn_charged`). Unlike
+    /// The total accumulated exhaust burn summed from transaction receipts (`exhaust_burn`). Unlike
     /// `TariAccumulatedExhaustBurn` (header-sourced, authoritative for supply) this shares the receipt source
     /// with `TariAccumulatedFees`, so their ratio is the exact realized rate; comparing the two burn totals
     /// reveals receipts the indexer has not observed (pruned/lagging).

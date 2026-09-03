@@ -21,7 +21,7 @@ use tari_engine_types::{
     confidential_output::ConfidentialOutput,
     crypto,
     events::Event,
-    fees::{FeeReceipt, FeeSource},
+    fees::FeeReceipt,
     id_provider::{IdProvider, ObjectIds},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
@@ -76,7 +76,6 @@ use crate::{
         RuntimeError,
         TransactionCommitError,
         address_allocation::AllocatedAddress,
-        fee_state,
         fee_state::FeeState,
         locking::LockedSubstate,
         scope::{CallFrame, CallScope},
@@ -1955,21 +1954,15 @@ impl<TStore: StateReader> WorkingState<TStore> {
             .to_u64_checked()
             .expect("FeeState guarantees that the total fee payments fit in an u64");
 
-        // The overcharge is kept by the network as if it were a fee payment inclusive of its own burn: its burn
-        // share moves into the exhaust burn bucket so that the burn consensus carries from the pre-burn fee matches
-        // the amount actually withheld from validators.
-        let rate_bps = self.fee_state.burn_rate_bps();
-        if total_fee_overcharge > 0 && rate_bps > 0 {
-            let (validator_share, burn_share) = fee_state::split_overcharge(total_fee_overcharge, rate_bps);
-            self.fee_state.add_charge(FeeSource::ExhaustBurn, burn_share);
-            total_fee_overcharge = validator_share;
-        }
+        // The burn is a share of what was collected, overcharge included, and leaders receive the rest.
+        let exhaust_burn = exhaust_burn_share(total_fees_paid, self.fee_state.burn_rate_bps());
 
         Ok(FeeReceipt::builder()
             .with_total_fee_payment(total_fee_payment)
             .with_total_fees_paid(total_fees_paid)
             .with_total_fee_overcharge(total_fee_overcharge)
             .with_cost_breakdown(self.fee_state.take_fee_charges())
+            .with_exhaust_burn(exhaust_burn)
             .build())
     }
 
@@ -2155,5 +2148,42 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let container = ResourceContainer::stealth(resource_address, valid_transfer.revealed_output_amount);
 
         Ok(Some(container))
+    }
+}
+
+/// The share of `paid` that is burned at `rate_bps`: `⌊paid × rate / 10_000⌋`. Never exceeds `paid`
+/// because `ExhaustBurnRate` caps the rate at 10_000, so the leader share `paid − burn` cannot go
+/// negative and a full rate leaves leaders exactly nothing.
+fn exhaust_burn_share(paid: u64, rate_bps: u16) -> u64 {
+    // At most `paid × 10_000 / 10_000 = paid`, so the cast back is lossless.
+    (u128::from(paid) * u128::from(rate_bps) / 10_000) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_burn_is_a_floor_share_of_what_was_paid_and_the_leader_gets_the_rest() {
+        for paid in [0u64, 1, 99, 100, 5_000, u64::MAX] {
+            for rate_bps in [0u16, 1, 500, 9_000, 10_000] {
+                let burn = exhaust_burn_share(paid, rate_bps);
+                let leader = paid - burn;
+                assert_eq!(burn + leader, paid, "paid: {paid}, rate_bps: {rate_bps}");
+                assert_eq!(
+                    u128::from(burn),
+                    u128::from(paid) * u128::from(rate_bps) / 10_000,
+                    "paid: {paid}, rate_bps: {rate_bps}"
+                );
+                if rate_bps == 10_000 {
+                    assert_eq!(leader, 0, "a full rate leaves leaders nothing (paid: {paid})");
+                }
+                if rate_bps == 0 {
+                    assert_eq!(burn, 0, "a zero rate burns nothing (paid: {paid})");
+                }
+            }
+        }
+        assert_eq!(exhaust_burn_share(100, 500), 5);
+        assert_eq!(exhaust_burn_share(105, 500), 5);
     }
 }

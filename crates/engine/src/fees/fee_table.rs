@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::fees::{ExhaustBurnRate, FeeRates};
+use tari_engine_types::fees::FeeRates;
 use tari_ootle_transaction::LITERAL_BYTE_DIVISOR;
 
 /// The narrowest `max_fee` a run can meter at is `1`, which a dry run clamps to. `Amount` encodes as
@@ -110,30 +110,23 @@ impl FeeTable {
     /// Two charges read `max_fee` back, and they move in opposite directions, so both are counted.
     /// The weight term is the fee literal's width drift at this table's weight cost. The storage
     /// term is the fee vault's residual width drift at this table's byte cost, plus the rounding
-    /// boundary the storage divisor can land on. The burn re-multiplies their sum, being taken over
-    /// the running total, and the trailing `1` covers its own rounding boundary.
+    /// boundary the storage divisor can land on.
     ///
     /// `tari_engine_types::fees::FEE_ESTIMATE_ALLOWANCE` is the value this yields, restated where
     /// `FeeReceipt::required_fees` can reach it.
-    pub const fn fee_estimate_allowance(&self, burn_rate_bps: u16) -> u64 {
+    pub const fn fee_estimate_allowance(&self) -> u64 {
         let weight_drift = MAX_FEE_LITERAL_WEIGHT_DRIFT.saturating_mul(self.per_transaction_weight_cost);
         let storage_drift = MAX_FEE_RESIDUAL_BYTE_DRIFT.saturating_mul(self.per_byte_storage_cost) /
             non_zero(self.storage_cost_divisor) +
             1;
-        let drift = weight_drift.saturating_add(storage_drift);
-        drift
-            .saturating_add(drift.saturating_mul(burn_rate_bps as u64) / 10_000)
-            .saturating_add(1)
+        weight_drift.saturating_add(storage_drift)
     }
 
     /// The rates a fee estimator needs, projected onto a type it can see. `FeeRates` lives in
     /// `tari_engine_types` because an estimator (a wallet, say) must price a transaction without
     /// depending on the execution engine, and this table cannot move there — `fee_estimate_allowance`
     /// reads `LITERAL_BYTE_DIVISOR` from a crate downstream of it.
-    ///
-    /// The burn rate is not part of this table. It is a consensus constant resolved per epoch, so
-    /// the caller supplies the rate in force for the epoch it is pricing.
-    pub fn to_rates(&self, exhaust_burn_rate: ExhaustBurnRate) -> FeeRates {
+    pub fn to_rates(&self) -> FeeRates {
         FeeRates {
             per_transaction_weight_cost: self.per_transaction_weight_cost(),
             per_module_call_cost: self.per_module_call_cost(),
@@ -142,7 +135,6 @@ impl FeeTable {
             per_wasm_point_cost: self.per_wasm_point_cost(),
             storage_cost_divisor: self.storage_cost_divisor(),
             wasm_points_cost_divisor: self.wasm_points_cost_divisor(),
-            exhaust_burn_rate,
         }
     }
 
@@ -260,7 +252,7 @@ impl WasmMeteringRate {
 
 #[cfg(test)]
 mod tests {
-    use tari_engine_types::fees::{FEE_ESTIMATE_ALLOWANCE, MAX_EXHAUST_BURN_RATE_BPS};
+    use tari_engine_types::fees::FEE_ESTIMATE_ALLOWANCE;
     use tari_template_lib::types::Amount;
 
     use super::*;
@@ -292,30 +284,24 @@ mod tests {
         let mut table = shipped_like();
 
         // Weight drift (3 units) + storage drift (8 bytes) + the storage rounding boundary.
-        assert_eq!(table.fee_estimate_allowance(0), 3 + 8 + 1 + 1);
-        // A full burn doubles all of it.
-        assert_eq!(table.fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS), 12 * 2 + 1);
+        assert_eq!(table.fee_estimate_allowance(), 3 + 8 + 1);
 
         // The storage divisor scales the residual term down.
         table.storage_cost_divisor = 4;
-        assert_eq!(table.fee_estimate_allowance(0), 3 + 8 / 4 + 1 + 1);
+        assert_eq!(table.fee_estimate_allowance(), 3 + 8 / 4 + 1);
 
-        // Each rate multiplies the whole drift.
+        // Each rate multiplies its own term.
         table.storage_cost_divisor = 1;
         table.per_transaction_weight_cost = 2;
-        assert_eq!(table.fee_estimate_allowance(0), 6 + 8 + 1 + 1);
+        assert_eq!(table.fee_estimate_allowance(), 6 + 8 + 1);
         table.per_byte_storage_cost = 2;
-        assert_eq!(table.fee_estimate_allowance(0), 6 + 16 + 1 + 1);
+        assert_eq!(table.fee_estimate_allowance(), 6 + 16 + 1);
     }
 
     /// `FEE_ESTIMATE_ALLOWANCE` is stated in `tari_engine_types`, which cannot see a `FeeTable`. It
-    /// holds for a table priced like the shipped ones at the highest burn the estimate is derived
-    /// against.
+    /// holds for a table priced like the shipped ones.
     #[test]
     fn the_restated_allowance_matches_the_derivation() {
-        assert_eq!(
-            FEE_ESTIMATE_ALLOWANCE,
-            shipped_like().fee_estimate_allowance(MAX_EXHAUST_BURN_RATE_BPS)
-        );
+        assert_eq!(FEE_ESTIMATE_ALLOWANCE, shipped_like().fee_estimate_allowance());
     }
 }

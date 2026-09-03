@@ -50,9 +50,6 @@ tari_consensus = { workspace = true, optional = true }
 [dev-dependencies]
 bounded-vec = { workspace = true }
 tempfile = { workspace = true }
-# Test-only, so nothing that prices a transaction has to carry the consensus engine: lets the
-# restated burn rate be pinned to the consensus constant rather than drifting from it.
-tari_consensus = { workspace = true }
 
 [features]
 p2p = ["tari_networking", "tari_ootle_p2p", "libp2p-identity", "multiaddr"]

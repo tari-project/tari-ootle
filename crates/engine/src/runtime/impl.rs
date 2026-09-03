@@ -3569,11 +3569,7 @@ where
         // payment that cannot cover it cannot commit anything at all — better established here,
         // before the main instructions run, than after they have consumed compute nobody pays for.
         self.invoke_modules_on_fee_checkpoint()?;
-        // Against what the payment can spend on charges, not against the payment itself: the burn is
-        // taken over whatever the charges come to, so a payment that exactly matches them cannot
-        // also cover the burn on top.
-        if !self.tracker.is_fee_state_dry_run() &&
-            self.tracker.spendable_fee_payments() < self.tracker.total_fee_charges()
+        if !self.tracker.is_fee_state_dry_run() && self.tracker.total_fee_payments() < self.tracker.total_fee_charges()
         {
             return Err(RuntimeError::InsufficientFeesPaid {
                 required_fee: self.tracker.required_fee_payment(),

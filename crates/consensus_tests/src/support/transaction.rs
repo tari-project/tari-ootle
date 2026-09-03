@@ -33,18 +33,21 @@ pub fn build_transaction_from(tx: Transaction) -> TransactionRecord {
     TransactionRecord::new(tx)
 }
 
-/// Fabricates a fully-paid fee receipt for a test execution. `fee` is the pre-burn execution fee; a 5% exhaust
-/// burn is charged on top, mirroring the shape the real executor produces.
+/// Fabricates a fully-paid fee receipt for a test execution. `fee` is the leader's share; a 5% burn share of
+/// the payment sits on top of it, mirroring the shape the real executor produces.
 fn create_test_fee_receipt(fee: u64) -> FeeReceipt {
-    let exhaust_burn = fee / 20;
+    // 5% of the total paid is burned, so the leader's share is 95% of it. Scaling the leader fee
+    // by 1/19 gives the burn that makes the total paid split exactly this way.
+    let exhaust_burn = fee / 19;
+    let paid = fee + exhaust_burn;
     let mut cost_breakdown = FeeBreakdown::default();
-    cost_breakdown.add(FeeSource::WasmExecution, fee);
-    cost_breakdown.add(FeeSource::ExhaustBurn, exhaust_burn);
+    cost_breakdown.add(FeeSource::WasmExecution, paid);
     FeeReceipt::builder()
-        .with_total_fee_payment(fee + exhaust_burn)
-        .with_total_fees_paid(fee + exhaust_burn)
+        .with_total_fee_payment(paid)
+        .with_total_fees_paid(paid)
         .with_total_fee_overcharge(0)
         .with_cost_breakdown(cost_breakdown)
+        .with_exhaust_burn(exhaust_burn)
         .build()
 }
 

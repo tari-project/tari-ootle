@@ -277,8 +277,8 @@ pub trait RuntimeInterface {
     /// what it would have cost.
     fn metered_fee_receipt(&self) -> FeeReceipt;
 
-    /// The payment those charges require, inclusive of the exhaust burn taken over them — the figure
-    /// a rejected payer has to raise their fee to.
+    /// The payment those charges require — the figure a rejected payer has to raise their fee to.
+    /// The exhaust burn is a share of what is paid rather than a charge, so it does not raise this.
     fn required_fee_payment(&self) -> u64;
 
     /// The maximum Wasmer metering points the transaction may consume given the fees paid so far,

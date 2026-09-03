@@ -94,10 +94,11 @@ pub struct ConsensusConstants {
     /// honest proposals are never rejected.
     /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on block validity.
     pub max_block_validation_execution_points: u64,
-    /// The exhaust burn rate, charged to the fee payer on top of the execution fee and burned.
-    /// `ExhaustBurnRate::ZERO` means no fees are burned. CONSENSUS RULE: must be uniform network-wide, otherwise
-    /// nodes diverge on the burn totals in block headers. Use `exhaust_burn_rate` to resolve the rate for a given
-    /// epoch rather than reading this field directly.
+    /// The share of collected fees that is burned rather than paid to leaders, in basis points. The user's price
+    /// is the fee table alone; this only splits what was collected. `10_000` burns everything and leaders receive
+    /// nothing. CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on the burn totals in block
+    /// headers. Use `exhaust_burn_rate` to resolve the rate for a given epoch rather than reading this field
+    /// directly.
     pub exhaust_burn_rate: ExhaustBurnRate,
     /// The furthest ahead of the current epoch a transaction's `max_epoch` may be set. Every
     /// transaction declares a mandatory `max_epoch`, so this caps how long any transaction can

@@ -31,8 +31,8 @@ pub struct FeeState {
     /// Set out-of-band by `FeeModule` during runtime initialization (only ever true for indexer dry-runs).
     dry_run: bool,
     /// The exhaust burn rate in basis points, resolved for the execution epoch. Set out-of-band by `FeeModule`
-    /// during runtime initialization; used at settlement to take the burn share out of any non-refundable fee
-    /// overcharge.
+    /// during runtime initialization; used at settlement to split what was collected between leaders and the
+    /// burn.
     burn_rate_bps: u16,
 }
 
@@ -152,45 +152,11 @@ impl FeeState {
     }
 }
 
-/// Splits a non-refundable fee overcharge into `(validator_share, exhaust_burn_share)`, treating the overcharge as
-/// a payment inclusive of its own burn (`validator_share * (1 + rate) ~= overcharge`). This keeps the burn that
-/// consensus carries from the pre-burn transaction fee consistent (to within integer rounding) with the amount
-/// actually withheld from validators.
-pub(crate) fn split_overcharge(overcharge: u64, rate_bps: u16) -> (u64, u64) {
-    let validator_share = (u128::from(overcharge) * 10_000 / (10_000 + u128::from(rate_bps))) as u64;
-    (validator_share, overcharge - validator_share)
-}
-
 #[cfg(test)]
 mod tests {
     use tari_template_lib::types::{ObjectKey, ResourceAddress};
 
     use super::*;
-
-    #[test]
-    fn it_splits_the_overcharge_as_a_burn_inclusive_payment() {
-        assert_eq!(split_overcharge(0, 500), (0, 0));
-        assert_eq!(split_overcharge(100, 0), (100, 0));
-        // 105 = 100 validator share + 5% burn on it
-        assert_eq!(split_overcharge(105, 500), (100, 5));
-
-        for overcharge in [1u64, 99, 100, 101, 5_000, 123_456_789, u64::MAX] {
-            for rate_bps in [0u16, 1, 250, 500, 10_000] {
-                let (validator_share, burn_share) = split_overcharge(overcharge, rate_bps);
-                assert_eq!(
-                    validator_share + burn_share,
-                    overcharge,
-                    "shares must sum to the overcharge (overcharge: {overcharge}, rate_bps: {rate_bps})"
-                );
-                let burn_on_share = (u128::from(validator_share) * u128::from(rate_bps) / 10_000) as u64;
-                assert!(
-                    burn_share.abs_diff(burn_on_share) <= 1,
-                    "burn share must be the burn on the validator share within rounding (overcharge: {overcharge}, \
-                     rate_bps: {rate_bps}, burn_share: {burn_share}, expected: {burn_on_share})"
-                );
-            }
-        }
-    }
 
     #[test]
     fn it_prevents_fees_from_exceeding_u64_max() {

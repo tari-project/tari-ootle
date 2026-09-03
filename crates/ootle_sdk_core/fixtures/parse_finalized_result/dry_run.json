@@ -2,8 +2,8 @@
   "name": "parse_finalized_result/dry_run",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.39.0",
-    "git_rev": "dee549eb268a89412bde31f685359207b7789ab3",
+    "core_version": "0.40.0",
+    "git_rev": "4401353d33bcdd22736b1bba404ffe7cca151551",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "parse_finalized_result",
@@ -112,7 +112,7 @@
         ]
       },
       "epoch": 11,
-      "estimated_fee": 9007199254742024,
+      "estimated_fee": 9007199254742011,
       "events": [
         {
           "payload": [

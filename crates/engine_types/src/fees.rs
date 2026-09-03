@@ -186,6 +186,7 @@ pub struct FeeReceipt {
     /// charged to the payer and never appears in `cost_breakdown`.
     #[n(4)]
     #[cbor(default)]
+    #[serde(default)]
     exhaust_burn: u64,
 }
 

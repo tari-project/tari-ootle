@@ -342,6 +342,7 @@ mod transaction_execution_operations {
                         total_fees_paid: 0,
                         total_fee_overcharge: 0,
                         cost_breakdown: FeeBreakdown::default(),
+                        exhaust_burn: 0,
                     }
                     .build(),
                 ),
@@ -372,6 +373,7 @@ mod transaction_execution_operations {
                         total_fees_paid: 0,
                         total_fee_overcharge: 0,
                         cost_breakdown: FeeBreakdown::default(),
+                        exhaust_burn: 0,
                     }
                     .build(),
                 ),
@@ -492,6 +494,7 @@ mod transaction_execution_operations {
                         total_fees_paid: 0,
                         total_fee_overcharge: 0,
                         cost_breakdown: FeeBreakdown::default(),
+                        exhaust_burn: 0,
                     }
                     .build(),
                 ),

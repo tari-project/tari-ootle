@@ -108,7 +108,7 @@ impl DryRunTransactionProcessor {
 
         // Estimate the burn at the rate in effect for the current epoch.
         let current_epoch = self.epoch_manager.current_epoch().await?;
-        let burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch).as_bps();
+        let burn_rate = self.consensus_constants.exhaust_burn_rate(current_epoch);
 
         let mut state_store = new_memory_store();
         state_store.set_many(found_substates)?;
@@ -122,12 +122,7 @@ impl DryRunTransactionProcessor {
             self.claim_burn_proof_verifier.clone(),
         );
         let exec_output = task::spawn_blocking(move || {
-            processor.execute(
-                &transaction,
-                state_store.into_read_only(),
-                virtual_substates,
-                burn_rate_bps,
-            )
+            processor.execute(&transaction, state_store.into_read_only(), virtual_substates, burn_rate)
         })
         .await??;
 

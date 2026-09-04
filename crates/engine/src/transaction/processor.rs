@@ -28,6 +28,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason},
     component::{Component, derive_component_address_from_public_key},
     entity_id_provider::EntityIdProvider,
+    fees::ExhaustBurnRate,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
     limits,
@@ -103,8 +104,8 @@ pub struct TransactionProcessor<TStore, TTemplateProvider> {
     modules: ModulesCollection<TStore>,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     wasm_metering_rate: WasmMeteringRate,
-    /// The exhaust burn rate in basis points, resolved for the execution epoch and seeded onto the fee state.
-    burn_rate_bps: u16,
+    /// The exhaust burn rate resolved for the execution epoch and seeded onto the fee state.
+    burn_rate: ExhaustBurnRate,
     /// Selects the substate schema version for the execution epoch, which is scheduled per network.
     network: Network,
     dry_run: bool,
@@ -124,7 +125,7 @@ where
         modules: ModulesCollection<TStore>,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
         wasm_metering_rate: WasmMeteringRate,
-        burn_rate_bps: u16,
+        burn_rate: ExhaustBurnRate,
         network: Network,
         dry_run: bool,
     ) -> Self {
@@ -136,7 +137,7 @@ where
             modules,
             claim_burn_proof_verifier,
             wasm_metering_rate,
-            burn_rate_bps,
+            burn_rate,
             network,
             dry_run,
         }
@@ -155,7 +156,7 @@ where
             modules,
             claim_burn_proof_verifier,
             wasm_metering_rate,
-            burn_rate_bps,
+            burn_rate,
             network,
             dry_run,
         } = self;
@@ -186,7 +187,7 @@ where
             intent_commitment,
             transaction_weight,
             wasm_metering_rate,
-            burn_rate_bps,
+            burn_rate,
             network,
             dry_run,
         );

@@ -17,7 +17,7 @@ pub const MAX_EXHAUST_BURN_RATE_BPS: u16 = 10_000;
 /// The share of the fees a transaction paid that is burned rather than paid to leaders. A rate
 /// reaches consensus only through this type, so no network can be configured to burn more than
 /// was collected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ExhaustBurnRate(u16);
 
 impl ExhaustBurnRate {

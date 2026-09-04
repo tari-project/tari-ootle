@@ -21,7 +21,7 @@ use tari_engine_types::{
     confidential_output::ConfidentialOutput,
     crypto,
     events::Event,
-    fees::FeeReceipt,
+    fees::{ExhaustBurnRate, FeeReceipt},
     id_provider::{IdProvider, ObjectIds},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
@@ -190,12 +190,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         initial_call_scope: CallScope,
         transaction_hash: Hash32,
         intent_commitment: Hash32,
-        burn_rate_bps: u16,
+        burn_rate: ExhaustBurnRate,
         network: Network,
         dry_run: bool,
     ) -> Self {
         let mut fee_state = FeeState::new();
-        fee_state.set_burn_rate_bps(burn_rate_bps);
+        fee_state.set_burn_rate(burn_rate);
         fee_state.set_dry_run(dry_run);
         Self {
             network,
@@ -1955,7 +1955,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             .expect("FeeState guarantees that the total fee payments fit in an u64");
 
         // The burn is a share of what was collected, overcharge included, and leaders receive the rest.
-        let exhaust_burn = exhaust_burn_share(total_fees_paid, self.fee_state.burn_rate_bps());
+        let exhaust_burn = exhaust_burn_share(total_fees_paid, self.fee_state.burn_rate());
 
         Ok(FeeReceipt::builder()
             .with_total_fee_payment(total_fee_payment)
@@ -2151,12 +2151,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 }
 
-/// The share of `paid` that is burned at `rate_bps`: `⌊paid × rate / 10_000⌋`. Never exceeds `paid`
+/// The share of `paid` that is burned at `rate`: `⌊paid × rate / 10_000⌋`. Never exceeds `paid`
 /// because `ExhaustBurnRate` caps the rate at 10_000, so the leader share `paid − burn` cannot go
 /// negative and a full rate leaves leaders exactly nothing.
-fn exhaust_burn_share(paid: u64, rate_bps: u16) -> u64 {
+fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
     // At most `paid × 10_000 / 10_000 = paid`, so the cast back is lossless.
-    (u128::from(paid) * u128::from(rate_bps) / 10_000) as u64
+    (u128::from(paid) * u128::from(rate.as_bps()) / 10_000) as u64
 }
 
 #[cfg(test)]
@@ -2167,7 +2167,7 @@ mod tests {
     fn the_burn_is_a_floor_share_of_what_was_paid_and_the_leader_gets_the_rest() {
         for paid in [0u64, 1, 99, 100, 5_000, u64::MAX] {
             for rate_bps in [0u16, 1, 500, 9_000, 10_000] {
-                let burn = exhaust_burn_share(paid, rate_bps);
+                let burn = exhaust_burn_share(paid, ExhaustBurnRate::new(rate_bps));
                 let leader = paid - burn;
                 assert_eq!(burn + leader, paid, "paid: {paid}, rate_bps: {rate_bps}");
                 assert_eq!(
@@ -2183,7 +2183,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(exhaust_burn_share(100, 500), 5);
-        assert_eq!(exhaust_burn_share(105, 500), 5);
+        assert_eq!(exhaust_burn_share(100, ExhaustBurnRate::new(500)), 5);
+        assert_eq!(exhaust_burn_share(105, ExhaustBurnRate::new(500)), 5);
     }
 }

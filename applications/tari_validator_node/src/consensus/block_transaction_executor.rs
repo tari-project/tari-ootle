@@ -88,12 +88,12 @@ where
 
         // Resolve the exhaust burn rate for the epoch this transaction executes in, so the payer is charged the
         // rate in effect at execution time.
-        let burn_rate_bps = self.consensus_constants.exhaust_burn_rate(execute_epoch).as_bps();
+        let burn_rate = self.consensus_constants.exhaust_burn_rate(execute_epoch);
 
         // Execute the transaction and get the result
         let exec_output = self
             .executor
-            .execute(transaction, state_db.into_read_only(), virtual_substates, burn_rate_bps)
+            .execute(transaction, state_db.into_read_only(), virtual_substates, burn_rate)
             .map_err(|e| BlockTransactionExecutorError::ExecutionThreadFailure(e.to_string()))?;
 
         // Generate the resolved inputs to set the specific version and required lock flag, as we know it after

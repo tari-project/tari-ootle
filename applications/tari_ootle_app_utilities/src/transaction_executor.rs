@@ -13,7 +13,12 @@ use tari_engine::{
     traits::ClaimProofVerifier,
     transaction::{ModulesCollection, TransactionError, TransactionProcessor},
 };
-use tari_engine_types::{commit_result::ExecuteResult, substate::Substate, virtual_substate::VirtualSubstates};
+use tari_engine_types::{
+    commit_result::ExecuteResult,
+    fees::ExhaustBurnRate,
+    substate::Substate,
+    virtual_substate::VirtualSubstates,
+};
 use tari_ootle_common_types::{
     SubstateLockType,
     SubstateRequirement,
@@ -34,7 +39,7 @@ pub trait TransactionExecutor<TStore> {
         transaction: &Transaction,
         state_store: TStore,
         virtual_substates: VirtualSubstates,
-        burn_rate_bps: u16,
+        burn_rate: ExhaustBurnRate,
     ) -> Result<ExecutionOutput, Self::Error>;
 }
 
@@ -128,7 +133,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
         transaction: &Transaction,
         state_store: TStore,
         virtual_substates: VirtualSubstates,
-        burn_rate_bps: u16,
+        burn_rate: ExhaustBurnRate,
     ) -> Result<ExecutionOutput, Self::Error> {
         // Include signature public key badges for all transaction signers in the initial auth scope
         // NOTE: we assume all signatures have already been validated.
@@ -148,7 +153,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             self.modules.clone(),
             self.claim_burn_proof_verifier.clone(),
             self.wasm_metering_rate,
-            burn_rate_bps,
+            burn_rate,
             self.network,
             self.dry_run,
         );

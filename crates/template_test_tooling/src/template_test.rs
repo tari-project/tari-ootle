@@ -34,6 +34,7 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
+    fees::ExhaustBurnRate,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
@@ -114,7 +115,7 @@ pub struct TemplateTest {
     enable_fees: bool,
     dry_run: bool,
     fee_table: FeeTable,
-    burn_rate_bps: u16,
+    burn_rate: ExhaustBurnRate,
     virtual_substates: HashMap<VirtualSubstateId, VirtualSubstate>,
     key_seed: u8,
     auto_add_proofs_from_signers: bool,
@@ -281,7 +282,7 @@ impl TemplateTest {
                 per_template_size_premium_unit_cost: 100,
                 per_template_publish_cost: 250_000,
             },
-            burn_rate_bps: 0,
+            burn_rate: ExhaustBurnRate::new(0),
             key_seed: 1,
             auto_add_proofs_from_signers: true,
         }
@@ -374,7 +375,7 @@ impl TemplateTest {
     /// Sets the exhaust burn rate applied to the transaction's accrued fees. Defaults to zero, so
     /// tests see no burn unless they ask for one.
     pub fn set_burn_rate_bps(&mut self, rate_bps: u16) -> &mut Self {
-        self.burn_rate_bps = rate_bps;
+        self.burn_rate = ExhaustBurnRate::new(rate_bps);
         self
     }
 
@@ -790,7 +791,7 @@ impl TemplateTest {
             Arc::from(modules.into_boxed_slice()),
             Arc::new(AlwaysPassesProofVerifier),
             wasm_metering_rate,
-            self.burn_rate_bps,
+            self.burn_rate,
             Network::LocalNet,
             self.dry_run,
         );

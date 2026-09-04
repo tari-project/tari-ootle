@@ -15,6 +15,7 @@ use tari_engine::{
     transaction::TransactionProcessor,
 };
 use tari_engine_types::{
+    fees::ExhaustBurnRate,
     substate::SubstateId,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
@@ -97,7 +98,7 @@ fn setup(shared: &SharedState) -> BenchTxProcessor {
         modules,
         shared.claim_burn_proof_verifier.clone(),
         WasmMeteringRate::unmetered(),
-        0,
+        ExhaustBurnRate::new(0),
         Network::LocalNet,
         false,
     )

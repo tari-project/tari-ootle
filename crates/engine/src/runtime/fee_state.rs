@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::{
-    fees::{FeeBreakdown, FeeSource},
+    fees::{ExhaustBurnRate, FeeBreakdown, FeeSource},
     resource_container::ResourceContainer,
 };
 use tari_template_lib::types::{VaultId, constants::TARI_TOKEN};
@@ -30,10 +30,9 @@ pub struct FeeState {
     /// When true, fee charges are still metered but the executor will not abort if payments are insufficient.
     /// Set out-of-band by `FeeModule` during runtime initialization (only ever true for indexer dry-runs).
     dry_run: bool,
-    /// The exhaust burn rate in basis points, resolved for the execution epoch. Set out-of-band by `FeeModule`
-    /// during runtime initialization; used at settlement to split what was collected between leaders and the
-    /// burn.
-    burn_rate_bps: u16,
+    /// The exhaust burn rate resolved for the execution epoch. Set out-of-band by `FeeModule` during runtime
+    /// initialization; used at settlement to split what was collected between leaders and the burn.
+    burn_rate: ExhaustBurnRate,
 }
 
 impl FeeState {
@@ -143,12 +142,12 @@ impl FeeState {
         self.dry_run
     }
 
-    pub fn set_burn_rate_bps(&mut self, rate_bps: u16) {
-        self.burn_rate_bps = rate_bps;
+    pub fn set_burn_rate(&mut self, rate: ExhaustBurnRate) {
+        self.burn_rate = rate;
     }
 
-    pub fn burn_rate_bps(&self) -> u16 {
-        self.burn_rate_bps
+    pub fn burn_rate(&self) -> ExhaustBurnRate {
+        self.burn_rate
     }
 }
 

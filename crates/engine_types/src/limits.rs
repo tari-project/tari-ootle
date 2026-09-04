@@ -117,6 +117,10 @@ impl NativeExecutionPoints {
     /// One ElGamal (DLEQ) value proof. It verifies two Schnorr-style equations over four decompressed
     /// points rather than one, so it is priced at double the mask-knowledge variant.
     pub const PER_ELGAMAL_VALUE_PROOF: u64 = 1_200_000;
+    /// Fixed cost of a hash invocation, charged on top of [`Self::PER_HASH_BYTE`].
+    pub const PER_HASH: u64 = 10_000;
+    /// Each byte fed to a hash.
+    pub const PER_HASH_BYTE: u64 = 30;
     /// One stealth/confidential input commitment: decompress + point aggregation (~4.8µs measured).
     /// Substate access is charged separately by the fee module.
     pub const PER_INPUT: u64 = 42_000;
@@ -128,6 +132,27 @@ impl NativeExecutionPoints {
     /// viewable-balance proof (~0.26ms measured marginal). Charged only once the resource's view
     /// key presence is known — a cheap substate read that precedes all proof crypto.
     pub const PER_OUTPUT_VIEWABLE_SURCHARGE: u64 = 2_000_000;
+    /// Fixed cost of a multi-scalar multiplication, before its per-term charge.
+    pub const PER_RISTRETTO_MSM: u64 = 100_000;
+    /// Each term of a multi-scalar multiplication. Below [`Self::PER_RISTRETTO_MUL`] because the
+    /// terms are evaluated by one Straus/Pippenger multiscalar multiplication
+    /// (`RistrettoPublicKey::batch_mul`) rather than multiplied one at a time, so the windowed
+    /// tables and the accumulation are shared across them. Charging the full multiplication rate per
+    /// term would price work the batch does not do; a per-term rate is only defensible while the
+    /// implementation actually batches.
+    pub const PER_RISTRETTO_MSM_TERM: u64 = 250_000;
+    /// One variable-base Ristretto scalar multiplication, decompression included.
+    pub const PER_RISTRETTO_MUL: u64 = 550_000;
+    /// One fixed-base multiplication of the Ristretto basepoint. Cheaper than the variable-base
+    /// case: the basepoint's multiples are precomputed and there is no point to decompress.
+    pub const PER_RISTRETTO_MUL_BASE: u64 = 300_000;
+    /// One Ristretto group operation: decompress the operands, one addition or negation, recompress.
+    pub const PER_RISTRETTO_OP: u64 = 50_000;
+    /// One scalar field operation. No point decompression, so orders of magnitude below a
+    /// multiplication on the group.
+    pub const PER_SCALAR_OP: u64 = 3_000;
+    /// One Ristretto Schnorr signature verification.
+    pub const PER_SCHNORR_VERIFY: u64 = 1_100_000;
     /// Fixed per-statement cost: balance-proof Schnorr verification, bulletproof base cost and
     /// basic validations (~0.24ms measured).
     pub const PER_STATEMENT: u64 = 2_100_000;

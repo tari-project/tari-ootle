@@ -50,7 +50,7 @@ use tari_template_lib::{
         SpendContextInvokeArg,
         VaultInvokeArg,
     },
-    types::engine_args::SignatureInvokeArg,
+    types::engine_args::IntrinsicInvokeArg,
 };
 use wasmer::{AsStoreMut, AsStoreRef, Function, FunctionEnv, FunctionEnvMut, Instance, Store, WasmPtr, imports};
 use wasmer_middlewares::metering::{MeteringPoints, get_remaining_points, set_remaining_points};
@@ -348,8 +348,8 @@ impl WasmProcess {
                     state.interface_mut().builtin_template_invoke(arg.action)
                 })
             },
-            EngineOp::SignatureInvoke => Self::handle(&mut env, arg_ptr, arg_len, |state, arg: SignatureInvokeArg| {
-                state.interface_mut().signature_invoke(arg.action, arg.args.into())
+            EngineOp::IntrinsicInvoke => Self::handle(&mut env, arg_ptr, arg_len, |state, arg: IntrinsicInvokeArg| {
+                state.interface_mut().intrinsic_invoke(arg.intrinsic, arg.args.into())
             }),
             EngineOp::SpendContextInvoke => {
                 Self::handle(&mut env, arg_ptr, arg_len, |state, arg: SpendContextInvokeArg| {

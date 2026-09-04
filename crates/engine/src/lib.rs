@@ -3,6 +3,7 @@
 
 pub mod executables;
 pub mod fees;
+pub mod intrinsics;
 pub mod runtime;
 pub mod state_store;
 pub mod template;

@@ -216,3 +216,51 @@ mod tests {
         );
     }
 }
+
+/// A borrowed byte slice that encodes as CBOR major type 2, the same as [`Bytes`].
+///
+/// The encode-side counterpart to [`Bytes`], for building engine-call arguments out of data the
+/// caller already holds. `Bytes` owns its buffer, so using it for an argument copies every byte
+/// before the encoder copies them again; this borrows instead, which matters most where the payload
+/// is large and arbitrary — a blob being hashed.
+///
+/// There is no decode direction: the engine decodes into the owning [`Bytes`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BytesRef<'a>(pub &'a [u8]);
+
+impl<'a> BytesRef<'a> {
+    pub const fn new(bytes: &'a [u8]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl<C> minicbor::Encode<C> for BytesRef<'_> {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(self.0)?;
+        Ok(())
+    }
+}
+
+impl<C> minicbor::CborLen<C> for BytesRef<'_> {
+    fn cbor_len(&self, ctx: &mut C) -> usize {
+        minicbor::bytes::cbor_len(self.0, ctx)
+    }
+}
+
+impl<'a> From<&'a [u8]> for BytesRef<'a> {
+    fn from(value: &'a [u8]) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for BytesRef<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}

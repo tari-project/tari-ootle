@@ -106,7 +106,7 @@ use tari_template_lib::{
         NonFungibleAddress,
         TemplateAddress,
         ValidatorFeePoolAddress,
-        engine_args::SignatureAction,
+        engine_args::IntrinsicId,
         stealth::StealthTransferStatement,
     },
 };
@@ -228,7 +228,9 @@ pub trait RuntimeInterface {
     ) -> Result<(), RuntimeError>;
     fn put_on_workspace(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
 
-    fn signature_invoke(&mut self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
+    /// Runs a native intrinsic — a pure function of its arguments, priced from those arguments and
+    /// charged before it runs. Backs the `tari_template_lib::intrinsics` API.
+    fn intrinsic_invoke(&mut self, intrinsic: IntrinsicId, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
 
     /// Read-only introspection over the spending `StealthTransferStatement`, available only while a spend-script
     /// predicate is executing. Backs the `SpendContext` template-lib API.

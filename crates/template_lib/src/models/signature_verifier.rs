@@ -1,13 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
-use tari_template_lib_types::{
-    crypto::{PublicKey, Signature, SignatureDomain, SignaturePayload},
-    engine_args::{SignatureAction, SignatureInvokeArg, SignatureVerifyArgRef},
-};
+use tari_template_lib_types::crypto::{PublicKey, Signature, SignatureDomain, SignaturePayload};
 
-use crate::args::InvokeResult;
+use crate::intrinsics;
 
 pub trait Verifiable {
     fn verify(&self, public_key: &PublicKey, message: &[u8]) -> bool;
@@ -36,16 +32,6 @@ impl SignatureVerifier {
 
 impl SignatureVerifier {
     pub fn verify(&self, public_key: &PublicKey, message: &[u8], payload: &SignaturePayload) -> bool {
-        let resp: InvokeResult = call_engine(EngineOp::SignatureInvoke, &SignatureInvokeArg {
-            action: SignatureAction::Verify,
-            args: invoke_args![SignatureVerifyArgRef {
-                public_key,
-                domain: self.domain,
-                message,
-                payload,
-            }],
-        });
-
-        resp.decode().expect("Failed to decode signature verification result")
+        intrinsics::schnorr_verify_with_domain(public_key, self.domain, message, payload)
     }
 }

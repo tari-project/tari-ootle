@@ -2,5 +2,8 @@
 
 /**
  * Representation of a 64-byte hash value
+ *
+ * Encoded as a CBOR byte string rather than an array of integers, so it crosses the engine
+ * boundary in 66 bytes rather than ~130.
  */
 export type Hash64 = string;

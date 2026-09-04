@@ -181,6 +181,8 @@ pub mod resource;
 
 pub mod events;
 
+pub mod intrinsics;
+
 pub mod template;
 
 pub use tari_template_lib_types as types;

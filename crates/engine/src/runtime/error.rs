@@ -54,6 +54,7 @@ use tari_template_lib::{
         TransactionReceiptAddress,
         VaultId,
         crypto::PedersenCommitmentBytes,
+        engine_args::IntrinsicId,
     },
 };
 
@@ -114,6 +115,11 @@ pub enum RuntimeError {
     LayerOneCommitmentNotFound { address: ClaimedOutputTombstoneAddress },
     #[error("Invalid argument {argument}: {reason}")]
     InvalidArgument { argument: &'static str, reason: String },
+    #[error(
+        "Intrinsic {intrinsic} is not supported by this validator. The template requires a newer engine — validators \
+         and indexers must be upgraded before it can be called."
+    )]
+    IntrinsicNotSupported { intrinsic: IntrinsicId },
     #[error("Invalid number of arguments: expected {expected}, but got {len}")]
     InvalidNumberOfArguments { expected: usize, len: usize },
     #[error("Invalid amount '{amount}': {reason}")]

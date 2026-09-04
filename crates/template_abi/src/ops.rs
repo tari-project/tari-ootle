@@ -30,7 +30,7 @@ pub enum EngineOp {
     ResourceInvoke = 0x02,
     VaultInvoke = 0x03,
     BucketInvoke = 0x04,
-    // _Reserved = 0x05,
+    // 0x05 reserved
     NonFungibleInvoke = 0x06,
     GenerateUniqueId = 0x07,
     ConsensusInvoke = 0x08,
@@ -41,8 +41,9 @@ pub enum EngineOp {
     ProofInvoke = 0x0D,
     BuiltinTemplateInvoke = 0x0E,
     AddressAllocationInvoke = 0x0F,
-    SignatureInvoke = 0x10,
+    // 0x10 reserved
     SpendContextInvoke = 0x11,
+    IntrinsicInvoke = 0x12,
 }
 
 impl EngineOp {
@@ -53,7 +54,6 @@ impl EngineOp {
             0x02 => Some(EngineOp::ResourceInvoke),
             0x03 => Some(EngineOp::VaultInvoke),
             0x04 => Some(EngineOp::BucketInvoke),
-            // 0x05 => Some(EngineOp::_Reserved),
             0x06 => Some(EngineOp::NonFungibleInvoke),
             0x07 => Some(EngineOp::GenerateUniqueId),
             0x08 => Some(EngineOp::ConsensusInvoke),
@@ -64,8 +64,8 @@ impl EngineOp {
             0x0D => Some(EngineOp::ProofInvoke),
             0x0E => Some(EngineOp::BuiltinTemplateInvoke),
             0x0F => Some(EngineOp::AddressAllocationInvoke),
-            0x10 => Some(EngineOp::SignatureInvoke),
             0x11 => Some(EngineOp::SpendContextInvoke),
+            0x12 => Some(EngineOp::IntrinsicInvoke),
             _ => None,
         }
     }

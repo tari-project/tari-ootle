@@ -243,12 +243,6 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
         call: &RuntimeEvent,
     ) -> Result<(), RuntimeModuleError> {
         match call {
-            RuntimeEvent::SignatureVerified => {
-                track.add_fee_charge(
-                    FeeSource::SignatureVerification,
-                    self.fee_table.per_signature_verification_cost(),
-                );
-            },
             RuntimeEvent::LogEmitted { size_bytes } => {
                 // Charged under the same source as the host call that emitted the log: the flat
                 // per-call cost prices the call, this prices what it carried. Division per call

@@ -340,8 +340,7 @@ pub enum FeeSource {
     Storage = 2,
     #[n(3)]
     TransactionWeight = 3,
-    #[n(4)]
-    SignatureVerification = 4,
+    // 4 Reserved for future use
     #[n(5)]
     TemplateLoad = 5,
     #[n(6)]
@@ -362,9 +361,13 @@ pub enum FeeSource {
     #[n(9)]
     #[serde(alias = "ExhaustBurn")]
     Reserved = 9,
-    /// Native verification metering (stealth transfers, confidential withdraws, burn claims),
-    /// priced in the same points as `WasmExecution` via wall-clock equivalence and charged at the
-    /// same per-point rate.
+    /// Native verification metering — stealth transfers, confidential withdraws, burn claims, and
+    /// the intrinsics a template invokes — priced in the same points as `WasmExecution` via
+    /// wall-clock equivalence and charged at the same per-point rate.
+    ///
+    /// Every kind of native work shares this source deliberately. A source per kind would widen
+    /// [`FeeReceipt::widest`], and so the receipt size bound on every transaction, to itemise a
+    /// breakdown the per-point rate already makes comparable.
     #[n(10)]
     NativeExecution = 10,
 }
@@ -372,12 +375,11 @@ pub enum FeeSource {
 impl FeeSource {
     /// Every variant. `fee_source_all_is_exhaustive` fails to compile if a variant is added without
     /// being listed here.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::Initial,
         Self::RuntimeCall,
         Self::Storage,
         Self::TransactionWeight,
-        Self::SignatureVerification,
         Self::TemplateLoad,
         Self::SubstateCreate,
         Self::WasmExecution,
@@ -499,7 +501,6 @@ mod tests {
                 FeeSource::RuntimeCall |
                 FeeSource::Storage |
                 FeeSource::TransactionWeight |
-                FeeSource::SignatureVerification |
                 FeeSource::TemplateLoad |
                 FeeSource::SubstateCreate |
                 FeeSource::WasmExecution |

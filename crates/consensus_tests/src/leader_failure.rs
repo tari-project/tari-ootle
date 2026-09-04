@@ -50,8 +50,8 @@ async fn single_shard_node_goes_down() {
 
         if committed_height == NodeHeight(1) {
             // This allows a few more leader failures to occur
-            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-            test.wait_for_pool_count(TestVnDestination::All, 1).await;
+            let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+            test.wait_for_transaction_seen(TestVnDestination::All, tx.id()).await;
         }
 
         if test.validators_iter().filter(|vn| vn.address != failure_node).all(|v| {
@@ -125,8 +125,8 @@ async fn single_shard_neighbour_nodes_go_down() {
 
         if committed_height == NodeHeight(1) {
             // This allows a few more leader failures to occur
-            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-            test.wait_for_pool_count(TestVnDestination::All, 1).await;
+            let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+            test.wait_for_transaction_seen(TestVnDestination::All, tx.id()).await;
         }
 
         if test
@@ -328,8 +328,8 @@ async fn multi_shard_node_goes_down() {
         if committed_height == NodeHeight(1) && !sent_extra_tx {
             sent_extra_tx = true;
             // This allows a few more leader failures to occur
-            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-            test.wait_for_pool_count(TestVnDestination::All, 1).await;
+            let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+            test.wait_for_transaction_seen(TestVnDestination::All, tx.id()).await;
         }
 
         if test.validators_iter().filter(|vn| vn.address != failure_node).all(|v| {
@@ -547,8 +547,8 @@ async fn single_shard_node_goes_down_and_catches_up() {
 
         if committed_height == NodeHeight(1) {
             // This allows a few more leader failures to occur
-            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-            test.wait_for_pool_count(TestVnDestination::All, 1).await;
+            let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+            test.wait_for_transaction_seen(TestVnDestination::All, tx.id()).await;
         }
 
         if is_back_online &&

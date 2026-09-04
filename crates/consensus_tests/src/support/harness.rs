@@ -511,6 +511,18 @@ impl Test {
         .await
     }
 
+    /// Waits until every validator in `dest` has received the transaction. Unlike waiting on a pool count,
+    /// this cannot be raced by the transaction being proposed and finalized between two polls.
+    pub async fn wait_for_transaction_seen(&self, dest: TestVnDestination, tx_id: &TransactionId) {
+        self.wait_all_for_predicate(format!("transaction {tx_id} seen"), |vn| {
+            if !dest.is_for_vn(vn) {
+                return true;
+            }
+            vn.has_seen_transaction(tx_id)
+        })
+        .await
+    }
+
     pub fn with_all_validators(&self, f: impl FnMut(&Validator)) {
         self.validators.values().for_each(f);
     }

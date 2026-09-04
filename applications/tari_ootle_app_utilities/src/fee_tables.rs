@@ -56,9 +56,9 @@
 //!
 //! ## Cryptographic Operation Fees
 //!
-//! - **`per_signature_verification_cost`**: Cost for each cryptographic signature verification performed during
-//!   transaction execution. Signature verification is computationally expensive and thus has a higher relative cost
-//!   (10x on testnet).
+//! Cryptography a template invokes runs as an intrinsic and is priced by
+//! `tari_engine_types::limits::NativeExecutionPoints` in metering points, not by a rate in this
+//! table — its cost tracks measured CPU time, which a flat per-operation fee cannot.
 //!
 //! # Fee Timing
 //!
@@ -86,7 +86,6 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     per_transaction_weight_cost: 1,
     per_module_call_cost: 1,
     per_byte_storage_cost: 1,
-    per_signature_verification_cost: 10,
     // Bumped from 1 to better reflect worst-case cold wasmer instantiation: a 2 MiB template (the
     // current cap) costs ~7000 µT to load vs ~700 µT previously.
     per_template_load_cost_unit: 10,
@@ -144,7 +143,6 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     per_transaction_weight_cost: 1,
     per_module_call_cost: 1,
     per_byte_storage_cost: 1,
-    per_signature_verification_cost: 10,
     per_template_load_cost_unit: 10,
     per_substate_create_cost: 25,
     per_wasm_point_cost: 1,

@@ -32,6 +32,8 @@ pub use tari_template_lib_types::{
     AccessRule,
     AuthHookCaller,
     ComponentAddress,
+    Hash32,
+    Hash64,
     MaxBytes,
     MaxString,
     Metadata,
@@ -89,6 +91,9 @@ pub use tari_template_macros::template;
 #[cfg(all(feature = "macro", not(target_arch = "wasm32")))]
 pub use tari_template_macros::template_non_wasm as template;
 
+/// Native primitives — Ristretto arithmetic, hashing, signature verification. Exposed as a module
+/// rather than glob-imported: these are specialist and read better qualified as `intrinsics::…`.
+pub use crate::intrinsics;
 pub use crate::{
     args::{VaultFreezeFlag, VaultFreezeFlags},
     caller_context::CallerContext,

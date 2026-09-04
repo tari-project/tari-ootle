@@ -51,7 +51,7 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     vault::Vault,
 };
-use tari_ootle_common_types::{GetVerifier, services::template_provider::TemplateProvider};
+use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
@@ -134,7 +134,7 @@ use tari_template_lib::{
         bytes::Bytes,
         constants::{IMAGE_URL, TARI_TOKEN, TOKEN_SYMBOL},
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
-        engine_args::{SignatureAction, SignatureVerifyArg},
+        engine_args::IntrinsicId,
         metadata,
         stealth::{
             AtomicCondition,
@@ -161,6 +161,7 @@ use super::{
     working_state::WorkingState,
 };
 use crate::{
+    intrinsics,
     runtime::{
         RuntimeError,
         RuntimeInterface,
@@ -3875,24 +3876,15 @@ where
         Ok(())
     }
 
-    fn signature_invoke(&mut self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
-        self.invoke_modules_on_runtime_call("signature_invoke")?;
+    fn intrinsic_invoke(&mut self, intrinsic: IntrinsicId, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("intrinsic_invoke")?;
 
-        match action {
-            SignatureAction::Verify => {
-                self.invoke_modules_on_runtime_event(RuntimeEvent::SignatureVerified)?;
+        // Priced from the declared arguments and charged before the work runs, so a transaction that
+        // cannot afford an intrinsic traps without the validator having performed it.
+        let points = intrinsics::price(intrinsic, &args)?;
+        self.tracker.charge_native_execution(points)?;
 
-                let SignatureVerifyArg {
-                    public_key,
-                    domain,
-                    message,
-                    payload,
-                } = args.assert_one_arg()?;
-
-                let is_valid = payload.get_verifier().verify(&domain, &message, &public_key, &payload);
-                Ok(InvokeResult::encode(&is_valid)?)
-            },
-        }
+        intrinsics::dispatch(intrinsic, args)
     }
 
     fn spend_context_invoke(&mut self, action: SpendContextAction) -> Result<InvokeResult, RuntimeError> {

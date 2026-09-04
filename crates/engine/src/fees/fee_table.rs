@@ -36,7 +36,6 @@ pub struct FeeTable {
     pub per_transaction_weight_cost: u64,
     pub per_module_call_cost: u64,
     pub per_byte_storage_cost: u64,
-    pub per_signature_verification_cost: u64,
     pub per_template_load_cost_unit: u64,
     /// Flat cost charged once per newly-created substate, on top of `per_byte_storage_cost`.
     /// Reflects the slot-allocation cost of adding a new entry to permanent state, separate from
@@ -89,7 +88,6 @@ impl FeeTable {
             per_transaction_weight_cost: 0,
             per_module_call_cost: 0,
             per_byte_storage_cost: 0,
-            per_signature_verification_cost: 0,
             per_template_load_cost_unit: 0,
             per_substate_create_cost: 0,
             per_wasm_point_cost: 0,
@@ -148,10 +146,6 @@ impl FeeTable {
 
     pub fn per_byte_storage_cost(&self) -> u64 {
         self.per_byte_storage_cost
-    }
-
-    pub fn per_signature_verification_cost(&self) -> u64 {
-        self.per_signature_verification_cost
     }
 
     pub fn per_template_load_cost_unit(&self) -> u64 {

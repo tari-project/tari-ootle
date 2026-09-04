@@ -176,7 +176,6 @@ Rules and checks applied to a payment:
   bytes are priced well below persisted ones.
 - `TemplateLoad` — `(bytes_loaded / 3000) × per_template_load_cost_unit`, charged **once per template
   per transaction**; repeat calls into an already-loaded template are free.
-- `SignatureVerification` — `per_signature_verification_cost` per signature verified.
 - Metering points accumulate for WASM and native crypto, but are not priced until finalisation.
 
 **Compute on credit.** A transaction cannot pay before it has sourced its funds, so the fee intent
@@ -220,8 +219,8 @@ fee instruction and before the first main instruction, and it does four things i
 
 ## Stage 3 — the main intent
 
-The main instructions run against the post-checkpoint state and keep accruing `RuntimeCall`,
-`TemplateLoad` and `SignatureVerification` charges as before. What changes is the compute budget.
+The main instructions run against the post-checkpoint state and keep accruing `RuntimeCall` and
+`TemplateLoad` charges as before. What changes is the compute budget.
 
 **Compute is funded by what the payment has left.** The allowance is:
 
@@ -348,7 +347,6 @@ finalised).
 | `TransactionWeight` | runtime init | 1 µT per weight unit |
 | `RuntimeCall` | every engine host call | 1 µT, plus 1 µT per 64 bytes of a log message |
 | `TemplateLoad` | first load of each template | 10 µT per 3 KB |
-| `SignatureVerification` | per signature | 10 µT |
 | `Storage` | finalisation | 1 µT per byte |
 | `SubstateCreate` | finalisation | 25 µT per new substate |
 | `TemplatePublish` | finalisation | 250,000 µT flat; first 96 KiB at the storage rate; 100 µT × units² per KiB beyond |

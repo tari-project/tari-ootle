@@ -122,6 +122,7 @@ impl TestEpochManager {
         {
             let mut lock = self.inner.lock().await;
             lock.current_epoch = current_epoch;
+            lock.epoch_started = true;
         }
 
         let _ = self.tx_epoch_events.send(EpochManagerEvent::EpochChanged {
@@ -232,6 +233,20 @@ impl EpochManagerReader for TestEpochManager {
 
     fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
         self.tx_epoch_events.subscribe()
+    }
+
+    async fn is_this_validator_registered_for_epoch(&self, epoch: Epoch) -> Result<bool, EpochManagerError> {
+        if !self.state_lock().await.epoch_started {
+            return Ok(false);
+        }
+        if self.current_epoch().await? < epoch {
+            return Ok(false);
+        }
+        match self.get_local_committee_info(epoch).await {
+            Ok(_) => Ok(true),
+            Err(err) if err.is_not_registered_error() => Ok(false),
+            Err(err) => Err(err),
+        }
     }
 
     async fn get_committee_for_substate(
@@ -514,6 +529,9 @@ impl EpochManagerReader for TestEpochManager {
 #[derive(Debug, Clone)]
 pub struct TestEpochManagerState {
     pub current_epoch: Epoch,
+    /// Validators must not leave the idle state until the test calls `set_current_epoch`, otherwise a
+    /// validator spawned early runs its pacemaker against peers that do not exist yet.
+    pub epoch_started: bool,
     pub last_epoch_hash: FixedHash,
     #[allow(clippy::type_complexity)]
     pub validator_nodes: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
@@ -526,6 +544,7 @@ impl Default for TestEpochManagerState {
     fn default() -> Self {
         Self {
             current_epoch: Epoch(1),
+            epoch_started: false,
             last_epoch_hash: FixedHash::default(),
             validator_nodes: HashMap::new(),
             committees: HashMap::new(),

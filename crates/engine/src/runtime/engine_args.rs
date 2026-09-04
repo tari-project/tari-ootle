@@ -39,6 +39,12 @@ impl EngineArgs {
             })
     }
 
+    /// Total encoded size of every argument. Available without decoding, so a price derived from it
+    /// can be charged before the work — and before the arguments are read — is done.
+    pub fn encoded_len(&self) -> u64 {
+        self.args.iter().map(|arg| arg.len() as u64).sum()
+    }
+
     pub fn assert_one_arg<T>(&self) -> Result<T, RuntimeError>
     where T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         if self.len() == 1 {

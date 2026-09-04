@@ -57,7 +57,7 @@ ended on, and the validator is still paid for the work it did.
   <rect x="24" y="292" width="520" height="118" rx="8" fill="#1c2333" stroke="#f0883e"/>
   <text x="44" y="318" fill="#f0883e" font-size="14" font-weight="bold">2 · Fee checkpoint</text>
   <text x="44" y="340" fill="#8b949e" font-size="12">on_fee_checkpoint prices the state the fee intent would persist.</text>
-  <text x="44" y="358" fill="#f0883e" font-size="12">CHECK  spendable(payments) &#x2265; charges so far?</text>
+  <text x="44" y="358" fill="#f0883e" font-size="12">CHECK  payments &#x2265; charges so far?</text>
   <text x="44" y="376" fill="#8b949e" font-size="12">The state is snapshotted; the workspace is cleared and proofs dropped.</text>
   <text x="44" y="394" fill="#8b949e" font-size="12">This snapshot is the fallback the transaction can still commit.</text>
   <line x1="544" y1="351" x2="576" y2="351" stroke="#f85149" stroke-width="2" marker-end="url(#feeArrowRed)"/>
@@ -95,7 +95,7 @@ ended on, and the validator is still paid for the work it did.
   <text x="44" y="636" fill="#8b949e" font-size="12">Pass 1 — on_before_finalize prices the state execution ended on.</text>
   <text x="44" y="654" fill="#8b949e" font-size="12">Select what to persist: the whole transaction, or the fee intent alone.</text>
   <text x="44" y="672" fill="#8b949e" font-size="12">Pass 2 — on_before_persist re-prices whichever state was chosen.</text>
-  <text x="44" y="690" fill="#a371f7" font-size="12">Storage · SubstateCreate · TemplatePublish · Wasm/Native · ExhaustBurn</text>
+  <text x="44" y="690" fill="#a371f7" font-size="12">Storage · SubstateCreate · TemplatePublish · Wasm/Native</text>
   <text x="44" y="712" fill="#f0883e" font-size="12">CHECK  payments &#x2265; the recomputed charges?</text>
   <line x1="544" y1="664" x2="576" y2="664" stroke="#f85149" stroke-width="2" marker-end="url(#feeArrowRed)"/>
 
@@ -111,8 +111,8 @@ ended on, and the validator is still paid for the work it did.
   <rect x="24" y="762" width="520" height="110" rx="8" fill="#161b22" stroke="#30363d"/>
   <text x="44" y="788" fill="#e6edf3" font-size="14" font-weight="bold">Settlement</text>
   <text x="44" y="810" fill="#8b949e" font-size="12">Charges collected; the unspent payment is refunded to its vault.</text>
-  <text x="44" y="828" fill="#8b949e" font-size="12">Unrefundable overpayment is kept and split with the exhaust burn.</text>
-  <text x="44" y="846" fill="#8b949e" font-size="12">The exhaust burn is destroyed; leaders are paid the pre-burn fee.</text>
+  <text x="44" y="828" fill="#8b949e" font-size="12">Unrefundable overpayment is kept as part of what was paid.</text>
+  <text x="44" y="846" fill="#8b949e" font-size="12">A share of what was paid is burned; leaders are paid the rest.</text>
   <text x="44" y="864" fill="#8b949e" font-size="12">The transaction receipt is up&#x2019;d into the substate diff.</text>
 
   <line x1="284" y1="872" x2="284" y2="904" stroke="#3fb950" stroke-width="2" marker-end="url(#feeArrowGreen)"/>
@@ -205,9 +205,8 @@ fee instruction and before the first main instruction, and it does four things i
    falls back to committing, so it is priced *before* the main intent spends any compute: `Storage`,
    `SubstateCreate` and `TemplatePublish` are computed over the substates the fee intent mutated,
    plus the transaction receipt it would produce.
-3. **Test the payment.** The check is `spendable(payments) ≥ total charges`, not
-   `payments ≥ charges` — the exhaust burn is taken *on top of* the charges, so a payment that
-   exactly matches them cannot also cover the exhaust burn. A shortfall rejects the transaction
+3. **Test the payment.** The check is `payments ≥ total charges`. The exhaust burn is a share of
+   what is paid rather than a charge, so it does not enter here. A shortfall rejects the transaction
    outright: nothing is written and no fee is taken.
 4. **Snapshot and reset.** The working state is cloned as the fallback; the workspace is cleared and
    its proofs dropped, so the main intent starts with a clean workspace.
@@ -227,7 +226,7 @@ The main instructions run against the post-checkpoint state and keep accruing `R
 **Compute is funded by what the payment has left.** The allowance is:
 
 ```
-allowance = points_funded_by( spendable(payments) − charges_so_far )
+allowance = points_funded_by( payments − charges_so_far )
 ```
 
 The flat credit is gone — sourcing the fee was its only purpose, and that is done. Funding
@@ -280,7 +279,6 @@ The charges computed in these passes:
 | `TemplatePublish` | flat `per_template_publish_cost` + first `template_size_premium_free_bytes` at the storage rate + `units² × per_template_size_premium_unit_cost` |
 | `WasmExecution` | `(total points / wasm_points_cost_divisor) × per_wasm_point_cost` |
 | `NativeExecution` | same rate, over the accumulated native points |
-| `ExhaustBurn` | `total of all charges above × exhaust_burn_rate / 10_000` |
 
 <Aside type="note">
   WASM and native points are divided **once, over the transaction total**, not per call. Dividing per
@@ -305,14 +303,13 @@ Once the charges are final:
    `total_fee_overcharge`.
 2. **Refundable payments are drawn down** only to the amount still owed.
 3. **Whatever is left of a refundable payment goes back to its vault.**
-4. **The overcharge is split** as though it were a payment inclusive of its own exhaust burn: the
-   burn share moves into `ExhaustBurn`, the rest is kept by the network.
+4. **The exhaust burn is taken out of what was collected.** `exhaust_burn = ⌊total_fees_paid ×
+   exhaust_burn_rate / 10_000⌋`, overcharge included, and is recorded on the fee receipt.
 5. **The transaction receipt is written** into the substate diff, carrying the fee receipt, the
    events, the diff summary and the outcome.
 
 Fees flow onward as two separate quantities: leaders are paid `pre_burn_fees_paid` (the total paid
-*minus* the exhaust burn) in full, and the exhaust burn is destroyed and carried in the block
-header.
+*minus* the exhaust burn), and the exhaust burn is destroyed and carried in the block header.
 
 ---
 
@@ -320,16 +317,23 @@ header.
 
 `exhaust_burn_rate` is a consensus constant — 500 bps (5%) on mainnet — and every validator must
 use the same value or nodes diverge on block headers. It is an `ExhaustBurnRate`, which cannot hold a
-rate above `MAX_EXHAUST_BURN_RATE_BPS` (10 000 bps): that is the rate the dry-run allowance is
-derived against, so a network burning faster would under-state what every estimate reports.
+rate above `MAX_EXHAUST_BURN_RATE_BPS` (10 000 bps): the whole of what was paid.
 
-The exhaust burn is charged **on top of** the accrued fee, not deducted from it. Two consequences
-follow, and both show up as rules elsewhere on this page:
+The burn is a **share of what was collected**, not a charge. The fee table alone is the payer's
+price; the rate only splits what was paid between leaders and the burn:
 
-- A payment of `P` can only cover charges of `P / (1 + rate)`. That is the `spendable()` function used
-  at the checkpoint and by the compute allowance.
-- The payment a set of charges requires is `ceil(charges × (1 + rate))`, rounded up. That is the
-  figure a rejected payer is told to retry with.
+| | payer pays | leaders receive | burned |
+|---|---|---|---|
+| charges `F`, rate `s` bps | `F` | `F − ⌊F × s / 10_000⌋` | `⌊F × s / 10_000⌋` |
+
+Three consequences follow, and each shows up as a rule elsewhere on this page:
+
+- A payment of `P` covers charges of `P`. The checkpoint test and the compute allowance compare the
+  payment against the charges directly.
+- The payment a set of charges requires is the charges. That is the figure a rejected payer is told
+  to retry with.
+- A dry-run estimate does not depend on the rate, so a wallet prices a transaction from the fee
+  table alone.
 
 ---
 
@@ -350,9 +354,11 @@ finalised).
 | `TemplatePublish` | finalisation | 250,000 µT flat; first 96 KiB at the storage rate; 100 µT × units² per KiB beyond |
 | `WasmExecution` | finalisation | 1 µT per 1000 metering points |
 | `NativeExecution` | finalisation | 1 µT per 1000 point-equivalents |
-| `ExhaustBurn` | finalisation | 5% of the total |
 
 A source that charges nothing is omitted from the breakdown entirely rather than recorded as a zero.
+The exhaust burn is not a source: it is settled over the total paid and recorded on the receipt's
+`exhaust_burn` field. `FeeSource::ExhaustBurn` remains only so receipts persisted before the share
+model still decode; nothing writes it.
 
 ---
 
@@ -362,7 +368,7 @@ Submit a transaction as a **dry run** and the engine meters it exactly as it wou
 aborts for insufficient payment. Read `FinalizeResult::required_fees()` from the result and use it as
 the `max_fee`.
 
-That figure is `total_fees_required + FEE_ESTIMATE_ALLOWANCE` (25 µT). The allowance exists because
+That figure is `total_fees_required + FEE_ESTIMATE_ALLOWANCE` (12 µT). The allowance exists because
 `max_fee` is itself an input to the cost, so the real run meters *slightly* differently from the dry
 run that estimated it:
 
@@ -370,10 +376,8 @@ run that estimated it:
   `max_fee` costs marginally more weight.
 - The storage tally byte-counts the fee vault *before* the unspent payment is returned, so a wider
   `max_fee` leaves a narrower residual there and costs marginally less.
-- The exhaust burn re-multiplies both.
 
-The allowance bounds the pair in both directions at any exhaust burn rate up to
-`MAX_EXHAUST_BURN_RATE_BPS`.
+The allowance bounds the pair in both directions. The exhaust burn rate does not enter it.
 
 An estimate describes the transaction it was metered on, which matters wherever the fee feeds back
 into the transaction's shape. Stealth input selection targets `amount + max_fee`, so the fee decides

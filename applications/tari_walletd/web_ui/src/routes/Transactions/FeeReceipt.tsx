@@ -39,7 +39,6 @@ const FEE_SOURCE_LABELS: Record<string, string> = {
   SubstateCreate: "Substate creation",
   WasmExecution: "WASM execution",
   TemplatePublish: "Template publish",
-  ExhaustBurn: "Exhaust burn",
 };
 
 function unsignedSaturatingSub(a: bigint): bigint {

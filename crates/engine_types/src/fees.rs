@@ -355,11 +355,13 @@ pub enum FeeSource {
     /// templates.
     #[n(8)]
     TemplatePublish = 8,
-    /// Never charged. The burn is a share of what was paid, recorded on `FeeReceipt::exhaust_burn`
-    /// rather than charged to the payer. The variant remains so receipts persisted before the share
-    /// model still decode; it can go at the next testnet reset.
+    /// Never charged. Slot 9 carried the exhaust burn surcharge before the burn became a share of
+    /// what was paid, recorded on `FeeReceipt::exhaust_burn`. The variant remains so receipts
+    /// persisted under that model still decode, by index in CBOR and borsh and by either name in
+    /// JSON; it can go at the next testnet reset.
     #[n(9)]
-    ExhaustBurn = 9,
+    #[serde(alias = "ExhaustBurn")]
+    Reserved = 9,
     /// Native verification metering (stealth transfers, confidential withdraws, burn claims),
     /// priced in the same points as `WasmExecution` via wall-clock equivalence and charged at the
     /// same per-point rate.
@@ -380,7 +382,7 @@ impl FeeSource {
         Self::SubstateCreate,
         Self::WasmExecution,
         Self::TemplatePublish,
-        Self::ExhaustBurn,
+        Self::Reserved,
         Self::NativeExecution,
     ];
 }
@@ -502,10 +504,20 @@ mod tests {
                 FeeSource::SubstateCreate |
                 FeeSource::WasmExecution |
                 FeeSource::TemplatePublish |
-                FeeSource::ExhaustBurn |
+                FeeSource::Reserved |
                 FeeSource::NativeExecution => {},
             }
         }
+    }
+
+    /// Wallets and the indexer persist receipts as JSON, so a breakdown written under the surcharge
+    /// model still names the slot by its old name.
+    #[test]
+    fn the_reserved_slot_decodes_from_its_former_json_name() {
+        let breakdown: FeeBreakdown = serde_json::from_str(r#"{"breakdown":{"ExhaustBurn":5}}"#).unwrap();
+        assert_eq!(breakdown.get(FeeSource::Reserved), 5);
+        let single: FeeSource = serde_json::from_str(r#""ExhaustBurn""#).unwrap();
+        assert_eq!(single, FeeSource::Reserved);
     }
 
     #[test]

@@ -1050,7 +1050,7 @@ fn the_exhaust_burn_does_not_move_the_charges() {
 
         for receipt in &receipts {
             assert_eq!(
-                receipt.fee_breakdown().get(FeeSource::ExhaustBurn),
+                receipt.fee_breakdown().get(FeeSource::Reserved),
                 0,
                 "at {rate} bps the burn must not be charged"
             );

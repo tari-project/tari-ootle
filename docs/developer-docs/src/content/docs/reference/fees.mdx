@@ -357,8 +357,8 @@ finalised).
 
 A source that charges nothing is omitted from the breakdown entirely rather than recorded as a zero.
 The exhaust burn is not a source: it is settled over the total paid and recorded on the receipt's
-`exhaust_burn` field. `FeeSource::ExhaustBurn` remains only so receipts persisted before the share
-model still decode; nothing writes it.
+`exhaust_burn` field. `FeeSource::Reserved` holds the slot the surcharge occupied, only so receipts
+persisted before the share model still decode; nothing writes it.
 
 ---
 

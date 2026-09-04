@@ -632,16 +632,17 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         &mut self,
         invalidations: I,
         state_version: StateVersion,
-    ) -> Result<(), StorageError> {
+    ) -> Result<usize, StorageError> {
         const OPERATION: &str = "substate_cache_invalidate";
         use crate::storage_sqlite::schema::{substate_cache, substate_cache_invalidations};
 
         let now = unix_timestamp();
+        let mut retired = 0;
         for invalidation in invalidations {
             let id = invalidation.substate_id().to_string();
 
             if let Some(retires_up_to) = invalidation.retires_up_to() {
-                diesel::delete(
+                retired += diesel::delete(
                     substate_cache::table
                         .filter(substate_cache::substate_id.eq(&id))
                         .filter(substate_cache::version.le(retires_up_to as i32)),
@@ -651,7 +652,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             }
 
             if invalidation.retires_nonexistence() {
-                diesel::delete(
+                retired += diesel::delete(
                     substate_cache::table
                         .filter(substate_cache::substate_id.eq(&id))
                         .filter(substate_cache::version.is_null()),
@@ -676,10 +677,10 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .map_err(|e| StorageError::general(OPERATION, e))?;
         }
 
-        Ok(())
+        Ok(retired)
     }
 
-    fn substate_cache_prune(&mut self, journal_retention: Duration, max_entries: usize) -> Result<(), StorageError> {
+    fn substate_cache_prune(&mut self, journal_retention: Duration, max_entries: usize) -> Result<usize, StorageError> {
         const OPERATION: &str = "substate_cache_prune";
         use crate::storage_sqlite::schema::{substate_cache, substate_cache_invalidations};
 
@@ -696,7 +697,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .map_err(|e| StorageError::general(OPERATION, e))?;
         let excess = count.saturating_sub(max_entries as i64);
         if excess <= 0 {
-            return Ok(());
+            return Ok(0);
         }
 
         // An evicted entry costs one committee round trip to restore, so oldest-written-first is a
@@ -708,9 +709,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         )
         .bind::<diesel::sql_types::BigInt, _>(excess)
         .execute(self.connection())
-        .map_err(|e| StorageError::general(OPERATION, e))?;
-
-        Ok(())
+        .map_err(|e| StorageError::general(OPERATION, e))
     }
 
     fn upsert_verified_state_root(&mut self, root: &VerifiedStateRoot) -> Result<(), StorageError> {

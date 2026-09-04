@@ -107,6 +107,20 @@ function BlockWeightCell({ weight, max }: { weight: bigint; max: bigint }) {
   );
 }
 
+function BlockBurnCell({ burn, leaderFee }: { burn: bigint | null; leaderFee: bigint }) {
+  if (burn === null) {
+    return <span>…</span>;
+  }
+  const collected = leaderFee + burn;
+  const percent = collected > 0n ? Number((burn * 1000n) / collected) / 10 : null;
+  return (
+    <span>
+      {burn.toString()}
+      {percent !== null ? ` (${percent}% of ${collected.toString()} collected)` : ""}
+    </span>
+  );
+}
+
 export default function BlockDetails() {
   const { blockId } = useParams();
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
@@ -126,6 +140,7 @@ export default function BlockDetails() {
   const [blockWeight, setBlockWeight] = useState<bigint>(0n);
   const [maxBlockWeight, setMaxBlockWeight] = useState<bigint>(0n);
   const [foreignProposals, setForeignProposals] = useState<ForeignProposalAtom[]>([]);
+  const [blockExhaustBurn, setBlockExhaustBurn] = useState<bigint | null>(null);
 
   useEffect(() => {
     if (blockId !== undefined) {
@@ -144,6 +159,14 @@ export default function BlockDetails() {
               let justifyTime = justify_block.block.block_time || 0;
               setBlockTime(Math.floor(new Date(blockTime * 1000).getTime() / 1000) - Math.floor(new Date(justifyTime * 1000).getTime() / 1000));
             }
+            // The header burn accumulates within an epoch, so this block's burn is the step from
+            // the parent, or the whole figure when the parent belongs to the previous epoch.
+            const accumulated = BigInt(resp.block.header.accumulated_data.total_exhaust_burn);
+            const parentAccumulated =
+              justify_block.block.header.epoch === resp.block.header.epoch
+                ? BigInt(justify_block.block.header.accumulated_data.total_exhaust_burn)
+                : 0n;
+            setBlockExhaustBurn(accumulated > parentAccumulated ? accumulated - parentAccumulated : 0n);
           });
           setEpochEvents([]);
           const otherCommands: OtherCommands = {};
@@ -258,6 +281,14 @@ export default function BlockDetails() {
                               <div className={block!.header.proposed_by === identity!.public_key ? "my_money" : ""}>
                                 {block!.header.total_leader_fee}
                               </div>
+                            </DataTableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell title="The share of the fees collected in this block that is burnt rather than paid to the leader">
+                              Fee Burn
+                            </TableCell>
+                            <DataTableCell>
+                              <BlockBurnCell burn={blockExhaustBurn} leaderFee={BigInt(block!.header.total_leader_fee)} />
                             </DataTableCell>
                           </TableRow>
                           <TableRow>

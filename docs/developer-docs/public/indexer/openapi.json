@@ -1552,16 +1552,16 @@
           },
           "fee_volume": {
             "type": "string",
-            "description": "Total pre-burn execution fees `F`, summed from transaction receipts."
+            "description": "Total fees paid by transaction payers, summed from transaction receipts."
           },
           "receipt_exhaust_burned": {
             "type": "string",
-            "description": "Total exhaust burned summed from the same receipts as `fee_volume`; `receipt_exhaust_burned /\nfee_volume` is the exact realized burn rate, and this is the burn netted from `total_supply`. May\ntransiently trail `total_exhaust_burned` while the receipt sync frontier catches up to the checkpoint\nfrontier."
+            "description": "Total exhaust burned summed from the same receipts as `fee_volume`; `receipt_exhaust_burned /\nfee_volume` is the exact realized burn share, and this is the burn netted from `total_supply`. May\ntransiently trail `total_exhaust_burned` while the receipt sync frontier catches up to the checkpoint\nfrontier."
           },
           "target_burn_rate_bps": {
             "type": "integer",
             "format": "int32",
-            "description": "The target exhaust burn rate in basis points in effect at `current_epoch`.",
+            "description": "The share of collected fees burned rather than paid to leaders, in basis points, in effect at `current_epoch`.",
             "minimum": 0
           },
           "total_claimed": {
@@ -2284,6 +2284,7 @@
       "ValidatorConsensusState": {
         "type": "string",
         "enum": [
+          "Initialising",
           "Idle",
           "CheckSync",
           "Syncing",

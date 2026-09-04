@@ -9,6 +9,6 @@ OUT_PATH=./docs/developer-docs/public/indexer/indexer-api.html
 
 mkdir -p "$(dirname $OPENAPI_PATH)"
 # Generate API docs for the indexer
-cargo run --bin indexer-gen-openapi --release --no-default-features -- $OPENAPI_PATH
+cargo run -p tari_indexer --bin indexer-gen-openapi --release --no-default-features -- $OPENAPI_PATH
 
 pnpm --package=@redocly/cli@2.32.2 dlx redocly build-docs $OPENAPI_PATH -o $OUT_PATH

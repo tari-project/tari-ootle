@@ -63,11 +63,11 @@ export default function FeeReceipt({ data }: { data: FeeReceiptType }) {
     BigInt(data.total_fee_payment) - totalFeesCharged - BigInt(data.total_fee_overcharge),
   );
 
-  const exhaustBurn = BigInt(data.cost_breakdown?.breakdown?.ExhaustBurn ?? 0);
-  // Rough effective burn rate for display: the burn as a percentage of the non-burn fees, to one decimal place
-  const nonBurnFees = unsignedSaturatingSub(totalFeesCharged - exhaustBurn);
+  // The burn is a share of what was paid, so the rate shown is burn / paid to one decimal place
+  const exhaustBurn = BigInt(data.exhaust_burn ?? 0);
+  const totalFeesPaid = BigInt(data.total_fees_paid);
   const burnPercent =
-    exhaustBurn > BigInt(0) && nonBurnFees > BigInt(0) ? Number((exhaustBurn * BigInt(1000)) / nonBurnFees) / 10 : null;
+    exhaustBurn > BigInt(0) && totalFeesPaid > BigInt(0) ? Number((exhaustBurn * BigInt(1000)) / totalFeesPaid) / 10 : null;
 
   const feeItems: { label: string; value: string; help?: string }[] = [
     { label: "Total Fees Paid", value: formatCurrency(data.total_fee_payment, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
@@ -78,8 +78,8 @@ export default function FeeReceipt({ data }: { data: FeeReceiptType }) {
         burnPercent !== null ? ` (~${burnPercent}%)` : ""
       }`,
       help:
-        "A fixed percentage of the transaction fee that is permanently burned, reducing the total supply. " +
-        "It is not paid to validators.",
+        "The share of the fees paid that is permanently burned, reducing the total supply. " +
+        "Validators receive the remainder.",
     },
     {
       label: "Fees Refunded",

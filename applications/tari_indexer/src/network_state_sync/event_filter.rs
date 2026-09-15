@@ -1,15 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{events::Event, substate::SubstateId};
 use tari_template_lib_types::{EntityId, ResourceAddress, TemplateAddress};
-
-/// Payload metadata key under which events (e.g. `std.vault.deposit`, `std.vault.withdraw`)
-/// carry the resource address of the resource being transferred.
-const PAYLOAD_RESOURCE_ADDRESS_KEY: &str = "resource_address";
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct EventFilter {
@@ -72,21 +66,20 @@ impl EventFilter {
         })
     }
 
-    /// Derive the resource address an event refers to, if any.
+    /// The resource address an event names directly, if any.
     ///
-    /// Two cases are recognised:
-    /// 1. The event's `substate_id` is a `Resource(..)` — the `std.resource.*` events (`create`, `mint`, `recall`,
-    ///    `freeze`, `unfreeze`, `update_access_rules`, `update_nonfungible_data`) all attach the resource address as
-    ///    the substate_id.
-    /// 2. The event payload contains a `resource_address` entry parseable as a `ResourceAddress` — `std.vault.deposit`
-    ///    and `std.vault.withdraw` both set this.
+    /// Only the `std.resource.*` events (`create`, `mint`, `recall`, `freeze`, `unfreeze`,
+    /// `update_access_rule`, `update_auth_hook`, `update_metadata`, `update_nonfungible_data`)
+    /// qualify: they carry the resource address as their `substate_id`.
+    ///
+    /// A vault event does not. Its `substate_id` is the `VaultId`, an opaque `ObjectKey` that
+    /// encodes the owning entity and nothing about the resource, and the payload no longer
+    /// duplicates what the vault substate already records. A subscriber that wants one resource's
+    /// transfers resolves the vaults it cares about — a vault's resource is fixed for its life, so
+    /// one lookup holds forever — and filters on `substate_id` instead. That is also the narrower
+    /// subscription: a resource filter would match every account on the network holding it.
     pub fn event_resource_address(event: &Event) -> Option<ResourceAddress> {
-        if let Some(addr) = event.substate_id().and_then(|s| s.as_resource_address()) {
-            return Some(addr);
-        }
-        event
-            .get_payload(PAYLOAD_RESOURCE_ADDRESS_KEY)
-            .and_then(|s| ResourceAddress::from_str(s).ok())
+        event.substate_id().and_then(|s| s.as_resource_address())
     }
 
     /// Convert a topic filter with `*` wildcards to a SQL LIKE pattern.
@@ -146,9 +139,9 @@ mod tests {
         TemplateAddress::from_array([byte; 32])
     }
 
-    fn vault_deposit_event(vault_byte: u8, resource: &ResourceAddress, template_addr: TemplateAddress) -> Event {
+    fn vault_deposit_event(vault_byte: u8, template_addr: TemplateAddress) -> Event {
         let vault_id = VaultId::new(ObjectKey::from_array([vault_byte; ObjectKey::LENGTH]));
-        let payload = Metadata::from_iter([("resource_address", resource.to_string())]);
+        let payload = Metadata::from_iter([("amount", "100".to_string())]);
         Event::std(Some(vault_id.into()), template_addr, "vault", "deposit", payload)
     }
 
@@ -162,23 +155,26 @@ mod tests {
         )
     }
 
+    /// A vault event names no resource, so a resource filter cannot admit it. Subscribers after one
+    /// resource's transfers filter on the vault's `substate_id` instead.
     #[test]
-    fn matches_vault_deposit_by_resource_address_in_payload() {
-        let token = resource(1);
-        let other = resource(2);
-        let event = vault_deposit_event(9, &token, template(3));
+    fn a_resource_filter_never_matches_a_vault_event() {
+        let vault_id = VaultId::new(ObjectKey::from_array([9; ObjectKey::LENGTH]));
+        let event = vault_deposit_event(9, template(3));
 
-        let matching = EventFilter {
-            resource_address: Some(token),
+        assert!(EventFilter::event_resource_address(&event).is_none());
+
+        let by_resource = EventFilter {
+            resource_address: Some(resource(1)),
             ..Default::default()
         };
-        assert!(matching.matches(&event));
+        assert!(!by_resource.matches(&event));
 
-        let non_matching = EventFilter {
-            resource_address: Some(other),
+        let by_vault = EventFilter {
+            substate_id: Some(vault_id.into()),
             ..Default::default()
         };
-        assert!(!non_matching.matches(&event));
+        assert!(by_vault.matches(&event));
     }
 
     #[test]
@@ -202,8 +198,7 @@ mod tests {
 
     #[test]
     fn rejects_events_without_resource_when_filter_set() {
-        // An event that has neither a Resource substate_id nor a resource_address payload entry
-        // must not match a resource_address filter.
+        // An event whose substate_id is not a resource must not match a resource_address filter.
         let template_addr = template(5);
         let event = Event::std(None, template_addr, "component", "updated", Metadata::new());
 
@@ -216,23 +211,23 @@ mod tests {
 
     #[test]
     fn combines_with_other_filters() {
-        let token = resource(1);
         let tmpl = template(2);
-        let event = vault_deposit_event(9, &token, tmpl);
+        let vault_id = VaultId::new(ObjectKey::from_array([9; ObjectKey::LENGTH]));
+        let event = vault_deposit_event(9, tmpl);
 
         // All filters match
         let filter = EventFilter {
             topic: Some("std.vault.deposit".into()),
             template_address: Some(tmpl),
-            resource_address: Some(token),
+            substate_id: Some(vault_id.into()),
             ..Default::default()
         };
         assert!(filter.matches(&event));
 
-        // Topic mismatches => no match even if resource matches
+        // Topic mismatches => no match even if the vault matches
         let filter = EventFilter {
             topic: Some("std.vault.withdraw".into()),
-            resource_address: Some(token),
+            substate_id: Some(vault_id.into()),
             ..Default::default()
         };
         assert!(!filter.matches(&event));
@@ -240,21 +235,24 @@ mod tests {
 
     #[test]
     fn empty_filter_matches_any_event() {
-        let event = vault_deposit_event(9, &resource(1), template(2));
+        let event = vault_deposit_event(9, template(2));
         let filter = EventFilter::default();
         assert!(filter.matches(&event));
     }
 
+    /// A payload entry named `resource_address` is a template's own data, not a resource the filter
+    /// recognises. Only `substate_id` decides.
     #[test]
-    fn derives_resource_address_from_payload_only_when_parseable() {
+    fn a_resource_address_payload_entry_does_not_make_an_event_match() {
         let tmpl = template(1);
-        let payload = Metadata::from_iter([("resource_address", "not-a-valid-address".to_string())]);
-        let event = Event::std(None, tmpl, "vault", "deposit", payload);
+        let token = resource(1);
+        let payload = Metadata::from_iter([("resource_address", token.to_string())]);
+        let event = Event::custom(None, tmpl, "mytemplate.transfer".to_string(), payload);
 
         assert!(EventFilter::event_resource_address(&event).is_none());
 
         let filter = EventFilter {
-            resource_address: Some(resource(1)),
+            resource_address: Some(token),
             ..Default::default()
         };
         assert!(!filter.matches(&event));

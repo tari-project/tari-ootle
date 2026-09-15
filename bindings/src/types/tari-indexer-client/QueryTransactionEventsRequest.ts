@@ -9,9 +9,9 @@ export type QueryTransactionEventsRequest = {
   topic: string | null;
   substate_id: SubstateId | null;
   /**
-   * Filter by resource address. Matches when either the event's `substate_id` is the given
-   * resource (std.resource.* events) or the event payload contains a `resource_address` entry
-   * equal to the given address (std.vault.deposit / std.vault.withdraw).
+   * Filter by resource address. Matches the events whose `substate_id` is that resource, which
+   * is the `std.resource.*` family. Vault events name no resource — filter those by
+   * `substate_id`, the vault's ID.
    */
   resource_address?: ResourceAddress | null;
   limit: number | null;

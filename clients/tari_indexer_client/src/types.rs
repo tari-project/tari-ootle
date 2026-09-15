@@ -307,9 +307,9 @@ pub struct QueryTransactionEventsRequest {
     pub topic: Option<String>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub substate_id: Option<SubstateId>,
-    /// Filter by resource address. Matches when either the event's `substate_id` is the given
-    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
-    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    /// Filter by resource address. Matches the events whose `substate_id` is that resource, which
+    /// is the `std.resource.*` family. Vault events name no resource — filter those by
+    /// `substate_id`, the vault's ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub resource_address: Option<ResourceAddress>,
@@ -335,9 +335,9 @@ pub struct StreamTransactionEventsRequest {
     pub substate_id: Option<SubstateId>,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub template_address: Option<TemplateAddress>,
-    /// Filter by resource address. Matches when either the event's `substate_id` is the given
-    /// resource (std.resource.* events) or the event payload contains a `resource_address` entry
-    /// equal to the given address (std.vault.deposit / std.vault.withdraw).
+    /// Filter by resource address. Matches the events whose `substate_id` is that resource, which
+    /// is the `std.resource.*` family. Vault events name no resource — filter those by
+    /// `substate_id`, the vault's ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub resource_address: Option<ResourceAddress>,

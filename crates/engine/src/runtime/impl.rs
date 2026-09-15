@@ -404,12 +404,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// therefore carry only what a reader cannot recover from the substates the same transaction
     /// ups: the amount moved, which rule changed, which vault was reached. Anything the reader can
     /// read off `substate_id` or off a substate it names — a resource's type, symbol or metadata —
-    /// is charged for twice and must stay out.
-    ///
-    /// An entry earns its place despite that only when a consumer has to match on it while
-    /// streaming, with no substate in hand yet. `std.vault.{deposit,withdraw}` carry
-    /// `resource_address` for that reason: their `substate_id` is the vault, so the indexer's
-    /// `EventFilter` has nothing else to filter a subscription on.
+    /// is charged for twice and must stay out. A consumer that needs a substate's contents to
+    /// interpret an event resolves it once and caches it — a vault's resource, for instance, is
+    /// fixed for the vault's life — rather than having every caller pay to carry it.
     fn emit_std_event<T: Into<SubstateId>>(
         object_name: &str,
         action: &str,
@@ -2484,10 +2481,7 @@ where
                     Self::check_bucket_is_unlocked("deposit", bucket_id, &bucket)?;
 
                     // Emit a builtin event for the deposit
-                    let payload = Metadata::from_iter([
-                        ("resource_address", bucket.resource_address().to_string()),
-                        ("amount", bucket.unlocked_amount().to_string()),
-                    ]);
+                    let payload = Metadata::from_iter([("amount", bucket.unlocked_amount().to_string())]);
 
                     Self::emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
 
@@ -2601,10 +2595,7 @@ where
                     }
 
                     // Emit a builtin event for the withdraw
-                    let payload = Metadata::from_iter([
-                        ("resource_address", resource_container.resource_address().to_string()),
-                        ("amount", public_amount.to_string()),
-                    ]);
+                    let payload = Metadata::from_iter([("amount", public_amount.to_string())]);
 
                     Self::emit_std_event("vault", "withdraw", vault_id, payload, state)?;
 

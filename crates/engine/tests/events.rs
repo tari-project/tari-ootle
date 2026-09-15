@@ -83,10 +83,9 @@ fn builtin_vault_events() {
         .unwrap();
     assert_eq!(*event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
     // assert_eq!(event.component_address().unwrap(), sender_address);
-    assert_eq!(
-        *event.payload().get("resource_address").unwrap(),
-        TARI_TOKEN.to_string()
-    );
+    // The vault is what identifies the transfer; its resource is read off the vault substate.
+    assert!(event.substate_id().unwrap().is_vault());
+    assert!(event.payload().get("resource_address").is_none());
     assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 
     // a standard event for the deposit must have been emmitted
@@ -98,6 +97,7 @@ fn builtin_vault_events() {
         .unwrap();
     assert_eq!(*event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
     // assert_eq!(event.component_address().unwrap(), receiver_address);
-    assert_eq!(event.payload().get("resource_address").unwrap(), TARI_TOKEN.to_string());
+    assert!(event.substate_id().unwrap().is_vault());
+    assert!(event.payload().get("resource_address").is_none());
     assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 }

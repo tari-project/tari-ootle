@@ -40,9 +40,9 @@ const REPLAY_PAGE_SIZE: u32 = 500;
         ("topic" = Option<String>, Query, description = "Filter by event topic"),
         ("substate_id" = Option<String>, Query, description = "Filter by substate ID"),
         ("template_address" = Option<String>, Query, description = "Filter by template address"),
-        ("resource_address" = Option<String>, Query, description = "Filter by resource address \
-            (derived from substate_id for std.resource.* events, or from the `resource_address` \
-            payload entry for std.vault.deposit / std.vault.withdraw)"),
+        ("resource_address" = Option<String>, Query, description = "Filter by resource address. \
+            Matches only std.resource.* events, which carry the resource as their substate_id. \
+            Vault events name no resource: filter those by substate_id (the vault ID)"),
         ("after_id" = Option<i64>, Query, description = "Resume from this event ID (exclusive)"),
     )
 )]

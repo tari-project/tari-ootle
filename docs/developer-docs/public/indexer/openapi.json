@@ -1001,7 +1001,7 @@
           {
             "name": "resource_address",
             "in": "query",
-            "description": "Filter by resource address (derived from substate_id for std.resource.* events, or from the `resource_address` payload entry for std.vault.deposit / std.vault.withdraw)",
+            "description": "Filter by resource address. Matches only std.resource.* events, which carry the resource as their substate_id. Vault events name no resource: filter those by substate_id (the vault ID)",
             "required": false,
             "schema": {
               "type": "string"

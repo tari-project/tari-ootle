@@ -1585,4 +1585,42 @@ mod tests {
         // With the journal expired, a fetch that started before the transition is no longer vetoed.
         assert!(put(&store, &substate(9), 1, 100).await);
     }
+
+    /// The backfill must clear every value written under the old rule — vault events and anything
+    /// else whose substate_id is not a resource — and leave the resource events alone. `resource_`
+    /// ends in a LIKE single-character wildcard, so a row like `resourceXcc` is what the escaping
+    /// exists to catch.
+    #[test]
+    fn the_backfill_clears_every_non_resource_resource_address() {
+        use diesel::{QueryableByName, connection::SimpleConnection, sql_types::Text};
+
+        #[derive(QueryableByName)]
+        struct Row {
+            #[diesel(sql_type = Text)]
+            substate_id: String,
+        }
+
+        let mut conn = SqliteConnection::establish(":memory:").unwrap();
+        conn.batch_execute(
+            "CREATE TABLE events (substate_id TEXT NULL, resource_address TEXT NULL);
+             INSERT INTO events VALUES
+               ('resource_aa', 'resource_aa'),
+               ('vault_bb', 'resource_aa'),
+               ('resourceXcc', 'resource_aa'),
+               ('component_dd', 'resource_aa'),
+               (NULL, 'resource_aa');",
+        )
+        .unwrap();
+
+        conn.batch_execute(include_str!(
+            "migrations/2026-09-15-000000_events_resource_address_resource_only/up.sql"
+        ))
+        .unwrap();
+
+        let kept = sql_query("SELECT substate_id FROM events WHERE resource_address IS NOT NULL")
+            .load::<Row>(&mut conn)
+            .unwrap();
+        let kept: Vec<&str> = kept.iter().map(|r| r.substate_id.as_str()).collect();
+        assert_eq!(kept, ["resource_aa"]);
+    }
 }

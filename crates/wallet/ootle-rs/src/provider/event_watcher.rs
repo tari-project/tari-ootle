@@ -21,9 +21,12 @@ pub struct TransactionEventFilter {
     pub topic: Option<String>,
     pub substate_id: Option<SubstateId>,
     pub template_address: Option<TemplateAddress>,
-    /// Filter by resource address. Useful for tracking all activity (deposits, withdrawals,
-    /// mints, burns, freezes, etc.) for a specific token regardless of which template
-    /// orchestrated the call.
+    /// Filter by resource address. Matches the events that name a resource as their substate —
+    /// mints, burns, recalls, freezes, metadata and access-rule changes.
+    ///
+    /// Vault deposits and withdrawals do not match: a vault event names the vault, not the
+    /// resource. To watch a token's transfers, resolve the vaults holding it — a vault's resource
+    /// is fixed for its life, so one lookup holds — and set `substate_id` to the vault instead.
     pub resource_address: Option<ResourceAddress>,
     /// Resume the event stream from this event ID (exclusive).
     /// Events with id > after_id will be replayed from the database before switching to live.

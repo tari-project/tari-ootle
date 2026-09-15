@@ -349,7 +349,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         Ok(latest.is_some())
     }
 
-    pub fn get_many<I: IntoIterator<Item = (SubstateRequirement, u32)> + ExactSizeIterator>(
+    pub fn get_many<I: IntoIterator<Item = (SubstateRequirement, u64)> + ExactSizeIterator>(
         &self,
         ids: I,
     ) -> Result<HashMap<SubstateRequirement, Substate>, SubstateStoreError> {
@@ -976,7 +976,7 @@ impl LockStatus {
 
 #[derive(Debug, Clone)]
 pub struct LatestSubstateVersion {
-    version: u32,
+    version: u64,
     is_up: bool,
 }
 
@@ -989,7 +989,7 @@ impl LatestSubstateVersion {
         self.is_up
     }
 
-    pub fn version(&self) -> u32 {
+    pub fn version(&self) -> u64 {
         self.version
     }
 }

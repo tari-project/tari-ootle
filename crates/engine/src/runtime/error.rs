@@ -400,6 +400,18 @@ impl RuntimeError {
             } => RejectReason::InsufficientFeesPaid(format!(
                 "{instruction_prefix}Insufficient fees paid: {fees_paid}, required fees: {required_fee}"
             )),
+            // The paid fee did not fund the compute the transaction used. Paying more is what fixes it, so it
+            // reports as a fee shortfall rather than as a failure of the code. `FeeIntentComputeExceeded` and
+            // `MaxNativeExecutionPointsExceeded` are flat ceilings that a larger fee does not raise, so they stay
+            // execution failures.
+            Self::InsufficientFeesForNativeExecution {
+                required_points,
+                consumed_points,
+                allowance,
+            } => RejectReason::InsufficientFeesPaid(format!(
+                "{instruction_prefix}Insufficient fees to fund native verification requiring {required_points} \
+                 points: {consumed_points} of {allowance} allowance points already consumed"
+            )),
             Self::FeePaymentInMainIntent => RejectReason::FeePaymentInMainIntent,
             err => RejectReason::ExecutionFailure(format!("{instruction_prefix}{err}")),
         }

@@ -495,6 +495,40 @@ fn fail_partial_paid_fees() {
     assert_eq!(new_balance, orig_balance - Amount::from(total_fees));
 }
 
+/// Running out of the compute the fee funds is a fee shortfall wherever it is noticed. A transaction that stops
+/// part-way through reports it the same way as one that runs to the end and is found short, so a payer is told to
+/// raise the fee rather than to go looking for a bug in the template.
+#[test]
+fn underfunded_compute_rejects_as_a_fee_shortfall() {
+    // Funding the wasm path and the native path takes different amounts: too little and execution stops inside the
+    // first method's wasm, a little more and it reaches a native stealth verification it cannot fund.
+    for fee_paid in [1000u64, 1300] {
+        let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+
+        let (account, owner_token, private_key) = test.create_funded_account();
+        let (account2, owner_token2, _) = test.create_funded_account();
+        test.enable_fees();
+
+        let result = test.execute_expect_commit(
+            Transaction::builder_localnet(Epoch(1))
+                .pay_fee_from_component(account, Amount::from(fee_paid))
+                .call_method(account2, "withdraw", args![STEALTH_TARI_RESOURCE_ADDRESS, 1000])
+                .put_last_instruction_output_on_workspace("bucket")
+                .take_from_bucket("bucket", 500u64, "bucket2")
+                .call_method(account, "deposit", args![Workspace("bucket")])
+                .call_method(account, "deposit", args![Workspace("bucket2")])
+                .build_and_seal(&private_key),
+            vec![owner_token, owner_token2],
+        );
+
+        let reason = result.expect_failure();
+        assert!(
+            matches!(reason, RejectReason::InsufficientFeesPaid(_)),
+            "paying {fee_paid} gave: {reason}"
+        );
+    }
+}
+
 #[test]
 fn fail_pay_negative_fee() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);

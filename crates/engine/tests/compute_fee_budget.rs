@@ -79,7 +79,7 @@ fn setup() -> Harness {
 
 fn assert_insufficient_fees(reason: &RejectReason) {
     assert!(
-        matches!(reason, RejectReason::ExecutionFailure(msg) if msg.contains("Insufficient fees")),
+        matches!(reason, RejectReason::InsufficientFeesPaid(_)),
         "expected an insufficient-fees-for-compute failure, got {reason:?}",
     );
 }

@@ -433,10 +433,13 @@ fn fail_partial_paid_fees() {
     let orig_balance: Amount = test.call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     test.enable_fees();
 
-    // Must cover what committing the fee intent costs — otherwise nothing commits at all — yet stay
-    // smaller than the full transaction's fee, so the main instructions exhaust the compute the
-    // payment funds and trap.
-    const FEE_PAID: u64 = 2000;
+    // The payment lands in the window where all three hold: the fee intent commits on its own, the
+    // main instructions run far enough to overrun the fee they funded, and that overrun surfaces as
+    // `InsufficientFeesPaid`. Fund less and the native verification allowance runs out part-way
+    // through an instruction, which rejects as an execution failure instead; fund more and the whole
+    // transaction is affordable. Engine pricing changes move the window, so re-tune against the fee
+    // the transaction reports when it succeeds.
+    const FEE_PAID: u64 = 1700;
 
     let result = test.execute_expect_commit(
         Transaction::builder_localnet(Epoch(1))

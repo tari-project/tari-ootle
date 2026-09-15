@@ -329,16 +329,18 @@ mod account_template {
             *approval = approval
                 .checked_sub(amount)
                 .unwrap_or_else(|| panic!("Amount exceeds approval (max: {}, attempted: {})", approval, amount));
-            // Clean up zero approvals
-            if approval.is_zero() {
-                self.approvals.swap_remove(&(resource, badge));
-            }
+            let is_exhausted = approval.is_zero();
 
             emit_event("withdraw_approved", [
-                ("spender_badge", badge_resource.to_string()),
+                ("spender_badge", badge.to_string()),
                 ("resource", resource.to_string()),
                 ("amount", amount.to_string()),
             ]);
+
+            // Clean up zero approvals
+            if is_exhausted {
+                self.approvals.swap_remove(&(resource, badge));
+            }
 
             self.get_vault_mut(resource).withdraw(amount)
         }

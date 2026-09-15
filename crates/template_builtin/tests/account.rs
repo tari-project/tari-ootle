@@ -51,6 +51,52 @@ fn it_allows_badge_to_withdraw_from_account() {
 }
 
 #[test]
+fn the_withdraw_approved_event_names_the_spending_badge() {
+    let mut test = TemplateTest::new_builtin_only();
+
+    let (owner, owner_proof, owner_secret) = test.create_funded_account();
+    let (user1, user1_proof, user1_secret) = test.create_empty_account();
+
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 1000])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof],
+    );
+
+    let result = test.execute_expect_success(
+        test.transaction()
+            .call_method(user1, "create_ownership_proof", args![])
+            .put_last_instruction_output_on_workspace("user1_proof")
+            .call_method(owner, "withdraw_approved", args![
+                Workspace("user1_proof"),
+                TARI_TOKEN,
+                1000
+            ])
+            .put_last_instruction_output_on_workspace("bucket")
+            .drop_all_proofs_in_workspace()
+            .call_method(user1, "deposit", args![Workspace("bucket")])
+            .finish()
+            .seal(&user1_secret),
+        vec![user1_proof.clone()],
+    );
+
+    let event = result
+        .finalize
+        .events
+        .iter()
+        .find(|e| e.topic().ends_with("withdraw_approved"))
+        .expect("no withdraw_approved event");
+
+    // The badge is the whole non-fungible address, matching what `approve` recorded. Its resource
+    // address alone does not identify which badge spent the approval.
+    assert_eq!(event.get_payload("spender_badge").unwrap(), user1_proof.to_string());
+    assert_eq!(event.get_payload("resource").unwrap(), TARI_TOKEN.to_string());
+    assert_eq!(event.get_payload("amount").unwrap(), "1000");
+}
+
+#[test]
 fn it_rejects_withdrawals_greater_than_approval() {
     let mut test = TemplateTest::new_builtin_only();
 

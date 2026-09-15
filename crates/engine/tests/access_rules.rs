@@ -24,6 +24,7 @@ use tari_template_lib::{
             RuleRequirement,
             UpdateRule,
         },
+        constants::TARI_TOKEN,
         rule,
     },
 };
@@ -564,7 +565,10 @@ mod resource_access_rules {
                     10
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit", args![Workspace("tokens")])
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -668,7 +672,10 @@ mod resource_access_rules {
                     10
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit", args![Workspace("tokens")])
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -729,7 +736,10 @@ mod resource_access_rules {
                     100
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit", args![Workspace("tokens")])
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -935,6 +945,151 @@ mod resource_access_rules {
         );
     }
 
+    /// A proof the submitter left on the workspace authorizes the call boundary and nothing past it: a frame acts
+    /// with the badges it is stamped with and the proofs it is handed as arguments. A method that takes no `Proof`
+    /// therefore cannot reach a resource action the badge guards, however the transaction was assembled.
+    #[test]
+    fn a_workspace_proof_reaches_a_callee_only_as_an_argument() {
+        let mut test = TemplateTest::new(CRATE_PATH, [
+            "tests/templates/access_rules",
+            "tests/templates/cross_template",
+        ]);
+
+        // The component and its resources belong to the owner: the user acts on them with a badge alone, so the
+        // resource's owner rule cannot stand in for the badge the test is about.
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+        let (user_account, user_proof, user_key) = test.create_empty_account();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+        let cross_call_template = test.get_template_address("CrossTemplate");
+
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "using_resource_rules", args![])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let component_address = result.finalize.execution_results[0]
+            .decode::<ComponentAddress>()
+            .unwrap();
+        let badge_resource = result
+            .finalize
+            .result
+            .any_accept()
+            .unwrap()
+            .up_iter()
+            .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
+            .filter(|(_, r)| r.resource_type().is_non_fungible())
+            .map(|(addr, _)| addr.as_resource_address().unwrap())
+            .next()
+            .unwrap();
+
+        // Give the user the badge that the token resource's withdraw and deposit rules name.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component_address, "mint_new_badge", args![])
+                .put_last_instruction_output_on_workspace("badge")
+                .call_method(user_account, "deposit", args![Workspace("badge")])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        // `take_tokens` takes no proof, so the component's frame is left with its own badges alone.
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(user_account, "create_proof_for_resource", args![badge_resource])
+                .put_last_instruction_output_on_workspace("proof")
+                .call_method(component_address, "take_tokens", args![10])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&user_key),
+            vec![user_proof.clone()],
+        );
+
+        assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
+
+        // The same badge, handed to the method, satisfies the rule.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(user_account, "create_proof_for_resource", args![badge_resource])
+                .put_last_instruction_output_on_workspace("proof")
+                .call_method(component_address, "take_tokens_using_proof", args![
+                    Workspace("proof"),
+                    10
+                ])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&user_key),
+            vec![user_proof.clone()],
+        );
+
+        // A frame that was handed the proof may forward it onward.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(user_account, "create_proof_for_resource", args![badge_resource])
+                .put_last_instruction_output_on_workspace("proof")
+                .call_function(cross_call_template, "call_component_with_args_using_proof", args![
+                    component_address,
+                    "take_tokens_using_proof",
+                    Workspace("proof"),
+                    10,
+                ])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&user_key),
+            vec![user_proof],
+        );
+    }
+
+    /// Signer badges are not proofs: they are stamped into every frame a top-level instruction pushes, so a rule
+    /// naming the signer is satisfied without any `Proof` argument.
+    #[test]
+    fn a_signer_gated_account_method_needs_no_proof_argument() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_account, owner_proof, owner_key) = test.create_funded_account();
+        let (other_account, other_proof, other_key) = test.create_empty_account();
+
+        // The account's methods are gated on its owner rule, which the signer badge satisfies with no proof
+        // anywhere in the transaction.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(owner_account, "withdraw", args![TARI_TOKEN, 100])
+                .put_last_instruction_output_on_workspace("withdrawn")
+                .call_method(other_account, "deposit", args![Workspace("withdrawn")])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        // A different signer carries a different badge.
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(owner_account, "withdraw", args![TARI_TOKEN, 100])
+                .put_last_instruction_output_on_workspace("withdrawn")
+                .call_method(other_account, "deposit", args![Workspace("withdrawn")])
+                .build_and_seal(&other_key),
+            vec![other_proof],
+        );
+
+        assert_access_denied_for_action(reason, ActionIdent::ComponentCallMethod {
+            component_address: owner_account,
+            method: "withdraw".to_string(),
+        });
+    }
+
     #[allow(clippy::too_many_lines)]
     #[test]
     fn it_creates_a_proof_from_bucket() {
@@ -1022,7 +1177,10 @@ mod resource_access_rules {
                     args![Workspace("proof"), 10],
                 )
                 .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit", args![Workspace("tokens")])
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
                 // Deposit before dropping the proof - this step should error
                 .call_method(user_account, "deposit", args![Workspace("badges")])
                 .drop_all_proofs_in_workspace()
@@ -1065,7 +1223,10 @@ mod resource_access_rules {
                     args![Workspace("proof"), 10],
                 )
                 .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit", args![Workspace("tokens")])
+                .call_method(user_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
                 .drop_all_proofs_in_workspace()
                 .call_method(user_account, "deposit", args![Workspace("badges")])
                 .build_and_seal(&owner_key),

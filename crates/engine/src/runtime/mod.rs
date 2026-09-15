@@ -216,6 +216,10 @@ pub trait RuntimeInterface {
     /// Checks whether the current execution context has owner permission of the given component.
     fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError>;
 
+    /// Ends the current frame's call boundary by revoking the proofs that were in scope only for the boundary
+    /// check. Must run after the frame's access rule has been evaluated and before anything acts in the frame.
+    fn revoke_boundary_proofs(&mut self) -> Result<(), RuntimeError>;
+
     /// Asserts that the signer badge for `public_key` is in the transaction's base auth scope, i.e. that the
     /// transaction is signed by that key.
     fn check_signer_badge_in_scope(&self, public_key: RistrettoPublicKeyBytes) -> Result<(), RuntimeError>;

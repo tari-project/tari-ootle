@@ -1510,6 +1510,17 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    /// Takes the boundary proofs away from the current (most recently pushed) call frame. Must be called once the
+    /// frame's access rule has been evaluated and before anything acts in the frame.
+    pub fn revoke_boundary_proofs(&mut self) -> Result<(), RuntimeError> {
+        self.call_frames
+            .last_mut()
+            .ok_or(RuntimeError::NoActiveCallFrame)?
+            .scope_mut()
+            .revoke_boundary_proofs();
+        Ok(())
+    }
+
     pub fn current_call_scope(&self) -> Result<&CallScope, RuntimeError> {
         Ok(self
             .call_frames
@@ -1585,9 +1596,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 max_depth: max_call_depth,
             });
         }
-
-        let current = self.current_call_scope()?;
-        new_frame.scope_mut().update_from_parent(current);
 
         match self.call_frames.last() {
             // If this is the first call frame, then we use the base auth scope (virtual proofs are carried from the

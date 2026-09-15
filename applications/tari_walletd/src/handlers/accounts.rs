@@ -1020,10 +1020,22 @@ pub async fn handle_transfer(
                 builder
             }
         })
-        .call_method(source_account_address, "withdraw", args![
-            req.resource_address,
-            req.amount
-        ])
+        .then(|builder| {
+            // The badge authorizes the resource's withdraw rule inside the account's frame, which it reaches as
+            // a `Proof` argument.
+            if req.proof_from_badge_resource.is_some() {
+                builder.call_method(source_account_address, "withdraw_with_auth", args![
+                    req.resource_address,
+                    req.amount,
+                    Workspace("proof")
+                ])
+            } else {
+                builder.call_method(source_account_address, "withdraw", args![
+                    req.resource_address,
+                    req.amount
+                ])
+            }
+        })
         .put_last_instruction_output_on_workspace("bucket")
         .call_method(destination_account_address, "deposit", args![Workspace("bucket")])
         .then(|builder| {

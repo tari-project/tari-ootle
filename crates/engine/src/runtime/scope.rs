@@ -34,6 +34,10 @@ pub struct CallScope {
     /// unconsumed, and the caller keeps them once the frame is popped.
     inherited_buckets: IndexSet<BucketId>,
     inherited_proofs: IndexSet<ProofId>,
+    /// Proofs seeded from the transaction's base scope so that the callee's access rule can be evaluated against
+    /// the caller at the call boundary. [`Self::revoke_boundary_proofs`] takes them away again once that check has
+    /// run, leaving the frame to act with its own badges and the proofs it was handed as arguments.
+    boundary_proofs: IndexSet<ProofId>,
     component_lock: Option<LockedSubstate>,
     lock_scope: IndexSet<LockId>,
     bucket_scope: IndexSet<BucketId>,
@@ -52,6 +56,7 @@ impl CallScope {
             proof_scope: IndexSet::new(),
             inherited_buckets: IndexSet::new(),
             inherited_proofs: IndexSet::new(),
+            boundary_proofs: IndexSet::new(),
             component_lock: None,
             lock_scope: IndexSet::new(),
             bucket_scope: IndexSet::new(),
@@ -67,11 +72,34 @@ impl CallScope {
     }
 
     /// Installs the auth scope this frame starts with. Its proofs came from the frame's caller (the transaction's
-    /// base scope for a top-level instruction), so the caller accounts for them.
-    pub(crate) fn set_auth_scope(&mut self, scope: AuthorizationScope) {
+    /// base scope for a top-level instruction), so the caller accounts for them. They last until the boundary
+    /// check has run — see [`Self::revoke_boundary_proofs`]. Proofs already in scope arrived as call arguments and
+    /// authorize for the whole frame, so they are carried into `scope`.
+    pub(crate) fn set_auth_scope(&mut self, mut scope: AuthorizationScope) {
+        let argument_proofs = self.auth_scope.proofs().clone();
+        self.boundary_proofs = scope
+            .proofs()
+            .iter()
+            .filter(|id| !argument_proofs.contains(*id))
+            .copied()
+            .collect();
+        for proof_id in &argument_proofs {
+            scope.add_proof(*proof_id);
+        }
         self.inherited_proofs.extend(scope.proofs().iter().copied());
         self.proof_scope.extend(scope.proofs().iter().copied());
         self.auth_scope = scope;
+    }
+
+    /// Drops the proofs that were in scope only for the call boundary check. The frame keeps its badges and its
+    /// `Proof` arguments, so a component reached by a top-level instruction can act on a guarded resource only with
+    /// a proof its caller handed it.
+    pub(crate) fn revoke_boundary_proofs(&mut self) {
+        for proof_id in std::mem::take(&mut self.boundary_proofs) {
+            self.proof_scope.swap_remove(&proof_id);
+            self.inherited_proofs.swap_remove(&proof_id);
+            self.auth_scope.remove_proof(&proof_id);
+        }
     }
 
     pub fn lock_scope(&self) -> &IndexSet<LockId> {
@@ -232,16 +260,6 @@ impl CallScope {
 
     pub fn remove_substate_from_referenced(&mut self, address: &SubstateId) -> bool {
         self.referenced.swap_remove(address)
-    }
-
-    pub fn update_from_parent(&mut self, _parent: &CallScope) {
-        // Nothing to do? We bring things into scope via the args so that is why we don't need to move things across
-        // here.
-
-        // self.owned.extend(_parent.owned.iter().cloned());
-        // for proof in _parent.auth_scope.proofs() {
-        //     self.auth_scope.add_proof(*proof);
-        // }
     }
 
     /// Merges what a completed child frame hands back into this scope. Only substates the child created and still

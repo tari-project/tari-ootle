@@ -540,6 +540,9 @@ where
         runtime
             .interface_mut()
             .check_component_ownership(NativeAction::UpdateComponentTemplate.into())?;
+        // A migration with no `migrate` function never reaches `invoke_template`, so this frame's call boundary
+        // ends here.
+        runtime.interface_mut().revoke_boundary_proofs()?;
 
         runtime.interface_mut().update_component_template(new_template)?;
 
@@ -945,12 +948,18 @@ where
         Ok(result)
     }
 
+    /// Runs a template function in the frame the caller has already pushed. This is the only path from the engine
+    /// into template code, so it is where a frame stops holding the proofs that were in scope for its call
+    /// boundary: whatever the frame's access rule was evaluated against, the code itself acts with its own badges
+    /// and its `Proof` arguments.
     fn invoke_template(
         module: LoadedTemplate,
         mut runtime: Runtime,
         function_def: &FunctionDef,
         args: &[tari_bor::Value],
     ) -> Result<InstructionResult, TransactionErrorKind> {
+        runtime.interface_mut().revoke_boundary_proofs()?;
+
         let result = match module {
             LoadedTemplate::Wasm(loaded) => {
                 // Instantiation runs before the first metered operator, so it is charged against

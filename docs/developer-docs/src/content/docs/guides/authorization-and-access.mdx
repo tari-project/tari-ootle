@@ -149,6 +149,38 @@ and update its own component state (when declared `&mut self`), but cannot write
 vault or resource, or call another component. The acting component's badge satisfies the hook's own method
 rule, and the sandbox is what stops the hook spending it on the acting component's behalf.
 
+#### Proofs reach a frame only as arguments
+
+A `Proof` authorizes in the frame that holds it. A frame holds the proofs it creates itself and the proofs it
+was passed as arguments — nothing else. In particular, a proof a transaction left on its workspace authorizes
+the **call boundary**, where the callee's method access rule is evaluated, and stops there: the callee's frame
+does not hold it, so it cannot use it for a resource action or forward it onward.
+
+That makes the `Proof` parameter part of a method's contract. **A method that acts on a resource guarded by a
+badge must take the badge as a `Proof`**, and the caller must hand it in:
+
+```rust
+// Acts on `self.tokens`, whose withdraw rule names a badge. Only reachable with the badge.
+pub fn take_tokens(&mut self, auth: Proof, amount: Amount) -> Bucket {
+    auth.authorize_with(|| self.tokens.withdraw(amount))
+}
+```
+
+```rust
+// In the transaction
+.call_method(account, "create_proof_for_resource", args![badge_resource])
+.put_last_instruction_output_on_workspace("proof")
+.call_method(component, "take_tokens", args![Workspace("proof"), 100])
+```
+
+The built-in account follows the same rule: `withdraw`, `deposit` and the `create_proof_*` methods each have a
+`_with_auth` variant taking the proof, and a resource whose withdraw or deposit rule names a badge is reachable
+only through those.
+
+A proof handed in remains the caller's — the callee may hold and forward it but never consumes it — and it stops
+authorizing when the caller drops it. Signer badges are not proofs: they are stamped into every frame a
+top-level instruction pushes, so a rule naming the transaction's signer needs no `Proof` argument.
+
 #### Resource Access Rules
 
 Resources can also have access rules, typically governing who can mint, burn, recall, freeze, or update metadata.

@@ -447,10 +447,22 @@ where TSpec: WalletSdkSpec
                     builder
                 }
             })
-            .call_method(*from_account.component_address(), "withdraw_confidential", args![
-                params.resource_address,
-                proof
-            ])
+            .then(|builder| {
+                // The badge authorizes the resource's withdraw rule inside the account's frame, which it
+                // reaches as a `Proof` argument.
+                if params.proof_from_resource.is_some() {
+                    builder.call_method(
+                        *from_account.component_address(),
+                        "withdraw_confidential_with_auth",
+                        args![params.resource_address, proof, Workspace("proof")],
+                    )
+                } else {
+                    builder.call_method(*from_account.component_address(), "withdraw_confidential", args![
+                        params.resource_address,
+                        proof
+                    ])
+                }
+            })
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(to_account.address, "deposit", args![Workspace("bucket")])
             .then(|builder| {

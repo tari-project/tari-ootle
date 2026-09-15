@@ -3851,6 +3851,10 @@ where
         })
     }
 
+    fn revoke_boundary_proofs(&mut self) -> Result<(), RuntimeError> {
+        self.tracker.write_with(|state| state.revoke_boundary_proofs())
+    }
+
     fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError> {
         self.tracker.read_with(|state| {
             let locked = state

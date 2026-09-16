@@ -11,11 +11,6 @@ name: Build Matrix of Binaries
   schedule:
     - cron: "05 00 * * *"
   workflow_dispatch:
-    inputs:
-      customTag:
-        description: "Development Tag"
-        required: true
-        default: "development-tag"
 
 env:
   # Matches the protoc that ubuntu-latest ships, which the ci workflow builds these protos against.
@@ -47,9 +42,9 @@ env:
   RUSTUP_PERMIT_COPY_RENAME: true
 
 concurrency:
-  # https://docs.github.com/en/actions/examples/using-concurrency-expressions-and-a-test-matrix
-  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') || github.ref != 'refs/heads/development' || github.ref != 'refs/heads/nextnet' || github.ref != 'refs/heads/stagenet' }}
+  group: '${{ github.workflow }} @ ${{ github.ref }}'
+  # Cancel superseded runs on adhoc build branches. Never cancel release tag builds.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 permissions:
   contents: read
@@ -166,12 +161,6 @@ jobs:
           # Strip gc used by rust
           TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU//gc}
           echo "TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU}" >> $GITHUB_ENV
-
-      - name: Scheduled Destination Folder Override
-        if: ${{ github.event_name == 'schedule' && github.event.schedule == '05 00 * * *' }}
-        shell: bash
-        run: |
-          echo "S3_DEST_OVERRIDE=daily/" >> $GITHUB_ENV
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@master

@@ -568,13 +568,13 @@ impl ProcessManager {
             },
             BurnFunds {
                 amount,
-                wallet_daemon_instance_id,
+                wallet_instance_id,
                 account_name,
                 out_path,
                 reply,
             } => {
                 let result = self
-                    .burn_funds_to_wallet_account(amount, wallet_daemon_instance_id, account_name, out_path)
+                    .burn_funds_to_wallet_account(amount, wallet_instance_id, account_name, out_path)
                     .await;
                 if reply.send(result).is_err() {
                     log::warn!("Request cancelled before response could be sent")
@@ -602,16 +602,16 @@ impl ProcessManager {
     async fn burn_funds_to_wallet_account(
         &mut self,
         amount: u64,
-        wallet_daemon_instance_id: InstanceId,
+        wallet_instance_id: InstanceId,
         account_name: String,
         out_path: PathBuf,
     ) -> anyhow::Result<PathBuf> {
         let wallet_daemon = self
             .instance_manager
-            .get_wallet_daemon(wallet_daemon_instance_id)
+            .get_wallet_daemon(wallet_instance_id)
             .ok_or_else(|| {
                 anyhow!(
-                    "Instance {wallet_daemon_instance_id} is not a wallet daemon. Please start a wallet daemon before \
+                    "Instance {wallet_instance_id} is not a wallet daemon. Please start a wallet daemon before \
                      burning funds"
                 )
             })?;

@@ -33,8 +33,7 @@ pub async fn create(
 pub struct MinotariWalletBurnFundsRequest {
     pub amount: u64,
     /// The wallet daemon that holds the account the burn is claimed into.
-    #[serde(alias = "wallet_instance_id")]
-    pub wallet_daemon_instance_id: InstanceId,
+    pub wallet_instance_id: InstanceId,
     pub account_name: String,
 }
 
@@ -50,7 +49,7 @@ pub async fn burn_funds(
     let misc_path = context.config().base_dir.join("misc");
     let file_name = context
         .process_manager()
-        .burn_funds(req.amount, req.wallet_daemon_instance_id, req.account_name, misc_path)
+        .burn_funds(req.amount, req.wallet_instance_id, req.account_name, misc_path)
         .await?;
 
     Ok(MinotariWalletBurnFundsResponse {

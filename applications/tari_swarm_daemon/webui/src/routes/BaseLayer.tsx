@@ -120,7 +120,7 @@ function BurnFunds() {
           onAct={() =>
             swarm.act("Burn funds", async () => {
               const resp = await swarmRpc("burn_funds", {
-                wallet_daemon_instance_id: target.instance_id,
+                wallet_instance_id: target.instance_id,
                 account_name: accountName,
                 amount,
               });

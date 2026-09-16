@@ -272,6 +272,11 @@ pub enum RuntimeError {
          across transactions."
     )]
     MaxNativeExecutionPointsExceeded { consumed_points: u64, max_points: u64 },
+    #[error(
+        "Component state may not contain a {kind} ({id}): buckets, proofs and address allocations live only for the \
+         transaction that creates them"
+    )]
+    TransientValueInComponentState { kind: &'static str, id: String },
     #[error("No fees paid from stealth transfer: {details}")]
     NoFeesPaid { details: String },
     #[error("No fee checkpoint")]

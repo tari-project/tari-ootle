@@ -14,6 +14,9 @@ mod template {
         vault: Option<Vault>,
         vault_copy: Option<Vault>,
         vault_ref: Option<VaultId>,
+        proof: Option<Proof>,
+        bucket: Option<Bucket>,
+        allocation: Option<ComponentAddressAllocation>,
     }
 
     impl Shenanigans {
@@ -38,6 +41,36 @@ mod template {
             let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
             Self {
                 vault: Some(vault),
+                ..Default::default()
+            }
+        }
+
+        pub fn mint_bucket() -> Bucket {
+            ResourceBuilder::public_fungible().initial_supply(1000u32)
+        }
+
+        /// Stores the caller's `Proof` in this component's state. The proof is the caller's, so this frame does not
+        /// owe it and the dangling-proof check at pop has nothing to say about it.
+        pub fn keep_proof_in_state(proof: Proof) -> Self {
+            Self {
+                proof: Some(proof),
+                ..Default::default()
+            }
+        }
+
+        /// Stores the caller's `Bucket` in this component's state rather than in a vault. Inherited like the proof
+        /// above, so the dangling-bucket check does not cover it either.
+        pub fn keep_bucket_in_state(bucket: Bucket) -> Self {
+            Self {
+                bucket: Some(bucket),
+                ..Default::default()
+            }
+        }
+
+        /// Stores an unconsumed address allocation in this component's state.
+        pub fn keep_allocation_in_state() -> Self {
+            Self {
+                allocation: Some(CallerContext::allocate_component_address(None)),
                 ..Default::default()
             }
         }

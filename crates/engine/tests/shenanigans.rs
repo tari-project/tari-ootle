@@ -756,3 +756,66 @@ fn it_answers_a_drop_authorize_for_any_proof_id() {
         vec![],
     );
 }
+
+/// A bucket, proof or address allocation is named by a counter that restarts each transaction, so one stored in a
+/// component reaches the ledger as an id that can only alias an unrelated object later. Component state is also
+/// handed to a resource auth hook as an argument, and an id in an argument is read as a capability the callee was
+/// lent — so a stored proof would lend the hook authority its caller never granted.
+///
+/// The proof and the bucket here are the caller's, which is the case nothing else covers: a frame does not owe what
+/// it was lent, so the dangling-proof and dangling-bucket checks at pop both pass.
+#[test]
+fn it_rejects_transient_values_in_component_state() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+
+    let result = test.execute_expect_success(
+        test.transaction()
+            .call_function(template_addr, "with_fungible_vault", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let holder = result.finalize.execution_results[0]
+        .decode::<ComponentAddress>()
+        .unwrap();
+
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_method(holder, "create_vault_proof", args![])
+            .put_last_instruction_output_on_workspace("proof")
+            .call_function(template_addr, "keep_proof_in_state", args![Workspace("proof")])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert!(
+        reason.to_string().contains("Component state may not contain a proof"),
+        "keep_proof_in_state gave: {reason}"
+    );
+
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_function(template_addr, "mint_bucket", args![])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_function(template_addr, "keep_bucket_in_state", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert!(
+        reason.to_string().contains("Component state may not contain a bucket"),
+        "keep_bucket_in_state gave: {reason}"
+    );
+
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_function(template_addr, "keep_allocation_in_state", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert!(
+        reason
+            .to_string()
+            .contains("Component state may not contain a component address allocation"),
+        "keep_allocation_in_state gave: {reason}"
+    );
+}

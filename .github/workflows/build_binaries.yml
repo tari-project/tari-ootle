@@ -9,7 +9,9 @@ name: Build Matrix of Binaries
       - "build-all-*"
       - "build-bins-*"
   schedule:
-    - cron: "05 00 * * *"
+    # Off-peak and off the hour: GitHub defers scheduled runs queued at popular slots,
+    # so a nightly asked for on the hour starts hours after the time it names.
+    - cron: "37 20 * * *"
   workflow_dispatch:
 
 env:

@@ -17,6 +17,7 @@ mod template {
         proof: Option<Proof>,
         bucket: Option<Bucket>,
         allocation: Option<ComponentAddressAllocation>,
+        resource_allocation: Option<ResourceAddressAllocation>,
     }
 
     impl Shenanigans {
@@ -63,6 +64,28 @@ mod template {
         pub fn keep_bucket_in_state(bucket: Bucket) -> Self {
             Self {
                 bucket: Some(bucket),
+                ..Default::default()
+            }
+        }
+
+        /// Empties the caller's bucket into a fresh one and keeps the emptied bucket in state. An empty bucket is
+        /// tolerated at finalize and stays in the frame's scope, so neither the dangling-bucket check nor the
+        /// in-scope check on the new state objects to the id being there.
+        pub fn keep_emptied_bucket_in_state(mut bucket: Bucket) -> Component<Self> {
+            let contents = bucket.take(bucket.amount());
+            Component::new(Self {
+                vault: Some(Vault::from_bucket(contents)),
+                bucket: Some(bucket),
+                ..Default::default()
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
+        /// Keeps an unconsumed resource address allocation in state.
+        pub fn keep_resource_allocation_in_state() -> Self {
+            Self {
+                resource_allocation: Some(CallerContext::allocate_resource_address()),
                 ..Default::default()
             }
         }

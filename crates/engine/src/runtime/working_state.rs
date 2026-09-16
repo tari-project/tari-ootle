@@ -1366,29 +1366,32 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // restarts at zero every transaction. Persisting one stores an id that can only ever alias an unrelated
         // object of a later transaction — and component state is handed to a resource auth hook as an argument,
         // where an id in it is read as a capability the hook was lent.
-        if let Some(id) = next_state.bucket_ids().first() {
-            return Err(RuntimeError::TransientValueInComponentState {
-                kind: "bucket",
-                id: id.to_string(),
-            });
-        }
-        if let Some(id) = next_state.proof_ids().first() {
-            return Err(RuntimeError::TransientValueInComponentState {
-                kind: "proof",
-                id: id.to_string(),
-            });
-        }
-        if let Some(allocation) = next_state.component_address_allocations().first() {
-            return Err(RuntimeError::TransientValueInComponentState {
-                kind: "component address allocation",
-                id: allocation.id().to_string(),
-            });
-        }
-        if let Some(allocation) = next_state.resource_address_allocations().first() {
-            return Err(RuntimeError::TransientValueInComponentState {
-                kind: "resource address allocation",
-                id: allocation.id().to_string(),
-            });
+        //
+        // `validate_finalized` rejects one of these left live at the end of a transaction, which covers the
+        // careless cases. It cannot see an id whose object is gone or empty by then: a proof dropped from the
+        // workspace, or a bucket emptied into another. Those are what this check carries.
+        let transient = [
+            ("bucket", next_state.bucket_ids().first().map(ToString::to_string)),
+            ("proof", next_state.proof_ids().first().map(ToString::to_string)),
+            (
+                "component address allocation",
+                next_state
+                    .component_address_allocations()
+                    .first()
+                    .map(|a| a.id().to_string()),
+            ),
+            (
+                "resource address allocation",
+                next_state
+                    .resource_address_allocations()
+                    .first()
+                    .map(|a| a.id().to_string()),
+            ),
+        ];
+        for (kind, id) in transient {
+            if let Some(id) = id {
+                return Err(RuntimeError::TransientValueInComponentState { kind, id });
+            }
         }
 
         // Check that no vaults are duplicated

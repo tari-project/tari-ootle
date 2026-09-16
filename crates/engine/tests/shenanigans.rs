@@ -762,8 +762,10 @@ fn it_answers_a_drop_authorize_for_any_proof_id() {
 /// handed to a resource auth hook as an argument, and an id in an argument is read as a capability the callee was
 /// lent — so a stored proof would lend the hook authority its caller never granted.
 ///
-/// The proof and the bucket here are the caller's, which is the case nothing else covers: a frame does not owe what
-/// it was lent, so the dangling-proof and dangling-bucket checks at pop both pass.
+/// Two of these shapes have a second net: an unconsumed bucket or allocation is still live at the end of the
+/// transaction, so `validate_finalized` would reject them anyway. They are here for branch coverage. The two that
+/// escape everything else are the proof, whose object `drop_all_proofs_in_workspace` removes while the id stays in
+/// state, and the emptied bucket, which `validate_finalized` tolerates because it carries nothing.
 #[test]
 fn it_rejects_transient_values_in_component_state() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
@@ -806,16 +808,38 @@ fn it_rejects_transient_values_in_component_state() {
         "keep_bucket_in_state gave: {reason}"
     );
 
+    // An emptied bucket stays in scope and is tolerated at finalize, so this is the shape that reaches the ledger
+    // with nothing else objecting.
     let reason = test.execute_expect_failure(
         test.transaction()
-            .call_function(template_addr, "keep_allocation_in_state", args![])
+            .call_function(template_addr, "mint_bucket", args![])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_function(template_addr, "keep_emptied_bucket_in_state", args![Workspace(
+                "bucket"
+            )])
             .build_and_seal(test.secret_key()),
         vec![],
     );
     assert!(
-        reason
-            .to_string()
-            .contains("Component state may not contain a component address allocation"),
-        "keep_allocation_in_state gave: {reason}"
+        reason.to_string().contains("Component state may not contain a bucket"),
+        "keep_emptied_bucket_in_state gave: {reason}"
     );
+
+    for (function, kind) in [
+        ("keep_allocation_in_state", "component address allocation"),
+        ("keep_resource_allocation_in_state", "resource address allocation"),
+    ] {
+        let reason = test.execute_expect_failure(
+            test.transaction()
+                .call_function(template_addr, function, args![])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert!(
+            reason
+                .to_string()
+                .contains(&format!("Component state may not contain a {kind}")),
+            "{function} gave: {reason}"
+        );
+    }
 }

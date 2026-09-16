@@ -1,5 +1,5 @@
 {
-  "packageManager": "pnpm@11.6.0",
+  "packageManager": "pnpm@12.4.2",
   "dependencies": {
     "@tari-project/ootle-ts-bindings": "link:bindings",
     "@tari-project/ootle-web-ui-theming": "link:applications/theming",

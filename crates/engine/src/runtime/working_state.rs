@@ -1370,28 +1370,23 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // `validate_finalized` rejects one of these left live at the end of a transaction, which covers the
         // careless cases. It cannot see an id whose object is gone or empty by then: a proof dropped from the
         // workspace, or a bucket emptied into another. Those are what this check carries.
-        let transient = [
-            ("bucket", next_state.bucket_ids().first().map(ToString::to_string)),
-            ("proof", next_state.proof_ids().first().map(ToString::to_string)),
-            (
+        if let Some(id) = next_state.bucket_ids().first() {
+            return Err(RuntimeError::transient_in_component_state("bucket", id));
+        }
+        if let Some(id) = next_state.proof_ids().first() {
+            return Err(RuntimeError::transient_in_component_state("proof", id));
+        }
+        if let Some(alloc) = next_state.component_address_allocations().first() {
+            return Err(RuntimeError::transient_in_component_state(
                 "component address allocation",
-                next_state
-                    .component_address_allocations()
-                    .first()
-                    .map(|a| a.id().to_string()),
-            ),
-            (
+                alloc.id(),
+            ));
+        }
+        if let Some(alloc) = next_state.resource_address_allocations().first() {
+            return Err(RuntimeError::transient_in_component_state(
                 "resource address allocation",
-                next_state
-                    .resource_address_allocations()
-                    .first()
-                    .map(|a| a.id().to_string()),
-            ),
-        ];
-        for (kind, id) in transient {
-            if let Some(id) = id {
-                return Err(RuntimeError::TransientValueInComponentState { kind, id });
-            }
+                alloc.id(),
+            ));
         }
 
         // Check that no vaults are duplicated

@@ -277,6 +277,7 @@ pub enum RuntimeError {
          transaction that creates them"
     )]
     TransientValueInComponentState { kind: &'static str, id: String },
+
     #[error("No fees paid from stealth transfer: {details}")]
     NoFeesPaid { details: String },
     #[error("No fee checkpoint")]
@@ -383,6 +384,15 @@ pub enum RuntimeError {
 }
 
 impl RuntimeError {
+    /// Names the transient value a component tried to persist. Takes the id as `impl Display` so that only the id
+    /// actually being reported is formatted.
+    pub fn transient_in_component_state(kind: &'static str, id: impl std::fmt::Display) -> Self {
+        Self::TransientValueInComponentState {
+            kind,
+            id: id.to_string(),
+        }
+    }
+
     pub fn to_reject_reason(&self, instruction_idx: Option<usize>) -> RejectReason {
         let instruction_prefix = if let Some(ref idx) = instruction_idx {
             format_args!("At instruction #{}: ", *idx)

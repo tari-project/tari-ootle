@@ -53,7 +53,7 @@ pub enum ProcessManagerRequest {
     },
     BurnFunds {
         amount: u64,
-        wallet_instance_id: InstanceId,
+        wallet_daemon_instance_id: InstanceId,
         account_name: String,
         out_path: PathBuf,
         reply: Reply<PathBuf>,
@@ -384,7 +384,7 @@ impl ProcessManagerHandle {
     pub async fn burn_funds<P: AsRef<Path>>(
         &self,
         amount: u64,
-        wallet_instance_id: InstanceId,
+        wallet_daemon_instance_id: InstanceId,
         account_name: String,
         out_path: P,
     ) -> anyhow::Result<PathBuf> {
@@ -392,7 +392,7 @@ impl ProcessManagerHandle {
         self.tx_request
             .send(ProcessManagerRequest::BurnFunds {
                 amount,
-                wallet_instance_id,
+                wallet_daemon_instance_id,
                 account_name,
                 out_path: out_path.as_ref().to_path_buf(),
                 reply: tx_reply,

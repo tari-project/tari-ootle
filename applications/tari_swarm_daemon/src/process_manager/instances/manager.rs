@@ -372,8 +372,12 @@ impl InstanceManager {
     //     self.wallet_daemons.values()
     // }
 
-    pub fn get_wallet_daemon_mut(&mut self, id: InstanceId) -> Option<&mut WalletDaemonProcess> {
-        self.wallet_daemons.get_mut(&id)
+    /// Returns the long-running wallet daemon with this id. The short-lived key-creating run shares the
+    /// `wallet_daemons` collection but serves no JSON-RPC, so it is never a usable daemon.
+    pub fn get_wallet_daemon(&self, id: InstanceId) -> Option<&WalletDaemonProcess> {
+        self.wallet_daemons
+            .get(&id)
+            .filter(|daemon| daemon.instance().instance_type().is_wallet_daemon())
     }
 
     pub fn get_instance_mut(&mut self, id: InstanceId) -> Option<&mut Instance> {

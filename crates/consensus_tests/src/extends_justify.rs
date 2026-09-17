@@ -80,6 +80,7 @@ fn build_block(
         ProtocolVersion::at(NETWORK, TEST_EPOCH),
         parent_id,
         justify.calculate_id(),
+        timeout_certificate.as_ref().map(|tc| tc.calculate_id()),
         height,
         TEST_EPOCH,
         ShardGroup::all_shards(NUM_PRESHARDS),

@@ -38,6 +38,7 @@ message TimeoutVote {
   uint64 epoch = 1;
   uint64 height = 2;
   tari.ootle.common.SignatureAndPublicKey signature = 3;
+  uint64 high_pc_height = 4;
 }
 
 message ForeignProposalMessage {
@@ -183,7 +184,12 @@ message QuorumCertificate {
 message TimeoutCertificate {
   uint64 epoch = 1;
   uint64 block_height = 2;
-  repeated tari.ootle.common.SignatureAndPublicKey signatures = 3;
+  repeated SignedTimeout timeouts = 3;
+}
+
+message SignedTimeout {
+  uint64 high_pc_height = 1;
+  tari.ootle.common.SignatureAndPublicKey signature = 2;
 }
 
 message ValidatorMetadata {

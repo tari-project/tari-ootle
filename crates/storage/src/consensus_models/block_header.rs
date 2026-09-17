@@ -20,6 +20,7 @@ use tari_consensus_types::{
     ProposalCertificate,
     ShardGroupAccumulatedData,
     SignedMessage,
+    TcId,
     ToSignatureMessage,
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
@@ -109,6 +110,12 @@ pub struct BlockHeader {
     #[n(16)]
     #[cbor(default)]
     protocol_version: ProtocolVersion,
+    /// The id of the timeout certificate this block carries, or `None` when it carries none. From
+    /// [`ProtocolVersion::V1`] it is part of the metadata hash and therefore of the signed block id, so a validity
+    /// rule that reads the certificate (`check_justify_reaches_timeout_certificate`) reads data the proposer signed.
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    #[n(17)]
+    timeout_certificate_id: Option<TcId>,
 }
 
 impl BlockHeader {
@@ -118,6 +125,7 @@ impl BlockHeader {
         protocol_version: ProtocolVersion,
         parent: BlockId,
         justify_id: PcId,
+        timeout_certificate_id: Option<TcId>,
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
@@ -136,6 +144,7 @@ impl BlockHeader {
             protocol_version,
             parent,
             justify_id,
+            timeout_certificate_id,
             height,
             epoch,
             shard_group,
@@ -160,6 +169,7 @@ impl BlockHeader {
         protocol_version: ProtocolVersion,
         parent: BlockId,
         justify_id: PcId,
+        timeout_certificate_id: Option<TcId>,
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
@@ -191,6 +201,7 @@ impl BlockHeader {
             epoch_hash,
             accumulated_data,
             extra_data,
+            timeout_certificate_id,
         };
         header.id = header.calculate_id();
 
@@ -214,6 +225,7 @@ impl BlockHeader {
             protocol_version,
             BlockId::zero(),
             justify_id,
+            None,
             NodeHeight::zero(),
             epoch,
             shard_group,
@@ -254,6 +266,7 @@ impl BlockHeader {
             epoch_hash: FixedHash::zero(),
             accumulated_data: ShardGroupAccumulatedData::default(),
             extra_data: ExtraData::new(),
+            timeout_certificate_id: None,
         }
     }
 
@@ -291,6 +304,7 @@ impl BlockHeader {
             epoch_hash: parent_epoch_hash,
             accumulated_data: parent_accumulated_data,
             extra_data: ExtraData::new(),
+            timeout_certificate_id: None,
         };
         block.id = block.calculate_id();
         block
@@ -327,12 +341,24 @@ impl BlockHeader {
             .into()
     }
 
+    /// The metadata hash is the one header field the base layer never recomputes: a commit proof carries it as an
+    /// opaque value inside the header preimage that `tari_sidechain` hashes. Fields that only this network's
+    /// validity rules read therefore commit here, which keeps the header preimage identical to the one the base
+    /// layer verifies while still binding them into the block id.
     pub fn calculate_metadata_hash(&self) -> FixedHash {
-        let fields = MetadataHashFields::V1(MetadataHashFieldsV1 {
-            total_leader_fee: self.total_leader_fee,
-            timestamp: self.timestamp,
-            extra_data: &self.extra_data,
-        });
+        let fields = match self.protocol_version {
+            ProtocolVersion::V0 => MetadataHashFields::V1(MetadataHashFieldsV1 {
+                total_leader_fee: self.total_leader_fee,
+                timestamp: self.timestamp,
+                extra_data: &self.extra_data,
+            }),
+            ProtocolVersion::V1 => MetadataHashFields::V2(MetadataHashFieldsV2 {
+                total_leader_fee: self.total_leader_fee,
+                timestamp: self.timestamp,
+                extra_data: &self.extra_data,
+                timeout_certificate_id: self.timeout_certificate_id.as_ref().map(TcId::hash),
+            }),
+        };
         hashing::block_metadata_hasher().chain(&fields).finalize().into()
     }
 
@@ -452,6 +478,10 @@ impl BlockHeader {
         &self.justify_id
     }
 
+    pub fn timeout_certificate_id(&self) -> Option<&TcId> {
+        self.timeout_certificate_id.as_ref()
+    }
+
     pub fn height(&self) -> NodeHeight {
         self.height
     }
@@ -561,6 +591,7 @@ impl SignedMessage for BlockHeader {
 #[derive(Debug, BorshSerialize)]
 enum MetadataHashFields<'a> {
     V1(MetadataHashFieldsV1<'a>),
+    V2(MetadataHashFieldsV2<'a>),
 }
 
 #[derive(Debug, BorshSerialize)]
@@ -570,6 +601,14 @@ struct MetadataHashFieldsV1<'a> {
     extra_data: &'a ExtraData,
 }
 
+#[derive(Debug, BorshSerialize)]
+struct MetadataHashFieldsV2<'a> {
+    total_leader_fee: u64,
+    timestamp: u64,
+    extra_data: &'a ExtraData,
+    timeout_certificate_id: Option<&'a FixedHash>,
+}
+
 #[cfg(test)]
 mod tests {
     use tari_consensus_types::ProposalCertificate;
@@ -577,12 +616,20 @@ mod tests {
     use super::*;
 
     fn header(protocol_version: ProtocolVersion) -> BlockHeader {
+        header_with_timeout_certificate(protocol_version, None)
+    }
+
+    fn header_with_timeout_certificate(
+        protocol_version: ProtocolVersion,
+        timeout_certificate_id: Option<TcId>,
+    ) -> BlockHeader {
         let shard_group = ShardGroup::all_shards(NumPreshards::P64);
         BlockHeader::create(
             Network::LocalNet,
             protocol_version,
             BlockId::zero(),
             ProposalCertificate::genesis(Epoch(1), shard_group).calculate_id(),
+            timeout_certificate_id,
             NodeHeight(2),
             Epoch(1),
             shard_group,
@@ -599,24 +646,26 @@ mod tests {
         .unwrap()
     }
 
-    /// The encoding of a header that carries no protocol version: the same array with the trailing element,
-    /// which is `protocol_version`, dropped.
+    /// The encoding of a header that carries no protocol version: the same array truncated before element 16,
+    /// which is `protocol_version`, dropping it and every field added after it.
     fn encode_without_protocol_version(header: &BlockHeader) -> Vec<u8> {
+        const PROTOCOL_VERSION_INDEX: u64 = 16;
         let bytes = tari_bor::encode(header).unwrap();
         let mut decoder = minicbor::Decoder::new(&bytes);
         let len = decoder
             .array()
             .unwrap()
             .expect("BlockHeader encodes as a definite length array");
+        assert!(len > PROTOCOL_VERSION_INDEX);
         let body_start = decoder.position();
-        for _ in 0..len - 1 {
+        for _ in 0..PROTOCOL_VERSION_INDEX {
             decoder.skip().unwrap();
         }
-        let last_element_start = decoder.position();
+        let protocol_version_start = decoder.position();
 
         let mut out = Vec::new();
-        minicbor::Encoder::new(&mut out).array(len - 1).unwrap();
-        out.extend_from_slice(&bytes[body_start..last_element_start]);
+        minicbor::Encoder::new(&mut out).array(PROTOCOL_VERSION_INDEX).unwrap();
+        out.extend_from_slice(&bytes[body_start..protocol_version_start]);
         out
     }
 
@@ -639,6 +688,33 @@ mod tests {
             assert_eq!(decoded.protocol_version(), protocol_version);
             assert_eq!(decoded.calculate_hash(), header.calculate_hash());
         }
+    }
+
+    #[test]
+    fn a_header_round_trips_its_timeout_certificate_id() {
+        let tc_id = TcId::from([7u8; 32]);
+        let header = header_with_timeout_certificate(ProtocolVersion::V1, Some(tc_id));
+        let decoded: BlockHeader = tari_bor::decode(&tari_bor::encode(&header).unwrap()).unwrap();
+        assert_eq!(decoded.timeout_certificate_id(), Some(&tc_id));
+        assert_eq!(decoded.id(), header.id());
+    }
+
+    #[test]
+    fn from_v1_the_timeout_certificate_id_is_in_the_block_id() {
+        let without = header(ProtocolVersion::V1);
+        let with = header_with_timeout_certificate(ProtocolVersion::V1, Some(TcId::from([7u8; 32])));
+        let with_other = header_with_timeout_certificate(ProtocolVersion::V1, Some(TcId::from([8u8; 32])));
+        assert_ne!(without.calculate_metadata_hash(), with.calculate_metadata_hash());
+        assert_ne!(with.calculate_metadata_hash(), with_other.calculate_metadata_hash());
+        assert_ne!(without.id(), with.id());
+        assert_ne!(with.id(), with_other.id());
+    }
+
+    #[test]
+    fn v0_block_ids_do_not_commit_to_the_timeout_certificate_id() {
+        let without = header(ProtocolVersion::V0);
+        let with = header_with_timeout_certificate(ProtocolVersion::V0, Some(TcId::from([7u8; 32])));
+        assert_eq!(without.id(), with.id());
     }
 
     #[test]

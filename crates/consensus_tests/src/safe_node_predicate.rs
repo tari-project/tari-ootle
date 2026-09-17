@@ -86,6 +86,7 @@ fn build_block_with_tc(
         ProtocolVersion::V0,
         parent_id,
         justify.calculate_id(),
+        timeout_certificate.as_ref().map(|tc| tc.calculate_id()),
         height,
         TEST_EPOCH,
         ShardGroup::all_shards(NUM_PRESHARDS),

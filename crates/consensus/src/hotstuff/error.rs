@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, LeafBlock, PcId, QcId};
+use tari_consensus_types::{BlockId, LeafBlock, PcId, QcId, TcId};
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{Epoch, NodeHeight, ProtocolVersion, ShardGroup, VersionedSubstateIdError, VotePower};
 use tari_ootle_storage::{
@@ -161,6 +161,21 @@ pub enum ProposalValidationError {
     ProposingGenesisBlock { proposed_by: String, block_id: BlockId },
     #[error("Block {block} proposed by {proposed_by} is a dummy block. These are immediately rejected.")]
     ProposingDummyBlock { proposed_by: String, block: LeafBlock },
+    #[error(
+        "Block {block_id} justifies from height {justify_height}, below the highest certificate height \
+         {max_high_pc_height} that its timeout certificate attests to"
+    )]
+    JustifyBelowTimeoutCertificate {
+        block_id: BlockId,
+        justify_height: NodeHeight,
+        max_high_pc_height: NodeHeight,
+    },
+    #[error("Block {block_id} header commits to timeout certificate {header_tc_id:?} but the block carries {tc_id:?}")]
+    TimeoutCertificateIdMismatch {
+        block_id: BlockId,
+        header_tc_id: Option<TcId>,
+        tc_id: Option<TcId>,
+    },
     #[error("Justified block {justify_block} for proposed block {block_description} by {proposed_by} not found")]
     JustifyBlockNotFound {
         proposed_by: String,

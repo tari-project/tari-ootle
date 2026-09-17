@@ -263,6 +263,7 @@ mod tests {
     use tari_consensus_types::{
         ProposalCertificate,
         ShardGroupAccumulatedData,
+        TcId,
         ToSignatureMessage,
         ValidatorSchnorrSignature,
     };
@@ -289,11 +290,13 @@ mod tests {
     #[test]
     fn it_hashes_the_header_identically_to_sidechain_header() {
         for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1] {
-            assert_hashes_identically_to_sidechain_header(protocol_version);
+            for timeout_certificate_id in [None, Some(TcId::from([4u8; 32]))] {
+                assert_hashes_identically_to_sidechain_header(protocol_version, timeout_certificate_id);
+            }
         }
     }
 
-    fn build_header(protocol_version: ProtocolVersion) -> BlockHeader {
+    fn build_header(protocol_version: ProtocolVersion, timeout_certificate_id: Option<TcId>) -> BlockHeader {
         let parent_id = seed_hash(1).into_array().into();
         let shard_group = ShardGroup::all_shards(NumPreshards::P256);
         let qc1 = ProposalCertificate::new(
@@ -313,6 +316,7 @@ mod tests {
             protocol_version,
             parent_id,
             qc1_id,
+            timeout_certificate_id,
             NodeHeight(2),
             Epoch(1),
             shard_group,
@@ -362,8 +366,11 @@ mod tests {
         assert!(!qc_signature.verify(other_version, &block_id, decision, epoch, height));
     }
 
-    fn assert_hashes_identically_to_sidechain_header(protocol_version: ProtocolVersion) {
-        let block = build_header(protocol_version);
+    fn assert_hashes_identically_to_sidechain_header(
+        protocol_version: ProtocolVersion,
+        timeout_certificate_id: Option<TcId>,
+    ) {
+        let block = build_header(protocol_version, timeout_certificate_id);
         let sidechain_header = SidechainBlockHeader {
             network: block.network().as_byte(),
             protocol_version: block.protocol_version().as_u32(),

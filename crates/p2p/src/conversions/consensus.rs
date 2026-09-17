@@ -45,6 +45,8 @@ use tari_consensus_types::{
     ProposalCertificate,
     ProposalVote,
     ShardGroupAccumulatedData,
+    SignedTimeout,
+    TcId,
     TimeoutCertificate,
     TimeoutVote,
 };
@@ -191,6 +193,7 @@ impl From<&TimeoutVote> for proto::consensus::TimeoutVote {
             epoch: value.epoch.as_u64(),
             height: value.height.as_u64(),
             signature: Some((&value.signature).into()),
+            high_pc_height: value.high_pc_height.as_u64(),
         }
     }
 }
@@ -202,6 +205,7 @@ impl TryFrom<proto::consensus::TimeoutVote> for TimeoutVote {
         Ok(TimeoutVote {
             epoch: Epoch(value.epoch),
             height: NodeHeight(value.height),
+            high_pc_height: NodeHeight(value.high_pc_height),
             signature: value
                 .signature
                 .ok_or_else(|| anyhow!("Signature is missing"))?
@@ -485,6 +489,7 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
 fn try_convert_proto_block_header(
     value: proto::consensus::BlockHeader,
     justify_id: PcId,
+    timeout_certificate_id: Option<TcId>,
     commands: &BTreeSet<Command>,
 ) -> Result<consensus_models::BlockHeader, anyhow::Error> {
     let network = u8::try_from(value.network)
@@ -534,6 +539,7 @@ fn try_convert_proto_block_header(
             protocol_version,
             value.parent_id.try_into()?,
             justify_id,
+            timeout_certificate_id,
             NodeHeight(value.height),
             Epoch(value.epoch),
             shard_group,
@@ -587,10 +593,15 @@ impl TryFrom<proto::consensus::Block> for consensus_models::Block {
             .ok_or_else(|| anyhow!("Block conversion: QC not provided"))?;
         let justify = ProposalCertificate::try_from(justify)?;
 
-        let high_tc = value.timeout_certificate.map(TryInto::try_into).transpose()?;
+        let high_tc: Option<TimeoutCertificate> = value.timeout_certificate.map(TryInto::try_into).transpose()?;
 
         let header = value.header.ok_or_else(|| anyhow!("BlockHeader not provided"))?;
-        let header = try_convert_proto_block_header(header, justify.calculate_id(), &commands)?;
+        let header = try_convert_proto_block_header(
+            header,
+            justify.calculate_id(),
+            high_tc.as_ref().map(|tc| tc.calculate_id()),
+            &commands,
+        )?;
 
         Ok(Self::new(header, justify, commands, high_tc))
     }
@@ -603,7 +614,7 @@ impl From<&TimeoutCertificate> for proto::consensus::TimeoutCertificate {
         Self {
             epoch: value.epoch().as_u64(),
             block_height: value.height().as_u64(),
-            signatures: value.signatures().iter().map(Into::into).collect(),
+            timeouts: value.timeouts().iter().map(Into::into).collect(),
         }
     }
 }
@@ -616,12 +627,37 @@ impl TryFrom<proto::consensus::TimeoutCertificate> for TimeoutCertificate {
             Epoch(value.epoch),
             NodeHeight(value.block_height),
             value
-                .signatures
+                .timeouts
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()
-                .context("invalid encoding of signatures")?,
+                .context("invalid encoding of timeouts")?,
         ))
+    }
+}
+
+// -------------------------------- SignedTimeout -------------------------------- //
+
+impl From<&SignedTimeout> for proto::consensus::SignedTimeout {
+    fn from(value: &SignedTimeout) -> Self {
+        Self {
+            high_pc_height: value.high_pc_height.as_u64(),
+            signature: Some((&value.signature).into()),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::SignedTimeout> for SignedTimeout {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::SignedTimeout) -> Result<Self, Self::Error> {
+        Ok(Self {
+            high_pc_height: NodeHeight(value.high_pc_height),
+            signature: value
+                .signature
+                .ok_or_else(|| anyhow!("Signature is missing"))?
+                .try_into()?,
+        })
     }
 }
 

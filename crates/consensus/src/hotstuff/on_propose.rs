@@ -667,6 +667,7 @@ where TConsensusSpec: ConsensusSpec
             ProtocolVersion::at(self.config.network, epoch),
             *parent_block.block_id(),
             high_qc_id,
+            propose_high_tc.as_ref().map(|tc| tc.calculate_id()),
             next_height,
             epoch,
             local_committee_info.shard_group(),

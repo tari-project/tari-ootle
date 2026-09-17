@@ -151,6 +151,7 @@ impl Block {
             protocol_version,
             parent,
             justify.calculate_id(),
+            high_tc.as_ref().map(|tc| tc.calculate_id()),
             height,
             epoch,
             shard_group,

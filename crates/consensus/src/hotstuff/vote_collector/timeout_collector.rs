@@ -73,8 +73,8 @@ where TConsensusSpec: ConsensusSpec
 
         match result {
             Ok(Some((quorum_votes, _))) => {
-                let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
-                let new_tc = TimeoutCertificate::new(current_epoch, height, signatures);
+                let timeouts = quorum_votes.iter().map(|vote| vote.as_signed_timeout()).collect();
+                let new_tc = TimeoutCertificate::new(current_epoch, height, timeouts);
                 let high_tc = self.store.with_write_tx(|tx| new_tc.update_highest(tx))?;
                 if new_tc.calculate_id() == *high_tc.id() {
                     info!(target: LOG_TARGET, "🕒️ New HIGH {}", new_tc);

@@ -84,4 +84,10 @@ export type BlockHeader = {
    * existed decode and hash unchanged.
    */
   protocol_version: number;
+  /**
+   * The id of the timeout certificate this block carries, or `None` when it carries none. From
+   * [`ProtocolVersion::V1`] it is part of the metadata hash and therefore of the signed block id, so a validity
+   * rule that reads the certificate (`check_justify_reaches_timeout_certificate`) reads data the proposer signed.
+   */
+  timeout_certificate_id: string | null;
 };

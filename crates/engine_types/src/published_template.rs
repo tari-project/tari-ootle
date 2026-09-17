@@ -150,7 +150,25 @@ impl AsRef<[u8]> for PublishedTemplateAddress {
 
 newtype_struct_serde_impl!(PublishedTemplateAddress, BorTag<ObjectKey, TAG>);
 
-pub type TemplateBlob = MaxBytes<{ limits::ENGINE_LIMITS.max_template_binary_size_bytes }>;
+/// Wire-format ceiling for a published template binary.
+///
+/// What may be published is a policy question — [`limits::ENGINE_LIMITS`]`.max_template_binary_size_bytes`, enforced
+/// by `PublishTemplateLimitValidator` before a transaction is gossiped or stored and again by the engine at
+/// execution. What decodes is a format question, and it stays fixed while that policy limit moves: a policy limit
+/// below this ceiling is a rule about future publishes, whereas a decode limit below it renders templates already
+/// committed to state unreadable.
+///
+/// A published template is exempt from [`limits::EngineLimits::max_substate_size`], so this is the only size bound
+/// its substate format carries.
+pub const MAX_TEMPLATE_BLOB_WIRE_BYTES: usize = 2 * 1024 * 1024; // 2 MiB
+
+const _: () = assert!(
+    limits::ENGINE_LIMITS.max_template_binary_size_bytes <= MAX_TEMPLATE_BLOB_WIRE_BYTES,
+    "the publish limit must stay within the wire ceiling, or a publish the engine accepts encodes a substate that \
+     cannot be decoded"
+);
+
+pub type TemplateBlob = MaxBytes<MAX_TEMPLATE_BLOB_WIRE_BYTES>;
 
 pub type TemplateName = MaxString<{ limits::ENGINE_LIMITS.max_template_name_length }>;
 
@@ -198,5 +216,33 @@ impl PublishedTemplate {
             at_epoch: self.at_epoch,
             metadata_hash: self.metadata_hash,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The publish limit is applied before a transaction executes, leaving the format free to carry more than it
+    /// admits. That headroom is what lets the publish limit move while the format stays put.
+    #[test]
+    fn a_blob_past_the_publish_limit_but_within_the_ceiling_round_trips() {
+        let bytes = vec![0xABu8; limits::ENGINE_LIMITS.max_template_binary_size_bytes + 1];
+        let blob = TemplateBlob::new_checked(bytes.clone()).expect("within the wire ceiling");
+
+        let encoded = tari_bor::encode(&blob).unwrap();
+        let decoded = tari_bor::decode::<TemplateBlob>(&encoded).unwrap();
+
+        assert_eq!(decoded.as_slice(), bytes.as_slice());
+    }
+
+    #[test]
+    fn a_blob_past_the_ceiling_does_not_decode() {
+        let bytes = vec![0xABu8; MAX_TEMPLATE_BLOB_WIRE_BYTES + 1];
+        assert!(TemplateBlob::new_checked(bytes.clone()).is_none());
+
+        let encoded = tari_bor::encode(&tari_bor::Value::Bytes(bytes)).unwrap();
+
+        tari_bor::decode::<TemplateBlob>(&encoded).unwrap_err();
     }
 }

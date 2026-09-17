@@ -239,7 +239,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     fn enforce_substate_size_limit(id: &SubstateId, value: &SubstateValue) -> Result<(), RuntimeError> {
-        // Published template has its own size restriction
+        // A published template carries its own bound, `max_template_binary_size_bytes`, applied at ingress and again
+        // in `TransactionProcessor::publish_template` and sized by what the binary's compile costs.
         if value.published_template().is_some() {
             return Ok(());
         }

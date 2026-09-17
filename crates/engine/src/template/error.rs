@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use tari_engine_types::commit_result::ExecutionFailureCode;
 use wasmer::InstantiationError;
 
 use crate::wasm::WasmExecutionError;
@@ -43,5 +44,20 @@ pub enum TemplateLoaderError {
 impl From<wasmer::InstantiationError> for TemplateLoaderError {
     fn from(value: InstantiationError) -> Self {
         Self::InstantiationError(Box::new(value))
+    }
+}
+
+impl TemplateLoaderError {
+    /// A module that cannot be compiled, instantiated or deserialized is a property of what was
+    /// published, so the template is at fault.
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        match self {
+            Self::WasmModuleError(err) => err.failure_code(),
+            Self::CompileError(_) |
+            Self::InstantiationError(_) |
+            Self::ExportError(_) |
+            Self::RuntimeError(_) |
+            Self::DeserializeError(_) => ExecutionFailureCode::TemplateError,
+        }
     }
 }

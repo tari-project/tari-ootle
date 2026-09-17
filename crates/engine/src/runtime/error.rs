@@ -20,9 +20,10 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use log::warn;
 use tari_bor::BorError;
 use tari_engine_types::{
-    commit_result::RejectReason,
+    commit_result::{ExecutionFailureCode, RejectReason},
     entity_id_provider::EntityIdProviderError,
     id_provider::IdProviderError,
     indexed_value::IndexedValueError,
@@ -62,7 +63,10 @@ use super::workspace::WorkspaceError;
 use crate::{
     runtime::{ActionIdent, RuntimeModuleError, locking::LockError},
     state_store::StateStoreError,
+    transaction::TransactionErrorKind,
 };
+
+const LOG_TARGET: &str = "tari::ootle::engine::runtime::error";
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -299,13 +303,15 @@ pub enum RuntimeError {
     CrossTemplateCallFunctionError {
         template_address: TemplateAddress,
         function: String,
-        details: String,
+        /// The callee's own error. Kept whole rather than rendered so that what failed inside the call —
+        /// an access denial, say — still reaches the caller's [`ExecutionFailureCode`].
+        details: Box<TransactionErrorKind>,
     },
     #[error("Cross-template call failed for method '{method}' on component '{component_address}': {details}")]
     CrossTemplateCallMethodError {
         component_address: ComponentAddress,
         method: String,
-        details: String,
+        details: Box<TransactionErrorKind>,
     },
     #[error("Virtual substate not found: {address}")]
     VirtualSubstateNotFound { address: VirtualSubstateId },
@@ -433,7 +439,193 @@ impl RuntimeError {
                  points: {consumed_points} of {allowance} allowance points already consumed"
             )),
             Self::FeePaymentInMainIntent => RejectReason::FeePaymentInMainIntent,
-            err => RejectReason::ExecutionFailure(format!("{instruction_prefix}{err}")),
+            err => {
+                let code = err.failure_code();
+                if code == ExecutionFailureCode::Unclassified {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Unclassified execution failure — this error needs a failure_code: {err}"
+                    );
+                }
+                RejectReason::ExecutionFailure {
+                    code,
+                    message: format!("{instruction_prefix}{err}"),
+                }
+            },
+        }
+    }
+
+    /// The coarse reason this failure is reported to consumers as.
+    ///
+    /// Exhaustive by design: a new `RuntimeError` variant must be classified here before it compiles, which
+    /// is the only thing that keeps the taxonomy from decaying back into
+    /// [`ExecutionFailureCode::Unclassified`]. Do not add a `_` arm.
+    // One arm per variant is the point: the length is what makes an unclassified error impossible.
+    #[allow(clippy::too_many_lines)]
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        use ExecutionFailureCode as C;
+        match self {
+            Self::EncodingError(_) |
+            Self::IndexedValueError(_) |
+            Self::WorkspaceError(_) |
+            Self::SubstateAlreadySpent { .. } |
+            Self::ProofNotInScope { .. } |
+            Self::AddressAllocationNotInScope { .. } |
+            Self::SignerBadgeNotInScope { .. } |
+            Self::InvalidArgument { .. } |
+            Self::IntrinsicNotSupported { .. } |
+            Self::InvalidNumberOfArguments { .. } |
+            Self::InvalidAmount { .. } |
+            Self::BucketNotFound { .. } |
+            Self::BucketNotInScope { .. } |
+            Self::ProofNotFound { .. } |
+            Self::ItemNotOnWorkspace { .. } |
+            Self::NoLastInstructionOutput |
+            Self::DuplicateNonFungibleId { .. } |
+            Self::SpendContextUnavailable |
+            Self::ConfidentialOutputAlreadyClaimed { .. } |
+            Self::NoFeesPaid { .. } |
+            Self::ComponentAlreadyExists { .. } |
+            Self::InvalidOpLockedBucket { .. } |
+            Self::DuplicateReference { .. } |
+            Self::ArgumentValidationError(_) |
+            Self::FeePaymentInMainIntent |
+            Self::AddressAllocationNotFound { .. } |
+            Self::AddressAllocationTypeMismatch { .. } |
+            Self::AddressAllocationNoTemplate |
+            Self::NumericConversionError { .. } |
+            Self::NotSupported { .. } => C::InvalidArgument,
+
+            Self::SubstateNotFound { .. } |
+            Self::RootSubstateNotFound { .. } |
+            Self::ReferencedSubstateNotFound { .. } |
+            Self::NonExistentSubstateReturned { .. } |
+            Self::ComponentReferencedUnknownSubstate { .. } |
+            Self::LayerOneCommitmentNotFound { .. } |
+            Self::VaultNotFound { .. } |
+            Self::NonFungibleNotFound { .. } |
+            Self::ResourceNotFound { .. } |
+            Self::TemplateNotFound { .. } |
+            Self::FailedToLoadTemplate { .. } |
+            Self::VirtualSubstateNotFound { .. } => C::NotFound,
+
+            Self::SubstateOutOfScope { .. } |
+            Self::SubstateNotOwned { .. } |
+            Self::AccessDenied { .. } |
+            Self::AccessDeniedSetComponentState { .. } |
+            Self::AccessDeniedAuthHook { .. } |
+            Self::AccessDeniedOwnerRequired { .. } |
+            Self::WriteInReadOnlyContext |
+            Self::ForbiddenInReadOnlyContext { .. } |
+            Self::WriteOutsideOwnComponent { .. } |
+            Self::ForbiddenInAuthHookContext { .. } |
+            Self::CrossTemplateCallNotAllowed { .. } => C::AccessDenied,
+
+            Self::VaultFrozen { .. } |
+            Self::InvalidOpNonFungibleBurnt { .. } |
+            Self::FreezeResourceMismatch { .. } |
+            Self::RecallResourceMismatch { .. } => C::ResourceRestricted,
+
+            Self::ResourceSupplyWouldOverflow { .. } |
+            Self::ResourceSupplyWouldUnderflow { .. } |
+            Self::ValueSumOverflow { .. } => C::InsufficientFunds,
+
+            Self::MissingValueProofForCommitment { .. } |
+            Self::SpendConditionNotMet { .. } |
+            Self::InvalidClaimProof { .. } => C::InvalidProof,
+
+            Self::BucketNotEmpty { .. } |
+            Self::OrphanedSubstate { .. } |
+            Self::OrphanedSubstates { .. } |
+            Self::UnreturnedBuckets { .. } |
+            Self::UnreturnedProofs { .. } |
+            Self::AddressAllocationNotUsed { .. } => C::DanglingResources,
+
+            Self::TooManyOutputs(_) | Self::TooManyEntities(_) | Self::MaxCallDepthExceeded { .. } => C::LimitExceeded,
+
+            // Paying more is what clears these.
+            Self::InsufficientFeesPaid { .. } | Self::InsufficientFeesForNativeExecution { .. } => C::OutOfCompute,
+
+            // Flat ceilings. No fee raises either, so the work has to move: out of the fee intent for the
+            // credit, across transactions for the per-transaction maximum.
+            Self::FeeIntentComputeExceeded { .. } | Self::MaxNativeExecutionPointsExceeded { .. } => C::LimitExceeded,
+
+            Self::TransientValueInSubstate { .. } |
+            Self::InvalidMethodAccessRule { .. } |
+            Self::InvalidReturnValue(_) |
+            Self::NotInComponentContext { .. } |
+            Self::EngineCallOutsideInvocation { .. } |
+            Self::InvalidEventTopic { .. } |
+            Self::UnexpectedNonNullInAuthHookReturn => C::TemplateError,
+
+            Self::StateStoreError(_) |
+            Self::LockSubstateMismatch { .. } |
+            Self::CurrentFrameError { .. } |
+            Self::ModuleError(_) |
+            Self::NoFeeCheckpoint |
+            Self::TransactionReceiptAlreadyExists { .. } |
+            Self::TransactionReceiptNotFound |
+            Self::AuthScopeStackEmpty |
+            Self::DuplicateSubstate { .. } |
+            Self::CallFrameRemainingOnStack { .. } |
+            Self::InvariantError { .. } |
+            Self::LockError(_) |
+            Self::DanglingSubstateLocks { .. } |
+            Self::NoActiveCallFrame |
+            Self::DuplicateBucket { .. } |
+            Self::DuplicateProof { .. } => C::EngineInvariant,
+
+            // Delegating arms: the wrapped error is the one that knows.
+            Self::ResourceError(err) => err.failure_code(),
+            Self::TransactionCommitError(err) => err.failure_code(),
+            Self::AssertError(err) => err.failure_code(),
+            Self::LimitError(err) => err.failure_code(),
+            // The spend script's rejection is itself a runtime error; reporting `InvalidProof` here would
+            // hide, say, an access denial raised inside the script.
+            Self::SpendScriptRejected { details } => details.failure_code(),
+            // A cross-template call reports what the callee failed with, not the fact that a call was made.
+            Self::CrossTemplateCallFunctionError { details, .. } |
+            Self::CrossTemplateCallMethodError { details, .. } => details.failure_code(),
+        }
+    }
+}
+
+impl AssertError {
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        match self {
+            Self::InvalidResource { .. } |
+            Self::InvalidResourceType { .. } |
+            Self::BucketAmountAssertionFail { .. } |
+            Self::BucketContainsNonFungiblesAssertionFail { .. } |
+            Self::BucketContainsNonFungiblesAnyAssertionFail { .. } => ExecutionFailureCode::AssertionFailed,
+            // The assertion never ran: the workspace slot held the wrong kind of value.
+            Self::NotABucket { .. } | Self::ValueIsNull => ExecutionFailureCode::InvalidArgument,
+        }
+    }
+}
+
+impl LimitError {
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        match self {
+            Self::SubstateSizeExceeded { .. } |
+            Self::LogSizeExceeded { .. } |
+            Self::MaxLogsExceeded |
+            Self::MaxEventsExceeded |
+            Self::EventSizeExceeded { .. } |
+            Self::MaxRandomBytesLenExceeded { .. } => ExecutionFailureCode::LimitExceeded,
+        }
+    }
+}
+
+impl TransactionCommitError {
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        match self {
+            Self::DanglingBuckets { .. } |
+            Self::DanglingProofs { .. } |
+            Self::DanglingLockedValueInVault { .. } |
+            Self::DanglingAddressAllocations { .. } => ExecutionFailureCode::DanglingResources,
+            Self::IdProviderError(err) => err.failure_code(),
+            Self::StateStoreError(_) => ExecutionFailureCode::EngineInvariant,
         }
     }
 }

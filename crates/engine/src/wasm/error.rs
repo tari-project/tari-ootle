@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::BorError;
-use tari_engine_types::indexed_value::IndexedValueError;
+use tari_engine_types::{commit_result::ExecutionFailureCode, indexed_value::IndexedValueError};
 use tari_template_abi::{TEMPLATE_DEF_CUSTOM_SECTION, version::WasmAbiVersion};
 use wasmer::{ExportError, InstantiationError, MemoryAccessError};
 
@@ -23,6 +23,11 @@ pub enum WasmExecutionError {
     // NOTE this renders as "Wasm RuntimeError: <message>"
     #[error("Wasm {0}")]
     WasmRuntimeError(#[from] wasmer::RuntimeError),
+    #[error(
+        "Exceeded a fixed compute maximum after consuming {consumed_points} WASM metering points. Whichever cap bound \
+         the call, per call or per transaction, a higher fee does not raise it — split the work up."
+    )]
+    MaxComputeExceeded { consumed_points: u64 },
     #[error(
         "Insufficient fees to pay for compute: consumed {consumed_points} WASM metering points, which exceeds what \
          the paid fees cover. Increase the transaction fee."
@@ -149,5 +154,70 @@ pub enum WasmValidationError {
 impl From<wasmer::InstantiationError> for WasmExecutionError {
     fn from(value: InstantiationError) -> Self {
         Self::InstantiationError(Box::new(value))
+    }
+}
+
+impl WasmExecutionError {
+    /// The coarse reason this failure is reported to consumers as. Exhaustive by design — see
+    /// `RuntimeError::failure_code`.
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        use ExecutionFailureCode as C;
+        match self {
+            // A trap, a bad pointer or a malformed ABI section are all the template's doing: the engine
+            // handed it a well-formed call and the module could not honour it.
+            Self::InstantiationError(_) |
+            Self::ExportError(_) |
+            Self::WasmRuntimeError(_) |
+            Self::ExpectedPointerReturn { .. } |
+            Self::MemoryAccessError(_) |
+            Self::MemoryUnderflow { .. } |
+            Self::MemoryPointerOutOfRange { .. } |
+            Self::MissingAbiFunction { .. } |
+            Self::InvalidEngineOp { .. } |
+            Self::EngineArgDecodeFailed(_) |
+            Self::AbiTemplateDefDecodeError(_) |
+            Self::AbiTemplateDefSectionMalformed { .. } |
+            Self::AbiTemplateDefSectionMissing |
+            Self::UnexpectedAbiFunction { .. } |
+            Self::EncodingError(_) |
+            Self::Panic { .. } |
+            Self::ValueVisitorError(_) |
+            Self::TemplateVersionMismatch { .. } => C::TemplateError,
+
+            Self::InsufficientFeesForCompute { .. } => C::OutOfCompute,
+
+            // Both are flat ceilings a larger fee does not raise; only moving the work clears them.
+            Self::FeeIntentComputeExceeded { .. } | Self::MaxComputeExceeded { .. } => C::LimitExceeded,
+
+            Self::MemoryAllocationTooLarge |
+            Self::MemoryAllocationFailed |
+            Self::CallSizeLimitExceeded { .. } |
+            Self::EngineCallArgSizeExceeded { .. } => C::LimitExceeded,
+
+            Self::InvalidArgumentCount { .. } => C::InvalidArgument,
+            Self::MemoryNotSet => C::EngineInvariant,
+
+            Self::RuntimeError(err) => err.failure_code(),
+            Self::WasmValidationError(err) => err.failure_code(),
+        }
+    }
+}
+
+impl WasmValidationError {
+    /// Every validation failure is a property of the published module, so the template is always at fault.
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        match self {
+            Self::FunctionNameTooLong { .. } |
+            Self::FunctionTooManyArguments { .. } |
+            Self::FunctionTooManyTupleReturn { .. } |
+            Self::TooManyFunctions { .. } |
+            Self::InvalidMigrationReturnType { .. } |
+            Self::DisallowedCustomSection { .. } |
+            Self::StartSectionNotAllowed |
+            Self::TooManyTables { .. } |
+            Self::TooManyGlobals { .. } |
+            Self::MissingExport { .. } |
+            Self::InvalidExportSignature { .. } => ExecutionFailureCode::TemplateError,
+        }
     }
 }

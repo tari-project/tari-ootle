@@ -7,7 +7,7 @@ use ootle_byte_type::ToByteType;
 use rand::random;
 use tari_engine::transaction::TransactionErrorKind;
 use tari_engine_types::{
-    commit_result::{RejectReason, TransactionResult},
+    commit_result::{ExecutionFailureCode, RejectReason, TransactionResult},
     hashing::hash_template_code,
     limits,
     published_template::PublishedTemplateAddress,
@@ -72,11 +72,11 @@ fn publish_template_invalid_binary() {
         vec![owner_proof],
     );
 
-    assert!(matches!(result, RejectReason::ExecutionFailure(_)));
-
-    if let RejectReason::ExecutionFailure(error) = result {
-        assert!(error.starts_with("At instruction #1: Load template error:"));
-    }
+    let RejectReason::ExecutionFailure { code, message } = result else {
+        panic!("expected an execution failure, got {result:?}");
+    };
+    assert_eq!(code, ExecutionFailureCode::TemplateError);
+    assert!(message.starts_with("At instruction #1: Load template error:"));
 }
 
 #[test]

@@ -416,8 +416,9 @@ fn resolve_large_amount_fixture_seed() -> Fixture {
 // there is no CBOR byte stream here. Three cases lock the three TransactionResult arms, including the
 // `EpochExpired` abort drift case.
 
-/// The 3 committed result-parse vectors: a full Accept (fees + event + diff), an AcceptFeeRejectRest,
-/// and a Reject whose reason is `Abort{EpochExpired}` — the canonical-AbortReason drift case.
+/// The committed result-parse vectors: a full Accept (fees + event + diff), an AcceptFeeRejectRest, a
+/// Reject whose reason is `Abort{EpochExpired}` — the canonical-AbortReason drift case — and a Reject
+/// whose reason is a classified `ExecutionFailure`, which pins the failure sub-code the same way.
 const PARSE_VECTORS: &[VectorCase] = &[
     ("parse_finalized_result/accept.json", parse_accept_fixture_seed),
     (
@@ -427,6 +428,10 @@ const PARSE_VECTORS: &[VectorCase] = &[
     (
         "parse_finalized_result/reject_epoch_expired.json",
         parse_reject_epoch_expired_fixture_seed,
+    ),
+    (
+        "parse_finalized_result/reject_access_denied.json",
+        parse_reject_access_denied_fixture_seed,
     ),
     ("parse_finalized_result/dry_run.json", parse_dry_run_fixture_seed),
 ];
@@ -568,7 +573,7 @@ fn parse_accept_fee_reject_rest_fixture_seed() -> Fixture {
     let raw = parse_finalized_wire_json(parse_execute_result(
         TransactionResult::AcceptFeeRejectRest(
             parse_accept_diff(),
-            RejectReason::ExecutionFailure("main intent failed".to_string()),
+            RejectReason::execution_failure_unclassified("main intent failed"),
         ),
         Some(7),
     ));
@@ -586,6 +591,20 @@ fn parse_reject_epoch_expired_fixture_seed() -> Fixture {
         None,
     ));
     parse_fixture_seed("parse_finalized_result/reject_epoch_expired", raw)
+}
+
+/// Reject vector whose reason is an `ExecutionFailure` carrying a classified code. Proves the parser
+/// surfaces `ACCESS_DENIED` as a stable failure sub-code rather than leaving it inside the message.
+fn parse_reject_access_denied_fixture_seed() -> Fixture {
+    use tari_engine_types::commit_result::{ExecutionFailureCode, RejectReason, TransactionResult};
+    let raw = parse_finalized_wire_json(parse_execute_result(
+        TransactionResult::Reject(RejectReason::ExecutionFailure {
+            code: ExecutionFailureCode::AccessDenied,
+            message: "At instruction #0: Access Denied: Withdraw".to_string(),
+        }),
+        None,
+    ));
+    parse_fixture_seed("parse_finalized_result/reject_access_denied", raw)
 }
 
 /// Wraps an `ExecuteResult` in the indexer **dry-run** response JSON

@@ -508,7 +508,7 @@ mod tests {
     fn parses_accept_fee_reject_rest() {
         let result = TransactionResult::AcceptFeeRejectRest(
             accept_diff(),
-            InternalRejectReason::ExecutionFailure("boom".to_string()),
+            InternalRejectReason::execution_failure_unclassified("boom"),
         );
         let json = finalized_wire_json(execute_result(result, Some(7)));
         let parsed = parse_finalized_result(&json).unwrap();

@@ -4,7 +4,7 @@
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::fees::FeeTable;
 use tari_engine_types::{
-    commit_result::{RejectReason, TransactionResult},
+    commit_result::{ExecutionFailureCode, RejectReason, TransactionResult},
     fees::{FeeReceipt, FeeSource},
     limits::ENGINE_LIMITS,
 };
@@ -123,7 +123,10 @@ fn deducts_fees_when_transaction_fails() {
 
     let reason = result.expect_failure();
     result.expect_finalization_success();
-    assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
+    assert!(matches!(reason, RejectReason::ExecutionFailure {
+        code: ExecutionFailureCode::InvalidArgument,
+        ..
+    }));
 
     // Check the fee was still paid
     let payment = result.finalize.fee_receipt;
@@ -243,9 +246,9 @@ fn failed_fee_transaction() {
         .unwrap();
 
     let reason = result.expect_finalization_failure();
-    assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
+    assert!(matches!(reason, RejectReason::ExecutionFailure { .. }));
     let reason = result.expect_failure();
-    assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
+    assert!(matches!(reason, RejectReason::ExecutionFailure { .. }));
 
     let new_balance = test
         .read_only_state_store()
@@ -544,7 +547,10 @@ fn fail_pay_negative_fee() {
     );
 
     assert!(
-        matches!(reason, RejectReason::ExecutionFailure(_)),
+        matches!(reason, RejectReason::ExecutionFailure {
+            code: ExecutionFailureCode::TemplateError,
+            ..
+        }),
         "actual reason: {reason}"
     );
 }
@@ -719,7 +725,10 @@ fn dangling_bucket_pay_fees() {
 
     // Check that the failure reason is actually the dangling bucket
     let reason = result.expect_failure();
-    assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
+    assert!(matches!(reason, RejectReason::ExecutionFailure {
+        code: ExecutionFailureCode::DanglingResources,
+        ..
+    }));
     assert!(reason.to_string().contains("dangling bucket"));
 
     // The transaction still finishes successfully

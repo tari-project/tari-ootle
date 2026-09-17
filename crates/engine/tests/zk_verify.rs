@@ -11,7 +11,7 @@
 
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
-    commit_result::RejectReason,
+    commit_result::{ExecutionFailureCode, RejectReason},
     limits::{FREE_COMPUTE_GRACE_POINTS, MAX_WASM_POINTS_PER_TRANSACTION},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
@@ -262,7 +262,10 @@ fn stacked_verifies_exhaust_the_transaction_budget() {
 
     let reason = h.test.execute_expect_failure(tx, vec![]);
     assert!(
-        matches!(reason, RejectReason::ExecutionFailure(_)),
+        matches!(reason, RejectReason::ExecutionFailure {
+            code: ExecutionFailureCode::LimitExceeded,
+            ..
+        }),
         "expected {count} stacked verifies to run out of gas, got {reason:?}",
     );
 }
@@ -298,7 +301,13 @@ fn verify_does_not_fit_the_fee_intent_credit() {
 
     let reason = test.execute_expect_failure(tx, vec![owner]);
     assert!(
-        matches!(&reason, RejectReason::ExecutionFailure(msg) if msg.contains("compute credit")),
+        matches!(
+            &reason,
+            RejectReason::ExecutionFailure {
+                code: ExecutionFailureCode::LimitExceeded,
+                message,
+            } if message.contains("compute credit")
+        ),
         "expected the fee intent's compute credit to be the binding limit, got {reason:?}",
     );
 }

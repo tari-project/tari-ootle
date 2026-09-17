@@ -530,7 +530,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
             method: method.to_string(),
-            details: e.to_string(),
+            details: Box::new(e),
         })
     }
 
@@ -552,7 +552,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
             template_address: *template_address,
             function: function.to_string(),
-            details: e.to_string(),
+            details: Box::new(e),
         })
     }
 

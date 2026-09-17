@@ -441,7 +441,12 @@ impl Display for TransactionResult {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RejectReason {
     #[n(0)]
-    ExecutionFailure(#[n(0)] String),
+    ExecutionFailure {
+        #[n(0)]
+        code: ExecutionFailureCode,
+        #[n(1)]
+        message: String,
+    },
     #[n(1)]
     SubstateNotFound(#[n(0)] String),
     #[n(2)]
@@ -473,7 +478,7 @@ pub enum RejectReason {
 impl Display for RejectReason {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Self::ExecutionFailure(msg) => write!(f, "Execution failure: {}", msg),
+            Self::ExecutionFailure { code, message } => write!(f, "Execution failure ({code}): {message}"),
             Self::SubstateNotFound(msg) => write!(f, "Substates not found: {}", msg),
             Self::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
             Self::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
@@ -496,6 +501,124 @@ impl Display for RejectReason {
             },
             Self::Abort { reason } => write!(f, "Abnormal abort: {reason}"),
         }
+    }
+}
+
+impl RejectReason {
+    /// An execution failure whose cause has no [`ExecutionFailureCode`] yet.
+    ///
+    /// Engine code must not call this: the engine classifies through `failure_code`, and a caller that
+    /// reaches for `Unclassified` by hand puts a failure beyond the reach of every consumer that branches
+    /// on the code. It exists for test fixtures and for boundaries that only ever had a message.
+    pub fn execution_failure_unclassified(message: impl Into<String>) -> Self {
+        Self::ExecutionFailure {
+            code: ExecutionFailureCode::Unclassified,
+            message: message.into(),
+        }
+    }
+
+    /// The failure code, for the one variant that carries one.
+    pub fn execution_failure_code(&self) -> Option<ExecutionFailureCode> {
+        match self {
+            Self::ExecutionFailure { code, .. } => Some(*code),
+            _ => None,
+        }
+    }
+}
+
+/// Why a transaction failed during execution, coarse enough for a consumer to act on.
+///
+/// The engine's internal error types carry far more detail than a consumer can branch on, and that detail
+/// is a rendered string by the time it reaches [`RejectReason::ExecutionFailure`]. This enum is the part of
+/// it an application can make a decision from: whether to retry, to raise the fee, to re-quote, to fix its
+/// own call, or to tell the user their action was refused.
+///
+/// A code must be derivable from the error variant alone. The rendered message reaches consensus, so two
+/// validators that disagreed about the code would already have disagreed about the message — but a code is
+/// matched on rather than read, so a distinction that is invisible in prose becomes a fork here. See
+/// `SubstateStoreError::SubstateNotFound`, where two conditions are deliberately collapsed because a node
+/// with pruned history cannot tell them apart.
+///
+/// The variant names are a public contract — hosts branch on them, and the discriminants are encoded to
+/// consensus. **Never rename or renumber a variant; only add.**
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Deserialize,
+    Serialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum ExecutionFailureCode {
+    /// The fault lies in the template: it returned an error, panicked, trapped, or misused the engine.
+    /// A caller cannot fix its request to make the call succeed, and a retry will fail the same way.
+    ///
+    /// A panic carries the template author's own message, which is the only failure text in this enum
+    /// written to be read by an end user; the rest carry engine wording.
+    #[n(0)]
+    TemplateError,
+    /// An access rule, owner rule or auth hook refused the action.
+    #[n(1)]
+    AccessDenied,
+    /// A transaction-level assertion did not hold, e.g. a bucket did not contain the resource or amount
+    /// the manifest asserted. The usual cause is a quote that moved between building and executing.
+    #[n(2)]
+    AssertionFailed,
+    /// A vault or bucket did not hold enough of a resource, or a supply would over/underflow.
+    #[n(3)]
+    InsufficientFunds,
+    /// Execution ran past what the fee paid for. Paying more clears it, which is the line between this and
+    /// [`Self::LimitExceeded`]. Distinct from [`RejectReason::InsufficientFeesPaid`], which is the
+    /// settled-up shortfall rather than a mid-execution stop.
+    #[n(4)]
+    OutOfCompute,
+    /// A fixed engine ceiling was reached: compute caps, substate/event/log size, event and log counts, call
+    /// depth, generated outputs or entities, template size. No fee raises any of them, so the work has to be
+    /// made smaller or split up.
+    #[n(5)]
+    LimitExceeded,
+    /// The call was malformed — wrong argument count, undecodable argument, unknown function, an amount
+    /// that is not valid for the operation. A client-side bug rather than anything the user did.
+    #[n(6)]
+    InvalidArgument,
+    /// Something named by the transaction did not exist at execution time: a template, component, resource,
+    /// vault, non-fungible or workspace item. Distinct from [`RejectReason::SubstateNotFound`], which is a
+    /// declared *input* that could not be resolved.
+    #[n(7)]
+    NotFound,
+    /// The transaction left engine-owned values unaccounted for — buckets, proofs, address allocations or
+    /// substates that were neither consumed nor returned. A manifest bug.
+    #[n(8)]
+    DanglingResources,
+    /// The resource itself refused: a frozen vault, a burnt non-fungible, a recall or freeze aimed at the
+    /// wrong resource. The user's own authority is not the problem, so it is not [`Self::AccessDenied`].
+    #[n(9)]
+    ResourceRestricted,
+    /// A cryptographic proof did not verify, or a spend script rejected the spend: range proofs, balance
+    /// proofs, confidential and stealth proofs, burn-claim proofs.
+    #[n(10)]
+    InvalidProof,
+    /// The engine reached a state it holds to be impossible. Always a bug in the engine, never in the
+    /// transaction; a consumer should surface it as such rather than asking the user to retry.
+    #[n(11)]
+    EngineInvariant,
+    /// No code has been assigned to this failure yet. Consumers fall back to the message.
+    ///
+    /// Not a resting place: the engine emits a `warn!` whenever it produces one, so the tail can be
+    /// prioritised from real traffic instead of guessed at.
+    #[n(12)]
+    Unclassified,
+}
+
+impl Display for ExecutionFailureCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -549,7 +672,7 @@ impl From<&RejectReason> for AbortReason {
     fn from(reject_reason: &RejectReason) -> Self {
         match reject_reason {
             RejectReason::Abort { reason } => *reason,
-            RejectReason::ExecutionFailure(_) => Self::ExecutionFailure,
+            RejectReason::ExecutionFailure { .. } => Self::ExecutionFailure,
             RejectReason::SubstateNotFound(_) => Self::OneOrMoreInputsNotFound,
             RejectReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             RejectReason::FailedToLockInputs(_) => Self::LockInputsFailed,
@@ -575,7 +698,7 @@ mod tests {
             Hash32::from_array([0u8; Hash32::LENGTH]),
             vec![],
             vec![],
-            TransactionResult::Reject(RejectReason::ExecutionFailure("failed".to_string())),
+            TransactionResult::Reject(RejectReason::execution_failure_unclassified("failed")),
             FeeReceipt::builder().with_cost_breakdown(breakdown).build(),
         )
     }

@@ -22,10 +22,16 @@
 
 use std::error::Error;
 
-use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValueError};
+use log::warn;
+use tari_engine_types::{
+    commit_result::{ExecutionFailureCode, RejectReason},
+    indexed_value::IndexedValueError,
+};
 use tari_template_lib::types::{ComponentAddress, HashParseError, TemplateAddress};
 
 use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
+
+const LOG_TARGET: &str = "tari::ootle::engine::transaction::error";
 
 #[derive(Debug)]
 pub struct TransactionError {
@@ -61,7 +67,19 @@ impl TransactionError {
             TransactionErrorKind::WasmExecutionError(WasmExecutionError::InsufficientFeesForCompute { .. }) => {
                 RejectReason::InsufficientFeesPaid(self.to_string())
             },
-            _ => RejectReason::ExecutionFailure(self.to_string()),
+            _ => {
+                let code = self.kind.failure_code();
+                if code == ExecutionFailureCode::Unclassified {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Unclassified execution failure — this error needs a failure_code: {self}"
+                    );
+                }
+                RejectReason::ExecutionFailure {
+                    code,
+                    message: self.to_string(),
+                }
+            },
         }
     }
 }
@@ -139,4 +157,34 @@ pub enum TransactionErrorKind {
     },
     #[error("Blob index {index} out of bounds (transaction has {count} blob(s))")]
     BlobIndexOutOfBounds { index: u8, count: usize },
+}
+
+impl TransactionErrorKind {
+    /// The coarse reason this failure is reported to consumers as. Exhaustive by design — see
+    /// `RuntimeError::failure_code`.
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        use ExecutionFailureCode as C;
+        match self {
+            Self::TemplateNotFound { .. } => C::NotFound,
+            // The template was found; it could not be loaded, which is a property of the published module.
+            Self::FailedToLoadTemplate { .. } => C::TemplateError,
+            Self::LoadTemplate(err) => err.failure_code(),
+
+            Self::BorError(_) |
+            Self::ValueVisitorError(_) |
+            Self::FunctionNotFound { .. } |
+            Self::HashConversion(_) |
+            Self::NotAMigrationFunction { .. } |
+            Self::CannotCallMigrationFunctionDirectly { .. } |
+            Self::CannotCallAccountConstructor |
+            Self::InvalidCreateAccount { .. } |
+            Self::BlobIndexOutOfBounds { .. } => C::InvalidArgument,
+
+            Self::WasmBinaryTooBig { .. } => C::LimitExceeded,
+            Self::InvariantError { .. } | Self::TemplateProvider(_) => C::EngineInvariant,
+
+            Self::WasmExecutionError(err) => err.failure_code(),
+            Self::RuntimeError(err) => err.failure_code(),
+        }
+    }
 }

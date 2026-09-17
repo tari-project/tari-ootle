@@ -61,6 +61,7 @@ export * from "./types/Event";
 export * from "./types/EvidenceInputLockData";
 export * from "./types/Evidence";
 export * from "./types/ExecuteResult";
+export * from "./types/ExecutionFailureCode";
 export * from "./types/ExtraData";
 export * from "./types/FeeBreakdown";
 export * from "./types/FeeCostBreakdown";

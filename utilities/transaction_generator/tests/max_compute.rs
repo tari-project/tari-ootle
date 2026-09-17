@@ -6,7 +6,11 @@
 //! these tests prove it succeeds, pin how close to the limit it runs, and let `MAX_ROUNDS` be
 //! retuned if the cost drifts.
 
-use tari_engine_types::{commit_result::RejectReason, fees::FeeSource, limits::MAX_WASM_POINTS_PER_CALL};
+use tari_engine_types::{
+    commit_result::{ExecutionFailureCode, RejectReason},
+    fees::FeeSource,
+    limits::MAX_WASM_POINTS_PER_CALL,
+};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
 
@@ -122,7 +126,10 @@ fn stacked_busy_max_is_rejected_by_per_transaction_budget() {
         vec![],
     );
     assert!(
-        matches!(reason, RejectReason::ExecutionFailure(_)),
+        matches!(reason, RejectReason::ExecutionFailure {
+            code: ExecutionFailureCode::LimitExceeded,
+            ..
+        }),
         "expected an out-of-gas execution failure from exceeding the per-transaction budget, got {reason:?}",
     );
 }

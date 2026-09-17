@@ -6,7 +6,10 @@
 //! could run for far longer than any single call by stacking instructions. These tests prove the
 //! total is capped across calls.
 
-use tari_engine_types::{commit_result::RejectReason, limits::MAX_WASM_POINTS_PER_TRANSACTION};
+use tari_engine_types::{
+    commit_result::{ExecutionFailureCode, RejectReason},
+    limits::MAX_WASM_POINTS_PER_TRANSACTION,
+};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
 
@@ -47,7 +50,10 @@ fn per_transaction_budget_caps_total_across_calls() {
     // though, on a fresh per-call budget, it would have succeeded.
     let reason = test.execute_expect_failure(call(rounds, 2), vec![owner.clone()]);
     assert!(
-        matches!(reason, RejectReason::ExecutionFailure(_)),
+        matches!(reason, RejectReason::ExecutionFailure {
+            code: ExecutionFailureCode::LimitExceeded,
+            ..
+        }),
         "expected an out-of-gas execution failure, got {reason:?}",
     );
 }

@@ -91,7 +91,7 @@ export function rejectReasonToString(reason: RejectReason | null): string {
     return `ShardsNotPledged: ${reason.ShardsNotPledged}`;
   }
   if ("ExecutionFailure" in reason) {
-    return `ExecutionFailure: ${reason.ExecutionFailure}`;
+    return `ExecutionFailure (${reason.ExecutionFailure.code}): ${reason.ExecutionFailure.message}`;
   }
   if ("ShardPledgedToAnotherPayload" in reason) {
     return `ShardPledgedToAnotherPayload: ${reason.ShardPledgedToAnotherPayload}`;
@@ -108,9 +108,6 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   }
   if ("InvalidTransaction" in reason) {
     return `InvalidTransaction: ${reason.InvalidTransaction}`;
-  }
-  if ("ExecutionFailure" in reason) {
-    return `ExecutionFailure: ${reason.ExecutionFailure}`;
   }
   if ("OneOrMoreInputsNotFound" in reason) {
     return `OneOrMoreInputsNotFound: ${reason.OneOrMoreInputsNotFound}`;

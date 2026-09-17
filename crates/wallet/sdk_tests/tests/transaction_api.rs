@@ -56,7 +56,7 @@ fn finalized_result(transaction_id: TransactionId, fee_receipt: FeeReceipt) -> T
         vec![],
         TransactionResult::AcceptFeeRejectRest(
             SubstateDiff::new(),
-            RejectReason::ExecutionFailure("out of fees".to_string()),
+            RejectReason::execution_failure_unclassified("out of fees"),
         ),
         fee_receipt,
     );
@@ -124,7 +124,7 @@ async fn final_fee_is_zero_for_a_rejected_transaction() {
     };
     *final_decision = Decision::Abort(AbortReason::InsufficientFeesPaid);
     execution_result.as_mut().unwrap().finalize.result =
-        TransactionResult::Reject(RejectReason::ExecutionFailure("nope".to_string()));
+        TransactionResult::Reject(RejectReason::execution_failure_unclassified("nope"));
 
     let test = TestWithNetwork::with_network(CannedTransactionResultInterface::new(query_result));
     test.store()

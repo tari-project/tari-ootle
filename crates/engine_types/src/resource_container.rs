@@ -24,7 +24,7 @@ use tari_template_lib::{
     },
 };
 
-use crate::{confidential, crypto::OutputBody, substate::SubstateId};
+use crate::{commit_result::ExecutionFailureCode, confidential, crypto::OutputBody, substate::SubstateId};
 
 /// Instances of a single resource kept in Buckets and Vaults
 #[derive(
@@ -1014,4 +1014,28 @@ pub enum ResourceError {
         commitment: PedersenCommitmentBytes,
         details: String,
     },
+}
+
+impl ResourceError {
+    /// The coarse reason this failure is reported to consumers as. Exhaustive by design — see
+    /// `RuntimeError::failure_code`.
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        use ExecutionFailureCode as C;
+        match self {
+            Self::InsufficientBalance { .. } | Self::BalanceOverflow { .. } => C::InsufficientFunds,
+            Self::InvalidBalanceProof { .. } |
+            Self::InvalidConfidentialProof { .. } |
+            Self::InvalidRangeProof { .. } |
+            Self::InvalidValueProof { .. } |
+            Self::InvalidSpend { .. } |
+            Self::RequiredSignatureMissingForStealthUtxo { .. } |
+            Self::UtxoBurnFailed { .. } => C::InvalidProof,
+            Self::ResourceTypeMismatch { .. } |
+            Self::ResourceAddressMismatch { .. } |
+            Self::InvalidConfidentialMintWithChange => C::InvalidArgument,
+            Self::OperationNotAllowed(_) => C::ResourceRestricted,
+            Self::NonFungibleTokenIdNotFound { .. } => C::NotFound,
+            Self::InvariantError(_) => C::EngineInvariant,
+        }
+    }
 }

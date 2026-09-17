@@ -8,7 +8,7 @@
 
 use tari_engine::wasm::{WasmExecutionError, WasmModule, WasmValidationError};
 use tari_engine_types::{
-    commit_result::{RejectReason, TransactionResult},
+    commit_result::{ExecutionFailureCode, RejectReason, TransactionResult},
     hashing::hash_template_code,
     limits,
 };
@@ -387,12 +387,13 @@ fn an_oversized_return_value_is_rejected() {
     ));
 
     let reason = load_and_call(code).expect_err("an oversized return value was accepted");
-    let RejectReason::ExecutionFailure(error) = reason else {
+    let RejectReason::ExecutionFailure { code, message } = reason else {
         panic!("expected an execution failure, got {reason:?}");
     };
+    assert_eq!(code, ExecutionFailureCode::LimitExceeded);
     assert!(
-        error.contains(&limits::ENGINE_LIMITS.max_call_size.to_string()),
-        "unexpected error: {error}"
+        message.contains(&limits::ENGINE_LIMITS.max_call_size.to_string()),
+        "unexpected error: {message}"
     );
 }
 
@@ -483,9 +484,15 @@ fn an_unbounded_memory_copy_traps_on_the_meter() {
     );
 
     let reason = load_and_call(code).expect_err("an unbounded copy was accepted");
-    let reason = reason.to_string();
+    // The meter must be what stops it. A bounds check would refuse the copy for free, leaving a
+    // module able to ask for unbounded work and pay for none of it.
+    assert_eq!(
+        reason.execution_failure_code(),
+        Some(ExecutionFailureCode::LimitExceeded),
+        "the copy did not trap on the meter: {reason}"
+    );
     assert!(
-        !reason.contains("out of bounds") && reason.contains("unreachable"),
+        !reason.to_string().contains("out of bounds"),
         "the copy did not trap on the meter: {reason}"
     );
 }

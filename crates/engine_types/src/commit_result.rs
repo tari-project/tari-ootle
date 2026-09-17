@@ -573,12 +573,14 @@ pub enum ExecutionFailureCode {
     /// A vault or bucket did not hold enough of a resource, or a supply would over/underflow.
     #[n(3)]
     InsufficientFunds,
-    /// Execution ran past what the fee paid for, or past a hard compute ceiling. Distinct from
-    /// [`RejectReason::InsufficientFeesPaid`], which is the settled-up shortfall rather than the ceiling.
+    /// Execution ran past what the fee paid for. Paying more clears it, which is the line between this and
+    /// [`Self::LimitExceeded`]. Distinct from [`RejectReason::InsufficientFeesPaid`], which is the
+    /// settled-up shortfall rather than a mid-execution stop.
     #[n(4)]
     OutOfCompute,
-    /// An engine limit was exceeded: substate/event/log size, event and log counts, call depth, generated
-    /// outputs or entities, template size.
+    /// A fixed engine ceiling was reached: compute caps, substate/event/log size, event and log counts, call
+    /// depth, generated outputs or entities, template size. No fee raises any of them, so the work has to be
+    /// made smaller or split up.
     #[n(5)]
     LimitExceeded,
     /// The call was malformed — wrong argument count, undecodable argument, unknown function, an amount

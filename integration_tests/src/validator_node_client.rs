@@ -238,7 +238,7 @@ pub async fn concurrent_call_method(
     for handle in handles {
         let result = handle
             .await
-            .map_err(|e| RejectReason::ExecutionFailure(e.to_string()))?;
+            .map_err(|e| RejectReason::execution_failure_unclassified(e.to_string()))?;
         match result {
             Ok(response) => last_resp = Some(response),
             Err(e) => return Err(e),
@@ -248,8 +248,8 @@ pub async fn concurrent_call_method(
     if let Some(res) = last_resp {
         Ok(res)
     } else {
-        Err(RejectReason::ExecutionFailure(
-            "No responses from any of the concurrent calls".to_owned(),
+        Err(RejectReason::execution_failure_unclassified(
+            "No responses from any of the concurrent calls",
         ))
     }
 }
@@ -293,7 +293,7 @@ async fn call_method_inner(
     cucumber_log!("Inputs: {}", component);
 
     let component_address = component.substate_id.as_component_address().ok_or_else(|| {
-        RejectReason::ExecutionFailure(format!("Invalid component address: {}", component.substate_id))
+        RejectReason::execution_failure_unclassified(format!("Invalid component address: {}", component.substate_id))
     })?;
 
     // Build transaction
@@ -305,7 +305,7 @@ async fn call_method_inner(
     // Submit and wait for result
     let resp = submit_and_wait_for_result(&mut vn_client, transaction, Duration::from_secs(60))
         .await
-        .map_err(|e| RejectReason::ExecutionFailure(e.to_string()))?;
+        .map_err(|e| RejectReason::execution_failure_unclassified(e.to_string()))?;
 
     if let Some(failure) = resp.dry_run_result.as_ref().unwrap().finalize.fee_reject() {
         return Err(failure.clone());

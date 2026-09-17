@@ -11,7 +11,11 @@
 
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::fees::FeeTable;
-use tari_engine_types::{commit_result::RejectReason, fees::FeeSource, limits::FREE_COMPUTE_GRACE_POINTS};
+use tari_engine_types::{
+    commit_result::{ExecutionFailureCode, RejectReason},
+    fees::FeeSource,
+    limits::FREE_COMPUTE_GRACE_POINTS,
+};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{ComponentAddress, NonFungibleAddress, TemplateAddress};
 use tari_template_test_tooling::TemplateTest;
@@ -86,7 +90,13 @@ fn assert_insufficient_fees(reason: &RejectReason) {
 
 fn assert_fee_intent_credit_exceeded(reason: &RejectReason) {
     assert!(
-        matches!(reason, RejectReason::ExecutionFailure(msg) if msg.contains("compute credit")),
+        matches!(
+            reason,
+            RejectReason::ExecutionFailure {
+                code: ExecutionFailureCode::OutOfCompute,
+                message,
+            } if message.contains("compute credit")
+        ),
         "expected the fee intent's compute credit to be the binding limit, got {reason:?}",
     );
 }

@@ -28,7 +28,7 @@ use tari_engine::{
     wasm::{WasmExecutionError, WasmModule},
 };
 use tari_engine_types::{
-    commit_result::{FinalizeResult, RejectReason},
+    commit_result::{ExecutionFailureCode, FinalizeResult, RejectReason},
     substate::SubstateId,
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
@@ -443,8 +443,17 @@ fn test_errors_on_infinite_loop() {
             .build_and_seal(test.secret_key()),
         vec![],
     );
-    // Transaction failed: Execution failure: RuntimeError: unreachable\n    at tari_free (<module>[327]:0x2390c)
-    assert_reject_reason(reason, wasmer::RuntimeError::new("unreachable"))
+    // A loop with no exit can only end by exhausting the meter, and the bound it hits is the
+    // per-transaction cap — a limit no fee raises, not an underpayment.
+    assert_eq!(
+        reason.execution_failure_code(),
+        Some(ExecutionFailureCode::LimitExceeded),
+        "unexpected reason: {reason}"
+    );
+    assert!(
+        reason.to_string().contains("Exceeded the maximum compute"),
+        "unexpected reason: {reason}"
+    );
 }
 
 mod errors {
@@ -468,7 +477,8 @@ mod errors {
             )
             .unwrap();
         match result.finalize.result.any_reject().unwrap() {
-            RejectReason::ExecutionFailure(message) => {
+            RejectReason::ExecutionFailure { code, message } => {
+                assert_eq!(*code, ExecutionFailureCode::TemplateError);
                 assert!(
                     message.contains("Template error: This error message should be included in the execution result")
                 );

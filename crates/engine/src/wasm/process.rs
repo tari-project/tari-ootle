@@ -629,10 +629,10 @@ impl Invokable<Store> for WasmProcess {
             // return value. Those end the call as an engine-side error rather than a trap, and are
             // reported against whatever authorized the compute all the same.
             Err(err) => {
-                return Err(exhausted
-                    .then(|| compute_exceeded_error(binding_allowance, consumed, points_consumed))
-                    .flatten()
-                    .unwrap_or(err));
+                if exhausted {
+                    return Err(compute_exceeded_error(binding_allowance, consumed, points_consumed));
+                }
+                return Err(err);
             },
         };
 
@@ -656,8 +656,8 @@ impl Invokable<Store> for WasmProcess {
                         runtime_error: err,
                     });
                 }
-                if exhausted && let Some(err) = compute_exceeded_error(binding_allowance, consumed, points_consumed) {
-                    return Err(err);
+                if exhausted {
+                    return Err(compute_exceeded_error(binding_allowance, consumed, points_consumed));
                 }
                 error!(target: LOG_TARGET, "Error calling function: {}", err);
                 Err(err.into())
@@ -666,22 +666,26 @@ impl Invokable<Store> for WasmProcess {
     }
 }
 
-/// Reports an out-of-gas invocation against the compute that authorized it, when the authorized
-/// compute — rather than the per-transaction hard cap — is what bound the call. `None` where the
-/// hard cap bound it, which is a limit rather than an underpayment.
+/// Reports an out-of-gas invocation against whatever bound it.
+///
+/// With a binding allowance the call outran the compute someone authorized, which is an underpayment.
+/// Without one a hard cap bound it, which is a limit: no fee raises it, so it must not be reported as
+/// something the caller can pay their way out of.
 fn compute_exceeded_error(
     binding_allowance: Option<ComputeAllowance>,
     consumed: u64,
     points_consumed: u64,
-) -> Option<WasmExecutionError> {
-    let allowance = binding_allowance?;
+) -> WasmExecutionError {
     let consumed_points = consumed.saturating_add(points_consumed);
+    let Some(allowance) = binding_allowance else {
+        return WasmExecutionError::MaxComputeExceeded { consumed_points };
+    };
     match allowance.funding {
-        ComputeFunding::FeeIntentCredit => Some(WasmExecutionError::FeeIntentComputeExceeded {
+        ComputeFunding::FeeIntentCredit => WasmExecutionError::FeeIntentComputeExceeded {
             consumed_points,
             credit_points: allowance.points,
-        }),
-        ComputeFunding::Payment => Some(WasmExecutionError::InsufficientFeesForCompute { consumed_points }),
+        },
+        ComputeFunding::Payment => WasmExecutionError::InsufficientFeesForCompute { consumed_points },
     }
 }
 

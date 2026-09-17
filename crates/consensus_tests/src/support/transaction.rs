@@ -149,8 +149,8 @@ pub fn create_execution_result_for_transaction(
 
         TransactionResult::Accept(diff)
     } else {
-        TransactionResult::Reject(RejectReason::ExecutionFailure(
-            "Transaction was set to ABORT in test".to_string(),
+        TransactionResult::Reject(RejectReason::execution_failure_unclassified(
+            "Transaction was set to ABORT in test",
         ))
     };
 

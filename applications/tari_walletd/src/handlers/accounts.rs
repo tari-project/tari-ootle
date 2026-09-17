@@ -856,11 +856,11 @@ pub async fn handle_create_free_test_coins(
     let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, account.component_address()).await?;
     if let Some(reason) = finalized.finalize.any_reject() {
         return match reason {
-            RejectReason::ExecutionFailure(reason) => {
-                if reason.contains("Duplicate NFT token id") {
+            RejectReason::ExecutionFailure { message, .. } => {
+                if message.contains("Duplicate NFT token id") {
                     return Err(faucet_already_claimed());
                 }
-                Err(transaction_rejected(reason))
+                Err(transaction_rejected(message))
             },
             // TODO: consensus can emit failed to lock inputs when an output fails to lock and vice versa because it
             // locks them together in some cases. so we take both as meaning already claimed

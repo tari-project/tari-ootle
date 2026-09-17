@@ -1,5 +1,5 @@
 {
-  "name": "parse_finalized_result/accept_fee_reject_rest",
+  "name": "parse_finalized_result/reject_access_denied",
   "schema_version": 1,
   "provenance": {
     "core_version": "0.41.0",
@@ -12,7 +12,7 @@
       "Finalized": {
         "abort_details": null,
         "execution_result": {
-          "execute_epoch": 7,
+          "execute_epoch": null,
           "execution_time": {
             "nanos": 0,
             "secs": 1
@@ -48,56 +48,12 @@
               }
             ],
             "result": {
-              "AcceptFeeRejectRest": [
-                {
-                  "down_substates": [
-                    [
-                      "vault_4242424242424242424242424242424242424242424242424242424242424242",
-                      1
-                    ]
-                  ],
-                  "fee_withdrawals": [],
-                  "up_substates": [
-                    [
-                      "component_4141414141414141414141414141414141414141414141414141414141414141",
-                      {
-                        "substate": {
-                          "Component": {
-                            "body": {
-                              "state": [
-                                {
-                                  "@cbor": "tag",
-                                  "tag": 132,
-                                  "value": {
-                                    "@cbor": "bytes",
-                                    "hex": "4343434343434343434343434343434343434343434343434343434343434343"
-                                  }
-                                }
-                              ]
-                            },
-                            "header": {
-                              "access_rules": {
-                                "default": "DenyAll",
-                                "method_access": {}
-                              },
-                              "entity_id": "00",
-                              "owner_rule": "None",
-                              "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
-                            }
-                          }
-                        },
-                        "version": 0
-                      }
-                    ]
-                  ]
-                },
-                {
-                  "ExecutionFailure": {
-                    "code": "Unclassified",
-                    "message": "main intent failed"
-                  }
+              "Reject": {
+                "ExecutionFailure": {
+                  "code": "AccessDenied",
+                  "message": "At instruction #0: Access Denied: Withdraw"
                 }
-              ]
+              }
             },
             "total_fees_required": 9007199254741999,
             "transaction_hash": "5151515151515151515151515151515151515151515151515151515151515151"
@@ -109,28 +65,15 @@
           "nanos": 0,
           "secs": 1
         },
-        "final_decision": "Commit",
+        "final_decision": {
+          "Abort": "ExecutionFailure"
+        },
         "finalized_time": "2026-06-12 00:00:00.0"
       }
     }
   },
   "expected": {
     "parsed": {
-      "diff_summary": {
-        "down": [
-          [
-            "vault_4242424242424242424242424242424242424242424242424242424242424242",
-            1
-          ]
-        ],
-        "up": [
-          {
-            "substate_id": "component_4141414141414141414141414141414141414141414141414141414141414141",
-            "version": 0
-          }
-        ]
-      },
-      "epoch": 7,
       "events": [
         {
           "payload": [
@@ -167,10 +110,10 @@
       ],
       "submit": {
         "outcome": {
-          "OnlyFeeCommit": {
+          "Reject": {
             "code": "EXECUTION_FAILURE",
-            "failure_code": "UNCLASSIFIED",
-            "message": "Execution failure (Unclassified): main intent failed"
+            "failure_code": "ACCESS_DENIED",
+            "message": "Execution failure (AccessDenied): At instruction #0: Access Denied: Withdraw"
           }
         },
         "transaction_id": "5151515151515151515151515151515151515151515151515151515151515151"

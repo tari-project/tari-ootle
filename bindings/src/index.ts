@@ -12,6 +12,7 @@ export * from "./helpers/ootleAddress";
 export * from "./helpers/tariTypeTag";
 export * from "./tari-indexer-client";
 export * from "./types/AbortReason";
+export * from "./types/ExecutionFailureCode";
 export * from "./types/AbridgedTransactionKernel";
 export * from "./types/AccessRule";
 export * from "./types/Account";

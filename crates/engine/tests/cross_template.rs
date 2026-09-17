@@ -241,7 +241,7 @@ fn it_fails_on_invalid_calls() {
 
     // TODO: inner errors are not properly propagated up, they all end up being "Engine call returned null for op
     // CallInvoke" we should be able to assert a more specific error cause
-    assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
+    assert!(matches!(reason, RejectReason::ExecutionFailure { .. }));
 }
 
 #[test]

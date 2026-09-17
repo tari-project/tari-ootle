@@ -6,7 +6,10 @@ use tari_engine::{
     runtime::{NativeAction, RuntimeError},
     transaction::TransactionErrorKind,
 };
-use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValue};
+use tari_engine_types::{
+    commit_result::{ExecutionFailureCode, RejectReason},
+    indexed_value::IndexedValue,
+};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
@@ -203,12 +206,10 @@ fn it_fails_when_a_migration_panics() {
         vec![],
     );
 
-    assert_reject_reason(
-        reason,
-        RejectReason::ExecutionFailure(
-            "At instruction #1: Template error: Intentional panic during migration".to_string(),
-        ),
-    );
+    assert_reject_reason(reason, RejectReason::ExecutionFailure {
+        code: ExecutionFailureCode::TemplateError,
+        message: "At instruction #1: Template error: Intentional panic during migration".to_string(),
+    });
 }
 
 #[test]

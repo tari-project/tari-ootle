@@ -9,7 +9,7 @@
 //! message.
 
 use serde::{Deserialize, Serialize};
-use tari_engine_types::commit_result::{AbortReason, RejectReason as InternalRejectReason};
+use tari_engine_types::commit_result::{AbortReason, ExecutionFailureCode, RejectReason as InternalRejectReason};
 
 use crate::types::bytes::TransactionIdBytes;
 
@@ -33,13 +33,36 @@ pub fn abort_code(reason: &AbortReason) -> &'static str {
     }
 }
 
+/// The stable, SCREAMING_SNAKE code for an [`ExecutionFailureCode`] variant.
+///
+/// The **stable code set** for `ExecutionFailureCode`, on the same contract as [`abort_code`]: hosts
+/// branch on these strings, so **never rename a code; only add**.
+pub fn execution_failure_code(code: &ExecutionFailureCode) -> &'static str {
+    match code {
+        ExecutionFailureCode::TemplateError => "TEMPLATE_ERROR",
+        ExecutionFailureCode::AccessDenied => "ACCESS_DENIED",
+        ExecutionFailureCode::AssertionFailed => "ASSERTION_FAILED",
+        ExecutionFailureCode::InsufficientFunds => "INSUFFICIENT_FUNDS",
+        ExecutionFailureCode::OutOfCompute => "OUT_OF_COMPUTE",
+        ExecutionFailureCode::LimitExceeded => "LIMIT_EXCEEDED",
+        ExecutionFailureCode::InvalidArgument => "INVALID_ARGUMENT",
+        ExecutionFailureCode::NotFound => "NOT_FOUND",
+        ExecutionFailureCode::DanglingResources => "DANGLING_RESOURCES",
+        ExecutionFailureCode::ResourceRestricted => "RESOURCE_RESTRICTED",
+        ExecutionFailureCode::InvalidProof => "INVALID_PROOF",
+        ExecutionFailureCode::EngineInvariant => "ENGINE_INVARIANT",
+        ExecutionFailureCode::Unclassified => "UNCLASSIFIED",
+    }
+}
+
 /// A boundary reject reason: a stable `code` plus the rendered `message`.
 ///
 /// `code` is derived from the internal [`InternalRejectReason`] variant and is stable; hosts may
 /// branch on it. `message` is the internal `Display` rendering. `abort_code` carries the canonical
 /// [`AbortReason`] sub-code (via [`abort_code`]) when the reject is an abort — so hosts branch on, e.g.,
-/// `EPOCH_EXPIRED` **without** parsing the human message. It is `None` for non-abort variants and is
-/// omitted from JSON when absent (an additive field — existing `code` strings are unchanged).
+/// `EPOCH_EXPIRED` **without** parsing the human message. `failure_code` does the same for the
+/// `EXECUTION_FAILURE` case, carrying the [`ExecutionFailureCode`] sub-code (e.g. `ACCESS_DENIED`). Each is
+/// `None` for the variants that do not carry it and is omitted from JSON when absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RejectReason {
     /// Stable variant code, e.g. `EXECUTION_FAILURE`.
@@ -47,6 +70,10 @@ pub struct RejectReason {
     /// The canonical [`AbortReason`] sub-code (e.g. `EPOCH_EXPIRED`) when this is an abort; else `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abort_code: Option<String>,
+    /// The [`ExecutionFailureCode`] sub-code (e.g. `ACCESS_DENIED`) when this is an execution failure;
+    /// else `None`. A host that only reads `message` for `EXECUTION_FAILURE` should read this instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<String>,
     /// Human-readable detail (the internal `Display` output).
     pub message: String,
 }
@@ -55,7 +82,7 @@ impl RejectReason {
     /// The stable code for an internal reject-reason variant.
     fn code_of(reason: &InternalRejectReason) -> &'static str {
         match reason {
-            InternalRejectReason::ExecutionFailure(_) => "EXECUTION_FAILURE",
+            InternalRejectReason::ExecutionFailure { .. } => "EXECUTION_FAILURE",
             InternalRejectReason::SubstateNotFound(_) => "SUBSTATE_NOT_FOUND",
             InternalRejectReason::FailedToLockInputs(_) => "FAILED_TO_LOCK_INPUTS",
             InternalRejectReason::FailedToLockOutputs(_) => "FAILED_TO_LOCK_OUTPUTS",
@@ -81,11 +108,20 @@ impl RejectReason {
         }
     }
 
+    /// The execution-failure sub-code for the one variant that carries one.
+    fn failure_code_of(reason: &InternalRejectReason) -> Option<&'static str> {
+        match reason {
+            InternalRejectReason::ExecutionFailure { code, .. } => Some(execution_failure_code(code)),
+            _ => None,
+        }
+    }
+
     /// Builds the boundary form from the internal reject reason.
     pub fn from_internal(reason: &InternalRejectReason) -> Self {
         Self {
             code: Self::code_of(reason).to_string(),
             abort_code: Self::abort_code_of(reason).map(str::to_string),
+            failure_code: Self::failure_code_of(reason).map(str::to_string),
             message: reason.to_string(),
         }
     }
@@ -97,6 +133,7 @@ impl RejectReason {
         Self {
             code: "ABORT".to_string(),
             abort_code: None,
+            failure_code: None,
             message: message.into(),
         }
     }
@@ -109,6 +146,7 @@ impl RejectReason {
         Self {
             code: "MEMPOOL_REJECTED".to_string(),
             abort_code: None,
+            failure_code: None,
             message: message.into(),
         }
     }
@@ -260,12 +298,31 @@ mod tests {
         AbortReason::ValidityWindowTooLong,
     ];
 
+    /// Every [`ExecutionFailureCode`] variant, exhaustively listed on the same contract as
+    /// [`ALL_ABORT_REASONS`]: a new variant upstream must be added here and given a stable code.
+    const ALL_FAILURE_CODES: &[ExecutionFailureCode] = &[
+        ExecutionFailureCode::TemplateError,
+        ExecutionFailureCode::AccessDenied,
+        ExecutionFailureCode::AssertionFailed,
+        ExecutionFailureCode::InsufficientFunds,
+        ExecutionFailureCode::OutOfCompute,
+        ExecutionFailureCode::LimitExceeded,
+        ExecutionFailureCode::InvalidArgument,
+        ExecutionFailureCode::NotFound,
+        ExecutionFailureCode::DanglingResources,
+        ExecutionFailureCode::ResourceRestricted,
+        ExecutionFailureCode::InvalidProof,
+        ExecutionFailureCode::EngineInvariant,
+        ExecutionFailureCode::Unclassified,
+    ];
+
     #[test]
     fn reject_reason_preserves_code_and_message() {
-        let internal = InternalRejectReason::ExecutionFailure("boom".to_string());
+        let internal = InternalRejectReason::execution_failure_unclassified("boom");
         let boundary = RejectReason::from_internal(&internal);
         assert_eq!(boundary.code, "EXECUTION_FAILURE");
         assert_eq!(boundary.abort_code, None);
+        assert_eq!(boundary.failure_code.as_deref(), Some("UNCLASSIFIED"));
         assert_eq!(boundary.message, internal.to_string());
         assert!(boundary.message.contains("boom"));
     }
@@ -273,7 +330,7 @@ mod tests {
     #[test]
     fn every_variant_maps_to_a_code() {
         let variants = [
-            InternalRejectReason::ExecutionFailure("a".into()),
+            InternalRejectReason::execution_failure_unclassified("a"),
             InternalRejectReason::SubstateNotFound("a".into()),
             InternalRejectReason::FailedToLockInputs("a".into()),
             InternalRejectReason::FailedToLockOutputs("a".into()),
@@ -301,7 +358,10 @@ mod tests {
     #[test]
     fn top_level_reject_codes_are_stable() {
         let cases: &[(InternalRejectReason, &str)] = &[
-            (InternalRejectReason::ExecutionFailure("a".into()), "EXECUTION_FAILURE"),
+            (
+                InternalRejectReason::execution_failure_unclassified("a"),
+                "EXECUTION_FAILURE",
+            ),
             (InternalRejectReason::SubstateNotFound("a".into()), "SUBSTATE_NOT_FOUND"),
             (
                 InternalRejectReason::FailedToLockInputs("a".into()),
@@ -360,6 +420,60 @@ mod tests {
         );
     }
 
+    /// Each `ExecutionFailureCode` surfaces a non-empty, unique stable code.
+    #[test]
+    fn failure_codes_are_non_empty_and_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for code in ALL_FAILURE_CODES {
+            let s = execution_failure_code(code);
+            assert!(!s.is_empty(), "failure code for {code:?} is empty");
+            assert!(seen.insert(s), "duplicate failure code {s} for {code:?}");
+        }
+        assert_eq!(seen.len(), 13, "expected exactly 13 canonical failure codes");
+    }
+
+    /// The failure code set is frozen for the same reason the top-level codes are: a host branching on
+    /// `ACCESS_DENIED` must not have that branch silently stop matching.
+    #[test]
+    fn failure_codes_are_stable() {
+        let cases: &[(ExecutionFailureCode, &str)] = &[
+            (ExecutionFailureCode::TemplateError, "TEMPLATE_ERROR"),
+            (ExecutionFailureCode::AccessDenied, "ACCESS_DENIED"),
+            (ExecutionFailureCode::AssertionFailed, "ASSERTION_FAILED"),
+            (ExecutionFailureCode::InsufficientFunds, "INSUFFICIENT_FUNDS"),
+            (ExecutionFailureCode::OutOfCompute, "OUT_OF_COMPUTE"),
+            (ExecutionFailureCode::LimitExceeded, "LIMIT_EXCEEDED"),
+            (ExecutionFailureCode::InvalidArgument, "INVALID_ARGUMENT"),
+            (ExecutionFailureCode::NotFound, "NOT_FOUND"),
+            (ExecutionFailureCode::DanglingResources, "DANGLING_RESOURCES"),
+            (ExecutionFailureCode::ResourceRestricted, "RESOURCE_RESTRICTED"),
+            (ExecutionFailureCode::InvalidProof, "INVALID_PROOF"),
+            (ExecutionFailureCode::EngineInvariant, "ENGINE_INVARIANT"),
+            (ExecutionFailureCode::Unclassified, "UNCLASSIFIED"),
+        ];
+        for (code, expected) in cases {
+            assert_eq!(execution_failure_code(code), *expected);
+        }
+    }
+
+    /// `failure_code` rides alongside `abort_code` rather than replacing it: a reject carries at most
+    /// one of the two, so a host can read both without disambiguating first.
+    #[test]
+    fn sub_codes_do_not_overlap() {
+        let execution = RejectReason::from_internal(&InternalRejectReason::ExecutionFailure {
+            code: ExecutionFailureCode::AccessDenied,
+            message: "denied".into(),
+        });
+        assert_eq!(execution.failure_code.as_deref(), Some("ACCESS_DENIED"));
+        assert_eq!(execution.abort_code, None);
+
+        let abort = RejectReason::from_internal(&InternalRejectReason::Abort {
+            reason: AbortReason::EpochExpired,
+        });
+        assert_eq!(abort.abort_code.as_deref(), Some("EPOCH_EXPIRED"));
+        assert_eq!(abort.failure_code, None);
+    }
+
     /// The `Abort` arm surfaces the canonical abort sub-code while keeping its top-level `ABORT` code.
     #[test]
     fn abort_variant_surfaces_sub_code() {
@@ -376,6 +490,7 @@ mod tests {
         let r = RejectReason {
             code: "ABORT".into(),
             abort_code: None,
+            failure_code: None,
             message: "x".into(),
         };
         let oc = TransactionOutcome::Reject(r.clone());

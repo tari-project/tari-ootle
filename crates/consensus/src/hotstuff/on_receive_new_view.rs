@@ -71,6 +71,16 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<(), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveNewView");
 
+        if !message.timeout_claim_matches_high_pc() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NEWVIEW from {from} claims high certificate height {} but carries {}",
+                message.timeout.high_pc_height,
+                message.high_pc
+            );
+            return Ok(());
+        }
+
         let NewViewMessage {
             high_pc,
             last_vote,
@@ -118,8 +128,9 @@ where TConsensusSpec: ConsensusSpec
         }
 
         // A NEWVIEW reports the certificate its sender holds. One ahead of ours has to become ours before we
-        // propose, because a replica locked above our justify block rejects the proposal. One level with or behind
-        // ours is worth no write - every sender of a view reports the same certificate in the common case - but its
+        // propose: a replica locked above our justify block rejects the proposal, and the timeout certificate this
+        // vote goes into binds its leader to a certificate at least that high. One level with or behind ours is
+        // worth no write - every sender of a view reports the same certificate in the common case - but its
         // timeout vote still counts towards the quorum that ends the view, so the message carries on either way.
         let is_ahead_of_ours = self.store.with_read_tx(|tx| {
             let local_high_pc = HighPc::get(tx, epoch_state.epoch())?;
@@ -186,7 +197,7 @@ where TConsensusSpec: ConsensusSpec
 
         let threshold = epoch_state.local_committee_info().quorum_threshold();
 
-        info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.signatures().len(), threshold.value());
+        info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.num_signatures(), threshold.value());
         if timeout_certificate.calculate_id() == *high_tc.id() {
             info!(target: LOG_TARGET, "🕒️ New HIGH TC {}", timeout_certificate);
             // Clear the last sent new view since we have a new certificate

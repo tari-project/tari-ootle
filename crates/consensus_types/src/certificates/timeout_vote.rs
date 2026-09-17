@@ -10,18 +10,28 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{SignedMessage, ToSignatureMessage, Vote, validator_signature::ValidatorSignatureBytes};
+use crate::{SignedMessage, SignedTimeout, ToSignatureMessage, Vote, validator_signature::ValidatorSignatureBytes};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TimeoutVote {
     pub epoch: Epoch,
     pub height: NodeHeight,
+    /// The height of the signer's high proposal certificate. The leader of the next view must justify from a
+    /// certificate at least as high as the highest one a quorum attests to here.
+    pub high_pc_height: NodeHeight,
     pub signature: ValidatorSignatureBytes,
 }
 
 impl TimeoutVote {
     pub fn signature(&self) -> &ValidatorSignatureBytes {
         &self.signature
+    }
+
+    pub fn as_signed_timeout(&self) -> SignedTimeout {
+        SignedTimeout {
+            high_pc_height: self.high_pc_height,
+            signature: self.signature.clone(),
+        }
     }
 }
 
@@ -48,6 +58,7 @@ impl ToSignatureMessage for TimeoutVote {
         TimeoutVoteMessage {
             epoch: self.epoch,
             height: self.height,
+            high_pc_height: self.high_pc_height,
         }
         .to_signature_message()
     }
@@ -67,8 +78,8 @@ impl Display for TimeoutVote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TimeoutVote {{ epoch: {}, height: {}, signer: {} }}",
-            self.epoch, self.height, self.signature.public_key
+            "TimeoutVote {{ epoch: {}, height: {}, high pc height: {}, signer: {} }}",
+            self.epoch, self.height, self.high_pc_height, self.signature.public_key
         )
     }
 }
@@ -77,6 +88,7 @@ impl Display for TimeoutVote {
 pub struct TimeoutVoteMessage {
     pub epoch: Epoch,
     pub height: NodeHeight,
+    pub high_pc_height: NodeHeight,
 }
 
 impl ToSignatureMessage for TimeoutVoteMessage {
@@ -84,6 +96,7 @@ impl ToSignatureMessage for TimeoutVoteMessage {
         timeout_vote_signature_hasher()
             .chain(&self.epoch)
             .chain(&self.height)
+            .chain(&self.high_pc_height)
             .finalize()
             .into()
     }

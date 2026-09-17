@@ -154,6 +154,7 @@ export * from "./types/ShardGroup";
 export * from "./types/ShardGroupAccumulatedData";
 export * from "./types/ShardGroupEvidence";
 export * from "./types/ShardStateVersions";
+export * from "./types/SignedTimeout";
 export * from "./types/SpendAuthorization";
 export * from "./types/SpendCondition";
 export * from "./types/SpendWitness";

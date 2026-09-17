@@ -29,4 +29,6 @@ mod substate_store;
 #[cfg(test)]
 mod support;
 #[cfg(test)]
+mod timeout_certificate;
+#[cfg(test)]
 mod vote_equivocation_withholding;

@@ -159,8 +159,10 @@ newtype_struct_serde_impl!(PublishedTemplateAddress, BorTag<ObjectKey, TAG>);
 /// committed to state unreadable.
 ///
 /// A published template is exempt from [`limits::EngineLimits::max_substate_size`], so this is the only size bound
-/// its substate format carries.
-pub const MAX_TEMPLATE_BLOB_WIRE_BYTES: usize = 2 * 1024 * 1024; // 2 MiB
+/// its substate format carries, and it is bounded above by what a substate can be moved in: a template substate has
+/// to fit one `RPC_MAX_FRAME_SIZE` (6 MiB). The value below leaves the publish limit a doubling of room and keeps the
+/// one substate that may exceed `max_substate_size` within a megabyte of every other.
+pub const MAX_TEMPLATE_BLOB_WIRE_BYTES: usize = 2 * 1024 * 1024; // 2 MiB = max_substate_size + 1 MiB
 
 const _: () = assert!(
     limits::ENGINE_LIMITS.max_template_binary_size_bytes <= MAX_TEMPLATE_BLOB_WIRE_BYTES,

@@ -10,7 +10,7 @@ use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
     hashing::hash_template_code,
     limits,
-    published_template::{PublishedTemplateAddress, TemplateBlob},
+    published_template::PublishedTemplateAddress,
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_transaction::{Epoch, Transaction};
@@ -88,8 +88,7 @@ fn publish_template_too_big_binary() {
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
             .pay_fee_from_component(account_address, 200_000u64)
-            // SAFETY: We are intentionally publishing an oversized binary to test size limits.
-            .publish_template(unsafe { TemplateBlob::new_unchecked(random_wasm_binary) })
+            .publish_template(random_wasm_binary)
             .build_and_seal(&account_key),
         vec![owner_proof],
     );

@@ -17,6 +17,7 @@ use tari_template_lib::{
 };
 
 use crate::{
+    commit_result::ExecutionFailureCode,
     component::derive_component_address_from_public_key,
     hashing::{EngineHashDomainLabel, hasher32},
 };
@@ -36,6 +37,17 @@ pub enum IdProviderError {
     CounterExhausted { counter: &'static str },
     #[error("Failed to acquire lock")]
     LockingError { operation: String },
+}
+
+impl IdProviderError {
+    /// The coarse reason this failure is reported to consumers as. Exhaustive by design — see
+    /// `RuntimeError::failure_code`.
+    pub fn failure_code(&self) -> ExecutionFailureCode {
+        match self {
+            Self::MaxIdsExceeded { .. } => ExecutionFailureCode::LimitExceeded,
+            Self::LockingError { .. } => ExecutionFailureCode::EngineInvariant,
+        }
+    }
 }
 
 impl<'a> IdProvider<'a> {

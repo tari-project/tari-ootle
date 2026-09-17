@@ -552,10 +552,12 @@ impl RuntimeError {
 
             Self::TooManyOutputs(_) | Self::TooManyEntities(_) | Self::MaxCallDepthExceeded { .. } => C::LimitExceeded,
 
-            Self::InsufficientFeesPaid { .. } |
-            Self::FeeIntentComputeExceeded { .. } |
-            Self::InsufficientFeesForNativeExecution { .. } |
-            Self::MaxNativeExecutionPointsExceeded { .. } => C::OutOfCompute,
+            // Paying more is what clears these.
+            Self::InsufficientFeesPaid { .. } | Self::InsufficientFeesForNativeExecution { .. } => C::OutOfCompute,
+
+            // Flat ceilings. No fee raises either, so the work has to move: out of the fee intent for the
+            // credit, across transactions for the per-transaction maximum.
+            Self::FeeIntentComputeExceeded { .. } | Self::MaxNativeExecutionPointsExceeded { .. } => C::LimitExceeded,
 
             Self::TransientValueInSubstate { .. } |
             Self::InvalidMethodAccessRule { .. } |
@@ -631,7 +633,7 @@ impl TransactionCommitError {
             Self::DanglingProofs { .. } |
             Self::DanglingLockedValueInVault { .. } |
             Self::DanglingAddressAllocations { .. } => ExecutionFailureCode::DanglingResources,
-            Self::IdProviderError(_) => ExecutionFailureCode::LimitExceeded,
+            Self::IdProviderError(err) => err.failure_code(),
             Self::StateStoreError(_) => ExecutionFailureCode::EngineInvariant,
         }
     }

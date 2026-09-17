@@ -24,8 +24,8 @@ pub enum WasmExecutionError {
     #[error("Wasm {0}")]
     WasmRuntimeError(#[from] wasmer::RuntimeError),
     #[error(
-        "Exceeded the maximum compute a transaction may use after consuming {consumed_points} WASM metering points. \
-         The cap is fixed, so a higher fee does not raise it — split the work across transactions."
+        "Exceeded a fixed compute maximum after consuming {consumed_points} WASM metering points. Whichever cap bound \
+         the call, per call or per transaction, a higher fee does not raise it — split the work up."
     )]
     MaxComputeExceeded { consumed_points: u64 },
     #[error(
@@ -184,9 +184,10 @@ impl WasmExecutionError {
             Self::ValueVisitorError(_) |
             Self::TemplateVersionMismatch { .. } => C::TemplateError,
 
-            Self::InsufficientFeesForCompute { .. } | Self::FeeIntentComputeExceeded { .. } => C::OutOfCompute,
+            Self::InsufficientFeesForCompute { .. } => C::OutOfCompute,
 
-            Self::MaxComputeExceeded { .. } => C::LimitExceeded,
+            // Both are flat ceilings a larger fee does not raise; only moving the work clears them.
+            Self::FeeIntentComputeExceeded { .. } | Self::MaxComputeExceeded { .. } => C::LimitExceeded,
 
             Self::MemoryAllocationTooLarge |
             Self::MemoryAllocationFailed |

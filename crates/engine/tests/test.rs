@@ -443,15 +443,15 @@ fn test_errors_on_infinite_loop() {
             .build_and_seal(test.secret_key()),
         vec![],
     );
-    // A loop with no exit can only end by exhausting the meter, and the bound it hits is the
-    // per-transaction cap — a limit no fee raises, not an underpayment.
+    // A loop with no exit can only end by exhausting the meter, and what bounds it is a fixed cap —
+    // a limit no fee raises, not an underpayment.
     assert_eq!(
         reason.execution_failure_code(),
         Some(ExecutionFailureCode::LimitExceeded),
         "unexpected reason: {reason}"
     );
     assert!(
-        reason.to_string().contains("Exceeded the maximum compute"),
+        reason.to_string().contains("Exceeded a fixed compute maximum"),
         "unexpected reason: {reason}"
     );
 }

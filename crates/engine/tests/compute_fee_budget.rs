@@ -93,7 +93,7 @@ fn assert_fee_intent_credit_exceeded(reason: &RejectReason) {
         matches!(
             reason,
             RejectReason::ExecutionFailure {
-                code: ExecutionFailureCode::OutOfCompute,
+                code: ExecutionFailureCode::LimitExceeded,
                 message,
             } if message.contains("compute credit")
         ),

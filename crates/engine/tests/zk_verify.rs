@@ -304,7 +304,7 @@ fn verify_does_not_fit_the_fee_intent_credit() {
         matches!(
             &reason,
             RejectReason::ExecutionFailure {
-                code: ExecutionFailureCode::OutOfCompute,
+                code: ExecutionFailureCode::LimitExceeded,
                 message,
             } if message.contains("compute credit")
         ),

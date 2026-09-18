@@ -8,7 +8,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
-use tari_ootle_common_types::{ShardGroup, committee::CommitteeInfo, optional::Optional};
+use tari_ootle_common_types::{ShardGroup, committee::CommitteeInfo, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
@@ -585,9 +585,10 @@ where TConsensusSpec: ConsensusSpec
         if prepared.lock_status().is_deferrable_conflict() {
             warn!(
                 target: LOG_TARGET,
-                "❌ LocalOnly transaction {} in block {} has lock conflicts that an honest proposer defers. Not voting on block.",
+                "❌ LocalOnly transaction {} in block {} has lock conflicts that an honest proposer defers: {}. Not voting on block.",
                 pool_tx.id(),
                 block,
+                prepared.lock_status().failures().display(),
             );
             return Ok(Some(NoVoteReason::DeferrableLockConflict {
                 transaction_id: *pool_tx.id(),
@@ -826,9 +827,10 @@ where TConsensusSpec: ConsensusSpec
         if prepared.lock_status().is_deferrable_conflict() {
             warn!(
                 target: LOG_TARGET,
-                "❌ Prepare transaction {} in block {} has lock conflicts that an honest proposer defers. Not voting on block.",
+                "❌ Prepare transaction {} in block {} has lock conflicts that an honest proposer defers: {}. Not voting on block.",
                 tx_rec.id(),
                 block,
+                prepared.lock_status().failures().display(),
             );
             return Ok(Some(NoVoteReason::DeferrableLockConflict {
                 transaction_id: *tx_rec.id(),

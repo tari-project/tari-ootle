@@ -169,7 +169,7 @@ fn it_disallows_more_than_one_write_lock_non_local_only() {
 }
 
 #[test]
-fn it_allows_requesting_the_same_lock_within_one_transaction() {
+fn it_allows_an_input_and_an_output_lock_within_one_transaction() {
     let (store, _tmp) = create_store();
 
     let id = add_substate(&store, 0, 0);

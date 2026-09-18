@@ -179,7 +179,8 @@ mod tests {
 
     /// A stealth transfer statement with the given input/output counts; only the counts matter to the accumulator.
     fn statement(n_inputs: usize, n_outputs: usize) -> StealthTransferStatement {
-        let mut stmt = StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1));
+        let mut stmt =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
         stmt.inputs_statement.inputs = (0..n_inputs).map(|_| StealthInput::new(dummy_commitment())).collect();
         stmt.outputs_statement.outputs = (0..n_outputs).map(|_| dummy_output()).collect();
         stmt

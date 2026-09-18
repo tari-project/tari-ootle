@@ -5,7 +5,7 @@
 //! proof, and covenant claims) from unblinded input/output witnesses.
 
 use tari_ootle_wallet_crypto::stealth::create_transfer_statement as crypto_create_transfer_statement;
-use tari_template_lib_types::Amount;
+use tari_template_lib_types::{Amount, crypto::RistrettoPublicKeyBytes, stealth::RevealedOutput};
 
 use crate::{
     error::OotleWasmError,
@@ -36,6 +36,7 @@ pub fn build_stealth_transfer_statement(
     revealed_input_amount_microtari: u64,
     output_witnesses_json: &str,
     revealed_output_amount_microtari: u64,
+    revealed_receiver: &[u8],
 ) -> Result<String, OotleWasmError> {
     let inputs: Vec<StealthInputWitnessJson> = serde_json::from_str(input_witnesses_json)?;
     let inputs = inputs
@@ -49,11 +50,25 @@ pub fn build_stealth_transfer_statement(
         .map(TryInto::try_into)
         .collect::<Result<Vec<_>, OotleWasmError>>()?;
 
+    let revealed_output = match revealed_output_amount_microtari {
+        0 => None,
+        amount => {
+            let receiver = RistrettoPublicKeyBytes::from_bytes(revealed_receiver).map_err(|e| {
+                OotleWasmError::InvalidByteLength {
+                    field: "revealed_receiver",
+                    expected: RistrettoPublicKeyBytes::length(),
+                    got: e.actual_size(),
+                }
+            })?;
+            Some(RevealedOutput::new(Amount::from_u64(amount), receiver))
+        },
+    };
+
     let statement = crypto_create_transfer_statement(
         inputs,
         Amount::from_u64(revealed_input_amount_microtari),
         outputs.iter(),
-        Amount::from_u64(revealed_output_amount_microtari),
+        revealed_output,
     )
     .map_err(|e| OotleWasmError::Stealth(e.to_string()))?;
 
@@ -107,7 +122,7 @@ mod tests {
         );
         let outputs_json = format!("[{}]", output_witness_json(500, &output_mask));
 
-        let statement_json = build_stealth_transfer_statement(&inputs_json, 0, &outputs_json, 0).unwrap();
+        let statement_json = build_stealth_transfer_statement(&inputs_json, 0, &outputs_json, 0, &[]).unwrap();
         let statement: StealthTransferStatement = serde_json::from_str(&statement_json).unwrap();
         assert!(statement.balance_proof.is_some());
         assert!(
@@ -129,7 +144,7 @@ mod tests {
         );
         let outputs_json = format!("[{}]", output_witness_json(500, &output_mask));
 
-        let statement_json = build_stealth_transfer_statement(&inputs_json, 0, &outputs_json, 0).unwrap();
+        let statement_json = build_stealth_transfer_statement(&inputs_json, 0, &outputs_json, 0, &[]).unwrap();
         let statement: StealthTransferStatement = serde_json::from_str(&statement_json).unwrap();
         assert!(statement.covenant_claims.is_empty());
 
@@ -181,7 +196,7 @@ mod tests {
             .unwrap()
         );
 
-        let statement_json = build_stealth_transfer_statement(&inputs_json, 0, &outputs_json, 0).unwrap();
+        let statement_json = build_stealth_transfer_statement(&inputs_json, 0, &outputs_json, 0, &[]).unwrap();
         let statement: StealthTransferStatement = serde_json::from_str(&statement_json).unwrap();
 
         assert_eq!(statement.covenant_claims.len(), 1);
@@ -238,7 +253,7 @@ mod tests {
             hex::encode(input_mask.as_bytes()),
             witness_result["witness"],
         );
-        let err = build_stealth_transfer_statement(&inputs_json, 0, "[]", 500).unwrap_err();
+        let err = build_stealth_transfer_statement(&inputs_json, 0, "[]", 500, &[0u8; 32]).unwrap_err();
         assert!(matches!(err, OotleWasmError::Stealth(_)));
     }
 
@@ -250,7 +265,7 @@ mod tests {
             hex::encode(input_mask.as_bytes()),
             hex::encode(Hash32::zero().as_slice())
         );
-        let err = build_stealth_transfer_statement(&inputs_json, 0, "[]", 500).unwrap_err();
+        let err = build_stealth_transfer_statement(&inputs_json, 0, "[]", 500, &[0u8; 32]).unwrap_err();
         assert!(matches!(err, OotleWasmError::Stealth(_)));
     }
 }

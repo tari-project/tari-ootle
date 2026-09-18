@@ -14,8 +14,10 @@
 //!
 //! Every signature (auth + seal) is signed with a **fresh random Schnorr nonce** ([`sign_random`]) over
 //! the `create_message_v1` digests, and [`crate::tx::bor_encode`] encodes the result. The
-//! `is_seal_signer_authorized` flag is set `true` before building the unsealed tx iff there are zero
-//! authorization signatures.
+//! `is_seal_signer_authorized` flag is set `true` before building the unsealed tx in every seal case:
+//! all three seal with a key the spender controls, so the seal signer is always an authority here.
+//! (The public path in [`crate::tx`] assigns the flag from the authorization-signature count instead,
+//! because a public transaction's seal signer need not be one.)
 //!
 //! ## Comparison mode
 //!
@@ -142,6 +144,34 @@ struct SealPlan {
 
 /// Resolves the seal key and authorization signatures for the given case. Every signature is made with
 /// a fresh random nonce; the ephemeral case draws a fresh random seal key.
+/// The secret the transfer will seal with, or `None` for the ephemeral case, which draws a fresh key at seal time.
+///
+/// Assembly needs the matching public key before the balance proof is signed — a revealed output names the key
+/// authorised to take it, and that key must be one the transaction actually carries — while [`plan_seal`] needs the
+/// secret itself at seal time. Both go through here so the receiver named in the statement is the key that seals.
+fn seal_secret(
+    network: InternalNetwork,
+    account_secret: &RistrettoSecretKey,
+    sig_reqs: &StealthSignatureRequirementsState,
+) -> Result<Option<RistrettoSecretKey>, OotleSdkError> {
+    if sig_reqs.must_sign_with_account_key {
+        return Ok(Some(account_secret.clone()));
+    }
+    effective_seal_signer(sig_reqs)
+        .map(|signer| derive_stealth_secret(network, account_secret, signer))
+        .transpose()
+}
+
+/// The public key that will seal a stealth transfer assembled from `sig_reqs`, or `None` when the seal key is the
+/// ephemeral one drawn at seal time. See [`seal_secret`].
+pub fn seal_public_key(
+    network: Network,
+    account_secret: &RistrettoSecretKey,
+    sig_reqs: &StealthSignatureRequirementsState,
+) -> Result<Option<RistrettoPublicKeyBytes>, OotleSdkError> {
+    Ok(seal_secret(network.into(), account_secret, sig_reqs)?.map(|secret| public_key_bytes_from_secret(&secret)))
+}
+
 fn plan_seal(
     network: InternalNetwork,
     account_secret: &RistrettoSecretKey,
@@ -173,9 +203,8 @@ fn plan_seal(
             seal_secret: account_secret.clone(),
             auth_signatures,
         })
-    } else if let Some(seal_signer) = effective_seal_signer(sig_reqs) {
+    } else if let Some(seal_secret) = seal_secret(network, account_secret, sig_reqs)? {
         // Case (ii): a stealth input seals with its one-time key c+k.
-        let seal_secret = derive_stealth_secret(network, account_secret, seal_signer)?;
         let seal_pk = public_key_bytes_from_secret(&seal_secret);
 
         // Authorization signatures for the remaining required signers (the seal signer is skipped by
@@ -243,11 +272,13 @@ pub fn seal_and_encode_stealth_transfer(
 /// computes the seal signature over the seal digest with the planned key (random nonce), and injects it.
 fn finalize_seal(unsigned_v1: &mut UnsignedTransactionV1, plan: SealPlan) -> Result<Transaction, OotleSdkError> {
     // The flag is committed by the seal digest, so it must be settled before constructing the
-    // unsealed tx: with zero authorization signatures the seal signer is the transaction's only
-    // authority and must be authorized.
-    if plan.auth_signatures.is_empty() {
-        unsigned_v1.is_seal_signer_authorized = true;
-    }
+    // unsealed tx. Every seal case here seals with a key the spender controls — the account key, a
+    // stealth input's one-time `c+k`, or the ephemeral key — so the seal signer is always an
+    // authority, whatever authorization signatures accompany it. The flag is what puts its badge in
+    // the transaction's auth scope, which a promoted stealth seal signer (which carries no
+    // authorization signature of its own) needs to spend its own input, and which a revealed output
+    // naming that key needs to be taken.
+    unsigned_v1.is_seal_signer_authorized = true;
 
     let seal_pk = public_key_bytes_from_secret(&plan.seal_secret);
     let unsealed = UnsealedTransactionV1::new(unsigned_v1.clone(), plan.auth_signatures);
@@ -282,7 +313,7 @@ pub fn build_and_encode_stealth_transfer_with_seed(
     keys: &StealthKeys,
     seed: &BuildSeed,
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
-    let partial = build_stealth_transfer_unsigned_with_seed(network, intent, fetched_utxos, spend_secrets, seed)?;
+    let partial = build_stealth_transfer_unsigned_with_seed(network, intent, fetched_utxos, spend_secrets, keys, seed)?;
     seal_and_encode_stealth_transfer(network, partial, keys)
 }
 
@@ -296,7 +327,8 @@ pub fn build_and_encode_stealth_transfer(
     keys: &StealthKeys,
 ) -> Result<EncodedPublicTransfer, OotleSdkError> {
     let seed = random_seed();
-    let partial = build_stealth_transfer_unsigned_with_seed(network, intent, fetched_utxos, spend_secrets, &seed)?;
+    let partial =
+        build_stealth_transfer_unsigned_with_seed(network, intent, fetched_utxos, spend_secrets, keys, &seed)?;
     seal_and_encode_stealth_transfer(network, partial, keys)
 }
 
@@ -498,8 +530,15 @@ mod tests {
         };
 
         let spend_secrets = vec![SecretKeyBytes::from_bytes(view_secret.as_bytes()).unwrap()];
-        let partial =
-            build_stealth_transfer_unsigned_with_seed(NETWORK, &intent, &fetched, &spend_secrets, &seed).unwrap();
+        let partial = build_stealth_transfer_unsigned_with_seed(
+            NETWORK,
+            &intent,
+            &fetched,
+            &spend_secrets,
+            &stealth_keys(),
+            &seed,
+        )
+        .unwrap();
         (partial, owner_account_secret, public_nonce, seed)
     }
 
@@ -519,7 +558,7 @@ mod tests {
             dry_run: false,
             pay_fee_from_revealed: false,
         };
-        build_stealth_transfer_unsigned_with_seed(NETWORK, &intent, &[], &[], &send_seed()).unwrap()
+        build_stealth_transfer_unsigned_with_seed(NETWORK, &intent, &[], &[], &stealth_keys(), &send_seed()).unwrap()
     }
 
     fn decode(out: &EncodedPublicTransfer) -> Transaction {

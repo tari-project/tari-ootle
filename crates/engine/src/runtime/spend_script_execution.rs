@@ -75,7 +75,7 @@ impl SpendScriptExecution {
                 .collect(),
             input_condition_roots: input_condition_roots.to_vec(),
             revealed_input_amount: statement.inputs_statement.revealed_amount,
-            revealed_output_amount: statement.outputs_statement.revealed_output_amount,
+            revealed_output_amount: statement.outputs_statement.revealed_output_amount(),
             current_input_index: input_index,
             current_input_commitment: input_commitment,
             current_input_condition_root,

@@ -314,17 +314,69 @@ fn transfer_with_revealed_outputs() {
     assert_eq!(vault.balance(), 700);
 }
 
+/// The lift: every part of a statement but its revealed output is pinned by the balance proof, and confidential
+/// outputs go where their author encrypted them. Naming the receiver is what stops a submitter who did not build the
+/// statement from materialising its revealed funds in their own workspace.
 #[test]
-fn transfer_revealed_between_accounts() {
+fn a_lifted_statement_cannot_reveal_to_another_submitter() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let (alice, _alice_proof, alice_sk) = test.create_empty_account();
-    let (bob, _proof, _sk) = test.create_empty_account();
+    let (_alice, _alice_proof, alice_sk) = test.create_empty_account();
+    let (mallory, _mallory_proof, mallory_sk) = test.create_empty_account();
+    let alice_pk = RistrettoPublicKey::from_secret_key(&alice_sk).to_byte_type();
 
     let outputs = [100, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
-    let transfer_from_faucet = stealth::generate_transfer_data(
+    // Alice builds a statement that reveals 700 to herself.
+    let transfer = stealth::generate_transfer_data_to(
+        [MaskAndValue {
+            mask: mint.output_masks[1].clone(),
+            value: 1000,
+        }],
+        0u64,
+        [100, 200],
+        700,
+        alice_pk,
+    );
+
+    // Mallory lifts it verbatim into a transaction of her own, depositing the revealed bucket into her account.
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(faucet_resx, transfer.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(mallory, "deposit", args![Workspace("bucket")])
+            .finish()
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .seal(&mallory_sk),
+        vec![],
+    );
+
+    assert_reject_reason(
+        reason,
+        format!("public key {alice_pk} required to take the revealed output of 700"),
+    );
+
+    let store = test.read_only_state_store();
+    assert!(
+        store.get_vaults_for_account(mallory).unwrap().is_empty(),
+        "the lifter's account must gain nothing"
+    );
+}
+
+#[test]
+fn transfer_revealed_between_accounts() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (alice, _alice_proof, alice_sk) = test.create_empty_account();
+    let (bob, _proof, _sk) = test.create_empty_account();
+    // Alice seals this transaction, so hers is the only signer badge in scope to take a revealed output.
+    let alice_pk = RistrettoPublicKey::from_secret_key(&alice_sk).to_byte_type();
+
+    let outputs = [100, 1000, 10000];
+    let mint = stealth::generate_mint_statement(outputs, 0u64, None);
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
+
+    let transfer_from_faucet = stealth::generate_transfer_data_to(
         [
             MaskAndValue {
                 mask: mint.output_masks[2].clone(),
@@ -338,8 +390,9 @@ fn transfer_revealed_between_accounts() {
         0u64,
         [999, 9901],
         100,
+        alice_pk,
     );
-    let transfer_from_alice_to_bob = stealth::generate_transfer_data(NO_INPUTS, 100u64, [25, 25, 25], 25);
+    let transfer_from_alice_to_bob = stealth::generate_transfer_data_to(NO_INPUTS, 100u64, [25, 25, 25], 25, alice_pk);
     let result = test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
@@ -384,12 +437,14 @@ fn transfer_rejects_a_revealed_funds_bucket_with_locked_funds() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template_addr = test.get_template_address(TEMPLATE_NAME);
     let (alice, _alice_proof, alice_sk) = test.create_empty_account();
+    // Alice seals this transaction, so hers is the only signer badge in scope to take a revealed output.
+    let alice_pk = RistrettoPublicKey::from_secret_key(&alice_sk).to_byte_type();
 
     let outputs = [100, 1000, 10000];
     let mint = stealth::generate_mint_statement(outputs, 0u64, None);
     let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
-    let transfer_from_faucet = stealth::generate_transfer_data(
+    let transfer_from_faucet = stealth::generate_transfer_data_to(
         [
             MaskAndValue {
                 mask: mint.output_masks[2].clone(),
@@ -403,6 +458,7 @@ fn transfer_rejects_a_revealed_funds_bucket_with_locked_funds() {
         0u64,
         [999, 9901],
         100,
+        alice_pk,
     );
     let onward_transfer = stealth::generate_transfer_data(
         [MaskAndValue {

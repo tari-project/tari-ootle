@@ -2416,7 +2416,7 @@ fn run_golden_vectors() {
             let intent = input.stealth_intent.as_ref().expect("stealth fixture has an intent");
             let seed = input.stealth_seed.expect("stealth fixture has a seed");
             let (stmt, _mask) =
-                ootle_sdk_core::stealth::build_stealth_outputs_statement_with_seed(network, intent, &seed)
+                ootle_sdk_core::stealth::build_stealth_outputs_statement_with_seed(network, intent, &seed, None)
                     .unwrap_or_else(|e| panic!("stealth fixture `{}`: build failed: {e}", fixture.name));
             // If any output carries a resource view key, the validator needs it (the viewable-balance
             // proof is checked against it). The vectors use a single resource view key per statement.

@@ -209,7 +209,7 @@ impl BurnClaimKeyProvider for LocalKeyProvider<OotleSecretKey> {
             encrypted_data,
             sender_offset_public_key,
             output,
-            revealed_output_amount,
+            revealed_output,
         } = spec;
 
         let decrypted = self
@@ -217,26 +217,30 @@ impl BurnClaimKeyProvider for LocalKeyProvider<OotleSecretKey> {
             .await?;
         let agg_input_mask = decrypted.mask().clone();
 
-        let (outputs_statement, agg_output_mask) = self
-            .generate_outputs_statement(vec![output], revealed_output_amount)
-            .await?;
+        let (outputs_statement, agg_output_mask) =
+            self.generate_outputs_statement(vec![output], revealed_output).await?;
 
         // The single stealth input is the burn UTXO minted by the `claim_burn` instruction, which the
         // instruction itself authorises — hence a bare commitment with no witness.
         let inputs_statement = StealthInputsStatement::new(vec![StealthInput::from(commitment)], Amount::zero());
+
+        // A burn claim spends the minted burn UTXO, which no covenant gates, so there is nothing to claim. The claims
+        // are bound by the balance proof, so they must be settled before it is signed.
+        let covenant_claims = Vec::new();
 
         let balance_proof = generate_stealth_balance_proof_signature(
             &agg_input_mask,
             &agg_output_mask,
             &inputs_statement,
             &outputs_statement,
+            &covenant_claims,
         );
 
         Ok(StealthTransferStatement {
             inputs_statement,
             outputs_statement,
             balance_proof: Some(balance_proof),
-            covenant_claims: Vec::new(),
+            covenant_claims,
         })
     }
 }

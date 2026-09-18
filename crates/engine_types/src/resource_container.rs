@@ -1007,6 +1007,14 @@ pub enum ResourceError {
         commitment: PedersenCommitmentBytes,
         public_key: RistrettoPublicKeyBytes,
     },
+    #[error(
+        "The transaction signature with public key {receiver} required to take the revealed output of {amount} was \
+         not provided or is not in scope"
+    )]
+    RevealedOutputReceiverNotInScope {
+        receiver: RistrettoPublicKeyBytes,
+        amount: Amount,
+    },
     #[error("UTXO {id} failed to burn: {details}")]
     UtxoBurnFailed { id: UtxoId, details: String },
     #[error("Invalid value proof for commitment {commitment}: {details}")]

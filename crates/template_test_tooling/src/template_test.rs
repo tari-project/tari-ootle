@@ -79,6 +79,9 @@ use crate::{
     wrapped_transaction::WrappedTransaction,
 };
 
+/// The secret key [`TemplateTest`] signs with when no other key is given.
+pub const DEFAULT_SIGNING_KEY_HEX: &str = "8a39567509bf2f7074e5fd153337405292cdc9f574947313b62fbf8fb4cffc02";
+
 /// Returns the component address of the built-in XTR (Tari) faucet used in tests.
 pub const fn xtr_faucet_component() -> ComponentAddress {
     XTR_FAUCET_COMPONENT_ADDRESS
@@ -231,8 +234,7 @@ impl TemplateTest {
     /// templates from source; this is the seam for a caller that already has loaded templates —
     /// notably one embedding pre-compiled WASM so it needs no toolchain at run time.
     pub fn from_package(package: Package) -> Self {
-        let secret_key =
-            RistrettoSecretKey::from_hex("8a39567509bf2f7074e5fd153337405292cdc9f574947313b62fbf8fb4cffc02").unwrap();
+        let secret_key = RistrettoSecretKey::from_hex(DEFAULT_SIGNING_KEY_HEX).unwrap();
 
         let public_key = RistrettoPublicKey::from_secret_key(&secret_key);
 

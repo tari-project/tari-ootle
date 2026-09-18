@@ -9,7 +9,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
     tari_utilities::ByteArrayError,
 };
-use tari_template_lib::types::{Amount, stealth::StealthTransferStatement};
+use tari_template_lib::types::stealth::{RevealedOutput, StealthTransferStatement};
 
 use crate::{
     crypto::{commit_amount, messages, try_decode_to_signature},
@@ -23,7 +23,7 @@ const LOG_TARGET: &str = "tari::engine_types::stealth::transfer";
 #[derive(Debug, Clone)]
 pub struct ValidatedStealthTransfer {
     pub outputs: Vec<ValidatedStealthOutput>,
-    pub revealed_output_amount: Amount,
+    pub revealed_output: Option<RevealedOutput>,
 }
 
 /// The native-execution metering points [`validate_transfer`] (plus the per-input spend
@@ -99,7 +99,7 @@ pub fn validate_transfer(
 
         return Ok(ValidatedStealthTransfer {
             outputs: vec![],
-            revealed_output_amount: transfer.outputs_statement.revealed_output_amount,
+            revealed_output: transfer.outputs_statement.revealed_output,
         });
     }
     let balance_proof = balance_proof.ok_or_else(|| ResourceError::InvalidBalanceProof {
@@ -133,7 +133,7 @@ pub fn validate_transfer(
     })?;
     let revealed_output_commit = commit_amount(
         &RistrettoSecretKey::default(),
-        transfer.outputs_statement.revealed_output_amount,
+        transfer.outputs_statement.revealed_output_amount(),
     )
     .ok_or_else(|| ResourceError::InvalidBalanceProof {
         details: "Revealed output amount must be non-negative".to_string(),
@@ -146,7 +146,7 @@ pub fn validate_transfer(
         target: LOG_TARGET,
         "Validating transfer: revealed input amount: {}, revealed output amount: {}, public excess: {}, nonce: {}",
         transfer.inputs_statement.revealed_amount,
-        transfer.outputs_statement.revealed_output_amount,
+        transfer.outputs_statement.revealed_output_amount(),
         public_excess,
         balance_proof.get_public_nonce()
     );
@@ -156,6 +156,7 @@ pub fn validate_transfer(
         balance_proof.get_public_nonce(),
         &transfer.inputs_statement,
         &transfer.outputs_statement,
+        &transfer.covenant_claims,
     );
 
     if !balance_proof.verify_raw_uniform(&public_excess, &message) {
@@ -168,7 +169,7 @@ pub fn validate_transfer(
 
     Ok(ValidatedStealthTransfer {
         outputs: validated_outputs,
-        revealed_output_amount: transfer.outputs_statement.revealed_output_amount,
+        revealed_output: transfer.outputs_statement.revealed_output,
     })
 }
 
@@ -192,13 +193,24 @@ fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), Resource
             ),
         });
     }
-    if transfer.outputs_statement.revealed_output_amount.is_negative() {
-        return Err(ResourceError::InvalidBalanceProof {
-            details: format!(
-                "Revealed output amount must be non-negative: {}",
-                transfer.outputs_statement.revealed_output_amount
-            ),
-        });
+    if let Some(revealed) = transfer.outputs_statement.revealed_output {
+        // The presence of this field and the presence of a revealed bucket are the same fact, which holds only while
+        // `None` is the sole encoding of "no revealed output".
+        if !revealed.amount.is_positive() {
+            return Err(ResourceError::InvalidBalanceProof {
+                details: format!("Revealed output amount must be positive: {}", revealed.amount),
+            });
+        }
+        // The receiver reaches the auth scope as a badge, which is compared bytewise and never decompresses it, so
+        // canonicality is established here: a badge is satisfiable only by a signer whose key encodes to these bytes.
+        if RistrettoPublicKey::convert_from_byte_type(&revealed.receiver).is_err() {
+            return Err(ResourceError::InvalidSpend {
+                details: format!(
+                    "Revealed output receiver is not a canonical public key: {}",
+                    revealed.receiver
+                ),
+            });
+        }
     }
 
     if transfer.inputs_statement.revealed_amount.is_zero() && transfer.inputs_statement.inputs.is_empty() {
@@ -210,12 +222,13 @@ fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), Resource
     // Check the balance if there are no stealth inputs or outputs. Since the excess will be zero in this case, the
     // balance signature (r + 0.e) does not prove the balance.
     if transfer.inputs_statement.inputs.is_empty() && transfer.outputs_statement.outputs.is_empty() {
-        if transfer.inputs_statement.revealed_amount != transfer.outputs_statement.revealed_output_amount {
+        if transfer.inputs_statement.revealed_amount != transfer.outputs_statement.revealed_output_amount() {
             return Err(ResourceError::InvalidBalanceProof {
                 details: format!(
                     "Revealed input amount {} does not match revealed output amount {} - no stealth inputs or outputs \
                      provided",
-                    transfer.inputs_statement.revealed_amount, transfer.outputs_statement.revealed_output_amount
+                    transfer.inputs_statement.revealed_amount,
+                    transfer.outputs_statement.revealed_output_amount()
                 ),
             });
         }

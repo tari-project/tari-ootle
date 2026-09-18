@@ -376,7 +376,7 @@ async fn build_self_stealth_statement(
         iter::empty::<StealthInputWitness>(),
         stealth_amount,
         iter::once(&output_witness),
-        0,
+        None,
     )?;
 
     Ok((statement, pool_amounts))

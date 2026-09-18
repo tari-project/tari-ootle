@@ -702,7 +702,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 .stealth_seed
                 .unwrap_or_else(|| panic!("fixture `{}`: stealth op requires `input.stealth_seed`", fixture.name));
             let (stmt, mask) =
-                ootle_sdk_core::stealth::build_stealth_outputs_statement_with_seed(network, intent, &seed)
+                ootle_sdk_core::stealth::build_stealth_outputs_statement_with_seed(network, intent, &seed, None)
                     .unwrap_or_else(|e| panic!("fixture `{}`: core operation failed: {e}", fixture.name));
             // Record the deterministic fields: serialize the statement, then null out the
             // (byte-unstable) aggregated range proof so the semantic compare is stable.

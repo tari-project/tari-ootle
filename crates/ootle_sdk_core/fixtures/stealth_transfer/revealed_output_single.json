@@ -2,8 +2,8 @@
   "name": "stealth_transfer/revealed_output_single",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.39.0",
-    "git_rev": "dee549eb268a89412bde31f685359207b7789ab3",
+    "core_version": "0.41.0",
+    "git_rev": "6f4069ae154394942e07dcd6d6f423cd364d84e5",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
@@ -125,7 +125,10 @@
                           "tag": 930317972
                         }
                       ],
-                      "revealed_output_amount": "500000"
+                      "revealed_output": {
+                        "amount": "500000",
+                        "receiver": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42"
+                      }
                     }
                   }
                 }

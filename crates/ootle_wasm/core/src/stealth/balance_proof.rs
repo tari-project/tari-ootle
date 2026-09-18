@@ -9,7 +9,7 @@ use tari_ootle_wallet_crypto::balance_proof::{
 };
 use tari_template_lib_types::{
     crypto::{BalanceProofSignature, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
-    stealth::{StealthInputsStatement, StealthOutputsStatement},
+    stealth::{CovenantBalanceClaim, StealthInputsStatement, StealthOutputsStatement},
 };
 
 use crate::{error::OotleWasmError, keys::secret_key_from_bytes, sign::SchnorrSignatureResult};
@@ -25,13 +25,21 @@ pub fn generate_stealth_balance_proof_signature(
     aggregated_output_mask: &[u8],
     inputs_statement_json: &str,
     outputs_statement_json: &str,
+    covenant_claims_json: &str,
 ) -> Result<SchnorrSignatureResult, OotleWasmError> {
     let agg_input_mask = secret_key_from_bytes(aggregated_input_mask)?;
     let agg_output_mask = secret_key_from_bytes(aggregated_output_mask)?;
     let inputs_statement: StealthInputsStatement = serde_json::from_str(inputs_statement_json)?;
     let outputs_statement: StealthOutputsStatement = serde_json::from_str(outputs_statement_json)?;
+    let covenant_claims: Vec<CovenantBalanceClaim> = serde_json::from_str(covenant_claims_json)?;
 
-    let sig = crypto_generate(&agg_input_mask, &agg_output_mask, &inputs_statement, &outputs_statement);
+    let sig = crypto_generate(
+        &agg_input_mask,
+        &agg_output_mask,
+        &inputs_statement,
+        &outputs_statement,
+        &covenant_claims,
+    );
 
     Ok(SchnorrSignatureResult {
         public_nonce: sig.public_nonce().as_bytes().to_vec(),
@@ -46,6 +54,7 @@ pub fn validate_balance_proof_signature(
     signature: &[u8],
     inputs_statement_json: &str,
     outputs_statement_json: &str,
+    covenant_claims_json: &str,
 ) -> Result<bool, OotleWasmError> {
     let public_nonce =
         RistrettoPublicKeyBytes::from_bytes(public_nonce).map_err(|e| OotleWasmError::InvalidByteLength {
@@ -61,12 +70,21 @@ pub fn validate_balance_proof_signature(
     let sig_bytes: BalanceProofSignature = SchnorrSignatureBytes::new(public_nonce, signature_scalar);
     let inputs_statement: StealthInputsStatement = serde_json::from_str(inputs_statement_json)?;
     let outputs_statement: StealthOutputsStatement = serde_json::from_str(outputs_statement_json)?;
+    let covenant_claims: Vec<CovenantBalanceClaim> = serde_json::from_str(covenant_claims_json)?;
 
-    Ok(crypto_validate(&sig_bytes, &inputs_statement, &outputs_statement))
+    Ok(crypto_validate(
+        &sig_bytes,
+        &inputs_statement,
+        &outputs_statement,
+        &covenant_claims,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
+    /// The JSON encoding of an empty covenant claim list, which every statement these tests build carries.
+    const NO_CLAIMS: &str = "[]";
+
     use ootle_byte_type::ToByteType;
     use tari_crypto::{
         keys::{PublicKey, SecretKey},
@@ -108,7 +126,7 @@ mod tests {
             auth: SpendAuthorization::Key(owner_pk.to_byte_type()),
             tag: UtxoTag::new(0),
         }];
-        let transfer = create_transfer_statement(inputs, Amount::zero(), outputs.iter(), Amount::zero()).unwrap();
+        let transfer = create_transfer_statement(inputs, Amount::zero(), outputs.iter(), None).unwrap();
         (input_mask, output_mask, transfer)
     }
 
@@ -123,11 +141,18 @@ mod tests {
             output_mask.as_bytes(),
             &inputs_json,
             &outputs_json,
+            NO_CLAIMS,
         )
         .unwrap();
 
-        let valid =
-            validate_balance_proof_signature(&sig.public_nonce, &sig.signature, &inputs_json, &outputs_json).unwrap();
+        let valid = validate_balance_proof_signature(
+            &sig.public_nonce,
+            &sig.signature,
+            &inputs_json,
+            &outputs_json,
+            NO_CLAIMS,
+        )
+        .unwrap();
         assert!(valid);
     }
 
@@ -143,6 +168,7 @@ mod tests {
             proof.signature().as_bytes(),
             &inputs_json,
             &outputs_json,
+            NO_CLAIMS,
         )
         .unwrap();
         assert!(valid);
@@ -153,7 +179,8 @@ mod tests {
         let (_, _, transfer) = build_simple_transfer();
         let inputs_json = serde_json::to_string(&transfer.inputs_statement).unwrap();
         let outputs_json = serde_json::to_string(&transfer.outputs_statement).unwrap();
-        let valid = validate_balance_proof_signature(&[0u8; 32], &[0u8; 32], &inputs_json, &outputs_json).unwrap();
+        let valid =
+            validate_balance_proof_signature(&[0u8; 32], &[0u8; 32], &inputs_json, &outputs_json, NO_CLAIMS).unwrap();
         assert!(!valid);
     }
 
@@ -162,7 +189,8 @@ mod tests {
         let (_, _, transfer) = build_simple_transfer();
         let inputs_json = serde_json::to_string(&transfer.inputs_statement).unwrap();
         let outputs_json = serde_json::to_string(&transfer.outputs_statement).unwrap();
-        let err = validate_balance_proof_signature(&[0u8; 31], &[0u8; 32], &inputs_json, &outputs_json).unwrap_err();
+        let err = validate_balance_proof_signature(&[0u8; 31], &[0u8; 32], &inputs_json, &outputs_json, NO_CLAIMS)
+            .unwrap_err();
         assert!(matches!(err, OotleWasmError::InvalidByteLength { .. }));
     }
 }

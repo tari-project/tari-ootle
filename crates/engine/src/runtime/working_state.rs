@@ -62,7 +62,7 @@ use tari_template_lib::{
         constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
         crypto::{CommitmentValueProof, PedersenCommitmentBytes},
         metadata,
-        stealth::{SpendAuthorization, StealthInput, StealthTransferStatement},
+        stealth::{RevealedOutput, SpendAuthorization, StealthInput, StealthTransferStatement},
     },
 };
 
@@ -2282,13 +2282,32 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
         self.unlock_substate(resource_lock)?;
 
-        if valid_transfer.revealed_output_amount.is_zero() {
+        let Some(revealed) = valid_transfer.revealed_output else {
             return Ok(None);
-        }
+        };
+        self.check_revealed_output_receiver(&revealed)?;
 
-        let container = ResourceContainer::stealth(resource_address, valid_transfer.revealed_output_amount);
+        let container = ResourceContainer::stealth(resource_address, revealed.amount);
 
         Ok(Some(container))
+    }
+
+    /// Revealed funds materialise in the executing workspace, so unlike a stealth output nothing about the statement
+    /// decides who ends up with them. The receiver's badge is what authorises the reveal, so a statement lifted into
+    /// another transaction cannot produce its bucket there.
+    ///
+    /// The badge is checked against the base scope, as a key-path input's spend key is: whether a signer authorised
+    /// this transaction does not depend on how deeply nested the frame taking the funds is.
+    fn check_revealed_output_receiver(&self, revealed: &RevealedOutput) -> Result<(), RuntimeError> {
+        let badge = NonFungibleAddress::from_public_key(revealed.receiver);
+        if !self.base_call_scope().auth_scope().contains_badge(&badge) {
+            return Err(ResourceError::RevealedOutputReceiverNotInScope {
+                receiver: revealed.receiver,
+                amount: revealed.amount,
+            }
+            .into());
+        }
+        Ok(())
     }
 }
 

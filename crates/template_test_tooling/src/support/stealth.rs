@@ -7,6 +7,7 @@ use ootle_byte_type::ToByteType;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::hex::Hex,
 };
 use tari_ootle_wallet_crypto::{
     MaskAndValue,
@@ -21,7 +22,7 @@ use tari_template_lib::types::{
     EncryptedData,
     bytes::Bytes,
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
-    stealth::{SpendAuthorization, SpendCondition, StealthOutputsStatement, StealthTransferStatement},
+    stealth::{RevealedOutput, SpendAuthorization, SpendCondition, StealthOutputsStatement, StealthTransferStatement},
 };
 
 use crate::support::spec::{InputAuthSpec, InputSpec, OutputAuthSpec, OutputSpec};
@@ -34,6 +35,21 @@ pub enum OutputAuth {
     KeyPath(RistrettoPublicKeyBytes),
     /// Condition tree over these committed leaves.
     Conditions(Vec<SpendCondition>),
+}
+
+/// The key these helpers name as a revealed output's receiver: the one [`TemplateTest`] signs with by default, so a
+/// statement built here reveals to a signer of the transaction that carries it. A test that needs the reveal to fail
+/// submits the statement in a transaction signed by some other key.
+///
+/// [`TemplateTest`]: crate::template_test::TemplateTest
+pub fn default_revealed_receiver() -> RistrettoPublicKeyBytes {
+    let secret = RistrettoSecretKey::from_hex(crate::template_test::DEFAULT_SIGNING_KEY_HEX).unwrap();
+    RistrettoPublicKey::from_secret_key(&secret).to_byte_type()
+}
+
+/// The revealed output for `amount` taken by [`default_revealed_receiver`], or `None` when it is zero.
+fn revealed_output(amount: Amount) -> Option<RevealedOutput> {
+    (!amount.is_zero()).then(|| RevealedOutput::new(amount, default_revealed_receiver()))
 }
 
 pub fn generate_stealth_output_statement<I: IntoIterator<Item = u64>, A: Into<Amount>>(
@@ -115,7 +131,7 @@ fn generate_stealth_statement_internal(
         })
         .collect::<Vec<_>>();
 
-    let stmt = stealth::create_outputs_statement(&output_statements, revealed_output_amount).unwrap();
+    let stmt = stealth::create_outputs_statement(&output_statements, revealed_output(revealed_output_amount)).unwrap();
     (stmt, masks)
 }
 
@@ -142,6 +158,7 @@ pub fn spend_first_input_twice(
         &agg_output_mask,
         &statement.inputs_statement,
         &statement.outputs_statement,
+        &statement.covenant_claims,
     ));
 
     statement
@@ -189,7 +206,41 @@ where
     II::IntoIter: ExactSizeIterator,
     IS: Into<InputSpec>,
 {
-    generate_transfer_data_internal(inputs, revealed_input_amount, outputs, revealed_output_amount, None)
+    generate_transfer_data_internal(
+        inputs,
+        revealed_input_amount,
+        outputs,
+        revealed_output(revealed_output_amount.into()),
+        None,
+    )
+}
+
+/// [`generate_transfer_data`] naming `receiver` on the revealed output instead of
+/// [`default_revealed_receiver`]. For a transaction sealed by some other key, which is the only case where the two
+/// differ.
+pub fn generate_transfer_data_to<O, A, OS, IS, II>(
+    inputs: II,
+    revealed_input_amount: A,
+    outputs: O,
+    revealed_output_amount: A,
+    receiver: RistrettoPublicKeyBytes,
+) -> StealthSecretTransferData
+where
+    O: IntoIterator<Item = OS>,
+    OS: Into<OutputSpec>,
+    A: Into<Amount>,
+    II: IntoIterator<Item = IS>,
+    II::IntoIter: ExactSizeIterator,
+    IS: Into<InputSpec>,
+{
+    let amount = revealed_output_amount.into();
+    generate_transfer_data_internal(
+        inputs,
+        revealed_input_amount,
+        outputs,
+        (!amount.is_zero()).then(|| RevealedOutput::new(amount, receiver)),
+        None,
+    )
 }
 
 pub fn generate_transfer_data_with_view_key<IO, OS, A, II, IS>(
@@ -211,7 +262,7 @@ where
         inputs,
         revealed_input_amount,
         outputs,
-        revealed_output_amount,
+        revealed_output(revealed_output_amount.into()),
         Some(view_key.clone()),
     )
 }
@@ -231,7 +282,7 @@ fn generate_transfer_data_internal<IO, OS, A, II, IS>(
     inputs: II,
     revealed_input_amount: A,
     outputs: IO,
-    revealed_output_amount: A,
+    revealed_output: Option<RevealedOutput>,
     view_key: Option<RistrettoPublicKey>,
 ) -> StealthSecretTransferData
 where
@@ -306,13 +357,9 @@ where
             },
         });
 
-    let transfer = stealth::create_transfer_statement(
-        inputs,
-        revealed_input_amount.into(),
-        outputs.iter(),
-        revealed_output_amount.into(),
-    )
-    .unwrap();
+    let transfer =
+        stealth::create_transfer_statement(inputs, revealed_input_amount.into(), outputs.iter(), revealed_output)
+            .unwrap();
 
     StealthSecretTransferData {
         output_masks: outputs.into_iter().map(|m| m.witness.mask).collect(),

@@ -22,7 +22,12 @@ use tari_ootle_wallet_crypto::{
     pay_to::PayTo,
     stealth::{create_outputs_statement, pay_to_output_authorization},
 };
-use tari_template_lib_types::{Amount, ResourceAddress, crypto::RangeProofBytes};
+use tari_template_lib_types::{
+    Amount,
+    ResourceAddress,
+    crypto::{RangeProofBytes, RistrettoPublicKeyBytes},
+    stealth::RevealedOutput,
+};
 
 use crate::{
     error::OotleWasmError,
@@ -51,6 +56,7 @@ pub struct StealthOutputsResult {
 pub fn generate_stealth_outputs_statement(
     witnesses_json: &str,
     revealed_output_amount_microtari: u64,
+    revealed_receiver: &[u8],
 ) -> Result<StealthOutputsResult, OotleWasmError> {
     use tari_ootle_wallet_crypto::StealthOutputWitness;
 
@@ -65,7 +71,21 @@ pub fn generate_stealth_outputs_statement(
         .map(|w| &w.witness.mask)
         .fold(RistrettoSecretKey::default(), |acc, mask| acc + mask);
 
-    let statement = create_outputs_statement(witnesses.iter(), Amount::from_u64(revealed_output_amount_microtari))
+    let revealed_output = match revealed_output_amount_microtari {
+        0 => None,
+        amount => {
+            let receiver = RistrettoPublicKeyBytes::from_bytes(revealed_receiver).map_err(|e| {
+                OotleWasmError::InvalidByteLength {
+                    field: "revealed_receiver",
+                    expected: RistrettoPublicKeyBytes::length(),
+                    got: e.actual_size(),
+                }
+            })?;
+            Some(RevealedOutput::new(Amount::from_u64(amount), receiver))
+        },
+    };
+
+    let statement = create_outputs_statement(witnesses.iter(), revealed_output)
         .map_err(|e| OotleWasmError::Stealth(e.to_string()))?;
 
     Ok(StealthOutputsResult {
@@ -212,10 +232,16 @@ mod tests {
         )
     }
 
+    /// A stand-in receiver for a revealed output; the badge check that gives it meaning is the engine's.
+    fn a_receiver() -> RistrettoPublicKeyBytes {
+        let nonce = tari_crypto::ristretto::RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(5u64));
+        nonce.to_byte_type()
+    }
+
     #[test]
     fn generate_outputs_produces_valid_statement() {
         let witnesses = make_witness_json(1000);
-        let result = generate_stealth_outputs_statement(&witnesses, 0).unwrap();
+        let result = generate_stealth_outputs_statement(&witnesses, 0, &[]).unwrap();
         let stmt: StealthOutputsStatement = serde_json::from_str(&result.statement_json).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
         assert_eq!(result.aggregated_output_mask.len(), 32);
@@ -223,7 +249,7 @@ mod tests {
 
     #[test]
     fn generate_outputs_with_empty_array() {
-        let result = generate_stealth_outputs_statement("[]", 100).unwrap();
+        let result = generate_stealth_outputs_statement("[]", 100, a_receiver().as_bytes()).unwrap();
         let stmt: StealthOutputsStatement = serde_json::from_str(&result.statement_json).unwrap();
         assert!(stmt.outputs.is_empty());
         assert!(stmt.agg_range_proof.is_empty());
@@ -278,7 +304,7 @@ mod tests {
         })
         .unwrap();
 
-        let result = generate_stealth_outputs_statement(&format!("[{json}]"), 0).unwrap();
+        let result = generate_stealth_outputs_statement(&format!("[{json}]"), 0, &[]).unwrap();
         let stmt: StealthOutputsStatement = serde_json::from_str(&result.statement_json).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
         assert_eq!(stmt.outputs.len(), 1);
@@ -374,7 +400,7 @@ mod tests {
         assert!(witness.auth.spend_key().is_none());
         assert!(witness.auth.condition_root().is_some());
 
-        let result = generate_stealth_outputs_statement(&format!("[{json}]"), 0).unwrap();
+        let result = generate_stealth_outputs_statement(&format!("[{json}]"), 0, &[]).unwrap();
         let stmt: StealthOutputsStatement = serde_json::from_str(&result.statement_json).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
     }

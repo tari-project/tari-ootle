@@ -84,6 +84,9 @@ pub use substate_decode::{
     account_balances,
     decode_substate,
 };
+/// Re-exported because the stealth assembly API takes and returns these types: a revealed output names its
+/// receiver as a [`RistrettoPublicKeyBytes`].
+pub use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, stealth::RevealedOutput};
 pub use types::generic_intent::{
     ArgValue,
     BlobSpec,

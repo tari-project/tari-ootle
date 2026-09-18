@@ -8,8 +8,34 @@ use super::{SpendWitness, StealthUnspentOutput};
 use crate::{
     Amount,
     UtxoAddress,
-    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
+    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes, RistrettoPublicKeyBytes},
 };
+
+/// A revealed output together with the key authorised to take it.
+///
+/// The revealed funds materialise as a bucket in the executing workspace rather than as a stealth output, so unlike a
+/// confidential output nothing in the statement says where they end up. `receiver` supplies that: the engine requires
+/// the receiver's badge in the transaction's auth scope before it creates the bucket, so a statement lifted into
+/// another transaction yields its revealed funds to nobody. The receiver authorises the reveal; where the bucket goes
+/// afterwards is up to the instructions that take it.
+#[derive(Debug, Clone, Copy, Encode, Decode, CborLen, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+pub struct RevealedOutput {
+    /// The amount of revealed funds to output. Must be positive.
+    #[n(0)]
+    pub amount: Amount,
+    /// The public key whose badge must be in the transaction's auth scope for the revealed bucket to be created.
+    #[n(1)]
+    pub receiver: RistrettoPublicKeyBytes,
+}
+
+impl RevealedOutput {
+    pub fn new(amount: Amount, receiver: RistrettoPublicKeyBytes) -> Self {
+        Self { amount, receiver }
+    }
+}
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
@@ -20,10 +46,11 @@ pub struct StealthOutputsStatement {
     /// The stealth outputs that are to be created
     #[n(0)]
     pub outputs: Vec<StealthUnspentOutput>,
-    /// The amount of revealed funds to output. If this is a positive (non-zero) value, a bucket containing the
-    /// revealed stealth funds is created.
+    /// The revealed funds to output, and the key authorised to take them. When set, a bucket containing the revealed
+    /// stealth funds is created for `receiver`. `None` is the only encoding of "no revealed output": a zero amount is
+    /// rejected, so the presence of this field and the presence of a revealed bucket are the same thing.
     #[n(1)]
-    pub revealed_output_amount: Amount,
+    pub revealed_output: Option<RevealedOutput>,
     /// Bulletproof range proof for the output commitments proving that values are in the range
     /// [minimum_value_promise, 2^64)
     #[n(2)]
@@ -31,13 +58,23 @@ pub struct StealthOutputsStatement {
 }
 
 impl StealthOutputsStatement {
-    /// Create a new output statement with no stealth outputs, only a revealed amount.
-    pub fn new_revealed_only(amount: Amount) -> Self {
+    /// Create a new output statement with no stealth outputs, only a revealed amount taken by `receiver`.
+    pub fn new_revealed_only(amount: Amount, receiver: RistrettoPublicKeyBytes) -> Self {
         Self {
             outputs: vec![],
-            revealed_output_amount: amount,
+            revealed_output: Some(RevealedOutput::new(amount, receiver)),
             agg_range_proof: RangeProofBytes::empty(),
         }
+    }
+
+    /// The revealed output amount, or zero when there is no revealed output.
+    pub fn revealed_output_amount(&self) -> Amount {
+        self.revealed_output.map_or(Amount::ZERO, |r| r.amount)
+    }
+
+    /// The key authorised to take the revealed output, if there is one.
+    pub fn revealed_receiver(&self) -> Option<RistrettoPublicKeyBytes> {
+        self.revealed_output.map(|r| r.receiver)
     }
 }
 
@@ -168,10 +205,10 @@ pub struct StealthTransferStatement {
 }
 
 impl StealthTransferStatement {
-    pub fn revealed_only(input_amount: Amount, output_amount: Amount) -> Self {
+    pub fn revealed_only(input_amount: Amount, output_amount: Amount, receiver: RistrettoPublicKeyBytes) -> Self {
         Self {
             inputs_statement: StealthInputsStatement::new_revealed_only(input_amount),
-            outputs_statement: StealthOutputsStatement::new_revealed_only(output_amount),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(output_amount, receiver),
             balance_proof: None,
             covenant_claims: vec![],
         }
@@ -182,7 +219,12 @@ impl StealthTransferStatement {
     }
 
     pub fn revealed_output_amount(&self) -> Amount {
-        self.outputs_statement.revealed_output_amount
+        self.outputs_statement.revealed_output_amount()
+    }
+
+    /// The key authorised to take the revealed output, if there is one.
+    pub fn revealed_receiver(&self) -> Option<RistrettoPublicKeyBytes> {
+        self.outputs_statement.revealed_receiver()
     }
 
     pub fn stealth_outputs(&self) -> &[StealthUnspentOutput] {

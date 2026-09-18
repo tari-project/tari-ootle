@@ -506,14 +506,16 @@ OotleResult ootle_build_stealth_unsigned_with_seed(uint8_t network,
  *
  * # Safety
  * `handle` must be a non-null pointer previously returned by [`ootle_build_stealth_unsigned`] /
- * [`ootle_build_stealth_unsigned_with_seed`] / this fn and not yet consumed. `fetched_json` and
- * `spend_secrets_json` must each be a valid NUL-terminated UTF-8 C string. The returned envelope must
- * be freed with [`ootle_result_free`](crate::ootle_result_free).
+ * [`ootle_build_stealth_unsigned_with_seed`] / this fn and not yet consumed. `fetched_json`,
+ * `spend_secrets_json` and `keys_json` (`{account_secret}`, lowercase hex — assembly names the revealed output's
+ * receiver, which is the key that will seal) must each be a valid NUL-terminated UTF-8 C string. The returned
+ * envelope must be freed with [`ootle_result_free`](crate::ootle_result_free).
  */
 OotleResult ootle_apply_fetched_substates_stealth(OotleStealthPartialTransaction *handle,
                                                   uint8_t network,
                                                   const char *fetched_json,
-                                                  const char *spend_secrets_json);
+                                                  const char *spend_secrets_json,
+                                                  const char *keys_json);
 
 /**
  * Random-nonce default seal + BOR-encode of a stealth partial from [`ootle_build_stealth_unsigned`].
@@ -662,13 +664,16 @@ OotleResult ootle_validate_stealth_transfer(uint8_t network,
  * `"PARSE"`; an all-zero seed yields `"VALIDATION"`; a null arg or unknown network yields `"INVALID"`.
  *
  * # Safety
- * `intent_json` and `seed_hex` must each be a valid NUL-terminated UTF-8 C string. The returned
+ * `intent_json` and `seed_hex` must each be a valid NUL-terminated UTF-8 C string; `revealed_receiver_hex` is the
+ * lowercase-hex public key authorised to take the intent's revealed output, and may be null only when the intent
+ * reveals nothing. The returned
  * envelope must be freed with [`ootle_result_free`](crate::ootle_result_free). It never carries a
  * handle — do **not** call [`ootle_stealth_partial_transaction_free`] on its result.
  */
 OotleResult ootle_build_stealth_outputs_statement_with_seed(uint8_t network,
                                                             const char *intent_json,
-                                                            const char *seed_hex);
+                                                            const char *seed_hex,
+                                                            const char *revealed_receiver_hex);
 
 /**
  * Frees an opaque [`OotleStealthPartialTransaction`] handle. Null-safe; call **exactly once**, and

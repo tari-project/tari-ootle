@@ -231,10 +231,12 @@ pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, JsError>
 pub fn generate_stealth_outputs_statement(
     witnesses_json: &str,
     revealed_output_amount_microtari: u64,
+    revealed_receiver: &[u8],
 ) -> Result<StealthOutputsResult, JsError> {
     let result = ootle_wasm_core::stealth::outputs::generate_stealth_outputs_statement(
         witnesses_json,
         revealed_output_amount_microtari,
+        revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(StealthOutputsResult {
@@ -383,12 +385,14 @@ pub fn build_stealth_transfer_statement(
     revealed_input_amount_microtari: u64,
     output_witnesses_json: &str,
     revealed_output_amount_microtari: u64,
+    revealed_receiver: &[u8],
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::transfer::build_stealth_transfer_statement(
         input_witnesses_json,
         revealed_input_amount_microtari,
         output_witnesses_json,
         revealed_output_amount_microtari,
+        revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -431,12 +435,14 @@ pub fn generate_stealth_balance_proof_signature(
     aggregated_output_mask: &[u8],
     inputs_statement_json: &str,
     outputs_statement_json: &str,
+    covenant_claims_json: &str,
 ) -> Result<SchnorrSignatureResult, JsError> {
     let result = ootle_wasm_core::stealth::balance_proof::generate_stealth_balance_proof_signature(
         aggregated_input_mask,
         aggregated_output_mask,
         inputs_statement_json,
         outputs_statement_json,
+        covenant_claims_json,
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(SchnorrSignatureResult {
@@ -454,12 +460,14 @@ pub fn validate_balance_proof_signature(
     signature: &[u8],
     inputs_statement_json: &str,
     outputs_statement_json: &str,
+    covenant_claims_json: &str,
 ) -> Result<bool, JsError> {
     ootle_wasm_core::stealth::balance_proof::validate_balance_proof_signature(
         public_nonce,
         signature,
         inputs_statement_json,
         outputs_statement_json,
+        covenant_claims_json,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }

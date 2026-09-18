@@ -42,6 +42,7 @@ use std::os::raw::c_char;
 
 use ootle_sdk_core::{
     FetchedSubstate,
+    RistrettoPublicKeyBytes,
     StealthKeys,
     StealthPartialTransaction,
     StealthResolution,
@@ -70,6 +71,7 @@ use crate::c_abi::{
     guarded,
     handle_kind,
     network_from_byte,
+    optional_str,
     output_json,
     parse_json,
     require_kind,
@@ -394,15 +396,17 @@ pub unsafe extern "C" fn ootle_build_stealth_unsigned_with_seed(
 ///
 /// # Safety
 /// `handle` must be a non-null pointer previously returned by [`ootle_build_stealth_unsigned`] /
-/// [`ootle_build_stealth_unsigned_with_seed`] / this fn and not yet consumed. `fetched_json` and
-/// `spend_secrets_json` must each be a valid NUL-terminated UTF-8 C string. The returned envelope must
-/// be freed with [`ootle_result_free`](crate::ootle_result_free).
+/// [`ootle_build_stealth_unsigned_with_seed`] / this fn and not yet consumed. `fetched_json`,
+/// `spend_secrets_json` and `keys_json` (`{account_secret}`, lowercase hex — assembly names the revealed output's
+/// receiver, which is the key that will seal) must each be a valid NUL-terminated UTF-8 C string. The returned
+/// envelope must be freed with [`ootle_result_free`](crate::ootle_result_free).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ootle_apply_fetched_substates_stealth(
     handle: *mut OotleStealthPartialTransaction,
     network: u8,
     fetched_json: *const c_char,
     spend_secrets_json: *const c_char,
+    keys_json: *const c_char,
 ) -> OotleResult {
     guarded(|| {
         if handle.is_null() {
@@ -421,8 +425,13 @@ pub unsafe extern "C" fn ootle_apply_fetched_substates_stealth(
             let network = network_from_byte(network)?;
             let fetched_json = unsafe { required_str(fetched_json, "fetched_json") }?;
             let spend_secrets_json = unsafe { required_str(spend_secrets_json, "spend_secrets_json") }?;
+            let keys_json = unsafe { required_str(keys_json, "keys_json") }?;
             let fetched: Vec<FetchedSubstate> = parse_json(fetched_json, "fetched substates")?;
             let spend_secrets = parse_spend_secrets(spend_secrets_json)?;
+            // Assembly names the revealed output's receiver, which is the key that will seal, so the account secret
+            // is needed here and not only at seal time.
+            let keys: StealthProductionKeysJson = parse_json(keys_json, "keys")?;
+            let keys = keys.into_core();
 
             // The handle must still be a resolver; a `Ready` (already-assembled) handle has no more
             // inputs to apply — seal it instead.
@@ -436,7 +445,7 @@ pub unsafe extern "C" fn ootle_apply_fetched_substates_stealth(
                 },
             };
 
-            match apply_fetched_substates_stealth(partial, network, &fetched, &spend_secrets) {
+            match apply_fetched_substates_stealth(partial, network, &fetched, &spend_secrets, &keys) {
                 Ok(StealthResolution::Resolved(ready)) => {
                     let body = serde_json::json!({ "status": "resolved" });
                     Ok(OotleResult::ok_stealth_handle_json(
@@ -728,7 +737,9 @@ pub unsafe extern "C" fn ootle_validate_stealth_transfer(
 /// `"PARSE"`; an all-zero seed yields `"VALIDATION"`; a null arg or unknown network yields `"INVALID"`.
 ///
 /// # Safety
-/// `intent_json` and `seed_hex` must each be a valid NUL-terminated UTF-8 C string. The returned
+/// `intent_json` and `seed_hex` must each be a valid NUL-terminated UTF-8 C string; `revealed_receiver_hex` is the
+/// lowercase-hex public key authorised to take the intent's revealed output, and may be null only when the intent
+/// reveals nothing. The returned
 /// envelope must be freed with [`ootle_result_free`](crate::ootle_result_free). It never carries a
 /// handle — do **not** call [`ootle_stealth_partial_transaction_free`] on its result.
 #[unsafe(no_mangle)]
@@ -736,6 +747,7 @@ pub unsafe extern "C" fn ootle_build_stealth_outputs_statement_with_seed(
     network: u8,
     intent_json: *const c_char,
     seed_hex: *const c_char,
+    revealed_receiver_hex: *const c_char,
 ) -> OotleResult {
     guarded(|| {
         flatten((|| {
@@ -745,8 +757,15 @@ pub unsafe extern "C" fn ootle_build_stealth_outputs_statement_with_seed(
 
             let intent: StealthTransferIntent = parse_json(intent_json, "intent")?;
             let seed = BuildSeed::from_array(seed_from_hex(seed_hex)?);
+            let revealed_receiver = unsafe { optional_str(revealed_receiver_hex, "revealed_receiver_hex") }?
+                .map(|hex| {
+                    RistrettoPublicKeyBytes::from_hex(hex).map_err(|e| {
+                        OotleResult::err("PARSE", &format!("revealed_receiver_hex is not a public key: {e}"))
+                    })
+                })
+                .transpose()?;
 
-            match build_stealth_outputs_statement_with_seed(network, &intent, &seed) {
+            match build_stealth_outputs_statement_with_seed(network, &intent, &seed, revealed_receiver) {
                 Ok((stmt, mask)) => {
                     // Serialize the statement, then null the byte-unstable aggregated range proof so
                     // the semantic compare is stable.

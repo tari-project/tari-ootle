@@ -171,7 +171,8 @@ mod tests {
     /// the commitments and proofs are dummies.
     fn statement(n_inputs: usize, n_outputs: usize) -> StealthTransferStatement {
         // A non-zero revealed amount keeps the statement constructor happy; only the input/output counts matter here.
-        let mut stmt = StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1));
+        let mut stmt =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::zero());
         stmt.inputs_statement.inputs = (0..n_inputs).map(|_| StealthInput::new(dummy_commitment())).collect();
         stmt.outputs_statement.outputs = (0..n_outputs).map(|_| dummy_output()).collect();
         stmt

@@ -99,7 +99,7 @@ use tari_template_lib_types::{
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
-    stealth::SpendAuthorization,
+    stealth::{RevealedOutput, SpendAuthorization},
 };
 use tokio::task;
 
@@ -661,9 +661,10 @@ pub(crate) async fn execute_claim_burn(
 
     let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
         iter::once(input),
-        0,
+        Amount::zero(),
         iter::once(&output_witness),
-        max_fee,
+        // The claim key signs this transaction, so it is the only badge in scope to take the revealed fee.
+        Some(RevealedOutput::new(Amount::from(max_fee), stealth_claim_pk)),
     )?;
     // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
     // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
@@ -1675,7 +1676,10 @@ pub async fn handle_create_stealth_transfer_statement(
             sdk.key_manager_api().next_derived_key_id(KeyBranch::Nonce)?.into()
         };
 
-        let output_revealed_amount = req.outputs.iter().map(|o| o.revealed_amount).sum();
+        // The signing key is what the engine sees as a badge, so it is the key a revealed output must name.
+        let signing_public_key = sdk.key_manager_api().get_public_key(signing_key_id)?;
+
+        let output_revealed_amount: Amount = req.outputs.iter().map(|o| o.revealed_amount).sum();
         let outputs = req
             .outputs
             .iter()
@@ -1704,7 +1708,10 @@ pub async fn handle_create_stealth_transfer_statement(
                         )
                     })?,
                 outputs,
-                output_revealed_amount,
+                // The sender signs this transaction, so its key is what authorises the revealed funds.
+                revealed_output: (!output_revealed_amount.is_zero()).then(|| {
+                    RevealedOutput::new(output_revealed_amount, signing_public_key.public_key().to_byte_type())
+                }),
             })
             .map_err(map_statement_construction_error)?;
 
@@ -2654,7 +2661,7 @@ mod create_stealth_transfer_statement_handler_tests {
         assert_eq!(response.utxo_signers[1].public_nonce, output_a.sender_public_nonce);
 
         // A single, fully blinded output: the whole 250 is committed, none of it revealed.
-        assert_eq!(statement.outputs_statement.revealed_output_amount, Amount::zero());
+        assert_eq!(statement.outputs_statement.revealed_output, None);
         let outputs = statement.stealth_outputs();
         assert_eq!(outputs.len(), 1);
 

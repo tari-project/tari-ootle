@@ -12,7 +12,7 @@ use tari_template_lib_types::{
     EncryptedData,
     ResourceAddress,
     crypto::{PedersenCommitmentBytes, UtxoTag},
-    stealth::{SpendCondition, StealthInput, TemplateFunction},
+    stealth::{RevealedOutput, SpendCondition, StealthInput, TemplateFunction},
 };
 
 use crate::Address;
@@ -275,14 +275,14 @@ pub struct ResolvedStealthTransferSpec {
     /// Revealed amount the transfer consumes from a bucket.
     pub revealed_input_amount: Amount,
     pub outputs: Vec<Output>,
-    /// Revealed amount the transfer pays out, e.g. to cover a fee.
-    pub revealed_output_amount: Amount,
+    /// Revealed funds the transfer pays out, e.g. to cover a fee, and the key authorised to take them.
+    pub revealed_output: Option<RevealedOutput>,
 }
 
 impl ResolvedStealthTransferSpec {
     pub fn total_output_amount(&self) -> Amount {
         let stealth_output_total: Amount = self.outputs.iter().map(|o| Amount::from(o.amount.get())).sum();
-        stealth_output_total + self.revealed_output_amount
+        stealth_output_total + self.revealed_output.map_or(Amount::ZERO, |r| r.amount)
     }
 
     /// Whether the transfer needs a balance proof. A transfer with no stealth inputs and no stealth
@@ -304,8 +304,8 @@ pub struct BurnClaimStatementSpec {
     pub sender_offset_public_key: RistrettoPublicKey,
     /// The stealth output the claimed funds are paid into.
     pub output: Output,
-    /// Revealed amount reserved to pay the claim transaction's fee.
-    pub revealed_output_amount: Amount,
+    /// Revealed funds reserved to pay the claim transaction's fee, and the key authorised to take them.
+    pub revealed_output: Option<RevealedOutput>,
 }
 
 #[cfg(test)]

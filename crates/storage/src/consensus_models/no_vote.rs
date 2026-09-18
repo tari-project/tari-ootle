@@ -98,6 +98,8 @@ pub enum NoVoteReason {
     BlockWeightExceeded { total_weight: u64, max_weight: u64 },
     #[error("Block wasm execution points {total_points} exceed the maximum {max_points}")]
     BlockExecutionPointsExceeded { total_points: u64, max_points: u64 },
+    #[error("Transaction {transaction_id} has substate lock conflicts and must be deferred to a later block")]
+    DeferrableLockConflict { transaction_id: TransactionId },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -145,6 +147,7 @@ impl NoVoteReason {
             Self::InvalidEvidence { .. } => "InvalidEvidence",
             Self::BlockWeightExceeded { .. } => "BlockWeightExceeded",
             Self::BlockExecutionPointsExceeded { .. } => "BlockExecutionPointsExceeded",
+            Self::DeferrableLockConflict { .. } => "DeferrableLockConflict",
         }
     }
 }

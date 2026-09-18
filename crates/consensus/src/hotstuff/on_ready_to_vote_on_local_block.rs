@@ -582,6 +582,18 @@ where TConsensusSpec: ConsensusSpec
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
+        if prepared.lock_status().is_deferrable_conflict() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ LocalOnly transaction {} in block {} has lock conflicts that an honest proposer defers. Not voting on block.",
+                pool_tx.id(),
+                block,
+            );
+            return Ok(Some(NoVoteReason::DeferrableLockConflict {
+                transaction_id: *pool_tx.id(),
+            }));
+        }
+
         match prepared {
             PreparedTransaction::LocalOnly(local) => {
                 match *local {
@@ -810,6 +822,18 @@ where TConsensusSpec: ConsensusSpec
                 )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?
         };
+
+        if prepared.lock_status().is_deferrable_conflict() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ Prepare transaction {} in block {} has lock conflicts that an honest proposer defers. Not voting on block.",
+                tx_rec.id(),
+                block,
+            );
+            return Ok(Some(NoVoteReason::DeferrableLockConflict {
+                transaction_id: *tx_rec.id(),
+            }));
+        }
 
         match prepared {
             PreparedTransaction::LocalOnly(_) => {

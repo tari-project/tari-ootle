@@ -793,7 +793,7 @@ where TConsensusSpec: ConsensusSpec
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
-        if prepared.lock_status().is_any_failed() && !prepared.lock_status().is_hard_conflict() {
+        if prepared.lock_status().is_deferrable_conflict() {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ Transaction {} has lock conflicts, but no hard conflicts. Skipping proposing this transaction...",

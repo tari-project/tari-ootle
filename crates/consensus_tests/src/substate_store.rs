@@ -30,6 +30,7 @@ use tari_ootle_storage::{
         SubstateRecord,
         SubstateTransition,
         SubstateUpdateBatch,
+        VersionedSubstateIdLockIntent,
     },
 };
 use tari_ootle_transaction::Network;
@@ -187,7 +188,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     let err = store
         .try_lock(
             tx_id(2),
-            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
+            &RequireLockIntentRef::new(id.substate_id(), 1, SubstateLockType::Output),
             false,
         )
         .unwrap_err();
@@ -196,17 +197,195 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
         LockFailedError::LockConflict { .. }
     ));
 
-    // The same transaction is able to lock as an output
+    // The same transaction is able to lock the version it will create as an output
     store
         .try_lock(
             tx_id(1),
-            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
+            &RequireLockIntentRef::new(id.substate_id(), 1, SubstateLockType::Output),
             false,
         )
         .unwrap();
 
     let n = store.new_locks().get(id.substate_id()).unwrap().len();
     assert_eq!(n, 2);
+}
+
+#[test]
+fn an_output_lock_over_a_write_lock_requires_the_version_to_not_exist() {
+    // A WRITE lock over v0 says nothing about which version the OUTPUT lock claims. Granting OUTPUT over a live
+    // version would let the transaction UP a version that already exists.
+    let (store, _tmp) = create_store();
+
+    let id = add_substate(&store, 0, 0);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+
+    store
+        .try_lock(
+            tx_id(1),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Write),
+            false,
+        )
+        .unwrap();
+
+    let err = store
+        .try_lock(
+            tx_id(1),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
+            false,
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        err.ok_lock_failed().unwrap(),
+        LockFailedError::SubstateIsUp { .. }
+    ));
+}
+
+#[test]
+fn an_output_lock_over_a_read_lock_requires_the_version_to_not_exist() {
+    // Local-only rules allow an OUTPUT lock alongside another transaction's READ lock. The claimed version must
+    // still not exist, otherwise two transactions in one block UP the same version.
+    let (store, _tmp) = create_store();
+
+    let id = add_substate(&store, 0, 0);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+
+    store
+        .try_lock(
+            tx_id(1),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Read),
+            true,
+        )
+        .unwrap();
+
+    let err = store
+        .try_lock(
+            tx_id(2),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
+            true,
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        err.ok_lock_failed().unwrap(),
+        LockFailedError::SubstateIsUp { .. }
+    ));
+
+    // The version the transaction will actually create is still lockable
+    store
+        .try_lock(
+            tx_id(2),
+            &RequireLockIntentRef::new(id.substate_id(), 1, SubstateLockType::Output),
+            true,
+        )
+        .unwrap();
+}
+
+#[test]
+fn an_output_lock_for_a_live_version_is_a_hard_conflict() {
+    // try_lock_all classifies SubstateIsUp as a hard conflict, so the transaction ABORTs rather than being deferred
+    // to a later block: the version it claims is taken for good.
+    let (store, _tmp) = create_store();
+
+    let id = add_substate(&store, 0, 0);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+
+    store
+        .try_lock(
+            tx_id(1),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Read),
+            true,
+        )
+        .unwrap();
+
+    let lock_status = store
+        .try_lock_all(
+            tx_id(2),
+            [RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output)],
+            true,
+        )
+        .unwrap();
+
+    assert!(lock_status.is_hard_conflict());
+    assert!(!lock_status.is_deferrable_conflict());
+    assert!(matches!(
+        lock_status.hard_conflict().unwrap(),
+        LockFailedError::SubstateIsUp { .. }
+    ));
+}
+
+#[test]
+fn an_unversioned_lock_conflict_is_deferrable() {
+    // The proposer skips a transaction whose locks failed without a hard conflict, and the replica no-votes any
+    // block that sequences one. Both sides read the same predicate, so it must hold for the contended case.
+    let (store, _tmp) = create_store();
+
+    let id = add_substate(&store, 0, 0);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+
+    store
+        .try_lock(
+            tx_id(1),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Write),
+            false,
+        )
+        .unwrap();
+
+    // An unversioned input requirement: the transaction may be proposed later at whatever version is live then
+    let intent = VersionedSubstateIdLockIntent::write(id.clone(), false);
+    let lock_status = store.try_lock_all(tx_id(2), [&intent], false).unwrap();
+
+    assert!(lock_status.is_any_failed());
+    assert!(!lock_status.is_hard_conflict());
+    assert!(lock_status.is_deferrable_conflict());
+}
+
+#[test]
+fn a_versioned_lock_conflict_is_not_deferrable() {
+    let (store, _tmp) = create_store();
+
+    let id = add_substate(&store, 0, 0);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+
+    store
+        .try_lock(
+            tx_id(1),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Write),
+            false,
+        )
+        .unwrap();
+
+    let intent = VersionedSubstateIdLockIntent::write(id.clone(), true);
+    let lock_status = store.try_lock_all(tx_id(2), [&intent], false).unwrap();
+
+    assert!(lock_status.is_hard_conflict());
+    assert!(!lock_status.is_deferrable_conflict());
+}
+
+#[test]
+fn locking_without_failures_is_not_a_deferrable_conflict() {
+    let (store, _tmp) = create_store();
+
+    let id = add_substate(&store, 0, 0);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+
+    let intent = VersionedSubstateIdLockIntent::write(id.clone(), true);
+    let lock_status = store.try_lock_all(tx_id(1), [&intent], false).unwrap();
+
+    assert!(!lock_status.is_any_failed());
+    assert!(!lock_status.is_deferrable_conflict());
 }
 
 #[test]

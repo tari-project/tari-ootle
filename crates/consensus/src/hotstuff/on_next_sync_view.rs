@@ -85,9 +85,11 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             last_sent_vote.display(),
         );
 
+        let high_pc_height = high_pc.height();
         let msg = TimeoutVoteMessage {
-            epoch: high_pc.epoch(),
+            epoch,
             height: timeout_height,
+            high_pc_height,
         };
 
         let signature = self.signer_service.sign(&msg);
@@ -102,6 +104,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             timeout: TimeoutVote {
                 epoch,
                 height: timeout_height,
+                high_pc_height,
                 signature,
             },
         };

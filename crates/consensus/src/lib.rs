@@ -9,5 +9,6 @@ mod tracing;
 pub mod traits;
 mod validations;
 
-// Re-export the QC signature check for recovery probes outside the consensus crate.
-pub use validations::check_quorum_certificate_signatures;
+// The QC signature check is used by recovery probes outside the consensus crate; both are also exercised
+// directly by the consensus test suite.
+pub use validations::{check_justify_reaches_timeout_certificate, check_quorum_certificate_signatures};

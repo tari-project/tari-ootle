@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use log::{debug, warn};
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{QuorumCertificateRef, TimeoutVote};
+use tari_consensus_types::{QuorumCertificateRef, TimeoutVote, ValidatorSignatureBytes};
 use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
@@ -263,6 +263,31 @@ pub(super) fn check_timeout_certificate<TConsensusSpec: ConsensusSpec>(
 
     check_quorum_certificate_signatures::<TConsensusSpec>(network, tc.into(), committee, signing_service)?;
 
+    check_justify_reaches_timeout_certificate(candidate_block)?;
+
+    Ok(())
+}
+
+/// Checks that a block justifies from a certificate at least as high as the highest one its timeout certificate
+/// attests to.
+///
+/// The attested heights carry weight only once the timeout certificate's signatures have been verified against the
+/// committee, which `check_timeout_certificate` does before calling this. On a verified certificate a quorum signs
+/// the height of the certificate it held when it timed out, so the committee has provably reached that height, and
+/// a proposal justifying from lower discards blocks that a quorum has certified - which is how a leader orphans a
+/// branch it does not like.
+pub fn check_justify_reaches_timeout_certificate(block: &Block) -> Result<(), ProposalValidationError> {
+    let Some(tc) = block.timeout_certificate() else {
+        return Ok(());
+    };
+    let max_high_pc_height = tc.max_high_pc_height();
+    if block.justify().height() < max_high_pc_height {
+        return Err(ProposalValidationError::JustifyBelowTimeoutCertificate {
+            block_id: *block.id(),
+            justify_height: block.justify().height(),
+            max_high_pc_height,
+        });
+    }
     Ok(())
 }
 
@@ -287,9 +312,9 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
         return Ok(());
     }
 
-    let mut check_dups = HashSet::with_capacity(qc.signatures().len());
+    let mut check_dups = HashSet::with_capacity(qc.num_signatures());
     let mut total_vote_power = VotePower::zero();
-    for signature in qc.signatures() {
+    let mut account_for = |signature: &ValidatorSignatureBytes| -> Result<(), ProposalValidationError> {
         let Some(power) = committee.get_power_by_public_key(signature.public_key()) else {
             return Err(ProposalValidationError::ValidatorNotInCommittee {
                 validator: signature.public_key().to_string(),
@@ -301,16 +326,20 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
             });
         };
         total_vote_power += power;
-        if !check_dups.insert(signature.public_key()) {
+        if !check_dups.insert(*signature.public_key()) {
             return Err(ProposalValidationError::QcDuplicateSignature {
                 qc: qc.calculate_id(),
                 validator: *signature.public_key(),
             });
         }
+        Ok(())
+    };
 
-        match qc {
-            QuorumCertificateRef::ProposalCertificate(pc) => {
-                let block_id = pc.calculate_block_id();
+    match qc {
+        QuorumCertificateRef::ProposalCertificate(pc) => {
+            let block_id = pc.calculate_block_id();
+            for signature in pc.signatures() {
+                account_for(signature)?;
                 // `check_protocol_version` pins a block's version to `at(network, header.epoch())` before any vote
                 // is cast on it, so resolving from the schedule here yields the version the signers used.
                 let message = ProposalVoteMessage::new(
@@ -321,23 +350,27 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
                     pc.height().as_u64(),
                 );
                 let vote = SignedProposalVote { message, signature };
-                let is_valid = signing_service.verify(&vote);
-                if !is_valid {
+                if !signing_service.verify(&vote) {
                     return Err(ProposalValidationError::QcInvalidSignature { qc: qc.calculate_id() });
                 }
-            },
-            QuorumCertificateRef::TimeoutCertificate(tc) => {
+            }
+        },
+        QuorumCertificateRef::TimeoutCertificate(tc) => {
+            for timeout in tc.timeouts() {
+                account_for(&timeout.signature)?;
+                // Each signer attests to its own high certificate height, so the height it reports is part of what
+                // it signed and a quorum cannot be assembled that hides one.
                 let vote = TimeoutVote {
                     epoch: tc.epoch(),
                     height: tc.height(),
-                    signature: signature.clone(),
+                    high_pc_height: timeout.high_pc_height,
+                    signature: timeout.signature.clone(),
                 };
-                let is_valid = signing_service.verify(&vote);
-                if !is_valid {
+                if !signing_service.verify(&vote) {
                     return Err(ProposalValidationError::QcInvalidSignature { qc: qc.calculate_id() });
                 }
-            },
-        }
+            }
+        },
     }
 
     if total_vote_power < committee.quorum_threshold() {

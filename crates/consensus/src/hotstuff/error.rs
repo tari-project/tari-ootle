@@ -161,6 +161,15 @@ pub enum ProposalValidationError {
     ProposingGenesisBlock { proposed_by: String, block_id: BlockId },
     #[error("Block {block} proposed by {proposed_by} is a dummy block. These are immediately rejected.")]
     ProposingDummyBlock { proposed_by: String, block: LeafBlock },
+    #[error(
+        "Block {block_id} justifies from height {justify_height}, below the highest certificate height \
+         {max_high_pc_height} that its timeout certificate attests to"
+    )]
+    JustifyBelowTimeoutCertificate {
+        block_id: BlockId,
+        justify_height: NodeHeight,
+        max_high_pc_height: NodeHeight,
+    },
     #[error("Justified block {justify_block} for proposed block {block_description} by {proposed_by} not found")]
     JustifyBlockNotFound {
         proposed_by: String,

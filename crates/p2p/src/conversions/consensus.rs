@@ -46,6 +46,7 @@ use tari_consensus_types::{
     ProposalCertificate,
     ProposalVote,
     ShardGroupAccumulatedData,
+    SignedTimeout,
     TimeoutCertificate,
     TimeoutVote,
 };
@@ -192,6 +193,7 @@ impl From<&TimeoutVote> for proto::consensus::TimeoutVote {
             epoch: value.epoch.as_u64(),
             height: value.height.as_u64(),
             signature: Some((&value.signature).into()),
+            high_pc_height: value.high_pc_height.as_u64(),
         }
     }
 }
@@ -203,6 +205,7 @@ impl TryFrom<proto::consensus::TimeoutVote> for TimeoutVote {
         Ok(TimeoutVote {
             epoch: Epoch(value.epoch),
             height: NodeHeight(value.height),
+            high_pc_height: NodeHeight(value.high_pc_height),
             signature: value
                 .signature
                 .ok_or_else(|| anyhow!("Signature is missing"))?
@@ -611,7 +614,7 @@ impl From<&TimeoutCertificate> for proto::consensus::TimeoutCertificate {
         Self {
             epoch: value.epoch().as_u64(),
             block_height: value.height().as_u64(),
-            signatures: value.signatures().iter().map(Into::into).collect(),
+            timeouts: value.timeouts().iter().map(Into::into).collect(),
         }
     }
 }
@@ -624,12 +627,37 @@ impl TryFrom<proto::consensus::TimeoutCertificate> for TimeoutCertificate {
             Epoch(value.epoch),
             NodeHeight(value.block_height),
             value
-                .signatures
+                .timeouts
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()
-                .context("invalid encoding of signatures")?,
+                .context("invalid encoding of timeouts")?,
         ))
+    }
+}
+
+// -------------------------------- SignedTimeout -------------------------------- //
+
+impl From<&SignedTimeout> for proto::consensus::SignedTimeout {
+    fn from(value: &SignedTimeout) -> Self {
+        Self {
+            high_pc_height: value.high_pc_height.as_u64(),
+            signature: Some((&value.signature).into()),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::SignedTimeout> for SignedTimeout {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::SignedTimeout) -> Result<Self, Self::Error> {
+        Ok(Self {
+            high_pc_height: NodeHeight(value.high_pc_height),
+            signature: value
+                .signature
+                .ok_or_else(|| anyhow!("Signature is missing"))?
+                .try_into()?,
+        })
     }
 }
 

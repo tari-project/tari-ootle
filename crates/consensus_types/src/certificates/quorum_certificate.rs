@@ -5,7 +5,7 @@ use borsh::BorshSerialize;
 use serde::Serialize;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 
-use crate::{ProposalCertificate, QcId, TimeoutCertificate, ValidatorSignatureBytes};
+use crate::{ProposalCertificate, QcId, TimeoutCertificate};
 
 #[derive(Debug, Clone, Serialize, BorshSerialize)]
 pub enum QuorumCertificateRef<'a> {
@@ -29,10 +29,10 @@ impl QuorumCertificateRef<'_> {
         }
     }
 
-    pub fn signatures(&self) -> &[ValidatorSignatureBytes] {
+    pub fn num_signatures(&self) -> usize {
         match self {
-            Self::ProposalCertificate(pc) => pc.signatures(),
-            Self::TimeoutCertificate(tc) => tc.signatures(),
+            Self::ProposalCertificate(pc) => pc.signatures().len(),
+            Self::TimeoutCertificate(tc) => tc.num_signatures(),
         }
     }
 

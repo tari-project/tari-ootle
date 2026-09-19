@@ -2,8 +2,8 @@
   "name": "arg_dsl/address_tombstone",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.39.0",
-    "git_rev": "9f4833febee5c633a6fb2f0bd61dd1ce6d33c481",
+    "core_version": "0.41.0",
+    "git_rev": "36f16b7bac7b69dec46bd8e02384fca6e2feb28f",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "encode_arg",

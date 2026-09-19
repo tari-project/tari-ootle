@@ -26,7 +26,7 @@ use anyhow::{anyhow, bail};
 use serde_json::json;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::OotleAddress;
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration};
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -461,7 +461,11 @@ pub async fn submit_manifest_with_signing_keys(
             Some(max_epoch) => b.with_max_epoch(max_epoch),
             None => b,
         })
-        .with_inputs(inputs.into_iter().map(|i| i.into_unversioned()))
+        .with_inputs(
+            inputs
+                .into_iter()
+                .map(|i| InputDeclaration::write(i.into_substate_id())),
+        )
         .build_unsigned();
 
     let transaction_submit_req = TransactionSubmitRequest {
@@ -533,7 +537,7 @@ pub async fn submit_manifest(
                 .get(s.trim())
                 .unwrap_or_else(|| panic!("No outputs named {}", s.trim()))
         })
-        .map(|(_, addr)| addr.clone().into_unversioned())
+        .map(|(_, addr)| InputDeclaration::write(addr.substate_id().clone()))
         .collect::<Vec<_>>();
 
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new(), HashMap::new())
@@ -597,7 +601,7 @@ pub async fn submit_manifest(
 //     wallet_daemon_name: String,
 //     fee_instructions: Vec<Instruction>,
 //     instructions: Vec<Instruction>,
-//     inputs: Vec<SubstateRequirement>,
+//     inputs: Vec<InputDeclaration>,
 //     outputs_name: String,
 //     min_epoch: Option<Epoch>,
 //     max_epoch: Option<Epoch>,
@@ -754,20 +758,20 @@ pub async fn call_component(
 
     let inputs = if use_unversioned_inputs {
         [
-            SubstateRequirement::unversioned(account_component_address),
-            SubstateRequirement::unversioned(source_component_address),
+            InputDeclaration::write(account_component_address),
+            InputDeclaration::write(source_component_address),
         ]
     } else {
         // Typically only used in failing tests to assert that a substate is already DOWN
         [
-            SubstateRequirement::new(
+            InputDeclaration::from(tari_ootle_common_types::SubstateRequirement::new(
                 account_component_address.into(),
                 find_output_version(world, output_ref.as_str(), account_component_address.into())?,
-            ),
-            SubstateRequirement::new(
+            )),
+            InputDeclaration::from(tari_ootle_common_types::SubstateRequirement::new(
                 source_component_address.into(),
                 find_output_version(world, output_ref.as_str(), source_component_address.into())?,
-            ),
+            )),
         ]
     };
 

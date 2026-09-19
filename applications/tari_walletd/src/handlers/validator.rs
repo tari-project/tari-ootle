@@ -10,7 +10,7 @@ use log::*;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{SubstateAddress, SubstateRequirement, derive_fee_pool_address};
+use tari_ootle_common_types::{InputDeclaration, SubstateAddress, derive_fee_pool_address};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, TransactionContext};
@@ -175,7 +175,11 @@ pub async fn handle_claim_validator_fees(
                     .call_method(account_component_address, "deposit", args![Workspace("joined")])
                     .call_method(account_component_address, "pay_fee", args![max_fee])
             })
-            .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+            .with_inputs(
+                inputs
+                    .into_iter()
+                    .map(|input| InputDeclaration::write(input.into_substate_id())),
+            )
     } else {
         let (statement, pool_amounts) =
             build_self_stealth_statement(&sdk, &account, account_key_id, &fee_pool_addresses, max_fee).await?;
@@ -203,7 +207,7 @@ pub async fn handle_claim_validator_fees(
     };
 
     let unsigned_transaction = builder
-        .with_inputs(fee_pool_addresses.iter().copied().map(SubstateRequirement::unversioned))
+        .with_inputs(fee_pool_addresses.iter().copied().map(InputDeclaration::write))
         .map(|builder| {
             if let Some(index) = req.claim_key_index {
                 if claim_public_key == account_public_key {

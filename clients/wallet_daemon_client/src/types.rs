@@ -33,9 +33,9 @@ use tari_engine_types::{
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
     Epoch,
+    InputDeclaration,
     ShardGroup,
     SubstateAddress,
-    SubstateRequirement,
     shard::Shard,
     substate_type::SubstateType,
 };
@@ -119,7 +119,7 @@ pub struct CallInstructionRequest {
     /// Substates the instructions require as transaction inputs. Needed for any input that cannot be inferred
     /// from the instructions, e.g. a `ConfidentialOutput` named only by a commitment inside an opaque proof.
     #[serde(default)]
-    pub inputs: Vec<SubstateRequirement>,
+    pub inputs: Vec<InputDeclaration>,
     /// If true, inputs inferred from the instructions are added to `inputs`.
     #[serde(default)]
     pub override_inputs: Option<bool>,

@@ -138,7 +138,12 @@ impl DryRunTransactionProcessor {
     ) -> Result<HashMap<SubstateId, Substate>, DryRunTransactionProcessorError> {
         let substates = self
             .substate_manager
-            .get_substates(transaction.inputs().iter().map(|req| req.as_ref()))
+            .get_substates(
+                transaction
+                    .inputs()
+                    .iter()
+                    .map(|req| req.as_ref().to_substate_requirement_ref()),
+            )
             .await?;
         Ok(substates
             .into_iter()

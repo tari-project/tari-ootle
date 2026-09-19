@@ -8,7 +8,7 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedValueError},
     substate::SubstateId,
 };
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
 use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{Blobs, ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
@@ -27,7 +27,7 @@ pub struct UnsignedTransactionV1 {
     /// Input objects that may be read/write
     #[n(3)]
     #[cbor(with = "tari_bor::adapters::indexset_codec")]
-    pub inputs: IndexSet<SubstateRequirement>,
+    pub inputs: IndexSet<InputDeclaration>,
     #[n(4)]
     pub min_epoch: Option<Epoch>,
     /// The last epoch in which this transaction may be sequenced. Mandatory: every transaction has a
@@ -84,7 +84,7 @@ impl UnsignedTransactionV1 {
         network: N,
         fee_instructions: Vec<Instruction>,
         instructions: Vec<Instruction>,
-        inputs: IndexSet<SubstateRequirement>,
+        inputs: IndexSet<InputDeclaration>,
         min_epoch: Option<Epoch>,
         max_epoch: Epoch,
         dry_run: bool,
@@ -125,12 +125,12 @@ impl UnsignedTransactionV1 {
         &self.instructions
     }
 
-    pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
         &self.inputs
     }
 
-    pub fn add_input(&mut self, input: SubstateRequirement) -> &mut Self {
-        self.inputs.insert(input);
+    pub fn add_input(&mut self, input: InputDeclaration) -> &mut Self {
+        declare_input(&mut self.inputs, input);
         self
     }
 

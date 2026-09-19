@@ -3,7 +3,7 @@
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration};
 use tari_ootle_transaction::{Network, Transaction, args};
 use tari_template_lib_types::constants::{
     TARI_TOKEN,
@@ -30,10 +30,10 @@ pub fn builder(network: Network, max_epoch: Epoch) -> impl Fn(u64) -> Transactio
                     .call_method("account", "pay_fee", args![50_000])
             })
             .with_inputs([
-                SubstateRequirement::unversioned(TARI_TOKEN),
-                SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
-                SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
-                SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
+                InputDeclaration::read(TARI_TOKEN),
+                InputDeclaration::write(XTR_FAUCET_COMPONENT_ADDRESS),
+                InputDeclaration::write(XTR_FAUCET_VAULT_ADDRESS),
+                InputDeclaration::read(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
             ])
             .build_and_seal(&signer_secret_key)
     }

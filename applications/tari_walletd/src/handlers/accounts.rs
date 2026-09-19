@@ -17,7 +17,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_app_utilities::fee_tables::fee_rates_by_network;
-use tari_ootle_common_types::{Epoch, SubstateRequirement, optional::Optional};
+use tari_ootle_common_types::{Epoch, InputDeclaration, SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::{Transaction, args};
 use tari_ootle_wallet_crypto::{
     OutputWitness,
@@ -826,7 +826,11 @@ pub async fn handle_create_free_test_coins(
                 .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace("new_account")])
                 .call_method("new_account", "pay_fee", args![max_fee])
         })
-        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+        .with_inputs(
+            inputs
+                .into_iter()
+                .map(|input| InputDeclaration::write(input.into_substate_id())),
+        )
         .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
@@ -1045,7 +1049,11 @@ pub async fn handle_transfer(
                 builder
             }
         })
-        .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
+        .with_inputs(
+            inputs
+                .into_iter()
+                .map(|req| InputDeclaration::write(req.into_substate_id())),
+        )
         .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;

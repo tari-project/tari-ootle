@@ -2,8 +2,8 @@
   "name": "cosign/seal_with_auth",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.39.0",
-    "git_rev": "dee549eb268a89412bde31f685359207b7789ab3",
+    "core_version": "0.41.0",
+    "git_rev": "36f16b7bac7b69dec46bd8e02384fca6e2feb28f",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "cosign_seal_with_auth",
@@ -107,14 +107,17 @@
             ],
             "inputs": [
               {
+                "is_write": true,
                 "substate_id": "component_3131313131313131313131313131313131313131313131313131313131313131",
                 "version": null
               },
               {
+                "is_write": true,
                 "substate_id": "resource_3232323232323232323232323232323232323232323232323232323232323232",
                 "version": null
               },
               {
+                "is_write": true,
                 "substate_id": "vault_3333333333333333333333333333333333333333333333333333333333333333",
                 "version": null
               }

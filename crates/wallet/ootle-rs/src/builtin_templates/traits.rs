@@ -3,7 +3,7 @@
 
 use std::future::Future;
 
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_transaction::UnsignedTransaction;
 
 use crate::{Address, provider::ProviderError};
@@ -11,7 +11,7 @@ use crate::{Address, provider::ProviderError};
 pub trait UnsignedTransactionBuilder {
     fn default_signer_address(&self) -> &Address;
 
-    fn add_input<S: Into<SubstateRequirement>>(self, substate_id: S) -> Self;
+    fn add_input<S: Into<InputDeclaration>>(self, substate_id: S) -> Self;
 
     fn prepare(self) -> impl Future<Output = Result<UnsignedTransaction, ProviderError>>;
 }

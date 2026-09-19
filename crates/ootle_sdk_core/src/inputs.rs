@@ -41,7 +41,7 @@ use tari_engine_types::{
     component::derive_component_address_from_public_key,
     substate::{SubstateId, SubstateValue},
 };
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{ComponentAddress, ResourceAddress, constants::TARI_TOKEN};
@@ -215,7 +215,7 @@ pub struct PartialTransaction {
     /// not present in the returned batch is recorded as absent (`Some(None)`). Without this, an
     /// optional substate the indexer reports missing would be re-requested forever.
     pending_fetch: Vec<SubstateId>,
-    resolved: Vec<SubstateRequirement>,
+    resolved: Vec<InputDeclaration>,
 
     // --- stealth accumulation state ---------------------------------------------------------------
     /// Recovered per-input witnesses (mask + value), folded into the transfer statement / balance
@@ -277,7 +277,7 @@ impl PartialTransaction {
 
     /// Borrows the resolved inputs accumulated so far (deterministic order). Mainly for tests / the
     /// seal path.
-    pub fn resolved_inputs(&self) -> &[SubstateRequirement] {
+    pub fn resolved_inputs(&self) -> &[InputDeclaration] {
         &self.resolved
     }
 
@@ -362,7 +362,7 @@ impl PartialTransaction {
     pub fn new_for_wants_with_extra_inputs(
         unsigned: UnsignedTransaction,
         wants: WantList,
-        extra_inputs: Vec<SubstateRequirement>,
+        extra_inputs: Vec<InputDeclaration>,
     ) -> Self {
         Self {
             unsigned,
@@ -386,13 +386,13 @@ impl PartialTransaction {
     /// Builds a fully-resolved partial from an already-complete explicit input set (the
     /// explicit-input short-circuit shared by the public and generic front-ends). Public so the
     /// generic builder reuses the identical short-circuit.
-    pub fn new_with_explicit_inputs(unsigned: UnsignedTransaction, resolved: Vec<SubstateRequirement>) -> Self {
+    pub fn new_with_explicit_inputs(unsigned: UnsignedTransaction, resolved: Vec<InputDeclaration>) -> Self {
         Self::with_explicit_inputs(unsigned, resolved)
     }
 
     /// Folds an already-complete input set in directly (the explicit short-circuit path) and marks
     /// the partial fully resolved.
-    fn with_explicit_inputs(unsigned: UnsignedTransaction, resolved: Vec<SubstateRequirement>) -> Self {
+    fn with_explicit_inputs(unsigned: UnsignedTransaction, resolved: Vec<InputDeclaration>) -> Self {
         Self {
             unsigned,
             wants: Vec::new(),
@@ -635,7 +635,7 @@ pub fn apply_fetched_substates_with_secrets(
 fn resolve_one(
     want: &WantItem,
     cache: &HashMap<SubstateId, Option<SubstateValue>>,
-    resolved: &mut Vec<SubstateRequirement>,
+    resolved: &mut Vec<InputDeclaration>,
     to_fetch: &mut Vec<SubstateId>,
 ) -> Result<bool, OotleSdkError> {
     match want {
@@ -670,7 +670,7 @@ fn resolve_specific(
     substate_id: &str,
     required: bool,
     cache: &HashMap<SubstateId, Option<SubstateValue>>,
-    resolved: &mut Vec<SubstateRequirement>,
+    resolved: &mut Vec<InputDeclaration>,
     to_fetch: &mut Vec<SubstateId>,
 ) -> Result<bool, OotleSdkError> {
     let id = SubstateId::from_str_checked(substate_id)?;
@@ -678,13 +678,13 @@ fn resolve_specific(
     // Required substates are added without a fetch — validators reject a bad input anyway (saves a
     // round-trip).
     if required {
-        push_unique(resolved, SubstateRequirement::unversioned(id));
+        push_unique(resolved, InputDeclaration::write(id));
         return Ok(true);
     }
 
     match cache.get(&id) {
         Some(Some(_)) => {
-            push_unique(resolved, SubstateRequirement::unversioned(id));
+            push_unique(resolved, InputDeclaration::write(id));
             Ok(true)
         },
         // Fetched-but-absent: optional, so satisfied without an input.
@@ -703,7 +703,7 @@ fn resolve_vault(
     resource_address: &str,
     required: bool,
     cache: &HashMap<SubstateId, Option<SubstateValue>>,
-    resolved: &mut Vec<SubstateRequirement>,
+    resolved: &mut Vec<InputDeclaration>,
     to_fetch: &mut Vec<SubstateId>,
 ) -> Result<bool, OotleSdkError> {
     let component_id = SubstateId::from_str_checked(component_address)?;
@@ -746,9 +746,9 @@ fn resolve_vault(
                 if let SubstateValue::Vault(vault) = value &&
                     *vault.resource_address() == resource
                 {
-                    push_unique(resolved, SubstateRequirement::unversioned(vault_id.clone()));
+                    push_unique(resolved, InputDeclaration::write(vault_id.clone()));
                     if resource != TARI_TOKEN {
-                        push_unique(resolved, SubstateRequirement::unversioned(resource));
+                        push_unique(resolved, InputDeclaration::write(resource));
                     }
                     matched = true;
                 }
@@ -782,7 +782,7 @@ fn resolve_vault(
 fn resolve_all_vaults(
     component_address: &str,
     cache: &HashMap<SubstateId, Option<SubstateValue>>,
-    resolved: &mut Vec<SubstateRequirement>,
+    resolved: &mut Vec<InputDeclaration>,
     to_fetch: &mut Vec<SubstateId>,
 ) -> Result<bool, OotleSdkError> {
     let component_id = SubstateId::from_str_checked(component_address)?;
@@ -810,7 +810,7 @@ fn resolve_all_vaults(
     // The called component is itself an input (parity with the synchronous builder's
     // `add_input_for_component_ref`). Without this, a method call on a component the host does not own
     // is rejected at execution with SUBSTATE_NOT_FOUND.
-    push_unique(resolved, SubstateRequirement::unversioned(component_id));
+    push_unique(resolved, InputDeclaration::write(component_id));
 
     let vault_ids = component_vault_ids(component)?;
 
@@ -819,10 +819,10 @@ fn resolve_all_vaults(
         match cache.get(&vault_id) {
             Some(Some(value)) => {
                 if let SubstateValue::Vault(vault) = value {
-                    push_unique(resolved, SubstateRequirement::unversioned(vault_id.clone()));
+                    push_unique(resolved, InputDeclaration::write(vault_id.clone()));
                     let resource = *vault.resource_address();
                     if resource != TARI_TOKEN {
-                        push_unique(resolved, SubstateRequirement::unversioned(resource));
+                        push_unique(resolved, InputDeclaration::write(resource));
                     }
                 }
             },
@@ -853,7 +853,7 @@ fn component_vault_ids(component: &tari_engine_types::component::Component) -> R
 }
 
 /// Pushes an input only if not already present (stable `Vec`, `IndexSet`-like de-dup).
-fn push_unique(resolved: &mut Vec<SubstateRequirement>, req: SubstateRequirement) {
+fn push_unique(resolved: &mut Vec<InputDeclaration>, req: InputDeclaration) {
     if !resolved.contains(&req) {
         resolved.push(req);
     }

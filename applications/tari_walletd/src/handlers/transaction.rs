@@ -9,7 +9,13 @@ use futures::{future, future::Either};
 use indexmap::IndexSet;
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_ootle_common_types::{Epoch, optional::Optional, response_status::ResponseErrorStatus};
+use tari_ootle_common_types::{
+    Epoch,
+    InputDeclaration,
+    SubstateRequirement,
+    optional::Optional,
+    response_status::ResponseErrorStatus,
+};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::{
     apis::transaction::TransactionApiError,
@@ -162,15 +168,10 @@ async fn submit_inner(
             .locate_dependent_substates(&substates, req.detect_inputs_use_unversioned)
             .await
             .or_jrpc_not_found()?;
+        let declared = req.transaction.inputs().clone();
         loaded_substates
             .into_iter()
-            .map(|input| {
-                if req.detect_inputs_use_unversioned {
-                    input.into_unversioned()
-                } else {
-                    input
-                }
-            })
+            .map(|input| declare_detected_input(input, &declared, req.detect_inputs_use_unversioned))
             .collect()
     } else {
         vec![]
@@ -372,13 +373,7 @@ pub async fn handle_detect_inputs(
         .await
         .or_jrpc_not_found()?
         .into_iter()
-        .map(|input| {
-            if req.use_unversioned {
-                input.into_unversioned()
-            } else {
-                input
-            }
-        })
+        .map(|input| declare_detected_input(input, req.transaction.inputs(), req.use_unversioned))
         .collect::<Vec<_>>();
 
     let transaction = context
@@ -418,15 +413,10 @@ async fn submit_dry_run_inner(
             .locate_dependent_substates(&substates, req.detect_inputs_use_unversioned)
             .await
             .or_jrpc_not_found()?;
+        let declared = req.transaction.inputs().clone();
         dependencies
             .into_iter()
-            .map(|input| {
-                if req.detect_inputs_use_unversioned {
-                    input.into_unversioned()
-                } else {
-                    input
-                }
-            })
+            .map(|input| declare_detected_input(input, &declared, req.detect_inputs_use_unversioned))
             .collect()
     } else {
         vec![]
@@ -543,7 +533,9 @@ pub async fn handle_submit_manifest(
         .locate_dependent_substates(&substates, true)
         .await
         .or_jrpc_not_found()?;
-    let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
+    let inputs = dependencies
+        .into_iter()
+        .map(|input| InputDeclaration::write(input.into_substate_id()));
 
     let transaction = transaction.with_inputs(inputs);
 
@@ -816,6 +808,25 @@ pub async fn handle_publish_template(
     })
 }
 
+/// Turns a detected dependency into a declaration, deferring to what the transaction already said
+/// about that substate.
+///
+/// Input detection walks the substates an instruction reaches and learns nothing about how each one
+/// is used, so on its own it can only declare a write. A caller that declared a read knows better,
+/// and folding the detected set in would otherwise widen it back to a write and take the caller's
+/// read parallelism away.
+fn declare_detected_input(
+    detected: SubstateRequirement,
+    declared: &IndexSet<InputDeclaration>,
+    use_unversioned: bool,
+) -> InputDeclaration {
+    let is_write = declared
+        .get(detected.substate_id())
+        .is_none_or(|declaration| declaration.is_write());
+    let version = if use_unversioned { None } else { detected.version() };
+    InputDeclaration::new(detected.into_substate_id(), version, is_write)
+}
+
 fn resolve_metadata_hash(
     input: tari_ootle_walletd_client::types::PublishTemplateMetadata,
 ) -> Result<tari_ootle_template_metadata::MetadataHash, anyhow::Error> {
@@ -829,5 +840,58 @@ fn resolve_metadata_hash(
             let meta = TemplateMetadata::from_cbor(&bytes).map_err(|e| anyhow!(e))?;
             meta.hash().map_err(|e| anyhow!(e))
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::engine_types::substate::SubstateId;
+    use tari_template_lib_types::ComponentAddress;
+
+    use super::*;
+
+    fn component(byte: u8) -> SubstateId {
+        SubstateId::Component(ComponentAddress::from_array([byte; 32]))
+    }
+
+    #[test]
+    fn a_detected_input_the_caller_declared_read_stays_a_read() {
+        let id = component(1);
+        let declared = IndexSet::from([InputDeclaration::read(id.clone())]);
+
+        let decl = declare_detected_input(SubstateRequirement::versioned(id, 3), &declared, false);
+
+        assert!(decl.is_read());
+        assert_eq!(decl.version(), Some(3));
+    }
+
+    #[test]
+    fn a_detected_input_the_caller_did_not_declare_is_a_write() {
+        let declared = IndexSet::from([InputDeclaration::read(component(1))]);
+
+        let decl = declare_detected_input(SubstateRequirement::unversioned(component(2)), &declared, false);
+
+        assert!(decl.is_write());
+    }
+
+    #[test]
+    fn a_detected_input_the_caller_declared_write_stays_a_write() {
+        let id = component(1);
+        let declared = IndexSet::from([InputDeclaration::write(id.clone())]);
+
+        let decl = declare_detected_input(SubstateRequirement::versioned(id, 3), &declared, false);
+
+        assert!(decl.is_write());
+    }
+
+    #[test]
+    fn unversioned_detection_drops_the_version_it_found() {
+        let id = component(1);
+        let declared = IndexSet::from([InputDeclaration::read(id.clone())]);
+
+        let decl = declare_detected_input(SubstateRequirement::versioned(id, 3), &declared, true);
+
+        assert_eq!(decl.version(), None);
+        assert!(decl.is_read());
     }
 }

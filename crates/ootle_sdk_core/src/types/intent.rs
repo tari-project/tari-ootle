@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::InputDeclaration;
 
 use crate::types::{
     address::{ComponentAddressStr, ResourceAddressStr},
@@ -21,9 +21,10 @@ use crate::types::{
     numeric::BoundaryAmount,
 };
 
-/// One explicit input: a substate-id string (`<prefix>_<hex>`) plus an optional version.
+/// One explicit input: a substate-id string (`<prefix>_<hex>`), an optional version, and the access
+/// the transaction intends.
 ///
-/// Mirrors [`SubstateRequirement`] at the boundary. Uses an explicit input set (no automatic input
+/// Mirrors [`InputDeclaration`] at the boundary. Uses an explicit input set (no automatic input
 /// resolution).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputRef {
@@ -31,37 +32,54 @@ pub struct InputRef {
     pub substate_id: String,
     /// The optional explicit version.
     pub version: Option<u32>,
+    /// Whether the transaction intends to write to this input. A payload that omits it declares a
+    /// write, which is always safe to execute and only costs concurrency.
+    #[serde(default = "write_by_default")]
+    pub is_write: bool,
+}
+
+const fn write_by_default() -> bool {
+    true
 }
 
 impl InputRef {
-    /// Builds an unversioned input ref.
+    /// Builds an unversioned write input ref.
     pub fn unversioned(substate_id: impl Into<String>) -> Self {
         Self {
             substate_id: substate_id.into(),
             version: None,
+            is_write: true,
         }
     }
 
-    /// Builds a versioned input ref.
+    /// Builds a versioned write input ref.
     pub fn versioned(substate_id: impl Into<String>, version: u32) -> Self {
         Self {
             substate_id: substate_id.into(),
             version: Some(version),
+            is_write: true,
         }
     }
 
-    /// Converts to the internal [`SubstateRequirement`], parsing the substate id.
-    pub fn to_internal(&self) -> Result<SubstateRequirement, OotleSdkError> {
-        let id = SubstateId::from_str(&self.substate_id)
-            .map_err(|e| OotleSdkError::Parse(format!("invalid substate id '{}': {e}", self.substate_id)))?;
-        Ok(SubstateRequirement::new(id, self.version))
+    /// Declares this input read-only. The transaction aborts if it writes to it.
+    pub fn read_only(mut self) -> Self {
+        self.is_write = false;
+        self
     }
 
-    /// Builds from an internal [`SubstateRequirement`].
-    pub fn from_internal(req: &SubstateRequirement) -> Self {
+    /// Converts to the internal [`InputDeclaration`], parsing the substate id.
+    pub fn to_internal(&self) -> Result<InputDeclaration, OotleSdkError> {
+        let id = SubstateId::from_str(&self.substate_id)
+            .map_err(|e| OotleSdkError::Parse(format!("invalid substate id '{}': {e}", self.substate_id)))?;
+        Ok(InputDeclaration::new(id, self.version, self.is_write))
+    }
+
+    /// Builds from an internal [`InputDeclaration`].
+    pub fn from_internal(req: &InputDeclaration) -> Self {
         Self {
             substate_id: req.substate_id().to_string(),
             version: req.version(),
+            is_write: req.is_write(),
         }
     }
 }
@@ -105,9 +123,9 @@ pub struct PublicTransferIntent {
 }
 
 impl PublicTransferIntent {
-    /// Converts the explicit input set to internal [`SubstateRequirement`]s. Used when lowering the
+    /// Converts the explicit input set to internal [`InputDeclaration`]s. Used when lowering the
     /// intent to builder calls.
-    pub fn inputs_to_internal(&self) -> Result<Vec<SubstateRequirement>, OotleSdkError> {
+    pub fn inputs_to_internal(&self) -> Result<Vec<InputDeclaration>, OotleSdkError> {
         self.inputs.iter().map(InputRef::to_internal).collect()
     }
 }

@@ -78,7 +78,10 @@ impl TransactionRecord {
     }
 
     pub fn to_initial_evidence(&self, num_preshards: NumPreshards, num_committees: u32) -> Evidence {
-        let inputs = self.transaction.all_inputs_iter();
+        let inputs = self
+            .transaction
+            .all_inputs_iter()
+            .map(|i| i.to_substate_requirement_ref());
         Evidence::from_inputs_and_outputs(
             num_preshards,
             num_committees,

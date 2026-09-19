@@ -2,8 +2,8 @@
   "name": "public_transfer/single_key_basic",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.39.0",
-    "git_rev": "dee549eb268a89412bde31f685359207b7789ab3",
+    "core_version": "0.41.0",
+    "git_rev": "36f16b7bac7b69dec46bd8e02384fca6e2feb28f",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_public_transfer",
@@ -21,7 +21,8 @@
       "inputs": [
         {
           "substate_id": "component_1111111111111111111111111111111111111111111111111111111111111111",
-          "version": 0
+          "version": 0,
+          "is_write": true
         }
       ],
       "min_epoch": 1,
@@ -62,6 +63,7 @@
             ],
             "inputs": [
               {
+                "is_write": true,
                 "substate_id": "component_1111111111111111111111111111111111111111111111111111111111111111",
                 "version": 0
               }

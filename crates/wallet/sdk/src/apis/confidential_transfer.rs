@@ -10,7 +10,7 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
     Epoch,
-    SubstateRequirement,
+    InputDeclaration,
     optional::{IsNotFoundError, Optional},
 };
 use tari_ootle_transaction::{Transaction, args};
@@ -252,7 +252,7 @@ where TSpec: WalletSdkSpec
 
         let dest_account_exists = to_account.exists_on_chain;
         if dest_account_exists {
-            inputs.push(SubstateRequirement::unversioned(to_account.address));
+            inputs.push(InputDeclaration::write(to_account.address));
             // Only the destination's vault for this resource is touched by the deposit (if it has none, the
             // deposit creates one). For an account we do not own, we only know its vault ids, so all of them
             // are declared.
@@ -261,13 +261,13 @@ where TSpec: WalletSdkSpec
                 .get_vault_by_resource(&to_account.address, &params.resource_address)
                 .optional()?
             {
-                Some(vault) => inputs.push(SubstateRequirement::unversioned(vault.id)),
-                None => inputs.extend(to_account.vaults.iter().copied().map(SubstateRequirement::unversioned)),
+                Some(vault) => inputs.push(InputDeclaration::write(vault.id)),
+                None => inputs.extend(to_account.vaults.iter().copied().map(InputDeclaration::write)),
             }
         }
 
         let account_substate = self.substate_api.get_substate(&params.from_account.into())?;
-        inputs.push(account_substate.substate_id.into_unversioned_requirement());
+        inputs.push(account_substate.substate_id.into_unversioned_declaration());
 
         // Fees are paid out of this account's TARI vault, so that vault and its resource are mutated too.
         if let Some(vault) = self
@@ -275,8 +275,8 @@ where TSpec: WalletSdkSpec
             .get_vault_by_resource(from_account.component_address(), &TARI_TOKEN)
             .optional()?
         {
-            inputs.push(SubstateRequirement::unversioned(vault.id));
-            inputs.push(SubstateRequirement::unversioned(vault.resource_address));
+            inputs.push(InputDeclaration::write(vault.id));
+            inputs.push(InputDeclaration::write(vault.resource_address));
         }
 
         let src_vault = self
@@ -292,23 +292,23 @@ where TSpec: WalletSdkSpec
             });
         }
         let src_vault_substate = self.substate_api.get_substate(&src_vault.id.into())?;
-        inputs.push(src_vault_substate.substate_id.into_unversioned_requirement());
+        inputs.push(src_vault_substate.substate_id.into_unversioned_declaration());
 
         // add the input for the resource address to be transferred
-        inputs.push(SubstateRequirement::unversioned(params.resource_address));
+        inputs.push(InputDeclaration::write(params.resource_address));
 
         // We need to fetch the resource substate to check if there is a view key present.
         let resource = self.substate_api.fetch_resource(params.resource_address).await?;
 
         // The badge proof is created from the badge's vault in this account, so both are inputs.
         if let Some(ref badge_resource_address) = params.proof_from_resource {
-            inputs.push(SubstateRequirement::unversioned(*badge_resource_address));
+            inputs.push(InputDeclaration::write(*badge_resource_address));
             if let Some(badge_vault) = self
                 .accounts_api
                 .get_vault_by_resource(from_account.component_address(), badge_resource_address)
                 .optional()?
             {
-                inputs.push(SubstateRequirement::unversioned(badge_vault.id));
+                inputs.push(InputDeclaration::write(badge_vault.id));
             }
         }
 
@@ -345,7 +345,7 @@ where TSpec: WalletSdkSpec
                 .commitments
                 .iter()
                 .map(|commitment| ConfidentialOutputAddress::new(params.resource_address, *commitment))
-                .map(SubstateRequirement::unversioned),
+                .map(InputDeclaration::write),
         );
 
         // Generate outputs

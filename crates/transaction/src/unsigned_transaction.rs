@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use indexmap::IndexSet;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration, declare_inputs};
 use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
@@ -107,13 +107,13 @@ impl UnsignedTransaction {
         }
     }
 
-    pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
         match self {
             Self::V1(tx) => tx.inputs(),
         }
     }
 
-    pub fn add_input(&mut self, input: SubstateRequirement) -> &mut Self {
+    pub fn add_input(&mut self, input: InputDeclaration) -> &mut Self {
         match self {
             Self::V1(tx) => {
                 tx.add_input(input);
@@ -178,8 +178,8 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
-        self.inputs_mut().extend(inputs);
+    pub fn with_inputs<I: IntoIterator<Item = InputDeclaration>>(mut self, inputs: I) -> Self {
+        declare_inputs(self.inputs_mut(), inputs);
         self
     }
 
@@ -220,7 +220,7 @@ impl UnsignedTransaction {
         self.with_signatures(vec![])
     }
 
-    pub(crate) fn inputs_mut(&mut self) -> &mut IndexSet<SubstateRequirement> {
+    pub(crate) fn inputs_mut(&mut self) -> &mut IndexSet<InputDeclaration> {
         match self {
             Self::V1(tx) => &mut tx.inputs,
         }

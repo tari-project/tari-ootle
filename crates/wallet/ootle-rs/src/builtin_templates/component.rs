@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use tari_ootle_common_types::{Epoch, SubstateRequirement, engine_types::substate::SubstateId};
+use tari_ootle_common_types::{Epoch, InputDeclaration, engine_types::substate::SubstateId};
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, builder::named_args::NamedArg};
 use tari_template_lib_types::{
     Amount,
@@ -67,7 +67,7 @@ pub trait TransactionBuildable: Sized {
     fn put_last_instruction_output_on_workspace<T: Into<String>>(self, label: T) -> Self;
 
     /// Add a specific substate requirement as an input.
-    fn add_input<S: Into<SubstateRequirement>>(self, substate_id: S) -> Self;
+    fn add_input<S: Into<InputDeclaration>>(self, substate_id: S) -> Self;
 
     /// Escape hatch to the raw [`TransactionBuilder`] for advanced usage.
     fn then<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(self, f: F) -> Self;
@@ -95,7 +95,7 @@ impl<'a, P: Provider> UnsignedTransactionBuilder for ComponentInvokeBuilder<'a, 
         self.provider.default_signer_address()
     }
 
-    fn add_input<S: Into<SubstateRequirement>>(mut self, substate_id: S) -> Self {
+    fn add_input<S: Into<InputDeclaration>>(mut self, substate_id: S) -> Self {
         self.builder = self.builder.add_input(substate_id);
         self
     }
@@ -162,7 +162,7 @@ impl<'a, P: Provider> TransactionBuildable for ComponentInvokeBuilder<'a, P> {
         self
     }
 
-    fn add_input<S: Into<SubstateRequirement>>(mut self, substate_id: S) -> Self {
+    fn add_input<S: Into<InputDeclaration>>(mut self, substate_id: S) -> Self {
         self.builder = self.builder.add_input(substate_id);
         self
     }

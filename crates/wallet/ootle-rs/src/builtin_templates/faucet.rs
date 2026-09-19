@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration};
 use tari_ootle_transaction::{TransactionBuilder, UnsignedTransaction, args};
 use tari_template_lib_types::{
     Amount,
@@ -54,7 +54,7 @@ impl<'a, P: Provider> UnsignedTransactionBuilder for FaucetInvokeBuilder<'a, P> 
         self.provider.default_signer_address()
     }
 
-    fn add_input<S: Into<SubstateRequirement>>(mut self, substate_id: S) -> Self {
+    fn add_input<S: Into<InputDeclaration>>(mut self, substate_id: S) -> Self {
         self.builder = self.builder.add_input(substate_id);
         self
     }
@@ -219,7 +219,7 @@ impl<P: Provider> TransactionBuildable for FaucetInvokeBuilder<'_, P> {
         self
     }
 
-    fn add_input<S: Into<SubstateRequirement>>(mut self, substate_id: S) -> Self {
+    fn add_input<S: Into<InputDeclaration>>(mut self, substate_id: S) -> Self {
         self.builder = self.builder.add_input(substate_id);
         self
     }

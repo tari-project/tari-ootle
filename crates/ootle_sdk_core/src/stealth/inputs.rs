@@ -38,7 +38,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::substate::{SubstateId, SubstateValue};
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_wallet_crypto::{MaskAndValue, StealthCryptoApi, StealthInputWitness};
 use tari_template_lib_types::{ResourceAddress, UtxoAddress, crypto::PedersenCommitmentBytes};
 
@@ -161,7 +161,7 @@ pub(crate) fn resolve_one_stealth_utxo(
     must_sign_with_account_key: bool,
     seal_signer: &mut Option<StealthSignerEntry>,
     required_signers: &mut Vec<StealthSignerEntry>,
-    resolved: &mut Vec<SubstateRequirement>,
+    resolved: &mut Vec<InputDeclaration>,
     to_fetch: &mut Vec<SubstateId>,
 ) -> Result<bool, OotleSdkError> {
     // Derive the UTXO substate id.
@@ -232,7 +232,8 @@ pub(crate) fn resolve_one_stealth_utxo(
     }));
 
     // Add the UTXO substate as a transaction input.
-    let req = SubstateRequirement::unversioned(utxo_substate_id);
+    // The UTXO is spent, so it is downed rather than read.
+    let req = InputDeclaration::write(utxo_substate_id);
     if !resolved.contains(&req) {
         resolved.push(req);
     }

@@ -2,13 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::executables::{Executable, Instructions, WeightedExecutable};
-use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::InputDeclaration;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 pub struct WrappedTransaction {
     transaction: tari_ootle_transaction::Transaction,
-    inputs: Vec<SubstateRequirement>,
+    inputs: Vec<InputDeclaration>,
 }
 
 impl WrappedTransaction {
@@ -19,7 +18,7 @@ impl WrappedTransaction {
         }
     }
 
-    pub fn extend_inputs<I: IntoIterator<Item = SubstateRequirement>>(&mut self, inputs: I) -> &mut Self {
+    pub fn extend_inputs<I: IntoIterator<Item = InputDeclaration>>(&mut self, inputs: I) -> &mut Self {
         self.inputs.extend(inputs);
         self
     }
@@ -38,13 +37,19 @@ impl Executable for WrappedTransaction {
         self.transaction.to_id_and_intent_commitment()
     }
 
-    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_ {
-        // Combine the inputs from the transaction and the additional inputs
-        // Note: duplicates are possible
+    fn all_inputs_iter(&self) -> impl Iterator<Item = InputDeclaration> + '_ {
+        // The transaction's own declarations win: the extra inputs exist so a test need not declare
+        // every substate, not to overrule a test that declared one deliberately.
+        let extra = self.inputs.iter().filter(|extra| {
+            !self
+                .transaction
+                .all_inputs_iter()
+                .any(|declared| declared.substate_id() == extra.substate_id())
+        });
         self.transaction
             .all_inputs_iter()
-            .chain(self.inputs.iter().map(|id| id.as_ref()))
-            .map(|req| req.substate_id().clone())
+            .map(|decl| decl.to_owned())
+            .chain(extra.cloned())
     }
 
     fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {

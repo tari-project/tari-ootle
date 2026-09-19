@@ -2,8 +2,8 @@
   "name": "stealth_transfer/stealth_seal_with_input",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.39.0",
-    "git_rev": "dee549eb268a89412bde31f685359207b7789ab3",
+    "core_version": "0.41.0",
+    "git_rev": "36f16b7bac7b69dec46bd8e02384fca6e2feb28f",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
@@ -97,6 +97,7 @@
             ],
             "inputs": [
               {
+                "is_write": true,
                 "substate_id": "utxo_0101010101010101010101010101010101010101010101010101010101010101_52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
                 "version": null
               }

@@ -9,7 +9,7 @@ macro_rules! resource_address {
 }
 
 pub mod _macro_exports {
-    pub use tari_ootle_common_types::{Epoch, SubstateRequirement, engine_types::substate::SubstateId};
+    pub use tari_ootle_common_types::{Epoch, InputDeclaration, engine_types::substate::SubstateId};
     pub use tari_ootle_transaction::{
         self as transaction,
         TransactionBuilder,
@@ -345,7 +345,7 @@ macro_rules! __ootle_invoke_impl {
             }
         }
 
-        fn add_input<S: Into<$crate::macros::_macro_exports::SubstateRequirement>>(self, substate_id: S) -> Self {
+        fn add_input<S: Into<$crate::macros::_macro_exports::InputDeclaration>>(self, substate_id: S) -> Self {
             let Self { interface, builder } = self;
             Self {
                 builder: $crate::macros::_macro_exports::TransactionBuildable::add_input(builder, substate_id),
@@ -387,7 +387,7 @@ macro_rules! __ootle_unsigned_tx_builder_impl {
             $crate::macros::_macro_exports::UnsignedTransactionBuilder::default_signer_address(&self.builder)
         }
 
-        fn add_input<S: Into<$crate::macros::_macro_exports::SubstateRequirement>>(self, substate_id: S) -> Self {
+        fn add_input<S: Into<$crate::macros::_macro_exports::InputDeclaration>>(self, substate_id: S) -> Self {
             $crate::macros::_macro_exports::TransactionBuildable::add_input(self, substate_id)
         }
 

@@ -142,7 +142,7 @@ fn command_for(transaction: &Transaction, num_committees: u32) -> Command {
     let evidence = Evidence::from_inputs_and_outputs(
         NumPreshards::current(),
         num_committees,
-        transaction.all_inputs_iter(),
+        transaction.all_inputs_iter().map(|i| i.to_substate_requirement_ref()),
         outputs,
     );
 

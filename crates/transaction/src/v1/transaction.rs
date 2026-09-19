@@ -13,7 +13,7 @@ use tari_engine_types::{
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
+use tari_ootle_common_types::{Epoch, InputDeclaration, InputDeclarationRef};
 use tari_template_lib_types::{
     ComponentAddress,
     Hash32,
@@ -67,7 +67,8 @@ const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 /// `the_block_budget_admits_a_transaction_at_the_signature_cap` is where that headroom is pinned.
 pub const MAX_SIGNATURES_PER_TRANSACTION: usize = STEALTH_LIMITS.max_total_inputs_per_transaction;
 
-static XTR_REQUIREMENT: SubstateRequirement = SubstateRequirement::new(SubstateId::Resource(TARI_TOKEN), None);
+/// The TARI resource is immutable, so the fee payment every transaction makes against it is a read.
+static XTR_REQUIREMENT: InputDeclaration = InputDeclaration::new(SubstateId::Resource(TARI_TOKEN), None, false);
 
 #[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -150,7 +151,7 @@ impl TransactionV1 {
         false
     }
 
-    pub(crate) fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub(crate) fn inputs(&self) -> &IndexSet<InputDeclaration> {
         self.body.inputs()
     }
 
@@ -220,7 +221,7 @@ impl TransactionV1 {
         (self.body, self.seal_signature)
     }
 
-    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
+    pub fn all_inputs_iter(&self) -> impl Iterator<Item = InputDeclarationRef<'_>> + '_ {
         self.inputs()
             .iter()
             .filter(|id| id.substate_id().as_resource_address() != Some(TARI_TOKEN))

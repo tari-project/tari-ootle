@@ -772,7 +772,10 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
                 let initial_evidence = Evidence::from_inputs_and_outputs(
                     num_preshards,
                     num_committees,
-                    transaction.transaction.all_inputs_iter(),
+                    transaction
+                        .transaction
+                        .all_inputs_iter()
+                        .map(|i| i.to_substate_requirement_ref()),
                     transaction.transaction.known_outputs_iter(),
                 );
 

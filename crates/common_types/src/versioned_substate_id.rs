@@ -377,6 +377,11 @@ impl VersionedSubstateId {
     pub fn into_unversioned_requirement(self) -> SubstateRequirement {
         SubstateRequirement::unversioned(self.substate_id)
     }
+
+    /// The unversioned write declaration for this substate.
+    pub fn into_unversioned_declaration(self) -> crate::InputDeclaration {
+        crate::InputDeclaration::write(self.substate_id)
+    }
 }
 
 impl ToSubstateAddress for VersionedSubstateId {

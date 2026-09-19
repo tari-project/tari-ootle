@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::info;
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::Account;
 use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId, constants::TARI_TOKEN};
@@ -29,9 +29,9 @@ impl Runner {
             .pay_fee_from_component(in_account.component_address, crate::MAX_FEE)
             .call_function(self.faucet_template, "mint", args![1_000_000_000])
             .with_inputs([
-                SubstateRequirement::unversioned(in_account.component_address),
-                SubstateRequirement::unversioned(fee_vault.id),
-                SubstateRequirement::unversioned(fee_vault.resource_address),
+                InputDeclaration::write(in_account.component_address),
+                InputDeclaration::write(fee_vault.id),
+                InputDeclaration::write(fee_vault.resource_address),
             ])
             .build_and_seal(&key.key);
 

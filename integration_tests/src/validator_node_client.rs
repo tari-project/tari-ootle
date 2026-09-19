@@ -9,7 +9,7 @@ use tari_engine_types::{
     commit_result::RejectReason,
     substate::{SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
+use tari_ootle_common_types::{InputDeclaration, SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::{Transaction, builder::TransactionBuilder};
 use tari_template_builtin::{
     ACCOUNT_TEMPLATE_ADDRESS,
@@ -299,7 +299,7 @@ async fn call_method_inner(
     // Build transaction
     let transaction = TransactionBuilder::new(Network::LocalNet, DEFAULT_TEST_MAX_EPOCH)
         .call_method(component_address, method_call, vec![])
-        .with_inputs(vec![component])
+        .with_inputs(vec![InputDeclaration::from(component)])
         .build_and_seal(&secret_key);
 
     // Submit and wait for result

@@ -15,7 +15,7 @@ use anyhow::anyhow;
 use cli::Cli;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
 use tari_indexer_client::rest_api_client::IndexerRestApiClient;
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration};
 use tari_ootle_transaction::{Blob, Network};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
@@ -159,12 +159,12 @@ fn get_transaction_builder(args: &WriteArgs, max_epoch: Epoch) -> anyhow::Result
     }
 }
 
-fn parse_inputs(items: &[String]) -> anyhow::Result<Vec<SubstateRequirement>> {
+fn parse_inputs(items: &[String]) -> anyhow::Result<Vec<InputDeclaration>> {
     items
         .iter()
         .map(|s| {
             s.trim()
-                .parse::<SubstateRequirement>()
+                .parse::<InputDeclaration>()
                 .map_err(|e| anyhow!("Invalid --input '{}': {}", s, e))
         })
         .collect()

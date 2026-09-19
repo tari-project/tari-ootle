@@ -13,7 +13,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
-use tari_ootle_common_types::{SubstateRequirement, displayable::Displayable, optional::Optional};
+use tari_ootle_common_types::{InputDeclaration, displayable::Displayable, optional::Optional};
 use tari_ootle_transaction::{Transaction, TransactionBuilder, UnsignedTransaction, args};
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
 use tari_template_lib::{
@@ -486,7 +486,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 })?;
 
         // add the input for the resource address to be transferred
-        substate_inputs.push(SubstateRequirement::unversioned(params.resource_address));
+        substate_inputs.push(InputDeclaration::write(params.resource_address));
 
         for output in &params.outputs {
             // No revealed outputs, no need to use the account
@@ -670,7 +670,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
 
             // If we're spending from the owner account, add the inputs
             if inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive() {
-                substate_inputs.push(SubstateRequirement::unversioned(*owner_account.component_address()));
+                substate_inputs.push(InputDeclaration::write(*owner_account.component_address()));
 
                 // Add the vaults for XTR (fees) and the spending resource if different
                 if let Some(vault) = self
@@ -678,8 +678,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .get_vault_by_resource(owner_account.component_address(), &TARI_TOKEN)
                     .optional()?
                 {
-                    substate_inputs.push(SubstateRequirement::unversioned(vault.id));
-                    substate_inputs.push(SubstateRequirement::unversioned(vault.resource_address));
+                    substate_inputs.push(InputDeclaration::write(vault.id));
+                    substate_inputs.push(InputDeclaration::write(vault.resource_address));
                 }
                 if params.resource_address != TARI_TOKEN &&
                     let Some(vault) = self
@@ -687,8 +687,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         .get_vault_by_resource(owner_account.component_address(), &params.resource_address)
                         .optional()?
                 {
-                    substate_inputs.push(SubstateRequirement::unversioned(vault.id));
-                    substate_inputs.push(SubstateRequirement::unversioned(vault.resource_address));
+                    substate_inputs.push(InputDeclaration::write(vault.id));
+                    substate_inputs.push(InputDeclaration::write(vault.resource_address));
                 }
             }
 
@@ -776,7 +776,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .filter(|i| i.is_on_chain)
                     .map(|i| &i.commitment)
                     .map(|commitment| UtxoAddress::new(fee_resource, (*commitment).into()))
-                    .map(SubstateRequirement::unversioned),
+                    .map(InputDeclaration::write),
             );
 
             substate_inputs.extend(
@@ -786,15 +786,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .filter(|i| i.is_on_chain)
                     .map(|i| &i.commitment)
                     .map(|commitment| UtxoAddress::new(params.resource_address, (*commitment).into()))
-                    .map(SubstateRequirement::unversioned),
+                    .map(InputDeclaration::write),
             );
 
             // Add any swap-related inputs if any
             if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
-                substate_inputs.push(SubstateRequirement::unversioned(swap.input_resource));
-                substate_inputs.push(SubstateRequirement::unversioned(swap.pool_address));
+                substate_inputs.push(InputDeclaration::write(swap.input_resource));
+                substate_inputs.push(InputDeclaration::write(swap.pool_address));
                 // Add the pool component's dependent substates (e.g. its vaults)
-                substate_inputs.extend(swap_pool_deps);
+                substate_inputs.extend(swap_pool_deps.into_iter().map(InputDeclaration::from));
             }
 
             // Add badge vault if needed
@@ -806,7 +806,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .ok_or_else(|| StealthTransferApiError::BadgeVaultNotFound {
                         resource_address: *badge_resource_address,
                     })?;
-                substate_inputs.push(SubstateRequirement::unversioned(badge_vault.id));
+                substate_inputs.push(InputDeclaration::write(badge_vault.id));
             }
 
             // We assume that all inputs being spent require a signature. This is fine because we currently filter out
@@ -871,7 +871,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         &self,
         address: &OotleAddress,
         resource_address: &ResourceAddress,
-        substate_inputs: &mut Vec<SubstateRequirement>,
+        substate_inputs: &mut Vec<InputDeclaration>,
     ) -> Result<bool, StealthTransferApiError> {
         let destination_account = derive_account_address_from_public_key(address.account_public_key());
 
@@ -883,13 +883,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         {
             Some(local_account) => {
                 if local_account.is_confirmed_on_chain() {
-                    substate_inputs.push(SubstateRequirement::unversioned(destination_account));
+                    substate_inputs.push(InputDeclaration::write(destination_account));
                     if let Some(vault) = self
                         .accounts_api
                         .get_vault_by_resource(local_account.component_address(), resource_address)
                         .optional()?
                     {
-                        substate_inputs.push(SubstateRequirement::unversioned(vault.id));
+                        substate_inputs.push(InputDeclaration::write(vault.id));
                     }
 
                     Ok(true)
@@ -906,7 +906,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .optional()?;
 
                 if let Some(ValidatorScanResult { id: address, substate }) = to_account_substate {
-                    substate_inputs.push(SubstateRequirement::unversioned(destination_account));
+                    substate_inputs.push(InputDeclaration::write(destination_account));
 
                     let account =
                         substate
@@ -931,7 +931,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             resource_address,
                             destination_account
                         );
-                        substate_inputs.push(SubstateRequirement::unversioned(vault.vault_id()));
+                        substate_inputs.push(InputDeclaration::write(vault.vault_id()));
                     } else {
                         debug!(
                             target: LOG_TARGET,
@@ -954,7 +954,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         network: Network,
         owner_account: &AccountWithAddress,
         params: StealthTransferParams,
-        inputs: Vec<SubstateRequirement>,
+        inputs: Vec<InputDeclaration>,
         fee_transfer_statement: Option<StealthTransferStatement>,
         transfer_statement: StealthTransferStatement,
     ) -> Result<UnsignedTransaction, StealthTransferApiError> {
@@ -1126,7 +1126,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         network: Network,
         owner_account: &AccountWithAddress,
         params: StealthTransferParams,
-        inputs: Vec<SubstateRequirement>,
+        inputs: Vec<InputDeclaration>,
         transfer_statement: StealthTransferStatement,
     ) -> Result<UnsignedTransaction, StealthTransferApiError> {
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;

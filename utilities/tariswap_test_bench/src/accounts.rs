@@ -6,7 +6,7 @@ use std::ops::RangeInclusive;
 use log::info;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::indexed_value::IndexedWellKnownTypes;
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::{
     apis::accounts::derive_account_address_from_public_key,
@@ -43,9 +43,9 @@ impl Runner {
                     .pay_fee_from_component("account", crate::MAX_FEE)
             })
             .with_inputs([
-                SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
-                SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
-                SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
+                InputDeclaration::write(XTR_FAUCET_COMPONENT_ADDRESS),
+                InputDeclaration::write(XTR_FAUCET_VAULT_ADDRESS),
+                InputDeclaration::write(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
             ])
             .finish();
 
@@ -127,11 +127,11 @@ impl Runner {
                 Amount::from(crate::MAX_FEE * num_accounts as u64),
             )
             .with_inputs([
-                SubstateRequirement::unversioned(*default_account.component_address()),
-                SubstateRequirement::unversioned(fee_vault.id),
-                SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
-                SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
-                SubstateRequirement::unversioned(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
+                InputDeclaration::write(*default_account.component_address()),
+                InputDeclaration::write(fee_vault.id),
+                InputDeclaration::write(XTR_FAUCET_COMPONENT_ADDRESS),
+                InputDeclaration::write(XTR_FAUCET_VAULT_ADDRESS),
+                InputDeclaration::write(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
             ])
             .build_and_seal(default_acc_secret.secret());
 
@@ -202,14 +202,14 @@ impl Runner {
                         .call_method(faucet.component_address, "take_free_coins", args![])
                         .put_last_instruction_output_on_workspace("faucet")
                         .call_method(account.component_address, "deposit", args![Workspace("faucet")])
-                        .add_input(SubstateRequirement::unversioned(account.component_address))
+                        .add_input(InputDeclaration::write(account.component_address))
                 })
                 .with_inputs([
-                    SubstateRequirement::unversioned(faucet.component_address),
-                    SubstateRequirement::unversioned(faucet.resource_address),
-                    SubstateRequirement::unversioned(faucet.vault_address),
-                    SubstateRequirement::unversioned(fee_vault.account_address),
-                    SubstateRequirement::unversioned(fee_vault.id),
+                    InputDeclaration::write(faucet.component_address),
+                    InputDeclaration::write(faucet.resource_address),
+                    InputDeclaration::write(faucet.vault_address),
+                    InputDeclaration::write(fee_vault.account_address),
+                    InputDeclaration::write(fee_vault.id),
                 ])
                 .build_and_seal(&key.key);
 

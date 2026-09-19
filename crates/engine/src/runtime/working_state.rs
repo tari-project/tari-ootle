@@ -183,6 +183,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         state_store: TStore,
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
+        read_declared_inputs: HashSet<SubstateId>,
         transaction_hash: Hash32,
         intent_commitment: Hash32,
         burn_rate: ExhaustBurnRate,
@@ -204,7 +205,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             address_allocations: IndexMap::new(),
             used_address_allocations: IndexMap::new(),
 
-            store: WorkingStateStore::new(state_store),
+            store: WorkingStateStore::new(state_store, read_declared_inputs),
 
             last_instruction_output: None,
 

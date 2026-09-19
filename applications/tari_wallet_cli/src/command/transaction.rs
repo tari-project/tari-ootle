@@ -40,7 +40,7 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId, SubstateValue},
 };
 use tari_ootle_address::OotleAddress;
-use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration, SubstateAddress};
 use tari_ootle_transaction::{
     Instruction,
     Transaction,
@@ -109,8 +109,12 @@ pub struct CommonSubmitArgs {
     /// Timeout in seconds
     #[clap(long, short = 't', alias = "wait-timeout")]
     pub wait_for_result_timeout_secs: Option<u64>,
+    /// Substates to declare as transaction inputs. May be repeated. Accepts an unversioned id like
+    /// `component_<hex>`, a versioned `component_<hex>:<version>`, and either form with a `:read` or
+    /// `:write` suffix declaring the access intended (`component_<hex>:?:read`); the default is
+    /// `write`.
     #[clap(long, short = 'i')]
-    pub inputs: Vec<SubstateRequirement>,
+    pub inputs: Vec<InputDeclaration>,
     #[clap(long, alias = "autofill")]
     pub detect_inputs: Option<bool>,
     #[clap(long, short = 'v')]

@@ -12,7 +12,7 @@ use tari_engine_types::{
     json_cbor::convert_json_to_cbor,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
+use tari_ootle_common_types::{InputDeclaration, SubstateRequirement, optional::Optional};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::{apis::substate::ValidatorScanResult, models::TransactionContext};
 use tari_ootle_walletd_client::{
@@ -129,7 +129,11 @@ pub async fn handle_mint_faucet(
         ])
         .put_last_instruction_output_on_workspace("tokens")
         .call_method(account.component_address, "deposit", args![Workspace("tokens")])
-        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+        .with_inputs(
+            inputs
+                .into_iter()
+                .map(|input| InputDeclaration::write(input.into_substate_id())),
+        )
         .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
         .finish();
@@ -341,7 +345,11 @@ pub async fn handle_transfer(
     let transaction = builder
         .with_dry_run(req.dry_run)
         .pay_fee_from_component(fee_payer_account_address, req.max_fee)
-        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+        .with_inputs(
+            inputs
+                .into_iter()
+                .map(|input| InputDeclaration::write(input.into_substate_id())),
+        )
         .finish();
 
     let transaction = sdk

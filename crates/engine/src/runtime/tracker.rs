@@ -20,6 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::collections::HashSet;
+
 use log::*;
 use ootle_network::Network;
 use tari_engine_types::{
@@ -123,6 +125,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         state_store: TStore,
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
+        read_declared_inputs: HashSet<SubstateId>,
         transaction_hash: Hash32,
         intent_commitment: Hash32,
         transaction_weight: TransactionWeight,
@@ -136,6 +139,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 state_store,
                 virtual_substates,
                 initial_call_scope,
+                read_declared_inputs,
                 transaction_hash,
                 intent_commitment,
                 burn_rate,

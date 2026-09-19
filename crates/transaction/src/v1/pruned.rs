@@ -13,7 +13,7 @@
 
 use indexmap::IndexSet;
 use log::*;
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration};
 use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
@@ -51,7 +51,7 @@ pub struct PrunedUnsignedTransactionV1 {
     pub instructions: Vec<Instruction>,
     #[n(3)]
     #[cbor(with = "tari_bor::adapters::indexset_codec")]
-    pub inputs: IndexSet<SubstateRequirement>,
+    pub inputs: IndexSet<InputDeclaration>,
     #[n(4)]
     pub min_epoch: Option<Epoch>,
     #[n(5)]
@@ -92,7 +92,7 @@ impl PrunedUnsignedTransactionV1 {
         &self.instructions
     }
 
-    pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
         &self.inputs
     }
 
@@ -157,7 +157,7 @@ impl PrunedUnsealedTransactionV1 {
         &self.transaction.instructions
     }
 
-    pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
         &self.transaction.inputs
     }
 
@@ -247,7 +247,7 @@ impl PrunedTransactionV1 {
         self.body.instructions()
     }
 
-    pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
         self.body.inputs()
     }
 
@@ -386,7 +386,7 @@ mod tests {
 
     fn sample_unsigned_with_blobs(blobs: Blobs) -> UnsignedTransactionV1 {
         let mut inputs = IndexSet::new();
-        inputs.insert(SubstateRequirement::versioned(
+        inputs.insert(InputDeclaration::write_versioned(
             SubstateId::Component(ComponentAddress::from_array([1; 32])),
             1,
         ));

@@ -2,7 +2,7 @@
 import type { BlobHashes } from "./BlobHashes";
 import type { Epoch } from "./Epoch";
 import type { Instruction } from "./Instruction";
-import type { SubstateRequirement } from "./SubstateRequirement";
+import type { InputDeclaration } from "./InputDeclaration";
 
 /**
  * Mirror of `UnsignedTransactionV1` but with blob commitments instead of blob payloads.
@@ -14,7 +14,7 @@ export type PrunedUnsignedTransactionV1 = {
   network: number;
   fee_instructions: Array<Instruction>;
   instructions: Array<Instruction>;
-  inputs: Array<SubstateRequirement>;
+  inputs: Array<InputDeclaration>;
   min_epoch: Epoch | null;
   max_epoch: Epoch;
   is_seal_signer_authorized: boolean;

@@ -2,7 +2,7 @@
 import type { Blobs } from "./Blobs";
 import type { Epoch } from "./Epoch";
 import type { Instruction } from "./Instruction";
-import type { SubstateRequirement } from "./SubstateRequirement";
+import type { InputDeclaration } from "./InputDeclaration";
 
 export type UnsignedTransactionV1 = {
   network: number;
@@ -11,7 +11,7 @@ export type UnsignedTransactionV1 = {
   /**
    * Input objects that may be read/write
    */
-  inputs: Array<SubstateRequirement>;
+  inputs: Array<InputDeclaration>;
   min_epoch: Epoch | null;
   /**
    * The last epoch in which this transaction may be sequenced. Mandatory: every transaction has a

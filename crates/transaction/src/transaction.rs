@@ -13,9 +13,9 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
+    InputDeclaration,
+    InputDeclarationRef,
     SubstateAddress,
-    SubstateRequirement,
-    SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
     committee::CommitteeInfo,
@@ -170,7 +170,7 @@ impl Transaction {
         self.signatures().first().map(|sig| *sig.public_key())
     }
 
-    pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
         match self {
             Self::V1(tx) => tx.inputs(),
         }
@@ -206,7 +206,7 @@ impl Transaction {
         }
     }
 
-    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
+    pub fn all_inputs_iter(&self) -> impl Iterator<Item = InputDeclarationRef<'_>> + '_ {
         match self {
             Self::V1(tx) => tx.all_inputs_iter(),
         }
@@ -522,7 +522,7 @@ mod tests {
             ])
             .put_last_instruction_output_on_workspace("workspace")
             .publish_template(b"template".to_vec())
-            .add_input(SubstateRequirement::versioned(
+            .add_input(InputDeclaration::write_versioned(
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
                 1,
             ))

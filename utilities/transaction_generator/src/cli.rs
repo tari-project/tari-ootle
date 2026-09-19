@@ -48,8 +48,10 @@ pub struct WriteArgs {
     pub templates: Vec<String>,
     /// Extra substate inputs to declare on each generated transaction that aren't passed as `--arg`
     /// (e.g. a fee vault the manifest debits but never names). May be repeated. Accepts an
-    /// unversioned id like `vault_<hex>` or a versioned `vault_<hex>:<version>`. Substate-typed
-    /// `--arg`s are declared as inputs automatically and don't need repeating here.
+    /// unversioned id like `vault_<hex>`, a versioned `vault_<hex>:<version>`, and either form with
+    /// a `:read` or `:write` suffix declaring the access intended (`vault_<hex>:?:read`); the
+    /// default is `write`. Substate-typed `--arg`s are declared as inputs automatically and don't
+    /// need repeating here.
     #[clap(long = "input", alias = "inputs")]
     pub inputs: Vec<String>,
     #[clap(long, alias = "args-file")]

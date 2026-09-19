@@ -2,8 +2,8 @@
   "name": "parse_finalized_result/dry_run",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.40.0",
-    "git_rev": "4401353d33bcdd22736b1bba404ffe7cca151551",
+    "core_version": "0.41.0",
+    "git_rev": "36f16b7bac7b69dec46bd8e02384fca6e2feb28f",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "parse_finalized_result",

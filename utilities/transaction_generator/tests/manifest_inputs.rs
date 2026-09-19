@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_transaction::{Epoch, Network};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
@@ -25,7 +25,7 @@ const TEMPLATE: &str = "33333333333333333333333333333333333333333333333333333333
 fn declares_account_arg_and_explicit_input_as_transaction_inputs() {
     let globals = HashMap::from([("account".to_string(), ACCOUNT.parse::<ManifestValue>().unwrap())]);
     let templates = HashMap::from([("MaxCompute".to_string(), TemplateAddress::from_hex(TEMPLATE).unwrap())]);
-    let extra_inputs = vec![VAULT.parse::<SubstateRequirement>().unwrap()];
+    let extra_inputs = vec![VAULT.parse::<InputDeclaration>().unwrap()];
 
     let build = manifest::builder(
         RistrettoSecretKey::default(),
@@ -55,4 +55,15 @@ fn declares_account_arg_and_explicit_input_as_transaction_inputs() {
         inputs.iter().any(|id| id == VAULT),
         "explicit --input vault should be declared as an input, got {inputs:?}",
     );
+}
+
+#[test]
+fn an_input_declares_the_intent_it_was_given() {
+    let write = format!("{VAULT}:write").parse::<InputDeclaration>().unwrap();
+    let read = format!("{VAULT}:read").parse::<InputDeclaration>().unwrap();
+    let bare = VAULT.parse::<InputDeclaration>().unwrap();
+
+    assert!(write.is_write());
+    assert!(read.is_read());
+    assert!(bare.is_write(), "an --input with no intent must declare a write");
 }

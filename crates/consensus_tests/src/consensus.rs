@@ -31,9 +31,9 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
+    InputDeclaration,
     NodeHeight,
     SubstateLockType,
-    SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
     crypto::{create_key_pair, create_key_pair_from_seed},
@@ -1009,7 +1009,7 @@ async fn single_shard_inputs_from_previous_outputs() {
     let (tx1, _, outputs) = test.send_transaction_to_all(Decision::Commit, 1, 5, 5).await;
     let prev_outputs = outputs
         .iter()
-        .map(|output| SubstateRequirement::versioned(output.clone(), 0))
+        .map(|output| InputDeclaration::write_versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
     let tx2 = Transaction::builder_localnet(Epoch(1))
@@ -1073,7 +1073,7 @@ async fn multishard_inputs_from_previous_outputs() {
     let (tx1, _, outputs) = test.send_transaction_to_all(Decision::Commit, 1, 5, 2).await;
     let prev_outputs = outputs
         .iter()
-        .map(|output| SubstateRequirement::versioned(output.clone(), 0))
+        .map(|output| InputDeclaration::write_versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
     let tx2 = Transaction::builder_localnet(Epoch(1))
@@ -1270,9 +1270,7 @@ async fn single_shard_unversioned_inputs() {
     // First get transaction in the mempool
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
     // Remove versions from inputs to test substate version resolution
-    let unversioned_inputs = inputs
-        .iter()
-        .map(|i| SubstateRequirement::new(i.substate_id().clone(), None));
+    let unversioned_inputs = inputs.iter().map(|i| InputDeclaration::write(i.substate_id().clone()));
     let tx = Transaction::builder_localnet(Epoch(1))
         .with_inputs(unversioned_inputs)
         .build_and_seal(&PrivateKey::default());
@@ -1356,14 +1354,14 @@ async fn multishard_unversioned_input_conflict() {
     // Distinct sealers: the transaction id excludes the seal nonce, so an identical body sealed
     // by the same key would be one transaction, not two conflicting ones.
     let tx1 = Transaction::builder_localnet(Epoch(1))
-        .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
-        .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
+        .add_input(InputDeclaration::write(id0.substate_id().clone()))
+        .add_input(InputDeclaration::write(id1.substate_id().clone()))
         .build_and_seal(&PrivateKey::from_canonical_bytes(&[1u8; 32]).unwrap());
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder_localnet(Epoch(1))
-        .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
-        .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
+        .add_input(InputDeclaration::write(id0.substate_id().clone()))
+        .add_input(InputDeclaration::write(id1.substate_id().clone()))
         .build_and_seal(&PrivateKey::from_canonical_bytes(&[2u8; 32]).unwrap());
     let tx2 = TransactionRecord::new(tx2);
 
@@ -1460,14 +1458,14 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
         .unwrap();
 
     let tx1 = Transaction::builder_localnet(Epoch(1))
-        .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
-        .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
+        .add_input(InputDeclaration::write(id0.substate_id().clone()))
+        .add_input(InputDeclaration::write(id1.substate_id().clone()))
         .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder_localnet(Epoch(1))
-        .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
-        .add_input(SubstateRequirement::unversioned(id2.substate_id().clone()))
+        .add_input(InputDeclaration::write(id0.substate_id().clone()))
+        .add_input(InputDeclaration::write(id2.substate_id().clone()))
         .build_and_seal(&Default::default());
     let tx2 = TransactionRecord::new(tx2);
 

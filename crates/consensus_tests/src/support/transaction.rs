@@ -16,7 +16,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateDiff, SubstateId},
     transaction_receipt::{FinalizeOutcome, TransactionReceipt},
 };
-use tari_ootle_common_types::{LockIntent, SubstateRequirement};
+use tari_ootle_common_types::{InputDeclaration, LockIntent};
 use tari_ootle_storage::consensus_models::{TransactionRecord, VersionedSubstateIdLockIntent};
 use tari_ootle_transaction::{Transaction, TransactionIntent, args};
 use tari_template_lib_types::{SubstateOwnerRule, TransactionReceiptAddress};
@@ -187,7 +187,7 @@ pub fn random_substates_ids_for_committee_generator(
     })
 }
 
-pub fn build_transaction(inputs: Vec<SubstateRequirement>) -> TransactionRecord {
+pub fn build_transaction(inputs: Vec<InputDeclaration>) -> TransactionRecord {
     let k = PrivateKey::default();
     let tx = Transaction::builder_localnet(Epoch(1))
         .call_function(Default::default(), "foo", args![])

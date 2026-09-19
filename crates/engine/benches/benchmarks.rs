@@ -16,9 +16,9 @@ use tari_engine::{
 };
 use tari_engine_types::{
     fees::ExhaustBurnRate,
-    substate::SubstateId,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_transaction::{Instruction, TransactionId, TransactionWeight, call_args};
 use tari_template_lib::types::{Hash32, constants::XTR_FAUCET_CLAIM_RESOURCE_ADDRESS, crypto::RistrettoPublicKeyBytes};
 use tari_template_test_tooling::{Package, mocks::AlwaysPassesProofVerifier};
@@ -38,11 +38,11 @@ impl Executable for CreateAndFundAccountExecutable {
         Hash32::default()
     }
 
-    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_ {
+    fn all_inputs_iter(&self) -> impl Iterator<Item = InputDeclaration> + '_ {
         [
-            SubstateId::from(FAUCET_COMPONENT_ADDRESS),
-            SubstateId::from(FAUCET_VAULT_ID),
-            SubstateId::from(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
+            InputDeclaration::write(FAUCET_COMPONENT_ADDRESS),
+            InputDeclaration::write(FAUCET_VAULT_ID),
+            InputDeclaration::read(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS),
         ]
         .into_iter()
     }

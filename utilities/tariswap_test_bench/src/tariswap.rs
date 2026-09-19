@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use log::info;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::indexed_value::decode_value_at_path;
-use tari_ootle_common_types::{SubstateRequirement, optional::Optional};
+use tari_ootle_common_types::{InputDeclaration, optional::Optional};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_sdk::models::Account;
 use tari_template_lib_types::{
@@ -57,10 +57,10 @@ impl Runner {
                 builder
             })
             .with_inputs([
-                SubstateRequirement::unversioned(in_account.component_address),
-                SubstateRequirement::unversioned(fee_vault.id),
-                SubstateRequirement::unversioned(TARI_TOKEN),
-                SubstateRequirement::unversioned(faucet.resource_address),
+                InputDeclaration::write(in_account.component_address),
+                InputDeclaration::write(fee_vault.id),
+                InputDeclaration::write(TARI_TOKEN),
+                InputDeclaration::write(faucet.resource_address),
             ])
             .build_and_seal(&key.key);
 
@@ -131,16 +131,16 @@ impl Runner {
 
                 let transaction = self
                     .new_transaction_builder()
-                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.id)))
+                    .with_inputs(maybe_lp_vault.map(|v| InputDeclaration::write(v.id)))
                     .with_inputs([
-                        SubstateRequirement::unversioned(account.component_address),
-                        SubstateRequirement::unversioned(xtr_vault.id),
-                        SubstateRequirement::unversioned(faucet_vault.id),
-                        SubstateRequirement::unversioned(tariswap.component_address),
-                        SubstateRequirement::unversioned(tariswap.lp_resource_address),
-                        SubstateRequirement::unversioned(faucet.resource_address),
+                        InputDeclaration::write(account.component_address),
+                        InputDeclaration::write(xtr_vault.id),
+                        InputDeclaration::write(faucet_vault.id),
+                        InputDeclaration::write(tariswap.component_address),
+                        InputDeclaration::write(tariswap.lp_resource_address),
+                        InputDeclaration::write(faucet.resource_address),
                     ])
-                    .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
+                    .with_inputs(tariswap.vaults.values().map(|v| InputDeclaration::write(*v)))
                     .pay_fee_from_component(account.component_address, crate::MAX_FEE)
                     .call_method(account.component_address, "withdraw", args![TARI_TOKEN, amount_a])
                     .put_last_instruction_output_on_workspace("a")
@@ -255,17 +255,17 @@ impl Runner {
                     .optional()?;
                 let transaction = self
                     .new_transaction_builder()
-                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.id)))
+                    .with_inputs(maybe_lp_vault.map(|v| InputDeclaration::write(v.id)))
                     .with_inputs([
-                        SubstateRequirement::unversioned(account.component_address),
-                        SubstateRequirement::unversioned(xtr_vault.id),
-                        SubstateRequirement::unversioned(faucet_vault.id),
-                        SubstateRequirement::unversioned(tariswap.component_address),
-                        SubstateRequirement::unversioned(faucet.resource_address),
-                        SubstateRequirement::unversioned(TARI_TOKEN),
-                        SubstateRequirement::unversioned(tariswap.lp_resource_address),
+                        InputDeclaration::write(account.component_address),
+                        InputDeclaration::write(xtr_vault.id),
+                        InputDeclaration::write(faucet_vault.id),
+                        InputDeclaration::write(tariswap.component_address),
+                        InputDeclaration::write(faucet.resource_address),
+                        InputDeclaration::write(TARI_TOKEN),
+                        InputDeclaration::write(tariswap.lp_resource_address),
                     ])
-                    .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
+                    .with_inputs(tariswap.vaults.values().map(|v| InputDeclaration::write(*v)))
                     .pay_fee_from_component(account.component_address, SWAP_FEE)
                     .call_method(tariswap.component_address, "get_pool_balance", args![TARI_TOKEN])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
@@ -328,15 +328,15 @@ impl Runner {
                 let transaction = self
                     .new_transaction_builder()
                     .with_inputs([
-                        SubstateRequirement::unversioned(account.component_address),
-                        SubstateRequirement::unversioned(xtr_vault.id),
-                        SubstateRequirement::unversioned(faucet_vault.id),
-                        SubstateRequirement::unversioned(tariswap.component_address),
-                        SubstateRequirement::unversioned(faucet.resource_address),
-                        SubstateRequirement::unversioned(TARI_TOKEN),
-                        SubstateRequirement::unversioned(tariswap.lp_resource_address),
+                        InputDeclaration::write(account.component_address),
+                        InputDeclaration::write(xtr_vault.id),
+                        InputDeclaration::write(faucet_vault.id),
+                        InputDeclaration::write(tariswap.component_address),
+                        InputDeclaration::write(faucet.resource_address),
+                        InputDeclaration::write(TARI_TOKEN),
+                        InputDeclaration::write(tariswap.lp_resource_address),
                     ])
-                    .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
+                    .with_inputs(tariswap.vaults.values().map(|v| InputDeclaration::write(*v)))
                     .pay_fee_from_component(account.component_address, SWAP_FEE)
                     .call_method(tariswap.component_address, "get_pool_balance", args![TARI_TOKEN])
                     .call_method(tariswap.component_address, "get_pool_balance", args![

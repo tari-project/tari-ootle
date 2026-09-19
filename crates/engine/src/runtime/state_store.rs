@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, mem};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+};
 
 use indexmap::{IndexMap, IndexSet};
 use tari_engine_types::{
@@ -36,18 +39,24 @@ pub struct WorkingStateStore<TStore> {
 
     downed_utxos: IndexSet<UtxoAddress>,
     downed_confidential_outputs: IndexSet<ConfidentialOutputAddress>,
+    /// Inputs the transaction declared as reads. A shard group that does not hold an input locks it
+    /// from that declaration without executing, so by the time execution runs, a read declaration is
+    /// a promise the rest of the network has already acted on: no write lock may be taken against
+    /// one.
+    read_declared_inputs: HashSet<SubstateId>,
     /// The underlying state store that is used to load substates that are not in the working state maps.
     state_store: TStore,
 }
 
 impl<TStore: StateReader> WorkingStateStore<TStore> {
-    pub fn new(state_store: TStore) -> Self {
+    pub fn new(state_store: TStore, read_declared_inputs: HashSet<SubstateId>) -> Self {
         Self {
             new_substates: IndexMap::new(),
             loaded_substates: HashMap::new(),
             locked_substates: LockedSubstates::default(),
             downed_utxos: IndexSet::default(),
             downed_confidential_outputs: IndexSet::default(),
+            read_declared_inputs,
             state_store,
         }
     }
@@ -58,6 +67,9 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         }
         if !self.exists(&id)? {
             return Err(RuntimeError::SubstateNotFound { id: id.clone() });
+        }
+        if lock_flag.is_write() && self.read_declared_inputs.contains(&id) {
+            return Err(RuntimeError::WriteToReadDeclaredInput { id });
         }
         let lock_id = self.locked_substates.try_lock(id.clone(), lock_flag)?;
         self.load_and_cache(id)?;
@@ -324,5 +336,56 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
                 .optional()?
                 .ok_or_else(|| RuntimeError::SubstateNotFound { id: id.clone() }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::confidential::ClaimedOutputTombstone;
+    use tari_template_lib::types::{ClaimedOutputTombstoneAddress, ObjectKey};
+
+    use super::*;
+    use crate::state_store::memory::MemoryStateStore;
+
+    fn tombstone_id(byte: u8) -> SubstateId {
+        SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::new(ObjectKey::from_array(
+            [byte; ObjectKey::LENGTH],
+        )))
+    }
+
+    fn store_holding(ids: &[SubstateId], read_declared: &[SubstateId]) -> WorkingStateStore<MemoryStateStore> {
+        let mut backing = MemoryStateStore::new();
+        backing
+            .set_many(
+                ids.iter()
+                    .map(|id| (id.clone(), Substate::new(0, ClaimedOutputTombstone { value: 1 }))),
+            )
+            .unwrap();
+        WorkingStateStore::new(backing, read_declared.iter().cloned().collect())
+    }
+
+    #[test]
+    fn a_read_declared_substate_refuses_a_write_lock() {
+        let id = tombstone_id(1);
+        let mut store = store_holding(&[id.clone()], &[id.clone()]);
+
+        let err = store.try_lock(id.clone(), LockFlag::Write).unwrap_err();
+        assert!(matches!(err, RuntimeError::WriteToReadDeclaredInput { id: got } if got == id));
+    }
+
+    #[test]
+    fn a_read_declared_substate_still_takes_a_read_lock() {
+        let id = tombstone_id(2);
+        let mut store = store_holding(&[id.clone()], &[id.clone()]);
+
+        store.try_lock(id, LockFlag::Read).unwrap();
+    }
+
+    #[test]
+    fn an_undeclared_substate_takes_a_write_lock() {
+        let id = tombstone_id(3);
+        let mut store = store_holding(&[id.clone()], &[]);
+
+        store.try_lock(id, LockFlag::Write).unwrap();
     }
 }

@@ -101,7 +101,7 @@ pub fn assemble_stealth_transfer_statement(
     agg_output_mask: SecretKeyBytes,
     agg_input_mask: RistrettoSecretKey,
     sig_reqs_state: StealthSignatureRequirementsState,
-    resolved_utxo_inputs: Vec<tari_ootle_common_types::SubstateRequirement>,
+    resolved_utxo_inputs: Vec<tari_ootle_common_types::InputDeclaration>,
     _entropy: &StealthEntropy,
 ) -> Result<StealthPartialTransaction, OotleSdkError> {
     // Pre-flight: the per-output revealed-deposit slices must reconcile with the top-level
@@ -183,7 +183,7 @@ fn build_unsigned_transaction(
     network: Network,
     intent: &StealthTransferIntent,
     transfer: StealthTransferStatement,
-    resolved_utxo_inputs: Vec<tari_ootle_common_types::SubstateRequirement>,
+    resolved_utxo_inputs: Vec<tari_ootle_common_types::InputDeclaration>,
 ) -> Result<UnsignedTransaction, OotleSdkError> {
     let from_component: ComponentAddress = intent.from_account.to_internal()?;
     let resource: ResourceAddress = intent.resource_address.to_internal()?;

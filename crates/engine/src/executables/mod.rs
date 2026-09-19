@@ -3,7 +3,7 @@
 
 mod transaction;
 
-use tari_engine_types::substate::SubstateId;
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_transaction::{Blobs, Instruction, TransactionId, TransactionWeight};
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
@@ -28,7 +28,7 @@ pub trait Executable {
         (self.to_id(), self.calculate_intent_commitment())
     }
 
-    fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateId> + '_;
+    fn all_inputs_iter(&self) -> impl Iterator<Item = InputDeclaration> + '_;
 
     /// Returns the main signer of the executable, if any.
     fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {

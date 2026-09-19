@@ -8,7 +8,7 @@ use std::{
 
 use tari_indexer_client::{rest_api_client::IndexerRestApiClient, types::GetSubstatesRequest};
 use tari_ootle_common_types::{
-    SubstateRequirement,
+    InputDeclaration,
     engine_types::{
         indexed_value::IndexedValueError,
         substate::{SubstateId, SubstateValue},
@@ -129,13 +129,13 @@ impl TransactionInputResolver {
         // in this case anyway, so this saves queries to the indexer (and VNs) in that case. This may be an
         // incorrect trade-off.
         if required {
-            tx_mut.add_input(SubstateRequirement::unversioned(substate_id.clone()));
+            tx_mut.add_input(InputDeclaration::write(substate_id.clone()));
             return Ok(true);
         }
 
         match self.cache.get(substate_id) {
             Some(Some(_)) => {
-                tx_mut.add_input(SubstateRequirement::unversioned(substate_id.clone()));
+                tx_mut.add_input(InputDeclaration::write(substate_id.clone()));
                 Ok(true)
             },
             Some(None) => Ok(true),
@@ -187,9 +187,9 @@ impl TransactionInputResolver {
                             })?;
                             if vault.resource_address() == resource_address {
                                 // Found the vault for the specified resource
-                                tx_mut.add_input(SubstateRequirement::unversioned(vault_id));
+                                tx_mut.add_input(InputDeclaration::write(vault_id));
                                 if *resource_address != TARI_TOKEN {
-                                    tx_mut.add_input(SubstateRequirement::unversioned(*resource_address));
+                                    tx_mut.add_input(InputDeclaration::write(*resource_address));
                                 }
                                 is_satisfied = true;
                             }
@@ -289,9 +289,9 @@ impl TransactionInputResolver {
                                     found: SubstateType::from(vault),
                                 }
                             })?;
-                            tx_mut.add_input(SubstateRequirement::unversioned(vault_id));
+                            tx_mut.add_input(InputDeclaration::write(vault_id));
                             if *vault.resource_address() != TARI_TOKEN {
-                                tx_mut.add_input(SubstateRequirement::unversioned(*vault.resource_address()));
+                                tx_mut.add_input(InputDeclaration::write(*vault.resource_address()));
                             }
                         },
                         Some(None) => {

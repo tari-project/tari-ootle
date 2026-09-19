@@ -391,7 +391,7 @@ mod tests {
         },
         substate::SubstateId,
     };
-    use tari_ootle_common_types::SubstateRequirement;
+    use tari_ootle_common_types::InputDeclaration;
     use tari_ootle_transaction::{
         INVOCATION_FLOOR,
         MAX_SIGNATURES_PER_TRANSACTION,
@@ -489,7 +489,7 @@ mod tests {
         let inputs = (0..count).map(|i| {
             let mut key = [0u8; 32];
             key[..8].copy_from_slice(&(i as u64).to_le_bytes());
-            SubstateRequirement::unversioned(SubstateId::Component(ComponentAddress::from_array(key)))
+            InputDeclaration::write(SubstateId::Component(ComponentAddress::from_array(key)))
         });
         let statement = StealthTransferStatement {
             inputs_statement: StealthInputsStatement::new(

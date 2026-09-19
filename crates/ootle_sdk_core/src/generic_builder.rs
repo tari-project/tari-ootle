@@ -362,10 +362,10 @@ fn parse_function_name(s: &str) -> Result<tari_template_lib_types::FunctionName,
         .map_err(|_| OotleSdkError::Validation(format!("function/method name '{s}' exceeds the length limit")))
 }
 
-/// Converts the intent's explicit input set to internal `SubstateRequirement`s.
+/// Converts the intent's explicit input set to internal `InputDeclaration`s.
 fn inputs_to_internal(
     intent: &GenericTransactionIntent,
-) -> Result<Vec<tari_ootle_common_types::SubstateRequirement>, OotleSdkError> {
+) -> Result<Vec<tari_ootle_common_types::InputDeclaration>, OotleSdkError> {
     intent
         .inputs
         .iter()
@@ -373,10 +373,10 @@ fn inputs_to_internal(
         .collect()
 }
 
-/// Converts the intent's additive `extra_inputs` to internal `SubstateRequirement`s.
+/// Converts the intent's additive `extra_inputs` to internal `InputDeclaration`s.
 fn extra_inputs_to_internal(
     intent: &GenericTransactionIntent,
-) -> Result<Vec<tari_ootle_common_types::SubstateRequirement>, OotleSdkError> {
+) -> Result<Vec<tari_ootle_common_types::InputDeclaration>, OotleSdkError> {
     intent
         .extra_inputs
         .iter()

@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Box, Chip, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
-import { SubstateRequirement, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { InputDeclaration, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import { DataTableCell } from "../../../Components/StyledComponents";
 
@@ -53,7 +53,7 @@ function getTypeColor(type: string): "primary" | "secondary" | "success" | "warn
   }
 }
 
-export default function Inputs({ data }: { data: SubstateRequirement[] }) {
+export default function Inputs({ data }: { data: InputDeclaration[] }) {
   if (!data || data.length === 0) {
     return (
       <Box sx={{ p: 3, textAlign: "center" }}>
@@ -71,10 +71,11 @@ export default function Inputs({ data }: { data: SubstateRequirement[] }) {
             <TableCell>Substate ID</TableCell>
             <TableCell>Type</TableCell>
             <TableCell>Version</TableCell>
+            <TableCell>Access</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((item: SubstateRequirement, index: number) => {
+          {data.map((item: InputDeclaration, index: number) => {
             const substateId = substateIdToString(item.substate_id);
             const type = getSubstateType(substateId);
             return (
@@ -96,6 +97,14 @@ export default function Inputs({ data }: { data: SubstateRequirement[] }) {
                   ) : (
                     <Chip label="Latest" size="small" color="success" variant="outlined" />
                   )}
+                </DataTableCell>
+                <DataTableCell>
+                  <Chip
+                    label={item.is_write ? "Write" : "Read"}
+                    size="small"
+                    color={item.is_write ? "warning" : "default"}
+                    variant="outlined"
+                  />
                 </DataTableCell>
               </TableRow>
             );

@@ -40,7 +40,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
-    SubstateRequirement,
+    InputDeclaration,
     crypto::create_key_pair_from_seed,
     substate_type::SubstateType,
 };
@@ -803,7 +803,7 @@ impl TemplateTest {
         wrapped_transaction.extend_inputs(
             self.state_store
                 .iter()
-                .map(|(id, s)| SubstateRequirement::versioned(id.clone(), s.version())),
+                .map(|(id, s)| InputDeclaration::write_versioned(id.clone(), s.version())),
         );
 
         let tx_id = wrapped_transaction.to_id();

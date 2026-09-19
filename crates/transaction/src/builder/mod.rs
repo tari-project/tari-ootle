@@ -17,7 +17,7 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input, declare_inputs};
 use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{
     Amount,
@@ -936,19 +936,20 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    /// Add an input to use in the transaction
-    pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
-        self.unsigned_transaction.inputs_mut().insert(input_object.into());
+    /// Add an input to use in the transaction. A bare substate id declares a write; pass an
+    /// [`InputDeclaration`] to declare a read.
+    pub fn add_input<I: Into<InputDeclaration>>(mut self, input_object: I) -> Self {
+        declare_input(self.unsigned_transaction.inputs_mut(), input_object.into());
         self
     }
 
-    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
+    pub fn with_inputs<I: IntoIterator<Item = InputDeclaration>>(mut self, inputs: I) -> Self {
         self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
         self
     }
 
     pub fn with_unversioned_inputs<I: IntoIterator<Item = S>, S: Into<SubstateId>>(self, inputs: I) -> Self {
-        self.with_inputs(inputs.into_iter().map(|input| SubstateRequirement::unversioned(input)))
+        self.with_inputs(inputs.into_iter().map(InputDeclaration::write))
     }
 
     /// Pre-allocate a resource address. The allocated address is added to the workspace and can be used in subsequent
@@ -974,9 +975,10 @@ impl<D> TransactionBuilder<D> {
                     if let InstructionArg::Literal(bytes) = arg &&
                         let Ok(indexed) = IndexedValue::from_raw(bytes)
                     {
-                        self.unsigned_transaction
-                            .inputs_mut()
-                            .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
+                        declare_inputs(
+                            self.unsigned_transaction.inputs_mut(),
+                            indexed.referenced_substates().map(InputDeclaration::write),
+                        );
                     }
                 }
             },
@@ -986,9 +988,10 @@ impl<D> TransactionBuilder<D> {
                     if let InstructionArg::Literal(bytes) = arg &&
                         let Ok(indexed) = IndexedValue::from_raw(bytes)
                     {
-                        self.unsigned_transaction
-                            .inputs_mut()
-                            .extend(indexed.referenced_substates().map(SubstateRequirement::unversioned));
+                        declare_inputs(
+                            self.unsigned_transaction.inputs_mut(),
+                            indexed.referenced_substates().map(InputDeclaration::write),
+                        );
                     }
                 }
             },

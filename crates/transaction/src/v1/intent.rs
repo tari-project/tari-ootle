@@ -95,7 +95,7 @@ mod tests {
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
     use tari_engine_types::{Epoch, substate::SubstateId, transaction_receipt::FinalizeOutcome};
-    use tari_ootle_common_types::SubstateRequirement;
+    use tari_ootle_common_types::InputDeclaration;
     use tari_template_lib_types::ComponentAddress;
 
     use super::*;
@@ -113,7 +113,7 @@ mod tests {
 
     fn sample_unsigned() -> UnsignedTransactionV1 {
         let mut inputs = IndexSet::new();
-        inputs.insert(SubstateRequirement::versioned(
+        inputs.insert(InputDeclaration::write_versioned(
             SubstateId::Component(ComponentAddress::from_array([1; 32])),
             1,
         ));
@@ -218,7 +218,7 @@ mod tests {
 
         // inputs: extra / version changed
         let mut u = base.clone();
-        u.inputs.insert(SubstateRequirement::versioned(
+        u.inputs.insert(InputDeclaration::write_versioned(
             SubstateId::Component(ComponentAddress::from_array([9; 32])),
             1,
         ));
@@ -227,12 +227,16 @@ mod tests {
         u.inputs = base
             .inputs
             .iter()
-            .map(|i| SubstateRequirement {
+            .map(|i| InputDeclaration {
                 substate_id: i.substate_id.clone(),
                 version: i.version.map(|v| v.wrapping_add(1)),
+                is_write: i.is_write,
             })
             .collect();
         assert_ne!(commitment_of(u), base_commitment, "inputs (version changed)");
+        let mut u = base.clone();
+        u.inputs = base.inputs.iter().map(|i| i.clone().with_intent(!i.is_write)).collect();
+        assert_ne!(commitment_of(u), base_commitment, "inputs (intent changed)");
 
         // min_epoch: value change and Some <-> None; max_epoch: value change
         let mut u = base.clone();

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::Instant};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use log::*;
 use ootle_network::Network;
@@ -169,20 +169,31 @@ where
         // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
         // transaction (payment of fees)
         initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
-        for input_substate_id in executable.all_inputs_iter() {
+        let mut read_declared_inputs = HashSet::new();
+        let mut write_declared_inputs = HashSet::new();
+        for input in executable.all_inputs_iter() {
             debug!(
                 target: LOG_TARGET,
                 "Adding substate to initial call scope: {}",
-                input_substate_id
+                input
             );
-            initial_call_scope.add_substate_to_owned(input_substate_id);
+            if input.is_write() {
+                write_declared_inputs.insert(input.substate_id().clone());
+            } else {
+                read_declared_inputs.insert(input.substate_id().clone());
+            }
+            initial_call_scope.add_substate_to_owned(input.into_substate_id());
         }
+        // A substate declared both ways is a write: the same rule `declare_input` applies when
+        // building the declaration set, repeated here because an `Executable` may chain several.
+        read_declared_inputs.retain(|id| !write_declared_inputs.contains(id));
 
         let transaction_weight = executable.calculate_weight();
         let tracker = StateTracker::new(
             state_db,
             virtual_substates,
             initial_call_scope,
+            read_declared_inputs,
             id.as_hash(),
             intent_commitment,
             transaction_weight,

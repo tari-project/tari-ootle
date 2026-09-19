@@ -8,7 +8,7 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, InputDeclaration};
 use tari_ootle_transaction::{Blob, Network, Transaction};
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_manifest::ManifestValue;
@@ -22,7 +22,7 @@ pub fn builder<P: AsRef<Path>>(
     manifest: P,
     globals: HashMap<String, ManifestValue>,
     templates: HashMap<String, TemplateAddress>,
-    extra_inputs: Vec<SubstateRequirement>,
+    extra_inputs: Vec<InputDeclaration>,
     blob_inputs: HashMap<String, Blob>,
     random_signer: bool,
     max_epoch: Epoch,
@@ -36,7 +36,7 @@ pub fn builder<P: AsRef<Path>>(
     let inputs = globals
         .values()
         .filter_map(|value| value.as_address().cloned())
-        .map(SubstateRequirement::unversioned)
+        .map(InputDeclaration::write)
         .chain(extra_inputs)
         .collect::<Vec<_>>();
     let instructions = tari_transaction_manifest::parse_manifest(&contents, globals, templates, blob_inputs)?;

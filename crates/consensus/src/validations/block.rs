@@ -6,7 +6,6 @@
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
-    DerivableFromPublicKey,
     Epoch,
     committee::{Committee, CommitteeInfo},
 };
@@ -19,7 +18,6 @@ use super::common::{
     check_height,
     check_network,
     check_proposal_certificate,
-    check_proposed_by_leader,
     check_protocol_version,
     check_shard_group_bounds,
     check_shard_group_matches,
@@ -28,7 +26,7 @@ use super::common::{
 };
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, ProposalValidationError},
-    traits::{ConsensusSpec, LeaderStrategy},
+    traits::ConsensusSpec,
 };
 
 pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
@@ -37,7 +35,6 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
     committee_for_block: &Committee<TConsensusSpec::Addr>,
     local_committee_info: &CommitteeInfo,
     vote_signing_service: &TConsensusSpec::SignerService,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
     config: &HotstuffConfig,
     expected_epoch_hash: &FixedHash,
 ) -> Result<(), HotStuffError> {
@@ -45,7 +42,6 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
         block,
         committee_for_block,
         vote_signing_service,
-        leader_strategy,
         config,
         expected_epoch_hash,
     )?;
@@ -58,24 +54,21 @@ fn check_proposal<TConsensusSpec: ConsensusSpec>(
     block: &Block,
     committee_for_block: &Committee<TConsensusSpec::Addr>,
     signer_service: &TConsensusSpec::SignerService,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
     config: &HotstuffConfig,
     expected_epoch_hash: &FixedHash,
 ) -> Result<(), HotStuffError> {
     check_header::<TConsensusSpec>(block.header(), expected_epoch_hash, config, signer_service)?;
-    check_block(leader_strategy, committee_for_block, block)?;
+    check_block(block)?;
     check_proposal_certificate::<TConsensusSpec>(config.network, block, committee_for_block, signer_service)?;
     check_timeout_certificate::<TConsensusSpec>(config.network, block, committee_for_block, signer_service)?;
 
     Ok(())
 }
-pub(super) fn check_block<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
-    leader_strategy: &TLeaderStrategy,
-    local_committee: &Committee<TAddr>,
-    block: &Block,
-) -> Result<(), ProposalValidationError> {
+/// Checks that do not depend on committed state. Whether the proposer is the leader of the view
+/// below the block does: it is checked in `validate_local_proposed_block`, where the block's justify
+/// is on hand to anchor the liveness state that decides it.
+pub(super) fn check_block(block: &Block) -> Result<(), ProposalValidationError> {
     check_height(block)?;
-    check_proposed_by_leader(leader_strategy, local_committee, block)?;
     Ok(())
 }
 

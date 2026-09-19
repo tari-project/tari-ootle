@@ -693,7 +693,9 @@ impl TestBuilder {
                     num_preshards: TEST_NUM_PRESHARDS,
                     pacemaker_block_time: DEFAULT_PACEMAKER_BLOCK_TIME,
                     missed_proposal_suspend_threshold: 5,
-                    missed_proposal_recovery_threshold: 5,
+                    probation_base_votes: 5,
+                    probation_base_blocks: 100,
+                    probation_max_backoff_exp: 6,
                     max_transaction_validity_epochs: 100,
                     // Keep the weight budget effectively unbounded in tests so behaviour stays
                     // count-limited (as before) unless a test specifically exercises the weight budget.

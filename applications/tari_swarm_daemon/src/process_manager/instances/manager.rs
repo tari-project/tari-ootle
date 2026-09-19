@@ -40,7 +40,9 @@ const CONSENSUS_CONSTANTS_TEMPLATE: &str = r#"# Consensus constants for this swa
 # pacemaker_block_time_secs = 10
 # base_layer_confirmations = 3
 # missed_proposal_suspend_threshold = 5
-# missed_proposal_recovery_threshold = 5
+# probation_base_votes = 5
+# probation_base_blocks = 100
+# probation_max_backoff_exp = 6
 # max_transaction_validity_epochs = 2160
 "#;
 use crate::{

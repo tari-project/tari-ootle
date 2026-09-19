@@ -70,6 +70,7 @@ use tari_ootle_storage::{
         BlockTransactionExecution,
         EpochCheckpoint,
         ForeignProposalRecord,
+        LivenessCounters,
         LockedSubstateValue,
         PendingShardStateTreeDiff,
         StateVersionTransitions,
@@ -145,6 +146,7 @@ use crate::{
         transaction::TransactionCf,
         transaction_pool::TransactionPoolCf,
         transaction_pool_state_update,
+        validator_liveness_log::ValidatorLivenessLogCf,
         validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
         vote_equivocation,
     },
@@ -2041,6 +2043,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(stats)
     }
 
+    fn validator_liveness_counters_as_of(
+        &self,
+        epoch: Epoch,
+        public_key: &RistrettoPublicKeyBytes,
+        as_of: NodeHeight,
+    ) -> Result<Option<LivenessCounters>, StorageError> {
+        let cf = self.db().cf(ValidatorLivenessLogCf)?;
+        let start = cf.encode_key(&(epoch, *public_key, NodeHeight::zero()));
+        // The upper bound is exclusive and the query is inclusive of `as_of`.
+        let end = cf.encode_key(&(epoch, *public_key, as_of.saturating_add(NodeHeight(1))));
+        let counters = cf
+            .range_iterator(Ordering::Descending, start..end)
+            .next()
+            .transpose()?
+            .map(|(_, counters)| counters);
+        Ok(counters)
+    }
+
     fn vote_equivocation_exists(
         &self,
         epoch: Epoch,
@@ -2053,6 +2073,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             .cf(vote_equivocation::VoteEquivocationCf)?
             .exists(&(epoch, height, *public_key), OPERATION)?;
         Ok(exists)
+    }
+
+    fn vote_equivocation_exists_for_validator(
+        &self,
+        epoch: Epoch,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<bool, StorageError> {
+        // The evidence is keyed by view before signer, so this scans the epoch. Only one record per
+        // view and signer is kept and equivocation is rare, so there is normally nothing to scan.
+        for key in self
+            .db()
+            .cf(vote_equivocation::ByEpochQuery)?
+            .query_prefix_range_key_iterator(Ordering::Ascending, &epoch)
+        {
+            let (_, _, signer) = key?;
+            if signer == *public_key {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
 

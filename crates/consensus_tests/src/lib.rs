@@ -17,6 +17,8 @@ mod last_voted_persistence;
 #[cfg(test)]
 mod leader_failure;
 #[cfg(test)]
+mod leader_fast_skip;
+#[cfg(test)]
 mod safe_node_predicate;
 #[cfg(test)]
 mod stale_qc_carry_forward;
@@ -26,3 +28,5 @@ mod state_tree;
 mod substate_store;
 #[cfg(test)]
 mod support;
+#[cfg(test)]
+mod vote_equivocation_withholding;

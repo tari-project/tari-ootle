@@ -42,6 +42,7 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use crate::{
     hotstuff::{
         HotStuffError,
+        LeaderSkipSet,
         ProposalValidationError,
         block_change_set::ProposedBlockChangeSet,
         commit_proofs::generate_end_of_epoch_commit_proof,
@@ -66,6 +67,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     parent_merkle_root: FixedHash,
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
+    skip_set: &LeaderSkipSet,
     parent_timestamp: u64,
     parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
@@ -82,6 +84,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
         parent_merkle_root,
         leader_strategy,
         local_committee,
+        skip_set,
         parent_timestamp,
         parent_accumulated_data,
         parent_epoch_hash,
@@ -106,6 +109,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
     parent_merkle_root: FixedHash,
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
+    skip_set: &LeaderSkipSet,
     parent_timestamp: u64,
     parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
@@ -122,6 +126,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
         parent_merkle_root,
         leader_strategy,
         local_committee,
+        skip_set,
         parent_timestamp,
         parent_accumulated_data,
         parent_epoch_hash,
@@ -145,6 +150,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
     justify_block: &Block,
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
+    skip_set: &LeaderSkipSet,
 ) -> Vec<Block> {
     calculate_dummy_blocks(
         justify_block.height(),
@@ -158,6 +164,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         *justify_block.state_merkle_root(),
         leader_strategy,
         local_committee,
+        skip_set,
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
@@ -176,6 +183,7 @@ pub fn check_extends_justify<TAddr: NodeAddressable, TLeaderStrategy: LeaderStra
     justify_block: &Block,
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
+    skip_set: &LeaderSkipSet,
 ) -> Result<Vec<Block>, ProposalValidationError> {
     let does_not_extend = |details: String| ProposalValidationError::CandidateBlockDoesNotExtendJustify {
         justify_block_height: justify_block.height(),
@@ -216,8 +224,13 @@ pub fn check_extends_justify<TAddr: NodeAddressable, TLeaderStrategy: LeaderStra
         )));
     }
 
-    let dummy_blocks =
-        calculate_dummy_blocks_from_justify(candidate_block, justify_block, leader_strategy, local_committee);
+    let dummy_blocks = calculate_dummy_blocks_from_justify(
+        candidate_block,
+        justify_block,
+        leader_strategy,
+        local_committee,
+        skip_set,
+    );
 
     // Every skipped view must be filled: a shorter chain reaches the candidate's parent from a height the candidate
     // does not claim to extend from.
@@ -253,6 +266,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
     parent_merkle_root: FixedHash,
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
+    skip_set: &LeaderSkipSet,
     parent_timestamp: u64,
     parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
@@ -287,7 +301,9 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             break;
         }
         let view_height = current_block_height - NodeHeight(1);
-        let (_, leader) = leader_strategy.get_leader(local_committee, view_height);
+        // The dummy block stands for the view its effective leader missed, and is charged to it when
+        // it commits. Its id covers the proposer, so every replica must derive the same one.
+        let (_, leader) = skip_set.effective_leader(leader_strategy, local_committee, view_height);
         let dummy_header = BlockHeader::dummy_block(
             network,
             ProtocolVersion::at(network, epoch),

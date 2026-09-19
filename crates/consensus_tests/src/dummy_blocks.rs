@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use ootle_byte_type::ToByteType;
 use tari_common_types::types::FixedHash;
 use tari_consensus::hotstuff::{
+    LeaderSkipSet,
     calculate_dummy_blocks,
     calculate_dummy_blocks_from_justify,
     calculate_last_dummy_block,
@@ -63,6 +64,7 @@ fn dummy_blocks() {
         FixedHash::zero(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         genesis.timestamp(),
         ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
@@ -78,6 +80,7 @@ fn dummy_blocks() {
         FixedHash::zero(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         genesis.timestamp(),
         ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
@@ -109,7 +112,13 @@ fn last_matches_generated_using_real_data() {
         None,
     );
 
-    let dummy = calculate_dummy_blocks_from_justify(&candidate, &justify, &RoundRobinLeaderStrategy, &committee);
+    let dummy = calculate_dummy_blocks_from_justify(
+        &candidate,
+        &justify,
+        &RoundRobinLeaderStrategy,
+        &committee,
+        &LeaderSkipSet::none(),
+    );
 
     let last = calculate_last_dummy_block(
         justify.height(),
@@ -122,6 +131,7 @@ fn last_matches_generated_using_real_data() {
         *justify.state_merkle_root(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         justify.timestamp(),
         ShardGroupAccumulatedData::default(),
         *justify.epoch_hash(),
@@ -182,6 +192,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         *epoch_genesis.state_merkle_root(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         epoch_genesis.timestamp(),
         *epoch_genesis.header().accumulated_data(),
         *epoch_genesis.epoch_hash(),
@@ -199,6 +210,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         *zero_block.state_merkle_root(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         zero_block.timestamp(),
         *zero_block.header().accumulated_data(),
         *zero_block.epoch_hash(),
@@ -225,6 +237,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         *epoch_genesis.state_merkle_root(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         epoch_genesis.timestamp(),
         *epoch_genesis.header().accumulated_data(),
         *epoch_genesis.epoch_hash(),
@@ -339,6 +352,7 @@ fn proposer_accumulated_data_must_come_from_justify_on_timeout_recovery() {
         *justify_block.state_merkle_root(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
@@ -444,6 +458,7 @@ fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
         *justify_block.state_merkle_root(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
@@ -464,6 +479,7 @@ fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
         *justify_block.state_merkle_root(),
         &RoundRobinLeaderStrategy,
         &committee,
+        &LeaderSkipSet::none(),
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),

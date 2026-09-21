@@ -276,17 +276,20 @@ fn remove_tracked_file(path: &Path, identity: Option<u64>) {
 pub struct WasmModuleCache {
     dir: PathBuf,
     index: Arc<Mutex<CacheIndex>>,
-    writes: mpsc::SyncSender<Write>,
+    writes: mpsc::SyncSender<WriteRequest>,
 }
 
 /// Artifacts the writer thread will accept before [`WasmModuleCache::store`] starts dropping them.
 ///
-/// A queued artifact is one already held in memory by whoever compiled it, so a slot costs a
-/// pointer. A dropped one costs a recompile the next time the template is wanted cold.
-const WRITE_QUEUE_CAPACITY: usize = 64;
+/// Queueing one is a cheap clone — a `wasmer::Module` is an `Arc` — but the queue outlives the
+/// execution that compiled it, so a full queue is the last owner of this many artifacts, which this
+/// module's own docs put at hundreds of KiB to tens of MiB each. The queue's job is to decouple a
+/// caller from one slow write rather than to hold a cache's worth of compiled code, so it is sized
+/// for the first. A dropped artifact costs a recompile the next time its template is wanted cold.
+const WRITE_QUEUE_CAPACITY: usize = 8;
 
 /// A request to the writer thread.
-enum Write {
+enum WriteRequest {
     Artifact {
         addr: TemplateAddress,
         loaded: LoadedTemplate,
@@ -578,16 +581,16 @@ impl WasmModuleCache {
     /// It ends when the cache and every clone of it are dropped, which closes the queue. An
     /// artifact still queued at that point is lost, and costs the recompile any artifact that was
     /// never written costs.
-    fn spawn_writer(&self, requests: mpsc::Receiver<Write>) {
+    fn spawn_writer(&self, requests: mpsc::Receiver<WriteRequest>) {
         let cache = self.clone_without_writer();
         let spawned = thread::Builder::new()
             .name("wasm-cache-writer".to_string())
             .spawn(move || {
                 for request in requests {
                     match request {
-                        Write::Artifact { addr, loaded } => cache.write_now(&addr, &loaded),
+                        WriteRequest::Artifact { addr, loaded } => cache.write_now(&addr, &loaded),
                         #[cfg(test)]
-                        Write::Barrier(reply) => {
+                        WriteRequest::Barrier(reply) => {
                             let _ignore = reply.send(());
                         },
                     }
@@ -623,15 +626,32 @@ impl WasmModuleCache {
     /// compiled module is valid either way and the only cost of no cache entry is a later
     /// recompile.
     pub fn store(&self, addr: &TemplateAddress, loaded: &LoadedTemplate) {
-        let request = Write::Artifact {
+        let request = WriteRequest::Artifact {
             addr: *addr,
             loaded: loaded.clone(),
         };
-        if self.writes.try_send(request).is_err() {
-            debug!(
-                target: LOG_TARGET,
-                "Dropping the compiled module for template {}: the cache writer is behind", addr,
-            );
+        match self.writes.try_send(request) {
+            Ok(_) => {},
+            Err(mpsc::TrySendError::Full(_)) => {
+                // Warned rather than logged quietly: a device slow enough to keep the writer behind
+                // turns this cache into a directory nothing lands in, and every call to a cold
+                // template recompiles it. Before the write moved off the caller that showed up as
+                // slow execution, which an operator could see.
+                warn!(
+                    target: LOG_TARGET,
+                    "The wasm module cache writer is behind. Dropping the compiled module for template {}, which \
+                     will be compiled again when that template is next wanted cold.",
+                    addr,
+                );
+            },
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "The wasm module cache writer has stopped. Nothing further will be cached for the life of this \
+                     process, starting with the compiled module for template {}.",
+                    addr,
+                );
+            },
         }
     }
 
@@ -647,9 +667,9 @@ impl WasmModuleCache {
         };
 
         let path = self.path_for(addr);
-        // Every call needs its own tempfile: a cache directory is shared by concurrent threads and by
-        // whatever other processes point at it, so two `store`s of one address can run at once. The pid
-        // and counter make the name unique to this call.
+        // Every call needs its own tempfile: another process pointing at this directory can be
+        // publishing the same address at the same moment. The pid separates this process's writes
+        // from theirs and the counter separates this call from the next.
         let tmp = self.dir.join(format!(
             "{}_{}.bin.tmp.{}.{}",
             addr,
@@ -709,7 +729,7 @@ impl WasmModuleCache {
     #[cfg(test)]
     fn flush(&self) {
         let (reply, done) = mpsc::sync_channel(0);
-        if self.writes.send(Write::Barrier(reply)).is_ok() {
+        if self.writes.send(WriteRequest::Barrier(reply)).is_ok() {
             let _ignore = done.recv();
         }
     }
@@ -781,13 +801,19 @@ impl<TStore> DiskCachedWasmTemplateProvider<TStore> {
     }
 }
 
-/// Both lookups below answer from a cache hit without asking `inner`, which is sound only while
-/// every artifact in the cache came from a successful `inner.get_template` — so the template's
-/// substate existed when it was written, and templates are immutable and never destroyed. A writer
-/// that puts an artifact into this cache from anywhere else breaks that: `call_function` resolves a
-/// template through the provider and nothing else, so a node holding an artifact for a substate that
-/// does not exist would execute a call every other node aborts. Any such writer owes this path an
-/// existence check against `inner` first.
+/// Both lookups below answer from a cache hit without asking `inner`. What makes that sound is a
+/// property of the directory rather than of this type: every artifact in it is one whose template
+/// substate had been resolved before it was written, and templates are immutable and are never
+/// destroyed, so an artifact that was right when written stays right.
+///
+/// Each writer establishes that for itself, and there are two. This provider stores only what
+/// `inner.get_template` has just served. The indexer's `TemplateManager` shares the same
+/// `WasmModuleCache` and stores from its own `templates` table, whose rows reach `Active` only
+/// through `add_and_load_template` after the template's substate was fetched.
+///
+/// A third writer owes this path the same guarantee. `call_function` resolves a template through the
+/// provider and nothing else, so a node serving an artifact for a substate that does not exist
+/// executes a call every other node aborts.
 impl<TStore> TemplateProvider for DiskCachedWasmTemplateProvider<TStore>
 where TStore: TemplateProvider<Template = PublishedTemplate> + Clone + 'static
 {
@@ -976,13 +1002,10 @@ mod tests {
         // First call: cache miss, compile-then-store.
         let first = provider.get_template(&addr).unwrap().expect("loaded");
         cache.flush();
-        cache.flush();
         assert!(cache.path_for(&addr).exists(), "store should write a file");
 
         // Second call: cache hit, deserialize-only path.
         let second = provider.get_template(&addr).unwrap().expect("loaded");
-        cache.flush();
-        cache.flush();
         assert_eq!(first.template_name(), second.template_name());
         assert_eq!(first.code_size(), second.code_size());
         assert_eq!(
@@ -1073,7 +1096,6 @@ mod tests {
         let (store, addr) = make_store();
         let provider = DiskCachedWasmTemplateProvider::new(store, cache.clone());
         let loaded = provider.get_template(&addr).unwrap().expect("loaded");
-        cache.flush();
         cache.flush();
 
         let bytes = fs::read(cache.path_for(&addr)).unwrap();

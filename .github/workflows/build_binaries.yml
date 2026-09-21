@@ -234,7 +234,7 @@ jobs:
       # runs on the default branch populate.
       - name: Cache vcpkg binaries - Windows
         if: startsWith(runner.os,'Windows')
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}\vcpkg-cache
           key: vcpkg-${{ matrix.builds.name }}-${{ hashFiles('.github/workflows/build_binaries.yml') }}

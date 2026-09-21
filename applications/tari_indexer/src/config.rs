@@ -37,6 +37,7 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig},
 };
+use tari_ootle_template_provider::TemplateConfig;
 use tari_ootle_transaction::Network;
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
@@ -252,6 +253,10 @@ pub struct IndexerConfig {
     pub transaction_prune_interval: Duration,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
+    /// Bounds on the compiled-template caches: the in-memory one, and the on-disk artifact cache
+    /// shared by the template manager and dry runs.
+    #[serde(default)]
+    pub templates: TemplateConfig,
     /// Template addresses to watch for component creation/update events.
     /// Components created from these templates are tracked in a separate table for fast lookup.
     /// Defaults to the builtin liquidity pool template.
@@ -441,6 +446,7 @@ impl Default for IndexerConfig {
             max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),
             transaction_prune_interval: default_transaction_prune_interval(),
             event_filters: vec![],
+            templates: TemplateConfig::default(),
             watched_templates: default_watched_templates(),
             verify_substate_proofs: default_verify_substate_proofs(),
             rate_limits: IndexerRateLimitsConfig::default(),

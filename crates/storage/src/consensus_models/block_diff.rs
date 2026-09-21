@@ -95,4 +95,15 @@ impl BlockDiff {
     ) -> Result<SubstateChange, StorageError> {
         tx.block_diffs_get_change_for_versioned_substate(block_id, substate_id)
     }
+
+    /// Returns whether the branch ending at `block_id` records any change for the given substate version. Prefer this
+    /// over [`Self::get_for_versioned_substate`] where only existence matters: it does not read the change, and an UP
+    /// carries the whole substate value.
+    pub fn contains_versioned_substate<'a, TTx: StateStoreReadTransaction, T: Into<VersionedSubstateIdRef<'a>>>(
+        tx: &TTx,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<bool, StorageError> {
+        tx.block_diffs_contains_versioned_substate(block_id, substate_id)
+    }
 }

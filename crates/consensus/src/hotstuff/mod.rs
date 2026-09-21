@@ -33,6 +33,7 @@ mod state_machine;
 mod state_tree_gc;
 pub mod substate_store;
 mod transaction_manager;
+mod view_buffer;
 mod vote_collector;
 mod worker;
 

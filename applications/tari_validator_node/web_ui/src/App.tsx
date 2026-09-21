@@ -26,6 +26,7 @@ import ValidatorNode from "./routes/VN/ValidatorNode";
 import Connections from "./routes/Connections/Connections";
 import Fees from "./routes/Fees/Fees";
 import Blocks from "./routes/Blocks/Blocks";
+import Diagnostics from "./routes/Diagnostics/Diagnostics";
 import ValidatorNodes from "./routes/ValidatorNodes/ValidatorNodes";
 import ErrorPage from "./routes/ErrorPage";
 import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
@@ -90,6 +91,11 @@ export const breadcrumbRoutes = [
   {
     label: "Mempool",
     path: "/mempool",
+    dynamic: false,
+  },
+  {
+    label: "Diagnostics",
+    path: "/diagnostics",
     dynamic: false,
   },
   {
@@ -171,6 +177,7 @@ export default function App() {
             <Route path="blocks" element={<Blocks />} />
             <Route path="vns" element={<ValidatorNodes />} />
             <Route path="mempool" element={<Mempool />} />
+            <Route path="diagnostics" element={<Diagnostics />} />
             <Route path="transactions/:transactionHash" element={<TransactionDetails />} />
             <Route path="blocks/:blockId" element={<BlockDetails />} />
             <Route path="templates/:address" element={<TemplateFunctions />} />

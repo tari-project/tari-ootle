@@ -54,7 +54,7 @@ use tari_state_store_rocksdb::{
 
 use crate::genesis_state::create_genesis_state;
 
-const LOG_TARGET: &str = "tari::validator::migrations";
+const LOG_TARGET: &str = "tari::validator_node::migrations";
 
 pub fn migrate<TAddr: NodeAddressable + 'static>(
     tx: &mut RocksDbStateStoreWriteTransaction<'_, TAddr>,

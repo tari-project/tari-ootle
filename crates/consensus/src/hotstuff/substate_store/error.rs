@@ -61,8 +61,11 @@ pub enum LockFailedError {
         substate_id: VersionedSubstateId,
         conflict: LockConflict,
     },
-    #[error("Substate {id} is already UP and conflicts with an existing output")]
-    SubstateIsUp { id: VersionedSubstateId },
+    /// The exact version an OUTPUT lock claims has already existed. A version that was created and later
+    /// destroyed is as unusable as a live one - the version is part of the substate's identity, so recreating
+    /// it would resurrect a spent substate.
+    #[error("Substate {id} already exists and cannot be created as an output")]
+    SubstateExists { id: VersionedSubstateId },
 }
 
 impl LockFailedError {

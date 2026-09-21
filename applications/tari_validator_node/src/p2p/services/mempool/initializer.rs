@@ -35,6 +35,7 @@ use super::metrics::PrometheusMempoolMetrics;
 use crate::{
     consensus::ConsensusHandle,
     p2p::services::mempool::{handle::MempoolHandle, service::MempoolService},
+    template_prewarm::TemplatePrewarmer,
 };
 
 const LOG_TARGET: &str = "tari::ootle::validator_node::mempool";
@@ -46,6 +47,7 @@ pub fn spawn<TValidator, TStateStore>(
     consensus_handle: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
     rx_gossip: mpsc::Receiver<GossipMessage>,
+    template_prewarmer: TemplatePrewarmer,
     #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> (MempoolHandle, JoinHandle<anyhow::Result<()>>)
 where
@@ -66,6 +68,7 @@ where
         consensus_handle,
         networking,
         rx_gossip,
+        template_prewarmer,
         #[cfg(feature = "metrics")]
         metrics,
     );

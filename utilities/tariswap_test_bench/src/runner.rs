@@ -1,7 +1,12 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{path::Path, str::FromStr, time::Duration};
+use std::{
+    path::Path,
+    str::FromStr,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 use log::info;
 use tari_crypto::tari_utilities::SafePassword;
@@ -42,6 +47,10 @@ pub struct Runner {
     /// Validity window shared by every transaction the bench builds, resolved once at startup. A
     /// bench run is short relative to this, so a single window covers the whole run.
     pub(crate) max_epoch: Epoch,
+    /// Source of the per-transaction nonce. The transaction id excludes the seal signature, so
+    /// the nonce is what makes each member of a batch that repeats the same instructions over the
+    /// same unversioned inputs (pool creation, swaps) a distinct transaction.
+    next_nonce: AtomicU64,
 }
 
 /// Epochs past the epoch at startup that bench transactions stay valid for.
@@ -60,6 +69,7 @@ impl Runner {
             tariswap_template,
             stats: Stats::default(),
             max_epoch,
+            next_nonce: AtomicU64::new(0),
         })
     }
 
@@ -129,6 +139,7 @@ impl Runner {
 
     pub fn new_transaction_builder(&self) -> TransactionBuilder {
         Transaction::builder(self.cli.network, self.max_epoch)
+            .with_nonce(self.next_nonce.fetch_add(1, Ordering::Relaxed))
     }
 }
 

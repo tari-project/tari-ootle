@@ -1,11 +1,15 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_consensus_types::BlockId;
 use tari_ootle_common_types::NodeHeight;
-use tari_ootle_storage::consensus_models::{Block, ValidBlock};
+use tari_ootle_storage::consensus_models::{Block, NoVoteReason, ValidBlock, VoteEquivocation};
 use tari_ootle_transaction::TransactionId;
 
-use crate::{hotstuff::HotStuffError, messages::HotstuffMessage};
+use crate::{
+    hotstuff::{ConsensusCurrentState, ConsensusStateEvent, HotStuffError},
+    messages::HotstuffMessage,
+};
 
 pub trait ConsensusHooks {
     fn on_local_block_committed(&mut self, block: &ValidBlock);
@@ -20,6 +24,23 @@ pub trait ConsensusHooks {
     fn on_leader_timeout(&mut self, new_height: NodeHeight);
 
     fn on_needs_sync(&mut self, local_height: NodeHeight, remote_qc_height: NodeHeight);
+
+    /// Called for every consensus state machine transition, including the ones into and out of
+    /// state sync and the failure transition into `Sleeping`.
+    fn on_state_transition(
+        &mut self,
+        _from: ConsensusCurrentState,
+        _to: ConsensusCurrentState,
+        _event: &ConsensusStateEvent,
+    ) {
+    }
+
+    /// Called when this node decided not to vote on an otherwise valid local proposal.
+    fn on_no_vote(&mut self, _block_id: &BlockId, _reason: &NoVoteReason) {}
+
+    /// Called when a committee member is caught signing two different votes for one view. The
+    /// evidence is already persisted by the time this fires.
+    fn on_vote_equivocation(&mut self, _evidence: &VoteEquivocation) {}
 
     fn on_transaction_ready(&mut self, tx_id: &TransactionId);
     fn on_transaction_batch_finalized(&mut self, num_committed: usize, num_aborted: usize);
@@ -89,6 +110,29 @@ impl<T: ConsensusHooks> ConsensusHooks for OptionalHooks<T> {
         }
     }
 
+    fn on_state_transition(
+        &mut self,
+        from: ConsensusCurrentState,
+        to: ConsensusCurrentState,
+        event: &ConsensusStateEvent,
+    ) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.on_state_transition(from, to, event);
+        }
+    }
+
+    fn on_no_vote(&mut self, block_id: &BlockId, reason: &NoVoteReason) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.on_no_vote(block_id, reason);
+        }
+    }
+
+    fn on_vote_equivocation(&mut self, evidence: &VoteEquivocation) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.on_vote_equivocation(evidence);
+        }
+    }
+
     fn on_transaction_ready(&mut self, tx_id: &TransactionId) {
         if let Some(inner) = self.inner.as_mut() {
             inner.on_transaction_ready(tx_id);
@@ -125,6 +169,10 @@ impl ConsensusHooks for NoopHooks {
     fn on_leader_timeout(&mut self, _new_height: NodeHeight) {}
 
     fn on_needs_sync(&mut self, _local_height: NodeHeight, _remote_qc_height: NodeHeight) {}
+
+    fn on_state_transition(&mut self, _: ConsensusCurrentState, _: ConsensusCurrentState, _: &ConsensusStateEvent) {}
+
+    fn on_no_vote(&mut self, _block_id: &BlockId, _reason: &NoVoteReason) {}
 
     fn on_transaction_ready(&mut self, _tx_id: &TransactionId) {}
 
@@ -186,6 +234,26 @@ impl<A: ConsensusHooks, B: ConsensusHooks> ConsensusHooks for CompositeHook<A, B
     fn on_needs_sync(&mut self, local_height: NodeHeight, remote_qc_height: NodeHeight) {
         self.first.on_needs_sync(local_height, remote_qc_height);
         self.second.on_needs_sync(local_height, remote_qc_height);
+    }
+
+    fn on_state_transition(
+        &mut self,
+        from: ConsensusCurrentState,
+        to: ConsensusCurrentState,
+        event: &ConsensusStateEvent,
+    ) {
+        self.first.on_state_transition(from, to, event);
+        self.second.on_state_transition(from, to, event);
+    }
+
+    fn on_no_vote(&mut self, block_id: &BlockId, reason: &NoVoteReason) {
+        self.first.on_no_vote(block_id, reason);
+        self.second.on_no_vote(block_id, reason);
+    }
+
+    fn on_vote_equivocation(&mut self, evidence: &VoteEquivocation) {
+        self.first.on_vote_equivocation(evidence);
+        self.second.on_vote_equivocation(evidence);
     }
 
     fn on_transaction_ready(&mut self, tx_id: &TransactionId) {

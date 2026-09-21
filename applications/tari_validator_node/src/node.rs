@@ -27,6 +27,7 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
+use tari_ootle_common_types::diag_event;
 use tari_ootle_storage::{StateStore, consensus_models::Block};
 use tari_shutdown::Shutdown;
 
@@ -68,11 +69,13 @@ impl ValidatorNode {
             tokio::select! {
                 _ = PANIC_NOTIFIER.notified() => {
                     error!(target: LOG_TARGET, "💤 Panic detected in another task. Shutting down...");
+                    self.services.diagnostics.emit(diag_event!(error, "node.shutdown", "Shutting down after a panic in another task", reason => "panic"));
                     shutdown.trigger();
                     break;
                 },
                 _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");
+                    self.services.diagnostics.emit(diag_event!(info, "node.shutdown", "Shutting down on SIGINT", reason => "sigint"));
                     shutdown.trigger();
                     break;
                 },
@@ -90,12 +93,19 @@ impl ValidatorNode {
                         Ok(_) => {
                             if !shutdown.is_triggered() {
                                 warn!(target: LOG_TARGET, "❓️ A service has exited unexpectedly. Shutting down...");
+                                self.services.diagnostics.emit(diag_event!(
+                                    warn,
+                                    "node.service_exited",
+                                    "A service exited unexpectedly. Shutting down",
+                                    reason => "service_exited"
+                                ));
                             }
                             shutdown.trigger();
                             break;
                         },
                         Err(err) => {
                             error!(target: LOG_TARGET, "Error in service: {}", err);
+                            self.services.diagnostics.emit(diag_event!(error, "node.task_failed", "A service task failed: {err}", error => &err));
                             return Err(err);
                         }
                     }

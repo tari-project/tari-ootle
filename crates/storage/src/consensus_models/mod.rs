@@ -31,6 +31,7 @@ mod transaction_pool;
 mod transaction_pool_status_update;
 mod validated_block;
 mod validator_stats;
+mod vote_equivocation;
 
 pub use block::*;
 pub use block_diff::*;
@@ -62,3 +63,4 @@ pub use transaction_pool::*;
 pub use transaction_pool_status_update::*;
 pub use validated_block::*;
 pub use validator_stats::*;
+pub use vote_equivocation::*;

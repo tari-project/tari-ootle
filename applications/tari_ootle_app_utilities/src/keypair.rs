@@ -56,7 +56,7 @@ use tari_crypto::{
 use tari_ootle_p2p::PeerAddress;
 
 const REQUIRED_IDENTITY_PERMS: u32 = 0o100600;
-const LOG_TARGET: &str = "tari::identity";
+const LOG_TARGET: &str = "tari::application::identity";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]

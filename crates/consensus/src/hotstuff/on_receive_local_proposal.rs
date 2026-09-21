@@ -45,7 +45,7 @@ use crate::{
         HotstuffEvent,
         ProposalValidationError,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
-        calculate_dummy_blocks_from_justify,
+        check_extends_justify,
         epoch_state::EpochState,
         error::HotStuffError,
         generate_epoch_checkpoint,
@@ -432,8 +432,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // And vote to move onto the next view
             self.send_vote_to_leader(next_leader, valid_block.block(), decision)
                 .await?;
-            self.store
-                .with_write_tx(|tx| valid_block.block().as_last_voted().set(tx))?;
+        }
+
+        if let Some(ref reason) = block_decision.no_vote_reason {
+            self.hooks.on_no_vote(valid_block.id(), reason);
         }
 
         self.hooks.on_local_block_committed(&valid_block);
@@ -695,11 +697,18 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let last_sent_vote = LastSentVote::from(message.vote.clone());
 
+        // The vote must be durable before anyone can see it. A crash between the send and the write
+        // leaves a restarted node with no record that it voted at this height, free to vote again at
+        // that height for a competing block; a crash the other way round only loses a message, which
+        // the network may drop anyway and which the next NEWVIEW carries again.
+        self.store.with_write_tx(|tx| {
+            block.as_last_voted().set(tx)?;
+            last_sent_vote.set(tx)
+        })?;
+
         self.outbound_messaging
             .send(leader.clone(), HotstuffMessage::Vote(message))
             .await?;
-
-        self.store.with_write_tx(|tx| last_sent_vote.set(tx))?;
 
         Ok(())
     }
@@ -905,15 +914,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             }
         };
 
-        if candidate_block.justifies_parent() && !candidate_block.parent_exists(tx)? {
-            return Err(ProposalValidationError::ParentNotFound {
-                proposed_by: candidate_block.proposed_by().to_string(),
-                parent_id: *candidate_block.parent(),
-                block_id: *candidate_block.id(),
-            }
-            .into());
-        }
-
         if justify_block.height() != candidate_block.justify().height() {
             return Err(ProposalValidationError::JustifyBlockInvalid {
                 proposed_by: candidate_block.proposed_by().to_string(),
@@ -927,61 +927,22 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
-        if candidate_block.height() < justify_block.height() {
-            return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
-                justify_block_height: justify_block.height(),
-                candidate_block_height: candidate_block.height(),
-            }
-            .into());
+        let dummy_blocks =
+            check_extends_justify(&candidate_block, &justify_block, &self.leader_strategy, local_committee)?;
+        if !dummy_blocks.is_empty() {
+            info!(
+                target: LOG_TARGET,
+                "🔨 {} dummy block(s) fill the leader failure before block {}",
+                dummy_blocks.len(),
+                candidate_block
+            );
         }
 
+        // The candidate extends its justify block, so the locked block is an ancestor of the candidate exactly when
+        // it is, or is an ancestor of, the justify block. The dummy blocks that may sit between the two are not
+        // stored yet, so the predicate is evaluated on the justify block rather than walking back from the candidate.
         let high_pc = HighPc::get(tx, candidate_block.epoch())?;
-        // if the block parent is not the justify parent, then we have experienced a leader failure
-        // and should make dummy blocks to fill in the gaps.
-        if candidate_block.timeout_certificate().is_some() {
-            let num_dummies = candidate_block
-                .height()
-                .as_u64()
-                .saturating_sub(justify_block.height().as_u64())
-                .saturating_sub(1);
-
-            if num_dummies > 0 {
-                info!(target: LOG_TARGET, "🔨 Creating {} dummy block(s) for block {}", num_dummies, candidate_block);
-                // On a leader failure we use the justify block (QC-certified block) as the starting point for dummy
-                // blocks. This is deterministic across all honest nodes since the QC is included in the candidate
-                // block and all nodes have the justified block stored.
-                let dummy_blocks = calculate_dummy_blocks_from_justify(
-                    &candidate_block,
-                    &justify_block,
-                    &self.leader_strategy,
-                    local_committee,
-                );
-
-                if let Some(last_dummy) = dummy_blocks.last() {
-                    if candidate_block.parent() != last_dummy.id() {
-                        warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
-                        return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
-                            justify_block_height: justify_block.height(),
-                            candidate_block_height: candidate_block.height(),
-                        }
-                        .into());
-                    }
-
-                    // The logic for not checking is_safe is as follows:
-                    // We can't without adding the dummy blocks to the DB
-                    // We know that justify_block is safe because we have added it to our chain
-                    // We know that each dummy block is built in a chain from the justify block to the candidate block
-                    // We know that last dummy block is the parent of candidate block
-                    // Therefore we know that candidate block satisfies the safeNode predicate
-                    return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
-                }
-            } else {
-                // timeout certificate with no dummy blocks?
-                warn!(target: LOG_TARGET, "❓️ Candidate block {} has a timeout certificate but does not extend beyond the justify block, no dummy blocks will be created", candidate_block);
-            }
-        }
-
-        if !high_pc.block_id().is_zero() && !candidate_block.is_safe(tx)? {
+        if !high_pc.block_id().is_zero() && !candidate_block.is_safe(tx, &justify_block)? {
             return Err(ProposalValidationError::NotSafeBlock {
                 proposed_by: candidate_block.proposed_by().to_string(),
                 block_id: *candidate_block.id(),
@@ -989,7 +950,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
-        Ok(ValidBlock::new(candidate_block))
+        Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks))
     }
 }
 

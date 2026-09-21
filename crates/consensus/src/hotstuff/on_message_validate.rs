@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use log::*;
 use tari_consensus_types::BlockId;
@@ -16,14 +16,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
-    consensus_models::{
-        Block,
-        ForeignParkedProposal,
-        ForeignProposal,
-        ForeignProposalRecord,
-        ForeignProposalStatus,
-        TransactionRecord,
-    },
+    consensus_models::{Block, ForeignParkedProposal, ForeignProposal, TransactionRecord},
 };
 use tari_ootle_transaction::TransactionId;
 use tokio::sync::broadcast;
@@ -38,7 +31,13 @@ use crate::{
         error::HotStuffError,
         on_receive_new_transaction::OnReceiveNewTransaction,
     },
-    messages::{ForeignProposalMessage, HotstuffMessage, MissingTransactionsRequest, ProposalMessage},
+    messages::{
+        ForeignProposalMessage,
+        HotstuffMessage,
+        MAX_REQUESTED_TRANSACTIONS,
+        MissingTransactionsRequest,
+        ProposalMessage,
+    },
     tracing::TraceTimer,
     traits::{ConsensusSpec, OutboundMessaging},
     validations,
@@ -56,7 +55,7 @@ pub struct OnMessageValidate<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     tx_events: broadcast::WeakSender<HotstuffEvent>,
     /// Keep track of max 32 in-flight requests
-    active_missing_transaction_requests: SimpleFixedArray<u32, 32>,
+    active_missing_transaction_requests: MissingTransactionRequests<TConsensusSpec::Addr>,
     current_request_id: u32,
 }
 
@@ -80,7 +79,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             vote_signing_service,
             outbound_messaging,
             tx_events,
-            active_missing_transaction_requests: SimpleFixedArray::new(),
+            active_missing_transaction_requests: MissingTransactionRequests::new(),
             current_request_id: 0,
         }
     }
@@ -99,7 +98,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 if !epoch_state.local_committee().contains(&from) {
                     warn!(
                         target: LOG_TARGET,
-                        "❌ Received message from non-committee member {}. Discarding message.",
+                        "❌ Received Proposal from non-committee member {}. Discarding message.",
                         from
                     );
                     return Ok(MessageValidationResult::Discard);
@@ -110,7 +109,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 if !epoch_state.local_committee().contains(&from) {
                     warn!(
                         target: LOG_TARGET,
-                        "❌ Received catch-up response from non-committee member {}. Discarding message.",
+                        "❌ Received CatchUpSyncResponse from non-committee member {}. Discarding message.",
                         from
                     );
                     return Ok(MessageValidationResult::Discard);
@@ -121,22 +120,41 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 self.process_foreign_proposal(epoch_state, from, proposal).await
             },
             HotstuffMessage::MissingTransactionsResponse(msg) => {
-                if !self.active_missing_transaction_requests.remove_element(&msg.request_id) {
+                let Some(request) = self.active_missing_transaction_requests.take(msg.request_id, &from) else {
                     warn!(target: LOG_TARGET, "❓Received missing transactions (req_id = {}) from {} that we did not request. Discarding message", msg.request_id, from);
                     return Ok(MessageValidationResult::Discard);
-                }
-                // TODO: validate that only requested transactions are returned
-                if msg.transactions.len() > 1000 {
-                    warn!(target: LOG_TARGET, "⚠️Peer sent more than the maximum amount of transactions. Discarding message");
+                };
+
+                if msg.transactions.len() > request.transactions.len() {
+                    warn!(target: LOG_TARGET, "⚠️Peer {from} sent {} transaction(s) for req_id = {} but only {} were requested. Discarding message", msg.transactions.len(), msg.request_id, request.transactions.len());
                     return Ok(MessageValidationResult::Discard);
                 }
+
+                let returned_ids = msg
+                    .transactions
+                    .iter()
+                    .map(|transaction| transaction.calculate_id())
+                    .collect::<HashSet<_>>();
+
+                if let Some(unrequested) = returned_ids.difference(&request.transactions).next() {
+                    warn!(target: LOG_TARGET, "⚠️Peer {from} sent transaction {unrequested} for req_id = {} that we did not request. Discarding message", msg.request_id);
+                    return Ok(MessageValidationResult::Discard);
+                }
+
+                // Each requested transaction is returned at most once, so that the count check above bounds
+                // the work one response can ask for.
+                if returned_ids.len() != msg.transactions.len() {
+                    warn!(target: LOG_TARGET, "⚠️Peer {from} sent duplicate transactions for req_id = {}. Discarding message", msg.request_id);
+                    return Ok(MessageValidationResult::Discard);
+                }
+
                 Ok(MessageValidationResult::Ready {
                     from,
                     message: HotstuffMessage::MissingTransactionsResponse(msg),
                 })
             },
             HotstuffMessage::MissingTransactionsRequest(msg) => {
-                if msg.transactions.len() > 1000 {
+                if msg.transactions.len() > MAX_REQUESTED_TRANSACTIONS {
                     warn!(target: LOG_TARGET, "⚠️Peer requested more than the maximum amount of transactions. Discarding message");
                     return Ok(MessageValidationResult::Discard);
                 }
@@ -147,7 +165,18 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             },
             msg @ HotstuffMessage::NewView(_) |
             msg @ HotstuffMessage::Vote(_) |
-            msg @ HotstuffMessage::CatchUpSyncRequest(_) |
+            msg @ HotstuffMessage::CatchUpSyncRequest(_) => {
+                if !epoch_state.local_committee().contains(&from) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❌ Received {} from non-committee member {}. Discarding message.",
+                        msg.as_type_str(),
+                        from
+                    );
+                    return Ok(MessageValidationResult::Discard);
+                }
+                Ok(MessageValidationResult::Ready { from, message: msg })
+            },
             msg => Ok(MessageValidationResult::Ready { from, message: msg }),
         }
     }
@@ -160,18 +189,20 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         missing_txs: HashSet<TransactionId>,
     ) -> Result<(), HotStuffError> {
         let request_id = self.next_request_id();
-        self.active_missing_transaction_requests.insert(request_id);
         self.outbound_messaging
             .send(
-                to,
+                to.clone(),
                 HotstuffMessage::MissingTransactionsRequest(MissingTransactionsRequest {
                     request_id,
                     block_id,
                     epoch,
-                    transactions: missing_txs,
+                    transactions: missing_txs.clone(),
                 }),
             )
             .await?;
+        // Only a request that went out holds one of the few slots a response can be matched against.
+        self.active_missing_transaction_requests
+            .insert(request_id, to, missing_txs);
         Ok(())
     }
 
@@ -480,11 +511,6 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         };
 
         if let Err(err) = self.check_foreign_proposal(&msg.proposal, &committee) {
-            // Save the proposal as invalid in the store (TODO: just for debugging purposes, perhaps provide a
-            // config for this to avoid storing debug data in production)
-            let mut fp = ForeignProposalRecord::new((*msg.proposal).clone());
-            fp.set_proposal_status(ForeignProposalStatus::Invalid);
-            self.store.with_write_tx(|tx| fp.save(tx))?;
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::ForeignProposal(msg),
@@ -592,41 +618,93 @@ pub enum MessageValidationResult<TAddr> {
     },
 }
 
+/// A missing-transaction request we sent and are still willing to accept a response for.
 #[derive(Debug, Clone)]
-struct SimpleFixedArray<T, const SZ: usize> {
-    elems: [Option<T>; SZ],
-    ptr: usize,
+struct PendingMissingTransactionsRequest<TAddr> {
+    request_id: u32,
+    /// The peer the request went to. A response only counts when it comes back from this peer.
+    to: TAddr,
+    transactions: HashSet<TransactionId>,
 }
 
-impl<T: Copy, const SZ: usize> SimpleFixedArray<T, SZ> {
+/// A fixed-capacity ring of in-flight missing-transaction requests. Capacity is a bound on concurrent
+/// requests, not a guarantee: the oldest entry is dropped once it is full, and its response is then
+/// discarded as unrequested.
+#[derive(Debug, Clone)]
+struct MissingTransactionRequests<TAddr> {
+    requests: VecDeque<PendingMissingTransactionsRequest<TAddr>>,
+}
+
+impl<TAddr: PartialEq> MissingTransactionRequests<TAddr> {
+    const CAPACITY: usize = 32;
+
     pub fn new() -> Self {
         Self {
-            elems: [None; SZ],
-            ptr: 0,
+            requests: VecDeque::with_capacity(Self::CAPACITY),
         }
     }
 
-    pub fn insert(&mut self, elem: T) {
-        // We dont care about overwriting "old" elements
-        *self.elems.get_mut(self.ptr).expect("ptr out of range") = Some(elem);
-        self.ptr = (self.ptr + 1) % SZ;
+    pub fn insert(&mut self, request_id: u32, to: TAddr, transactions: HashSet<TransactionId>) {
+        if self.requests.len() == Self::CAPACITY {
+            self.requests.pop_front();
+        }
+        self.requests.push_back(PendingMissingTransactionsRequest {
+            request_id,
+            to,
+            transactions,
+        });
     }
 
-    pub fn remove_element(&mut self, elem: &T) -> bool
-    where T: PartialEq {
-        for e in &mut self.elems {
-            if e.as_ref() == Some(elem) {
-                // We dont care about "holes" in the collection
-                *e = None;
-                return true;
-            }
-        }
-        false
+    /// Removes and returns the request with this id that was sent to `from`, if any.
+    pub fn take(&mut self, request_id: u32, from: &TAddr) -> Option<PendingMissingTransactionsRequest<TAddr>> {
+        let pos = self
+            .requests
+            .iter()
+            .position(|req| req.request_id == request_id && req.to == *from)?;
+        self.requests.remove(pos)
     }
 }
 
-impl<const SZ: usize, T: Copy> Default for SimpleFixedArray<T, SZ> {
-    fn default() -> Self {
-        Self::new()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(n: u8) -> HashSet<TransactionId> {
+        [TransactionId::new([n; 32])].into_iter().collect()
+    }
+
+    #[test]
+    fn a_response_from_a_peer_we_did_not_ask_is_not_matched() {
+        let mut requests = MissingTransactionRequests::new();
+        requests.insert(1, "alice", req(1));
+
+        assert!(requests.take(1, &"bob").is_none());
+        assert!(requests.take(1, &"alice").is_some());
+    }
+
+    #[test]
+    fn the_same_id_to_two_peers_matches_each_peer_once() {
+        let mut requests = MissingTransactionRequests::new();
+        requests.insert(1, "alice", req(1));
+        requests.insert(1, "bob", req(2));
+
+        assert_eq!(requests.take(1, &"bob").unwrap().transactions, req(2));
+        assert_eq!(requests.take(1, &"alice").unwrap().transactions, req(1));
+        assert!(requests.take(1, &"alice").is_none());
+    }
+
+    #[test]
+    fn the_oldest_request_is_evicted_once_capacity_is_reached() {
+        let mut requests = MissingTransactionRequests::new();
+        for i in 0..=MissingTransactionRequests::<&str>::CAPACITY {
+            requests.insert(i as u32, "alice", req(0));
+        }
+
+        assert!(requests.take(0, &"alice").is_none());
+        assert!(
+            requests
+                .take(MissingTransactionRequests::<&str>::CAPACITY as u32, &"alice")
+                .is_some()
+        );
     }
 }

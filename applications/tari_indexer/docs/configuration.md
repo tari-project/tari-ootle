@@ -98,6 +98,16 @@ Main indexer application settings.
 # Only used when transaction_retention_epochs is set.
 #transaction_prune_interval = 3600
 
+# Compiled-template caches. The in-memory one holds modules for the life of the process; the on-disk
+# one holds their serialized form under <data_dir>/wasm_cache and is shared by the template manager
+# and dry runs. A compiled artifact runs about ten times the size of the WASM it came from, so the
+# disk cap is what keeps that directory bounded: over it, the least recently used artifacts are
+# deleted and recompiled on demand. Both are node-local caches — deleting either costs CPU, never
+# data.
+#[indexer.templates]
+#max_cache_size_bytes = 1073741824
+#max_disk_cache_size_bytes = 10737418240
+
 # Sidechain ID to listen on (optional, hex string)
 #sidechain_id = "a1b2c3d4e5f6..."
 

@@ -207,6 +207,16 @@ fn create_table_for_cf<CF: Cf>() -> TableResponse {
                 Column::new("destroyed", "Destroyed"),
             ]);
         },
+        KeyPrefix::VoteEquivocations => {
+            table.with_columns([
+                Column::new("public_key", "Signer"),
+                Column::new("epoch", "Epoch"),
+                Column::new("height", "Height"),
+                Column::new("detected_at", "Detected at"),
+                Column::new("first", "First vote"),
+                Column::new("second", "Second vote"),
+            ]);
+        },
         _ => {
             // The data can still be returned to the request, though the columns will not be specified
         },

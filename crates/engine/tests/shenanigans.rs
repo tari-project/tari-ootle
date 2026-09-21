@@ -757,6 +757,51 @@ fn it_answers_a_drop_authorize_for_any_proof_id() {
     );
 }
 
+/// Non-fungible data is the other place a caller-supplied CBOR value is written straight to a substate: both the mint
+/// path and `UpdateNonFungibleData` store what the template hands them, so the same transaction-scoped ids have to be
+/// refused there.
+///
+/// The proof is the shape with no other net: `drop_all_proofs_in_workspace` removes the object while the id stays in
+/// the token, so `validate_finalized` sees nothing live to object to. The minted token is banked in a vault so that
+/// the run reaches finalize rather than failing on a dangling bucket.
+#[test]
+fn it_rejects_transient_values_in_non_fungible_data() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+
+    let result = test.execute_expect_success(
+        test.transaction()
+            .call_function(template_addr, "with_fungible_vault", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let holder = result.finalize.execution_results[0]
+        .decode::<ComponentAddress>()
+        .unwrap();
+
+    for (function, location) in [
+        ("mint_nft_with_proof_in_data", "Non-fungible data"),
+        ("mint_nft_with_proof_in_mutable_data", "Non-fungible mutable data"),
+        ("update_nft_mutable_data_with_proof", "Non-fungible mutable data"),
+    ] {
+        let reason = test.execute_expect_failure(
+            test.transaction()
+                .call_method(holder, "create_vault_proof", args![])
+                .put_last_instruction_output_on_workspace("proof")
+                .call_function(template_addr, function, args![Workspace("proof")])
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert!(
+            reason
+                .to_string()
+                .contains(&format!("{location} may not contain a proof")),
+            "{function} gave: {reason}"
+        );
+    }
+}
+
 /// A bucket, proof or address allocation is named by a counter that restarts each transaction, so one stored in a
 /// component reaches the ledger as an id that can only alias an unrelated object later. Component state is also
 /// handed to a resource auth hook as an argument, and an id in an argument is read as a capability the callee was

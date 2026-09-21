@@ -19,7 +19,7 @@ use crate::{
             syncing::Syncing,
         },
     },
-    traits::{ConsensusSpec, SyncManager},
+    traits::{ConsensusSpec, SyncManager, hooks::ConsensusHooks},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::sm::worker";
@@ -82,17 +82,23 @@ where
         }
     }
 
-    fn transition(&mut self, state: ConsensusState<TSpec>, event: ConsensusStateEvent) -> ConsensusState<TSpec> {
+    fn transition(
+        &mut self,
+        context: &mut ConsensusWorkerContext<TSpec>,
+        state: ConsensusState<TSpec>,
+        event: ConsensusStateEvent,
+    ) -> ConsensusState<TSpec> {
         let state_str = state.to_string();
         let event_str = event.to_string();
+        let from = ConsensusCurrentState::from(&state);
 
-        let next_state = match (state, event) {
+        let next_state = match (state, &event) {
             (ConsensusState::Initialising(_), ConsensusStateEvent::Initialised) => ConsensusState::Idle(Idle::new()),
             (ConsensusState::Idle(state), ConsensusStateEvent::RegisteredForEpoch { .. }) => {
                 ConsensusState::CheckSync(state.into())
             },
             (ConsensusState::CheckSync(_), ConsensusStateEvent::NeedSync { target_epoch }) => {
-                ConsensusState::Syncing(Syncing::new(target_epoch))
+                ConsensusState::Syncing(Syncing::new(*target_epoch))
             },
             (ConsensusState::CheckSync(state), ConsensusStateEvent::Ready) => ConsensusState::Running(state.into()),
             (ConsensusState::Syncing(state), ConsensusStateEvent::SyncComplete) => {
@@ -118,6 +124,10 @@ where
         };
 
         info!(target: LOG_TARGET, "⚙️ TRANSITION: {state_str} --- {event_str} ---> {next_state}");
+        context
+            .hotstuff
+            .hooks_mut()
+            .on_state_transition(from, ConsensusCurrentState::from(&next_state), &event);
         next_state
     }
 
@@ -144,7 +154,7 @@ where
         let mut state = ConsensusState::Initialising(initialising);
         loop {
             let next_event = self.next_event(&mut context, &state).await;
-            state = self.transition(state, next_event);
+            state = self.transition(&mut context, state, next_event);
             let _ignore = context.tx_current_state.send((&state).into());
             if state.is_shutdown() {
                 info!(target: LOG_TARGET, "💤 Consensus state machine shutting down");

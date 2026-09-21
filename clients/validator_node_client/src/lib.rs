@@ -71,6 +71,20 @@ impl ValidatorNodeClient {
         self.send_request("get_consensus_status", json!({})).await
     }
 
+    pub async fn get_diagnostic_events(
+        &mut self,
+        request: GetDiagnosticEventsRequest,
+    ) -> Result<GetDiagnosticEventsResponse, ValidatorNodeClientError> {
+        self.send_request("get_diagnostic_events", request).await
+    }
+
+    pub async fn clear_diagnostic_events(
+        &mut self,
+        request: ClearDiagnosticEventsRequest,
+    ) -> Result<ClearDiagnosticEventsResponse, ValidatorNodeClientError> {
+        self.send_request("clear_diagnostic_events", request).await
+    }
+
     pub async fn get_state(&mut self, request: GetStateRequest) -> Result<GetStateResponse, ValidatorNodeClientError> {
         self.send_request("get_state", request).await
     }

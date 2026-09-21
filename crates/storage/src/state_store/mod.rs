@@ -75,6 +75,7 @@ use crate::{
         TransactionRecord,
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
+        VoteEquivocation,
     },
 };
 
@@ -223,6 +224,15 @@ pub trait StateStoreReadTransaction: Sized {
         block_id: &BlockId,
         substate_id: T,
     ) -> Result<SubstateChange, StorageError>;
+    /// Returns whether the branch ending at `block_id` records any change for the given substate version. Selection
+    /// follows the same branch rules as [`Self::block_diffs_get_last_change_for_substate`].
+    ///
+    /// Implementations must answer without reading the change itself - an UP carries the whole substate value.
+    fn block_diffs_contains_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<bool, StorageError>;
 
     // -------------------------------- ProposalCertificate -------------------------------- //
     fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &PcId) -> Result<ProposalCertificate, StorageError>;
@@ -382,6 +392,13 @@ pub trait StateStoreReadTransaction: Sized {
         epoch: Epoch,
         public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorConsensusStats, StorageError>;
+
+    fn vote_equivocation_exists(
+        &self,
+        epoch: Epoch,
+        height: NodeHeight,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<bool, StorageError>;
 }
 
 pub trait StateStoreWriteTransaction {
@@ -607,6 +624,13 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Epoch cleanup -------------------------------- //
     fn epoch_cleanup(&mut self, epoch: Epoch) -> Result<(), StorageError>;
+
+    // -------------------------------- Vote equivocation -------------------------------- //
+    /// Records evidence that a validator signed two conflicting votes for one view. Returns whether
+    /// this was the first evidence for that (epoch, height, signer): later pairs from the same
+    /// equivocator at the same view prove nothing the first does not, and keeping the first bounds
+    /// what an equivocator can make this node write.
+    fn vote_equivocation_record(&mut self, evidence: &VoteEquivocation) -> Result<bool, StorageError>;
 
     // -------------------------------- Diagnotics -------------------------------- //
     fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError>;

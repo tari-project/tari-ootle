@@ -80,13 +80,15 @@ function Miner() {
   );
 }
 
-function BurnFunds({ walletInstanceId }: { walletInstanceId: number }) {
+function BurnFunds() {
   const swarm = useSwarm();
   const [amount, setAmount] = useState(1000 * ONE_TARI);
   const [accountName, setAccountName] = useState("");
   const [claimUrl, setClaimUrl] = useState<string | null>(null);
 
-  const target = swarm.wallets[0];
+  // burn_funds is addressed to the wallet daemon that holds the destination account — the daemon is queried
+  // for the account's owner key. The swarm picks the console wallet the funds are spent from.
+  const target = swarm.wallets.find((wallet) => wallet.is_running);
   if (!target) {
     return <span className="faint">Start a wallet daemon to burn funds into an account.</span>;
   }
@@ -118,7 +120,7 @@ function BurnFunds({ walletInstanceId }: { walletInstanceId: number }) {
           onAct={() =>
             swarm.act("Burn funds", async () => {
               const resp = await swarmRpc("burn_funds", {
-                wallet_instance_id: walletInstanceId,
+                wallet_instance_id: target.instance_id,
                 account_name: accountName,
                 amount,
               });
@@ -173,7 +175,7 @@ export default function BaseLayer() {
               <dt>GRPC</dt>
               <dd className="num">{wallet.ports.grpc ?? "—"}</dd>
             </dl>
-            <BurnFunds walletInstanceId={wallet.id} />
+            <BurnFunds />
           </NodeCard>
         ))}
 

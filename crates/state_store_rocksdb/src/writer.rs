@@ -84,6 +84,7 @@ use tari_ootle_storage::{
         TransactionRecord,
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
+        VoteEquivocation,
     },
     time,
 };
@@ -152,6 +153,7 @@ use crate::{
         transaction_pool_state_update,
         transaction_pool_state_update::{TransactionPoolStateUpdateCf, TransactionPoolStateUpdateData},
         validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
+        vote_equivocation,
     },
     error::RocksDbStorageError,
     options::DatabaseOptions,
@@ -1738,12 +1740,24 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let db = self.db();
         cleanup::cleanup_blocks_for_epoch(&db, prune_epoch)?;
         cleanup::cleanup_qcs_for_epoch(&db, prune_epoch)?;
+        cleanup::vote_equivocations_for_epoch(&db, prune_epoch)?;
         cleanup::foreign_proposals_for_epoch(&db, prune_epoch)?;
         if self.options.prune_transaction_history {
             cleanup::cleanup_finalized_transactions_for_epoch(&db, prune_epoch)?;
         }
 
         Ok(())
+    }
+
+    fn vote_equivocation_record(&mut self, evidence: &VoteEquivocation) -> Result<bool, StorageError> {
+        const OPERATION: &str = "vote_equivocation_record";
+        let key = (evidence.epoch, evidence.height, evidence.public_key);
+        let cf = self.db().cf(vote_equivocation::VoteEquivocationCf)?;
+        if cf.exists(&key, OPERATION)? {
+            return Ok(false);
+        }
+        cf.insert(&key, evidence, OPERATION)?;
+        Ok(true)
     }
 
     fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError> {
@@ -1950,6 +1964,34 @@ mod cleanup {
             count,
             up_to_epoch
         );
+
+        Ok(())
+    }
+
+    /// Equivocation evidence is retained for as long as the blocks of the view it indicts, so an
+    /// operator reading the record can still fetch the blocks it refers to.
+    pub fn vote_equivocations_for_epoch(db: &DbWriteContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+        const OPERATION: &str = "cleanup::vote_equivocations_for_epoch";
+        let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
+
+        let cf = db.cf(vote_equivocation::VoteEquivocationCf)?;
+        let mut count = 0usize;
+        for key in db
+            .cf(vote_equivocation::ByEpochQuery)?
+            .query_range_key_iterator(Ordering::Ascending, Epoch::zero()..up_to_epoch)
+        {
+            cf.delete(&key?, OPERATION)?;
+            count += 1;
+        }
+
+        if count > 0 {
+            info!(
+                target: LOG_TARGET,
+                "Cleaned up {} vote equivocation records for ..{}",
+                count,
+                up_to_epoch
+            );
+        }
 
         Ok(())
     }

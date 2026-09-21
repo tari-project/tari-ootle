@@ -59,6 +59,14 @@ root:
     - stdout
 
 loggers:
+  # Shared application code (configuration, identity) logs under this target in every binary.
+  tari::application:
+    level: info
+    appenders:
+      - ootle
+      - stdout
+    additive: false
+
   # Route log events common to every application to all appenders
   tari::ootle_wallet_daemon:
     level: debug

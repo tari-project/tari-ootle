@@ -39,6 +39,8 @@ import {
   IoCodeDownloadOutline,
   IoCodeDownload,
   IoBarChartSharp,
+  IoPulseOutline,
+  IoPulse,
 } from "react-icons/io5";
 import Tooltip from "@mui/material/Tooltip";
 import Fade from "@mui/material/Fade";
@@ -85,6 +87,12 @@ const mainItems = [
     icon: <IoLayersOutline style={iconStyle} />,
     activeIcon: <IoLayers style={activeIconStyle} />,
     link: "mempool",
+  },
+  {
+    title: "Diagnostics",
+    icon: <IoPulseOutline style={iconStyle} />,
+    activeIcon: <IoPulse style={activeIconStyle} />,
+    link: "diagnostics",
   },
   {
     title: "Validator Nodes",

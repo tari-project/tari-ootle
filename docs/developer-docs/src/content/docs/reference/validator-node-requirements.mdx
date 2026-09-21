@@ -23,7 +23,7 @@ cargo build --release -p tari_vn_bench
 | | Recommended | Where it comes from |
 |---|---|---|
 | CPU | 8 physical cores at 2.2 GHz or better, with AVX2 | Measured — a machine of this class passes every axis with margin |
-| Memory | 16 GiB | The node's enforced caps sum to ~2 GiB; the rest is headroom and OS |
+| Memory | 16 GiB | The node's enforced caps sum to ~2.3 GiB; the rest is headroom and OS |
 | Storage speed | NVMe, fsync p99 under 2 ms | Measured at 0.64 ms on a passing machine; the threshold is judgement |
 | Disk capacity | **not yet established** | See [Open questions](#open-questions) |
 | Network bandwidth | **not yet established** | See [Open questions](#open-questions) |
@@ -63,11 +63,12 @@ Memory budget:
      128 MiB  Transaction gossip queue
      128 MiB  Consensus messaging queue
      768 MiB  State store block cache and memtables
-     200 MiB  Compiled template module cache
+     1.0 GiB  Compiled template module cache
+       4 MiB  Resident builtin templates
       64 MiB  Mempool dedup cache
       20 MiB  WASM instance memory at maximum call depth
-     1.5 GiB  enforced caps
-     2.3 GiB  required, including headroom for traffic-scaled buffers and allocator overhead
+     2.3 GiB  enforced caps
+     3.5 GiB  required, including headroom for traffic-scaled buffers and allocator overhead
 ```
 
 Every line there is a limit the node enforces — a queue that drops beyond its byte budget, a cache
@@ -104,6 +105,11 @@ which no amount of benchmarking on an idle machine substitutes for.
 and `epoch_history_length` bound how much history is retained, but committed substates grow
 monotonically and nothing has measured the rate. Answering it needs a node run across several
 epochs with disk usage sampled per epoch, at both `keep_transaction_history` settings.
+
+The compiled-template cache is the one disk term that *is* bounded: `max_disk_cache_size_bytes`
+defaults to 10 GiB, and past it the least recently used artifacts are deleted and recompiled on
+demand. It is a cache of on-chain bytes, so it can be deleted at any time for the price of
+recompiling what is asked for next.
 
 **Network bandwidth.** No data. A committee is 40 validators per shard group and gossip messages may
 be up to 2 MiB, but nothing has been measured. Nothing caps the total number of peers a node holds

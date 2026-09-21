@@ -33,6 +33,8 @@ use tari_ootle_common_types::{
     SubstateAddress,
     VotePower,
     committee::Committee,
+    diag_event,
+    diagnostics::DiagnosticSink,
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
 };
@@ -75,6 +77,8 @@ pub struct EpochManagerService<TSpec: EpochManagerSpec> {
     /// cache. Cleared on every epoch advance — see `activate_epoch`.
     committee_cache: CommitteeCache<TSpec::Addr>,
 
+    diagnostics: Arc<dyn DiagnosticSink>,
+
     shutdown: ShutdownSignal,
 }
 
@@ -84,6 +88,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
         epoch_events: TSpec::EpochEventOracle,
         node_public_key: RistrettoPublicKeyBytes,
+        diagnostics: Arc<dyn DiagnosticSink>,
         shutdown: ShutdownSignal,
     ) -> (EpochManagerHandle<TSpec::Addr>, JoinHandle<anyhow::Result<()>>) {
         let (tx_request, rx_request) = mpsc::channel(10);
@@ -107,6 +112,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 waiting_for_scanning_complete: Vec::new(),
                 epoch_events,
                 committee_cache,
+                diagnostics,
                 shutdown,
             }
             .run()
@@ -129,10 +135,12 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                         Some(event) => {
                             if let Err(err) = self.handle_epoch_event(event).await {
                                 error!(target: LOG_TARGET, "🚨 Epoch event error: {err}");
+                                self.diagnostics.emit(diag_event!(error, "epoch.event_error", "Failed to handle an epoch event: {err}", error => err));
                             }
                         }
                         None => {
                             warn!(target: LOG_TARGET, "💤 Shutting down epoch manager (no further epoch events)");
+                            self.diagnostics.emit(diag_event!(error, "epoch.oracle_stopped", "The epoch oracle produced no further events. The node can no longer follow epoch changes"));
                             break;
                         }
                     }
@@ -285,11 +293,26 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     self.inner.current_epoch_hash(),
                     epoch_hash,
                 );
+                self.diagnostics.emit(diag_event!(
+                    warn,
+                    "epoch.hash_corrected",
+                    "Corrected the epoch hash for epoch {epoch}",
+                    epoch => epoch,
+                    previous => self.inner.current_epoch_hash(),
+                    corrected => epoch_hash
+                ));
                 self.inner.insert_current_epoch(epoch, epoch_hash)?;
                 Ok(())
             },
             Ordering::Greater => {
                 self.has_epoch_changed = true;
+                self.diagnostics.emit(diag_event!(
+                    info,
+                    "epoch.changed",
+                    "Epoch advanced to {epoch}",
+                    epoch => epoch,
+                    epoch_hash => epoch_hash
+                ));
                 // In the base layer case, the epoch_hash is the first block of the epoch
                 // persist the epoch data including the validator node set
                 self.inner.insert_current_epoch(epoch, epoch_hash)?;

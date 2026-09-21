@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine_types::limits::{ENGINE_LIMITS, WASM_LIMITS};
 use tari_ootle_p2p::max_gossip_message_size;
-use tari_ootle_template_provider::TemplateConfig;
+use tari_ootle_template_provider::{TemplateConfig, builtin_resident_bytes};
 use tari_state_store_rocksdb::{DatabaseOptions, MAX_WRITE_BUFFER_NUMBER, all_column_families_iter};
 use tari_swarm::Config as SwarmConfig;
 
@@ -172,9 +172,18 @@ pub fn budget(constants: &ConsensusConstants, pid: Option<u32>) -> MemoryBudget 
             bytes: TemplateConfig::default().max_cache_size_bytes(),
             bound: Bound::Capped,
             // A moka LRU weighed at 4x each template's code size, so the cap is on resident bytes rather than
-            // template count and the cache evicts rather than growing over a node's lifetime.
+            // template count and the cache evicts rather than growing over a node's lifetime. Builtins are
+            // held apart from it and are the line below.
             source: "TemplateConfig::max_cache_size_bytes default (crates/template_provider/src/memory_cache.rs)"
                 .to_string(),
+        },
+        BudgetLine {
+            name: "Resident builtin templates".to_string(),
+            bytes: builtin_resident_bytes(),
+            bound: Bound::Capped,
+            // Held for the life of the provider rather than cached: a builtin bypasses the disk cache, so an
+            // eviction would recompile it from source on a caller's thread. Fixed by the binaries in the build.
+            source: "builtin_resident_bytes (crates/template_provider/src/memory_cache.rs)".to_string(),
         },
         BudgetLine {
             name: "Block execution working set".to_string(),

@@ -24,7 +24,7 @@ use tari_state_store_rocksdb::{
 
 use super::common::rewrite_unprefixed_rows;
 
-const LOG_TARGET: &str = "tari::validator::migrations::v2";
+const LOG_TARGET: &str = "tari::validator_node::migrations::v2";
 
 pub fn migrate<TAddr: NodeAddressable + 'static>(
     tx: &mut RocksDbStateStoreWriteTransaction<'_, TAddr>,

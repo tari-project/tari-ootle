@@ -3,6 +3,583 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.41.1](https://github.com/tari-project/tari-ootle/compare/v0.41.0...v0.41.1) (2026-09-21)
+
+The consensus audit release. It closes the ways a byzantine leader could fork a committee, stall it
+or crash its replicas, and stops a peer deciding how much work a node does for it. Also: a wallet
+send that could hang the daemon, a disk cache that only ever grew, and a queryable log of what a
+validator saw go wrong.
+
+### ⚠️ Upgrade notes
+
+- **Coordinated upgrade required.** Consensus and execution both change in ways that cannot be
+  epoch-gated, so every validator and indexer restarts on the new binary together. No reset.
+- **Operators — the memory budget rises.** The in-memory module cache default moves from 200 MiB to
+  1 GiB, taking the node's enforced budget to roughly 2.3 GiB and the RAM it asks of the machine
+  from \~2.3 GiB to \~3.5 GiB.
+- **Operators — two new config sections**: `templates.max_disk_cache_size_bytes`
+  (default 10 GiB, and the indexer gains a `templates` section of its own) and
+  `[validator_node.diagnostics]`.
+- **Template authors** — a non-fungible's `data` or `mutable_data` can no longer hold a `BucketId`,
+  `ProofId` or address allocation.
+- **Rust API** — `WasmModuleCache::open` takes a `cap_bytes` argument,
+  `RuntimeError::transient_in_component_state` is now `transient_value_in_substate`, and
+  `TemplateBlob` is `MaxBytes<MAX_TEMPLATE_BLOB_WIRE_BYTES>`.
+
+### Consensus
+
+- `fix!` — **Fixes a possible committee split**, where a byzantine leader could get two conflicting
+  branches of the chain committed. (#2635)
+- `fix!` — **A byzantine leader can no longer make replicas vote for a transaction an honest leader
+  would have deferred.** (#2650)
+- `fix!` — **A byzantine leader can no longer crash every replica's consensus worker**, repeatedly.
+  (#2651)
+- `fix!` — **Substate lock checks are tightened**, closing a gap the audit found in how output
+  locks are granted. (#2650)
+- `fix` — **A committee member can no longer take back a vote it has already cast** to break a
+  quorum that is forming. (#2649)
+- `feat` — **Equivocation is recorded as evidence** when a committee member votes two ways, visible
+  as a diagnostic event, a Prometheus counter and in db-inspector. Nothing acts on it yet. (#2649)
+- `fix` — **A node that crashes just after voting can no longer vote again at that height.** (#2649)
+- `fix` — **Only committee members can feed a node's consensus**, and a response is accepted only
+  from the peer that was asked. (#2646)
+- `fix` — **A peer can no longer decide how much memory and work a node spends on it** — catch-up
+  responses, buffered messages and stored votes are all bounded. (#2647)
+- `fix` — **A leader that is ahead of the committee can still end its view**, where it previously
+  had to wait one out. (#2638)
+- `refactor` — **A commit proof is now a fixed size**, small enough that a long stall cannot push it
+  past what the base layer will verify. (#2643)
+
+### Engine
+
+- `fix!` — **Transaction-scoped ids can no longer be stored in non-fungible data**, where they would
+  outlive the transaction that named them. (#2634)
+- `fix!` — **Anyone may call `deposit_with_auth`**, which is the point of the method — it was locked
+  to the account owner, the one caller who never needs it. (#2627)
+- `feat!` — **The compiled-template caches are bounded.** The on-disk one only ever grew, and would
+  have reached about 29 GiB at 10,000 templates. (#2619)
+- `perf` — **Templates are compiled before they are needed**, and a cached artifact is written
+  off the execution path, so a transaction no longer waits on a cold compile or a disk flush.
+  (#2660, #2661)
+- `refactor` — **The maximum published-template size can now be changed** without making larger
+  already-published templates unreadable. (#2629)
+
+### Wallet
+
+- `fix` — **A wallet holding many equal-valued outputs could hang the whole daemon** while selecting
+  inputs for a send. The search is now capped. (#2639)
+
+### Validator observability
+
+- `feat` — **A validator records its own abnormal moments** — leader failures, no-votes, consensus
+  errors, sync transitions, panics — in a bounded event log, queryable over JSON-RPC and in the web
+  UI. (#2644)
+
+### Release tooling and CI
+
+- `feat` — **Release checklists, plus a pre-tag gate and a post-tag dashboard**
+  (`scripts/release_check.py`, `scripts/release_status.py`). (#2630)
+- `fix` — **The release build selects packages**, which is why v0.41.0 shipped no Windows binaries.
+  (#2631)
+- `fix` — **A failed required build leg turns the tag run red** instead of reporting green over an
+  incomplete draft. Tag builds also restore the cargo cache, riscv64 is dropped, and windows-arm64
+  links again. (#2632, #2633)
+- `fix` — **The swarm burns funds into the wallet daemon**, not the console wallet. (#2628)
+- `fix` — **The tariswap bench stamps a distinct nonce per transaction**, so identical calls no
+  longer collide on one id. (#2626)
+
+### Tests
+
+- `test` — **Within-epoch catch-up sync has a cucumber scenario**, covering over real networking
+  what only the in-process harness covered. (#2648)
+
+## [0.41.0](https://github.com/tari-project/tari-ootle/compare/v0.40.2...v0.41.0) (2026-09-16)
+
+The security release. Four waves of an execution-engine audit close every fund-theft and
+validator-kill finding that was open against the engine — a callee's vaults leaking into a caller's
+scope, a stealth UTXO spendable more than once in one transaction, account squatting, proofs
+authorising frames that were never handed them, and a dozen ways a submitter could abort every
+validator that touched their transaction. Alongside them: a wallet can finally spend a balance split
+across many stealth UTXOs, the indexer follows each shard group's tip instead of polling for state,
+and the WASM meter starts charging for work it was letting through free.
+
+### ⚠️ Upgrade notes
+
+**A coordinated upgrade, not a reset.** Esmeralda takes a scheduled `ProtocolVersion::V1` activation
+at **epoch 11086**, which is what lets the hashed-schema changes — a receipt's `exhaust_burn`, a
+resource's `auth_hook_updater`, the block header and vote shape — pivot on an epoch boundary instead
+of mid-epoch. Substates created under V0 keep hashing under V0. Two conditions: every validator is on
+the new binary *before* epoch 11086 (`check_activation_schedule` refuses to start a node whose
+schedule disagrees with what it has already run past), and esmeralda must never have run a
+post-#2520 binary while still on V0 — a receipt committed that way is hashed with `exhaust_burn` and
+no epoch-granular activation can describe it.
+
+The stricter requirement is separate: the **ungated** engine changes — metering rates, the weight
+floor, event payloads, the proof scope model, the account-ownership gate — switch at *binary
+deployment*, not at an epoch boundary. Two validators on different binaries compute different
+receipts for the same transaction, so the fleet upgrades and restarts together.
+
+- `fix!` — **Proofs reach a frame only as arguments.** A top-level instruction no longer copies the
+  transaction's workspace proofs into a callee's frame: a method rule is evaluated at the call
+  boundary and those proofs are revoked immediately after. A template method that acts on a
+  badge-guarded resource must now take the badge as a `Proof` parameter. The builtin account gains
+  `_with_auth` variants of every affected method and the wallet and SDK flows are migrated onto them;
+  a deployed third-party template exposing no proof-taking method needs updating before those flows
+  work again.
+- `feat!` — **The authorization signature cap rises from 16 to 1024**, the stealth input ceiling.
+  Transactions carrying 17–1024 signatures are now admitted where they were rejected at ingress and
+  in block validation, so every node must run this before any node submits one.
+- `feat!` — **Publishing a template costs execution points**, charged before the compile runs at
+  `140_000_000 + 2100` per binary byte — `hello_world` comes to ~0.72 TARI.
+  `max_template_binary_size_bytes` drops **1.5 MiB → 1 MiB**, and a publish in the **fee
+  instructions is refused outright**. Block weight budgets are re-denominated with it (a call now
+  weighs at least `INVOCATION_FLOOR` = 30): `max_block_weight` 10000 → 24000 and
+  `max_block_validation_weight` 15000 → 36000, holding the same ~160 commands per block and the same
+  ~3.7 s of propose-time execution.
+- `refactor!` — **Node eviction and `epoch_end_spread_blocks` are removed.**
+  `ConsensusConfig::enable_eviction_proposal`, `ConsensusConstantsFile::missed_proposal_evict_threshold`
+  and `epoch_end_spread_blocks` are gone from structs that are `deny_unknown_fields`, so **a node
+  config or localnet constants file still setting any of them fails to load**. Drop the lines.
+  Missed-proposal suspension and recovery are untouched.
+- **Operator note — a byte cap at ingress narrows a wire parameter.** New
+  `ConsensusConstants::max_transaction_size_bytes` (1.75 MiB) is enforced at ingress and
+  `max_gossip_message_size` is derived from it, so gossip messages drop **2 MiB → 1.77 MiB**: a node
+  on the new limit cannot decode a frame an unupgraded peer relays. Mainnet
+  `base_layer_confirmations` also drops 1000 → 780, taking a burn claim's wait from ~33 h to ~26 h
+  and landing the lag on an L1 epoch boundary.
+- `feat!` — **Builtin event payloads shrink.** `std.resource.{create,update_nonfungible_data,
+  update_metadata}` now carry an empty payload and `std.vault.{deposit,withdraw}` carry only
+  `amount`. The indexer's `resource_address` event filter is derived from `substate_id` alone, so it
+  matches the `std.resource.*` family and **no longer matches vault events** — a subscriber wanting
+  one resource's transfers filters on the vault's `substate_id`, which is the more precise
+  subscription anyway. `events.resource_address` is NULL for vault events going forward; existing
+  rows are untouched.
+- **What breaks on esmeralda without a reset**, all accepted as testnet costs: a deployed template
+  calling the retired `EngineOp::SignatureInvoke` (discriminant `0x10` reserved), or whose binary
+  lacks the `tari_tdef` custom section, since the ABI is no longer read from guest memory; a
+  component whose state already holds a `BucketId`, `ProofId` or address allocation, which can no
+  longer be written to; and any substate already over 1 MiB, which is rejected on touch until a
+  transaction brings it back under the limit. Indexer economics accumulators are in the old fee units
+  until a resync.
+- **Operator note — wipe the WASM artifact cache** (`wasm_cache/`) on any node built from
+  `development` since #2589. `ENGINE_FINGERPRINT` stays at `v5` while the entry header grew from 8 to
+  48 bytes, so a leftover file is read with the wrong layout. It fails its new CRC and self-heals,
+  but wiping is the clean move.
+- `fix!` — **An underfunded transaction now aborts as `InsufficientFeesPaid`** where WASM or native
+  metering exhaustion previously reported `ExecutionFailure`, so a wallet can tell "resubmit with a
+  bigger fee" from "this will never work". The reason rides in `Decision::Abort(..)` and the
+  prepare-vote path compares the whole decision.
+- `refactor!` — **API breaks worth naming:** `tari_bor::encoded_len`/`encoded_len_with` return
+  `usize` rather than `Result`; `derive_fee_pool_address` returns `Result<_, InvalidFeePoolShard>`;
+  `ShardGroup`'s `Deserialize`/`Decode` go through `new_checked`, so an inverted group is a decode
+  error; `GetSubstatesBatchResponse` becomes a `oneof` and `GetSubstatesBatchRequest` gains
+  `include_proofs`; `RpcClientConfig` gains a public field; `IdProvider`/`ObjectIds`/`EntityIdProvider`
+  take `&mut self`; `SubstateCache::read` loses its `version` parameter; `tari_ootle_wallet_sdk`
+  gains a required trait method.
+- **Build note — Windows ships the wallet daemon only.** `wasmer-compiler-cranelift` 7.4 is a
+  `compile_error!` on Windows, so the fee table and the static template-def extractor moved down to
+  `tari_engine_types` and the validator node and indexer stay Linux/macOS. Intel macOS is dropped
+  from the release matrix: `tari_ootle-*-macos-x86_64.zip` and `tari_ootle-*-macos-universal.zip` are
+  gone and `macos-arm64` is no longer best-effort. Windows code signing is still failing on an
+  expired Azure Trusted Signing secret, which is a portal change rather than a code one.
+
+### Wallet
+
+- `feat!` — **A fragmented balance is spendable again.** A key-path stealth spend authorizes each
+  input with its own one-time key, so spending *n* stealth inputs takes *n* signatures. At a cap of
+  16 that made the signature cap — not `STEALTH_LIMITS`, which admits 1024 inputs — the binding limit
+  on a multi-input spend, expressed in the wrong units and in a crate a wallet author reading the
+  stealth limits would never consult. A wallet whose balance was split across more than 17 stealth
+  UTXOs could not spend it in one transaction, and a coinjoin was capped at 17 participants. The cap
+  is now 1024, made affordable by verifying a transaction's whole signature set as one batch: one
+  multiscalar multiplication over `2n + 1` terms in place of *n* double-base multiplications, ~3x at
+  the cap with the per-signature cost falling as the set grows, and **2.6x cheaper to refuse** an
+  invalid set than the per-signature path it replaces. Weights are hash-derived rather than sampled,
+  so a validity predicate a committee votes on does not depend on local randomness. A spend at the
+  cap costs 22,628 of the 24,000 weight a leader packs, so weight — not the count — is what stops one
+  monopolising a block.
+- `fix` — **A transfer and its fee now share one input budget.** Selection used
+  `STEALTH_LIMITS.max_inputs`, the cap on a single *statement* (1000), but what bounds a wallet is
+  the per-*transaction* total (1024) — and a transfer that cannot source its fee from its own
+  revealed remainder carries a second statement whose inputs come out of that same total. Both
+  selections were capped independently, so a fragmented wallet could build a transaction of up to
+  2000 inputs against a ceiling of 1024, which the engine refuses and ingress refuses before that:
+  the wallet building what the network will not take. Now `MAX_TRANSFER_INPUTS` = 960 and a
+  `FEE_INTENT_INPUT_RESERVE` of 64, held back unconditionally — whether a merged statement fits the
+  fee-intent credit is only known after selection, and a selection that had already claimed the whole
+  budget could not fall back.
+- `feat` — **Transaction finality is driven from the indexer's event stream.** The transaction
+  service learned of finality only by polling the indexer for every pending transaction every 5 s. It
+  now subscribes to `/events` and queries a transaction's result the moment a `TransactionFinalized`
+  notification names it. An aborted transaction writes no substate and is silent on the stream, so
+  the 5 s poll stays as a backstop — but while the stream is connected it only queries transactions
+  pending longer than `silent_transaction_timeout` (10 s). Commits are reported as soon as the
+  indexer's stream delivers the receipt, an abort is noticed within ~10 s instead of ~5 s, at a third
+  of the previous query load. `/events` has no replay, so each reconnection requests a full check.
+- `fix` — **A UTXO scan could silently skip outputs** — no error, no gap in the frame sequence, and
+  nothing to notice after the fact. Two independent causes in the `/utxos/stream` resume protocol.
+  `state_version` is stamped per sync *batch*, so every UTXO a block touches on a shard shares one
+  version and a `LIMIT n` cut landing inside a version group reported that group's version as the
+  watermark — the next request's `> V` filter then dropped the rest of the group, and one busy block
+  on a shard was enough. And `EndOfShard.max_state_version` came from `MAX(state_version)` over the
+  whole shard, ignoring `from_epoch`, `unspent_only` and truncation, so a truncated pass jumped its
+  cursor past its own undelivered remainder. Reads now end on a version boundary, and truncation is
+  the server's answer (`has_more`) rather than each client's inference.
+- `fix` — **A missing substate answers `NotFound`, not a general error.** A caller polling for
+  something that does not exist *yet* — an account it has just created, an input whose creating
+  transaction has not reached the indexer — could not distinguish that from the wallet being broken,
+  and only one of the two is worth retrying. The distinction was already carried by
+  `SubstateApiError`'s `IsNotFoundError` impl and simply never reached the JSON-RPC layer.
+- `fix` — `X-Accel-Buffering: no` on `/events`, `/transactions/events/stream` and `/utxos/stream`;
+  nginx and the proxies following its conventions buffer upstream responses by default, which on a
+  long-lived SSE stream means indefinitely. `/utxos/stream` declares its negotiated content type
+  (`application/x-protobuf` or `application/x-ndjson`) instead of always answering
+  `application/octet-stream`.
+- `feat` — `put_workspace` alias on the transaction builder.
+
+### Indexer and state sync
+
+- `feat` — **Follow mode: the indexer stops polling.** Each shard group holds a `sync_state` stream
+  open past the validator's tip and receives transitions as they commit, so cache invalidation
+  latency drops from one sync round (~60 s) to roughly **one block**. Shard groups run concurrently
+  under a `FuturesUnordered`; each winds its own stream down between messages on an epoch advance,
+  syncs the new epoch's checkpoints, re-resolves its committee and reopens from the cursor it holds.
+  A global re-plan happens only when the set of shard groups itself changes. Keepalives re-stamp the
+  watermark of every shard a stream has closed off, so a quiet shard stays served for as long as its
+  validator keeps answering and `state_sync_stream_deadline` (now 600 s) is only how often a quiet
+  stream is reopened.
+- `feat` — **Per-request deadlines and keepalives made it possible.** Both were already per-request
+  fields on the wire, but the only way to set either was `RpcClientConfig`, fixed when the session is
+  created — and `RpcMultiPool` caches one client per peer, so buying a long deadline for one
+  long-lived stream applied it to every ordinary read on that session. New ACK keepalive frames let
+  an idle streaming response prove liveness *within* its deadline rather than extending it; before,
+  a responder with nothing to send was indistinguishable from one that had died. Restoring the
+  framework's dead test suite (~1,900 lines behind two commented-out `mod` lines) turned up several
+  pre-existing bugs, fixed here: read timeouts that restarted on *every* frame including keepalives,
+  so asking for keepalives made the client wait longer and an idle stream never timed out at all; a
+  refused session reported as `Ok`; a fixed budget of twenty discarded stale frames tearing down a
+  whole pooled session; and a server that could not be driven without a libp2p transport.
+- `fix` — **A `sync_state` responder answers only for shards it stores, at the epoch of sending.** An
+  unbounded request for shards a node no longer serves streamed no transitions — because none arrive
+  for those shards any more — and then closed each shard off with a completion marker. The indexer
+  takes a completion marker as evidence that a shard is level with its committee, so that silence
+  read as freshness and the cache kept serving values it believed current. Follow mode makes this
+  load-bearing: a held-open stream spans epoch boundaries, and "peer went quiet" must read as
+  *unknown*, never as *caught up*. A peer-attributable failure now skips only that shard group rather
+  than costing every other group its state sync.
+- `fix` — **Three ways a stale value could be installed as the live head**, all closed. A committee
+  member that is behind answers with a version this indexer has already watched the substate pass —
+  legitimately, from its own point of view — and the transition had already deleted the cached row
+  that would have ranked the answer down, so a write below the version the stream has shown is now
+  refused. A destroy with no successor no longer admits an `Up` at the destroyed version while still
+  admitting a `Down` at it. And a finalized transaction result retires what it created or destroyed
+  ahead of the stream, which is what the `transfer.feature` "substate does not exist" failures were:
+  the wallet asked whether a destination account existed, that nonexistence was cached, it learned
+  the transfer committed, and read back the stale answer.
+- `feat` — **Substates the committee agrees do not exist are cached.** `DoesNotExist` is the most
+  expensive lookup the indexer makes: `Up` and `Down` return on the first acceptable response, but
+  absence has nothing to prove against the state tree, so it is settled by `f + 1` agreement and
+  walks that many committee members — every time, because it was also the one result the cache would
+  not keep. Recorded as a row with no version rather than a sentinel, so `Option`'s own ordering
+  gives the head-ranking rule for free. Served only while the shard's stream is demonstrably alive
+  (`state_sync_keepalive_interval × 3`), because a nonexistence is correct at the instant it is taken
+  and false ever after; transaction receipts are excluded, since they are the bulk of the stream by
+  count and are answered from the indexer's own tables anyway.
+- `feat` — **Committee members are raced on a substate read**, up to `READ_RACE_WIDTH = 3` in flight,
+  settling on the first response that decides the read. Members were asked one at a time, so an
+  unreachable first pick waited out the full 10 s connect timeout — on a small committee, a 1-in-n
+  chance per read of a multi-second stall. The decision rules move into one `CommitteeReadTally`, and
+  `DoesNotExist` now settles at `f + 1` throughout rather than needing `f + 2` on the way through the
+  loop.
+- `feat!` — **The batched substate read path carries proofs.** `get_substate_batch` streamed bare
+  values, so every batch result was written unverified — and with proof verification on the read path
+  refused those entries and refetched singly, so the batch populated a cache it could not then use.
+  `SubstateProofGenerator` hoists the parts that do not vary per substate out of the loop: 50
+  substates across 50 distinct shards costs ~449 µs against ~10.68 ms one-shot, which also means one
+  batched request is ~25x cheaper for a validator to serve than the 50 single reads it replaces. Two
+  responder defects fixed with it — it never checked it stored the requested ids, and `missing` was
+  logged and dropped rather than put on the wire.
+- `refactor!` — **The cache serves only the head.** The indexer is a gateway to the network's current
+  state, not to its history, so a lookup naming a version is only ever asking whether that version is
+  still current; what the head says about it is decided once, in `SubstateCacheEntry::answer_at`.
+- `feat` — Cache refusals, invalidations and evictions are logged and counted. A read refused because
+  the shard's watermark was missing or stale came back as `Ok(None)`, indistinguishable from an empty
+  cache, so an indexer whose every read had started costing a committee round trip gave no hint why.
+  `api_sse_connections_active` gauges streaming connections per endpoint — the principal load signal
+  from wallets now that the daemon follows `/events` — and `api_http_response_body_size_bytes` was
+  constructed and observed but never registered, so it was exported nowhere.
+- `fix` — A shard group with no committee answers 503 naming the group rather than a masked 500, and
+  a spent version answers 404 rather than 500. A `resource_address` entry in a *template's* event
+  payload can no longer make an event match a resource filter.
+- `fix` — **State is served from the current committee and validated against the previous.** Only the
+  quorum that makes an `EpochCheckpoint` valid needs to be the previous committee; using it to pick
+  serving peers preferentially targeted validators that may have left the register, while continuing
+  members of the same shard group hold identical state and are `Running`. `SyncSource` orders
+  continuing members, then members that joined at this epoch, then departed prev-only members as the
+  full-turnover fallback, each tier shuffled.
+
+### Execution engine — security
+
+Four audit waves. Every item is reachable by an ordinary submitter unless stated, and each has a
+regression test verified to fail on the pre-fix code.
+
+- `fix!` — **A callee's vaults no longer leak into the caller's scope.** `include_owned_in_scope`
+  seeded a callee frame with every substate reachable from the component's state, and
+  `update_from_child_scope` extended the caller's owned set with the callee's whole set on pop. So a
+  template could call any `allow_all` method on a victim (`Account::get_balances`), come away with
+  the victim's vault in its own scope, and `withdraw_all()` — TARI's withdraw rule is `AllowAll` — or
+  persist the victim's vault id into its own state permanently. Component-reachable substates now
+  live in a separate `component_owned` set, in scope for that frame alone. Buckets and proofs no
+  longer merge upward either: a frame hands back only what it names in its return value.
+- `fix!` — **A stealth UTXO could be spent more than once in one transaction.** `WorkingStateStore`
+  kept no spent set its own reads consulted, so `exists()` answered from the immutable input snapshot
+  and a downed UTXO still read as present. Three spends followed: one UTXO listed *n* times in a
+  single statement — the inputs fold positionally into the excess, so a spender who knows the mask
+  builds a valid balance proof for *n·v* — up to 65 statements over one UTXO in one transaction with
+  one down and *k* output sets, and spend-then-`StealthUtxoBurn`, whose diff carried both a down and
+  an up@v+1 of the same address.
+- `fix!` — **Proof access was unscoped, and `SetVaultFreeze` froze any vault.** Proof ids come from a
+  transaction-wide counter, so a component called by a frame holding a proof could name it by id and
+  authorize with a badge it was never handed, or read its amount, resource and non-fungible ids.
+  Separately, `SetVaultFreeze` authorized `Freeze` against a resource and then write-locked any vault
+  id without checking what it held — so anyone could publish a resource with
+  `freezable(rule!(allow_all))` and freeze any vault on the network, a TARI vault included, leaving
+  its owner unable to withdraw or pay fees. Network-wide, and cheap.
+- `fix!` — **Attacker-reachable panics are removed from execution.** The release profile is
+  `panic = 'abort'` with `overflow-checks = true`, so each of these stopped every validator that
+  executed the transaction: `schnorr_verify` on `PublicKey::Zero`; guest-controlled pointer
+  arithmetic at publish (a ~50-byte module declaring `_ABI_TEMPLATE_DEF` as `-1`); resource balance
+  overflow, including the locked/unlocked pair that bounding only the unlocked field left open; and
+  `FeeBreakdown::add`. Two more in the same file: `lock_all`'s `Confidential` arm copied the revealed
+  amount where it moved it, so taking and dropping a proof over a confidential vault **doubled** its
+  revealed balance; and its `Stealth` arm returned the wrong container type, so every proof over a
+  stealth vault — TARI included — aborted the transaction. A workspace-wide
+  `clippy::arithmetic_side_effects` sweep (962 hits, every one read in context) closed the rest,
+  including two wallet daemon RPCs that could crash the daemon (`claim_fees` with `shards: [0]`) or
+  hang it allocating ~4 billion shard ids (`get_fees` with an inverted shard group).
+- `fix!` — **Template modules are validated before they are instantiated.** `finalize_loaded_module`
+  instantiated an untrusted module and validated it afterwards, and the legacy ABI path read a
+  template definition out of guest-controlled linear memory — both on the `PublishTemplate` path.
+  Table types were passed through untouched, so `table.grow` with a delta of `0xFFFFFFFF` asked the
+  host for tens of gigabytes at a cost of two metering points. Also: `tari_alloc` and `tari_free` are
+  now inside the metering window, return values are capped at `max_call_size`, and an operator the
+  metering table does not price costs 1000 rather than 1.
+- `fix!` — **Limits the engine documented but did not enforce on every path.** `check_write_allowed`
+  now lives in a `try_lock` helper every lock passes through (five sites took a write lock without
+  it); `max_substate_size` binds on mutation as well as creation, so a vault's non-fungible id set
+  can no longer grow past 1 MiB one deposit at a time; and a new `max_event_size_bytes` (2 KiB)
+  bounds an event payload, which the receipt could not reject for being oversized because it is built
+  after fees settle. Transient ids are also rejected in component state — a `BucketId`, `ProofId` or
+  address allocation written there reaches the ledger where it can only alias an unrelated object of
+  a later transaction, and `invoke_resource_access_hook` passes component state into the hook frame
+  as an *argument*, where a tagged proof id is treated as an authorizing proof.
+- `fix!` — **Resource and proof lifecycle corrections.** A bucket whose funds a proof has locked can
+  no longer be consumed by `Bucket::join`, `PayFee::FromBucket` or the stealth-transfer
+  revealed-funds path. `GetOwnerProof` works on a component created earlier in the same transaction.
+  A resource's auth hook can read the resource it guards — the write lock is released across the hook
+  call. `validate_finalized` tests confidential vaults with `has_locked_funds()` rather than
+  `locked_balance()`, which reports zero for hidden amounts.
+- `fix` — **The workspace is deterministic and lock scope is enforced.** `Workspace.items`,
+  `Workspace.proofs` and `address_allocations` were hash collections iterated on paths that reach
+  consensus. Separately, `CallScope`'s lock-scope methods had no callers, so `DanglingSubstateLocks`
+  was unreachable and a callee could leak a lock and grief the rest of the caller's transaction; the
+  one place the engine really leaked a lock is fixed with it, so two `ClaimValidatorFees` against one
+  pool in a transaction now succeed.
+
+### Execution engine — pricing and metering
+
+- `perf!` — **Engine responses cross the WASM ABI as their encoding, not a `Value` tree.** The host
+  built the tree with an encode-then-decode and the guest tore it down with another, on a path where
+  the guest's half is metered. Carrying `tari_bor::RawCbor` instead: a tariswap swap **−53%** guest
+  metering points, an account balance read −49%, account create + fund −23%. Points are user fees, so
+  that is a direct cost reduction. The wire does not move and a published template keeps working
+  unchanged; only a recompiled one gets the saving. This is also what rejected the original zero-copy
+  (rkyv) plan — per-byte marshalling turned out to be near free, and the cost was per call.
+- `feat!` — **Bulk memory and table operators are charged by length.** `memory.copy`, `fill` and
+  `init` were priced at a flat 2–4 points regardless of the length operand, so the meter bounded a
+  template's instruction count and not its work — on the order of 70 TB of `memory.copy` fit the 250M
+  per-transaction budget. A `BulkMetering` middleware emits an inline length-proportional charge
+  against the same metering global before each bulk operator runs: 1 point per byte, 16 per table
+  element.
+- `feat!` — **Template instantiation is priced per data-segment byte, not per binary byte.** Compiled
+  code is laid down once at publish; the faucet (151 KiB), liquidity pool (322 KiB) and account
+  (530 KiB) all instantiate in the same ~0.015 ms, so pricing off `code_size()` would have
+  overcharged the account template by **18x** on every instruction of every transaction.
+  `memory.grow` is repriced with it — wasmer grows by mapping and the zeroing is the OS's, lazily on
+  first touch, so the work is per *call* — and the builtins now declare the memory they use rather
+  than taking a grow per instantiation for a page they always need. A faucet claim's WASM points:
+  272,989 → 94,321 → **76,264**.
+- `feat!` — **Native intrinsics.** Templates had no hashing at all and no group or scalar arithmetic,
+  so anything cryptographic had to be compiled to WASM at roughly ten times the native cost — a
+  Groth16 verification measured at ~112M metering points against ~9.9M natively. Ristretto and scalar
+  arithmetic, MSM, four hash functions with a `_parts` variant for Merkle walks, and Schnorr
+  verification. Every intrinsic is a pure function of its arguments, which is what lets the engine
+  price one *before* running it; they are addressed by a permanent numeric `IntrinsicId` behind a
+  single op, so adding one later changes no wire type and leaves every published template working.
+  Signature verification moves onto them, from a flat 10 µT fee charge and zero metering points to
+  `NativeExecutionPoints::PER_SCHNORR_VERIFY`, counting against the block execution budget.
+  *The prices are provisional* — derived from the existing `PER_INPUT` calibration, not measured.
+- `feat!` — **The exhaust burn is a share of what was collected, not a surcharge on top.** The fee
+  table alone is now the user's price; the rate splits what was collected (`B = ⌊F·s/10_000⌋`, every
+  network at 500 bps). `FEE_ESTIMATE_ALLOWANCE` drops 25 → 12, `FeeReceipt` gains `exhaust_burn`, and
+  `FeeSource::ExhaustBurn` becomes `Reserved` at the same index with a JSON alias so existing
+  receipts still render.
+- `fix!` — **A receipt's `exhaust_burn` is hashed only from protocol version 1.** The field was added
+  with `#[cbor(default)]` so old receipts decode, but the substate hash preimage is borsh and the
+  derive writes every field — so a pre-change receipt re-hashed with an extra `0` that the committing
+  node never covered, and any node deriving a receipt hash from its value disagreed with the
+  quorum-signed state roots. Found by resyncing a validator across a localnet upgrade: 179 of 380
+  receipt leaves hashed differently and a fresh validator could not sync at all.
+- `perf` — Thread-safe primitives are dropped from the strictly single-threaded execution path,
+  taking a heap allocation off every call-frame push.
+
+### Execution engine — authorization
+
+- `feat!` — **Caller identity is a badge, as in Radix.** It was a predicate evaluated once at method
+  entry, so "resource R may only be withdrawn while executing on behalf of A" was inexpressible — the
+  gate had to be replicated on every holder of R and was consumed at the door. Two virtual resources
+  are reserved and stamped into a callee's scope by `push_frame`, so the identity holds for the
+  frame's lifetime and is checkable at every auth point, resource rules included. Never inherited,
+  not capturable as a `Proof`, and the addresses are unforgeable. Three vulnerabilities were fixed
+  with it: hook frames run in `FrameWriteMode::OwnComponent`; a pushed frame inherits its parent's
+  write mode, closing a sandbox escape; and `Recall` must match the vault's resource, where
+  `recallable(allow_all)` could previously drain a vault of any other resource.
+- `feat!` — **Account ownership is gated on the signer badge.** `CreateAccount` derived the canonical
+  address for any public key and forwarded a caller-supplied `owner_rule`/`access_rules`, so a
+  squatter could create the victim's account ahead of them, name itself the owner, and collect every
+  subsequent deposit — including the ones the victim's own senders make. Custom rules now require
+  that key's signer badge, and `Account::create` is no longer reachable as a `CallFunction` or
+  through `TemplateManager::call`. Creating an account on the default rules stays permissionless, so
+  deposits to an account that does not exist yet still work.
+- `feat!` — **A resource's auth hook can be replaced or removed.** The hook was fixed at creation and
+  runs on nearly every resource action, so one that panics, denies unconditionally or fails to decode
+  its arguments took the whole resource offline and made the balances in its vaults unspendable —
+  with no recovery at all if its component was created under `OwnerRule::None`. `ResourceAccessRules`
+  gains `auth_hook_updater`, defaulting to `UpdateRule::Locked`, so today's immutability is preserved
+  for every existing resource. The hook being replaced is deliberately not invoked.
+- `feat!` — `caller_component(addr)` / `caller_template(addr)` rule requirements land first (#2503),
+  and proof-taking `_with_auth` account methods ship ahead of the proof-scope change so call sites
+  could migrate before the protocol flipped.
+
+### Consensus
+
+- `fix` — **A leader's proposal is anchored entirely at the state anchor.** When a leader fills a
+  timeout gap with a dummy chain the candidate extends from the justify block, but the proposal
+  batch, the pool query, foreign proposal selection, the change set and command generation still read
+  at the highest seen block — an orphan the candidate abandons, whose pool records carry stages no
+  replica reproduces. In the same class, a `drain(..)` was discarding every pending pool update and
+  foreign pledge the proposer had just recorded, so the leader committed to a fee no replica
+  computed: nobody voted, the next leader rebuilt the identical block from the same still-pending
+  inputs, and the committee wedged at `high_qc = NodeHeight(6)` until nextest's 600 s kill.
+- `fix` — **A foreign proposal that fails to process while proposing is dropped and rejected.** The
+  atom had already shipped into `commands` before processing, the failure arm only logged, and
+  nothing recorded the proposal as proposed — so the next leader selected it again, the same
+  deterministic failure repeated, and another unvotable block shipped, with no self-clearing path.
+  Only a *validation* failure condemns a proposal; a storage or epoch-manager error retries.
+- `fix` — **A validator whose shard group changes can actually sync.** The refusal to open the next
+  epoch was an `Err` returned from inside the write transaction that had just saved the epoch
+  checkpoint, so the checkpoint was rolled back on every member on every attempt — and `check_sync`
+  then answered `UpToDate`, because a node whose shard group moved is behind by neither height nor
+  epoch. Sixty seconds of a six-validator swarm splitting into two committees, with the epoch never
+  advancing and the joining validator never getting its checkpoint.
+- `fix` — **Justified-block evidence is re-recorded on the surviving branch.** The "already
+  justified" guard was a persisted per-block flag stamped by the first block to justify it, certified
+  or not — so when that branch was abandoned the evidence went with it, and a multi-shard transaction
+  sat at `LocalAccepted` with `is_ready=false` forever while its shard group proposed empty blocks.
+- `fix!` — **Unauthenticated peers can no longer abort or restart the consensus worker.** One
+  Proposal with `justify.height = u64::MAX` plus a timeout certificate aborted every validator that
+  received it, and three handlers propagated errors reachable from unauthenticated gossip into the
+  worker's fatal catch-all, dropping it into `Failure → Sleeping (5s) → Initialising` on demand.
+- `fix` — **An `EndEpoch` hash is ratified from an observed boundary, not an activated epoch**, so a
+  node that has scanned the boundary block but is behind on applying epoch activations stops
+  no-voting. A deferred end-of-epoch now also resumes on the worker's 10 s periodic tick rather than
+  waiting for a whole scan to complete. Sync-class errors are no longer published as consensus
+  failures.
+
+### Node, networking and swarm
+
+- `fix` — **Connections that stop answering pings are closed.** `libp2p-ping` reports failures and
+  leaves the connection open — the policy decision belongs to the user, and we were not making it —
+  so a connection that could no longer carry traffic was held until the kernel exhausted
+  `tcp_retries2`, roughly 15 minutes during which every message routed over it was silently lost. Hit
+  on a local swarm when a VPN interface was torn down: one validator lost its path to three of six
+  peers, missed every proposal those peers led, and saw-toothed behind the chain for sixteen minutes
+  — *while holding healthy connections to the same peers* that traffic never used, because
+  `obtain_message_channel` returns the existing sink. Default 3 consecutive failures.
+- `feat` — **The validator node's memory ceiling drops 3.2 GiB → 2.4 GiB.** ~1.4 GiB of the old
+  figure was RocksDB and libp2p defaults: nine column families each with their own 64 MiB × 2
+  memtable budget and 32 MiB cache, and a gossipsub send queue of libp2p's default 5000 messages
+  against a 2 MiB message size. Now one shared RocksDB budget with memtables charged to the same
+  cache, explicit gossipsub bounds, a startup check that logs the budget table and warns when
+  `MemAvailable` is short, and metrics reporting capacity and live usage at scrape time. New
+  `tari-vn-bench` grades a candidate machine on whether it can keep *voting*, not just start, and
+  adds a requirements page with disk capacity and bandwidth marked **not established** rather than
+  guessed.
+- `fix` — A block's WASM execution points are reported in the web UI; `transactions_finalize_all`
+  deleted the reverse index as it finalized, so every block a user can actually look at summed to 0.
+  The WASM cache entry header is CRC-checksummed and the tempfile fsync'd before the rename — the
+  header sits outside the wasmer artifact and its four shape counts are consensus inputs, so
+  corruption confined to it yielded a divergent receipt with no error raised anywhere.
+- `feat` — Swarm log files are paged through mmap-backed byte windows instead of being fetched whole
+  on each poll, which locked up or killed the tab on a long-running swarm. A process that exits
+  non-zero prints its panic message to the daemon's own stdout, logs are attributed by `InstanceId`
+  rather than by longest-matching path prefix, and the console filters at `Info` while `swarm.log`
+  keeps `Debug`.
+
+### Build, CI and docs
+
+- `chore` — wasmer 7.1 → 7.4 (Cranelift 0.129 → 0.135), unblocked by bumping the libp2p fork, which
+  removed the `wasm-bindgen` pin that made 7.2+ unresolvable. Consensus impact verified against the
+  diff: no new `Features`, and the metering operator cost path is byte-identical. wasmer was capped
+  at `~7.1.0` first, because `^7.1.0` meant published `tari_engine` 0.39.3 and 0.40.0 did not compile
+  against a fresh resolve.
+- `ci` — Docker images build on tags only; every merge to `development` was kicking off a full
+  multi-binary image build and GHCR push that nothing consumes. The nightly binary build sheds three
+  pieces of dead configuration and moves to an off-peak cron, after scheduled runs drifted from
+  ~1.7 h to ~4.5 h behind their slot.
+- `test` — Several CI flakes fixed at the cause: validators no longer promote themselves to `Running`
+  before their peers exist, the transaction service tests wait on events rather than the clock, and
+  the harness timeout is a wall-clock bound rather than one every ignored event reset — which is why
+  a livelock burned 600 s and produced a 14 GB job log instead of panicking at its declared 60 s with
+  the dumps the code already emits. Plus a committee-split integration scenario, enabled by a LocalNet
+  consensus constants file: nothing had exercised a committee change before, because at the devnet
+  default committee size of 7 a second shard group needed fourteen validators.
+- `docs` — A new **Concepts** section: ten pages covering architecture, consensus, state and
+  execution, privacy, stablecoins, templates and assets, tokenomics and a glossary, with sixteen
+  hand-authored inline SVG diagrams. Every factual claim cites the source path it comes from, and
+  RFCs and TIPs are explicitly *not* treated as authoritative where they disagree with the code. Plus
+  a claim burn guide, a vulnerability disclosure policy, and corrected fee, version and WASM guidance
+  across all ten agent skills — the old publish-fee guidance was unachievable for any template, since
+  `per_template_publish_cost` alone is a flat 250,000 µT.
+
+### Crate versions
+
+`[workspace.package].version` moves to `0.41.0` (the whole tier-3 cohort). Independently versioned
+crates affected:
+
+| crate | version |
+|---|---|
+| `tari_bor` | 0.15.0 → 0.16.0 |
+| `ootle_serde` | 0.5.0 → 0.6.0 |
+| `ootle_byte_type` | 0.12.0 → 0.13.0 |
+| `tari_ootle_address` | 0.10.0 → 0.11.0 |
+| `tari_template_abi` | 0.19.1 → 0.20.0 |
+| `tari_template_lib` | 0.31.0 → 0.32.0 |
+| `tari_template_lib_types` | 0.31.0 → 0.32.0 |
+| `tari_template_macros` | 0.22.1 → 0.23.0 |
+| `tari_ootle_template_metadata` | 0.11.0 → 0.12.0 |
+| `tari_ootle_template_build` | 0.11.0 → 0.12.0 |
+| `tari_indexer_client` | 0.41.0 → 0.42.0 |
+| `ootle-rs` | 0.22.0 → 0.23.0 |
+| `ootle_ledger_client` | 0.6.0 → 0.7.0 |
+| `tari_ootle_wallet_crypto` | 0.42.0 → 0.43.0 |
+| `tari_ootle_wallet_sdk` | 0.42.0 → 0.43.0 |
+| `tari_ootle_wallet_storage_sqlite` | 0.42.0 → 0.43.0 |
+| `tari_ootle_walletd_client` | 0.42.0 → 0.43.0 |
+
+`crate_versioning.py list` and `impact` now read the crates.io sparse index, so a crate whose in-tree
+version was never published is reported as already covered rather than as a phantom cascade.
+
 ## [0.40.0](https://github.com/tari-project/tari-ootle/compare/v0.39.3...v0.40.0) (2026-09-02)
 
 Two production incidents on esmeralda are fixed here — a state-sync off-by-one that corrupted the

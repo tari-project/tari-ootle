@@ -794,6 +794,92 @@ mod resource_access_rules {
         );
     }
 
+    /// `deposit_with_auth` exists so that someone other than the account's owner can deposit a badge-restricted
+    /// resource, handing the account the badge its deposit rule names. Like `deposit`, it must therefore be
+    /// callable by anyone: the account's owner rule gates withdrawals, not what arrives.
+    #[test]
+    fn anyone_may_deposit_with_auth() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+        let (sender_account, sender_proof, sender_key) = test.create_empty_account();
+        let (recipient_account, _, _) = test.create_empty_account();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "using_resource_rules", args![])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let access_rules_component = result.finalize.execution_results[0]
+            .decode::<ComponentAddress>()
+            .unwrap();
+        let resources = result
+            .finalize
+            .result
+            .any_accept()
+            .unwrap()
+            .up_iter()
+            .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
+            .map(|(addr, r)| (r.resource_type().is_non_fungible(), addr.as_resource_address().unwrap()))
+            .collect::<Vec<_>>();
+        let badge_resource = resources.iter().find(|(is_nft, _)| *is_nft).unwrap().1;
+        let token_resource = resources.iter().find(|(is_nft, _)| !*is_nft).unwrap().1;
+
+        // The sender holds the badge that the token's withdraw and deposit rules name, and some tokens.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(access_rules_component, "mint_new_badge", args![])
+                .put_last_instruction_output_on_workspace("permission")
+                .call_method(sender_account, "deposit", args![Workspace("permission")])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(sender_account, "create_proof_by_amount", args![badge_resource, 1])
+                .put_last_instruction_output_on_workspace("proof")
+                .call_method(access_rules_component, "take_tokens_using_proof", args![
+                    Workspace("proof"),
+                    100
+                ])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(sender_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("proof")
+                ])
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&sender_key),
+            vec![sender_proof.clone()],
+        );
+
+        // The sender is not the recipient's owner. The deposit is authorized by the badge alone.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(sender_account, "create_proof_by_amount", args![badge_resource, 1])
+                .put_last_instruction_output_on_workspace("badge")
+                .call_method(sender_account, "withdraw_with_auth", args![
+                    token_resource,
+                    10,
+                    Workspace("badge")
+                ])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(recipient_account, "deposit_with_auth", args![
+                    Workspace("tokens"),
+                    Workspace("badge")
+                ])
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&sender_key),
+            vec![sender_proof],
+        );
+
+        let balance: Amount = test.call_method(recipient_account, "balance", args![token_resource], vec![]);
+        assert_eq!(balance, Amount::new(10));
+    }
+
     #[test]
     fn it_locks_resources_used_in_proofs() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);

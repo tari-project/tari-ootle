@@ -11,6 +11,8 @@ mod dummy_fill_anchor;
 #[cfg(test)]
 mod epoch_change;
 #[cfg(test)]
+mod extends_justify;
+#[cfg(test)]
 mod last_voted_persistence;
 #[cfg(test)]
 mod leader_failure;

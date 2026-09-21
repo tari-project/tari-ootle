@@ -8,7 +8,11 @@ use tari_ootle_storage::StateStore;
 
 use super::collector::VoteCollector;
 use crate::{
-    hotstuff::{epoch_state::EpochState, error::HotStuffError, vote_collector::helpers::check_eligibility},
+    hotstuff::{
+        epoch_state::EpochState,
+        error::HotStuffError,
+        vote_collector::{collector::exceeds_vote_lookahead, helpers::check_eligibility},
+    },
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
 };
@@ -55,6 +59,21 @@ where TConsensusSpec: ConsensusSpec
 
         let current_epoch = epoch_state.epoch();
         let local_committee_info = epoch_state.local_committee_info();
+
+        // Before any signature verification: a vote this far ahead is dropped by the collector, so the
+        // verification would be work done for nothing.
+        if exceeds_vote_lookahead(current_height, vote.height) {
+            warn!(
+                target: LOG_TARGET,
+                "🗑️ Discarding {} from {}: it is too far ahead of our current view {}/{}",
+                vote,
+                from,
+                current_epoch,
+                current_height
+            );
+            return Ok(None);
+        }
+
         let sender_vn =
             check_eligibility::<TConsensusSpec, _>(&self.epoch_manager, from, &vote, local_committee_info).await?;
         self.validate_vote(current_epoch, &vote)?;
@@ -88,9 +107,13 @@ where TConsensusSpec: ConsensusSpec
                 debug!(target: LOG_TARGET, "🟡 No quorum reached yet for TimeoutVote at height {}", height);
                 Ok(None)
             },
-            Err(err) => {
-                warn!(target: LOG_TARGET, "❌ {}", err);
-                // TODO: track equivocation and penalize nodes
+            Err(duplicate) => {
+                // Not equivocation, and no evidence can be built from it: a timeout vote signs
+                // (epoch, height) and nothing else, which is the view it is bucketed under, so the
+                // two votes necessarily attest to the same thing and differ only in the signature's
+                // nonce. Re-signing one view is something an honest node does, for instance after a
+                // restart loses the in-memory record of the NEWVIEW it last sent.
+                warn!(target: LOG_TARGET, "❌ {}", duplicate);
                 Ok(None)
             },
         }

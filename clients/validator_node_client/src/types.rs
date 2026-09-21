@@ -39,6 +39,7 @@ use tari_ootle_common_types::{
     StateVersion,
     SubstateAddress,
     committee::{Committee, CommitteeInfo},
+    diagnostics::{DiagnosticEventFilter, DiagnosticEventRecord, DiagnosticLevel},
     shard::Shard,
 };
 use tari_ootle_p2p::PeerAddress;
@@ -570,4 +571,89 @@ pub enum LayerOneTransactionParams {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct PrepareLayerOneTransactionResponse {
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+pub struct GetDiagnosticEventsRequest {
+    /// Excludes events below this level.
+    #[serde(default)]
+    pub min_level: Option<DiagnosticLevel>,
+    /// Matches topics starting with this string, e.g. `consensus.` for all consensus events.
+    #[serde(default)]
+    pub topic_prefix: Option<String>,
+    /// Unix milliseconds, inclusive.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    #[serde(default)]
+    pub since: Option<u64>,
+    /// Unix milliseconds, inclusive.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    #[serde(default)]
+    pub until: Option<u64>,
+    /// Return only events with an id below this one. Pass the `next_cursor` of the previous page.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    #[serde(default)]
+    pub before_id: Option<u64>,
+    /// Maximum events to return. Capped server-side.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+pub struct GetDiagnosticEventsResponse {
+    /// Newest first.
+    pub events: Vec<DiagnosticEventRecord>,
+    /// Pass as `before_id` to fetch the next page. `None` when the last page was returned.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub next_cursor: Option<u64>,
+    /// Oldest and newest event ids currently held, or `None` if the log is empty.
+    #[cfg_attr(feature = "ts", ts(type = "[number, number] | null"))]
+    pub bounds: Option<(u64, u64)>,
+}
+
+/// Deletes matching events. An all-default request clears the whole log.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+pub struct ClearDiagnosticEventsRequest {
+    #[serde(default)]
+    pub min_level: Option<DiagnosticLevel>,
+    #[serde(default)]
+    pub topic_prefix: Option<String>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    #[serde(default)]
+    pub since: Option<u64>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    #[serde(default)]
+    pub until: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+pub struct ClearDiagnosticEventsResponse {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub deleted: u64,
+}
+
+impl GetDiagnosticEventsRequest {
+    pub fn filter(&self) -> DiagnosticEventFilter {
+        DiagnosticEventFilter {
+            min_level: self.min_level,
+            topic_prefix: self.topic_prefix.clone(),
+            since: self.since,
+            until: self.until,
+        }
+    }
+}
+
+impl ClearDiagnosticEventsRequest {
+    pub fn filter(&self) -> DiagnosticEventFilter {
+        DiagnosticEventFilter {
+            min_level: self.min_level,
+            topic_prefix: self.topic_prefix.clone(),
+            since: self.since,
+            until: self.until,
+        }
+    }
 }

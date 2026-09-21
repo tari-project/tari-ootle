@@ -919,25 +919,35 @@ impl Block {
     /// accept a proposal is the branch of m.node extends from the currently locked node lockedQC.node. On the other
     /// hand, the liveness rule is the replica will accept m if m.justify has a higher view than the current
     /// lockedQC. The predicate is true as long as either one of two rules holds.
-    pub fn is_safe<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
+    ///
+    /// Both rules are read off `justify_block`, the block certified by this block's justify. This block must extend
+    /// `justify_block`, so it extends the locked block exactly when `justify_block` is the locked block or extends
+    /// it. A timeout certificate certifies no block and so carries no liveness signal: it proves only that its views
+    /// produced nothing.
+    pub fn is_safe<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        justify_block: &Block,
+    ) -> Result<bool, StorageError> {
         let locked = LockedBlock::get(tx, self.epoch())?;
 
         // Liveness rules
         //  (qc.viewNumber > lockedQC.viewNumber)
-        if self.max_certificate_height() > locked.height() {
+        if justify_block.height() > locked.height() {
             return Ok(true);
         }
 
         // Safety rule
         // (node extends from lockedQC.node)
-        if self.extends_pending(tx, locked.block_id())? {
+        if justify_block.id() == locked.block_id() || justify_block.extends_pending(tx, locked.block_id())? {
             return Ok(true);
         }
 
         info!(
             target: LOG_TARGET,
-            "❌ Block {} does satisfy the liveness or safety rules of the safeNode predicate. Locked block {}",
+            "❌ Block {} (justify block {}) does not satisfy the liveness or safety rules of the safeNode predicate. Locked block {}",
             self,
+            justify_block,
             locked,
         );
         Ok(false)

@@ -161,7 +161,7 @@ use super::{
     Runtime,
     RuntimeEvent,
     spend_script_execution::SpendScriptExecution,
-    working_state::WorkingState,
+    working_state::{WorkingState, reject_transient_values_in},
 };
 use crate::{
     intrinsics,
@@ -1835,6 +1835,7 @@ where
                             reason: "UpdateNonFungibleData resource action requires a resource address".to_string(),
                         })?;
                 let arg: ResourceUpdateNonFungibleDataArg = args.assert_one_arg()?;
+                reject_transient_values_in("Non-fungible mutable data", &arg.data)?;
 
                 let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;

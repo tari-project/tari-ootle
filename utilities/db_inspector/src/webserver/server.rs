@@ -113,7 +113,9 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::lock_conflict::LockConflictCf,
         column_families::lock_conflict::LockConflictBlockIdIndex,
         column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
-        column_families::diagnostic_no_vote::DiagnosticsNoVoteCf
+        column_families::diagnostic_no_vote::DiagnosticsNoVoteCf,
+        column_families::diagnostic_event::DiagnosticEventCf,
+        column_families::vote_equivocation::VoteEquivocationCf
     );
 
     let api = api.fallback(handlers::not_found);
@@ -182,6 +184,7 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::chain::CommittedParentChildChainIndex)
         .register_cf(column_families::chain::PendingChainIndex)
         .register_cf(column_families::chain::PendingParentChildIndex)
+        .register_cf(column_families::diagnostic_event::DiagnosticEventCf)
         .register_cf(column_families::diagnostic_no_vote::DiagnosticsNoVoteCf)
         .register_cf(column_families::epoch_checkpoint::EpochCheckpointCf)
         .register_cf(column_families::finalized_transaction::FinalizedTransactionLinkCf)
@@ -213,4 +216,5 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateCf)
         .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)
         .register_cf(column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf)
+        .register_cf(column_families::vote_equivocation::VoteEquivocationCf)
 }

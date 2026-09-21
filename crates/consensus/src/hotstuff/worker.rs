@@ -158,6 +158,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             state_store.clone(),
             epoch_manager.clone(),
             signing_service.clone(),
+            hooks.clone(),
         );
         let timeout_vote_collector =
             TimeoutVoteCollector::new(state_store.clone(), epoch_manager.clone(), signing_service.clone());
@@ -270,6 +271,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
     pub fn pacemaker(&self) -> &PaceMakerHandle {
         &self.pacemaker
+    }
+
+    pub fn hooks_mut(&mut self) -> &mut TConsensusSpec::Hooks {
+        &mut self.hooks
     }
 
     async fn get_starting_epoch(&self) -> Result<(Epoch, FixedHash), HotStuffError> {

@@ -9,7 +9,7 @@ use prometheus_client::{
 };
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage, traits::hooks::ConsensusHooks};
 use tari_ootle_common_types::NodeHeight;
-use tari_ootle_storage::consensus_models::{Block, ValidBlock};
+use tari_ootle_storage::consensus_models::{Block, ValidBlock, VoteEquivocation};
 use tari_ootle_transaction::TransactionId;
 
 use crate::metrics::CollectorRegister;
@@ -36,6 +36,7 @@ pub struct PrometheusConsensusMetrics {
     pacemaker_height: UnsignedGauge,
     pacemaker_leader_failures: Counter,
     needs_sync: Counter,
+    vote_equivocations: Counter,
 
     transactions_ready_for_consensus: Counter,
     transactions_finalized_committed: Counter,
@@ -91,6 +92,11 @@ impl PrometheusConsensusMetrics {
             needs_sync: Counter::default().register_at(
                 "needs_sync",
                 "Number of times consensus needs to sync",
+                registry,
+            ),
+            vote_equivocations: Counter::default().register_at(
+                "vote_equivocations",
+                "Number of committee members caught signing two conflicting votes for one view",
                 registry,
             ),
             transactions_ready_for_consensus: Counter::default().register_at(
@@ -155,6 +161,10 @@ impl ConsensusHooks for PrometheusConsensusMetrics {
 
     fn on_needs_sync(&mut self, _local_height: NodeHeight, _remote_qc_height: NodeHeight) {
         self.needs_sync.inc();
+    }
+
+    fn on_vote_equivocation(&mut self, _evidence: &VoteEquivocation) {
+        self.vote_equivocations.inc();
     }
 
     fn on_transaction_ready(&mut self, _tx_id: &TransactionId) {

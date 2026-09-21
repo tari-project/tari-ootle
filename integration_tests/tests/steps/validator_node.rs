@@ -600,6 +600,76 @@ async fn when_block_height(world: &mut TariWorld, step: &Step, vn_name: String, 
     panic!("Block height on VN {vn_name} is less than {height}");
 }
 
+/// Waits for a lagging validator to reach the view its committee had reached when this step started.
+///
+/// The mark is taken once, so the step measures recovery from a fixed deficit rather than chasing a moving
+/// tip. It fails if the lagging node's epoch passes the mark's: past an epoch boundary a node recovers by
+/// state sync from a checkpoint, and this step is here to hold the within-epoch block-import path.
+#[then(expr = "validator node {word} catches up to validator node {word} within {int} seconds")]
+async fn then_validator_catches_up_to(
+    world: &mut TariWorld,
+    step: &Step,
+    lagging_name: String,
+    reference_name: String,
+    timeout_secs: u64,
+) {
+    cucumber_log!("==== Step: {}", step.value);
+    let mut reference_client = world.get_validator_node(&reference_name).create_client();
+    let mut lagging_client = world.get_validator_node(&lagging_name).create_client();
+
+    let mark = reference_client
+        .get_consensus_status()
+        .await
+        .expect("reference validator consensus status");
+    let started_at = lagging_client
+        .get_consensus_status()
+        .await
+        .expect("lagging validator consensus status");
+
+    cucumber_log!(
+        "{lagging_name} is at {}/{} ({}), catching up to {reference_name} at {}/{}",
+        started_at.epoch,
+        started_at.height,
+        started_at.state,
+        mark.epoch,
+        mark.height,
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        let status = lagging_client
+            .get_consensus_status()
+            .await
+            .expect("lagging validator consensus status");
+
+        assert!(
+            status.epoch <= mark.epoch,
+            "{lagging_name} is in {} but {reference_name} was in {} when the step started: the network changed epoch,              so this scenario no longer exercises within-epoch catch-up",
+            status.epoch,
+            mark.epoch,
+        );
+
+        if status.epoch == mark.epoch && status.height >= mark.height {
+            cucumber_log!(
+                "{lagging_name} caught up to {}/{} (from {})",
+                status.epoch,
+                status.height,
+                started_at.height
+            );
+            return;
+        }
+
+        if Instant::now() >= deadline {
+            panic!(
+                "{lagging_name} did not catch up to {}/{} within {}s: it is at {}/{} (state={}), having started at {}",
+                mark.epoch, mark.height, timeout_secs, status.epoch, status.height, status.state, started_at.height,
+            );
+        }
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
 #[then(expr = "the validator node {word} has started epoch {int}")]
 async fn then_validator_node_switches_epoch(world: &mut TariWorld, step: &Step, vn_name: String, epoch: u64) {
     cucumber_log!("==== Step: {}", step.value);

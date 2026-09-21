@@ -10,5 +10,6 @@ mod state;
 mod syncing;
 mod worker;
 
+pub use event::ConsensusStateEvent;
 pub use state::ConsensusCurrentState;
 pub use worker::{ConsensusWorker, ConsensusWorkerContext};

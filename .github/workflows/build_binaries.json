@@ -17,15 +17,6 @@
     "best_effort": true
   },
   {
-    "name": "linux-riscv64",
-    "runs-on": "ubuntu-latest",
-    "rust": "1.97.1",
-    "target": "riscv64gc-unknown-linux-gnu",
-    "cross": true,
-    "build_enabled": true,
-    "best_effort": true
-  },
-  {
     "name": "macos-arm64",
     "runs-on": "macos-14",
     "rust": "1.97.1",
@@ -35,6 +26,7 @@
   },
   {
     "name": "windows-x64",
+    "vcpkg_openssl_triplet": "x64-windows-static",
     "runs-on": "windows-2022",
     "rust": "1.97.1",
     "target": "x86_64-pc-windows-msvc",
@@ -44,6 +36,7 @@
   },
   {
     "name": "windows-arm64",
+    "vcpkg_openssl_triplet": "arm64-windows-static",
     "runs-on": "windows-latest",
     "rust": "1.97.1",
     "target": "aarch64-pc-windows-msvc",

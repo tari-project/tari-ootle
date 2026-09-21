@@ -31,6 +31,7 @@ pub mod foreign_proposal;
 pub mod foreign_substate_pledge;
 
 pub mod certificates;
+pub mod diagnostic_event;
 pub mod diagnostic_no_vote;
 pub mod finalized_transaction;
 pub mod lock_conflict;
@@ -47,6 +48,7 @@ pub mod transaction;
 pub mod transaction_pool;
 pub mod transaction_pool_state_update;
 pub mod validator_node_epoch_stats;
+pub mod vote_equivocation;
 
 pub(crate) mod cf_names {
     pub(crate) const CHAIN_METADATA: &str = "chain";

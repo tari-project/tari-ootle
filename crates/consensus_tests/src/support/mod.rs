@@ -29,6 +29,7 @@ pub use executions_store::ExecuteSpec;
 pub use fixtures::*;
 pub use harness::*;
 pub use leader_strategy::*;
+pub use messaging_impls::NetworkSendObserver;
 pub use network::*;
 pub use spec::*;
 use tari_ootle_common_types::NumPreshards;

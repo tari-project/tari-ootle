@@ -32,6 +32,7 @@ pub async fn create(
 #[derive(Debug, Clone, Deserialize)]
 pub struct MinotariWalletBurnFundsRequest {
     pub amount: u64,
+    /// The wallet daemon that holds the account the burn is claimed into.
     pub wallet_instance_id: InstanceId,
     pub account_name: String,
 }

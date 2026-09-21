@@ -35,6 +35,7 @@ use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
 use tari_ootle_common_types::SubstateRequirementRef;
 use tari_ootle_p2p::PeerAddress;
+use tari_ootle_template_provider::TemplateConfig;
 use tari_ootle_transaction::Transaction;
 use tari_template_lib_types::constants::TARI_TOKEN;
 use tokio::{runtime::Handle, task};
@@ -67,11 +68,13 @@ impl DryRunTransactionProcessor {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         substate_manager: SubstateManager,
         wasm_cache: WasmModuleCache,
+        template_config: &TemplateConfig,
         claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
         consensus_constants: ConsensusConstants,
     ) -> Result<Self, std::io::Error> {
         let handle = Handle::try_current().map_err(std::io::Error::other)?;
-        let template_provider = build_dry_run_template_provider(handle, substate_manager.clone(), wasm_cache);
+        let template_provider =
+            build_dry_run_template_provider(handle, substate_manager.clone(), wasm_cache, template_config);
         Ok(Self {
             network,
             fee_table,

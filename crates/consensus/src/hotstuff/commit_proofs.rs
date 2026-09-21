@@ -79,85 +79,54 @@ pub fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
         )));
     }
 
+    // The verifier needs certificates only for the 3-chain that commits `b`: `QC(b'')`, `QC(b')`, `QC(b)`, where
+    // each certified block is the parent of the one before it. Every block below `b` is committed by being its
+    // ancestor, so the descent from `b` to the committed block is proven by hash links alone. The one exception is
+    // a committed block that is the direct parent of `b`: a link chain names only the blocks strictly between its
+    // certificate and the header, so that case is proven with `b`'s own justify.
+    const NUM_CHAIN_QCS: usize = 3;
+
     let mut block = Block::get(tx, &commit_qc.calculate_block_id())?;
     debug!(target: LOG_TARGET, "⚙️ START: generate commit proof {} {} -> {} {}", block.height(), block.id(), committed_block.height(), committed_block.id());
     debug!(target: LOG_TARGET, "⚙️ Adding the commit_qc to the proof: {commit_qc}");
     proof_elements.push(convert_qc_to_proof_element(&block, commit_qc)?);
+    let mut num_qcs = 1usize;
     while block.id() != committed_block.id() {
-        // Prevent possibility of endless loop if the IDs never match - which should be impossible.
-        if block.height() < committed_block.height() {
-            error!(
-                target: LOG_TARGET,
-                "⚠️ Invariant error: Block height {} is less than the commit block height {} in generate_block_commit_proof ({}, commit_block={})",
-                block.height(),
-                committed_block.height(),
-                block.as_leaf(),
-                committed_block.as_leaf()
-            );
-            return Err(HotStuffError::InvariantError(format!(
-                "Block height {} is less than the commit block height {} in generate_block_commit_proof ({}, \
-                 commit_block={})",
-                block.height(),
-                committed_block.height(),
-                block.as_leaf(),
-                committed_block.as_leaf(),
-            )));
-        }
+        check_not_below_committed(&block, committed_block)?;
 
-        if block.justifies_parent() {
-            // This block justifies the parent, so we add it to the proof
+        if num_qcs < NUM_CHAIN_QCS || block.parent() == committed_block.id() {
+            if !block.justifies_parent() {
+                return Err(HotStuffError::InvariantError(format!(
+                    "Block {} does not justify its parent {} in generate_block_commit_proof (commit_qc={}, \
+                     commit_block={})",
+                    block.as_leaf(),
+                    block.parent(),
+                    commit_qc.calculate_id(),
+                    committed_block.as_leaf(),
+                )));
+            }
             debug!(target: LOG_TARGET, "⚙️ Add justify: {}", block.justify());
             let parent = block.get_parent(tx)?;
             proof_elements.push(convert_qc_to_proof_element(&parent, block.justify())?);
+            num_qcs += 1;
             block = parent;
-        } else {
-            // This block does not justify the parent. We'll add link(s) back until we find the block that is justified
-            // by the PC. NOTE: That these blocks are not necessarily dummy blocks, they simply do not propose a new
-            // proposal certificate and so are included in the proof as "chain links".
-            // Start from the parent, because the QC that justifies this block was added in the justify_parent() == true
-            // above.
-            let parent_id = *block.parent();
-            let qc = block.into_justify();
-            block = Block::get(tx, &parent_id)?;
-            let qc_block_id = qc.calculate_block_id();
-            let qc_id = qc.calculate_id();
-            let qc_height = qc.height();
-
-            // let qc_block_id = block.justify().calculate_block_id();
-            // let qc_id = block.justify().calculate_id();
-            // let qc_height = block.justify().height();
-
-            debug!(target: LOG_TARGET, "⚙️ Start chain links");
-
-            let mut chain_links = vec![];
-            // Continue going back in the chain until we find a block that is justified by the QC
-            while *block.parent() != qc_block_id && block.id() != committed_block.id() {
-                debug!(target: LOG_TARGET, "⚙️ Add chain link: {block} QC: {qc_height} {qc_block_id} {qc_id}");
-                chain_links.push(ChainLink {
-                    header_hash: block.header().calculate_hash(),
-                    parent_id: *block.parent().hash(),
-                });
-
-                block = block.get_parent(tx)?;
-                if block.height() < qc_height {
-                    return Err(HotStuffError::InvariantError(format!(
-                        "Block height is less than the height of the QC in generate_block_commit_proof \
-                         (block={block}, qc={qc_height} {qc_block_id} {qc_id})",
-                    )));
-                }
-            }
-
-            if block.id() != committed_block.id() {
-                debug!(target: LOG_TARGET, "⚙️ Add final chain link: {block} QC: {qc_height} {qc_block_id} {qc_id}");
-                chain_links.push(ChainLink {
-                    header_hash: block.header().calculate_hash(),
-                    parent_id: *block.parent().hash(),
-                });
-            }
-
-            debug!(target: LOG_TARGET, "⚙️ End of chain links ({} chain link(s))", chain_links.len());
-            proof_elements.push(CommitProofElement::ChainLinks(chain_links));
+            continue;
         }
+
+        debug!(target: LOG_TARGET, "⚙️ Start chain links");
+        let mut chain_links = vec![];
+        block = block.get_parent(tx)?;
+        while block.id() != committed_block.id() {
+            check_not_below_committed(&block, committed_block)?;
+            debug!(target: LOG_TARGET, "⚙️ Add chain link: {block}");
+            chain_links.push(ChainLink {
+                header_hash: block.header().calculate_hash(),
+                parent_id: *block.parent().hash(),
+            });
+            block = block.get_parent(tx)?;
+        }
+        debug!(target: LOG_TARGET, "⚙️ End of chain links ({} chain link(s))", chain_links.len());
+        proof_elements.push(CommitProofElement::ChainLinks(chain_links));
     }
 
     debug!(target: LOG_TARGET, "⚙️ END of commit proof generation");
@@ -167,6 +136,29 @@ pub fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
     };
 
     Ok(command_commit_proof)
+}
+
+/// Guards the walk from the commit certificate down to the committed block against a chain that never reaches it.
+fn check_not_below_committed(block: &Block, committed_block: &Block) -> Result<(), HotStuffError> {
+    if block.height() < committed_block.height() {
+        error!(
+            target: LOG_TARGET,
+            "⚠️ Invariant error: Block height {} is less than the commit block height {} in generate_block_commit_proof ({}, commit_block={})",
+            block.height(),
+            committed_block.height(),
+            block.as_leaf(),
+            committed_block.as_leaf()
+        );
+        return Err(HotStuffError::InvariantError(format!(
+            "Block height {} is less than the commit block height {} in generate_block_commit_proof ({}, \
+             commit_block={})",
+            block.height(),
+            committed_block.height(),
+            block.as_leaf(),
+            committed_block.as_leaf(),
+        )));
+    }
+    Ok(())
 }
 
 pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<SidechainBlockHeader, HotStuffError> {
@@ -276,14 +268,191 @@ mod tests {
         ShardGroup,
         crypto::create_key_pair_from_seed,
     };
+    use tari_ootle_storage::{StateStore, StateStoreWriteTransaction};
     use tari_ootle_transaction::Network;
-    use tari_sidechain::{ProposalVoteMessage, QuorumDecision, ValidatorQcSignature};
+    use tari_sidechain::{ProposalVoteMessage, QuorumDecision, ValidatorQcSignature, check_proof_elements};
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 
     use super::*;
 
     fn seed_hash(seed: u8) -> FixedHash {
         let arr = [seed; 32];
         FixedHash::new(arr)
+    }
+
+    const NETWORK: Network = Network::LocalNet;
+
+    fn shard_group() -> ShardGroup {
+        ShardGroup::all_shards(NumPreshards::P256)
+    }
+
+    fn qc_for(block: &Block) -> ProposalCertificate {
+        ProposalCertificate::new(
+            block.header().calculate_hash(),
+            *block.parent(),
+            block.height(),
+            block.epoch(),
+            shard_group(),
+            vec![],
+            QuorumDecision::Accept,
+        )
+    }
+
+    /// A signed block whose distinct `seed` keeps its id unique. `justify` is any certificate; the tests choose
+    /// whether it certifies the parent.
+    fn real_block(parent: &Block, justify: ProposalCertificate, seed: u8) -> Block {
+        Block::create(
+            NETWORK,
+            ProtocolVersion::V0,
+            *parent.id(),
+            justify,
+            None,
+            parent.height() + NodeHeight(1),
+            parent.epoch(),
+            shard_group(),
+            Default::default(),
+            Default::default(),
+            seed_hash(seed),
+            0,
+            SchnorrSignatureBytes::zero(),
+            EpochTime::now().as_u64(),
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap()
+    }
+
+    fn dummy_block(parent: &Block, justify: ProposalCertificate) -> Block {
+        let header = BlockHeader::dummy_block(
+            NETWORK,
+            ProtocolVersion::V0,
+            *parent.id(),
+            Default::default(),
+            parent.height() + NodeHeight(1),
+            justify.calculate_id(),
+            parent.epoch(),
+            shard_group(),
+            *parent.header().state_merkle_root(),
+            parent.header().timestamp(),
+            *parent.header().epoch_hash(),
+            *parent.header().accumulated_data(),
+        );
+        Block::new(header, justify, Default::default(), None)
+    }
+
+    fn store_with(chain: &[Block]) -> (RocksDbStateStore<String>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        store
+            .with_write_tx(|tx| {
+                for block in chain {
+                    block.insert(tx)?;
+                    tx.proposal_certificates_save(block.justify())?;
+                }
+                Ok::<_, tari_ootle_storage::StorageError>(())
+            })
+            .unwrap();
+        (store, dir)
+    }
+
+    /// Runs the proof through the sidechain verifier's structural checks. The certificates carry no signatures,
+    /// so a zero quorum threshold exercises everything but signature verification.
+    fn assert_verifies(proof: &SidechainBlockCommitProof) {
+        check_proof_elements(
+            &proof.header,
+            &proof.proof_elements,
+            &|_| Ok(true),
+            QuorumDecision::Accept,
+            0,
+        )
+        .unwrap();
+    }
+
+    fn qc_element_ids(proof: &SidechainBlockCommitProof) -> Vec<Vec<FixedHash>> {
+        proof
+            .proof_elements
+            .iter()
+            .map(|elem| match elem {
+                CommitProofElement::QuorumCertificate(qc) => vec![qc.calculate_justified_block()],
+                CommitProofElement::ChainLinks(links) => links.iter().map(|l| l.calc_block_id()).collect(),
+            })
+            .collect()
+    }
+
+    /// Builds the 3-chain `b <- b' <- b''` on top of `base`, each block justifying its parent, and returns the
+    /// blocks with the certificate over `b''` that commits `b`.
+    fn three_chain(base: &Block, b_justify: ProposalCertificate, seed: u8) -> (Vec<Block>, ProposalCertificate) {
+        let b = real_block(base, b_justify, seed);
+        let b1 = real_block(&b, qc_for(&b), seed + 1);
+        let b2 = real_block(&b1, qc_for(&b1), seed + 2);
+        let commit_qc = qc_for(&b2);
+        (vec![b, b1, b2], commit_qc)
+    }
+
+    #[test]
+    fn it_proves_the_3_chain_with_certificates_and_the_rest_with_links() {
+        let zero = Block::zero_block(NETWORK, NumPreshards::P256);
+        let committed = real_block(&zero, zero.justify().clone(), 1);
+        let r1 = real_block(&committed, qc_for(&committed), 2);
+        let d1 = dummy_block(&r1, qc_for(&r1));
+        let d2 = dummy_block(&d1, qc_for(&r1));
+        let (chain, commit_qc) = three_chain(&d2, qc_for(&r1), 3);
+        let [b, b1, b2] = chain.as_slice() else { unreachable!() };
+        let all = [&zero, &committed, &r1, &d1, &d2, b, b1, b2];
+        let (store, _dir) = store_with(&all.map(Clone::clone));
+
+        let proof = store
+            .with_read_tx(|tx| generate_block_commit_proof(tx, &commit_qc, &committed))
+            .unwrap();
+
+        assert_eq!(qc_element_ids(&proof), vec![
+            vec![*b2.id().hash()],
+            vec![*b1.id().hash()],
+            vec![*b.id().hash()],
+            vec![*d2.id().hash(), *d1.id().hash(), *r1.id().hash()],
+        ]);
+        assert_verifies(&proof);
+    }
+
+    #[test]
+    fn it_certifies_a_committed_block_that_is_the_direct_parent_of_the_3_chain() {
+        let zero = Block::zero_block(NETWORK, NumPreshards::P256);
+        let committed = real_block(&zero, zero.justify().clone(), 1);
+        let (chain, commit_qc) = three_chain(&committed, qc_for(&committed), 2);
+        let [b, b1, b2] = chain.as_slice() else { unreachable!() };
+        let (store, _dir) = store_with(&[&zero, &committed, b, b1, b2].map(Clone::clone));
+
+        let proof = store
+            .with_read_tx(|tx| generate_block_commit_proof(tx, &commit_qc, &committed))
+            .unwrap();
+
+        assert_eq!(qc_element_ids(&proof), vec![
+            vec![*b2.id().hash()],
+            vec![*b1.id().hash()],
+            vec![*b.id().hash()],
+            vec![*committed.id().hash()],
+        ]);
+        assert_verifies(&proof);
+    }
+
+    #[test]
+    fn it_proves_the_head_of_the_3_chain_with_exactly_three_certificates() {
+        let zero = Block::zero_block(NETWORK, NumPreshards::P256);
+        let (chain, commit_qc) = three_chain(&zero, zero.justify().clone(), 1);
+        let [b, b1, b2] = chain.as_slice() else { unreachable!() };
+        let (store, _dir) = store_with(&[&zero, b, b1, b2].map(Clone::clone));
+
+        let proof = store
+            .with_read_tx(|tx| generate_block_commit_proof(tx, &commit_qc, b))
+            .unwrap();
+
+        assert_eq!(qc_element_ids(&proof), vec![
+            vec![*b2.id().hash()],
+            vec![*b1.id().hash()],
+            vec![*b.id().hash()],
+        ]);
+        assert_verifies(&proof);
     }
 
     #[test]

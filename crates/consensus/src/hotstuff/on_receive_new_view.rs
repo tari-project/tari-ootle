@@ -20,7 +20,7 @@ use crate::{
     },
     messages::NewViewMessage,
     tracing::TraceTimer,
-    traits::{ConsensusSpec, LeaderStrategy},
+    traits::{CertificateStore, ConsensusSpec, LeaderStrategy},
     validations::check_quorum_certificate_signatures,
 };
 
@@ -86,15 +86,34 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        let is_qc_valid = self.store.with_read_tx(|tx| {
-            let local_high_qc = HighPc::get(tx, epoch_state.epoch())?;
-            // Only accept a higher QC than the local one
-            if local_high_qc.block_height > high_pc.height() {
-                return Ok(false);
-            }
+        // A NEWVIEW is addressed to the leader of the view it names. Anyone else is not going to act on it, so
+        // establish that before verifying the certificate's 2f+1 signatures, which is the expensive part of
+        // handling this message.
+        let (leader, _) = self
+            .leader_strategy
+            .get_leader(epoch_state.local_committee(), timeout_height);
 
-            if let Err(err) = self.validate_qc(&high_pc, epoch_state, self.proposal_vote_collector.signing_service()) {
-                warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
+        if *leader != self.local_validator_addr {
+            warn!(target: LOG_TARGET, "❌ NEWVIEW failed, leader is {} at {}. Our address is {}", leader, timeout_height, self.local_validator_addr);
+            return Ok(());
+        }
+
+        if let Err(err) = self.validate_qc(&high_pc, epoch_state, self.proposal_vote_collector.signing_service()) {
+            warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
+            return Ok(());
+        }
+
+        // A NEWVIEW reports the certificate its sender holds. One ahead of ours has to become ours before we
+        // propose, because a replica locked above our justify block rejects the proposal. One level with or behind
+        // ours is worth no write - every sender of a view reports the same certificate in the common case - but its
+        // timeout vote still counts towards the quorum that ends the view, so the message carries on either way.
+        let is_ahead_of_ours = self.store.with_read_tx(|tx| {
+            let local_high_pc = HighPc::get(tx, epoch_state.epoch())?;
+            // A report level with ours leaves nothing to catch up to: `update_highest` sets the leaf block, which
+            // fails when the block is missing, so the certificate we hold at that height always has its block. A
+            // different certificate at the same height is equivocation, and the branch it names is one the lock
+            // rule keeps from committing rather than one to sync onto.
+            if local_high_pc.block_height >= high_pc.height() {
                 return Ok(false);
             }
 
@@ -115,19 +134,8 @@ where TConsensusSpec: ConsensusSpec
             Ok(true)
         })?;
 
-        if !is_qc_valid {
-            return Ok(());
-        }
-
-        // Check if we are the leader for the view after new_height. We'll set our local view height to the new_height
-        // if quorum is reached and propose a block at new_height.
-        let (leader, _) = self
-            .leader_strategy
-            .get_leader(epoch_state.local_committee(), timeout_height);
-
-        if *leader != self.local_validator_addr {
-            warn!(target: LOG_TARGET, "❌ NEWVIEW failed, leader is {} at {}. Our address is {}", leader, timeout_height, self.local_validator_addr);
-            return Ok(());
+        if is_ahead_of_ours {
+            self.store.with_write_tx(|tx| high_pc.update_highest(tx))?;
         }
 
         if let Some(vote) = last_vote {

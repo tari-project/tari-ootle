@@ -60,6 +60,7 @@ mod account_template {
                     .add_method_rule("balance", rule!(allow_all))
                     .add_method_rule("get_balances", rule!(allow_all))
                     .add_method_rule("deposit", rule!(allow_all))
+                    .add_method_rule("deposit_with_auth", rule!(allow_all))
                     .add_method_rule("withdraw_approved", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
                     .default(rule!(deny_all)),

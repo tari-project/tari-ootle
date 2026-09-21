@@ -42,6 +42,7 @@ use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 use tari_ootle_common_types::{
     Epoch,
     SubstateAddress,
+    diag_event,
     layer_one_transaction::{
         LayerOnePayloadType,
         LayerOneTransactionDef,
@@ -53,6 +54,8 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, public_key_to_peer_id};
 use tari_ootle_storage::{
+    DiagnosticEventPage,
+    DiagnosticEventStore,
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -66,6 +69,8 @@ use tari_validator_node_client::types::{
     self,
     AddPeerRequest,
     AddPeerResponse,
+    ClearDiagnosticEventsRequest,
+    ClearDiagnosticEventsResponse,
     ConnectionDirection,
     FunctionDef,
     GetAllVnsRequest,
@@ -80,6 +85,8 @@ use tari_validator_node_client::types::{
     GetCommsStatsResponse,
     GetConnectionsResponse,
     GetConsensusStatusResponse,
+    GetDiagnosticEventsRequest,
+    GetDiagnosticEventsResponse,
     GetEpochManagerStatsResponse,
     GetFilteredBlocksCountRequest,
     GetIdentityResponse,
@@ -113,12 +120,16 @@ use crate::{
         ConsensusHandle,
         spec::{ValidatorNodeStateStore, ValidatorTemplateProvider},
     },
+    diagnostics::DiagnosticsHandle,
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
+
+const DEFAULT_DIAGNOSTIC_EVENT_LIMIT: usize = 100;
+const MAX_DIAGNOSTIC_EVENT_LIMIT: usize = 1000;
 
 pub struct JsonRpcHandlers {
     config: ApplicationConfig,
@@ -132,6 +143,7 @@ pub struct JsonRpcHandlers {
     consensus_constants: ConsensusConstants,
     networking: NetworkingHandle<TariMessagingSpec>,
     state_store: ValidatorNodeStateStore,
+    diagnostics: DiagnosticsHandle,
 }
 
 impl JsonRpcHandlers {
@@ -148,6 +160,7 @@ impl JsonRpcHandlers {
             layer_one_transaction_submitter: services.layer_one_transaction_submitter.clone(),
             networking: services.networking.clone(),
             state_store: services.state_store.clone(),
+            diagnostics: services.diagnostics.clone(),
         }
     }
 
@@ -752,6 +765,67 @@ impl JsonRpcHandlers {
             .collect();
 
         Ok(JsonRpcResponse::success(answer_id, GetAllVnsResponse { vns }))
+    }
+
+    pub async fn get_diagnostic_events(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let request: GetDiagnosticEventsRequest = value.parse_params()?;
+
+        let limit = request
+            .limit
+            .unwrap_or(DEFAULT_DIAGNOSTIC_EVENT_LIMIT)
+            .clamp(1, MAX_DIAGNOSTIC_EVENT_LIMIT);
+        // One event beyond the page is fetched so that "is there a next page" is answered exactly
+        // rather than inferred, at the cost of one extra row.
+        let page = DiagnosticEventPage {
+            filter: request.filter(),
+            before_id: request.before_id,
+            limit: limit.saturating_add(1),
+        };
+
+        let mut events = self
+            .state_store
+            .diagnostic_events_query(&page)
+            .map_err(internal_error(answer_id.clone()))?;
+        let bounds = self
+            .state_store
+            .diagnostic_events_bounds()
+            .map_err(internal_error(answer_id.clone()))?;
+
+        let has_more = events.len() > limit;
+        events.truncate(limit);
+        let next_cursor = has_more.then(|| events.last().map(|event| event.id)).flatten();
+
+        Ok(JsonRpcResponse::success(answer_id, GetDiagnosticEventsResponse {
+            events,
+            next_cursor,
+            bounds,
+        }))
+    }
+
+    pub async fn clear_diagnostic_events(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let request: ClearDiagnosticEventsRequest = value.parse_params()?;
+        let filter = request.filter();
+
+        let deleted = self
+            .state_store
+            .diagnostic_events_clear(&filter)
+            .map_err(internal_error(answer_id.clone()))?;
+
+        if deleted > 0 {
+            self.diagnostics.emit(
+                diag_event!(info, "diagnostics.cleared", "Cleared {deleted} diagnostic event(s)", count => deleted)
+                    .with_optional_field("min_level", filter.min_level)
+                    .with_optional_field("topic_prefix", filter.topic_prefix.as_ref())
+                    .with_optional_field("since", filter.since)
+                    .with_optional_field("until", filter.until),
+            );
+        }
+
+        Ok(JsonRpcResponse::success(answer_id, ClearDiagnosticEventsResponse {
+            deleted: deleted as u64,
+        }))
     }
 
     pub async fn get_consensus_status(&self, value: JsonRpcExtractor) -> JrpcResult {

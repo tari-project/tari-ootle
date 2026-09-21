@@ -28,7 +28,7 @@ use std::fmt::Write;
 
 use log::*;
 use tari_engine_types::limits::{ENGINE_LIMITS, WASM_LIMITS};
-use tari_ootle_template_provider::TemplateConfig;
+use tari_ootle_template_provider::{TemplateConfig, builtin_resident_bytes};
 use tari_state_store_rocksdb::DatabaseOptions;
 
 use crate::{config::ValidatorNodeConfig, p2p::services::mempool::MEM_MAX_TRANSACTIONS_DEDUP};
@@ -89,6 +89,12 @@ impl MemoryBudget {
             BudgetLine {
                 name: "Compiled template module cache",
                 bytes: templates.max_cache_size_bytes(),
+            },
+            // Builtins are held for the life of the provider rather than cached, so they sit beside
+            // the cache's cap rather than inside it.
+            BudgetLine {
+                name: "Resident builtin templates",
+                bytes: builtin_resident_bytes(),
             },
             BudgetLine {
                 name: "Mempool dedup cache",
@@ -236,6 +242,7 @@ mod tests {
 
         for (name, bytes) in [
             ("template module cache", templates.max_cache_size_bytes()),
+            ("resident builtin templates", builtin_resident_bytes()),
             (
                 "mempool dedup cache",
                 MEM_MAX_TRANSACTIONS_DEDUP as u64 * DEDUP_BYTES_PER_TRANSACTION,

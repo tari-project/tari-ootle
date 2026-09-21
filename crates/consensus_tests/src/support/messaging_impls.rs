@@ -1,6 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{fmt, sync::Arc};
+
 use tari_consensus::{
     messages::HotstuffMessage,
     traits::{InboundMessaging, InboundMessagingError, OutboundMessaging, OutboundMessagingError},
@@ -8,14 +10,36 @@ use tari_consensus::{
 use tokio::sync::mpsc;
 
 use super::epoch_manager::TestEpochManager;
-use crate::support::TestAddress;
+use crate::support::{TestAddress, TestStore};
 
-#[derive(Debug, Clone)]
+/// Runs on the sending task with the message in hand and nothing sent yet, so a test can assert on
+/// what the sender had already done by the time it sent — durable state in particular — without
+/// racing the receiving side.
+pub type SendObserver = Arc<dyn Fn(&HotstuffMessage) + Send + Sync>;
+
+/// A [`SendObserver`] shared by every validator in a test, handed the sender's address and its own
+/// state store. The builder binds the two per validator.
+pub type NetworkSendObserver = Arc<dyn Fn(&TestAddress, &TestStore, &HotstuffMessage) + Send + Sync>;
+
+#[derive(Clone)]
 pub struct TestOutboundMessaging {
     epoch_manager: TestEpochManager,
     tx_leader: mpsc::Sender<(TestAddress, HotstuffMessage)>,
     tx_broadcast: mpsc::Sender<(Vec<TestAddress>, HotstuffMessage)>,
     loopback_sender: mpsc::Sender<HotstuffMessage>,
+    observer: Option<SendObserver>,
+}
+
+impl fmt::Debug for TestOutboundMessaging {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TestOutboundMessaging")
+            .field("epoch_manager", &self.epoch_manager)
+            .field("tx_leader", &self.tx_leader)
+            .field("tx_broadcast", &self.tx_broadcast)
+            .field("loopback_sender", &self.loopback_sender)
+            .field("has_observer", &self.observer.is_some())
+            .finish()
+    }
 }
 
 impl TestOutboundMessaging {
@@ -23,6 +47,7 @@ impl TestOutboundMessaging {
         epoch_manager: TestEpochManager,
         tx_leader: mpsc::Sender<(TestAddress, HotstuffMessage)>,
         tx_broadcast: mpsc::Sender<(Vec<TestAddress>, HotstuffMessage)>,
+        observer: Option<SendObserver>,
     ) -> (Self, mpsc::Receiver<HotstuffMessage>) {
         let (loopback_sender, loopback_receiver) = mpsc::channel(100);
         (
@@ -31,9 +56,16 @@ impl TestOutboundMessaging {
                 tx_leader,
                 tx_broadcast,
                 loopback_sender,
+                observer,
             },
             loopback_receiver,
         )
+    }
+
+    fn observe(&self, message: &HotstuffMessage) {
+        if let Some(observer) = self.observer.as_ref() {
+            observer(message);
+        }
     }
 }
 
@@ -41,8 +73,10 @@ impl OutboundMessaging for TestOutboundMessaging {
     type Addr = TestAddress;
 
     async fn send_self<T: Into<HotstuffMessage> + Send>(&mut self, message: T) -> Result<(), OutboundMessagingError> {
+        let message = message.into();
+        self.observe(&message);
         self.loopback_sender
-            .send(message.into())
+            .send(message)
             .await
             .map_err(|_| OutboundMessagingError::FailedToEnqueueMessage {
                 reason: "loopback channel closed".to_string(),
@@ -54,8 +88,10 @@ impl OutboundMessaging for TestOutboundMessaging {
         to: Self::Addr,
         message: T,
     ) -> Result<(), OutboundMessagingError> {
+        let message = message.into();
+        self.observe(&message);
         self.tx_leader
-            .send((to, message.into()))
+            .send((to, message))
             .await
             .map_err(|_| OutboundMessagingError::FailedToEnqueueMessage {
                 reason: "leader channel closed".to_string(),
@@ -68,12 +104,15 @@ impl OutboundMessaging for TestOutboundMessaging {
         T: Into<HotstuffMessage> + Send,
     {
         let peers = addresses.into_iter().collect();
+        let message = message.into();
+        self.observe(&message);
 
-        self.tx_broadcast.send((peers, message.into())).await.map_err(|_| {
-            OutboundMessagingError::FailedToEnqueueMessage {
+        self.tx_broadcast
+            .send((peers, message))
+            .await
+            .map_err(|_| OutboundMessagingError::FailedToEnqueueMessage {
                 reason: "broadcast channel closed".to_string(),
-            }
-        })
+            })
     }
 
     async fn broadcast<T>(&mut self, message: T) -> Result<(), OutboundMessagingError>

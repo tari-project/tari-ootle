@@ -20,6 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::sync::Arc;
+
+use tari_ootle_common_types::diagnostics::DiagnosticSink;
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
@@ -36,9 +39,16 @@ pub fn spawn_service<TSpec: EpochManagerSpec>(
     global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
     node_public_key: RistrettoPublicKeyBytes,
     epoch_events: TSpec::EpochEventOracle,
+    diagnostics: Arc<dyn DiagnosticSink>,
     shutdown_signal: ShutdownSignal,
 ) -> (EpochManagerHandle<TSpec::Addr>, JoinHandle<anyhow::Result<()>>) {
-    let (epoch_manager_handle, join_handle) =
-        EpochManagerService::<TSpec>::spawn(config, global_db, epoch_events, node_public_key, shutdown_signal);
+    let (epoch_manager_handle, join_handle) = EpochManagerService::<TSpec>::spawn(
+        config,
+        global_db,
+        epoch_events,
+        node_public_key,
+        diagnostics,
+        shutdown_signal,
+    );
     (epoch_manager_handle, join_handle)
 }

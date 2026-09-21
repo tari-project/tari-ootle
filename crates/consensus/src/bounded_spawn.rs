@@ -16,6 +16,7 @@ pub struct TrySpawnError;
 ///
 /// Use the asynchronous spawn method to spawn a task. If a given number of tasks are already spawned and have not
 /// completed, the spawn function will block (asynchronously) until a previously spawned task completes.
+#[derive(Debug)]
 pub struct BoundedSpawn {
     // inner: runtime::Handle,
     semaphore: Arc<Semaphore>,

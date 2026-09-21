@@ -40,7 +40,7 @@ where TConsensusSpec: ConsensusSpec
     }
 
     pub async fn handle(
-        &self,
+        &mut self,
         from: TConsensusSpec::Addr,
         current_height: NodeHeight,
         epoch_state: &EpochState<TConsensusSpec::Addr>,

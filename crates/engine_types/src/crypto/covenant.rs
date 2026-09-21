@@ -12,7 +12,7 @@ use tari_template_lib::types::{
 
 use crate::crypto::{commit_amount, messages, try_decode_to_signature};
 
-const LOG_TARGET: &str = "tari::engine::crypto::covenant";
+const LOG_TARGET: &str = "tari::ootle::engine::crypto::covenant";
 
 /// Verifies a covenant sub-balance proof (TIP-0006 Option A/C): that the value committed by `input_commitments` equals
 /// the value committed by `output_commitments` plus the cleartext `revealed_amount`.

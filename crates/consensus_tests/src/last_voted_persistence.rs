@@ -14,11 +14,19 @@
 //! a full RocksDB close/reopen cycle, and that the `should_vote` decision logic (height check)
 //! comes out the way the protocol requires.
 
-use tari_consensus_types::{BlockId, LastVoted};
-use tari_ootle_common_types::{Epoch, NodeHeight};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use tari_consensus::messages::HotstuffMessage;
+use tari_consensus_types::{BlockId, Decision, LastSentVote, LastVoted};
+use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+use crate::support::{NetworkSendObserver, Test, logging::setup_logger};
 
 type TestStore = RocksDbStateStore<PeerAddress>;
 
@@ -119,4 +127,88 @@ fn safety_predicate_allows_first_vote_when_no_record_exists() {
     // With no record, the safety predicate must permit a vote at any height.
     assert!(would_vote(None, NodeHeight(0)));
     assert!(would_vote(None, NodeHeight(1_000_000)));
+}
+
+/// A vote must be on disk before anyone can see it. If the record is written only after the send,
+/// a crash in between leaves the restarted node with no memory of having voted at that height and
+/// free to vote again there for a competing block — the equivocation `LastVoted` exists to prevent.
+///
+/// The observer runs on the sending task with the message in hand and nothing sent yet, so what it
+/// reads from the store is exactly what a crash at that instant would leave behind.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_vote_is_persisted_before_it_is_sent() {
+    setup_logger();
+
+    let violations: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let observed_votes = Arc::new(Mutex::new(0usize));
+
+    let observer = {
+        let violations = violations.clone();
+        let observed_votes = observed_votes.clone();
+        Arc::new(move |address: &_, store: &_, message: &HotstuffMessage| {
+            let HotstuffMessage::Vote(msg) = message else {
+                return;
+            };
+            let vote = &msg.vote;
+            *observed_votes.lock().unwrap() += 1;
+
+            let (last_voted, last_sent_vote) = RocksDbStateStore::with_read_tx(store, |tx| {
+                Ok::<_, tari_ootle_storage::StorageError>((
+                    LastVoted::get(tx, vote.epoch).optional()?,
+                    LastSentVote::get(tx, vote.epoch).optional()?,
+                ))
+            })
+            .unwrap();
+
+            let mut violations = violations.lock().unwrap();
+            match last_voted {
+                Some(last_voted) if last_voted.height == vote.block_height => {},
+                other => violations.push(format!(
+                    "{address} sent a vote at height {} with LastVoted {:?}",
+                    vote.block_height,
+                    other.map(|lv| lv.height)
+                )),
+            }
+            match last_sent_vote {
+                Some(last_sent_vote) if last_sent_vote.vote.block_id == vote.block_id => {},
+                other => violations.push(format!(
+                    "{address} sent a vote for block {} with LastSentVote {:?}",
+                    vote.block_id,
+                    other.map(|lsv| lsv.vote.block_id)
+                )),
+            }
+        }) as NetworkSendObserver
+    };
+
+    let mut test = Test::builder()
+        .with_test_timeout(Duration::from_secs(60))
+        .with_send_observer(observer)
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .start()
+        .await;
+
+    test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        let (_, _, _, committed_height) = test.on_block_committed().await;
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        if committed_height > NodeHeight(20) {
+            panic!("Transaction was not committed after {committed_height} blocks");
+        }
+    }
+
+    test.assert_clean_shutdown().await;
+
+    let observed = *observed_votes.lock().unwrap();
+    assert!(observed > 0, "No votes were observed; the test proves nothing");
+    let violations = violations.lock().unwrap();
+    assert!(
+        violations.is_empty(),
+        "{} of {observed} votes were sent before being persisted:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
 }

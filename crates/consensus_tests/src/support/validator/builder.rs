@@ -4,6 +4,7 @@
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use serde::Serialize;
@@ -40,7 +41,7 @@ use crate::support::{
     address::TestAddress,
     epoch_manager::TestEpochManager,
     executions_store::TestExecutionSpecStore,
-    messaging_impls::{TestInboundMessaging, TestOutboundMessaging},
+    messaging_impls::{NetworkSendObserver, SendObserver, TestInboundMessaging, TestOutboundMessaging},
     signing_service::TestVoteSignatureService,
     sync::AlwaysSyncedSyncManager,
 };
@@ -59,6 +60,7 @@ pub struct ValidatorBuilder {
     pub epoch_manager: Option<TestEpochManager>,
     pub transaction_executions: TestExecutionSpecStore,
     pub config: Option<HotstuffConfig>,
+    pub send_observer: Option<NetworkSendObserver>,
 }
 
 impl ValidatorBuilder {
@@ -77,6 +79,7 @@ impl ValidatorBuilder {
             epoch_manager: None,
             transaction_executions: TestExecutionSpecStore::new(),
             config: None,
+            send_observer: None,
         }
     }
 
@@ -122,6 +125,11 @@ impl ValidatorBuilder {
         self
     }
 
+    pub fn with_send_observer(&mut self, send_observer: Option<NetworkSendObserver>) -> &mut Self {
+        self.send_observer = send_observer;
+        self
+    }
+
     pub fn with_num_committees(&mut self, num_committees: u32) -> &mut Self {
         self.num_committees = num_committees;
         self
@@ -146,10 +154,6 @@ impl ValidatorBuilder {
             self.fee_claim_public_key,
         );
 
-        let (outbound_messaging, rx_loopback) =
-            TestOutboundMessaging::create(epoch_manager.clone(), tx_leader, tx_broadcast);
-        let inbound_messaging = TestInboundMessaging::new(self.address.clone(), rx_hs_message, rx_loopback);
-
         let store = {
             let rocks_path = self
                 .rocks_override_path
@@ -158,6 +162,15 @@ impl ValidatorBuilder {
             log::info!("Rocksdb path {}", rocks_path.display());
             TestStore::open(rocks_path, DatabaseOptions::default().with_debugging_data(true)).unwrap()
         };
+
+        let observer: Option<SendObserver> = self.send_observer.clone().map(|observe| {
+            let address = self.address.clone();
+            let store = store.clone();
+            Arc::new(move |message: &_| observe(&address, &store, message)) as SendObserver
+        });
+        let (outbound_messaging, rx_loopback) =
+            TestOutboundMessaging::create(epoch_manager.clone(), tx_leader, tx_broadcast, observer);
+        let inbound_messaging = TestInboundMessaging::new(self.address.clone(), rx_hs_message, rx_loopback);
 
         // Add XTR to the store, since this is implicit for all transactions.
         let (addr, xtr) = tari_ootle_app_utilities::genesis_resources::get_stealth_tari_resource(

@@ -32,6 +32,7 @@ use tari_consensus::messages::{
     ForeignProposalNotificationMessage,
     ForeignProposalRequestMessage,
     HotstuffMessage,
+    MAX_REQUESTED_TRANSACTIONS,
     MissingTransactionsRequest,
     MissingTransactionsResponse,
     NewViewMessage,
@@ -419,6 +420,13 @@ impl TryFrom<proto::consensus::MissingTransactionsRequest> for MissingTransactio
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::MissingTransactionsRequest) -> Result<Self, Self::Error> {
+        if value.transaction_ids.len() > MAX_REQUESTED_TRANSACTIONS {
+            return Err(anyhow!(
+                "MissingTransactionsRequest asks for {} transactions, the maximum is {}",
+                value.transaction_ids.len(),
+                MAX_REQUESTED_TRANSACTIONS
+            ));
+        }
         Ok(MissingTransactionsRequest {
             request_id: value.request_id,
             epoch: Epoch(value.epoch),
@@ -1113,5 +1121,38 @@ impl TryFrom<proto::consensus::ShardGroupAccumulatedData> for ShardGroupAccumula
             (u128::from(value.total_exhaust_burn_msb) << 64) | u128::from(value.total_exhaust_burn_lsb);
 
         Ok(Self { total_exhaust_burn })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn missing_transactions_request(num_transactions: usize) -> proto::consensus::MissingTransactionsRequest {
+        proto::consensus::MissingTransactionsRequest {
+            request_id: 1,
+            epoch: 1,
+            block_id: vec![0u8; 32],
+            transaction_ids: (0..num_transactions)
+                .map(|i| {
+                    let mut id = [0u8; 32];
+                    id[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                    id.to_vec()
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_request_up_to_the_maximum_decodes() {
+        let request = MissingTransactionsRequest::try_from(missing_transactions_request(MAX_REQUESTED_TRANSACTIONS))
+            .expect("A request at the maximum is valid");
+        assert_eq!(request.transactions.len(), MAX_REQUESTED_TRANSACTIONS);
+    }
+
+    #[test]
+    fn a_request_beyond_the_maximum_does_not_decode() {
+        MissingTransactionsRequest::try_from(missing_transactions_request(MAX_REQUESTED_TRANSACTIONS + 1))
+            .expect_err("A request beyond the maximum is rejected");
     }
 }

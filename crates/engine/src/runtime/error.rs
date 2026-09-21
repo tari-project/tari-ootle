@@ -273,10 +273,14 @@ pub enum RuntimeError {
     )]
     MaxNativeExecutionPointsExceeded { consumed_points: u64, max_points: u64 },
     #[error(
-        "Component state may not contain a {kind} ({id}): buckets, proofs and address allocations live only for the \
+        "{location} may not contain a {kind} ({id}): buckets, proofs and address allocations live only for the \
          transaction that creates them"
     )]
-    TransientValueInComponentState { kind: &'static str, id: String },
+    TransientValueInSubstate {
+        location: &'static str,
+        kind: &'static str,
+        id: String,
+    },
 
     #[error("No fees paid from stealth transfer: {details}")]
     NoFeesPaid { details: String },
@@ -384,10 +388,11 @@ pub enum RuntimeError {
 }
 
 impl RuntimeError {
-    /// Names the transient value a component tried to persist. Takes the id as `impl Display` so that only the id
-    /// actually being reported is formatted.
-    pub fn transient_in_component_state(kind: &'static str, id: impl std::fmt::Display) -> Self {
-        Self::TransientValueInComponentState {
+    /// Names the transient value a substate tried to persist and the field it was found in. Takes the id as
+    /// `impl Display` so that only the id actually being reported is formatted.
+    pub fn transient_value_in_substate(location: &'static str, kind: &'static str, id: impl std::fmt::Display) -> Self {
+        Self::TransientValueInSubstate {
+            location,
             kind,
             id: id.to_string(),
         }

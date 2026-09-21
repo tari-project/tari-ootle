@@ -77,3 +77,5 @@ clients/validator_node_grpc_client/package-lock.json
 .rtk/
 
 scripts/__pycache__/
+# CocoIndex Code (ccc)
+/.cocoindex_code/

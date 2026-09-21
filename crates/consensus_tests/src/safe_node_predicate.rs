@@ -6,11 +6,11 @@
 //! These are non-malicious scenarios that a correct HotStuff implementation must handle. The
 //! safeNode predicate is defined in `Block::is_safe`
 //! (`crates/storage/src/consensus_models/block.rs`) and gates whether a proposed block is allowed
-//! to be voted on. Two rules apply:
+//! to be voted on. Both rules are read off the candidate's justify block, which the candidate must extend
+//! (see `extends_justify`):
 //!
-//! - Safety: the candidate extends the currently locked block.
-//! - Liveness: the candidate's `max_certificate_height` (max of justify and TC height) exceeds the locked block's
-//!   height.
+//! - Safety: the justify block is, or extends, the currently locked block.
+//! - Liveness: the justify block's height exceeds the locked block's height.
 //!
 //! Either rule independently makes the candidate safe. The tests below construct minimal real
 //! chains in a tempdir-backed state store and exercise both rules and the unsafe corner.
@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 
 use tari_common_types::types::FixedHash;
 use tari_consensus::traits::CertificateStore;
-use tari_consensus_types::{BlockId, LeafBlock, ProposalCertificate, ShardGroupAccumulatedData};
+use tari_consensus_types::{BlockId, LeafBlock, ProposalCertificate, ShardGroupAccumulatedData, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ProtocolVersion, ShardGroup};
 use tari_ootle_p2p::PeerAddress;
@@ -68,6 +68,16 @@ fn qc_of(target: &LeafBlock) -> ProposalCertificate {
 /// Build a real block extending `parent_id` at `height` with `justify`. `marker` is mixed into
 /// the state Merkle root so two siblings at the same height produce distinct block ids.
 fn build_block(parent_id: BlockId, justify: ProposalCertificate, height: NodeHeight, marker: u8) -> Block {
+    build_block_with_tc(parent_id, justify, height, marker, None)
+}
+
+fn build_block_with_tc(
+    parent_id: BlockId,
+    justify: ProposalCertificate,
+    height: NodeHeight,
+    marker: u8,
+    timeout_certificate: Option<TimeoutCertificate>,
+) -> Block {
     let mut state_root = [0u8; FixedHash::byte_size()];
     state_root[0] = marker;
     state_root[1] = height.as_u64() as u8;
@@ -89,7 +99,7 @@ fn build_block(parent_id: BlockId, justify: ProposalCertificate, height: NodeHei
         ExtraData::new(),
     )
     .unwrap();
-    Block::new(header, justify, BTreeSet::new(), None)
+    Block::new(header, justify, BTreeSet::new(), timeout_certificate)
 }
 
 /// Safety rule: a candidate that extends the locked block is safe even when its justify is at
@@ -114,7 +124,7 @@ fn safe_when_candidate_extends_locked_at_equal_height() {
         })
         .unwrap();
 
-    let is_safe = store.with_read_tx(|tx| candidate.is_safe(tx)).unwrap();
+    let is_safe = store.with_read_tx(|tx| candidate.is_safe(tx, &locked)).unwrap();
     assert!(
         is_safe,
         "candidate that extends the locked block must be safe (safety rule)"
@@ -151,15 +161,15 @@ fn safe_when_justify_height_exceeds_locked_even_on_sibling_chain() {
         })
         .unwrap();
 
-    let is_safe = store.with_read_tx(|tx| candidate.is_safe(tx)).unwrap();
+    let is_safe = store.with_read_tx(|tx| candidate.is_safe(tx, &b2)).unwrap();
     assert!(
         is_safe,
         "candidate with justify height > locked must be safe (liveness rule), even when forked"
     );
 }
 
-/// Unsafe: candidate forks off the locked block AND its `max_certificate_height` does not exceed
-/// locked.height. Neither rule applies, so the predicate must reject.
+/// Unsafe: candidate forks off the locked block AND its justify height does not exceed locked.height.
+/// Neither rule applies, so the predicate must reject.
 #[test]
 fn unsafe_when_neither_rule_applies() {
     let (store, _tmp) = create_store();
@@ -181,9 +191,45 @@ fn unsafe_when_neither_rule_applies() {
         })
         .unwrap();
 
-    let is_safe = store.with_read_tx(|tx| candidate.is_safe(tx)).unwrap();
+    let is_safe = store.with_read_tx(|tx| candidate.is_safe(tx, &sibling)).unwrap();
     assert!(
         !is_safe,
         "candidate that forks off locked and has no liveness signal must be unsafe"
+    );
+}
+
+/// Unsafe: a timeout certificate certifies no block. However high its height, it says only that its views
+/// produced nothing, so it cannot stand in for a justify that reaches past the locked block.
+#[test]
+fn unsafe_when_only_the_timeout_certificate_is_above_locked() {
+    let (store, _tmp) = create_store();
+    let zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+
+    // zero -> locked (height 1). Sibling chain: zero -> sibling (height 1). The candidate extends `sibling`
+    // through a timeout certificate at height 9, and justifies `sibling` at height 1 (NOT > locked.height).
+    let locked = build_block(*zero.id(), zero.justify().clone(), NodeHeight(1), 1);
+    let sibling = build_block(*zero.id(), zero.justify().clone(), NodeHeight(1), 2);
+    let candidate = build_block_with_tc(
+        *sibling.id(),
+        qc_of(&sibling.as_leaf()),
+        NodeHeight(10),
+        2,
+        Some(TimeoutCertificate::new(TEST_EPOCH, NodeHeight(9), vec![])),
+    );
+
+    store
+        .with_write_tx(|tx| {
+            locked.insert(tx)?;
+            sibling.insert(tx)?;
+            qc_of(&sibling.as_leaf()).save(tx)?;
+            locked.as_locked().set(tx)?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    let is_safe = store.with_read_tx(|tx| candidate.is_safe(tx, &sibling)).unwrap();
+    assert!(
+        !is_safe,
+        "a timeout certificate above the locked block must not satisfy the liveness rule"
     );
 }

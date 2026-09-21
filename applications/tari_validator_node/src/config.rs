@@ -23,6 +23,7 @@
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use config::Config;
@@ -33,6 +34,8 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };
+use tari_ootle_common_types::diagnostics::DiagnosticLevel;
+use tari_ootle_storage::DiagnosticRetention;
 use tari_ootle_template_provider::TemplateConfig;
 use tari_ootle_transaction::Network;
 use tari_state_store_rocksdb::DatabaseOptions;
@@ -158,6 +161,9 @@ pub struct ValidatorNodeConfig {
     /// single line in the node's memory budget, which is logged at startup.
     #[serde(default = "default_state_store_memory_budget_bytes")]
     pub state_store_memory_budget_bytes: usize,
+    /// Local diagnostic event log
+    #[serde(default)]
+    pub diagnostics: DiagnosticsConfig,
 }
 
 fn default_max_transaction_gossip_queue_bytes() -> usize {
@@ -174,6 +180,56 @@ fn default_max_consensus_messaging_queue_bytes() -> usize {
 
 fn default_state_store_memory_budget_bytes() -> usize {
     tari_state_store_rocksdb::DEFAULT_MEMORY_BUDGET_BYTES
+}
+
+/// The validator's local record of abnormal events (leader failures, consensus errors, sync and
+/// state machine transitions, crashes). Read and cleared over JSON-RPC and shown in the web UI.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Maximum number of events retained. The oldest are dropped first.
+    #[serde(default = "default_diagnostics_max_events")]
+    pub max_events: usize,
+    /// Maximum age of a retained event, in seconds.
+    #[serde(default = "default_diagnostics_max_age_secs")]
+    pub max_age_secs: u64,
+    /// Events below this level are never recorded.
+    #[serde(default)]
+    pub min_level: DiagnosticLevel,
+}
+
+impl DiagnosticsConfig {
+    pub fn retention(&self) -> DiagnosticRetention {
+        DiagnosticRetention {
+            max_events: self.max_events,
+            max_age: Duration::from_secs(self.max_age_secs),
+        }
+    }
+}
+
+impl Default for DiagnosticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_events: default_diagnostics_max_events(),
+            max_age_secs: default_diagnostics_max_age_secs(),
+            min_level: DiagnosticLevel::Info,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_diagnostics_max_events() -> usize {
+    10_000
+}
+
+fn default_diagnostics_max_age_secs() -> u64 {
+    7 * 24 * 60 * 60
 }
 
 impl ValidatorNodeConfig {
@@ -263,6 +319,7 @@ impl Default for ValidatorNodeConfig {
             max_consensus_gossip_queue_bytes: default_max_consensus_gossip_queue_bytes(),
             max_consensus_messaging_queue_bytes: default_max_consensus_messaging_queue_bytes(),
             state_store_memory_budget_bytes: default_state_store_memory_budget_bytes(),
+            diagnostics: DiagnosticsConfig::default(),
         }
     }
 }

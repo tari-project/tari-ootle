@@ -91,7 +91,7 @@ use crate::{
     state_store::StateReader,
 };
 
-const LOG_TARGET: &str = "dan::engine::runtime::working_state";
+const LOG_TARGET: &str = "tari::ootle::engine::runtime::working_state";
 
 /// The view of a transaction's state that a runtime module is given when charging for it.
 ///
@@ -239,7 +239,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     fn enforce_substate_size_limit(id: &SubstateId, value: &SubstateValue) -> Result<(), RuntimeError> {
-        // Published template has its own size restriction
+        // A published template carries its own bound, `max_template_binary_size_bytes`, applied at ingress and again
+        // in `TransactionProcessor::publish_template` and sized by what compiling the binary costs.
         if value.published_template().is_some() {
             return Ok(());
         }
@@ -976,6 +977,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
                     if self.substate_exists(&addr)? {
                         return Err(RuntimeError::DuplicateNonFungibleId { token_id });
                     } else {
+                        reject_transient_values_in("Non-fungible data", &data)?;
+                        reject_transient_values_in("Non-fungible mutable data", &mut_data)?;
                         token_ids.insert(token_id);
                         self.new_substate(addr.clone(), NonFungibleContainer::new(data, mut_data))?;
                     }
@@ -1362,32 +1365,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
             }
         }
 
-        // A bucket, proof or address allocation is a capability the transaction holds, named by a counter that
-        // restarts at zero every transaction. Persisting one stores an id that can only ever alias an unrelated
-        // object of a later transaction — and component state is handed to a resource auth hook as an argument,
-        // where an id in it is read as a capability the hook was lent.
-        //
-        // `validate_finalized` rejects one of these left live at the end of a transaction, which covers the
-        // careless cases. It cannot see an id whose object is gone or empty by then: a proof dropped from the
-        // workspace, or a bucket emptied into another. Those are what this check carries.
-        if let Some(id) = next_state.bucket_ids().first() {
-            return Err(RuntimeError::transient_in_component_state("bucket", id));
-        }
-        if let Some(id) = next_state.proof_ids().first() {
-            return Err(RuntimeError::transient_in_component_state("proof", id));
-        }
-        if let Some(alloc) = next_state.component_address_allocations().first() {
-            return Err(RuntimeError::transient_in_component_state(
-                "component address allocation",
-                alloc.id(),
-            ));
-        }
-        if let Some(alloc) = next_state.resource_address_allocations().first() {
-            return Err(RuntimeError::transient_in_component_state(
-                "resource address allocation",
-                alloc.id(),
-            ));
-        }
+        // Component state is handed to a resource auth hook as an argument, where a transient id in it is read as a
+        // capability the hook was lent.
+        reject_transient_values("Component state", next_state)?;
 
         // Check that no vaults are duplicated
         let mut dup_check = HashSet::with_capacity(next_state.vault_ids().len());
@@ -2310,6 +2290,45 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
         Ok(Some(container))
     }
+}
+
+/// A bucket, proof or address allocation is a capability the transaction holds, named by a counter that restarts at
+/// zero every transaction. Persisting one stores an id that can only ever alias an unrelated object of a later
+/// transaction, so no substate may carry one.
+///
+/// `validate_finalized` rejects one of these left live at the end of a transaction, which covers the careless cases.
+/// It cannot see an id whose object is gone or empty by then: a proof dropped from the workspace, or a bucket emptied
+/// into another. Those are what this check carries.
+///
+/// `location` names the field for the error message.
+pub fn reject_transient_values(location: &'static str, indexed: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
+    if let Some(id) = indexed.bucket_ids().first() {
+        return Err(RuntimeError::transient_value_in_substate(location, "bucket", id));
+    }
+    if let Some(id) = indexed.proof_ids().first() {
+        return Err(RuntimeError::transient_value_in_substate(location, "proof", id));
+    }
+    if let Some(alloc) = indexed.component_address_allocations().first() {
+        return Err(RuntimeError::transient_value_in_substate(
+            location,
+            "component address allocation",
+            alloc.id(),
+        ));
+    }
+    if let Some(alloc) = indexed.resource_address_allocations().first() {
+        return Err(RuntimeError::transient_value_in_substate(
+            location,
+            "resource address allocation",
+            alloc.id(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// [`reject_transient_values`] for a raw CBOR value that has not been indexed yet.
+pub fn reject_transient_values_in(location: &'static str, value: &tari_bor::Value) -> Result<(), RuntimeError> {
+    reject_transient_values(location, &IndexedWellKnownTypes::from_value(value)?)
 }
 
 /// The share of `paid` that is burned at `rate`: `⌊paid × rate / 10_000⌋`. Never exceeds `paid`

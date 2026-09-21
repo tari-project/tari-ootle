@@ -81,6 +81,16 @@ disclosure at the bottom or omit it on short replies.
 Use `cargo  +nightly-2025-12-05 fmt --all` to format all code with the specified nightly version before pushing commits
 involving rust code.
 
+### Releases
+
+Release procedures live in `checklists/` — [`release.md`](checklists/release.md) (every release),
+[`release-breaking.md`](checklists/release-breaking.md) (consensus/engine/ABI/SDK breaks) and
+[`hotfix.md`](checklists/hotfix.md) (a fix on a tagged version). Follow them item by item rather
+than reconstructing the steps.
+
+Two scripts back them: `scripts/release_check.py` is the pre-tag gate (must print `READY TO TAG`)
+and `scripts/release_status.py` is the post-tag dashboard (`--watch` until the draft is complete).
+
 ### Publishing & Crate Versioning
 
 Two scripts in `scripts/` cover publishing to crates.io and reasoning about version bumps. Use them — don't hand-walk

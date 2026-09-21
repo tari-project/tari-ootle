@@ -606,15 +606,16 @@ impl ProcessManager {
         account_name: String,
         out_path: PathBuf,
     ) -> anyhow::Result<PathBuf> {
-        let wallet = self
+        let wallet_daemon = self
             .instance_manager
-            .get_wallet_daemon_mut(wallet_instance_id)
+            .get_wallet_daemon(wallet_instance_id)
             .ok_or_else(|| {
                 anyhow!(
-                    "No wallet daemon instances {wallet_instance_id} found. Please start a wallet before burning funds"
+                    "Instance {wallet_instance_id} is not a wallet daemon. Please start a wallet daemon before \
+                     burning funds"
                 )
             })?;
-        let account = wallet.get_account_by_name(account_name).await?;
+        let account = wallet_daemon.get_account_by_name(account_name).await?;
         let wallet = self
             .instance_manager
             .minotari_wallets()

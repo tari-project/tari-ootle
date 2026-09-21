@@ -323,6 +323,12 @@ pub struct EngineLimits {
     /// (up to [`EngineLimits::max_substate_outputs`] entries) and fee breakdown.
     pub max_event_size_bytes: usize,
     pub max_panic_message_size: usize,
+    /// Largest WASM binary a `PublishTemplate` instruction may carry.
+    ///
+    /// This is a policy rule about what may be published, applied by `PublishTemplateLimitValidator` at mempool
+    /// ingress and block validation and again by the engine at execution. It is free to move within
+    /// [`crate::published_template::MAX_TEMPLATE_BLOB_WIRE_BYTES`], which is what the substate format can carry and
+    /// therefore what an already-published template needs to stay readable.
     pub max_template_binary_size_bytes: usize,
     pub max_template_name_length: usize,
     pub max_call_depth: usize,

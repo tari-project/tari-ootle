@@ -426,9 +426,10 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                 Err(err) => {
                     let error = err.ok_lock_failed()?;
                     match error {
-                        err @ LockFailedError::SubstateIsUp { .. } | err @ LockFailedError::SubstateNotFound { .. } => {
-                            // If the substate does not exist or is not UP (unversioned: previously DOWNed and never
-                            // UPed), the transaction is invalid
+                        err @ LockFailedError::SubstateExists { .. } |
+                        err @ LockFailedError::SubstateNotFound { .. } => {
+                            // An input with no live version, or an output claiming a version that already exists,
+                            // is invalid at every height - no later block can make either succeed
                             let index = lock_status.add_failed(err);
                             lock_status.hard_conflict_idx = Some(index);
                         },
@@ -469,17 +470,16 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
 
         let Some(existing) = self.get_latest_lock_by_id(&self.parent_block, versioned_substate_id.substate_id())?
         else {
-            if requested_lock_type.is_output() {
-                self.lock_assert_not_exist(versioned_substate_id)?;
-            } else {
+            if requested_lock_type.is_input() {
                 self.lock_assert_is_up(versioned_substate_id)?;
             }
 
-            let version = versioned_substate_id.version();
-            self.add_new_lock(
-                versioned_substate_id.substate_id().clone(),
-                SubstateLock::new(transaction_id, version, requested_lock_type, is_local_only),
-            );
+            self.grant_lock(
+                transaction_id,
+                versioned_substate_id,
+                requested_lock_type,
+                is_local_only,
+            )?;
             return Ok(());
         };
 
@@ -578,11 +578,12 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                     .into());
                 }
 
-                let version = versioned_substate_id.version();
-                self.add_new_lock(
-                    versioned_substate_id.substate_id().clone(),
-                    SubstateLock::new(transaction_id, version, requested_lock_type, is_local_only),
-                );
+                self.grant_lock(
+                    transaction_id,
+                    versioned_substate_id,
+                    requested_lock_type,
+                    is_local_only,
+                )?;
             },
 
             // If a substate is already locked as WRITE:
@@ -636,11 +637,12 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                     .into());
                 }
 
-                let version = versioned_substate_id.version();
-                self.add_new_lock(
-                    versioned_substate_id.substate_id().clone(),
-                    SubstateLock::new(transaction_id, version, SubstateLockType::Output, is_local_only),
-                );
+                self.grant_lock(
+                    transaction_id,
+                    versioned_substate_id,
+                    SubstateLockType::Output,
+                    is_local_only,
+                )?;
             },
             // If a substate is already locked as OUTPUT:
             // - it MUST NOT be locked as READ, WRITE or OUTPUT, unless
@@ -693,17 +695,13 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                     .into());
                 }
 
-                let version = versioned_substate_id.version();
-                self.add_new_lock(
-                    versioned_substate_id.substate_id().clone(),
-                    SubstateLock::new(
-                        transaction_id,
-                        version,
-                        // WRITE or READ
-                        requested_lock_type,
-                        is_local_only,
-                    ),
-                );
+                // WRITE or READ
+                self.grant_lock(
+                    transaction_id,
+                    versioned_substate_id,
+                    requested_lock_type,
+                    is_local_only,
+                )?;
             },
         }
 
@@ -738,6 +736,29 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             .substate_locks_get_latest_for_substate(block, id)
             .optional()?;
         Ok(maybe_lock.map(Cow::Owned))
+    }
+
+    /// Grants `lock_type` over `id` to `transaction_id`.
+    ///
+    /// An OUTPUT lock claims a version that the transaction will create, so it is only valid while that version does
+    /// not exist. A lock already held over the substate says nothing about the requested version, so the assertion
+    /// must run wherever an OUTPUT lock is granted.
+    fn grant_lock(
+        &mut self,
+        transaction_id: TransactionId,
+        id: VersionedSubstateIdRef<'_>,
+        lock_type: SubstateLockType,
+        is_local_only: bool,
+    ) -> Result<(), SubstateStoreError> {
+        if lock_type.is_output() {
+            self.lock_assert_not_exist(id)?;
+        }
+
+        self.add_new_lock(
+            id.substate_id().clone(),
+            SubstateLock::new(transaction_id, id.version(), lock_type, is_local_only),
+        );
+        Ok(())
     }
 
     fn add_new_lock(&mut self, substate_id: SubstateId, lock: SubstateLock) {
@@ -832,32 +853,22 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         Ok(())
     }
 
+    /// Asserts that the exact version `id` names has never existed in this chain.
+    ///
+    /// A change recorded against a versioned substate address - UP or DOWN - is proof that the version was created,
+    /// and `SubstateRecord`s outlive their destruction, so existence, not liveness, is the test. The three sources are
+    /// checked cheapest first: the in-memory diff, then a point lookup, then the branch scan.
     fn lock_assert_not_exist(&self, id: VersionedSubstateIdRef<'_>) -> Result<(), SubstateStoreError> {
-        if let Some(change) = self.get_pending(&id.to_substate_address()) {
-            if change.is_up() {
-                return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
-                    id: id.to_owned(),
-                }));
-            }
-            return Ok(());
-        }
-
-        if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
-                .optional()?
-        {
-            if change.is_up() {
-                return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
-                    id: id.to_owned(),
-                }));
-            }
-            return Ok(());
+        if self.get_pending(&id.to_substate_address()).is_some() {
+            return Err(LockFailedError::SubstateExists { id: id.to_owned() }.into());
         }
 
         if SubstateRecord::exists(self.read_transaction(), id)? {
-            return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
-                id: id.to_owned(),
-            }));
+            return Err(LockFailedError::SubstateExists { id: id.to_owned() }.into());
+        }
+
+        if BlockDiff::contains_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)? {
+            return Err(LockFailedError::SubstateExists { id: id.to_owned() }.into());
         }
 
         Ok(())
@@ -971,6 +982,13 @@ impl LockStatus {
 
     pub fn is_hard_conflict(&self) -> bool {
         self.hard_conflict_idx.is_some()
+    }
+
+    /// Returns true if locking failed only in ways that may succeed once the conflicting locks are released, i.e. the
+    /// transaction is deferred to a later block rather than aborted. An honest proposer never sequences such a
+    /// transaction, so a replica must not vote for a block that does.
+    pub fn is_deferrable_conflict(&self) -> bool {
+        self.is_any_failed() && !self.is_hard_conflict()
     }
 }
 

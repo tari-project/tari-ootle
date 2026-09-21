@@ -658,7 +658,8 @@ where
         runtime.interface_mut().charge_template_compile(binary.len() as u64)?;
 
         let template_def = WasmModule::compile_prevalidated(binary, shape)?;
-        // The size cap above is enforced; constructing TemplateBlob is therefore infallible.
+        // The size cap above holds the binary within `MAX_TEMPLATE_BLOB_WIRE_BYTES` — a const assertion keeps the two
+        // ordered — so constructing TemplateBlob is infallible.
         let blob = TemplateBlob::new_checked(binary).expect("template binary size verified above");
         runtime
             .interface_mut()

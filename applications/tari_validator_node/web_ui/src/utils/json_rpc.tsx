@@ -53,10 +53,15 @@ import type {
   ListBlocksResponse,
   VNSubmitTransactionRequest,
   VNSubmitTransactionResponse,
+  GetDiagnosticEventsRequest,
+  GetDiagnosticEventsResponse,
+  ClearDiagnosticEventsRequest,
+  ClearDiagnosticEventsResponse,
 } from "@tari-project/ootle-ts-bindings";
 
-
-const DEFAULT_ADDRESS = new URL(import.meta.env.VITE_JRPC_ADDRESS || import.meta.env.VITE_JSON_RPC_ADDRESS || "http://localhost:18200");
+const DEFAULT_ADDRESS = new URL(
+  import.meta.env.VITE_JRPC_ADDRESS || import.meta.env.VITE_JSON_RPC_ADDRESS || "http://localhost:18200",
+);
 
 export async function getClientAddress(): Promise<URL> {
   try {
@@ -122,6 +127,12 @@ export const getTemplate = (request: GetTemplateRequest): Promise<GetTemplateRes
 
 // Validator Node
 export const getIdentity = (): Promise<VNGetIdentityResponse> => jsonRpc("get_identity");
+
+// Diagnostics
+export const getDiagnosticEvents = (request: GetDiagnosticEventsRequest): Promise<GetDiagnosticEventsResponse> =>
+  jsonRpc("get_diagnostic_events", request);
+export const clearDiagnosticEvents = (request: ClearDiagnosticEventsRequest): Promise<ClearDiagnosticEventsResponse> =>
+  jsonRpc("clear_diagnostic_events", request);
 
 export const getMempoolStats = (): Promise<GetMempoolStatsResponse> => jsonRpc("get_mempool_stats");
 export const getEpochManagerStats = (): Promise<GetEpochManagerStatsResponse> => jsonRpc("get_epoch_manager_stats");

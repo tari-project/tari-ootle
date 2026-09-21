@@ -156,6 +156,7 @@ fn handle_panic(panic_info: &panic::PanicHookInfo) {
     };
 
     error!(target: LOG_TARGET, "Panic occurred at {location}: {message}");
+    tari_validator_node::diagnostics::record_panic(&location, message);
 
     if let Err(err) = OpenOptions::new()
         .append(true)

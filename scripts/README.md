@@ -1,8 +1,12 @@
 # `scripts/` — release & versioning playbook
 
 This directory is the source of truth for **publishing crates to crates.io** and
-**reasoning about version bumps** across the workspace. The two scripts share
-state (the crate list lives in `publish_crates.py`) so neither drifts.
+**reasoning about version bumps** across the workspace. The scripts share state
+(the crate list lives in `publish_crates.py`) so none of them drifts.
+
+The procedures that use them — cutting a release, a breaking release, a hotfix —
+live in [`checklists/`](../checklists/README.md). Start there when you are
+releasing; start here when you are reasoning about a version.
 
 If you are an AI agent: prefer running these scripts over hand-editing
 `Cargo.toml`s. The output is deterministic and accounts for the workspace
@@ -10,7 +14,7 @@ versioning rules below.
 
 ---
 
-## TL;DR — the two scripts
+## TL;DR — the scripts
 
 ```sh
 # What's in the publish set, in publish order, with current versions + tiers,
@@ -29,6 +33,12 @@ versioning rules below.
 ./scripts/publish_crates.py --dry-run        # cargo publish --dry-run each crate
 ./scripts/publish_crates.py --execute        # actually publish
 ./scripts/publish_crates.py --from <crate> --execute   # resume after a failure
+
+# Is this tree safe to tag? (bumps, pins, changelog, npm, publish order)
+./scripts/release_check.py
+
+# After the tag: draft assets, workflow runs, npm, crates.io, downstream SDKs
+./scripts/release_status.py --watch
 ```
 
 ---
@@ -275,3 +285,48 @@ this bump break that pin — has its own tests. No network, no cargo, no pytest:
 ```sh
 python3 scripts/test_crate_versioning.py
 ```
+
+
+---
+
+## `release_check.py` — the pre-tag gate
+
+One question: *is this tree safe to tag?* Everything a tag sets off is
+irreversible, so every check that can run before the tag runs here — a clean tree
+on a release branch and in sync, a tag that is still free, a changelog entry, a
+version bump for every crate and npm package that changed since the last release,
+a topological publish order, and pins that all resolve. It flags a touched
+protocol activation schedule, because an epoch inherited from the previous
+release activates in the past or never.
+
+```sh
+./scripts/release_check.py [--since <tag>] [--offline] [--package]
+```
+
+It must print `READY TO TAG`. Blockers exit 1; warnings never fail the run — they
+are the things only a human can settle.
+
+**Why not `cargo publish --dry-run`?** A dry run resolves every dependency against
+the registry, so any crate in this release whose new version has not been
+published *yet* cannot resolve, and the dry run fails for a reason that says
+nothing about the real publish. `release_check.py`'s publish preflight resolves
+pins against crates.io **plus** what this release will publish, which is the
+question actually being asked. `--package` additionally runs `cargo package` for
+the crates that genuinely can be packaged now (those with no pending dependency).
+
+## `release_status.py` — the post-tag dashboard
+
+A `v*` tag fans out into six independent pipelines and none of them knows about
+the others, so this gathers all of it into one screen: the draft's assets against
+the build matrices (required vs `best_effort` legs), the tag's workflow runs, the
+npm packages, the crates.io publish set, and what each downstream SDK — ootle-go,
+ootle.ts, ootle-py — currently carries.
+
+```sh
+./scripts/release_status.py [<tag>] [--watch]
+```
+
+It refuses to say "safe to publish" while a required artifact is missing.
+Publishing the draft is the public moment: the developer docs render the wallet
+downloads of the newest *non-draft* release, and a failed `best_effort` build leg
+does not fail the tag run.

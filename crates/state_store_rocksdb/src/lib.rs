@@ -23,6 +23,7 @@
 pub mod cf_api;
 pub mod codecs;
 pub mod column_families;
+mod diagnostics;
 pub mod error;
 pub mod reader;
 mod store;

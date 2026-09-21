@@ -7,6 +7,7 @@ pub mod borsh;
 mod bytes;
 pub mod committee;
 pub mod crypto;
+pub mod diagnostics;
 pub mod displayable;
 mod engine_signature;
 mod era;

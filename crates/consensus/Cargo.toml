@@ -32,4 +32,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true, default-features = false, features = ["sync", "time", "macros", "rt"] }
 
 [dev-dependencies]
+tari_state_store_rocksdb = { workspace = true }
+tempfile = { workspace = true }
 time = { workspace = true }

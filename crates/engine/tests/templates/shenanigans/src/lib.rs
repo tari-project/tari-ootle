@@ -98,6 +98,39 @@ mod template {
             }
         }
 
+        /// Mints an NFT whose immutable data carries the caller's proof id. The proof is the caller's, so this frame
+        /// does not owe it and the dangling-proof check at pop has nothing to say about it.
+        pub fn mint_nft_with_proof_in_data(proof: Proof) -> Component<Self> {
+            Self::mint_nft_and_keep(|manager, id| manager.mint_non_fungible(id, &proof, &()))
+        }
+
+        /// As above, but the proof id goes in the mutable data the mint writes.
+        pub fn mint_nft_with_proof_in_mutable_data(proof: Proof) -> Component<Self> {
+            Self::mint_nft_and_keep(|manager, id| manager.mint_non_fungible(id, &(), &proof))
+        }
+
+        /// Mints a clean NFT and then overwrites its mutable data with the caller's proof id.
+        pub fn update_nft_mutable_data_with_proof(proof: Proof) -> Component<Self> {
+            Self::mint_nft_and_keep(|manager, id| {
+                let bucket = manager.mint_non_fungible(id.clone(), &(), &());
+                manager.update_non_fungible_data(id, &proof);
+                bucket
+            })
+        }
+
+        /// Mints a single token on a fresh non-fungible resource and keeps it in a vault, so that the token is not
+        /// left dangling and the run reaches finalize.
+        fn mint_nft_and_keep(mint: impl FnOnce(ResourceManager, NonFungibleId) -> Bucket) -> Component<Self> {
+            let resource_address = ResourceBuilder::non_fungible().mintable(rule!(allow_all), OWNER).build();
+            let bucket = mint(ResourceManager::get(resource_address), NonFungibleId::from_u32(1));
+            Component::new(Self {
+                vault: Some(Vault::from_bucket(bucket)),
+                ..Default::default()
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
         pub fn ref_stolen_vault(vault_id: VaultId) -> Self {
             Self {
                 vault_ref: Some(vault_id.into()),

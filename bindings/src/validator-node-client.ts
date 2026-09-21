@@ -1,6 +1,10 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+export * from "./types/validator-node-client/ClearDiagnosticEventsRequest";
+export * from "./types/validator-node-client/ClearDiagnosticEventsResponse";
+export * from "./types/validator-node-client/GetDiagnosticEventsRequest";
+export * from "./types/validator-node-client/GetDiagnosticEventsResponse";
 export * from "./types/validator-node-client/ValidatorNodeChange";
 export * from "./types/validator-node-client/VNSubmitTransactionRequest";
 export * from "./types/validator-node-client/GetFilteredBlocksCountRequest";

@@ -31,10 +31,11 @@ pub fn build_dry_run_template_provider(
     handle: Handle,
     substate_manager: SubstateManager,
     wasm_cache: WasmModuleCache,
+    config: &TemplateConfig,
 ) -> DryRunTemplateProvider {
     let network = NetworkTemplateProvider::new(handle, substate_manager);
     let disk_cached = DiskCachedWasmTemplateProvider::new(network, wasm_cache);
-    MemoryCacheTemplateProvider::new(disk_cached, &TemplateConfig::default())
+    MemoryCacheTemplateProvider::new(disk_cached, config)
 }
 
 /// Resolves a published template by fetching its substate from the network on demand.

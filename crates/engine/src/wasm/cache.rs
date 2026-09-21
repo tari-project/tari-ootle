@@ -781,6 +781,13 @@ impl<TStore> DiskCachedWasmTemplateProvider<TStore> {
     }
 }
 
+/// Both lookups below answer from a cache hit without asking `inner`, which is sound only while
+/// every artifact in the cache came from a successful `inner.get_template` — so the template's
+/// substate existed when it was written, and templates are immutable and never destroyed. A writer
+/// that puts an artifact into this cache from anywhere else breaks that: `call_function` resolves a
+/// template through the provider and nothing else, so a node holding an artifact for a substate that
+/// does not exist would execute a call every other node aborts. Any such writer owes this path an
+/// existence check against `inner` first.
 impl<TStore> TemplateProvider for DiskCachedWasmTemplateProvider<TStore>
 where TStore: TemplateProvider<Template = PublishedTemplate> + Clone + 'static
 {

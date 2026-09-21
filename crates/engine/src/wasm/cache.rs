@@ -808,8 +808,12 @@ impl<TStore> DiskCachedWasmTemplateProvider<TStore> {
 ///
 /// Each writer establishes that for itself, and there are two. This provider stores only what
 /// `inner.get_template` has just served. The indexer's `TemplateManager` shares the same
-/// `WasmModuleCache` and stores from its own `templates` table, whose rows reach `Active` only
-/// through `add_and_load_template` after the template's substate was fetched.
+/// `WasmModuleCache` and stores from its own `templates` table, where the rows that reach it are
+/// written by `add_and_load_template` after the template's substate was fetched. Its builtin rows are
+/// `Active` as well and stay out of the directory: `load_template_with_cache` answers a builtin from
+/// its own precache, and this provider resolves builtin addresses without consulting the cache at
+/// all — their addresses are constants rather than hashes of their binaries, so an artifact filed
+/// under one would outlive the binary it came from.
 ///
 /// A third writer owes this path the same guarantee. `call_function` resolves a template through the
 /// provider and nothing else, so a node serving an artifact for a substate that does not exist

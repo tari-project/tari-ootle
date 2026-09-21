@@ -285,8 +285,10 @@ pub struct WasmModuleCache {
 /// execution that compiled it, so a full queue is the last owner of this many artifacts, which this
 /// module's own docs put at hundreds of KiB to tens of MiB each. The queue's job is to decouple a
 /// caller from one slow write rather than to hold a cache's worth of compiled code, so it is sized
-/// for the first. A dropped artifact costs a recompile the next time its template is wanted cold.
-const WRITE_QUEUE_CAPACITY: usize = 8;
+/// for the first: a backlog only forms from compiles running at once, since every store follows a
+/// compile that costs more than the write does, and this sits above the number of those a node has
+/// cores for. A dropped artifact costs a recompile the next time its template is wanted cold.
+const WRITE_QUEUE_CAPACITY: usize = 16;
 
 /// A request to the writer thread.
 enum WriteRequest {

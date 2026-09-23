@@ -6,6 +6,7 @@ description: Step-by-step guide to moving funds from the Minotari base layer to 
 import { Image } from "astro:assets";
 import { Aside, Steps } from "@astrojs/starlight/components";
 
+import img_flow from "../../../assets/burn-claim-flow.svg";
 import img_burn from "../../../assets/minotari-console-wallet-burn.png";
 import img_public_key from "../../../assets/wallet-account-public-key.png";
 import img_claim_dialog from "../../../assets/wallet-claim-burn-dialog.png";
@@ -22,15 +23,9 @@ For how a claim is verified on-chain, see [Claim Burn](/guides/claim-burn/).
 
 ## How it works
 
-```
-   minotari_console_wallet
-            │  burn to your account public key
-            ▼
-   Minotari L1 ── confirmed ──▶ burn proof file
-                                     │  auto-claim
-                                     ▼
-                              tari_ootle_walletd ──▶ TARI in your account
-```
+<div style="background:#fff;border-radius:0.5rem;max-width:420px;margin-inline:auto;padding:0.5rem;">
+  <Image src={img_flow} alt="Burn and claim flow: minotari_console_wallet burns to your account public key on Minotari L1; once confirmed a burn proof file is written, which tari_ootle_walletd auto-claims into TARI in your account" />
+</div>
 
 1. `minotari_console_wallet` burns Minotari to your Ootle account's **public key**.
 2. Once the burn is confirmed, it writes a **burn proof** JSON file to a shared directory.

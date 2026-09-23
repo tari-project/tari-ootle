@@ -78,6 +78,11 @@ For how a claim is verified on-chain, see [How Burn Claims Work](/guides/claim-b
 
    Press <kbd>Enter</kbd> to move to the next field.
 
+   <Aside type="danger" title="A wrong key burns your funds for good">
+     Check both keys before sending. A burn is final: if the claim public key is not your Ootle account's, or the
+     sidechain key is not empty, nobody can claim the burn and the Minotari is lost.
+   </Aside>
+
 4. **Send.** Press <kbd>S</kbd>, then <kbd>y</kbd> to confirm.
 
 5. **Wait for the claim.**
@@ -247,5 +252,5 @@ Try again later.
 | No proof file appears                          | The burn is not confirmed yet. Check the Burn tab in `minotari_console_wallet`.    |
 | Proof file exists, daemon ignores it           | Different directory or network. Compare the paths above.             |
 | Claim rejected: `not yet claimable`            | Wait. The daemon retries on its own.                                 |
-| Claim rejected: ownership proof fails          | Wrong claim key or a sidechain key was set. The burn cannot be claimed into this account. |
+| Claim rejected: ownership proof fails          | Wrong claim key or a sidechain key was set. The burn cannot be claimed and the funds are lost. |
 | gRPC `connection refused`                      | gRPC not enabled, or wrong port for the network.                     |

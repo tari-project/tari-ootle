@@ -21,7 +21,13 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
-use tari_template_lib_types::{ComponentAddress, TemplateAddress, access_rules::ComponentAccessRules, bytes::Bytes};
+use tari_template_lib_types::{
+    ComponentAddress,
+    SubstateOwnerRule,
+    TemplateAddress,
+    access_rules::ComponentAccessRules,
+    bytes::Bytes,
+};
 
 use crate::{
     args::{CallAction, CallInvokeArg, CallMethodArg, ComponentAction, ComponentInvokeArg, ComponentRef, InvokeResult},
@@ -111,6 +117,20 @@ impl ComponentManager {
             component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::SetAccessRules,
             args: invoke_args![access_rules],
+        });
+    }
+
+    /// Replaces the rule that determines who owns the component. The owner may call every method and change the
+    /// access rules and the owner rule. It will panic if the caller does not satisfy the current owner rule.
+    ///
+    /// The new rule may name anyone, so this hands ownership to someone else. Setting
+    /// `SubstateOwnerRule::None` is final: no caller satisfies it, so neither the owner rule nor the access rules
+    /// can change again.
+    pub fn set_owner_rule(&self, owner_rule: SubstateOwnerRule) {
+        call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
+            component_ref: ComponentRef::Ref(self.0),
+            action: ComponentAction::SetOwnerRule,
+            args: invoke_args![owner_rule],
         });
     }
 

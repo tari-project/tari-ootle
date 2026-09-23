@@ -1451,6 +1451,63 @@ where
 
                 Ok(InvokeResult::unit())
             },
+            ComponentAction::SetOwnerRule => {
+                let component_address =
+                    component_ref
+                        .as_component_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "component_ref",
+                            reason: "SetOwnerRule component action requires a component address".to_string(),
+                        })?;
+
+                let owner_rule: SubstateOwnerRule = args.assert_one_arg()?;
+
+                // A component owner rule is only ever evaluated with the component's own frame on top, so
+                // `component(..)`/`template(..)` would be constant (true for the component's own address).
+                if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule &&
+                    rule.contains_scoped_to_component_or_template()
+                {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "owner_rule",
+                        reason: "component(..)/template(..) cannot be used in a component owner rule".to_string(),
+                    });
+                }
+
+                self.tracker.write_with(|state| {
+                    let component_lock = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .cloned()
+                        .ok_or(RuntimeError::NotInComponentContext {
+                            action: ComponentAction::SetOwnerRule.into(),
+                        })?;
+                    // Only the current component may be mutated. The component lock is created by the engine for the
+                    // executing component, so this only checks that the engine call names it.
+                    if *component_lock.substate_id() != component_address {
+                        return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
+                            address: SubstateId::Component(component_address),
+                        }));
+                    }
+                    let component = state.get_component(&component_lock)?;
+                    // Only the current owner rule gates this; the new rule may name anyone, which is how ownership
+                    // is handed over. `SubstateOwnerRule::None` is satisfied by no caller, so setting it is final.
+                    state
+                        .authorization()
+                        .require_ownership(ComponentAction::SetOwnerRule, component.as_ownership())?;
+
+                    state.modify_component_with(&component_lock, |component| {
+                        if owner_rule == *component.owner_rule() {
+                            return false;
+                        }
+                        component.set_owner_rule(owner_rule);
+                        true
+                    })?;
+
+                    Ok::<_, RuntimeError>(())
+                })?;
+
+                Ok(InvokeResult::unit())
+            },
             ComponentAction::GetTemplateAddress => {
                 let component_address =
                     component_ref
@@ -1481,9 +1538,9 @@ where
 
                 args.assert_no_args("Component::GetOwnerRule")?;
 
-                // The owner rule can never change, so this reads the component without locking it. It must read
-                // what the transaction has, not what the store had: a component created earlier in this same
-                // transaction is not in the store yet.
+                // This reads the component without locking it, so it must read what the transaction has, not what
+                // the store had: a component created earlier in this same transaction is not in the store yet, and
+                // `SetOwnerRule` earlier in this transaction changes the owner.
                 self.tracker.write_with(|state_mut| {
                     let component = state_mut
                         .store()

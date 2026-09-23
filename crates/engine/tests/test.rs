@@ -391,8 +391,8 @@ fn test_get_template_address() {
     assert_eq!(addr, template_test.get_template_address("Account"));
 }
 
-/// A component's owner rule is immutable, so `GetOwnerProof` reads it without a lock — but it must read what the
-/// transaction has written, not what the store had, or a component created in this same transaction has no proof.
+/// `GetOwnerProof` reads the owner rule without a lock, so it must read what the transaction has written, not what
+/// the store had, or a component created in this same transaction has no proof.
 #[test]
 fn test_get_owner_proof_for_a_component_created_in_the_same_transaction() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/component_manager"]);

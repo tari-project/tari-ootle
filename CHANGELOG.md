@@ -27,6 +27,11 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
   can be told apart from one the search never reached. `confidential.view_vault_balance` and
   `stealth_utxos.decrypt_value` both gain a `searched` field. (#2673)
 
+### Engine
+
+- `feat!` — **A component's owner can now replace its owner rule**, including handing ownership to
+  someone else or setting it to `None`, which is final. (#2677)
+
 ## [0.41.1](https://github.com/tari-project/tari-ootle/compare/v0.41.0...v0.41.1) (2026-09-21)
 
 The consensus audit release. It closes the ways a byzantine leader could fork a committee, stall it

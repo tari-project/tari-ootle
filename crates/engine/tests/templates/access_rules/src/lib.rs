@@ -453,6 +453,12 @@ mod access_rules_template {
             ComponentManager::get(component_addr).set_owner_rule(owner_rule);
         }
 
+        pub fn set_component_owner_rule_then_get_owner_proof(&mut self, owner_rule: SubstateOwnerRule) {
+            let manager = ComponentManager::get(CallerContext::current_component_address());
+            manager.set_owner_rule(owner_rule);
+            manager.get_owner_proof().drop();
+        }
+
         pub fn update_tokens_access_rule(&mut self, action: ResourceAuthAction, new_rule: AccessRule) {
             ResourceManager::get(self.tokens.resource_address()).update_access_rule(action, new_rule);
         }

@@ -513,6 +513,27 @@ mod component_owner_rule {
     }
 
     #[test]
+    fn get_owner_proof_sees_an_owner_rule_set_earlier_in_the_transaction() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let outgoing = Owner::new(&mut test);
+        let incoming = Owner::new(&mut test);
+        let component = create_component(&mut test, &outgoing);
+
+        let reason = fails(
+            &mut test,
+            &outgoing,
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component, "set_component_owner_rule_then_get_owner_proof", args![
+                    incoming.as_owner_rule()
+                ])
+                .build_and_seal(&outgoing.secret_key),
+        );
+        assert_reject_reason(reason, RuntimeError::SignerBadgeNotInScope {
+            public_key: incoming.public_key.to_byte_type(),
+        });
+    }
+
+    #[test]
     fn setting_the_current_owner_rule_leaves_the_component_unchanged() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
         let owner = Owner::new(&mut test);

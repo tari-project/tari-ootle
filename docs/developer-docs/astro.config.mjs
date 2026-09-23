@@ -73,7 +73,7 @@ export default defineConfig({
             { label: "API Keys for AI Agents", link: "/guides/agent-api-keys/" },
             { label: "Stealth Transfers", link: "/guides/stealth-resources/" },
             { label: "Burn Minotari for TARI", link: "/guides/burn-minotari/" },
-            { label: "Claim Burn", link: "/guides/claim-burn/" },
+            { label: "How Burn Claims Work", link: "/guides/claim-burn/" },
             { label: "Randomness in Templates", link: "/guides/randomness/" },
           ],
         },

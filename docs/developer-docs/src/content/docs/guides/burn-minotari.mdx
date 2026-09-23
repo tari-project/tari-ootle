@@ -1,18 +1,18 @@
 ---
 title: Burn Minotari for TARI
-description: Step-by-step guide to moving funds from the Minotari base layer to the Ootle by burning Minotari in the console wallet and claiming TARI with the Ootle wallet daemon, by hand or through gRPC and JSON-RPC.
+description: Step-by-step guide to moving funds from the Minotari base layer to the Ootle by burning Minotari with minotari_console_wallet and claiming TARI with the Ootle wallet daemon, by hand or through gRPC and JSON-RPC.
 ---
 
 import { Image } from "astro:assets";
 import { Aside, Steps } from "@astrojs/starlight/components";
 
-import img_burn from "../../../assets/console-wallet-burn.png";
+import img_burn from "../../../assets/minotari-console-wallet-burn.png";
 import img_public_key from "../../../assets/wallet-account-public-key.png";
 import img_claim_dialog from "../../../assets/wallet-claim-burn-dialog.png";
 
 ### Covered in this guide
 
-- Burning Minotari (L1) to your Ootle account with the console wallet.
+- Burning Minotari (L1) to your Ootle account with `minotari_console_wallet`.
 - Letting the Ootle wallet daemon claim it as TARI (L2).
 - Doing the same from a script or AI agent over gRPC and JSON-RPC.
 
@@ -23,10 +23,10 @@ For how a claim is verified on-chain, see [Claim Burn](/guides/claim-burn/).
 ## How it works
 
 ```
- console wallet ──burn──▶ Minotari L1 ──confirmed──▶ burn proof file ──▶ Ootle wallet daemon ──claim──▶ TARI in your account
+ minotari_console_wallet ──burn──▶ Minotari L1 ──confirmed──▶ burn proof file ──▶ Ootle wallet daemon ──claim──▶ TARI in your account
 ```
 
-1. The console wallet burns Minotari to your Ootle account's **public key**.
+1. `minotari_console_wallet` burns Minotari to your Ootle account's **public key**.
 2. Once the burn is confirmed, it writes a **burn proof** JSON file to a shared directory.
 3. The Ootle wallet daemon watches that directory and submits the claim automatically once it is claimable.
 
@@ -41,9 +41,9 @@ For how a claim is verified on-chain, see [Claim Burn](/guides/claim-burn/).
 
 ## Before you start
 
-- A funded [Minotari console wallet](https://github.com/tari-project/tari/releases) (`minotari_console_wallet`).
+- A funded [`minotari_console_wallet`](https://github.com/tari-project/tari/releases).
 - A running [Ootle wallet daemon](/guides/setup-a-wallet/) with an account.
-- Both on the **same network** (e.g. console wallet `--network esmeralda`, daemon `--network esme`).
+- Both on the **same network** (e.g. `minotari_console_wallet --network esmeralda`, `tari_ootle_walletd --network esme`).
 - Ideally both on the **same machine**, so they share the burn proof directory with no extra setup.
 
 ---
@@ -59,11 +59,11 @@ For how a claim is verified on-chain, see [Claim Burn](/guides/claim-burn/).
 
    <Image src={img_public_key} alt="Wallet UI account details with the Public Key column" className="w-full rounded-lg shadow-md" />
 
-2. **Open the Burn tab in the console wallet.**
+2. **Open the Burn tab in `minotari_console_wallet`.**
 
    Press <kbd>Tab</kbd> until the **Burn** tab is selected.
 
-   <Image src={img_burn} alt="Console wallet Burn Minotari form" className="w-full rounded-lg shadow-md" />
+   <Image src={img_burn} alt="minotari_console_wallet Burn Minotari form" className="w-full rounded-lg shadow-md" />
 
 3. **Fill in the form.**
 
@@ -81,7 +81,7 @@ For how a claim is verified on-chain, see [Claim Burn](/guides/claim-burn/).
 
 5. **Wait for the claim.**
 
-   Once the burn is confirmed on L1, the console wallet writes the proof file and the daemon picks it up. The TARI
+   Once the burn is confirmed on L1, `minotari_console_wallet` writes the proof file and the daemon picks it up. The TARI
    appears in your account balance after the confirmation window (see above).
 
 </Steps>
@@ -120,11 +120,11 @@ tari_ootle_walletd -p ootle_wallet_daemon.burn_proof_dir=/path/to/burn_proofs
 
 ## For scripts and AI agents
 
-An agent can do everything above through the console wallet's gRPC API and the daemon's JSON-RPC API. The steps
+An agent can do everything above through `minotari_console_wallet`'s gRPC API and the daemon's JSON-RPC API. The steps
 below are written so an agent can follow them directly: check each one, fix config where needed, then call the APIs
 or hand the user the exact command to run.
 
-### 1. Enable console wallet gRPC
+### 1. Enable `minotari_console_wallet` gRPC
 
 gRPC is off by default. Either start the wallet with the flag:
 
@@ -132,7 +132,7 @@ gRPC is off by default. Either start the wallet with the flag:
 minotari_console_wallet --network esmeralda --enable-grpc
 ```
 
-or set it under `[wallet]` in the console wallet's config (default `~/.tari/<network>/config/config.toml`):
+or set it under `[wallet]` in `minotari_console_wallet`'s config (default `~/.tari/<network>/config/config.toml`):
 
 ```toml
 [wallet]
@@ -142,7 +142,7 @@ grpc_address = "/ip4/127.0.0.1/tcp/18143"   # default: 18143 esmeralda, 18103 ma
 #grpc_authentication = { username = "admin", password = "xxxx" }
 ```
 
-Restart the console wallet after editing the config. For an unattended wallet add `--non-interactive` and
+Restart `minotari_console_wallet` after editing the config. For an unattended wallet add `--non-interactive` and
 `--password <password>` (or `MINOTARI_WALLET_PASSWORD`).
 
 <Aside type="caution">
@@ -206,7 +206,7 @@ grpcurl -plaintext -import-path "$PROTO" -proto wallet.proto \
   127.0.0.1:18143 tari.rpc.Wallet/GetBurnClaimProof
 ```
 
-When it is present the console wallet has also written the proof file, and from here the daemon claims it with no
+When it is present `minotari_console_wallet` has also written the proof file, and from here the daemon claims it with no
 further calls.
 
 ### 6. Track the claim
@@ -243,7 +243,7 @@ Try again later.
 
 | Symptom                                        | Fix                                                                  |
 | ---------------------------------------------- | -------------------------------------------------------------------- |
-| No proof file appears                          | The burn is not confirmed yet. Check the console wallet Burn tab.    |
+| No proof file appears                          | The burn is not confirmed yet. Check the Burn tab in `minotari_console_wallet`.    |
 | Proof file exists, daemon ignores it           | Different directory or network. Compare the paths above.             |
 | Claim rejected: `not yet claimable`            | Wait. The daemon retries on its own.                                 |
 | Claim rejected: ownership proof fails          | Wrong claim key or a sidechain key was set. The burn cannot be claimed into this account. |

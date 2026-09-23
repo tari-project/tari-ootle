@@ -4,7 +4,9 @@
 use indexmap::{IndexMap, map::Entry};
 use serde::{Deserialize, Serialize};
 
+mod burn_rate_schedule;
 mod fee_table;
+pub use burn_rate_schedule::{ExhaustBurnRateSchedule, ExhaustBurnRateSource, resolve_exhaust_burn_rate};
 pub use fee_table::{FeeTable, WasmMeteringRate};
 
 /// Inline literal args carry their bytes directly in the instruction, so they are priced by size,
@@ -15,13 +17,11 @@ pub use fee_table::{FeeTable, WasmMeteringRate};
 /// literal is the one term that can make a real run weigh more than the dry run that estimated it.
 pub const LITERAL_BYTE_DIVISOR: u64 = 3;
 
-/// The highest exhaust burn rate a network can be configured with, in basis points: the whole of
-/// what a transaction paid.
+/// The highest exhaust burn rate a network can be configured with, in basis points.
 ///
-/// The burn is a share of the fees collected, so a rate is meaningful only up to `10_000` — every
-/// microtari paid is burned and leaders receive nothing. The user's price is the fee table alone
-/// whatever the rate; the rate only splits what was collected between leaders and the burn.
-pub const MAX_EXHAUST_BURN_RATE_BPS: u16 = 10_000;
+/// Re-exported from `tari_template_lib_types` so that the governance template, which cannot depend
+/// on this crate, holds the council to the same ceiling the engine does.
+pub use tari_template_lib::types::governance::MAX_EXHAUST_BURN_RATE_BPS;
 
 /// An exhaust burn rate in basis points, at or below [`MAX_EXHAUST_BURN_RATE_BPS`].
 ///
@@ -40,6 +40,18 @@ impl ExhaustBurnRate {
             "exhaust burn rate is above MAX_EXHAUST_BURN_RATE_BPS"
         );
         Self(bps)
+    }
+
+    /// `bps` as a rate, or `None` if it is above [`MAX_EXHAUST_BURN_RATE_BPS`].
+    ///
+    /// The checked counterpart of [`Self::new`], for a rate that arrives from outside this binary —
+    /// a block header, a governance component, a configuration file — where being above the ceiling
+    /// is something to reject rather than a programming error.
+    pub const fn try_new(bps: u16) -> Option<Self> {
+        if bps > MAX_EXHAUST_BURN_RATE_BPS {
+            return None;
+        }
+        Some(Self(bps))
     }
 
     pub const fn as_bps(self) -> u16 {

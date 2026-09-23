@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, LeafBlock};
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, committee::CommitteeInfo};
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::QuorumCertificate;
@@ -413,8 +414,14 @@ impl ForeignProposal {
         &self.commit_proof.sidechain_block_commit_proof().header().epoch_hash
     }
 
-    pub fn to_locked_epoch(&self) -> LockedEpoch {
-        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into())
+    /// The execution context this proposal pins a transaction to.
+    ///
+    /// `exhaust_burn_rate` is supplied rather than read off the proposal: a foreign proposal is
+    /// proved against the layer-1 shaped header, which carries the block's metadata hash and not the
+    /// extra data the rate lives in. The caller resolves it for [`Self::epoch`] from the governance
+    /// schedule, which keeps the rate of every epoch a foreign proposal can still carry.
+    pub fn to_locked_epoch(&self, exhaust_burn_rate: ExhaustBurnRate) -> LockedEpoch {
+        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into(), exhaust_burn_rate)
     }
 
     pub fn proposed_by(&self) -> RistrettoPublicKeyBytes {

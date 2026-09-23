@@ -29,6 +29,7 @@ pub mod consensus_constants_file;
 #[cfg(feature = "epoch_oracle")]
 pub mod epoch_oracle_config;
 pub mod fee_tables;
+pub mod genesis_governance;
 pub mod genesis_resources;
 pub mod identity_management;
 pub mod keypair;

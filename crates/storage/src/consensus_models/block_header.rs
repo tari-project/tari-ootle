@@ -23,7 +23,17 @@ use tari_consensus_types::{
     ToSignatureMessage,
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ProtocolVersion, ShardGroup, hashing};
+use tari_engine_types::fees::ExhaustBurnRate;
+use tari_ootle_common_types::{
+    Epoch,
+    ExtraData,
+    ExtraFieldKey,
+    NodeHeight,
+    NumPreshards,
+    ProtocolVersion,
+    ShardGroup,
+    hashing,
+};
 use tari_ootle_transaction::Network;
 use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1, BlockHeaderHashFieldsV2};
 use tari_state_tree::{TreeHash, compute_merkle_root_for_hashes};
@@ -271,7 +281,10 @@ impl BlockHeader {
         parent_timestamp: u64,
         parent_epoch_hash: FixedHash,
         parent_accumulated_data: ShardGroupAccumulatedData,
+        parent_exhaust_burn_rate: ExhaustBurnRate,
     ) -> Self {
+        let mut extra_data = ExtraData::new();
+        extra_data.insert_bps(ExtraFieldKey::ExhaustBurnRate, parent_exhaust_burn_rate.as_bps());
         let mut block = Self {
             id: BlockId::zero(),
             network,
@@ -290,7 +303,7 @@ impl BlockHeader {
             timestamp: parent_timestamp,
             epoch_hash: parent_epoch_hash,
             accumulated_data: parent_accumulated_data,
-            extra_data: ExtraData::new(),
+            extra_data,
         };
         block.id = block.calculate_id();
         block
@@ -510,6 +523,34 @@ impl BlockHeader {
 
     pub fn epoch_hash(&self) -> &FixedHash {
         &self.epoch_hash
+    }
+
+    /// The exhaust burn rate in force for this block's epoch, or `None` if the header does not name
+    /// one or names a value above the ceiling.
+    ///
+    /// `None` is what a validator rejects a proposal on. Everything downstream of validation reads
+    /// [`Self::exhaust_burn_rate`] instead, because a header that reaches it has already been
+    /// checked against the epoch's rate.
+    pub fn try_exhaust_burn_rate(&self) -> Option<ExhaustBurnRate> {
+        self.extra_data
+            .get_bps(&ExtraFieldKey::ExhaustBurnRate)
+            .and_then(ExhaustBurnRate::try_new)
+    }
+
+    /// The exhaust burn rate in force for this block's epoch.
+    ///
+    /// Every header a node accepts names a rate — `check_exhaust_burn_rate` rejects one that does
+    /// not — so a header reaching this has one. A header that somehow does not reads as zero, which
+    /// burns nothing.
+    pub fn exhaust_burn_rate(&self) -> ExhaustBurnRate {
+        self.try_exhaust_burn_rate().unwrap_or_default()
+    }
+
+    /// The exhaust burn rate the next epoch opens at, which only an end-of-epoch block names.
+    pub fn next_epoch_exhaust_burn_rate(&self) -> Option<ExhaustBurnRate> {
+        self.extra_data
+            .get_bps(&ExtraFieldKey::NextEpochExhaustBurnRate)
+            .and_then(ExhaustBurnRate::try_new)
     }
 
     pub fn extra_data(&self) -> &ExtraData {

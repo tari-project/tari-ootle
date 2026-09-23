@@ -24,7 +24,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use log::info;
 use ootle_network::Network;
-use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine::{fees::FeeTable, state_store::new_memory_store, traits::ClaimProofVerifier, wasm::WasmModuleCache};
 use tari_engine_types::{
     commit_result::ExecuteResult,
@@ -45,6 +44,7 @@ use crate::{
         error::DryRunTransactionProcessorError,
         template_provider::{DryRunTemplateProvider, build_dry_run_template_provider},
     },
+    exhaust_burn_rate::resolve_exhaust_burn_rate_for_epoch,
     substate_manager::SubstateManager,
 };
 
@@ -58,7 +58,6 @@ pub struct DryRunTransactionProcessor {
     template_provider: DryRunTemplateProvider,
     substate_manager: SubstateManager,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
-    consensus_constants: ConsensusConstants,
 }
 
 impl DryRunTransactionProcessor {
@@ -70,7 +69,6 @@ impl DryRunTransactionProcessor {
         wasm_cache: WasmModuleCache,
         template_config: &TemplateConfig,
         claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
-        consensus_constants: ConsensusConstants,
     ) -> Result<Self, std::io::Error> {
         let handle = Handle::try_current().map_err(std::io::Error::other)?;
         let template_provider =
@@ -82,7 +80,6 @@ impl DryRunTransactionProcessor {
             template_provider,
             substate_manager,
             claim_burn_proof_verifier: Arc::new(claim_burn_proof_verifier),
-            consensus_constants,
         })
     }
 
@@ -111,7 +108,7 @@ impl DryRunTransactionProcessor {
 
         // Estimate the burn at the rate in effect for the current epoch.
         let current_epoch = self.epoch_manager.current_epoch().await?;
-        let burn_rate = self.consensus_constants.exhaust_burn_rate(current_epoch);
+        let burn_rate = resolve_exhaust_burn_rate_for_epoch(&self.substate_manager, self.network, current_epoch).await;
 
         let mut state_store = new_memory_store();
         state_store.set_many(found_substates)?;

@@ -23,7 +23,7 @@
 use std::time::Duration;
 
 use tari_engine_types::fees::ExhaustBurnRate;
-use tari_ootle_common_types::{Epoch, NumPreshards};
+use tari_ootle_common_types::NumPreshards;
 use tari_ootle_storage::consensus_models::LivenessThresholds;
 use tari_ootle_transaction::Network;
 
@@ -139,11 +139,14 @@ pub struct ConsensusConstants {
     /// honest proposals are never rejected.
     /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on block validity.
     pub max_block_validation_execution_points: u64,
-    /// The share of collected fees that is burned rather than paid to leaders, in basis points. The user's price
-    /// is the fee table alone; this only splits what was collected. `10_000` burns everything and leaders receive
-    /// nothing. CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on the burn totals in block
-    /// headers. Use `exhaust_burn_rate` to resolve the rate for a given epoch rather than reading this field
-    /// directly.
+    /// The share of collected fees that is burned rather than paid to leaders, in basis points, for a
+    /// context that has no epoch to resolve against: a dry run, a fee estimate, a test harness. The
+    /// user's price is the fee table alone; this only splits what was collected.
+    ///
+    /// Consensus does not read it. The rate an epoch actually settles at is resolved once at the epoch
+    /// boundary and carried in every block header of that epoch — see `ExhaustBurnRateSchedule` and
+    /// `LockedEpoch::exhaust_burn_rate` — so a node that read this field would be settling against a
+    /// constant the network may have moved away from.
     pub exhaust_burn_rate: ExhaustBurnRate,
     /// The furthest ahead of the current epoch a transaction's `max_epoch` may be set. Every
     /// transaction declares a mandatory `max_epoch`, so this caps how long any transaction can
@@ -367,13 +370,6 @@ impl ConsensusConstants {
         }
     }
 
-    /// Resolves the exhaust burn rate in effect at the given epoch. The rate is currently a
-    /// network-wide constant; the epoch parameter is the seam through which a future epoch-varying rate is
-    /// introduced without touching call sites.
-    pub fn exhaust_burn_rate(&self, _epoch: Epoch) -> ExhaustBurnRate {
-        self.exhaust_burn_rate
-    }
-
     /// The thresholds that decide a validator's liveness state, and with it whether leader selection
     /// skips its slot.
     pub fn liveness_thresholds(&self) -> LivenessThresholds {
@@ -408,6 +404,8 @@ impl From<Network> for ConsensusConstants {
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_common_types::Epoch;
+
     /// Room above a template binary for the rest of the transaction carrying it: its other
     /// instructions, inputs, signatures and CBOR framing.
     ///

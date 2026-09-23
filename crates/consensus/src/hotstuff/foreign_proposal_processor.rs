@@ -28,7 +28,7 @@ use tari_ootle_storage::{
         TransactionRecord,
     },
 };
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{Network, TransactionId};
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 
 use crate::{
@@ -36,6 +36,7 @@ use crate::{
         ProposalValidationError,
         block_change_set::ProposedBlockChangeSet,
         error::HotStuffError,
+        exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
         substate_store::PendingSubstateStore,
     },
     tracing::TraceTimer,
@@ -46,6 +47,7 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::foreign_proposal_pro
 #[allow(clippy::too_many_lines)]
 pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     tx: &TTx,
+    network: Network,
     local_leaf: &LeafBlock,
     proposal: &ForeignProposal,
     local_committee_info: &CommitteeInfo,
@@ -53,6 +55,13 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");
+
+    // The proposal is proved against the layer-1 shaped header, which carries a metadata hash and not
+    // the extra data the rate lives in, so the rate for its epoch is resolved here instead. Every shard
+    // group resolves the same value from the same global-shard state, which is what keeps groups that
+    // sequence this proposal in different epochs of their own agreeing on what a transaction pinned to
+    // `proposal.epoch()` settles at.
+    let foreign_exhaust_burn_rate = resolve_epoch_exhaust_burn_rate(tx, network, proposal.epoch())?;
 
     let foreign_shard_group = proposal.shard_group_unchecked();
     info!(
@@ -123,7 +132,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     continue;
                 }
 
-                if tx_rec.update_locked_epoch(proposal.to_locked_epoch()) {
+                if tx_rec.update_locked_epoch(proposal.to_locked_epoch(foreign_exhaust_burn_rate)) {
                     debug!(
                         target: LOG_TARGET,
                         "🔒 Foreign proposal {} updated locked epoch for transaction {} to {}",
@@ -413,7 +422,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
 
                 // We update this in the foreign Accept phase because we may be output-only and not yet performed the
                 // prepare phase. (therefore locked_epoch is None)
-                tx_rec.update_locked_epoch(proposal.to_locked_epoch());
+                tx_rec.update_locked_epoch(proposal.to_locked_epoch(foreign_exhaust_burn_rate));
 
                 let remote_decision = atom.decision;
                 let local_decision = tx_rec.current_decision();

@@ -8,7 +8,13 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
-use tari_ootle_common_types::{ShardGroup, committee::CommitteeInfo, displayable::Displayable, optional::Optional};
+use tari_ootle_common_types::{
+    Epoch,
+    ShardGroup,
+    committee::CommitteeInfo,
+    displayable::Displayable,
+    optional::Optional,
+};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
@@ -49,6 +55,7 @@ use crate::{
         calculate_state_merkle_root,
         error::HotStuffError,
         event::HotstuffEvent,
+        exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
         filter_diff_for_committee,
         foreign_proposal_processor::process_foreign_block,
         process_newly_justified_block,
@@ -417,6 +424,39 @@ where TConsensusSpec: ConsensusSpec
                                 block.id(),
                             );
                             proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochHashNotObserved);
+                            return Ok(());
+                        },
+                    }
+
+                    // Ratify the rate the next epoch opens at the same way, and against this node's own
+                    // resolution rather than the proposer's. The rate is fixed for the whole of an epoch by
+                    // the block that opens it, so this vote is the only point at which the committee agrees
+                    // on it; a leader that resolved something else gets no quorum for it.
+                    let local_rate =
+                        resolve_epoch_exhaust_burn_rate(tx, self.config.network, block.epoch() + Epoch(1))?;
+                    match block.next_epoch_exhaust_burn_rate() {
+                        Some(proposed) if proposed == local_rate => {},
+                        Some(proposed) => {
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ NO VOTE: EndEpoch in block {} opens the next epoch at {}bps but we resolve {}bps",
+                                block.id(),
+                                proposed.as_bps(),
+                                local_rate.as_bps(),
+                            );
+                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochBurnRateMismatch {
+                                local_bps: local_rate.as_bps(),
+                                proposed_bps: proposed.as_bps(),
+                            });
+                            return Ok(());
+                        },
+                        None => {
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ NO VOTE: EndEpoch in block {} does not name the exhaust burn rate for the next epoch",
+                                block.id(),
+                            );
+                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochBurnRateMissing);
                             return Ok(());
                         },
                     }
@@ -1610,6 +1650,7 @@ where TConsensusSpec: ConsensusSpec
 
         if let Err(err) = process_foreign_block(
             tx,
+            self.config.network,
             &local_block.as_leaf(),
             fp.proposal(),
             local_committee_info,

@@ -5,6 +5,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
+use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{
     Epoch,
     committee::{Committee, CommitteeInfo},
@@ -15,6 +16,7 @@ use super::common::{
     check_block_signature,
     check_current_epoch,
     check_epoch_hash,
+    check_exhaust_burn_rate,
     check_height,
     check_network,
     check_proposal_certificate,
@@ -37,6 +39,7 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
     vote_signing_service: &TConsensusSpec::SignerService,
     config: &HotstuffConfig,
     expected_epoch_hash: &FixedHash,
+    expected_exhaust_burn_rate: ExhaustBurnRate,
 ) -> Result<(), HotStuffError> {
     check_proposal::<TConsensusSpec>(
         block,
@@ -44,6 +47,7 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
         vote_signing_service,
         config,
         expected_epoch_hash,
+        expected_exhaust_burn_rate,
     )?;
     check_shard_group_matches(block.header(), local_committee_info.shard_group())?;
     // This proposal is valid, if it is for an epoch ahead of us, we need to sync
@@ -56,8 +60,15 @@ fn check_proposal<TConsensusSpec: ConsensusSpec>(
     signer_service: &TConsensusSpec::SignerService,
     config: &HotstuffConfig,
     expected_epoch_hash: &FixedHash,
+    expected_exhaust_burn_rate: ExhaustBurnRate,
 ) -> Result<(), HotStuffError> {
-    check_header::<TConsensusSpec>(block.header(), expected_epoch_hash, config, signer_service)?;
+    check_header::<TConsensusSpec>(
+        block.header(),
+        expected_epoch_hash,
+        expected_exhaust_burn_rate,
+        config,
+        signer_service,
+    )?;
     check_block(block)?;
     check_proposal_certificate::<TConsensusSpec>(config.network, block, committee_for_block, signer_service)?;
     check_timeout_certificate::<TConsensusSpec>(config.network, block, committee_for_block, signer_service)?;
@@ -75,6 +86,7 @@ pub(super) fn check_block(block: &Block) -> Result<(), ProposalValidationError> 
 fn check_header<TConsensusSpec: ConsensusSpec>(
     header: &BlockHeader,
     expected_epoch_hash: &FixedHash,
+    expected_exhaust_burn_rate: ExhaustBurnRate,
     config: &HotstuffConfig,
     signer_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
@@ -94,6 +106,7 @@ fn check_header<TConsensusSpec: ConsensusSpec>(
         });
     }
     check_epoch_hash(header, expected_epoch_hash)?;
+    check_exhaust_burn_rate(header, expected_exhaust_burn_rate)?;
     check_shard_group_bounds(header, config.consensus_constants.num_preshards)?;
     check_block_signature(header, signer_service)?;
     check_sidechain_id(header, config)?;

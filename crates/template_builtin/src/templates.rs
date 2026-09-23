@@ -5,6 +5,7 @@ use tari_template_lib_types::TemplateAddress;
 
 use crate::{
     ACCOUNT_TEMPLATE_ADDRESS,
+    BURN_RATE_GOVERNANCE_TEMPLATE_ADDRESS,
     LIQUIDITY_POOL_TEMPLATE_ADDRESS,
     NFT_FAUCET_TEMPLATE_ADDRESS,
     XTR_FAUCET_TEMPLATE_ADDRESS,
@@ -42,6 +43,11 @@ pub const fn all_builtin_templates() -> &'static [Template] {
             address: LIQUIDITY_POOL_TEMPLATE_ADDRESS,
             binary: include_bytes!("../compiled/liquidity_pool.wasm"),
             name: "TwoResourceLiquidityPool",
+        },
+        Template {
+            address: BURN_RATE_GOVERNANCE_TEMPLATE_ADDRESS,
+            binary: include_bytes!("../compiled/burn_rate_governance.wasm"),
+            name: "BurnRateGovernance",
         },
     ]
 }

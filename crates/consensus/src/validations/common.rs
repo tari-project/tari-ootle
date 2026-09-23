@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use log::{debug, warn};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{QuorumCertificateRef, TimeoutVote};
+use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
@@ -82,6 +83,36 @@ pub(super) fn check_epoch_hash(
             local_epoch_hash: *expected_epoch_hash,
             invalid_epoch_hash: *header.epoch_hash(),
             block_id: *header.id(),
+        });
+    }
+
+    Ok(())
+}
+
+/// A block must name the rate its epoch runs at, and must name the one this node opened the epoch
+/// with.
+///
+/// The rate is fixed for the whole of an epoch by the end-of-epoch block that opened it, which the
+/// committee ratified, so a proposal naming anything else settles fees against a split the rest of
+/// the committee will not reproduce.
+pub(super) fn check_exhaust_burn_rate(
+    header: &BlockHeader,
+    expected: ExhaustBurnRate,
+) -> Result<(), ProposalValidationError> {
+    let Some(rate) = header.try_exhaust_burn_rate() else {
+        return Err(ProposalValidationError::MissingExhaustBurnRate {
+            block_id: *header.id(),
+            epoch: header.epoch(),
+            local_rate_bps: expected.as_bps(),
+        });
+    };
+
+    if rate != expected {
+        return Err(ProposalValidationError::InvalidExhaustBurnRate {
+            block_id: *header.id(),
+            epoch: header.epoch(),
+            local_rate_bps: expected.as_bps(),
+            invalid_rate_bps: rate.as_bps(),
         });
     }
 

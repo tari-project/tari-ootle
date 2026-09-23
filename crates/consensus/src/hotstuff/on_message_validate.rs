@@ -352,6 +352,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             &self.vote_signing_service,
             &self.config,
             epoch_state.epoch_hash(),
+            epoch_state.exhaust_burn_rate(),
         )
     }
 

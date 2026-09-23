@@ -36,6 +36,7 @@ mod web_ui;
 
 mod base_layer;
 mod event_manager;
+mod exhaust_burn_rate;
 pub mod ipc;
 #[cfg(feature = "metrics")]
 mod metrics;

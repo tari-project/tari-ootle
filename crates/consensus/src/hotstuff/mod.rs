@@ -24,6 +24,7 @@ mod block_change_set;
 pub mod commit_proofs;
 mod epoch_gc;
 mod epoch_state;
+mod exhaust_burn_rate;
 mod foreign_proposal_processor;
 mod leader_skip;
 mod on_catch_up_sync;

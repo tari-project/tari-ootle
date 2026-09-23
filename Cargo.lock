@@ -11859,6 +11859,7 @@ dependencies = [
  "log",
  "ootle_byte_type",
  "serde",
+ "tari_bor",
  "tari_common_types",
  "tari_consensus_types",
  "tari_crypto",
@@ -13193,6 +13194,7 @@ version = "0.41.1"
 dependencies = [
  "anyhow",
  "minicbor",
+ "tari_bor",
  "tari_engine_types",
  "tari_ootle_transaction",
  "tari_template_lib",

@@ -13,6 +13,7 @@ use tari_consensus::hotstuff::{
 };
 use tari_consensus_types::{BlockId, ShardGroupAccumulatedData};
 use tari_crypto::tari_utilities::hex::Hex;
+use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
@@ -42,6 +43,7 @@ fn dummy_blocks() {
         shard_group,
         FixedHash::zero(),
         None,
+        ExhaustBurnRate::new(0),
     );
     let committee = (0u8..2)
         .map(create_key_pair_from_seed)
@@ -68,6 +70,7 @@ fn dummy_blocks() {
         genesis.timestamp(),
         ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
+        ExhaustBurnRate::new(0),
     );
     let last = calculate_last_dummy_block(
         NodeHeight(0),
@@ -84,6 +87,7 @@ fn dummy_blocks() {
         genesis.timestamp(),
         ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
+        ExhaustBurnRate::new(0),
     )
     .expect("last dummy block");
     assert_eq!(dummy[0].parent(), genesis.id());
@@ -110,6 +114,7 @@ fn last_matches_generated_using_real_data() {
         candidate.shard_group(),
         FixedHash::zero(),
         None,
+        ExhaustBurnRate::new(0),
     );
 
     let dummy = calculate_dummy_blocks_from_justify(
@@ -135,6 +140,7 @@ fn last_matches_generated_using_real_data() {
         justify.timestamp(),
         ShardGroupAccumulatedData::default(),
         *justify.epoch_hash(),
+        ExhaustBurnRate::new(0),
     )
     .expect("last dummy block");
 
@@ -162,6 +168,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         shard_group,
         non_zero_state_root,
         None,
+        ExhaustBurnRate::new(0),
     );
 
     // The zero block has all-zero fields - this is what the buggy proposer was using
@@ -196,6 +203,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         epoch_genesis.timestamp(),
         *epoch_genesis.header().accumulated_data(),
         *epoch_genesis.epoch_hash(),
+        ExhaustBurnRate::new(0),
     );
 
     // Simulate the BUGGY PROPOSER path: uses zero block instead of epoch genesis
@@ -214,6 +222,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         zero_block.timestamp(),
         *zero_block.header().accumulated_data(),
         *zero_block.epoch_hash(),
+        ExhaustBurnRate::new(0),
     )
     .unwrap();
 
@@ -241,6 +250,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         epoch_genesis.timestamp(),
         *epoch_genesis.header().accumulated_data(),
         *epoch_genesis.epoch_hash(),
+        ExhaustBurnRate::new(0),
     )
     .unwrap();
 
@@ -289,6 +299,7 @@ fn proposer_accumulated_data_must_come_from_justify_on_timeout_recovery() {
             shard_group,
             FixedHash::zero(),
             None,
+            ExhaustBurnRate::new(0),
         )
         .justify()
         .calculate_id(),
@@ -315,6 +326,7 @@ fn proposer_accumulated_data_must_come_from_justify_on_timeout_recovery() {
             shard_group,
             FixedHash::zero(),
             None,
+            ExhaustBurnRate::new(0),
         )
         .justify()
         .clone(),
@@ -356,6 +368,7 @@ fn proposer_accumulated_data_must_come_from_justify_on_timeout_recovery() {
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
+        ExhaustBurnRate::new(0),
     );
 
     let last_dummy = dummies.last().expect("dummy chain non-empty");
@@ -413,6 +426,7 @@ fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
         shard_group,
         FixedHash::zero(),
         None,
+        ExhaustBurnRate::new(0),
     );
 
     let make_block = |parent, height, timestamp| {
@@ -462,6 +476,7 @@ fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
+        ExhaustBurnRate::new(0),
     );
     let expected_parent = validator_dummies.last().expect("a dummy block fills the H+1 gap");
     assert_eq!(expected_parent.height(), gap_height);
@@ -483,6 +498,7 @@ fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
+        ExhaustBurnRate::new(0),
     )
     .expect("a dummy block fills the H+1 gap");
     assert_eq!(

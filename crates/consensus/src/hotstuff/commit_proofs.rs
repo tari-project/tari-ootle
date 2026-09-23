@@ -337,6 +337,7 @@ mod tests {
             parent.header().timestamp(),
             *parent.header().epoch_hash(),
             *parent.header().accumulated_data(),
+            parent.exhaust_burn_rate(),
         );
         Block::new(header, justify, Default::default(), None)
     }

@@ -2,4 +2,4 @@
 import type { Epoch } from "./Epoch";
 import type { Hash32 } from "./Hash32";
 
-export type LockedEpoch = { epoch: Epoch; hash: Hash32 };
+export type LockedEpoch = { epoch: Epoch; hash: Hash32; exhaust_burn_rate: number };

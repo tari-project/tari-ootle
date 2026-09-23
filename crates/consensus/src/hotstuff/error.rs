@@ -258,6 +258,26 @@ pub enum ProposalValidationError {
         invalid_epoch_hash: FixedHash,
     },
 
+    #[error(
+        "Block {block_id} does not name the exhaust burn rate for epoch {epoch}. Every block must name the rate its \
+         epoch runs at, which is {local_rate_bps}bps here"
+    )]
+    MissingExhaustBurnRate {
+        block_id: BlockId,
+        epoch: Epoch,
+        local_rate_bps: u16,
+    },
+    #[error(
+        "Block {block_id} settles at {invalid_rate_bps}bps, but epoch {epoch} runs at {local_rate_bps}bps. The rate \
+         is fixed for the whole of an epoch by the block that opened it"
+    )]
+    InvalidExhaustBurnRate {
+        block_id: BlockId,
+        epoch: Epoch,
+        local_rate_bps: u16,
+        invalid_rate_bps: u16,
+    },
+
     #[error("Foreign node in {shard_group} submitted invalid proposal for block {block_id}: {details}")]
     ForeignProposalInvalid {
         block_id: BlockId,

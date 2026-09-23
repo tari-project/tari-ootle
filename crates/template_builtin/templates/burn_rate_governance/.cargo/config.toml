@@ -1,0 +1,11 @@
+# Linear memory the module starts with, in bytes: 20 pages of 64 KiB.
+#
+# Measured peak for every builtin is 18 pages, so a module declaring the linker default (17) takes
+# one `memory.grow` on every instantiation — ~900 ns of host-side mapping, paid per call, for a page
+# it was always going to need. Declared pages cost nothing extra: the whole initial memory is one
+# mapping, which is why the cost is per grow call and not per page
+# (`crates/engine/examples/memory_page_cost.rs`).
+#
+# The two spare pages are slack, bounded well under `limits::WASM_LIMITS.max_memory_pages`.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--initial-memory=1310720"]

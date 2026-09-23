@@ -45,7 +45,11 @@ use tari_template_lib::types::{
     ValidatorFeePoolAddress,
     VaultId,
     address_prefixes,
-    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
+    constants::{
+        BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS,
+        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+        STEALTH_TARI_RESOURCE_ADDRESS,
+    },
 };
 
 use crate::{
@@ -364,8 +368,23 @@ impl SubstateId {
         matches!(self, Self::ConfidentialOutput(_))
     }
 
-    pub const fn is_global(&self) -> bool {
-        self.is_template()
+    /// Whether this substate lives on the global shard: held by, and addressable from, every shard
+    /// group rather than the one its address falls in.
+    ///
+    /// A transaction touching one of these executes against every shard group, so the set is kept to
+    /// substates that every group genuinely needs: the templates it executes, and the component that
+    /// names the epoch's exhaust burn rate, which every group resolves the rate from at an epoch
+    /// boundary.
+    ///
+    /// The set is append-only. Moving a substate off the global shard changes the shard its state
+    /// tree leaf lives in, and so every root taken since it was created.
+    pub fn is_global(&self) -> bool {
+        self.is_template() || self.is_burn_rate_governance()
+    }
+
+    /// Whether this is the component the council moves the exhaust burn rate through.
+    pub fn is_burn_rate_governance(&self) -> bool {
+        matches!(self, Self::Component(addr) if *addr == BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS)
     }
 
     pub fn is_read_only(&self) -> bool {

@@ -272,8 +272,14 @@ impl Transaction {
             .any(|i| matches!(i, Instruction::PublishTemplate { .. }))
     }
 
+    /// Whether this transaction executes against every shard group rather than only the ones its
+    /// substates fall in.
+    ///
+    /// Publishing a template is one, because the template lands on the global shard. Declaring a
+    /// global substate as an input is the other: a transaction that touches the burn rate governance
+    /// component has to be sequenced and executed by every group, since every group holds it.
     pub fn is_global(&self) -> bool {
-        self.has_publish_template()
+        self.has_publish_template() || self.all_inputs_substate_ids_iter().any(|id| id.is_global())
     }
 
     /// The binary each `PublishTemplate` instruction carries, across both instruction lists so that

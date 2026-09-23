@@ -16,6 +16,7 @@ const TEMPLATE_BUILTINS: &[&str] = &[
     "templates/nft_faucet",
     "templates/faucet",
     "templates/liquidity_pool",
+    "templates/burn_rate_governance",
 ];
 
 fn main() -> anyhow::Result<()> {

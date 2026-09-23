@@ -26,6 +26,7 @@ use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
     ExtraData,
+    ExtraFieldKey,
     NodeHeight,
     ProtocolVersion,
     committee::CommitteeInfo,
@@ -67,6 +68,7 @@ use crate::{
         calculate_state_merkle_root,
         epoch_state::EpochState,
         error::HotStuffError,
+        exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
         filter_diff_for_committee,
         foreign_proposal_processor::process_foreign_block,
         process_newly_justified_block,
@@ -453,6 +455,7 @@ where TConsensusSpec: ConsensusSpec
                 // evaluating, whose parent chain runs back through any dummies to the justify block.
                 if let Err(err) = process_foreign_block(
                     tx,
+                    self.config.network,
                     &state_anchor_leaf,
                     fp,
                     local_committee_info,
@@ -495,6 +498,7 @@ where TConsensusSpec: ConsensusSpec
         let locked_epoch = LockedEpoch::new(
             highest_seen_block.epoch(),
             highest_seen_block.epoch_hash().into_array().into(),
+            highest_seen_block.exhaust_burn_rate(),
         );
 
         // batch is empty for is_empty, is_epoch_end and is_epoch_start blocks
@@ -662,6 +666,20 @@ where TConsensusSpec: ConsensusSpec
         )?;
         timer.done();
 
+        // Every block names the rate its epoch runs at, carried forward from the block it extends, so a
+        // transaction settles at a rate the block that sequenced it commits to. An end-of-epoch block
+        // additionally names the rate the next epoch opens at: that is the value the quorum committing it
+        // ratifies, and the next epoch's genesis block carries it forward from there.
+        let mut extra_data = ExtraData::new();
+        extra_data.insert_bps(
+            ExtraFieldKey::ExhaustBurnRate,
+            highest_seen_block.exhaust_burn_rate().as_bps(),
+        );
+        if end_epoch_hash.is_some() {
+            let next_epoch_rate = resolve_epoch_exhaust_burn_rate(tx, self.config.network, epoch + Epoch(1))?;
+            extra_data.insert_bps(ExtraFieldKey::NextEpochExhaustBurnRate, next_epoch_rate.as_bps());
+        }
+
         let mut header = BlockHeader::create_unsigned(
             self.config.network,
             ProtocolVersion::at(self.config.network, epoch),
@@ -677,7 +695,7 @@ where TConsensusSpec: ConsensusSpec
             EpochTime::now().as_u64(),
             *highest_seen_block.epoch_hash(),
             accumulated_data,
-            ExtraData::new(),
+            extra_data,
         )?;
 
         let signature = self.signing_service.sign(&header);

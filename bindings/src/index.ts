@@ -30,6 +30,8 @@ export * from "./types/BlockHeader";
 export * from "./types/BlockId";
 export * from "./types/BucketId";
 export * from "./types/BuiltinPredicate";
+export * from "./types/BurnRateChange";
+export * from "./types/BurnRateGovernanceState";
 export * from "./types/Bytes";
 export * from "./types/CheckOrd";
 export * from "./types/ClaimBurnOutputData";

@@ -26,6 +26,7 @@ use tari_consensus_types::{
     ShardGroupAccumulatedData,
     TimeoutCertificate,
 };
+use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{
     Epoch,
     ExtraData,
@@ -186,6 +187,7 @@ impl Block {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn genesis(
         network: Network,
         protocol_version: ProtocolVersion,
@@ -194,8 +196,10 @@ impl Block {
         shard_group: ShardGroup,
         state_merkle_root: FixedHash,
         sidechain_id: Option<RistrettoPublicKeyBytes>,
+        exhaust_burn_rate: ExhaustBurnRate,
     ) -> Self {
         let mut extra_data = ExtraData::new();
+        extra_data.insert_bps(ExtraFieldKey::ExhaustBurnRate, exhaust_burn_rate.as_bps());
         if let Some(sidechain_id) = sidechain_id {
             extra_data.insert(
                 ExtraFieldKey::SidechainId,
@@ -372,7 +376,11 @@ impl Block {
     }
 
     pub fn to_locked_epoch(&self) -> LockedEpoch {
-        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into())
+        LockedEpoch::new(
+            self.epoch(),
+            self.epoch_hash().into_array().into(),
+            self.exhaust_burn_rate(),
+        )
     }
 
     pub fn shard_group(&self) -> ShardGroup {
@@ -452,6 +460,17 @@ impl Block {
 
     pub fn extra_data(&self) -> &ExtraData {
         self.header.extra_data()
+    }
+
+    /// The exhaust burn rate in force for this block's epoch. See
+    /// [`BlockHeader::exhaust_burn_rate`].
+    pub fn exhaust_burn_rate(&self) -> ExhaustBurnRate {
+        self.header.exhaust_burn_rate()
+    }
+
+    /// The exhaust burn rate the next epoch opens at, which only an end-of-epoch block names.
+    pub fn next_epoch_exhaust_burn_rate(&self) -> Option<ExhaustBurnRate> {
+        self.header.next_epoch_exhaust_burn_rate()
     }
 
     pub fn compute_command_inclusion_proof(&self, command_index: usize) -> Result<SparseMerkleProofExt, BlockError> {

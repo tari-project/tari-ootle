@@ -70,6 +70,7 @@ use crate::{
         add_tari_resources,
         initialize_builtin_faucet_state,
         initialize_builtin_nft_faucet_state,
+        initialize_burn_rate_governance_state,
     },
     helpers::derive_account_address_from_public_key,
     mocks::AlwaysPassesProofVerifier,
@@ -295,7 +296,19 @@ impl TemplateTest {
     pub fn bootstrap_state(&mut self) {
         add_tari_resources(&mut self.state_store).unwrap();
         initialize_builtin_faucet_state(&mut self.state_store);
-        initialize_builtin_nft_faucet_state(&mut self.state_store)
+        initialize_builtin_nft_faucet_state(&mut self.state_store);
+        // No council, matching a network that launches without one: the component exists and nobody
+        // owns it. `seat_burn_rate_council` replaces it for a test that wants one.
+        initialize_burn_rate_governance_state(&mut self.state_store, 0, &[]);
+    }
+
+    /// Seats `council` at `threshold` on the burn rate governance component, replacing whatever
+    /// bootstrap left there.
+    ///
+    /// The council is the component's owner rule, so `threshold` of these keys must sign a
+    /// transaction for the engine to admit it.
+    pub fn seat_burn_rate_council(&mut self, threshold: u16, council: &[RistrettoPublicKeyBytes]) {
+        initialize_burn_rate_governance_state(&mut self.state_store, threshold, council);
     }
 
     /// Compiles and adds a new template to the test environment after initial construction.

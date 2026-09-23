@@ -9,7 +9,13 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     vault::Vault,
 };
-use tari_template_builtin::{NFT_FAUCET_TEMPLATE_ADDRESS, NftFaucetState, XTR_FAUCET_TEMPLATE_ADDRESS, XtrFaucetState};
+use tari_template_builtin::{
+    BURN_RATE_GOVERNANCE_TEMPLATE_ADDRESS,
+    NFT_FAUCET_TEMPLATE_ADDRESS,
+    NftFaucetState,
+    XTR_FAUCET_TEMPLATE_ADDRESS,
+    XtrFaucetState,
+};
 use tari_template_lib::types::{
     Amount,
     EntityId,
@@ -17,6 +23,7 @@ use tari_template_lib::types::{
     ResourceType,
     access_rules::{ComponentAccessRules, LOCKED, ResourceAccessRules},
     constants::{
+        BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS,
         NFT_FAUCET_COMPONENT_ADDRESS,
         NFT_FAUCET_RESOURCE_ADDRESS,
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
@@ -25,6 +32,8 @@ use tari_template_lib::types::{
         XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
+    crypto::RistrettoPublicKeyBytes,
+    governance::{BurnRateGovernanceState, council_owner_rule, no_council_owner_rule},
     metadata,
     rule,
 };
@@ -156,6 +165,40 @@ pub fn initialize_builtin_nft_faucet_state<TStore: StateWriter>(store: &mut TSto
                     template_address: NFT_FAUCET_TEMPLATE_ADDRESS,
                     owner_rule: SubstateOwnerRule::None,
                     access_rules: ComponentAccessRules::allow_all(),
+                    entity_id: EntityId::default(),
+                },
+                body: ComponentBody { state },
+            }),
+        )
+        .unwrap();
+}
+
+/// Creates the burn rate governance component with `council` owning it at `threshold`.
+///
+/// Genesis creates this on every network, so a test that calls a council method needs it the same
+/// way a network does. A threshold of zero leaves it owned by nobody, which is what a network that
+/// seats no council gets.
+pub fn initialize_burn_rate_governance_state<TStore: StateWriter>(
+    store: &mut TStore,
+    threshold: u16,
+    council: &[RistrettoPublicKeyBytes],
+) {
+    let owner_rule = if threshold == 0 {
+        no_council_owner_rule()
+    } else {
+        council_owner_rule(threshold, council)
+    };
+
+    let state =
+        tari_bor::to_value(&BurnRateGovernanceState::new()).expect("BurnRateGovernanceState encode is infallible");
+    store
+        .set_state(
+            SubstateId::Component(BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS),
+            Substate::new(0, Component {
+                header: ComponentHeader {
+                    template_address: BURN_RATE_GOVERNANCE_TEMPLATE_ADDRESS,
+                    owner_rule,
+                    access_rules: ComponentAccessRules::new(),
                     entity_id: EntityId::default(),
                 },
                 body: ComponentBody { state },

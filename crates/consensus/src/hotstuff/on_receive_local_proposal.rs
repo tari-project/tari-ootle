@@ -522,6 +522,16 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             },
         };
 
+        // Taken from the committed block for the same reason as the boundary hash above: voters ratified
+        // it against their own resolution, so this is the quorum-agreed value and a node that resolved
+        // something else adopts it rather than opening the epoch on a rate of its own.
+        let Some(next_exhaust_burn_rate) = eoe_block.next_epoch_exhaust_burn_rate() else {
+            return Err(HotStuffError::InvariantError(format!(
+                "EOE block {} does not name the exhaust burn rate for {next_epoch}",
+                eoe_block.id()
+            )));
+        };
+
         // We still need the local oracle to have observed `next_epoch` to assign its committee /
         // validator set. If it has not yet (rare, given the base-layer scan lag keeps the boundary
         // block buried), defer; the worker retries `try_resume_pending_end_of_epoch` on its periodic
@@ -598,6 +608,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         next_shard_group,
                         next_genesis_state_merkle_root,
                         sidechain_id,
+                        next_exhaust_burn_rate,
                     );
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
                     genesis.justify().save(tx)?;

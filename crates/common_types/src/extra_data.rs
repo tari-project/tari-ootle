@@ -39,6 +39,16 @@ type ExtraFieldValue = MaxSizeBytes<MAX_DATA_SIZE>;
 pub enum ExtraFieldKey {
     #[n(0)]
     SidechainId = 0x00,
+    /// The exhaust burn rate in force for the block's epoch, big-endian basis points. Present on
+    /// every block, carried forward from the epoch's genesis block so that a node that joins by
+    /// state sync reads the rate off a header rather than having to have witnessed the epoch open.
+    #[n(1)]
+    ExhaustBurnRate = 0x01,
+    /// The exhaust burn rate the next epoch opens at, big-endian basis points. Present on an
+    /// end-of-epoch block only: it is the value the quorum committing that block ratifies, and the
+    /// next epoch's genesis block carries it into [`Self::ExhaustBurnRate`].
+    #[n(2)]
+    NextEpochExhaustBurnRate = 0x02,
     #[n(255)]
     Custom = 0xff,
 }
@@ -68,5 +78,59 @@ impl ExtraData {
 
     pub fn contains_key(&self, key: &ExtraFieldKey) -> bool {
         self.0.contains_key(key)
+    }
+
+    /// Records a basis-point rate under `key` as two big-endian bytes.
+    pub fn insert_bps(&mut self, key: ExtraFieldKey, bps: u16) -> &mut Self {
+        self.insert(
+            key,
+            bps.to_be_bytes()
+                .as_slice()
+                .try_into()
+                .expect("two bytes is within MAX_DATA_SIZE"),
+        )
+    }
+
+    /// The basis-point rate under `key`, or `None` if the key is absent or does not hold exactly the
+    /// two bytes [`Self::insert_bps`] writes.
+    ///
+    /// A malformed value reads as absent rather than as an error: this decodes a field of a block
+    /// header that an untrusted peer may have built, and every caller's answer to "not the value I
+    /// expect" is the same as its answer to "not there".
+    pub fn get_bps(&self, key: &ExtraFieldKey) -> Option<u16> {
+        let bytes: [u8; 2] = self.get(key)?.as_ref().try_into().ok()?;
+        Some(u16::from_be_bytes(bytes))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_rate_round_trips_through_two_big_endian_bytes() {
+        for bps in [0u16, 1, 500, 10_000, u16::MAX] {
+            let mut extra_data = ExtraData::new();
+            extra_data.insert_bps(ExtraFieldKey::ExhaustBurnRate, bps);
+            assert_eq!(
+                extra_data.get(&ExtraFieldKey::ExhaustBurnRate).unwrap().as_ref(),
+                &bps.to_be_bytes()
+            );
+            assert_eq!(extra_data.get_bps(&ExtraFieldKey::ExhaustBurnRate), Some(bps));
+        }
+    }
+
+    #[test]
+    fn an_absent_key_reads_as_none() {
+        assert_eq!(ExtraData::new().get_bps(&ExtraFieldKey::ExhaustBurnRate), None);
+    }
+
+    #[test]
+    fn a_value_that_is_not_two_bytes_reads_as_none() {
+        for bytes in [[].as_slice(), [1].as_slice(), [1, 2, 3].as_slice()] {
+            let mut extra_data = ExtraData::new();
+            extra_data.insert(ExtraFieldKey::ExhaustBurnRate, bytes.try_into().unwrap());
+            assert_eq!(extra_data.get_bps(&ExtraFieldKey::ExhaustBurnRate), None);
+        }
     }
 }

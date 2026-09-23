@@ -10,8 +10,6 @@ use std::{
 use futures::{StreamExt, future::Either, stream::FuturesUnordered};
 use log::*;
 use ootle_network::Network;
-#[cfg(feature = "metrics")]
-use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine_types::{
     published_template::PublishedTemplateMetadata,
     substate::{SubstateId, SubstateValue},
@@ -47,7 +45,13 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 #[cfg(feature = "metrics")]
-use crate::{network_state_sync::NetworkStateMetrics, store::ReadOnlyStore, substate_cache::SubstateCacheMetrics};
+use crate::{
+    exhaust_burn_rate::resolve_exhaust_burn_rate_for_epoch,
+    network_state_sync::NetworkStateMetrics,
+    store::ReadOnlyStore,
+    substate_cache::SubstateCacheMetrics,
+    substate_manager::SubstateManager,
+};
 use crate::{
     network_state_sync::{
         committee_client::{ValidatorCommitteeRpcPool, ValidatorRpcSession},
@@ -93,7 +97,7 @@ pub struct NetworkWideStateSync {
     #[cfg(feature = "metrics")]
     substate_cache_metrics: SubstateCacheMetrics,
     #[cfg(feature = "metrics")]
-    consensus_constants: ConsensusConstants,
+    substate_manager: SubstateManager,
 }
 
 impl NetworkWideStateSync {
@@ -109,7 +113,7 @@ impl NetworkWideStateSync {
         shard_watermarks: Arc<ShardWatermarks>,
         #[cfg(feature = "metrics")] metrics: NetworkStateMetrics,
         #[cfg(feature = "metrics")] substate_cache_metrics: SubstateCacheMetrics,
-        #[cfg(feature = "metrics")] consensus_constants: ConsensusConstants,
+        #[cfg(feature = "metrics")] substate_manager: SubstateManager,
     ) -> Self {
         Self {
             network,
@@ -127,7 +131,7 @@ impl NetworkWideStateSync {
             #[cfg(feature = "metrics")]
             substate_cache_metrics,
             #[cfg(feature = "metrics")]
-            consensus_constants,
+            substate_manager,
         }
     }
 
@@ -260,7 +264,10 @@ impl NetworkWideStateSync {
         match ReadOnlyStore::new(self.store.clone()).get_tari_economics().await {
             Ok(economics) => {
                 let current_epoch = self.epoch_manager.get_current_epoch();
-                let target_burn_rate_bps = self.consensus_constants.exhaust_burn_rate(current_epoch).as_bps();
+                let target_burn_rate_bps =
+                    resolve_exhaust_burn_rate_for_epoch(&self.substate_manager, self.network, current_epoch)
+                        .await
+                        .as_bps();
                 self.metrics.update(&economics, target_burn_rate_bps);
             },
             Err(err) => {

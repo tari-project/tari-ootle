@@ -42,11 +42,18 @@ pub const LIQUIDITY_POOL_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::fr
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ]);
 
+/// Address of the exhaust burn rate governance template.
+/// 0000000000000000000000000000000000000000000000000000000000000003
+pub const BURN_RATE_GOVERNANCE_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+]);
+
 pub fn is_builtin_template_address(addr: &TemplateAddress) -> bool {
     *addr == ACCOUNT_TEMPLATE_ADDRESS ||
         *addr == NFT_FAUCET_TEMPLATE_ADDRESS ||
         *addr == XTR_FAUCET_TEMPLATE_ADDRESS ||
-        *addr == LIQUIDITY_POOL_TEMPLATE_ADDRESS
+        *addr == LIQUIDITY_POOL_TEMPLATE_ADDRESS ||
+        *addr == BURN_RATE_GOVERNANCE_TEMPLATE_ADDRESS
 }
 
 #[cfg(feature = "state")]

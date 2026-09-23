@@ -52,11 +52,13 @@ use tari_consensus_types::{
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::{
     commit_result::AbortReason,
+    fees::ExhaustBurnRate,
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
     Epoch,
     ExtraData,
+    ExtraFieldKey,
     NodeHeight,
     ProtocolVersion,
     ShardGroup,
@@ -507,7 +509,7 @@ fn try_convert_proto_block_header(
     let proposed_by = RistrettoPublicKeyBytes::from_bytes(&value.proposed_by)
         .map_err(|_| anyhow!("Block conversion: Invalid proposed_by"))?;
 
-    let extra_data = value
+    let extra_data: ExtraData = value
         .extra_data
         .ok_or_else(|| anyhow!("ExtraData not provided"))?
         .try_into()?;
@@ -532,6 +534,13 @@ fn try_convert_proto_block_header(
                 .accumulated_data
                 .ok_or_else(|| anyhow!("AccumulatedData not provided"))?
                 .try_into()?,
+            // Read back out of the extra data the sender's dummy carried. A dummy block's id is
+            // recomputed here rather than trusted, so a rate that disagrees with what the receiver
+            // derives produces an id that does not link the chain, which is what rejects it.
+            extra_data
+                .get_bps(&ExtraFieldKey::ExhaustBurnRate)
+                .and_then(ExhaustBurnRate::try_new)
+                .ok_or_else(|| anyhow!("Block conversion: dummy block does not name an exhaust burn rate"))?,
         ))
     } else {
         // We calculate the BlockId and command MR locally from remote data. This means that they will

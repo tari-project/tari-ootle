@@ -20,6 +20,7 @@ use tari_consensus_types::{
     ProposalCertificate,
     TimeoutCertificate,
 };
+use tari_engine_types::fees::ExhaustBurnRate;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_ootle_common_types::{
     Epoch,
@@ -65,6 +66,7 @@ use crate::{
         epoch_state::EpochState,
         error::HotStuffError,
         event::HotstuffEvent,
+        exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
         on_catch_up_sync::OnCatchUpSync,
         on_catch_up_sync_request::OnSyncRequest,
         on_inbound_message::OnInboundMessage,
@@ -380,6 +382,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let epoch_state = EpochState {
             epoch: current_epoch,
             epoch_hash: current_epoch_hash,
+            exhaust_burn_rate: self.epoch_exhaust_burn_rate(current_epoch)?,
             local_committee_info,
             local_committee,
         };
@@ -434,8 +437,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             // Need to update epoch state if the epoch has changed
             if epoch_state.epoch != current_epoch {
+                let exhaust_burn_rate = self.epoch_exhaust_burn_rate(current_epoch)?;
                 epoch_state
-                    .update_from_epoch_manager(&self.epoch_manager, current_epoch)
+                    .update_from_epoch_manager(&self.epoch_manager, current_epoch, exhaust_burn_rate)
                     .await?;
                 local_claim_public_key = self
                     .epoch_manager
@@ -1306,6 +1310,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     justify_block.timestamp(),
                     *justify_block.header().accumulated_data(),
                     *justify_block.epoch_hash(),
+                    justify_block.exhaust_burn_rate(),
                 ) {
                     dummy_block = Some(dummy);
                 }
@@ -1606,6 +1611,17 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
+    /// The exhaust burn rate `epoch` runs at, read off the genesis block that opened it.
+    ///
+    /// Every block of the epoch names the same rate, and the genesis block is the one this node
+    /// wrote when it entered the epoch, so this is what a proposal from a peer is held to.
+    fn epoch_exhaust_burn_rate(&self, epoch: Epoch) -> Result<ExhaustBurnRate, HotStuffError> {
+        let genesis = self
+            .state_store
+            .with_read_tx(|tx| Block::get_genesis_for_epoch(tx, epoch))?;
+        Ok(genesis.exhaust_burn_rate())
+    }
+
     fn create_genesis_block_if_required(
         &self,
         epoch: Epoch,
@@ -1613,6 +1629,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         shard_group: ShardGroup,
     ) -> Result<bool, HotStuffError> {
         self.state_store.with_write_tx(|tx| {
+            // Resolved rather than carried forward from the previous epoch's end-of-epoch block: this
+            // opens an epoch for a node that may never have seen that block, because it joined by state
+            // sync. The resolution depends only on the epoch and on global-shard state, which such a
+            // node does have, so it lands on the value the rest of the network ratified.
+            let exhaust_burn_rate = resolve_epoch_exhaust_burn_rate(&**tx, self.config.network, epoch)?;
+
             // The parent for genesis blocks refer to this zero block
             let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);
             if !zero_block.exists(&**tx)? {
@@ -1637,6 +1659,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 shard_group,
                 FixedHash::new(state_merkle_root.into_array()),
                 self.config.sidechain_id,
+                exhaust_burn_rate,
             );
             // Warn: you cannot use genesis.exists(tx) here, because we're calculating the current state merkle root,
             // not the merkle root at height = 0.

@@ -4,10 +4,7 @@
 use std::collections::HashMap;
 
 use log::info;
-use tari_consensus::{
-    consensus_constants::ConsensusConstants,
-    traits::{BlockTransactionExecutor, BlockTransactionExecutorError},
-};
+use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
 use tari_engine::state_store::{
     StateWriter,
     memory::{MemoryStateStore, ReadOnlyMemoryStateStore},
@@ -30,15 +27,11 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_ex
 #[derive(Debug, Clone)]
 pub struct TariBlockTransactionExecutor<TExecutor> {
     executor: TExecutor,
-    consensus_constants: ConsensusConstants,
 }
 
 impl<TExecutor: TransactionExecutor<ReadOnlyMemoryStateStore>> TariBlockTransactionExecutor<TExecutor> {
-    pub fn new(executor: TExecutor, consensus_constants: ConsensusConstants) -> Self {
-        Self {
-            executor,
-            consensus_constants,
-        }
+    pub fn new(executor: TExecutor) -> Self {
+        Self { executor }
     }
 
     fn add_substates_to_memory_db<'a, I: IntoIterator<Item = (&'a SubstateRequirement, &'a Substate)>>(
@@ -74,7 +67,7 @@ where
         let mut state_db = new_memory_store();
         Self::add_substates_to_memory_db(resolved_inputs, &mut state_db)?;
 
-        let (execute_epoch, execute_epoch_hash) = locked_epoch.destructure();
+        let (execute_epoch, execute_epoch_hash, burn_rate) = locked_epoch.destructure();
         let virtual_substates = VirtualSubstates::from_iter([
             (
                 VirtualSubstateId::CurrentEpoch,
@@ -85,10 +78,6 @@ where
                 VirtualSubstate::CurrentEpochHash(execute_epoch_hash),
             ),
         ]);
-
-        // Resolve the exhaust burn rate for the epoch this transaction executes in, so the payer is charged the
-        // rate in effect at execution time.
-        let burn_rate = self.consensus_constants.exhaust_burn_rate(execute_epoch);
 
         // Execute the transaction and get the result
         let exec_output = self

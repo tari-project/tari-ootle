@@ -84,6 +84,10 @@ pub enum NoVoteReason {
         "End-of-epoch next-epoch hash cannot be ratified: local oracle has not observed the next epoch boundary block"
     )]
     EndOfEpochHashNotObserved,
+    #[error("End-of-epoch block does not name the exhaust burn rate the next epoch opens at")]
+    EndOfEpochBurnRateMissing,
+    #[error("End-of-epoch next-epoch exhaust burn rate mismatch. Local: {local_bps}bps, proposed: {proposed_bps}bps")]
+    EndOfEpochBurnRateMismatch { local_bps: u16, proposed_bps: u16 },
     #[error("The state Merkle root does not match")]
     StateMerkleRootMismatch,
     #[error("The command Merkle root does not match")]
@@ -147,6 +151,8 @@ impl NoVoteReason {
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
             Self::EndOfEpochHashMismatch { .. } => "EndOfEpochHashMismatch",
             Self::EndOfEpochHashNotObserved => "EndOfEpochHashNotObserved",
+            Self::EndOfEpochBurnRateMissing => "EndOfEpochBurnRateMissing",
+            Self::EndOfEpochBurnRateMismatch { .. } => "EndOfEpochBurnRateMismatch",
             Self::TotalLeaderFeeDisagreement => "TotalLeaderFeeDisagreement",
             Self::StateMerkleRootMismatch => "StateMerkleRootMismatch",
             Self::CommandMerkleRootMismatch => "CommandMerkleRootMismatch",

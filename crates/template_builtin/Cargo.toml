@@ -18,6 +18,7 @@ minicbor = { workspace = true, default-features = false, features = ["alloc", "d
 # depends on tari_template_builtin, so we can't list it with a published version here
 # or `cargo publish` can't resolve the manifest.
 tari_template_test_tooling = { path = "../template_test_tooling" }
+tari_bor = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_ootle_transaction = { workspace = true }

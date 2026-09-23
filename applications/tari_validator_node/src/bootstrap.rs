@@ -404,7 +404,7 @@ pub async fn spawn_services(
         )),
     );
     // The executor resolves the exhaust burn rate for each transaction's execution epoch.
-    let transaction_executor = TariBlockTransactionExecutor::new(transaction_processor, consensus_constants.clone());
+    let transaction_executor = TariBlockTransactionExecutor::new(transaction_processor);
 
     let transaction_validator = TariBlockTransactionValidator::new(
         create_node_transaction_validator(config.network, template_provider.clone(), &consensus_constants).boxed(),

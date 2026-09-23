@@ -93,6 +93,16 @@ pub const NFT_FAUCET_RESOURCE_ADDRESS: ResourceAddress = ResourceAddress::new(Ob
     0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]));
 
+/// Address of the component that lets the council move the exhaust burn rate.
+///
+/// Instantiated at genesis on every network and fixed thereafter: the address is named by the
+/// resolver that reads it and by [`crate::substates`]' global-address rule, and a substate cannot be
+/// moved once state roots have been taken over it.
+/// component_0104000000000000000000000000000000000000000000000000000000000000
+pub const BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::new(ObjectKey::from_array([
+    1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]));
+
 /// Metadata key used as convention to represent the symbol (a.k.a. ticker) of a token. Meant as a shorthand,
 /// user-friendly identification of the underlying token
 pub const TOKEN_SYMBOL: &str = "SYMBOL";

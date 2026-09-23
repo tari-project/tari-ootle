@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
-use tari_engine_types::{ValidatorFeePool, substate::SubstateDiff};
+use tari_engine_types::{ValidatorFeePool, fees::ExhaustBurnRate, substate::SubstateDiff};
 use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
@@ -71,6 +71,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     parent_timestamp: u64,
     parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
+    parent_exhaust_burn_rate: ExhaustBurnRate,
 ) -> Option<LeafBlock> {
     let mut dummy = None;
     with_dummy_blocks(
@@ -88,6 +89,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
         parent_timestamp,
         parent_accumulated_data,
         parent_epoch_hash,
+        parent_exhaust_burn_rate,
         |dummy_block| {
             dummy = Some(dummy_block.as_leaf());
             ControlFlow::Continue(())
@@ -113,6 +115,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
     parent_timestamp: u64,
     parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
+    parent_exhaust_burn_rate: ExhaustBurnRate,
 ) -> Vec<Block> {
     let mut dummies = Vec::with_capacity(new_height.saturating_sub(from_height).as_u64() as usize);
     with_dummy_blocks(
@@ -130,6 +133,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
         parent_timestamp,
         parent_accumulated_data,
         parent_epoch_hash,
+        parent_exhaust_burn_rate,
         |dummy_block| {
             if dummy_block.id() == expected_parent_block_id {
                 dummies.push(dummy_block);
@@ -168,6 +172,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         justify_block.timestamp(),
         *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
+        justify_block.exhaust_burn_rate(),
     )
 }
 
@@ -270,6 +275,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
     parent_timestamp: u64,
     parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
+    parent_exhaust_burn_rate: ExhaustBurnRate,
     mut callback: F,
 ) where
     TAddr: NodeAddressable,
@@ -317,6 +323,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             parent_timestamp,
             parent_epoch_hash,
             parent_accumulated_data,
+            parent_exhaust_burn_rate,
         );
         let dummy_block = Block::new(dummy_header, qc.clone(), Default::default(), None);
         debug!(

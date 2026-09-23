@@ -281,6 +281,31 @@ pub async fn spawn_services(
     // cache (which serves an entry only while its shard is being kept up with).
     let shard_watermarks = Arc::new(network_state_sync::ShardWatermarks::new());
 
+    // Substate manager
+    let substate_cache = SqliteSubstateCache::new(
+        store.clone(),
+        shard_watermarks.clone(),
+        config.indexer.substate_cache_max_serve_lag,
+        config.indexer.state_sync_keepalive_interval * NEGATIVE_SERVE_KEEPALIVES,
+        SUBSTATE_CACHE_JOURNAL_RETENTION,
+        DEFAULT_CACHE_TTL,
+        config.indexer.substate_cache_max_entries,
+    );
+    #[cfg(feature = "metrics")]
+    let substate_cache = substate_cache.with_metrics(substate_cache_metrics.clone());
+    substate_cache.spawn_pruner(SUBSTATE_CACHE_PRUNE_INTERVAL, shutdown.clone());
+    let substate_manager = SubstateManager::new(
+        config.network,
+        store.clone(),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        substate_cache.clone(),
+    )
+    .with_substate_proof_verification(config.indexer.verify_substate_proofs)
+    .with_negative_cache_ttl(config.indexer.substate_cache_negative_ttl);
+    #[cfg(feature = "metrics")]
+    let substate_manager = substate_manager.with_metrics(metrics_registry);
+
     network_state_sync::NetworkWideStateSync::new(
         config.network,
         epoch_manager.clone(),
@@ -296,40 +321,15 @@ pub async fn spawn_services(
         event_notifier.clone(),
         transaction_event_notifier.clone(),
         validator_status.clone(),
-        shard_watermarks.clone(),
+        shard_watermarks,
         #[cfg(feature = "metrics")]
         network_state_metrics,
         #[cfg(feature = "metrics")]
-        substate_cache_metrics.clone(),
+        substate_cache_metrics,
         #[cfg(feature = "metrics")]
-        consensus_constants.clone(),
+        substate_manager.clone(),
     )
     .spawn(shutdown.clone());
-
-    // Substate manager
-    let substate_cache = SqliteSubstateCache::new(
-        store.clone(),
-        shard_watermarks,
-        config.indexer.substate_cache_max_serve_lag,
-        config.indexer.state_sync_keepalive_interval * NEGATIVE_SERVE_KEEPALIVES,
-        SUBSTATE_CACHE_JOURNAL_RETENTION,
-        DEFAULT_CACHE_TTL,
-        config.indexer.substate_cache_max_entries,
-    );
-    #[cfg(feature = "metrics")]
-    let substate_cache = substate_cache.with_metrics(substate_cache_metrics);
-    substate_cache.spawn_pruner(SUBSTATE_CACHE_PRUNE_INTERVAL, shutdown.clone());
-    let substate_manager = SubstateManager::new(
-        config.network,
-        store.clone(),
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        substate_cache.clone(),
-    )
-    .with_substate_proof_verification(config.indexer.verify_substate_proofs)
-    .with_negative_cache_ttl(config.indexer.substate_cache_negative_ttl);
-    #[cfg(feature = "metrics")]
-    let substate_manager = substate_manager.with_metrics(metrics_registry);
 
     // Template manager
     let wasm_cache_dir = config.to_data_dir().join("wasm_cache");
@@ -385,8 +385,6 @@ pub async fn spawn_services(
             config.network,
             config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
         ),
-        // The processor resolves the exhaust burn rate for the current epoch on each dry-run estimate.
-        consensus_constants.clone(),
     )?;
 
     // Both of these have defaults that decide how much disk this node uses and what it deletes, so

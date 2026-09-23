@@ -13,6 +13,7 @@ use notify::{
     Watcher,
     event::{AccessKind, AccessMode},
 };
+use tari_engine_types::commit_result::{ExecutionFailureCode, RejectReason};
 use tari_ootle_common_types::{Epoch, optional::Optional};
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
@@ -38,20 +39,20 @@ const CLAIM_TRANSACTION_VALIDITY_EPOCHS: u64 = 3;
 const MAX_RETRIES_NETWORK: u32 = 10;
 /// Maximum retries for file read/parse errors (file still being written on macOS).
 const MAX_RETRIES_FILE_READ: u32 = 1;
-/// Maximum times a claim is deferred (dry run reports the burn "not yet claimable") before giving
+/// Maximum times a claim is deferred (the dry run reports the burn not yet claimable) before giving
 /// up. Proofs carry the L1 mined-in epoch, so a claim is only attempted once the network is past
 /// that epoch and normally succeeds; a deferral is a rare edge (older proof with no epoch, or an
 /// epoch-boundary race), so a modest bound suffices. On give-up the file remains for a manual claim.
 const MAX_RETRIES_DEFERRED: u32 = 20;
-/// Marker phrase in the claim-burn verifier's rejection when the burn's L1 block has not yet been
-/// synced by validators into a claimable epoch. Such a claim is valid but must wait, so matching
-/// this phrase lets the service defer rather than drop it. See `TariClaimBurnProofVerifier`.
-const BURN_NOT_YET_CLAIMABLE_MARKER: &str = "claimable in a later epoch";
 
 /// True if a dry-run rejection indicates the burn is valid but its L1 block is not yet synced into a
 /// claimable epoch, as opposed to a genuinely invalid claim.
-fn is_burn_not_yet_claimable(reject_reason: &str) -> bool {
-    reject_reason.contains(BURN_NOT_YET_CLAIMABLE_MARKER)
+///
+/// The engine says which of the two it is: `TariClaimBurnProofVerifier` returns
+/// `ClaimProofRejection::NotYetValid` for a header it has not synced, and that reaches here as
+/// [`ExecutionFailureCode::NotYetValid`].
+fn is_burn_not_yet_claimable(reject_reason: &RejectReason) -> bool {
+    reject_reason.execution_failure_code() == Some(ExecutionFailureCode::NotYetValid)
 }
 
 /// The epoch a claim must be strictly past before it is claimable, given the proof's
@@ -480,10 +481,9 @@ impl AutoClaimBurnService {
             )));
         };
         if let Some(reason) = result.finalize.any_reject() {
-            // A burn whose L1 block validators have not yet synced surfaces here as a generic
-            // execution failure carrying the verifier's marker phrase. Defer these so the claim
-            // lands once the base layer catches up, rather than dropping it as permanent.
-            if is_burn_not_yet_claimable(&reason.to_string()) {
+            // A burn whose L1 block validators have not yet synced is deferred so the claim lands
+            // once the base layer catches up, rather than being dropped as permanent.
+            if is_burn_not_yet_claimable(reason) {
                 return Err(ClaimError::Deferred);
             }
             return Err(ClaimError::Permanent(anyhow::anyhow!(
@@ -583,20 +583,33 @@ impl ClaimError {
 mod tests {
     use super::*;
 
+    fn execution_failure(code: ExecutionFailureCode) -> RejectReason {
+        RejectReason::ExecutionFailure {
+            code,
+            message: "At instruction #0: irrelevant to the decision".to_string(),
+        }
+    }
+
     #[test]
     fn defers_burn_not_yet_synced_rejection() {
-        // Mirrors the claim-burn verifier's rejection when the L1 block is not yet synced.
-        let reason = "Execution failure: At instruction #0: Invalid burn claim proof: block header not found for hash \
-                      0a1b2c. The claim may be invalid, or the burn may only be claimable in a later epoch.";
-        assert!(is_burn_not_yet_claimable(reason));
+        assert!(is_burn_not_yet_claimable(&execution_failure(
+            ExecutionFailureCode::NotYetValid
+        )));
     }
 
     #[test]
     fn does_not_defer_other_rejections() {
-        assert!(!is_burn_not_yet_claimable(
-            "Execution failure: At instruction #0: Insufficient funds"
-        ));
-        assert!(!is_burn_not_yet_claimable("Failed to lock inputs: input conflict"));
+        // A claim the verifier refused outright shares the instruction and the message shape with the
+        // deferrable one, so only the code separates them.
+        assert!(!is_burn_not_yet_claimable(&execution_failure(
+            ExecutionFailureCode::InvalidProof
+        )));
+        assert!(!is_burn_not_yet_claimable(&execution_failure(
+            ExecutionFailureCode::InsufficientFunds
+        )));
+        assert!(!is_burn_not_yet_claimable(&RejectReason::FailedToLockInputs(
+            "input conflict".to_string()
+        )));
     }
 
     #[test]

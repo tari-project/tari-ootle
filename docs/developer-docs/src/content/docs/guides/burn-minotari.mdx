@@ -240,8 +240,8 @@ Run it with `is_dry_run: true` first to get `required_fees`, then submit with th
 }
 ```
 
-A dry run that fails with `claimable in a later epoch` means the burn is valid but still inside the confirmation window.
-Try again later.
+A dry run whose rejection carries the code `NotYetValid` means the burn is valid but still inside the confirmation
+window. Try again later. Branch on the code rather than the message, which is free to change.
 
 ---
 
@@ -251,6 +251,6 @@ Try again later.
 | ---------------------------------------------- | -------------------------------------------------------------------- |
 | No proof file appears                          | The burn is not confirmed yet. Check the Burn tab in `minotari_console_wallet`.    |
 | Proof file exists, daemon ignores it           | Different directory or network. Compare the paths above.             |
-| Claim rejected: `claimable in a later epoch`   | Wait. The daemon retries on its own.                                 |
+| Claim rejected, code `NotYetValid`             | Wait. The daemon retries on its own.                                 |
 | Claim rejected: ownership proof fails          | Wrong claim key or a sidechain key was set. The burn cannot be claimed and the funds are lost. |
 | gRPC `connection refused`                      | gRPC not enabled, or wrong port for the network.                     |

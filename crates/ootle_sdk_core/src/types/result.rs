@@ -51,6 +51,7 @@ pub fn execution_failure_code(code: &ExecutionFailureCode) -> &'static str {
         ExecutionFailureCode::ResourceRestricted => "RESOURCE_RESTRICTED",
         ExecutionFailureCode::InvalidProof => "INVALID_PROOF",
         ExecutionFailureCode::EngineInvariant => "ENGINE_INVARIANT",
+        ExecutionFailureCode::NotYetValid => "NOT_YET_VALID",
         ExecutionFailureCode::Unclassified => "UNCLASSIFIED",
     }
 }
@@ -313,6 +314,7 @@ mod tests {
         ExecutionFailureCode::ResourceRestricted,
         ExecutionFailureCode::InvalidProof,
         ExecutionFailureCode::EngineInvariant,
+        ExecutionFailureCode::NotYetValid,
         ExecutionFailureCode::Unclassified,
     ];
 
@@ -429,7 +431,7 @@ mod tests {
             assert!(!s.is_empty(), "failure code for {code:?} is empty");
             assert!(seen.insert(s), "duplicate failure code {s} for {code:?}");
         }
-        assert_eq!(seen.len(), 13, "expected exactly 13 canonical failure codes");
+        assert_eq!(seen.len(), 14, "expected exactly 14 canonical failure codes");
     }
 
     /// The failure code set is frozen for the same reason the top-level codes are: a host branching on
@@ -449,6 +451,7 @@ mod tests {
             (ExecutionFailureCode::ResourceRestricted, "RESOURCE_RESTRICTED"),
             (ExecutionFailureCode::InvalidProof, "INVALID_PROOF"),
             (ExecutionFailureCode::EngineInvariant, "ENGINE_INVARIANT"),
+            (ExecutionFailureCode::NotYetValid, "NOT_YET_VALID"),
             (ExecutionFailureCode::Unclassified, "UNCLASSIFIED"),
         ];
         for (code, expected) in cases {

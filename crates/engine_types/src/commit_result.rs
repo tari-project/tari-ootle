@@ -608,6 +608,11 @@ pub enum ExecutionFailureCode {
     /// transaction; a consumer should surface it as such rather than asking the user to retry.
     #[n(11)]
     EngineInvariant,
+    /// The transaction is well-formed, but it depends on chain state this epoch does not have. The same
+    /// transaction, unchanged, can succeed once the state arrives, so a consumer schedules a retry rather
+    /// than reporting a failure. Nothing the caller sends differently would help now.
+    #[n(13)]
+    NotYetValid,
     /// No code has been assigned to this failure yet. Consumers fall back to the message.
     ///
     /// Not a resting place: the engine emits a `warn!` whenever it produces one, so the tail can be

@@ -36,17 +36,42 @@ pub trait Invokable<S> {
     ) -> Result<InstructionResult, Self::Error>;
 }
 
+/// Why a claim proof was refused.
+///
+/// The two carry the same detail text and differ only in whether the same proof, unchanged, could be
+/// accepted later. A caller acts on that difference: one claim is dropped, the other is retried.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ClaimProofRejection {
+    /// The proof does not verify. No later epoch admits it.
+    #[error("{0}")]
+    Invalid(String),
+    /// The proof names base layer state this epoch does not have. A later epoch may have it, and the
+    /// same proof then verifies.
+    #[error("{0}")]
+    NotYetValid(String),
+}
+
+/// A plain rejection reason is invalid, which is what most verification failures are. A verifier states
+/// [`ClaimProofRejection::NotYetValid`] explicitly, so the retryable case is never reached by accident.
+impl From<String> for ClaimProofRejection {
+    fn from(details: String) -> Self {
+        Self::Invalid(details)
+    }
+}
+
 /// Verifier for claim proofs (MinotariBurnClaimProof).
 ///
 /// Implementors of this trait should provide the logic to verify the authenticity and validity of the claim proof.
 /// If the claim proof is invalid, the failure reason should be returned.
 ///
-/// NOTE: This trait must be deterministic, as it is used in consensus-critical code paths.
+/// NOTE: This trait must be deterministic, as it is used in consensus-critical code paths. That extends to
+/// which [`ClaimProofRejection`] variant is returned: validators in an epoch must agree on whether a proof is
+/// refused for good or only for now.
 pub trait ClaimProofVerifier {
     fn verify_claim_proof(
         &self,
         epoch: Epoch,
         claimant: &RistrettoPublicKeyBytes,
         claim: &MinotariBurnClaimProof,
-    ) -> Result<(), String>;
+    ) -> Result<(), ClaimProofRejection>;
 }

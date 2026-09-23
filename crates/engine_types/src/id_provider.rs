@@ -44,7 +44,7 @@ impl IdProviderError {
     /// `RuntimeError::failure_code`.
     pub fn failure_code(&self) -> ExecutionFailureCode {
         match self {
-            Self::MaxIdsExceeded { .. } => ExecutionFailureCode::LimitExceeded,
+            Self::MaxIdsExceeded { .. } | Self::CounterExhausted { .. } => ExecutionFailureCode::LimitExceeded,
             Self::LockingError { .. } => ExecutionFailureCode::EngineInvariant,
         }
     }

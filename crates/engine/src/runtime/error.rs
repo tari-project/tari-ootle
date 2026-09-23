@@ -255,6 +255,8 @@ pub enum RuntimeError {
     ModuleError(#[from] RuntimeModuleError),
     #[error("Invalid burn claim proof: {details}")]
     InvalidClaimProof { details: String },
+    #[error("Burn claim proof names base layer state this epoch does not have: {details}")]
+    ClaimProofNotYetValid { details: String },
     #[error("Layer one commitment already claimed with address '{address}'")]
     ConfidentialOutputAlreadyClaimed { address: ClaimedOutputTombstoneAddress },
     #[error("Template {template_address} not found")]
@@ -484,6 +486,7 @@ impl RuntimeError {
             Self::InvalidArgument { .. } |
             Self::IntrinsicNotSupported { .. } |
             Self::InvalidNumberOfArguments { .. } |
+            Self::InvalidMOfNThreshold { .. } |
             Self::InvalidAmount { .. } |
             Self::BucketNotFound { .. } |
             Self::BucketNotInScope { .. } |
@@ -543,6 +546,8 @@ impl RuntimeError {
             Self::SpendConditionNotMet { .. } |
             Self::InvalidClaimProof { .. } => C::InvalidProof,
 
+            Self::ClaimProofNotYetValid { .. } => C::NotYetValid,
+
             Self::BucketNotEmpty { .. } |
             Self::OrphanedSubstate { .. } |
             Self::OrphanedSubstates { .. } |
@@ -550,7 +555,7 @@ impl RuntimeError {
             Self::UnreturnedProofs { .. } |
             Self::AddressAllocationNotUsed { .. } => C::DanglingResources,
 
-            Self::TooManyOutputs(_) | Self::TooManyEntities(_) | Self::MaxCallDepthExceeded { .. } => C::LimitExceeded,
+            Self::TooManyEntities(_) | Self::MaxCallDepthExceeded { .. } => C::LimitExceeded,
 
             // Paying more is what clears these.
             Self::InsufficientFeesPaid { .. } | Self::InsufficientFeesForNativeExecution { .. } => C::OutOfCompute,
@@ -591,6 +596,7 @@ impl RuntimeError {
             Self::LimitError(err) => err.failure_code(),
             // The spend script's rejection is itself a runtime error; reporting `InvalidProof` here would
             // hide, say, an access denial raised inside the script.
+            Self::IdAllocation(err) => err.failure_code(),
             Self::SpendScriptRejected { details } => details.failure_code(),
             // A cross-template call reports what the callee failed with, not the fact that a call was made.
             Self::CrossTemplateCallFunctionError { details, .. } |

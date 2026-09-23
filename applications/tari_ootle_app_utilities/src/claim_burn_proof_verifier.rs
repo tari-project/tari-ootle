@@ -12,7 +12,7 @@ use tari_crypto::{
     ristretto::{RistrettoSchnorr, RistrettoSecretKey, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
-use tari_engine::traits::ClaimProofVerifier;
+use tari_engine::traits::{ClaimProofRejection, ClaimProofVerifier};
 use tari_engine_types::{confidential::MinotariBurnClaimProof, crypto::get_commitment_factory};
 use tari_hashing::{TransactionHashDomain, hashers::KernelMmrHasherBlake256};
 use tari_mmr::common::LeafIndex;
@@ -59,7 +59,7 @@ where
         epoch: Epoch,
         claimant: &RistrettoPublicKeyBytes,
         claim_proof: &MinotariBurnClaimProof,
-    ) -> Result<(), String> {
+    ) -> Result<(), ClaimProofRejection> {
         // 1. Verify proof of knowledge of the burn commitment opening
         self.knowledge_proof.verify_claim_proof(epoch, claimant, claim_proof)?;
         // 2. Verify kernel inclusion proof
@@ -104,7 +104,7 @@ where
         epoch: Epoch,
         _claimant: &RistrettoPublicKeyBytes,
         claim_proof: &MinotariBurnClaimProof,
-    ) -> Result<(), String> {
+    ) -> Result<(), ClaimProofRejection> {
         // 1. Decode the merkle proof
         let (proof, read) = bincode::serde::decode_from_slice::<tari_mmr::MerkleProof, _>(
             claim_proof.encoded_merkle_proof.encoded_merkle_proof.as_slice(),
@@ -117,7 +117,9 @@ where
         })?;
         if read != claim_proof.encoded_merkle_proof.encoded_merkle_proof.len() {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed merkle proof: read length mismatch");
-            return Err("malformed merkle proof: read length mismatch".to_string());
+            return Err(ClaimProofRejection::Invalid(
+                "malformed merkle proof: read length mismatch".to_string(),
+            ));
         }
 
         // 2. Fetch the block header for this proof
@@ -141,11 +143,13 @@ where
                 "Claim burn failed - block header not found for hash {} in epoch {}",
                 claim_proof.encoded_merkle_proof.block_hash, epoch
             );
-            format!(
+            // A header this epoch has not synced may arrive in a later one, so the same proof can still
+            // verify. This is the only failure here that depends on when it is checked.
+            ClaimProofRejection::NotYetValid(format!(
                 "block header not found for hash {}. The claim may be invalid, or the burn may only be claimable in a \
                  later epoch.",
                 claim_proof.encoded_merkle_proof.block_hash
-            )
+            ))
         })?;
 
         // 3. Reconstitute the kernel to get the hash
@@ -219,7 +223,7 @@ impl ClaimProofVerifier for KnowledgeProofVerifier {
         _epoch: Epoch,
         claimant: &RistrettoPublicKeyBytes,
         claim: &MinotariBurnClaimProof,
-    ) -> Result<(), String> {
+    ) -> Result<(), ClaimProofRejection> {
         let MinotariBurnClaimProof {
             commitment,
             ownership_proof: proof_of_knowledge,
@@ -260,7 +264,9 @@ impl ClaimProofVerifier for KnowledgeProofVerifier {
 
         if !proof_of_knowledge.verify(&signer_pk, message) {
             warn!(target: LOG_TARGET, "Claim burn failed - signature verification failed");
-            return Err("invalid proof of knowledge signature".to_string());
+            return Err(ClaimProofRejection::Invalid(
+                "invalid proof of knowledge signature".to_string(),
+            ));
         }
 
         Ok(())

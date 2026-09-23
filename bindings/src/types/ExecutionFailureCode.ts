@@ -13,4 +13,5 @@ export type ExecutionFailureCode =
   | "ResourceRestricted"
   | "InvalidProof"
   | "EngineInvariant"
+  | "NotYetValid"
   | "Unclassified";

@@ -177,7 +177,7 @@ use crate::{
     },
     state_store::StateReader,
     template::LoadedTemplate,
-    traits::ClaimProofVerifier,
+    traits::{ClaimProofRejection, ClaimProofVerifier},
     transaction::{ModulesCollection, TransactionProcessor},
 };
 
@@ -3670,7 +3670,10 @@ where
             .verify_claim_proof(epoch, &self.seal_signer_public_key, &claim)
             .map_err(|e| {
                 warn!(target: LOG_TARGET, "Claim burn failed - proof verification failed: {}", e);
-                RuntimeError::InvalidClaimProof { details: e }
+                match e {
+                    ClaimProofRejection::Invalid(details) => RuntimeError::InvalidClaimProof { details },
+                    ClaimProofRejection::NotYetValid(details) => RuntimeError::ClaimProofNotYetValid { details },
+                }
             })?;
 
         self.tracker.write_with(|state_mut| {

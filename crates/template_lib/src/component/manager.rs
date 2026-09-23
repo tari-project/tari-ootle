@@ -145,7 +145,9 @@ impl ComponentManager {
         result.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
-    pub fn get_owner_proof(&self) -> Proof {
+    /// Returns a proof of the component owner's signer badge, or `None` if the owner rule is anything other than
+    /// `SubstateOwnerRule::ByPublicKey`. Fails the transaction if the owner's key did not sign it.
+    pub fn get_owner_proof(&self) -> Option<Proof> {
         let result = call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
             component_ref: ComponentRef::Ref(self.0),
             action: ComponentAction::GetOwnerProof,

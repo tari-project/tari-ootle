@@ -406,6 +406,19 @@ fn test_get_owner_proof_for_a_component_created_in_the_same_transaction() {
 }
 
 #[test]
+fn test_get_owner_proof_is_none_for_a_component_owned_by_an_access_rule() {
+    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/component_manager"]);
+
+    let has_proof: bool = template_test.call_function(
+        "ComponentManagerTest",
+        "has_owner_proof_when_owned_by_an_access_rule",
+        args![],
+        vec![],
+    );
+    assert!(!has_proof);
+}
+
+#[test]
 fn test_random() {
     let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/random"]);
     let component_address: ComponentAddress = template_test.call_function("RandomTest", "create", args![], vec![]);

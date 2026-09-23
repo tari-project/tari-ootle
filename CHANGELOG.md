@@ -31,6 +31,8 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
 
 - `feat!` — **A component's owner can now replace its owner rule**, including handing ownership to
   someone else or setting it to `None`, which is final. (#2677)
+- `fix!` — **`ComponentManager::get_owner_proof` returns `Option<Proof>`** and no longer panics for a
+  component whose owner is not a single public key. (#2677)
 
 ## [0.41.1](https://github.com/tari-project/tari-ootle/compare/v0.41.0...v0.41.1) (2026-09-21)
 

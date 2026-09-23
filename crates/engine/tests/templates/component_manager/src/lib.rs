@@ -41,9 +41,20 @@ mod template {
                 .with_access_rules(AccessRules::allow_all())
                 .create();
             let address = *component.address();
-            let proof = ComponentManager::get(address).get_owner_proof();
+            let proof = ComponentManager::get(address)
+                .get_owner_proof()
+                .expect("a component owned by the signer has an owner proof");
             proof.drop();
             address
+        }
+
+        /// Returns whether a component owned by an access rule has an owner proof.
+        pub fn has_owner_proof_when_owned_by_an_access_rule() -> bool {
+            let component = Component::new(Self)
+                .with_owner_rule(OwnerRule::ByAccessRule(AccessRule::AllowAll))
+                .with_access_rules(AccessRules::allow_all())
+                .create();
+            ComponentManager::get(*component.address()).get_owner_proof().is_some()
         }
     }
 }

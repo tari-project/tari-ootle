@@ -280,7 +280,9 @@ mod account_template {
         }
 
         pub fn create_ownership_proof(&mut self) -> Proof {
-            ComponentManager::current().get_owner_proof()
+            ComponentManager::current()
+                .get_owner_proof()
+                .expect("create_ownership_proof requires an account owned by a single public key")
         }
 
         // Approval methods

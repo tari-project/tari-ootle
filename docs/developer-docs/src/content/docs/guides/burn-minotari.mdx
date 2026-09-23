@@ -23,7 +23,13 @@ For how a claim is verified on-chain, see [Claim Burn](/guides/claim-burn/).
 ## How it works
 
 ```
- minotari_console_wallet ──burn──▶ Minotari L1 ──confirmed──▶ burn proof file ──▶ Ootle wallet daemon ──claim──▶ TARI in your account
+   minotari_console_wallet
+            │  burn to your account public key
+            ▼
+   Minotari L1 ── confirmed ──▶ burn proof file
+                                     │  auto-claim
+                                     ▼
+                              tari_ootle_walletd ──▶ TARI in your account
 ```
 
 1. `minotari_console_wallet` burns Minotari to your Ootle account's **public key**.
@@ -95,7 +101,7 @@ If auto-claim is off, or the wallets are on different machines, claim from the d
    of a proof file copied from another machine.
 3. Check the **Burn Proof Summary**, click **Estimate Fee**, then **Claim Burn**.
 
-<Image src={img_claim_dialog} alt="Wallet UI Claim Burn dialog" className="w-full rounded-lg shadow-md" />
+<Image src={img_claim_dialog} alt="Wallet UI Claim Burn dialog" width={420} className="rounded-lg shadow-md" />
 
 ### Where the proof files live
 
@@ -124,7 +130,7 @@ An agent can do everything above through `minotari_console_wallet`'s gRPC API an
 below are written so an agent can follow them directly: check each one, fix config where needed, then call the APIs
 or hand the user the exact command to run.
 
-### 1. Enable `minotari_console_wallet` gRPC
+### 1. Enable Minotari wallet gRPC
 
 gRPC is off by default. Either start the wallet with the flag:
 

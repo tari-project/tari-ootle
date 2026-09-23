@@ -1,5 +1,6 @@
 [package]
 name = "proto_builder"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

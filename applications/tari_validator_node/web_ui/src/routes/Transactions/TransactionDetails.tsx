@@ -20,35 +20,35 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
-import { Alert, Button, Fade, Grid, Table, TableBody, TableCell, TableContainer, TableRow } from "@mui/material";
-import Typography from "@mui/material/Typography";
-import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
-import PageHeading from "../../Components/PageHeading";
-import Events from "./Events";
-import Logs from "./Logs";
-import Instructions from "./Instructions";
-import Substates from "./Substates";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import Loading from "../../Components/Loading";
-import { getTransaction, getTransactionResult } from "../../utils/json_rpc";
-import { displayDuration } from "../../utils/helpers";
+import { Alert, Button, Fade, Grid, Table, TableBody, TableCell, TableContainer, TableRow } from "@mui/material";
+import Typography from "@mui/material/Typography";
 import type {
   Event,
   ExecuteResult,
   LogEntry,
-  VersionedSubstateId,
-  SubstateId,
   Substate,
+  SubstateId,
+  VersionedSubstateId,
 } from "@tari-project/ootle-ts-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
-import StatusChip from "../../Components/StatusChip";
 import { getSubstateDiffFromTransactionResult } from "@tari-project/ootle-ts-bindings/dist/helpers/helpers";
-import { Transaction } from "@tari-project/ootle-ts-bindings/dist/types/Transaction";
 import { Decision } from "@tari-project/ootle-ts-bindings/dist/types/Decision";
+import { Transaction } from "@tari-project/ootle-ts-bindings/dist/types/Transaction";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
+import Loading from "../../Components/Loading";
+import PageHeading from "../../Components/PageHeading";
+import StatusChip from "../../Components/StatusChip";
+import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
+import { displayDuration } from "../../utils/helpers";
+import { getTransaction, getTransactionResult } from "../../utils/json_rpc";
+import Events from "./Events";
+import Instructions from "./Instructions";
+import Logs from "./Logs";
+import Substates from "./Substates";
 
 export default function TransactionDetails() {
   const { transactionHash } = useParams();

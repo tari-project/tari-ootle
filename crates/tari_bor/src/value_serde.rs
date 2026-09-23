@@ -154,7 +154,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_i128<E: de::Error>(self, v: i128) -> Result<Value, E> {
-        Ok(Value::Integer(v))
+        Value::integer(v).ok_or_else(|| de::Error::custom("Value::Integer out of CBOR range"))
     }
 
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<Value, E> {
@@ -162,7 +162,10 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_u128<E: de::Error>(self, v: u128) -> Result<Value, E> {
-        i128::try_from(v).map(Value::Integer).map_err(de::Error::custom)
+        i128::try_from(v)
+            .ok()
+            .and_then(Value::integer)
+            .ok_or_else(|| de::Error::custom("Value::Integer out of CBOR range"))
     }
 
     fn visit_f64<E: de::Error>(self, v: f64) -> Result<Value, E> {
@@ -244,7 +247,8 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
                 }
             }
             let s = value_str.ok_or_else(|| de::Error::custom("missing 'value' in @cbor:int"))?;
-            s.parse::<i128>().map(Value::Integer).map_err(de::Error::custom)
+            let i = s.parse::<i128>().map_err(de::Error::custom)?;
+            Value::integer(i).ok_or_else(|| de::Error::custom("Value::Integer out of CBOR range"))
         },
         SENTINEL_MAP => {
             let mut entries: Option<Vec<(Value, Value)>> = None;
@@ -283,7 +287,7 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
 /// `Value::Integer` (lossless for the i128 range); anything else falls back to `Value::Float`.
 fn parse_json_arbitrary_number(raw: &str) -> Result<Value, String> {
     if let Ok(i) = raw.parse::<i128>() {
-        return Ok(Value::Integer(i));
+        return Value::integer(i).ok_or_else(|| format!("integer out of CBOR range: {raw}"));
     }
     raw.parse::<f64>()
         .map(Value::Float)
@@ -359,11 +363,32 @@ mod tests {
     }
 
     #[test]
-    fn integer_outside_i64_uses_sentinel() {
+    fn integers_outside_i64_but_inside_the_cbor_range_round_trip() {
+        for v in [
+            Value::Integer(i128::from(u64::MAX)),
+            Value::Integer(i128::from(i64::MAX) + 1),
+        ] {
+            assert_eq!(json_roundtrip(&v), v);
+        }
+    }
+
+    // `Value::Integer` is constructible with any `i128`, so serialization stays total for one
+    // outside [`INTEGER_RANGE`] and writes the sentinel. Reading it back would rebuild a value no
+    // encoder can write, so every route into the type refuses it.
+    #[test]
+    fn an_integer_outside_the_cbor_range_is_refused_on_the_way_back() {
         let v = Value::Integer(i128::from(u64::MAX) + 1);
         let json = serde_json::to_string(&v).unwrap();
         assert!(json.contains("@cbor"));
-        assert_eq!(json_roundtrip(&v), v);
+        assert!(serde_json::from_str::<Value>(&json).is_err());
+    }
+
+    // The CBOR serde route reaches `Value` through `deserialize_any`, which hands a 64-bit negative
+    // to `visit_i128` rather than through the minicbor decoder.
+    #[test]
+    fn the_serde_decoder_refuses_an_integer_below_i64_min() {
+        const NEGATIVE_BELOW_I64_MIN: [u8; 9] = [0x3b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        assert!(crate::serde_codec::from_slice::<Value>(&NEGATIVE_BELOW_I64_MIN).is_err());
     }
 
     #[test]

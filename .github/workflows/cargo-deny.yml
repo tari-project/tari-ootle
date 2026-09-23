@@ -1,0 +1,44 @@
+---
+name: Dependency policy
+
+'on':
+  # A pull request's branch is usually pushed to this repository, so `push` is restricted to the
+  # branches a merge lands on: otherwise every push to a branch with an open pull request runs the
+  # workflow twice.
+  push:
+    branches:
+      - development
+      - main
+    paths:
+      # Run if workflow changes
+      - '.github/workflows/cargo-deny.yml'
+      # Run on changed dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # Run if the policy changes
+      - 'deny.toml'
+  # Every pull request, whatever it touches. A workflow a path filter skips leaves its check
+  # pending, so a required `cargo_deny` context has to report on all of them or the ones it skips
+  # cannot merge. The run costs under a minute.
+  pull_request:
+  # Run manually
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  # Every policy in `deny.toml`: advisories, bans, licences and sources.
+  cargo_deny:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans licenses sources
+          # The action's default is `--all-features`. Naming it here keeps the graph CI resolves
+          # the same one `deny.toml` describes and a reviewer reproduces from the command line.
+          arguments: --all-features

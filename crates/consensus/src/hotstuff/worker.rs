@@ -52,6 +52,7 @@ use tokio::{
 };
 
 use super::{
+    LeaderSkipSet,
     ProposalValidationError,
     calculate_last_dummy_block,
     config::HotstuffConfig,
@@ -85,7 +86,7 @@ use crate::{
     },
     messages::{HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
-    traits::{CertificateStore, ConsensusSpec, LeaderStrategy, PeriodicTask, hooks::ConsensusHooks},
+    traits::{CertificateStore, ConsensusSpec, PeriodicTask, hooks::ConsensusHooks},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::worker";
@@ -186,13 +187,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 state_store.clone(),
                 epoch_manager.clone(),
                 pacemaker.clone_handle().current_view().clone(),
-                leader_strategy.clone(),
                 signing_service.clone(),
                 outbound_messaging.clone(),
                 tx_events.downgrade(),
             ),
 
             on_next_sync_view: OnNextSyncViewHandler::new(
+                config.clone(),
                 state_store.clone(),
                 outbound_messaging.clone(),
                 leader_strategy.clone(),
@@ -218,12 +219,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 outbound_messaging.clone(),
             ),
             on_receive_vote: OnReceiveVoteHandler::new(
+                config.clone(),
+                state_store.clone(),
                 pacemaker.clone_handle(),
                 proposal_vote_collector.clone(),
                 local_validator_addr.clone(),
                 leader_strategy.clone(),
             ),
             on_receive_new_view: OnReceiveNewViewHandler::new(
+                config.clone(),
                 local_validator_addr,
                 state_store.clone(),
                 leader_strategy.clone(),
@@ -931,16 +935,36 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
+    /// The validators whose slot leader selection skips, for the views a proposal certified at
+    /// `justify_height` decides.
+    fn load_leader_skip_set(
+        &self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        justify_height: NodeHeight,
+    ) -> Result<LeaderSkipSet, HotStuffError> {
+        let skip_set = self.state_store.with_read_tx(|tx| {
+            LeaderSkipSet::load_for_justify(
+                tx,
+                epoch_state.epoch(),
+                justify_height,
+                epoch_state.local_committee(),
+                &self.config.consensus_constants.liveness_thresholds(),
+            )
+        })?;
+        Ok(skip_set)
+    }
+
     /// Called when it may be time to propose if this node is the leader for the next view
     async fn on_beat(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         local_claim_public_key: &RistrettoPublicKeyBytes,
     ) -> Result<(), HotStuffError> {
-        let (highest_justified, last_proposed) = self.state_store.with_read_tx(|tx| {
+        let (highest_justified, high_pc_height, last_proposed) = self.state_store.with_read_tx(|tx| {
             let highest_height = get_highest_seen_justified_view(tx, epoch_state.epoch())?;
+            let high_pc_height = HighPc::get(tx, epoch_state.epoch())?.height();
             let last_proposed = LastProposed::get(tx, epoch_state.epoch()).optional()?;
-            Ok::<_, HotStuffError>((highest_height, last_proposed))
+            Ok::<_, HotStuffError>((highest_height, high_pc_height, last_proposed))
         })?;
 
         // h + 1 because we have not entered the next view yet after creating the new PC.
@@ -959,10 +983,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         // Once the highest view justifies this node as leader, we continue i.e we wait for votes to progress the view.
         // Force beat will ensure that if we don't get votes, we will propose with the current QC.
-        if !self.leader_strategy.is_leader(
-            &self.local_validator_addr,
+        // The view to propose for is the highest justified one, which a timeout certificate can carry
+        // above the high PC. The proposal takes its certificate from the high PC either way, so that is
+        // the liveness anchor every validator will check it against.
+        let skip_set = self.load_leader_skip_set(epoch_state, high_pc_height)?;
+        if !skip_set.is_effective_leader(
+            &self.leader_strategy,
             epoch_state.local_committee(),
             highest_justified,
+            &self.local_validator_addr,
         ) {
             debug!(
                 target: LOG_TARGET,
@@ -1064,11 +1093,20 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Ok(());
         }
 
-        // `height` is the highest justified view - check if this node is the leader (i.e. should propose to advance the
-        // view to h + 1)
-        let is_leader =
-            self.leader_strategy
-                .is_leader(&self.local_validator_addr, epoch_state.local_committee(), height);
+        // `height` is the view this node may propose for (i.e. it should propose to advance the view to
+        // h + 1). On a leader timeout that view sits above the certificate the proposal will carry, so
+        // the liveness anchor comes from the HighQC rather than from `height`.
+        let justify_height = self
+            .state_store
+            .with_read_tx(|tx| HighPc::get(tx, epoch_state.epoch()))?
+            .height();
+        let skip_set = self.load_leader_skip_set(epoch_state, justify_height)?;
+        let is_leader = skip_set.is_effective_leader(
+            &self.leader_strategy,
+            epoch_state.local_committee(),
+            height,
+            &self.local_validator_addr,
+        );
 
         if !is_leader {
             debug!(
@@ -1252,6 +1290,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     justify_block.height(),
                 );
 
+                let skip_set = self.load_leader_skip_set(epoch_state, justify_block.height())?;
                 if let Some(dummy) = calculate_last_dummy_block(
                     justify_block.height(),
                     next_height,
@@ -1263,6 +1302,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     *justify_block.state_merkle_root(),
                     &self.leader_strategy,
                     epoch_state.local_committee(),
+                    &skip_set,
                     justify_block.timestamp(),
                     *justify_block.header().accumulated_data(),
                     *justify_block.epoch_hash(),

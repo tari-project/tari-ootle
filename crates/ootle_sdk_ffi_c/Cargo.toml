@@ -1,5 +1,6 @@
 [package]
 name = "ootle_sdk_ffi_c"
+publish = false
 description = "Flat C ABI facade over ootle_sdk_core — extern \"C\" JSON-over-bytes surface + opaque handle for Go/C/C++ hosts"
 version.workspace = true
 edition.workspace = true

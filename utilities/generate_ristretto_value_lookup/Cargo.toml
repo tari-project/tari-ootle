@@ -1,5 +1,6 @@
 [package]
 name = "tari_value_lookup_generator"
+publish = false
 version = "0.1.0"
 description = "CLI utility to generate and validate Ristretto value-to-public-key lookup tables"
 edition.workspace = true

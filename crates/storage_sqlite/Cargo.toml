@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_storage_sqlite"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

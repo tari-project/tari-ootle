@@ -20,12 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Box, Chip, Table, TableBody, TableContainer, TableRow, Tooltip, Typography } from "@mui/material";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import { Box, Chip, Table, TableBody, TableContainer, TableRow, Tooltip, Typography } from "@mui/material";
 import type { FeeReceipt as FeeReceiptType } from "@tari-project/ootle-ts-bindings";
 import { DataTableCell } from "../../../Components/StyledComponents";
-import { formatCurrency } from "../../../utils/helpers";
 import { CURRENCY } from "../../../utils/constants";
+import { formatCurrency } from "../../../utils/helpers";
 
 const FEE_SOURCE_LABELS: Record<string, string> = {
   Initial: "Initial",
@@ -65,7 +65,9 @@ export default function FeeReceipt({ data }: { data: FeeReceiptType }) {
   const exhaustBurn = BigInt(data.exhaust_burn ?? 0);
   const totalFeesPaid = BigInt(data.total_fees_paid);
   const burnPercent =
-    exhaustBurn > BigInt(0) && totalFeesPaid > BigInt(0) ? Number((exhaustBurn * BigInt(1000)) / totalFeesPaid) / 10 : null;
+    exhaustBurn > BigInt(0) && totalFeesPaid > BigInt(0)
+      ? Number((exhaustBurn * BigInt(1000)) / totalFeesPaid) / 10
+      : null;
 
   const feeItems: { label: string; value: string; help?: string }[] = [
     { label: "Total Fees Paid", value: formatCurrency(data.total_fee_payment, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },

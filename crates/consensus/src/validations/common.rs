@@ -22,7 +22,7 @@ use tari_sidechain::ProposalVoteMessage;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    hotstuff::{HotstuffConfig, ProposalValidationError},
+    hotstuff::{HotstuffConfig, LeaderSkipSet, ProposalValidationError},
     traits::{ConsensusSpec, LeaderStrategy, ValidatorSignatureVerifierService},
     validations::signed_vote::SignedProposalVote,
 };
@@ -169,9 +169,15 @@ pub(super) fn check_height(block: &Block) -> Result<(), ProposalValidationError>
     Ok(())
 }
 
-pub(super) fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
+/// A block may only come from the effective leader of the view below it: the round-robin leader of
+/// that view, or - when that validator is suspended - the first validator after it that is not.
+///
+/// `skip_set` must be the one anchored on the block's justify, which is the state every node that
+/// can act on this block has committed.
+pub fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
+    skip_set: &LeaderSkipSet,
     block: &Block,
 ) -> Result<(), ProposalValidationError> {
     let parent_height =
@@ -183,7 +189,7 @@ pub(super) fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStr
                 block_height: block.height(),
                 details: "Block height is zero".to_string(),
             })?;
-    let (addr, leader) = leader_strategy.get_leader(local_committee, parent_height);
+    let (addr, leader) = skip_set.effective_leader(leader_strategy, local_committee, parent_height);
     if leader != block.proposed_by() {
         return Err(ProposalValidationError::NotLeader {
             proposed_by: block.proposed_by().to_string(),

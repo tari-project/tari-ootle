@@ -1,16 +1,15 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+import { Refresh } from "@mui/icons-material";
 import { Box, Button, Divider, Grid, TextField, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { client } from "../store/databases.ts";
-import { Link as RouterLink, useParams } from "react-router-dom";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Refresh } from "@mui/icons-material";
-import { Params } from "../client.ts";
 import prettyBytes from "pretty-bytes";
-
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link as RouterLink, useParams } from "react-router-dom";
+import { Params } from "../client.ts";
+import { client } from "../store/databases.ts";
 
 type Row = Record<string, string | object>;
 
@@ -33,14 +32,17 @@ interface PaginationModel extends GridPaginationModel {
 }
 
 function estimateWidth(labelLength: number, data: Row[], getter: (row: Row) => any): number {
-  return Math.min(2000, data.reduce((acc, row) => {
-    const value = getter(row);
-    if (typeof value === "string") {
-      return Math.max(acc, value.length * 8);
-    }
+  return Math.min(
+    2000,
+    data.reduce((acc, row) => {
+      const value = getter(row);
+      if (typeof value === "string") {
+        return Math.max(acc, value.length * 8);
+      }
 
-    return Math.max(acc, value.toString().length * 8);
-  }, labelLength * 15));
+      return Math.max(acc, value.toString().length * 8);
+    }, labelLength * 15),
+  );
 }
 
 function generateColumns(data: ColumnFamilyData): GridColDef<Row>[] {
@@ -73,10 +75,13 @@ function generateColumns(data: ColumnFamilyData): GridColDef<Row>[] {
     } as GridColDef<Row>;
   });
 
-  return [{
-    field: "id",
-    headerName: "Key",
-  }, ...cols];
+  return [
+    {
+      field: "id",
+      headerName: "Key",
+    },
+    ...cols,
+  ];
 }
 
 export default function InspectCf() {
@@ -91,15 +96,19 @@ export default function InspectCf() {
   const fetch = () => {
     setError(null);
     setIsLoading(true);
-    
+
     const query = { limit: pagination.pageSize, page: pagination.page, query: pagination.query || "", desc: true };
-    client.listCfItems(dbName!, cfName!, query as Params).then((res) => {
-      setData(res);
-    }).catch((err) => {
-      setError(err.message);
-    }).finally(() => {
-      setIsLoading(false);
-    });
+    client
+      .listCfItems(dbName!, cfName!, query as Params)
+      .then((res) => {
+        setData(res);
+      })
+      .catch((err) => {
+        setError(err.message);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
   };
 
   useEffect(fetch, [dbName, cfName, pagination]);
@@ -115,7 +124,6 @@ export default function InspectCf() {
     return rowCountRef.current;
   }, [data?.total_entries]);
 
-
   return (
     <>
       <Grid size={{ xs: 12, md: 12, lg: 12 }}>
@@ -127,7 +135,6 @@ export default function InspectCf() {
             alignItems: "center",
           }}
         >
-
           <Typography
             variant="h4"
             style={{
@@ -135,12 +142,7 @@ export default function InspectCf() {
             }}
           >
             <RouterLink to={`/databases/${dbName}`}>{dbName}</RouterLink> - {cfName}
-            <Button
-              variant="outlined"
-              color="primary"
-              onClick={() => fetch()}
-              style={{ marginLeft: theme.spacing(2) }}
-            >
+            <Button variant="outlined" color="primary" onClick={() => fetch()} style={{ marginLeft: theme.spacing(2) }}>
               <Refresh />
             </Button>
             <TextField
@@ -169,7 +171,6 @@ export default function InspectCf() {
               Clear
             </Button>
           </Typography>
-
         </Box>
         <Divider />
         {error && (
@@ -192,8 +193,8 @@ export default function InspectCf() {
         <Grid container spacing={12}>
           <Grid size={12}>
             <Typography variant="h6">
-              Total value
-              bytes: {prettyBytes(data.total_bytes)} (avg: {prettyBytes(data.total_bytes / data.rows.length)})
+              Total value bytes: {prettyBytes(data.total_bytes)} (avg:{" "}
+              {prettyBytes(data.total_bytes / data.rows.length)})
             </Typography>
           </Grid>
         </Grid>
@@ -201,18 +202,14 @@ export default function InspectCf() {
       {data?.rows.length && data?.largest_row_size ? (
         <Grid container spacing={12}>
           <Grid size={12}>
-            <Typography variant="h6">
-              Largest row size: {prettyBytes(data.largest_row_size)}
-            </Typography>
+            <Typography variant="h6">Largest row size: {prettyBytes(data.largest_row_size)}</Typography>
           </Grid>
         </Grid>
       ) : null}
       {data?.rows.length && data?.smallest_row_size ? (
         <Grid container spacing={12}>
           <Grid size={12}>
-            <Typography variant="h6">
-              Smallest row size: {prettyBytes(data.smallest_row_size)}
-            </Typography>
+            <Typography variant="h6">Smallest row size: {prettyBytes(data.smallest_row_size)}</Typography>
           </Grid>
         </Grid>
       ) : null}

@@ -26,27 +26,14 @@ interface LogoProps {
   fill?: string;
 }
 
-const Logo: React.FC<LogoProps> = ({
-  width = "210px",
-  height = "45px",
-  fill = "black",
-}) => (
-  <svg
-    width={width}
-    height={height}
-    viewBox="0 0 301 56"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
+const Logo: React.FC<LogoProps> = ({ width = "210px", height = "45px", fill = "black" }) => (
+  <svg width={width} height={height} viewBox="0 0 301 56" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path
       d="M115.148 30.8698L118.671 19.301L122.194 30.8698H115.148ZM114.869 8.29834L101.728 47.1145H110.134L112.908 38.14H124.434L127.208 47.1145H135.614L122.472 8.29834H114.869Z"
       fill={fill}
     />
     <path d="M176.445 8H184.258V46.8162H176.445V8Z" fill={fill} />
-    <path
-      d="M82.5313 47.1145H90.3446V15.5689H103.461V8.29834H69.4141V15.5689H82.5313V47.1145Z"
-      fill={fill}
-    />
+    <path d="M82.5313 47.1145H90.3446V15.5689H103.461V8.29834H69.4141V15.5689H82.5313V47.1145Z" fill={fill} />
     <path d="M197.824 18.008H200.848V35H197.824V18.008Z" fill={fill} />
     <path
       d="M204.576 18.008H208.584L216.816 30.632H216.864V18.008H219.888V35H216.048L207.648 21.968H207.6V35H204.576V18.008Z"

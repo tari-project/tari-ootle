@@ -1,5 +1,6 @@
 [package]
 name = "tari_indexer"
+publish = false
 description = "The Tari indexer implementation"
 version.workspace = true
 edition.workspace = true

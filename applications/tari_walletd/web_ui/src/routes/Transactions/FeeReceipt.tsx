@@ -68,7 +68,9 @@ export default function FeeReceipt({ data, finalFee }: { data: FeeReceiptProps; 
   const exhaustBurn = BigInt(data.exhaust_burn ?? 0);
   const totalFeesPaid = BigInt(data.total_fees_paid);
   const burnPercent =
-    exhaustBurn > BigInt(0) && totalFeesPaid > BigInt(0) ? Number((exhaustBurn * BigInt(1000)) / totalFeesPaid) / 10 : null;
+    exhaustBurn > BigInt(0) && totalFeesPaid > BigInt(0)
+      ? Number((exhaustBurn * BigInt(1000)) / totalFeesPaid) / 10
+      : null;
 
   const feeItems: { label: string; value: string; color: "primary" | "success"; help?: string }[] = [
     {

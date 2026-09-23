@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { styled } from "@mui/material/styles";
 import KeyboardArrowRightRoundedIcon from "@mui/icons-material/KeyboardArrowRightRounded";
 import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
-import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
 import MuiAccordionDetails, { AccordionDetailsProps } from "@mui/material/AccordionDetails";
+import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
+import { styled } from "@mui/material/styles";
 
 export const Accordion: any = styled((props: AccordionProps) => (
   <MuiAccordion disableGutters elevation={0} square {...props} />
 ))(({ theme }) => ({
-  border: `2px solid #ffffff`,
+  "border": `2px solid #ffffff`,
   "&:not(:last-child)": {
     borderBottom: 0,
   },
@@ -41,8 +41,8 @@ export const Accordion: any = styled((props: AccordionProps) => (
 export const AccordionSummary = styled((props: AccordionSummaryProps) => (
   <MuiAccordionSummary expandIcon={<KeyboardArrowRightRoundedIcon />} {...props} />
 ))(({ theme }) => ({
-  backgroundColor: theme.palette.mode === "dark" ? "rgba(255, 255, 255, .05)" : "rgba(0, 0, 0, .03)",
-  flexDirection: "row-reverse",
+  "backgroundColor": theme.palette.mode === "dark" ? "rgba(255, 255, 255, .05)" : "rgba(0, 0, 0, .03)",
+  "flexDirection": "row-reverse",
   "& .MuiAccordionSummary-expandIconWrapper.Mui-expanded": {
     transform: "rotate(90deg)",
   },

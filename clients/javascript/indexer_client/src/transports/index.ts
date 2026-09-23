@@ -3,8 +3,8 @@
  * //  SPDX-License-Identifier: BSD-3-Clause
  */
 
-import FetchTransport from "./fetch";
 import type { SseStream, SseStreamOptions } from "../sse";
+import FetchTransport from "./fetch";
 
 export { FetchTransport };
 
@@ -25,4 +25,3 @@ export interface HttpTransport {
 export interface TransportOptions {
   timeout_millis?: number;
 }
-

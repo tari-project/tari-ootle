@@ -32,6 +32,8 @@ pub struct IdProvider<'a> {
 pub enum IdProviderError {
     #[error("Maximum ID allocation of {max} exceeded")]
     MaxIdsExceeded { max: usize },
+    #[error("Ran out of {counter} ids")]
+    CounterExhausted { counter: &'static str },
     #[error("Failed to acquire lock")]
     LockingError { operation: String },
 }
@@ -74,16 +76,16 @@ impl<'a> IdProvider<'a> {
         Ok(v)
     }
 
-    pub fn new_bucket_id(&mut self) -> BucketId {
+    pub fn new_bucket_id(&mut self) -> Result<BucketId, IdProviderError> {
         self.object_ids.next_bucket_id()
     }
 
-    pub fn new_proof_id(&mut self) -> ProofId {
+    pub fn new_proof_id(&mut self) -> Result<ProofId, IdProviderError> {
         self.object_ids.next_proof_id()
     }
 
     pub fn new_uuid(&mut self, entropy: &[u8]) -> Result<[u8; 32], IdProviderError> {
-        let n = self.object_ids.next_uuid_id();
+        let n = self.object_ids.next_uuid_id()?;
         let h = hasher32(EngineHashDomainLabel::UuidOutput)
             .chain(&self.transaction_hash)
             .chain(&self.entity_id)
@@ -117,6 +119,15 @@ impl<'a> IdProvider<'a> {
         let hash = generate_output_id(&self.transaction_hash, n);
         Ok(ObjectKey::new(self.entity_id, ComponentKey::new(hash.trailing_bytes())))
     }
+}
+
+/// Advances a transient-handle counter.
+///
+/// Every id these hand out is one an executing transaction has already paid points for, so a counter reaches
+/// `u32::MAX` only if the points budget can buy four billion allocations. Exhaustion is a rejected transaction
+/// rather than a value a second handle could collide with.
+fn bump(id: u32, counter: &'static str) -> Result<u32, IdProviderError> {
+    id.checked_add(1).ok_or(IdProviderError::CounterExhausted { counter })
 }
 
 fn generate_output_id(transaction_hash: &Hash32, n: u32) -> Hash32 {
@@ -155,30 +166,52 @@ impl ObjectIds {
         Ok(id)
     }
 
-    pub fn next_bucket_id(&mut self) -> BucketId {
-        self.next_bucket_or_proof_id().into()
+    pub fn next_bucket_id(&mut self) -> Result<BucketId, IdProviderError> {
+        Ok(self.next_bucket_or_proof_id()?.into())
     }
 
-    pub fn next_proof_id(&mut self) -> ProofId {
-        self.next_bucket_or_proof_id().into()
+    pub fn next_proof_id(&mut self) -> Result<ProofId, IdProviderError> {
+        Ok(self.next_bucket_or_proof_id()?.into())
     }
 
-    fn next_bucket_or_proof_id(&mut self) -> u32 {
+    fn next_bucket_or_proof_id(&mut self) -> Result<u32, IdProviderError> {
         let id = self.bucket_or_proof_id;
-        self.bucket_or_proof_id += 1;
-        id
+        self.bucket_or_proof_id = bump(id, "bucket or proof")?;
+        Ok(id)
     }
 
-    pub fn next_uuid_id(&mut self) -> u32 {
+    pub fn next_uuid_id(&mut self) -> Result<u32, IdProviderError> {
         let id = self.uuid;
-        self.uuid += 1;
-        id
+        self.uuid = bump(id, "uuid")?;
+        Ok(id)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A counter refuses on the call that cannot advance it, which costs the last id and is what keeps one
+    /// from being served twice. The test asserts both halves: the id before the ceiling is served, and the
+    /// call that would have to repeat it errors instead.
+    #[test]
+    fn an_exhausted_transient_counter_refuses_rather_than_repeating() {
+        let mut object_ids = ObjectIds::new(1);
+        object_ids.bucket_or_proof_id = u32::MAX - 1;
+        object_ids.uuid = u32::MAX - 1;
+
+        assert_eq!(object_ids.next_bucket_id().unwrap(), BucketId::from(u32::MAX - 1));
+        assert!(matches!(
+            object_ids.next_proof_id(),
+            Err(IdProviderError::CounterExhausted { .. })
+        ));
+
+        assert_eq!(object_ids.next_uuid_id().unwrap(), u32::MAX - 1);
+        assert!(matches!(
+            object_ids.next_uuid_id(),
+            Err(IdProviderError::CounterExhausted { .. })
+        ));
+    }
 
     #[test]
     fn it_fails_if_generating_more_ids_than_the_max() {

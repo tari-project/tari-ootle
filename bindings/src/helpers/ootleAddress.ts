@@ -1,9 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import { OotleAddress } from "../types/OotleAddress";
-import { Network } from "../types/Network";
 import { bech32m, Decoded } from "bech32";
+import { Network } from "../types/Network";
+import { OotleAddress } from "../types/OotleAddress";
 
 const PAY_REF_MAX_LENGTH = 64;
 

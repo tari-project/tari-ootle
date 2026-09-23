@@ -20,16 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Typography from "@mui/material/Typography";
-import {
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-} from "../../../Components/Accordion";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import Chip from "@mui/material/Chip";
 import { Stack } from "@mui/material";
-import { useState, useEffect } from "react";
+import Chip from "@mui/material/Chip";
+import Typography from "@mui/material/Typography";
+import { useEffect, useState } from "react";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../../Components/Accordion";
 
 interface Log {
   level: string;
@@ -43,12 +39,7 @@ interface LogsProps {
   onExpandedChange?: (expanded: boolean) => void;
 }
 
-function Logs({
-  logs,
-  expandAllTrigger = 0,
-  collapseAllTrigger = 0,
-  onExpandedChange,
-}: LogsProps) {
+function Logs({ logs, expandAllTrigger = 0, collapseAllTrigger = 0, onExpandedChange }: LogsProps) {
   const [expanded, setExpanded] = useState(false);
 
   if (!logs || logs.length === 0) {
@@ -88,13 +79,7 @@ function Logs({
               <Chip
                 label={log.level}
                 variant="filled"
-                color={
-                  log.level === "Debug"
-                    ? "default"
-                    : log.level === "Info"
-                    ? "info"
-                    : "error"
-                }
+                color={log.level === "Debug" ? "default" : log.level === "Info" ? "info" : "error"}
               />
               <Typography variant="body2">{log.message}</Typography>
             </Stack>

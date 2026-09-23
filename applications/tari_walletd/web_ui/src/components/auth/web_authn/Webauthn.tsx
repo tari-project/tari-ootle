@@ -23,7 +23,7 @@ export default function WebAuthn(props: WebauthnProps) {
     isLoading: alreadyRegisteredIsLoading,
     isError: alreadyRegisteredIsError,
     error: alreadyRegisteredError,
-  } = useWebauthnAlreadyRegistered(APP_NAME);
+  } = useWebauthnAlreadyRegistered();
 
   useEffect(() => {
     if (!alreadyRegisteredIsError && alreadyRegisteredResponse) {

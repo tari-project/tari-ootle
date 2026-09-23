@@ -1,8 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import { styled } from "@mui/material/styles";
 import { Paper } from "@mui/material";
+import { styled } from "@mui/material/styles";
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -11,4 +11,3 @@ const StyledPaper = styled(Paper)(({ theme }) => ({
 }));
 
 export default StyledPaper;
-

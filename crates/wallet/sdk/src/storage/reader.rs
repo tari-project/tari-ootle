@@ -251,7 +251,9 @@ pub trait WalletStoreReader {
     ) -> Result<ResourceAddress, WalletStorageError>;
 
     // Webauthn registration
-    fn webauthn_is_user_registered(&mut self, username: &str) -> Result<bool, WalletStorageError>;
+    /// True if this wallet holds any webauthn registration at all, for any username. The wallet is
+    /// single-user: enrolment is a property of the wallet, not of a name the caller chooses.
+    fn webauthn_has_any_registration(&mut self) -> Result<bool, WalletStorageError>;
     fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError>;
 
     // Authored templates

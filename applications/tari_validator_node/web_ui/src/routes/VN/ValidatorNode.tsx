@@ -20,18 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import Grid from "@mui/material/Grid";
 import { useContext } from "react";
+import { VNContext } from "../../App";
+import SecondaryHeading from "../../Components/SecondaryHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
 import AllVNs from "./Components/AllVNs";
+import Blocks from "./Components/Blocks";
 import Connections from "./Components/Connections";
 import Fees from "./Components/Fees";
 import Info from "./Components/Info";
 import Mempool from "./Components/Mempool";
-import Blocks from "./Components/Blocks";
 import "./ValidatorNode.css";
-import { StyledPaper } from "../../Components/StyledComponents";
-import Grid from "@mui/material/Grid";
-import SecondaryHeading from "../../Components/SecondaryHeading";
-import { VNContext } from "../../App";
 
 function ValidatorNode() {
   const { epoch, identity, shardKey, error } = useContext(VNContext);

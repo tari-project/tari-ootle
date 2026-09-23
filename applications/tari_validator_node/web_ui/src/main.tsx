@@ -22,19 +22,19 @@
 
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "./theme/theme.css";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
+import BlockDetails from "./routes/Blocks/BlockDetails";
+import Blocks from "./routes/Blocks/Blocks";
+import CommitteeMembers from "./routes/Committees/CommitteeMembers";
 import Connections from "./routes/Connections/Connections";
+import ErrorPage from "./routes/ErrorPage";
 import Fees from "./routes/Fees/Fees";
 import Mempool from "./routes/Mempool/Mempool";
-import Blocks from "./routes/Blocks/Blocks";
-import ValidatorNodes from "./routes/ValidatorNodes/ValidatorNodes";
-import ErrorPage from "./routes/ErrorPage";
-import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
-import CommitteeMembers from "./routes/Committees/CommitteeMembers";
 import TransactionDetails from "./routes/Transactions/TransactionDetails";
-import BlockDetails from "./routes/Blocks/BlockDetails";
+import ValidatorNodes from "./routes/ValidatorNodes/ValidatorNodes";
+import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
+import "./theme/theme.css";
 
 const router = createBrowserRouter([
   {

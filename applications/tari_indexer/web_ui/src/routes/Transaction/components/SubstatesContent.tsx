@@ -26,11 +26,10 @@ import { Box, Chip, Collapse, Stack, Table, TableBody, TableContainer, TableRow,
 import { useTheme } from "@mui/material/styles";
 import { SubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
-import { AccordionIconButton, DataTableCell } from "../../../Components/StyledComponents";
-import { CodeBlock } from "../../../Components/StyledComponents";
-import { renderJson } from "../../../utils/helpers";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
+import CopyToClipboard from "../../../Components/CopyToClipboard";
+import { AccordionIconButton, CodeBlock, DataTableCell } from "../../../Components/StyledComponents";
+import { renderJson } from "../../../utils/helpers";
 
 interface SubstateRowProps {
   id: SubstateId;
@@ -43,9 +42,10 @@ function SubstateRow({ id, substate, state, index }: SubstateRowProps) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   const substateId = substateIdToString(id);
-  const version = substate !== null && substate !== undefined
-    ? "v" + (typeof substate === "number" ? substate : substate.version)
-    : "";
+  const version =
+    substate !== null && substate !== undefined
+      ? "v" + (typeof substate === "number" ? substate : substate.version)
+      : "";
 
   return (
     <>

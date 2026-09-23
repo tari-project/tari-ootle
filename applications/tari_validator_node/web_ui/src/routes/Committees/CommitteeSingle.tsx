@@ -20,24 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import TableRow from "@mui/material/TableRow";
-import { DataTableCell } from "../../Components/StyledComponents";
 import { Typography } from "@mui/material";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableContainer from "@mui/material/TableContainer";
 import TablePagination from "@mui/material/TablePagination";
-import "./Committees.css";
-import { emptyRows } from "../../utils/helpers";
+import TableRow from "@mui/material/TableRow";
 import { CommitteeMember } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import { DataTableCell } from "../../Components/StyledComponents";
+import { emptyRows } from "../../utils/helpers";
+import "./Committees.css";
 
 function Committee({
-                     begin,
-                     end,
-                     members,
-                     publicKey,
-                   }: {
+  begin,
+  end,
+  members,
+  publicKey,
+}: {
   begin: string;
   end: string;
   members: Array<CommitteeMember<string>>;
@@ -88,8 +88,9 @@ function Committee({
             <TableBody>
               {members.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((member) => (
                 <TableRow key={member.address}>
-                  <DataTableCell
-                    className={`member ${member.public_key === publicKey ? "me" : ""}`}>{member.public_key} (power: {member.vote_power.toString()})</DataTableCell>
+                  <DataTableCell className={`member ${member.public_key === publicKey ? "me" : ""}`}>
+                    {member.public_key} (power: {member.vote_power.toString()})
+                  </DataTableCell>
                 </TableRow>
               ))}
               {emptyRowsCnt > 0 && (

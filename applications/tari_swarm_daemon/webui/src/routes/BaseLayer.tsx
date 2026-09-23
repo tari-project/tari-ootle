@@ -25,9 +25,8 @@ function Miner() {
     >
       <div className="stack">
         <p className="prose">
-          Blocks confirm registrations and advance the base layer epoch. Mining past the epoch a
-          validator activates in leaves the committee with no checkpoint to sync from, so mine in
-          small steps.
+          Blocks confirm registrations and advance the base layer epoch. Mining past the epoch a validator activates in
+          leaves the committee with no checkpoint to sync from, so mine in small steps.
         </p>
 
         <div className="row" style={{ alignItems: "flex-end" }}>
@@ -60,11 +59,7 @@ function Miner() {
           </Field>
           <ActionButton
             disabled={swarm.isMining}
-            onAct={() =>
-              swarm.act("Start mining", () =>
-                swarmRpc("start_mining", { interval_seconds: seconds }),
-              )
-            }
+            onAct={() => swarm.act("Start mining", () => swarmRpc("start_mining", { interval_seconds: seconds }))}
           >
             Start timer
           </ActionButton>
@@ -179,9 +174,7 @@ export default function BaseLayer() {
           </NodeCard>
         ))}
 
-        {!nodes.length && !consoleWallets.length && (
-          <Empty>No base layer instances are configured.</Empty>
-        )}
+        {!nodes.length && !consoleWallets.length && <Empty>No base layer instances are configured.</Empty>}
       </div>
 
       <Miner />

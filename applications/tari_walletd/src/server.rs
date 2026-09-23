@@ -83,6 +83,24 @@ pub async fn spawn_listener(
     Ok((listen_addr, task))
 }
 
+/// Renders the part of a JSON-RPC request that may be written to a log: the request id, the method,
+/// and the number of parameters.
+///
+/// Parameter *values* must never reach a log record. `keys.import` carries a raw spending key, and
+/// the shipped log config routes this target at `debug` level to a rolling file, to `ootle.log` and
+/// to stdout, so anything formatted here outlives the process and is collected by log shippers and
+/// attached to bug reports. `JsonRpcExtractor`'s derived `Debug` prints its `parsed` field, which is
+/// the whole params value, so the extractor itself must never be formatted into a record.
+fn describe_request(request: &JsonRpcExtractor) -> String {
+    let params = match &request.parsed {
+        serde_json::Value::Null => "none".to_string(),
+        serde_json::Value::Object(fields) => format!("{} named", fields.len()),
+        serde_json::Value::Array(args) => format!("{} positional", args.len()),
+        _ => "1 scalar".to_string(),
+    };
+    format!("id={:?} method={} params={params}", request.id, request.method)
+}
+
 #[allow(clippy::too_many_lines)]
 async fn handler(
     Extension(context): Extension<Arc<HandlerContext>>,
@@ -93,7 +111,7 @@ async fn handler(
 ) -> Response {
     let token = authorization_header.map(|auth| auth.0.0);
     info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
-    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
+    debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", describe_request(&value));
     match value.method.as_str().split_once('.') {
         Some(("auth", method)) => match method {
             "request" => call_handler_any_response(context, value, token, auth::handle_login_request).await,
@@ -393,4 +411,39 @@ pub enum ApplicationErrorCode {
     TransactionRejected = 1000,
     FaucetAlreadyClaimed = 1001,
     GeneralError = 500,
+}
+
+#[cfg(test)]
+mod tests {
+    use axum_jrpc::Id;
+
+    use super::*;
+
+    fn keys_import(secret_key: &str) -> JsonRpcExtractor {
+        JsonRpcExtractor {
+            parsed: json!({ "key_type": "Ristretto", "secret_key": secret_key }),
+            method: "keys.import".to_string(),
+            id: Id::Num(7),
+        }
+    }
+
+    /// The log record must be a function of the request envelope alone. Two requests differing only
+    /// in a parameter value therefore describe identically -- which is the property that keeps an
+    /// imported spending key out of `json_rpc.log`.
+    #[test]
+    fn parameter_values_are_not_described() {
+        let secret = "a".repeat(64);
+        let described = describe_request(&keys_import(&secret));
+
+        assert_eq!(described, describe_request(&keys_import(&"b".repeat(64))));
+        assert!(!described.contains(&secret));
+    }
+
+    #[test]
+    fn the_envelope_is_described() {
+        let described = describe_request(&keys_import(&"a".repeat(64)));
+        assert!(described.contains("keys.import"));
+        assert!(described.contains('7'));
+        assert!(described.contains("2 named"));
+    }
 }

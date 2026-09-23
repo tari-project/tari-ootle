@@ -19,6 +19,8 @@
 use tari_template_abi::{TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, WASM_PTR_SIZE};
 use wasmparser::{BinaryReaderError, Parser, Payload};
 
+use crate::limits;
+
 /// Statically extract the embedded `TemplateDef` from a template's WASM bytes.
 ///
 /// Cheap relative to a full compile: a single linear pass over the WASM payload to find the custom
@@ -56,7 +58,8 @@ fn decode_template_def_from_blob(blob: &[u8]) -> Result<TemplateDef, ExtractTemp
             actual: blob.len(),
         });
     }
-    tari_bor::decode(&blob[WASM_PTR_SIZE..full_len]).map_err(ExtractTemplateDefError::Decode)
+    tari_bor::decode_with_max_depth(&blob[WASM_PTR_SIZE..full_len], limits::MAX_CBOR_NESTING_DEPTH)
+        .map_err(ExtractTemplateDefError::Decode)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -75,7 +78,7 @@ pub enum ExtractTemplateDefError {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_abi::{TemplateDef, TemplateDefV1, version};
+    use tari_template_abi::{ArgDef, FunctionDef, TemplateDef, TemplateDefV1, Type, version};
     use tari_template_builtin::all_builtin_templates;
 
     use super::*;
@@ -121,6 +124,58 @@ mod tests {
             abi_version: version::LATEST_TEMPLATE_VERSION,
             functions: Vec::new(),
         })
+    }
+
+    // The `tari_tdef` section is attacker-controlled and `Type` is self-recursive. This test asserts
+    // that a maliciously deep template definition encoding does not decode.
+    #[test]
+    fn a_deeply_nested_arg_type_is_rejected_rather_than_overflowing() {
+        const LEVELS: usize = 100_000;
+
+        fn def_with_arg_type(arg_type: Type) -> TemplateDef {
+            TemplateDef::V1(TemplateDefV1 {
+                template_name: "Synthetic".to_string(),
+                abi_version: version::LATEST_TEMPLATE_VERSION,
+                functions: vec![FunctionDef {
+                    name: "f".to_string(),
+                    arguments: vec![ArgDef {
+                        name: "a".to_string(),
+                        arg_type,
+                    }],
+                    output: Type::Unit,
+                    is_mut: false,
+                    is_migration: false,
+                }],
+            })
+        }
+
+        // One `Type::Vec` wrapper's worth of framing, and where in the encoding it goes, both taken
+        // from real encodes: building a payload this deep as a `Type` would overflow the stack on
+        // the way in and again when it dropped.
+        let flat = tari_bor::encode(&def_with_arg_type(Type::Unit)).unwrap();
+        let one_level = tari_bor::encode(&def_with_arg_type(Type::Vec(Box::new(Type::Unit)))).unwrap();
+        let at = flat
+            .iter()
+            .zip(&one_level)
+            .position(|(a, b)| a != b)
+            .expect("one more level must change the encoding");
+        let wrapper = &one_level[at..at + (one_level.len() - flat.len())];
+
+        let mut payload = Vec::with_capacity(flat.len() + wrapper.len() * LEVELS);
+        payload.extend_from_slice(&flat[..at]);
+        for _ in 0..LEVELS {
+            payload.extend_from_slice(wrapper);
+        }
+        payload.extend_from_slice(&flat[at..]);
+
+        let mut blob = ((payload.len() + WASM_PTR_SIZE) as u32).to_le_bytes().to_vec();
+        blob.extend_from_slice(&payload);
+        let wasm = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
+
+        assert!(matches!(
+            extract_template_def(&wasm),
+            Err(ExtractTemplateDefError::Decode(_))
+        ));
     }
 
     #[test]

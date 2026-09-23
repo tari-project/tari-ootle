@@ -20,9 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import ClearIcon from "@mui/icons-material/Clear";
+import SearchIcon from "@mui/icons-material/Search";
 import {
   Alert,
   Box,
@@ -36,14 +35,15 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import React, { useState, useCallback, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import Grid from "@mui/material/Grid";
 import { useQueryClient } from "@tanstack/react-query";
-import CopyToClipboard from "../../Components/CopyToClipboard";
-import { useGetTemplateDefinition } from "../../api/hooks/useTemplates";
 import type { FunctionDef, Type } from "@tari-project/ootle-ts-bindings";
-import SearchIcon from "@mui/icons-material/Search";
-import ClearIcon from "@mui/icons-material/Clear";
+import React, { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import CopyToClipboard from "../../Components/CopyToClipboard";
+import PageHeading from "../../Components/PageHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
+import { useGetTemplateDefinition } from "../../api/hooks/useTemplates";
 
 function stripTemplatePrefix(id: string): string {
   return id.startsWith("template_") ? id.slice("template_".length) : id;
@@ -94,9 +94,7 @@ function formatSignature(func: FunctionDef, isMethod: boolean): React.ReactNode 
   return (
     <>
       <span style={{ color: "#7c3aed" }}>pub fn </span>
-      <strong>{func.name}</strong>
-      ({params})
-      {output !== "Unit" && <> &rarr; {output}</>}
+      <strong>{func.name}</strong>({params}){output !== "Unit" && <> &rarr; {output}</>}
     </>
   );
 }
@@ -147,18 +145,8 @@ function TemplateDetails({ data }: { data: any }) {
     <Stack spacing={3}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
         <Typography variant="h6">{name}</Typography>
-        {codeSize != null && (
-          <Chip
-            label={`${(codeSize / 1024).toFixed(1)} KB`}
-            size="small"
-            variant="outlined"
-          />
-        )}
-        <Chip
-          label={`ABI v${defV1.abi_version}`}
-          size="small"
-          variant="outlined"
-        />
+        {codeSize != null && <Chip label={`${(codeSize / 1024).toFixed(1)} KB`} size="small" variant="outlined" />}
+        <Chip label={`ABI v${defV1.abi_version}`} size="small" variant="outlined" />
       </Box>
 
       <Divider />
@@ -284,7 +272,11 @@ function TemplatesLayout() {
 
             {fetchAddress && (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'Courier New', Courier, monospace", wordBreak: "break-all" }}>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ fontFamily: "'Courier New', Courier, monospace", wordBreak: "break-all" }}
+                >
                   {fetchAddress}
                 </Typography>
                 <CopyToClipboard copy={fetchAddress} />

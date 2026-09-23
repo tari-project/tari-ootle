@@ -20,13 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React from "react";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
-import StatusChip from "../../Components/StatusChip";
 import type { TransactionAtom } from "@tari-project/ootle-ts-bindings";
 import { Link } from "react-router-dom";
-import { renderJson } from "../../utils/helpers";
 import CodeBlockDialog from "../../Components/CodeBlock";
+import StatusChip from "../../Components/StatusChip";
+import { renderJson } from "../../utils/helpers";
 
 function Transaction({ transaction }: { transaction: TransactionAtom }) {
   const decision = typeof transaction.decision === "object" ? "Abort" : "Commit";

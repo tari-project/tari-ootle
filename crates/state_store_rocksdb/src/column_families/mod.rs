@@ -47,6 +47,7 @@ pub mod substate_locks;
 pub mod transaction;
 pub mod transaction_pool;
 pub mod transaction_pool_state_update;
+pub mod validator_liveness_log;
 pub mod validator_node_epoch_stats;
 pub mod vote_equivocation;
 

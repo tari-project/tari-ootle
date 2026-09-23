@@ -6,15 +6,11 @@ use tari_template_lib::types::TemplateAddress;
 use crate::runtime::{ChargeableState, StateTracker};
 
 pub trait RuntimeModule<TStore>: Send + Sync {
-    fn on_initialize(&self, _track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
+    fn on_initialize(&self, _track: &StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
-    fn on_runtime_call(
-        &self,
-        _track: &mut StateTracker<TStore>,
-        _call: &'static str,
-    ) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_call(&self, _track: &StateTracker<TStore>, _call: &'static str) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
@@ -25,7 +21,7 @@ pub trait RuntimeModule<TStore>: Send + Sync {
     /// here so observer-style modules can see every load.
     fn on_template_loaded(
         &self,
-        _track: &mut StateTracker<TStore>,
+        _track: &StateTracker<TStore>,
         _template_address: &TemplateAddress,
         _bytes_loaded: usize,
     ) -> Result<(), RuntimeModuleError> {
@@ -49,7 +45,7 @@ pub trait RuntimeModule<TStore>: Send + Sync {
     /// Invoked at the start of finalization, against the working state — before it is known
     /// whether the transaction commits or falls back to a fee-intent commit. Charges added here
     /// decide that outcome: they are what the paid-in-full check sees.
-    fn on_before_finalize(&self, _track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
+    fn on_before_finalize(&self, _track: &StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
@@ -61,11 +57,7 @@ pub trait RuntimeModule<TStore>: Send + Sync {
         Ok(())
     }
 
-    fn on_runtime_event(
-        &self,
-        _track: &mut StateTracker<TStore>,
-        _call: &RuntimeEvent,
-    ) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_event(&self, _track: &StateTracker<TStore>, _call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
 
@@ -74,7 +66,7 @@ pub trait RuntimeModule<TStore>: Send + Sync {
     /// is the caller's responsibility (the runtime fans out one event per call).
     fn on_wasm_execution(
         &self,
-        _track: &mut StateTracker<TStore>,
+        _track: &StateTracker<TStore>,
         _points_consumed: u64,
     ) -> Result<(), RuntimeModuleError> {
         Ok(())

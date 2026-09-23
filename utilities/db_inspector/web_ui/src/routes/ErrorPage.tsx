@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import Grid from "@mui/material/Grid";
+import Typography from "@mui/material/Typography";
 import { useRouteError } from "react-router-dom";
 import StyledPaper from "../components/StyledPaper";
-import Typography from "@mui/material/Typography";
-import Grid from "@mui/material/Grid";
 
 export default function ErrorPage() {
-  const error = useRouteError() as any || { message: "Page not found" };
+  const error = (useRouteError() as any) || { message: "Page not found" };
   console.error("Error", error);
 
   return (

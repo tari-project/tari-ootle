@@ -1,7 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import { useRef, type ReactNode } from "react";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Grid from "@mui/material/Grid";
@@ -9,13 +8,14 @@ import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { alpha, useTheme } from "@mui/material/styles";
-import { IoCashOutline, IoFlameOutline, IoReceiptOutline, IoWalletOutline } from "react-icons/io5";
 import type { Amount } from "@tari-project/ootle-ts-bindings";
-import PageHeading from "../../Components/PageHeading";
+import { useRef, type ReactNode } from "react";
+import { IoCashOutline, IoFlameOutline, IoReceiptOutline, IoWalletOutline } from "react-icons/io5";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
+import PageHeading from "../../Components/PageHeading";
 import { StyledPaper } from "../../Components/StyledComponents";
-import { bigintToDecimalString } from "../../utils/helpers";
 import { useNetworkEconomics } from "../../api/hooks/useNetworkEconomics";
+import { bigintToDecimalString } from "../../utils/helpers";
 
 // 1 TARI = 1_000_000 microTARI.
 const TARI_DIVISIBILITY = 6;

@@ -67,7 +67,9 @@ function TransactionReceiptDetails({ address }: { address: string }) {
                       <DataTableCell>
                         <Chip
                           label={receipt.outcome}
-                          color={receipt.outcome === "Commit" || receipt.outcome === "FeeIntentCommit" ? "success" : "error"}
+                          color={
+                            receipt.outcome === "Commit" || receipt.outcome === "FeeIntentCommit" ? "success" : "error"
+                          }
                           size="small"
                           variant="outlined"
                         />

@@ -116,4 +116,4 @@ const red = {
   950: "#450F0A",
 };
 
-export { tariBg, tariPurple, grey, teal, gothic, blue, orange, green, red };
+export { blue, gothic, green, grey, orange, red, tariBg, tariPurple, teal };

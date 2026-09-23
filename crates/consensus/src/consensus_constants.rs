@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{Epoch, NumPreshards};
+use tari_ootle_storage::consensus_models::LivenessThresholds;
 use tari_ootle_transaction::Network;
 
 /// The byte cap every network uses. Keeping it uniform is what lets one gossip limit serve the whole
@@ -52,14 +53,30 @@ pub struct ConsensusConstants {
     /// The maximum block time. The pacemaker will trigger a new view if a block is not received within this time +
     /// delta.
     pub pacemaker_block_time: Duration,
-    /// The number of missed proposals before a node will immediately send a NEWVIEW to the next leader when the node
-    /// who missed the proposals is selected as leader.
+    /// The number of missed proposals that suspends a validator. A suspended validator's slot in the
+    /// leader rotation is remapped to the next validator that is not suspended, so the network does
+    /// not pay a pacemaker timeout each time a validator that has stopped proposing comes up.
+    /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes disagree on who may propose.
     pub missed_proposal_suspend_threshold: u64,
-    /// The number of rounds a node must participate before their non-participation is reset. If a peer is offline,
-    /// gets suspended and comes online, their missed proposal count (up to a maximum of
-    /// `missed_proposal_recovery_threshold`) is decremented for each block that they participate (vote) in. Once
-    /// this reaches zero, the node is considered stable and out of suspension.
-    pub missed_proposal_recovery_threshold: u64,
+    /// The number of votes a suspended validator must land in committed blocks to earn its first
+    /// probation slot - one slot in which it is the leader again and can prove it is back. The
+    /// requirement doubles with each probation slot it then misses, up to
+    /// `probation_max_backoff_exp`, so a validator that votes but never proposes costs the network a
+    /// geometrically decreasing number of slots.
+    /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes disagree on who may propose.
+    pub probation_base_votes: u64,
+    /// The number of committed blocks after which a suspended validator gets a probation slot even
+    /// if none of its votes reached a certificate. This is what guarantees that a validator gets a
+    /// slot back: a vote counts towards the slot only once it is in the certificate of a committed
+    /// block and a leader stops collecting at a quorum, so a validator that is merely slower than
+    /// its committee can have every vote of its arrive too late to count. Doubles with each missed
+    /// probation slot like `probation_base_votes`.
+    /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes disagree on who may propose.
+    pub probation_base_blocks: u64,
+    /// The cap on the exponent in `probation_base_votes × 2^probation_failures` and
+    /// `probation_base_blocks × 2^probation_failures`.
+    /// CONSENSUS RULE: must be uniform network-wide, otherwise nodes disagree on who may propose.
+    pub probation_max_backoff_exp: u32,
     /// The maximum total weight of commands a leader will pack into a single block. This is a budget
     /// of transaction weight (see `Transaction::calculate_transaction_weight`) rather than a flat
     /// command count, so heavy transactions consume more of a block than light ones. This is a local
@@ -152,7 +169,9 @@ impl ConsensusConstants {
         num_preshards: NumPreshards::current(),
         pacemaker_block_time: Duration::from_secs(10),
         missed_proposal_suspend_threshold: 5,
-        missed_proposal_recovery_threshold: 5,
+        probation_base_votes: 5,
+        probation_base_blocks: 100,
+        probation_max_backoff_exp: 6,
         // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
         // transactions executed in ~11.5s. `INVOCATION_FLOOR` denominates the weight unit: every
         // instruction that instantiates a template weighs at least the floor, which puts a plain
@@ -203,7 +222,9 @@ impl ConsensusConstants {
         num_preshards: NumPreshards::current(),
         pacemaker_block_time: Duration::from_secs(10),
         missed_proposal_suspend_threshold: 5,
-        missed_proposal_recovery_threshold: 5,
+        probation_base_votes: 5,
+        probation_base_blocks: 100,
+        probation_max_backoff_exp: 6,
         // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
         // transactions executed in ~11.5s. `INVOCATION_FLOOR` denominates the weight unit: every
         // instruction that instantiates a template weighs at least the floor, which puts a plain
@@ -246,7 +267,9 @@ impl ConsensusConstants {
         num_preshards: NumPreshards::current(),
         pacemaker_block_time: Duration::from_secs(10),
         missed_proposal_suspend_threshold: 5,
-        missed_proposal_recovery_threshold: 5,
+        probation_base_votes: 5,
+        probation_base_blocks: 100,
+        probation_max_backoff_exp: 6,
         // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
         // transactions executed in ~11.5s. `INVOCATION_FLOOR` denominates the weight unit: every
         // instruction that instantiates a template weighs at least the floor, which puts a plain
@@ -303,7 +326,9 @@ impl ConsensusConstants {
             num_preshards: NumPreshards::current(),
             pacemaker_block_time: Duration::from_secs(10),
             missed_proposal_suspend_threshold: 5,
-            missed_proposal_recovery_threshold: 5,
+            probation_base_votes: 5,
+            probation_base_blocks: 100,
+            probation_max_backoff_exp: 6,
             // Calibrated against 2-core hardware (Esmeralda class), where ~500 LocalOnly stress
             // transactions executed in ~11.5s. `INVOCATION_FLOOR` denominates the weight unit: every
             // instruction that instantiates a template weighs at least the floor, which puts a plain
@@ -347,6 +372,17 @@ impl ConsensusConstants {
     /// introduced without touching call sites.
     pub fn exhaust_burn_rate(&self, _epoch: Epoch) -> ExhaustBurnRate {
         self.exhaust_burn_rate
+    }
+
+    /// The thresholds that decide a validator's liveness state, and with it whether leader selection
+    /// skips its slot.
+    pub fn liveness_thresholds(&self) -> LivenessThresholds {
+        LivenessThresholds {
+            suspend_after_missed: self.missed_proposal_suspend_threshold,
+            probation_base_votes: self.probation_base_votes,
+            probation_base_blocks: self.probation_base_blocks,
+            probation_max_backoff_exp: self.probation_max_backoff_exp,
+        }
     }
 }
 

@@ -20,19 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { TableContainer, Table, TableRow, TableBody, Collapse } from "@mui/material";
-import { renderJson } from "../../utils/helpers";
-import { DataTableCell } from "../../Components/StyledComponents";
-import { AccordionIconButton } from "../../Components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import { Collapse, Table, TableBody, TableContainer, TableRow } from "@mui/material";
+import { substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { Substate } from "@tari-project/ootle-ts-bindings/dist/types/Substate";
+import { SubstateId } from "@tari-project/ootle-ts-bindings/dist/types/SubstateId";
+import { VersionedSubstateId } from "@tari-project/ootle-ts-bindings/dist/types/VersionedSubstateId";
+import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 import CodeBlockDialog from "../../Components/CodeBlock";
-import { substateIdToString, SubstateRecord } from "@tari-project/ootle-ts-bindings";
-import { VersionedSubstateId } from "@tari-project/ootle-ts-bindings/dist/types/VersionedSubstateId";
-import { SubstateId } from "@tari-project/ootle-ts-bindings/dist/types/SubstateId";
-import { Substate } from "@tari-project/ootle-ts-bindings/dist/types/Substate";
+import { AccordionIconButton, DataTableCell } from "../../Components/StyledComponents";
+import { renderJson } from "../../utils/helpers";
 
 function UpSubstateRowData({ id, substate }: { id: SubstateId; substate: Substate }) {
   const [open, setOpen] = useState(false);
@@ -64,7 +63,9 @@ function UpSubstateRowData({ id, substate }: { id: SubstateId; substate: Substat
             <IoArrowUpCircle style={{ width: 22, height: 22, color: "#5F9C91" }} /> Up
           </div>
         </DataTableCell>
-        <DataTableCell>{substateId}:{substate.version}</DataTableCell>
+        <DataTableCell>
+          {substateId}:{substate.version}
+        </DataTableCell>
       </TableRow>
       <TableRow>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
@@ -95,15 +96,19 @@ function DownSubstateRowData({ id }: { id: VersionedSubstateId }) {
           Down
         </div>
       </DataTableCell>
-      <DataTableCell>{substateId}:{id.version}</DataTableCell>
+      <DataTableCell>
+        {substateId}:{id.version}
+      </DataTableCell>
     </TableRow>
   );
 }
 
-
-export default function Substates({ upData, downData }: {
+export default function Substates({
+  upData,
+  downData,
+}: {
   upData: [SubstateId, Substate][];
-  downData: VersionedSubstateId[]
+  downData: VersionedSubstateId[];
 }) {
   // const down = data.Accept.down_substates;
   const up = upData;

@@ -43,6 +43,7 @@ use crate::{
     hotstuff::{
         HotstuffConfig,
         HotstuffEvent,
+        LeaderSkipSet,
         ProposalValidationError,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
         check_extends_justify,
@@ -56,14 +57,8 @@ use crate::{
     },
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
-    traits::{
-        CertificateStore,
-        ConsensusSpec,
-        LeaderStrategy,
-        OutboundMessaging,
-        ValidatorSignerService,
-        hooks::ConsensusHooks,
-    },
+    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, hooks::ConsensusHooks},
+    validations::check_proposed_by_leader,
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_local_proposal";
@@ -426,12 +421,37 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 )
                 .await?;
 
-            // Get the leader that will collect votes for this block to justify moving onto the next view
-            let (next_leader, _) = self.leader_strategy.get_leader(local_committee, valid_block.height());
+            // Get the leader that will collect votes for this block to justify moving onto the next view.
+            // That leader's proposal carries a certificate for this block, so its liveness anchor is
+            // this block's height.
+            let skip_set = self.store.with_read_tx(|tx| {
+                LeaderSkipSet::load_for_justify(
+                    tx,
+                    valid_block.epoch(),
+                    valid_block.height(),
+                    local_committee,
+                    &self.config.consensus_constants.liveness_thresholds(),
+                )
+            })?;
+            let (next_leader, _) =
+                skip_set.effective_leader(&self.leader_strategy, local_committee, valid_block.height());
 
-            // And vote to move onto the next view
-            self.send_vote_to_leader(next_leader, valid_block.block(), decision)
-                .await?;
+            // And vote to move onto the next view, unless this node has caught the proposer
+            // equivocating. Withholding the signature is all it does: the block is processed, locked
+            // and committed as usual, and leader selection is untouched. Evidence is what this node
+            // happened to see - only the leader of a view receives the votes for it, and nothing
+            // shares what it found - so it may not decide anything the committee has to agree on.
+            if self.holds_equivocation_evidence_against(valid_block.block())? {
+                warn!(
+                    target: LOG_TARGET,
+                    "🚨 Withholding our vote on {}: its proposer {} equivocated in this epoch",
+                    valid_block.block(),
+                    valid_block.block().proposed_by(),
+                );
+            } else {
+                self.send_vote_to_leader(next_leader, valid_block.block(), decision)
+                    .await?;
+            }
         }
 
         if let Some(ref reason) = block_decision.no_vote_reason {
@@ -790,6 +810,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         Ok(())
     }
 
+    fn holds_equivocation_evidence_against(&self, block: &Block) -> Result<bool, HotStuffError> {
+        let holds = self
+            .store
+            .with_read_tx(|tx| tx.vote_equivocation_exists_for_validator(block.epoch(), block.proposed_by()))?;
+        Ok(holds)
+    }
+
     fn validate_block(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
@@ -927,8 +954,24 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
-        let dummy_blocks =
-            check_extends_justify(&candidate_block, &justify_block, &self.leader_strategy, local_committee)?;
+        // The liveness state that decides who may propose this block is read as of the block its
+        // justify commits, which is the state every node that can act on this view has committed.
+        let skip_set = LeaderSkipSet::load_for_justify(
+            tx,
+            candidate_block.epoch(),
+            justify_block.height(),
+            local_committee,
+            &self.config.consensus_constants.liveness_thresholds(),
+        )?;
+        check_proposed_by_leader(&self.leader_strategy, local_committee, &skip_set, &candidate_block)?;
+
+        let dummy_blocks = check_extends_justify(
+            &candidate_block,
+            &justify_block,
+            &self.leader_strategy,
+            local_committee,
+            &skip_set,
+        )?;
         if !dummy_blocks.is_empty() {
             info!(
                 target: LOG_TARGET,

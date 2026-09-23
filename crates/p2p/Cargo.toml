@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_p2p"
+publish = false
 description = "The Tari message types"
 version.workspace = true
 edition.workspace = true

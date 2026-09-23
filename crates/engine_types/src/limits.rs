@@ -358,6 +358,21 @@ pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_random_bytes_len: 1024, // 1 KiB per call
 };
 
+/// Maximum container nesting accepted from an untrusted CBOR payload.
+///
+/// Applied at each boundary where bytes this node did not produce first reach a native decoder: a
+/// published template's `tari_tdef` section, a gossiped or RPC-carried message, a peer's substate
+/// bytes and a transaction's engine arguments. A derived `Decode` on a self-recursive type descends
+/// one native stack frame per level and cannot thread a counter of its own, so a payload of a few
+/// hundred bytes reaches the end of the stack — a guard-page abort of the validator process, which
+/// no caller can catch. Every boundary applies the same figure, because a payload one node accepts
+/// and another rejects is a consensus split.
+///
+/// It sits generously above anything a legitimate payload nests to, because rejecting a valid
+/// payload is the worse failure. This figure guarantees that the deepest accepted input still decodes
+/// within the smallest stack untrusted decode runs on: a 2 MiB tokio worker.
+pub const MAX_CBOR_NESTING_DEPTH: usize = 256;
+
 pub const MAX_DIVISIBILITY: u8 = 18;
 
 pub const MAX_TOKEN_SYMBOL_LEN: usize = 10;

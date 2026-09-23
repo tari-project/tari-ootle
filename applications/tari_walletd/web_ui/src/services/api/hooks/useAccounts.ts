@@ -24,13 +24,13 @@ import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import {
-  ConfidentialTransferRequest,
   AccountOrKeyId,
   BadgeUsage,
   BalanceChangeSourceType,
   ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
+  ConfidentialTransferRequest,
   decodeOotleAddress,
   Memo,
   OutputStatus,
@@ -55,8 +55,8 @@ import {
   accountsSetDefault,
   accountsStealthTransfer,
   accountsTransfer,
-  mintFaucetNfts,
   confidentialListOutputs,
+  mintFaucetNfts,
   stealthUtxosList,
   validatorsGetFees,
 } from "@utils/json_rpc";

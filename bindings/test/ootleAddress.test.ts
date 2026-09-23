@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 import { describe, expect, it } from "vitest";
-import { DecodedOotleAddress, encodeOotleAddress, decodeOotleAddress } from "../src";
+import { DecodedOotleAddress, decodeOotleAddress, encodeOotleAddress } from "../src";
 
 describe("OotleAddress de/encoding", () => {
   function makeDecodedAddress() {

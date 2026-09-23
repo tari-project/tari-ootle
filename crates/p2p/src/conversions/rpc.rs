@@ -5,6 +5,7 @@ use std::convert::{TryFrom, TryInto};
 
 use anyhow::{Context, anyhow};
 use tari_engine_types::{
+    limits::MAX_CBOR_NESTING_DEPTH,
     published_template::PublishedTemplateMetadata,
     substate::{SubstateId, SubstateValue},
 };
@@ -178,7 +179,7 @@ impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
             // `CommandCommitProof` is a foreign serde-only type; serialize/deserialize via
             // tari_bor::serde_codec directly to match the encoding produced by
             // `encode_to_vec`/`tari_bor::adapters::serde_bridge`.
-            tari_bor::serde_codec::from_slice(&value.proof)
+            tari_bor::serde_codec::from_slice_with_max_depth(&value.proof, MAX_CBOR_NESTING_DEPTH)
                 .map_err(|e| anyhow!("Failed to decode CommandCommitProof: {e}"))?,
             shard_tree_summary,
         ))

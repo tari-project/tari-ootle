@@ -1,5 +1,6 @@
 [package]
 name = "sqlite_message_logger"
+publish = false
 description = "Debugging tool that logs all network messages in a SQLite database"
 version.workspace = true
 edition.workspace = true

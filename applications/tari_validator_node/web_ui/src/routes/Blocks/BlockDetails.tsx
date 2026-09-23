@@ -20,32 +20,23 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState, useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
-import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
-  Grid,
-  Table,
-  TableContainer,
-  TableBody,
-  TableRow,
-  TableCell,
-  Button,
-  Fade,
   Alert,
   Box,
+  Button,
+  Fade,
+  Grid,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableRow,
   Tooltip,
 } from "@mui/material";
 import Typography from "@mui/material/Typography";
-import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
-import PageHeading from "../../Components/PageHeading";
-import StatusChip from "../../Components/StatusChip";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import Loading from "../../Components/Loading";
-import { getBlock, getIdentity } from "../../utils/json_rpc";
-import Transactions from "./Transactions";
 import type {
   Block,
   Command,
@@ -53,6 +44,15 @@ import type {
   TransactionAtom,
   VNGetIdentityResponse,
 } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
+import Loading from "../../Components/Loading";
+import PageHeading from "../../Components/PageHeading";
+import StatusChip from "../../Components/StatusChip";
+import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
+import { getBlock, getIdentity } from "../../utils/json_rpc";
+import Transactions from "./Transactions";
 
 const COMMANDS = [
   "LocalOnly",
@@ -157,7 +157,10 @@ export default function BlockDetails() {
             if (resp.block.stored_at && justify_block.block.stored_at) {
               let blockTime = resp.block.block_time || 0;
               let justifyTime = justify_block.block.block_time || 0;
-              setBlockTime(Math.floor(new Date(blockTime * 1000).getTime() / 1000) - Math.floor(new Date(justifyTime * 1000).getTime() / 1000));
+              setBlockTime(
+                Math.floor(new Date(blockTime * 1000).getTime() / 1000) -
+                  Math.floor(new Date(justifyTime * 1000).getTime() / 1000),
+              );
             }
             // The header burn accumulates within an epoch, so this block's burn is the step from
             // the parent, or the whole figure when the parent belongs to the previous epoch.
@@ -174,7 +177,6 @@ export default function BlockDetails() {
           const data: { [key: string]: TransactionAtom[] } = {};
           for (let command of resp.block.commands) {
             if (typeof command === "object") {
-
               const cmd = Object.keys(command)[0];
 
               if (COMMANDS.indexOf(cmd) > -1) {
@@ -198,7 +200,6 @@ export default function BlockDetails() {
           setForeignProposals(foreignProposals);
           setBlockData(data);
           setOtherCommands(otherCommands);
-
         })
         .catch((err) => {
           setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
@@ -259,7 +260,10 @@ export default function BlockDetails() {
                           </TableRow>
                           <TableRow>
                             <TableCell>Epoch</TableCell>
-                            <DataTableCell>{block!.header.epoch} (ShardGroup {block!.header.shard_group.start}-{block!.header.shard_group.end_inclusive})</DataTableCell>
+                            <DataTableCell>
+                              {block!.header.epoch} (ShardGroup {block!.header.shard_group.start}-
+                              {block!.header.shard_group.end_inclusive})
+                            </DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Height</TableCell>
@@ -271,7 +275,9 @@ export default function BlockDetails() {
                           </TableRow>
                           <TableRow>
                             <TableCell>Proposal Certificate</TableCell>
-                            <DataTableCell>{block!.justify.height} ({block!.justify.signatures.length} signatures)</DataTableCell>
+                            <DataTableCell>
+                              {block!.justify.height} ({block!.justify.signatures.length} signatures)
+                            </DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Parent block</TableCell>
@@ -292,13 +298,16 @@ export default function BlockDetails() {
                               Fee Burn
                             </TableCell>
                             <DataTableCell>
-                              <BlockBurnCell burn={blockExhaustBurn} leaderFee={BigInt(block!.header.total_leader_fee)} />
+                              <BlockBurnCell
+                                burn={blockExhaustBurn}
+                                leaderFee={BigInt(block!.header.total_leader_fee)}
+                              />
                             </DataTableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell
-                              title="The total fees burnt by this shard group for this epoch as part of the exhaust">Accumulated
-                              Fee Burn</TableCell>
+                            <TableCell title="The total fees burnt by this shard group for this epoch as part of the exhaust">
+                              Accumulated Fee Burn
+                            </TableCell>
                             <DataTableCell>
                               {block!.header.accumulated_data.total_exhaust_burn.toString()}
                             </DataTableCell>
@@ -342,9 +351,7 @@ export default function BlockDetails() {
                           {block!.stored_at && (
                             <TableRow>
                               <TableCell>Stored at</TableCell>
-                              <DataTableCell>
-                                {new Date(block!.stored_at).toLocaleString()}
-                              </DataTableCell>
+                              <DataTableCell>{new Date(block!.stored_at).toLocaleString()}</DataTableCell>
                             </TableRow>
                           )}
                         </TableBody>
@@ -410,10 +417,14 @@ export default function BlockDetails() {
                   );
                 })}
                 {foreignProposals.length > 0 && (
-                  <Accordion expanded={expandedPanels.includes("panelForeignProposals")}
-                             onChange={handleChange("panelForeignProposals")}>
-                    <AccordionSummary aria-controls="panelForeignProposalsbh-content"
-                                      id="panelForeignProposalsbh-header">
+                  <Accordion
+                    expanded={expandedPanels.includes("panelForeignProposals")}
+                    onChange={handleChange("panelForeignProposals")}
+                  >
+                    <AccordionSummary
+                      aria-controls="panelForeignProposalsbh-content"
+                      id="panelForeignProposalsbh-header"
+                    >
                       <Typography>Foreign Proposals</Typography>
                     </AccordionSummary>
                     <AccordionDetails>
@@ -426,27 +437,41 @@ export default function BlockDetails() {
                   </Accordion>
                 )}
                 {epochEvents.length > 0 && (
-                  <Accordion expanded={expandedPanels.includes("panelEpochEvents")}
-                             onChange={handleChange("panelEpochEvents")}>
+                  <Accordion
+                    expanded={expandedPanels.includes("panelEpochEvents")}
+                    onChange={handleChange("panelEpochEvents")}
+                  >
                     <AccordionSummary aria-controls="panelEpochEventsbh-content" id="panelEpochEventsbh-header">
                       <Typography>EpochEvent</Typography>
                     </AccordionSummary>
                     <AccordionDetails>
-                      <ul>{epochEvents.map((evt, i) => <li key={i}>{evt}</li>)}</ul>
+                      <ul>
+                        {epochEvents.map((evt, i) => (
+                          <li key={i}>{evt}</li>
+                        ))}
+                      </ul>
                     </AccordionDetails>
                   </Accordion>
                 )}
-                {Object.keys(otherCommands).length > 0 && Object.keys(otherCommands).map((key, i) => (
-                  <Accordion key={i} expanded={expandedPanels.includes(`panel${key}`)}
-                             onChange={handleChange(`panel${key}`)}>
-                    <AccordionSummary aria-controls={`panel${key}bh-content`} id={`panel${key}sbh-header`}>
-                      <Typography>{key}</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <ul>{otherCommands[key].map((elem, j) => <li key={j}>{JSON.stringify(elem)}</li>)}</ul>
-                    </AccordionDetails>
-                  </Accordion>
-                ))}
+                {Object.keys(otherCommands).length > 0 &&
+                  Object.keys(otherCommands).map((key, i) => (
+                    <Accordion
+                      key={i}
+                      expanded={expandedPanels.includes(`panel${key}`)}
+                      onChange={handleChange(`panel${key}`)}
+                    >
+                      <AccordionSummary aria-controls={`panel${key}bh-content`} id={`panel${key}sbh-header`}>
+                        <Typography>{key}</Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <ul>
+                          {otherCommands[key].map((elem, j) => (
+                            <li key={j}>{JSON.stringify(elem)}</li>
+                          ))}
+                        </ul>
+                      </AccordionDetails>
+                    </Accordion>
+                  ))}
               </div>
             </Fade>
           )}

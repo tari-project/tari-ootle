@@ -20,14 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { NavLink } from "react-router-dom";
 import Fade from "@mui/material/Fade";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
 import Tooltip from "@mui/material/Tooltip";
-import { PiPuzzlePiece } from "react-icons/pi";
+import Typography from "@mui/material/Typography";
 import {
   IoBarChart,
   IoBarChartOutline,
@@ -44,7 +42,9 @@ import {
   IoServer,
   IoServerOutline,
 } from "react-icons/io5";
-import { TbTimelineEventText, TbTemplate } from "react-icons/tb";
+import { PiPuzzlePiece } from "react-icons/pi";
+import { TbTemplate, TbTimelineEventText } from "react-icons/tb";
+import { NavLink } from "react-router-dom";
 
 import ThemeSwitcher from "./ThemeSwitcher";
 

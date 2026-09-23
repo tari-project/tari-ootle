@@ -8,10 +8,13 @@ export type Params = { [key: string]: string | number | boolean | null };
 function getUrl(entity: string, params: Params = {}) {
   function toQueryString(params: Params): string {
     return new URLSearchParams(
-      Object.entries(params).reduce((acc, [key, value]) => {
-        acc[key] = String(value);
-        return acc;
-      }, {} as Record<string, string>),
+      Object.entries(params).reduce(
+        (acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        },
+        {} as Record<string, string>,
+      ),
     ).toString();
   }
 
@@ -40,7 +43,6 @@ async function getRequest(path: string, params: Params = {}) {
   return await response.json();
 }
 
-
 export function RestClient() {
   return {
     listDatabases: async () => {
@@ -53,7 +55,6 @@ export function RestClient() {
     listCfItems: async (dbName: string, cfName: string, params: Params = {}) => {
       return await getRequest(`databases/${dbName}/column-families/${cfName}`, params);
     },
-
   };
 }
 

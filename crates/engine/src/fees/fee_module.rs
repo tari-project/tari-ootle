@@ -178,7 +178,7 @@ impl FeeModule {
 }
 
 impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
-    fn on_initialize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
+    fn on_initialize(&self, track: &StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
         track.add_fee_charge(FeeSource::Initial, self.initial_cost);
         let transaction_weight = track.get_transaction_weight();
         let transaction_weight_cost = transaction_weight
@@ -190,14 +190,14 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
         Ok(())
     }
 
-    fn on_runtime_call(&self, track: &mut StateTracker<TStore>, _call: &'static str) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_call(&self, track: &StateTracker<TStore>, _call: &'static str) -> Result<(), RuntimeModuleError> {
         track.add_fee_charge(FeeSource::RuntimeCall, self.fee_table.per_module_call_cost());
         Ok(())
     }
 
     fn on_template_loaded(
         &self,
-        track: &mut StateTracker<TStore>,
+        track: &StateTracker<TStore>,
         template_address: &TemplateAddress,
         bytes_loaded: usize,
     ) -> Result<(), RuntimeModuleError> {
@@ -223,8 +223,8 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
         Ok(())
     }
 
-    fn on_before_finalize(&self, track: &mut StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
-        self.charge_finalization_fees(&mut track.chargeable_state())
+    fn on_before_finalize(&self, track: &StateTracker<TStore>) -> Result<(), RuntimeModuleError> {
+        track.with_chargeable_state(|state| self.charge_finalization_fees(state))
     }
 
     fn on_fee_checkpoint(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
@@ -237,11 +237,7 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
         self.charge_finalization_fees(state)
     }
 
-    fn on_runtime_event(
-        &self,
-        track: &mut StateTracker<TStore>,
-        call: &RuntimeEvent,
-    ) -> Result<(), RuntimeModuleError> {
+    fn on_runtime_event(&self, track: &StateTracker<TStore>, call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
         match call {
             RuntimeEvent::LogEmitted { size_bytes } => {
                 // Charged under the same source as the host call that emitted the log: the flat

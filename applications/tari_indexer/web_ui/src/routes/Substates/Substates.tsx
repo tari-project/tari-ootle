@@ -20,9 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper, CodeBlock } from "../../Components/StyledComponents";
+import ClearIcon from "@mui/icons-material/Clear";
+import GppMaybeIcon from "@mui/icons-material/GppMaybe";
+import SearchIcon from "@mui/icons-material/Search";
+import VerifiedIcon from "@mui/icons-material/Verified";
 import {
   Alert,
   Box,
@@ -33,27 +34,36 @@ import {
   IconButton,
   InputAdornment,
   Stack,
-  TextField,
-  Tooltip,
-  Typography,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableRow,
+  TextField,
+  Tooltip,
+  Typography,
 } from "@mui/material";
-import React, { useState, useCallback, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
-import { renderJson } from "../../utils/helpers";
-import CopyToClipboard from "../../Components/CopyToClipboard";
-import { useGetSubstate } from "../../api/hooks/useSubstates";
+import Grid from "@mui/material/Grid";
 import { convertCborValue, type Component, type SubstateValue } from "@tari-project/ootle-ts-bindings";
-import SearchIcon from "@mui/icons-material/Search";
-import ClearIcon from "@mui/icons-material/Clear";
-import VerifiedIcon from "@mui/icons-material/Verified";
-import GppMaybeIcon from "@mui/icons-material/GppMaybe";
+import React, { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import CopyToClipboard from "../../Components/CopyToClipboard";
+import PageHeading from "../../Components/PageHeading";
+import { CodeBlock, StyledPaper } from "../../Components/StyledComponents";
+import { useGetSubstate } from "../../api/hooks/useSubstates";
+import { renderJson } from "../../utils/helpers";
 
-const SUBSTATE_PREFIXES = ["component", "resource", "vault", "nft", "tombstone", "txreceipt", "template", "vnfp", "utxo"];
+const SUBSTATE_PREFIXES = [
+  "component",
+  "resource",
+  "vault",
+  "nft",
+  "tombstone",
+  "txreceipt",
+  "template",
+  "vnfp",
+  "utxo",
+];
 
 function validateSubstateId(id: string): string | null {
   if (!id) return null;
@@ -154,7 +164,9 @@ function FieldTable({ fields }: { fields: Array<{ label: string; value: React.Re
           {fields.map((field) => (
             <TableRow key={field.label}>
               <TableCell sx={{ fontWeight: "bold", width: "200px", whiteSpace: "nowrap" }}>{field.label}</TableCell>
-              <TableCell sx={{ fontFamily: "'Courier New', Courier, monospace", fontSize: "14px", wordBreak: "break-all" }}>
+              <TableCell
+                sx={{ fontFamily: "'Courier New', Courier, monospace", fontSize: "14px", wordBreak: "break-all" }}
+              >
                 {field.value}
               </TableCell>
             </TableRow>
@@ -188,7 +200,11 @@ function ResourceView({ data }: { data: any }) {
   return (
     <FieldTable
       fields={[
-        { label: "Resource Type", value: typeof data.resource_type === "object" ? JSON.stringify(data.resource_type) : String(data.resource_type) },
+        {
+          label: "Resource Type",
+          value:
+            typeof data.resource_type === "object" ? JSON.stringify(data.resource_type) : String(data.resource_type),
+        },
         { label: "Divisibility", value: String(data.divisibility) },
         { label: "Total Supply", value: data.total_supply !== null ? String(data.total_supply) : "Tracking disabled" },
         { label: "Owner Rule", value: <CodeBlock>{renderJson(data.owner_rule)}</CodeBlock> },
@@ -278,11 +294,7 @@ function UtxoView({ data }: { data: any }) {
 }
 
 function ClaimedOutputTombstoneView({ data }: { data: any }) {
-  return (
-    <FieldTable
-      fields={[{ label: "Value", value: String(data.value) }]}
-    />
-  );
+  return <FieldTable fields={[{ label: "Value", value: String(data.value) }]} />;
 }
 
 function FallbackView({ data }: { data: unknown }) {
@@ -390,7 +402,11 @@ function SubstatesLayout() {
 
             {fetchAddress && (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'Courier New', Courier, monospace", wordBreak: "break-all" }}>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ fontFamily: "'Courier New', Courier, monospace", wordBreak: "break-all" }}
+                >
                   {fetchAddress}
                 </Typography>
                 <CopyToClipboard copy={fetchAddress} />

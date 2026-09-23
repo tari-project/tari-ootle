@@ -62,8 +62,7 @@ export function Copyable({ value, chars = 6 }: { value: string | null | undefine
   if (!value) {
     return <span className="faint mono">—</span>;
   }
-  const short =
-    value.length > chars * 2 + 3 ? `${value.slice(0, chars)}…${value.slice(-chars)}` : value;
+  const short = value.length > chars * 2 + 3 ? `${value.slice(0, chars)}…${value.slice(-chars)}` : value;
 
   return (
     <button

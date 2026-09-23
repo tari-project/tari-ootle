@@ -30,13 +30,11 @@ use wasmer::{
     Function,
     FunctionType,
     Instance,
-    Pages,
     Store,
     TypedFunction,
     WasmPtr,
     imports,
-    sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, EngineBuilder},
-    wasmparser::{DataKind, ElementItems, ElementKind, Parser, Payload},
+    wasmparser::{Parser, Payload},
 };
 
 use crate::{
@@ -45,9 +43,8 @@ use crate::{
         WasmExecutionError,
         WasmProcess,
         WasmValidationError,
-        bulk_metering::BulkMetering,
-        limiting_tunable::LimitingTunables,
-        metering,
+        engine_config,
+        module_shape::validate_module_structure,
     },
 };
 
@@ -178,44 +175,7 @@ impl WasmModule {
     }
 
     fn create_engine() -> Engine {
-        const MEMORY_PAGE_LIMIT: Pages = Pages(limits::WASM_LIMITS.max_memory_pages as u32);
-        let base = BaseTunables::new();
-        let tunables = LimitingTunables::new(base, MEMORY_PAGE_LIMIT, limits::WASM_LIMITS.max_table_elements);
-        let mut compiler = Cranelift::new();
-        compiler
-            .opt_level(CraneliftOptLevel::SpeedAndSize)
-            .canonicalize_nans(true);
-        // Per-call metering ceiling. `WasmProcess::invoke` lowers each call's allowance further to
-        // whatever remains of the per-transaction budget (`MAX_WASM_POINTS_PER_TRANSACTION`).
-        let metering = Arc::new(metering::middleware(limits::MAX_WASM_POINTS_PER_CALL));
-        compiler.push_middleware(metering.clone());
-        // Must follow the static meter: `BulkMetering` reads the global indexes that meter installs
-        // and relies on its own emitted operators escaping static costing.
-        compiler.push_middleware(Arc::new(BulkMetering::new(metering)));
-
-        // Every feature is set explicitly rather than relying on `Features::default()`: the
-        // accepted-module set is consensus-critical, and wasmer flips defaults between releases
-        // (e.g. `extended_const` became default-on in 7.1.0). When bumping wasmer, add any newly
-        // introduced feature flag here explicitly.
-        let mut features = wasmer::sys::Features::default();
-        features
-            .threads(false)
-            .bulk_memory(true)
-            .multi_value(false)
-            .reference_types(true)
-            .simd(false)
-            .relaxed_simd(false)
-            .tail_call(false)
-            .memory64(false)
-            .multi_memory(false)
-            .exceptions(false)
-            .module_linking(false)
-            .extended_const(false)
-            .wide_arithmetic(false);
-
-        let mut engine = EngineBuilder::new(compiler).set_features(Some(features)).engine();
-        engine.set_tunables(tunables);
-        Engine::from(engine)
+        engine_config::create_engine()
     }
 }
 
@@ -344,8 +304,11 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
             ),
         });
     }
-    let template = tari_bor::decode::<TemplateDef>(&section[WASM_PTR_SIZE..full_len])
-        .map_err(WasmExecutionError::AbiTemplateDefDecodeError)?;
+    let template = tari_bor::decode_with_max_depth::<TemplateDef>(
+        &section[WASM_PTR_SIZE..full_len],
+        limits::MAX_CBOR_NESTING_DEPTH,
+    )
+    .map_err(WasmExecutionError::AbiTemplateDefDecodeError)?;
     Ok(template)
 }
 
@@ -442,76 +405,6 @@ fn validate_export_signature(
         }),
         None => Err(WasmValidationError::MissingExport { name: name.to_string() }),
     }
-}
-
-/// Checks what only the module bytes show: that the module declares no start function, and no more
-/// tables or globals than the limits.
-///
-/// A start function runs on every instantiation, before the engine has installed this call's
-/// metering allowance and outside any invocation it could attribute effects to. Templates have no
-/// use for one: the engine only ever enters a template through its `<name>_main` export.
-///
-/// Tables and globals are both host storage built at every instantiation and claimed by a
-/// declaration far smaller than what it claims. Each table's element count is bounded by the
-/// tunables, which see one table at a time, so the number of tables is what bounds the storage all
-/// of them together claim; a global's slot is fixed, so its count is the whole bound.
-fn validate_module_structure(code: &[u8]) -> Result<ModuleShape, WasmValidationError> {
-    let mut shape = ModuleShape::default();
-    for payload in Parser::new(0).parse_all(code) {
-        // Malformed wasm: stop and let the cranelift compile in
-        // `load_template_from_code` report the canonical CompileError.
-        let Ok(payload) = payload else { break };
-        match payload {
-            Payload::StartSection { .. } => return Err(WasmValidationError::StartSectionNotAllowed),
-            Payload::TableSection(reader) => {
-                let count = reader.count() as usize;
-                if count > limits::WASM_LIMITS.max_tables {
-                    return Err(WasmValidationError::TooManyTables {
-                        count,
-                        max_tables: limits::WASM_LIMITS.max_tables,
-                    });
-                }
-                for table in reader.into_iter().flatten() {
-                    shape.declared_table_slots = shape.declared_table_slots.saturating_add(table.ty.initial);
-                }
-            },
-            Payload::GlobalSection(reader) => {
-                let count = reader.count() as usize;
-                if count > limits::WASM_LIMITS.max_globals {
-                    return Err(WasmValidationError::TooManyGlobals {
-                        count,
-                        max_globals: limits::WASM_LIMITS.max_globals,
-                    });
-                }
-            },
-            // Only active segments are written into the instance's storage when it is built. A
-            // passive segment stays in the module until a `memory.init` or `table.init` reaches for
-            // it, so its bytes are a cost of that operator rather than of instantiation, and a call
-            // that never executes one must not pay for it.
-            Payload::DataSection(reader) => {
-                for segment in reader.into_iter().flatten() {
-                    if matches!(segment.kind, DataKind::Active { .. }) {
-                        shape.data_segment_bytes = shape.data_segment_bytes.saturating_add(segment.data.len() as u64);
-                        shape.data_segment_count = shape.data_segment_count.saturating_add(1);
-                    }
-                }
-            },
-            Payload::ElementSection(reader) => {
-                for segment in reader.into_iter().flatten() {
-                    if !matches!(segment.kind, ElementKind::Active { .. }) {
-                        continue;
-                    }
-                    let entries = match segment.items {
-                        ElementItems::Functions(items) => u64::from(items.count()),
-                        ElementItems::Expressions(_, items) => u64::from(items.count()),
-                    };
-                    shape.element_segment_entries = shape.element_segment_entries.saturating_add(entries);
-                }
-            },
-            _ => {},
-        }
-    }
-    Ok(shape)
 }
 
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {

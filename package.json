@@ -4,5 +4,14 @@
     "@tari-project/ootle-ts-bindings": "link:bindings",
     "@tari-project/ootle-web-ui-theming": "link:applications/theming",
     "@tari-project/wallet_jrpc_client": "link:clients/javascript/wallet_daemon_client"
+  },
+  "scripts": {
+    "fmt": "prettier --write \"**/*.{ts,tsx}\"",
+    "fmt:check": "prettier --check \"**/*.{ts,tsx}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.8.1",
+    "prettier-plugin-organize-imports": "^4.3.0",
+    "typescript": "catalog:"
   }
 }

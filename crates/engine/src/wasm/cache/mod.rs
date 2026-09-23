@@ -22,6 +22,8 @@
 //! - [`DiskCachedWasmTemplateProvider`] — a `TemplateProvider` middleware that wraps a raw `PublishedTemplate` provider
 //!   and outputs `LoadedTemplate`, doing compile-or-deserialize behind the scenes.
 
+mod const_hash;
+
 use std::{
     collections::HashMap,
     fs,
@@ -41,7 +43,7 @@ use std::{
 
 use log::*;
 use memmap2::Mmap;
-use tari_engine_types::{limits::ModuleShape, published_template::PublishedTemplate};
+use tari_engine_types::{limits, limits::ModuleShape, published_template::PublishedTemplate};
 use tari_ootle_common_types::{
     Epoch,
     services::template_provider::{TemplateMetadataProvider, TemplateProvider, TemplateProviderMetadata},
@@ -58,57 +60,204 @@ const LOG_TARGET: &str = "tari::ootle::engine::wasm::cache";
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Engine-config fingerprint embedded in cache filenames.
+/// Engine-config fingerprint embedded in cache filenames, derived from everything that decides
+/// what a compiled artifact contains and what is read back off it.
 ///
-/// Bump this string whenever any of the following change, otherwise nodes
-/// loading from a stale cache will misbehave (deserialize failures at best,
-/// undefined behaviour at worst):
+/// An artifact is only interchangeable with a fresh compile under the exact configuration that
+/// produced it, and two of the values a hit serves verbatim — the shape counts that price
+/// `instantiation_points`, and the metering global the artifact carries — are consensus figures.
+/// A node serving an artifact built under different settings therefore charges a different fee for
+/// the same transaction, or meters against a different cap, than one that compiled fresh. Deriving
+/// the fingerprint is what ties the filename to those settings without anyone having to remember to
+/// say so.
 ///
-/// - [`crate::wasm::WasmModule::create_engine`] config (compiler flags, features bitset, middleware list, tunables).
-/// - [`tari_engine_types::limits::MAX_WASM_POINTS_PER_CALL`], which the metering middleware bakes into the artifact as
-///   the initial remaining-points global. `WasmProcess::metering_allowance` reads it back with `get_remaining_points`,
-///   so a node serving a stale artifact meters against the old cap and diverges from one that compiled fresh.
-/// - The `wasmer` crate version (the serialized artifact format is internal to wasmer and not part of any stable wire
-///   spec).
-/// - The order or meaning of the header's fields at an unchanged `HEADER_BYTES`. A reader that agrees with the writer
-///   on the header's length but not on its field order recomputes a matching CRC over values it then reads from the
-///   wrong bytes. A change to the length needs no bump: it moves the artifact's start, so the body no longer begins
-///   with wasmer's magic and `deserialize_unchecked` rejects the file. A header that grows is caught one step earlier,
-///   at a CRC read from artifact bytes.
-/// - How the header's values are derived — `validate_module_structure`'s segment tally. A cache hit serves these
-///   verbatim rather than recomputing them, and `instantiation_points` prices a call off them, so a node reading a file
-///   written under an older derivation charges a different fee for the same transaction than one that compiled fresh.
-///   These are consensus values, not accounting hints.
+/// Every source input is a file narrow enough that each line in it decides what an artifact
+/// contains, which is what [`engine_config`](super::engine_config) and
+/// [`module_shape`](super::module_shape) exist as separate files for: a digest over a file is only
+/// as precise as that file is narrow, and imprecision here is paid for by every node recompiling
+/// every template. What is configuration rather than logic — the header layout and the limits — is
+/// hashed as values instead, so restating it cannot drift from applying it.
 ///
-/// On a bump, old cache files become orphans (different filename suffix)
-/// and the next compile-from-source rewrites under the new key.
-pub const ENGINE_FINGERPRINT: &str = "v5";
+/// Computed in a `const` context, so the digest is a compile-time constant and the source text it
+/// reads never reaches the binary.
+///
+/// The wasmer version is the one input not derived here, because a crate cannot read its
+/// dependencies' resolved versions and a published crate cannot reach the lockfile. Two things
+/// stand in for it: wasmer's own `MetadataHeader` carries an ABI version it refuses to load across,
+/// so a format change ends as a miss and a recompile; and `tari-wasmer-middlewares` pins `wasmer`,
+/// `wasmer-types` and `wasmer-vm` at an exact version, so the resolved version moves only when a
+/// manifest does. A wasmer bump that keeps the artifact format and changes codegen is what this
+/// leaves to the upgrade itself.
+const ENGINE_FINGERPRINT_BITS: u64 = {
+    let h = const_hash::init(b"tari.ootle.wasm_cache.engine_fingerprint.v2");
+    // The compiler flags, feature set and tunables every artifact is built under.
+    let h = const_hash::part(h, include_bytes!("../engine_config.rs"));
+    // The derivation of the shape counts a hit serves verbatim out of the header.
+    let h = const_hash::part(h, include_bytes!("../module_shape.rs"));
+    // The per-operator cost tables the middlewares bake into the emitted instrumentation.
+    let h = const_hash::part(h, include_bytes!("../metering.rs"));
+    let h = const_hash::part(h, include_bytes!("../bulk_metering.rs"));
+    // The memory and table bounds, which reach codegen through the style each one is adjusted to.
+    let h = const_hash::part(h, include_bytes!("../limiting_tunable.rs"));
+    // Which count a hit reads out of each header slot. Swapping two of these is a fee change.
+    let h = const_hash::values(h, &header_layout());
+    // Every limit, not just the ones the artifact bakes in: `validate_module_structure` enforces
+    // `max_tables` and `max_globals` at compile time only, and a hit goes straight to
+    // `finalize_loaded_module` without it. Destructured rather than read field by field, so that a
+    // limit added later does not compile until it is named here.
+    let limits::WasmLimits {
+        max_function_arguments,
+        max_function_name_length,
+        max_functions,
+        max_memory_pages,
+        max_globals,
+        max_tables,
+        max_table_elements,
+    } = limits::WASM_LIMITS;
+    const_hash::finish(const_hash::values(h, &[
+        limits::MAX_WASM_POINTS_PER_CALL as u128,
+        max_function_arguments as u128,
+        max_function_name_length as u128,
+        max_functions as u128,
+        max_memory_pages as u128,
+        max_globals as u128,
+        max_tables as u128,
+        max_table_elements as u128,
+    ]))
+};
 
-/// Five 8-byte LE fields at the head of each cache file: the original WASM source byte count
-/// followed by the four counts of [`ModuleShape`]. `wasmer::Module::serialize` preserves none of
-/// them, and all are needed after a cache hit — the first for accounting (e.g. moka weighing), the
-/// rest to price instantiation.
-const HEADER_FIELD_COUNT: usize = 5;
+/// The fingerprint as the lowercase hex it appears in a filename as.
+///
+/// Short enough for a filename, wide enough that no node will see two configurations collide. The
+/// hash is not cryptographic, and the property wanted of it is separation rather than resistance:
+/// every input is this build's own source and constants, so there is no party to search for a
+/// collision.
+static ENGINE_FINGERPRINT_HEX: [u8; 16] = const_hash::to_hex(ENGINE_FINGERPRINT_BITS);
+
+pub static ENGINE_FINGERPRINT: &str = match str::from_utf8(&ENGINE_FINGERPRINT_HEX) {
+    Ok(hex) => hex,
+    Err(_) => panic!("hex digits are ASCII"),
+};
+
+/// An 8-byte little-endian field at the head of a cache file.
+///
+/// The order of [`HEADER_FIELDS`] is the file format: it decides which count a hit reads each slot
+/// into. Both the write and the read are driven from that array rather than repeating it, so the
+/// order the fingerprint hashes is the order the file is actually written and parsed in.
+#[derive(Clone, Copy)]
+enum HeaderField {
+    /// The original WASM source byte count, which `wasmer::Module::serialize` does not preserve
+    /// and downstream caches weigh by.
+    CodeSize,
+    DataSegmentBytes,
+    DataSegmentCount,
+    ElementSegmentEntries,
+    DeclaredTableSlots,
+}
+
+const HEADER_FIELDS: [HeaderField; 5] = [
+    HeaderField::CodeSize,
+    HeaderField::DataSegmentBytes,
+    HeaderField::DataSegmentCount,
+    HeaderField::ElementSegmentEntries,
+    HeaderField::DeclaredTableSlots,
+];
+
+impl HeaderField {
+    const fn read_from(self, code_size: usize, shape: &ModuleShape) -> u64 {
+        match self {
+            HeaderField::CodeSize => code_size as u64,
+            HeaderField::DataSegmentBytes => shape.data_segment_bytes,
+            HeaderField::DataSegmentCount => shape.data_segment_count,
+            HeaderField::ElementSegmentEntries => shape.element_segment_entries,
+            HeaderField::DeclaredTableSlots => shape.declared_table_slots,
+        }
+    }
+
+    fn write_into(self, value: u64, code_size: &mut usize, shape: &mut ModuleShape) {
+        match self {
+            HeaderField::CodeSize => *code_size = value as usize,
+            HeaderField::DataSegmentBytes => shape.data_segment_bytes = value,
+            HeaderField::DataSegmentCount => shape.data_segment_count = value,
+            HeaderField::ElementSegmentEntries => shape.element_segment_entries = value,
+            HeaderField::DeclaredTableSlots => shape.declared_table_slots = value,
+        }
+    }
+}
+
+/// A shape whose every field is a different number, and a code size unlike any of them.
+///
+/// Written out field by field rather than built from a default, so a field added to `ModuleShape`
+/// does not compile until it is given a witness value here.
+const LAYOUT_WITNESS_SHAPE: ModuleShape = ModuleShape {
+    data_segment_bytes: 0x11,
+    data_segment_count: 0x22,
+    element_segment_entries: 0x33,
+    declared_table_slots: 0x44,
+};
+const LAYOUT_WITNESS_CODE_SIZE: usize = 0x55;
+
+/// What each header slot means, as the slot itself answers it.
+///
+/// Reading the witness back through [`HeaderField::read_from`] yields one witness value per slot,
+/// in slot order. Reordering the slots permutes it and repurposing one replaces a value, so the
+/// sequence the fingerprint hashes is produced by the accessor a hit actually uses rather than
+/// restated alongside it, and the two cannot drift.
+const fn header_layout() -> [u128; HEADER_FIELD_COUNT] {
+    let mut layout = [0u128; HEADER_FIELD_COUNT];
+    let mut i = 0;
+    while i < HEADER_FIELD_COUNT {
+        layout[i] = HEADER_FIELDS[i].read_from(LAYOUT_WITNESS_CODE_SIZE, &LAYOUT_WITNESS_SHAPE) as u128;
+        i += 1;
+    }
+    layout
+}
+
+/// The 8-byte LE fields at the head of each cache file. `wasmer::Module::serialize` preserves none
+/// of them, and all are needed after a cache hit — the first for accounting (e.g. moka weighing),
+/// the rest to price instantiation.
+const HEADER_FIELD_COUNT: usize = HEADER_FIELDS.len();
 const HEADER_FIELD_BYTES: usize = HEADER_FIELD_COUNT * 8;
 
-/// Zero padding between the fields and the CRC. This is the knob that satisfies the alignment
-/// assert below when the field count changes; the CRC stays a `u64`.
+/// Zero padding between the fields and the tag. This is the knob that satisfies the alignment
+/// assert below when the field count changes; the tag stays a `u64`.
 const HEADER_PAD_BYTES: usize = 0;
 
-/// Offset of the 8-byte LE CRC32 that covers every header byte before it.
+/// Offset of the 8-byte LE integrity tag.
 ///
-/// The fields sit outside the wasmer artifact, so `deserialize_unchecked` has no view of damage
-/// confined to them, while the four shape counts price `instantiation_points` into a committed fee
-/// receipt. The CRC is the only check that reaches those bytes.
-const CRC_OFFSET: usize = HEADER_FIELD_BYTES + HEADER_PAD_BYTES;
+/// It covers the header fields, the artifact body, and the file's identity — the template address
+/// and the engine fingerprint. The fields sit outside the wasmer artifact, so
+/// `deserialize_unchecked` has no view of damage confined to them, while the four shape counts
+/// price `instantiation_points` into a committed fee receipt. The body needs its own cover because
+/// wasmer validates only the 32 bytes of prefix it needs to find the metadata: past that,
+/// `rkyv::access_unchecked` reads whatever is there, and a body failing the prefix check is handed
+/// to an ELF loader rather than refused. Binding the address and the fingerprint is what makes a
+/// file answer for the name it was found under.
+const TAG_OFFSET: usize = HEADER_FIELD_BYTES + HEADER_PAD_BYTES;
 
-/// The header fields, the pad and the CRC.
+/// The header fields, the pad and the tag.
 ///
 /// The total is a multiple of 16: the artifact starts at `HEADER_BYTES` into a page-aligned mmap
 /// and its rkyv metadata a further 32 bytes in, where `rkyv::access_unchecked` reads an archived
 /// root that wasmer aligns to `MetadataHeader::ALIGN` (16); `MetadataHeader::parse` enforces the
 /// weaker 8-byte bound on the artifact itself.
-const HEADER_BYTES: usize = CRC_OFFSET + 8;
+const HEADER_BYTES: usize = TAG_OFFSET + 8;
+
+/// The integrity tag over a cache file: its identity, its header fields and its artifact body.
+///
+/// This is a checksum, not an authenticator. It turns a damaged or swapped file into a miss and a
+/// recompile, which is what keeps bit rot and a stale restore from reaching
+/// `deserialize_unchecked`. It is no obstacle to a process that can write the cache directory,
+/// since such a process can write a matching tag; what addresses that is the directory's mode,
+/// which [`WasmModuleCache::open`] takes away from group and other.
+fn integrity_tag(addr: &TemplateAddress, header_fields: &[u8], body: &[u8]) -> u64 {
+    let mut hasher = crc32fast::Hasher::new();
+    hasher.update(ENGINE_FINGERPRINT.as_bytes());
+    hasher.update(addr.as_ref());
+    hasher.update(header_fields);
+    hasher.update(body);
+    u64::from(hasher.finalize())
+}
 
 const _: () = assert!(
     HEADER_BYTES.is_multiple_of(16),
@@ -212,6 +361,57 @@ fn parse_orphan_name(name: &str) -> Option<TemplateAddress> {
     TemplateAddress::from_hex(addr).ok()
 }
 
+/// Takes write permission on the cache directory away from group and other.
+///
+/// Whoever can write a file here chooses the native code this process executes: an artifact goes to
+/// `Module::deserialize_unchecked`, which reads a body past its 32-byte prefix with
+/// `rkyv::access_unchecked` and hands one that fails the prefix check to an ELF loader. The
+/// integrity tag does not help — a writer can write a matching one — so the mode is what makes the
+/// directory's contents this process's own.
+///
+/// Hardening, so it reports rather than fails. A directory owned by another uid — an earlier run as
+/// root against the same mounted data dir, say — cannot be chmod'd, and the choice there is between
+/// running against a directory this process does not exclusively own and not starting at all. The
+/// first is the lesser of the two, and it is what every caller gets. A deployment that shares this
+/// directory between two accounts through a group loses the second account's writes, which is the
+/// point rather than a side effect.
+#[cfg(unix)]
+fn restrict_dir_to_owner(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    /// What the node runs with when the mode cannot be read or cannot be changed.
+    fn warn_unrestricted(dir: &Path, e: io::Error) {
+        warn!(
+            target: LOG_TARGET,
+            "Could not restrict the Wasm module cache at {} to its owner: {}. Continuing: anything \
+             able to write there chooses the native code this node runs.",
+            dir.display(),
+            e,
+        );
+    }
+
+    let mode = match fs::metadata(dir) {
+        Ok(meta) => meta.permissions().mode(),
+        Err(e) => return warn_unrestricted(dir, e),
+    };
+    if mode & 0o022 == 0 {
+        return;
+    }
+    match fs::set_permissions(dir, fs::Permissions::from_mode(mode & !0o022)) {
+        Ok(_) => warn!(
+            target: LOG_TARGET,
+            "Wasm module cache at {} was writable beyond its owner (mode {:#o}); restricted it to {:#o}.",
+            dir.display(),
+            mode & 0o7777,
+            mode & 0o7777 & !0o022,
+        ),
+        Err(e) => warn_unrestricted(dir, e),
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_dir_to_owner(_dir: &Path) {}
+
 /// The identity a later unlink compares against, where the platform has one.
 #[cfg(unix)]
 fn identity_of(meta: &fs::Metadata) -> Option<u64> {
@@ -251,8 +451,8 @@ fn remove_tracked_file(path: &Path, identity: Option<u64>) {
 /// Low-level on-disk cache for compiled wasmer modules.
 ///
 /// Files live at `{dir}/{template_address}_{ENGINE_FINGERPRINT}.bin`.
-/// The body is `[u64 LE: code_size][u64 LE x4: ModuleShape][u64 LE: CRC32 of the preceding fields]
-/// || wasmer::Module::serialize(...)`.
+/// The body is `[u64 LE: code_size][u64 LE x4: ModuleShape][u64 LE: integrity tag]
+/// || wasmer::Module::serialize(...)`, where the tag is [`integrity_tag`].
 ///
 /// Writes are atomic (tempfile + rename). Read failures (missing file,
 /// deserialize errors, format changes) are non-fatal: the corrupt file is
@@ -314,6 +514,7 @@ impl WasmModuleCache {
     pub fn open(dir: impl Into<PathBuf>, cap_bytes: u64) -> io::Result<Self> {
         let dir = dir.into();
         fs::create_dir_all(&dir)?;
+        restrict_dir_to_owner(&dir);
         let (writes, requests) = mpsc::sync_channel(WRITE_QUEUE_CAPACITY);
         let cache = Self {
             index: Arc::new(Mutex::new(Self::build_index(&dir, cap_bytes)?)),
@@ -350,7 +551,7 @@ impl WasmModuleCache {
     /// the next restart at the cost of a write on every read, and a mis-ordered eviction costs one
     /// recompile.
     fn build_index(dir: &Path, cap_bytes: u64) -> io::Result<CacheIndex> {
-        let suffix = format!("_{ENGINE_FINGERPRINT}.bin");
+        let suffix = format!("_{}.bin", ENGINE_FINGERPRINT);
         let stale_before = SystemTime::now().checked_sub(STALE_TEMPFILE_AGE);
         let mut found = Vec::new();
 
@@ -458,9 +659,9 @@ impl WasmModuleCache {
     ///
     /// The file is `mmap`'d rather than read into a `Vec<u8>` — wasmer's
     /// deserialize path accepts `bytes::Bytes` and `Bytes::from_owner` lets us
-    /// hand it the mmap region without copying. Cache hits cost a single
-    /// `mmap` syscall (and the page faults wasmer's deserializer triggers as
-    /// it walks the artifact); no full-artifact allocation.
+    /// hand it the mmap region without copying. A hit costs one `mmap` syscall
+    /// and one pass over the mapping to verify the tag, which faults in every
+    /// page ahead of the deserializer; no full-artifact allocation.
     pub fn try_load(&self, addr: &TemplateAddress) -> Option<LoadedTemplate> {
         let path = self.path_for(addr);
         let file = match fs::File::open(&path) {
@@ -509,37 +710,31 @@ impl WasmModuleCache {
             return None;
         }
 
-        let stored_crc = u64::from_le_bytes(
-            mmap[CRC_OFFSET..HEADER_BYTES]
+        let stored_tag = u64::from_le_bytes(
+            mmap[TAG_OFFSET..HEADER_BYTES]
                 .try_into()
-                .expect("HEADER_BYTES - CRC_OFFSET is 8"),
+                .expect("HEADER_BYTES - TAG_OFFSET is 8"),
         );
-        let computed_crc = u64::from(crc32fast::hash(&mmap[..CRC_OFFSET]));
-        if stored_crc != computed_crc {
+        let computed_tag = integrity_tag(addr, &mmap[..TAG_OFFSET], &mmap[HEADER_BYTES..]);
+        if stored_tag != computed_tag {
             warn!(
                 target: LOG_TARGET,
-                "Cache file {} has a corrupt header (CRC {:#010x}, expected {:#010x}); removing.",
+                "Cache file {} failed its integrity tag ({:#010x}, expected {:#010x}); removing.",
                 path.display(),
-                stored_crc,
-                computed_crc,
+                stored_tag,
+                computed_tag,
             );
             drop(mmap);
             self.discard(addr, &path, identity);
             return None;
         }
 
-        let mut field = [0u8; 8];
-        let mut read_field = |i: usize| {
-            field.copy_from_slice(&mmap[i * 8..(i + 1) * 8]);
-            u64::from_le_bytes(field)
-        };
-        let code_size = read_field(0) as usize;
-        let shape = ModuleShape {
-            data_segment_bytes: read_field(1),
-            data_segment_count: read_field(2),
-            element_segment_entries: read_field(3),
-            declared_table_slots: read_field(4),
-        };
+        let mut code_size = 0usize;
+        let mut shape = ModuleShape::default();
+        for (slot, field) in mmap[..HEADER_FIELD_BYTES].chunks_exact(8).zip(HEADER_FIELDS) {
+            let value = u64::from_le_bytes(slot.try_into().expect("chunks_exact(8) yields 8 bytes"));
+            field.write_into(value, &mut code_size, &mut shape);
+        }
 
         // Wrap the mmap as a Bytes that owns it, then slice past the
         // header. `Bytes::slice` is zero-copy (pointer + length
@@ -549,13 +744,12 @@ impl WasmModuleCache {
         let size_bytes = mmap.len() as u64;
         let body = bytes::Bytes::from_owner(mmap).slice(HEADER_BYTES..);
 
-        // SAFETY: bytes were written by [`Self::store`] in a previous run of
-        // this process (or an earlier process owning the same data dir) via
-        // `wasmer::Module::serialize`. The cache directory is node-local and
-        // not attacker-controlled in any sane operational setup. The
-        // fingerprint suffix in the filename guarantees the engine config
-        // matches this build; a deserialize failure simply triggers the
-        // recompile fallback.
+        // SAFETY: these bytes carry an [`integrity_tag`] computed over this node's
+        // [`ENGINE_FINGERPRINT`], the address they are filed under, the header fields and the body,
+        // and the tag was checked above. Only a writer holding this directory can produce a
+        // matching one, which is what [`restrict_dir_to_owner`] is for: `deserialize_unchecked`
+        // reads a body past its 32-byte prefix with `rkyv::access_unchecked` and hands one that
+        // fails the prefix check to an ELF loader, so bytes that reach it are already trusted.
         match unsafe { WasmModule::load_template_from_serialized(body, code_size, shape) } {
             Ok(loaded) => {
                 debug!(target: LOG_TARGET, "Cache hit for template {}", addr);
@@ -681,20 +875,12 @@ impl WasmModuleCache {
         ));
 
         let shape = wasm.shape();
-        // `HEADER_FIELD_COUNT` fields, in the order `try_load` reads them.
-        let fields: [u64; HEADER_FIELD_COUNT] = [
-            wasm.code_size() as u64,
-            shape.data_segment_bytes,
-            shape.data_segment_count,
-            shape.element_segment_entries,
-            shape.declared_table_slots,
-        ];
         let mut header = [0u8; HEADER_BYTES];
-        for (slot, value) in header.chunks_exact_mut(8).zip(fields) {
-            slot.copy_from_slice(&value.to_le_bytes());
+        for (slot, field) in header.chunks_exact_mut(8).zip(HEADER_FIELDS) {
+            slot.copy_from_slice(&field.read_from(wasm.code_size(), &shape).to_le_bytes());
         }
-        let crc = u64::from(crc32fast::hash(&header[..CRC_OFFSET]));
-        header[CRC_OFFSET..].copy_from_slice(&crc.to_le_bytes());
+        let tag = integrity_tag(addr, &header[..TAG_OFFSET], &serialized);
+        header[TAG_OFFSET..].copy_from_slice(&tag.to_le_bytes());
 
         let mut bytes = Vec::with_capacity(HEADER_BYTES + serialized.len());
         bytes.extend_from_slice(&header);
@@ -754,10 +940,11 @@ impl WasmModuleCache {
 /// Write `bytes` to `path`, flushed to the device before returning, and report the identity of the
 /// file written.
 ///
-/// [`WasmModuleCache::store`] publishes a file by rename, which can expose contents still held in
-/// the page cache. The artifact body lies past the header CRC's coverage, so it must reach the
-/// device before the rename names it. Durability stops at the contents: a rename lost to a crash
-/// costs one recompile.
+/// [`WasmModuleCache::store`] publishes a file by rename, which can name contents still held in the
+/// page cache. A torn artifact is only ever a tag mismatch and a recompile, so this buys latency
+/// rather than safety: without it, a crash leaves a file that is found, mmap'd and hashed in full
+/// before it is discarded. Durability stops at the contents — a rename lost to a crash costs one
+/// recompile.
 fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<Option<u64>> {
     use std::io::Write;
 
@@ -1021,6 +1208,20 @@ mod tests {
     }
 
     #[test]
+    fn every_header_slot_reads_back_the_field_it_wrote() {
+        // [`ENGINE_FINGERPRINT`] witnesses each slot through `read_from` alone. This is what holds
+        // `write_into` to the same field, so that a hit puts a count back where the writer took it
+        // from: every other field starts at zero, so a slot that crossed over reads one back.
+        for field in HEADER_FIELDS {
+            let expected = field.read_from(LAYOUT_WITNESS_CODE_SIZE, &LAYOUT_WITNESS_SHAPE);
+            let mut code_size = 0;
+            let mut shape = ModuleShape::default();
+            field.write_into(expected, &mut code_size, &mut shape);
+            assert_eq!(field.read_from(code_size, &shape), expected);
+        }
+    }
+
+    #[test]
     fn corrupt_cache_falls_back_to_recompile() {
         let dir = TempDir::new().unwrap();
         let cache = WasmModuleCache::open(dir.path(), TEST_CAP_BYTES).unwrap();
@@ -1060,8 +1261,60 @@ mod tests {
         bytes[8] ^= 0x01;
         fs::write(&path, &bytes).unwrap();
 
-        assert!(cache.try_load(&addr).is_none(), "a bad header CRC is a miss");
-        assert!(!path.exists(), "the file with the bad CRC should be removed");
+        assert!(cache.try_load(&addr).is_none(), "a bad integrity tag is a miss");
+        assert!(!path.exists(), "the file with the bad tag should be removed");
+    }
+
+    // The bytes the header's own tag never reached before it covered the body: the artifact's first
+    // byte, a byte in the middle of it, and its last. Each is a byte `deserialize_unchecked` would
+    // otherwise have read as native code or as an rkyv offset.
+    #[test]
+    fn a_flipped_artifact_byte_falls_back_to_recompile() {
+        for offset_from in [
+            |_len: usize| HEADER_BYTES,
+            |len: usize| HEADER_BYTES + (len - HEADER_BYTES) / 2,
+            |len: usize| len - 1,
+        ] {
+            let dir = TempDir::new().unwrap();
+            let cache = WasmModuleCache::open(dir.path(), TEST_CAP_BYTES).unwrap();
+            let (store, addr) = make_store();
+            let provider = DiskCachedWasmTemplateProvider::new(store, cache.clone());
+            provider.get_template(&addr).unwrap().expect("loaded");
+            cache.flush();
+
+            let path = cache.path_for(&addr);
+            let mut bytes = fs::read(&path).unwrap();
+            assert!(bytes.len() > HEADER_BYTES, "the artifact body should not be empty");
+            let offset = offset_from(bytes.len());
+            bytes[offset] ^= 0x01;
+            fs::write(&path, &bytes).unwrap();
+
+            assert!(
+                cache.try_load(&addr).is_none(),
+                "a damaged artifact at {offset} is a miss"
+            );
+            assert!(!path.exists(), "the damaged file should be removed");
+        }
+    }
+
+    // A whole artifact lifted from another template's file, under this build's fingerprint. The tag
+    // covers the address, so the file only answers for the name it is found under.
+    #[test]
+    fn an_artifact_under_the_wrong_address_falls_back_to_recompile() {
+        let dir = TempDir::new().unwrap();
+        let cache = WasmModuleCache::open(dir.path(), TEST_CAP_BYTES).unwrap();
+        let (store, addr) = make_store();
+        let provider = DiskCachedWasmTemplateProvider::new(store, cache.clone());
+        provider.get_template(&addr).unwrap().expect("loaded");
+        cache.flush();
+
+        let bytes = fs::read(cache.path_for(&addr)).unwrap();
+        let other = TemplateAddress::from_array([9u8; 32]);
+        let other_path = cache.path_for(&other);
+        fs::write(&other_path, &bytes).unwrap();
+
+        assert!(cache.try_load(&other).is_none());
+        assert!(!other_path.exists());
     }
 
     #[test]
@@ -1075,7 +1328,7 @@ mod tests {
 
         let path = cache.path_for(&addr);
         let mut bytes = fs::read(&path).unwrap();
-        bytes[CRC_OFFSET] ^= 0x01;
+        bytes[TAG_OFFSET] ^= 0x01;
         fs::write(&path, &bytes).unwrap();
 
         assert!(cache.try_load(&addr).is_none());
@@ -1096,7 +1349,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_header_crc_covers_the_fields() {
+    fn the_stored_tag_covers_the_fields_and_the_body() {
         let dir = TempDir::new().unwrap();
         let cache = WasmModuleCache::open(dir.path(), TEST_CAP_BYTES).unwrap();
         let (store, addr) = make_store();
@@ -1105,8 +1358,11 @@ mod tests {
         cache.flush();
 
         let bytes = fs::read(cache.path_for(&addr)).unwrap();
-        let stored_crc = u64::from_le_bytes(bytes[CRC_OFFSET..HEADER_BYTES].try_into().unwrap());
-        assert_eq!(stored_crc, u64::from(crc32fast::hash(&bytes[..CRC_OFFSET])));
+        let stored_tag = u64::from_le_bytes(bytes[TAG_OFFSET..HEADER_BYTES].try_into().unwrap());
+        assert_eq!(
+            stored_tag,
+            integrity_tag(&addr, &bytes[..TAG_OFFSET], &bytes[HEADER_BYTES..]),
+        );
 
         let reloaded = cache.try_load(&addr).expect("hit");
         assert_eq!(reloaded.code_size(), loaded.code_size());

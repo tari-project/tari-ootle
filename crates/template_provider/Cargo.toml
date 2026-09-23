@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_template_provider"
+publish = false
 description = "Shared template provider chain (in-memory cache + concurrent-load coalescing) for Tari Ootle, used by the validator node and indexer"
 version.workspace = true
 edition.workspace = true

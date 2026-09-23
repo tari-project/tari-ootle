@@ -20,24 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import Box from "@mui/material/Box";
+import Chip from "@mui/material/Chip";
+import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import Stack from "@mui/material/Stack";
-import {
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-} from "../../../Components/Accordion";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import Box from "@mui/material/Box";
-import Chip from "@mui/material/Chip";
-import { DataTableCell } from "../../../Components/StyledComponents";
-import { useState, useEffect } from "react";
 import type { Event } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../../Components/Accordion";
+import { DataTableCell } from "../../../Components/StyledComponents";
 
 interface EventsProps {
   events: Event[];
@@ -46,12 +42,7 @@ interface EventsProps {
   onExpandedChange?: (expanded: boolean) => void;
 }
 
-function Events({
-                  events,
-                  expandAllTrigger = 0,
-                  collapseAllTrigger = 0,
-                  onExpandedChange,
-                }: EventsProps) {
+function Events({ events, expandAllTrigger = 0, collapseAllTrigger = 0, onExpandedChange }: EventsProps) {
   const [expanded, setExpanded] = useState(false);
 
   if (!events || events.length === 0) {
@@ -91,9 +82,7 @@ function Events({
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip variant="filled" label={event.topic} color="default" />
-                  <Typography variant="subtitle2">
-                    {event.substate_id ? String(event.substate_id) : "N/A"}
-                  </Typography>
+                  <Typography variant="subtitle2">{event.substate_id ? String(event.substate_id) : "N/A"}</Typography>
                 </Stack>
               </AccordionSummary>
               <AccordionDetails>
@@ -106,11 +95,7 @@ function Events({
                       </TableRow>
                       <TableRow>
                         <TableCell>Substate ID</TableCell>
-                        <DataTableCell>
-                          {event.substate_id
-                            ? String(event.substate_id)
-                            : "N/A"}
-                        </DataTableCell>
+                        <DataTableCell>{event.substate_id ? String(event.substate_id) : "N/A"}</DataTableCell>
                       </TableRow>
                       <TableRow>
                         <TableCell>Template Address</TableCell>

@@ -81,7 +81,7 @@ use crate::{
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
-        scope::{CallScope, PushCallFrame},
+        scope::{CallScope, FrameWriteMode, PushCallFrame},
     },
     state_store::StateReader,
     template::LoadedTemplate,
@@ -203,7 +203,7 @@ where
 
         let blobs = std::rc::Rc::new(instructions.blobs);
 
-        let mut runtime_interface = Box::new(RuntimeInterfaceImpl::initialize(
+        let runtime_interface = std::rc::Rc::new(RuntimeInterfaceImpl::initialize(
             tracker,
             template_provider.clone(),
             transaction_signer_public_key,
@@ -211,21 +211,20 @@ where
             modules,
             claim_burn_proof_verifier,
             std::rc::Rc::clone(&blobs),
-        )?) as Box<dyn RuntimeInterface>;
+        )?) as std::rc::Rc<dyn RuntimeInterface>;
 
-        let runtime = Runtime::from_mut(&mut runtime_interface);
-        runtime_interface.set_runtime_pointer(runtime.as_pointer());
+        let runtime = Runtime::new(runtime_interface);
 
         let transaction_hash = id.as_hash();
 
-        let (mut runtime, fee_exec_results) =
+        let (runtime, fee_exec_results) =
             Self::process_instructions(&template_provider, runtime, instructions.fee, &blobs);
 
         let fee_exec_result = match fee_exec_results {
             Ok(execution_results) => {
                 // Checkpoint the tracker state after the fee instructions have been executed in case of transaction
                 // failure.
-                if let Err(err) = runtime.interface_mut().checkpoint_fee_intent() {
+                if let Err(err) = runtime.interface().checkpoint_fee_intent() {
                     let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason(None));
                     finalize.execution_results = execution_results;
                     // Nothing is taken and nothing is written, but what committing would have cost
@@ -265,10 +264,10 @@ where
 
         // Clear the workspace before executing the main instructions
         runtime
-            .interface_mut()
+            .interface()
             .workspace_invoke(WorkspaceAction::DropAll, invoke_args![].into())?;
 
-        let (mut runtime, instruction_result) =
+        let (runtime, instruction_result) =
             Self::process_instructions(&template_provider, runtime, instructions.main, &blobs);
 
         // Must be captured before finalize consumes the working state.
@@ -277,7 +276,7 @@ where
 
         match instruction_result {
             Ok(execution_results) => {
-                let mut finalize = runtime.interface_mut().finalize()?;
+                let mut finalize = runtime.interface().finalize()?;
                 finalize.execution_results = execution_results;
                 Ok(ExecuteResult {
                     finalize,
@@ -292,7 +291,7 @@ where
                 // Reset the state to when the state at the end of the fee instructions. The fee charges for the
                 // successful instructions are still charged even though the transaction failed.
                 // Finalize will now contain the fee payments and vault refunds only
-                let mut finalize = runtime.interface_mut().finalize_failure(err.to_reject_reason())?;
+                let mut finalize = runtime.interface().finalize_failure(err.to_reject_reason())?;
                 finalize.execution_results = fee_exec_result;
                 Ok(ExecuteResult {
                     finalize,
@@ -307,7 +306,7 @@ where
 
     fn process_instructions(
         template_provider: &TTemplateProvider,
-        mut runtime: Runtime,
+        runtime: Runtime,
         instructions: Vec<Instruction>,
         blobs: &tari_ootle_transaction::Blobs,
     ) -> (Runtime, Result<Vec<InstructionResult>, TransactionError>) {
@@ -315,7 +314,7 @@ where
             .into_iter()
             .enumerate()
             .map(|(idx, instruction)| {
-                Self::process_instruction(template_provider, &mut runtime, instruction, blobs)
+                Self::process_instruction(template_provider, &runtime, instruction, blobs)
                     .map_err(|e| TransactionError::new(idx + 1, e))
             })
             .collect();
@@ -332,7 +331,7 @@ where
     #[allow(clippy::too_many_lines)]
     fn process_instruction(
         template_provider: &TTemplateProvider,
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         instruction: Instruction,
         blobs: &tari_ootle_transaction::Blobs,
     ) -> Result<InstructionResult, TransactionErrorKind> {
@@ -355,9 +354,9 @@ where
                 address: template_address,
                 function,
                 args,
-            } => Self::call_function(template_provider, runtime, &template_address, &function, args),
+            } => Self::call_function(template_provider, runtime, &template_address, &function, args, None),
             Instruction::CallMethod { call, method, args } => {
-                Self::call_method(template_provider, runtime, call, &method, args)
+                Self::call_method(template_provider, runtime, call, &method, args, None)
             },
             // Basically names an output on the workspace so that you can refer to it as an
             // Arg::Variable
@@ -370,16 +369,16 @@ where
                 Ok(InstructionResult::empty())
             },
             Instruction::ClaimBurn { claim, output_data } => {
-                runtime.interface_mut().claim_burn(*claim, output_data)?;
+                runtime.interface().claim_burn(*claim, output_data)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::ClaimValidatorFees { address, max_amount } => {
-                runtime.interface_mut().claim_validator_fees(address, max_amount)?;
+                runtime.interface().claim_validator_fees(address, max_amount)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::Assert { key, assertion } => {
                 runtime
-                    .interface_mut()
+                    .interface()
                     .workspace_invoke(WorkspaceAction::Assert, invoke_args![key, assertion].into())?;
                 Ok(InstructionResult::empty())
             },
@@ -388,7 +387,7 @@ where
                 amount,
                 output_bucket,
             } => {
-                let runtime_mut = runtime.interface_mut();
+                let runtime_mut = runtime.interface();
                 let item = runtime_mut.workspace_invoke(WorkspaceAction::Get, invoke_args![input_bucket].into())?;
 
                 let bucket_ref = BucketRef::Ref(item.decode()?);
@@ -409,7 +408,7 @@ where
                 Ok(InstructionResult::empty())
             },
             Instruction::PutIntoBucket { src, dest } => {
-                let runtime_mut = runtime.interface_mut();
+                let runtime_mut = runtime.interface();
                 let src_item = runtime_mut.workspace_invoke(WorkspaceAction::Get, invoke_args![src].into())?;
                 let src_bucket_id: BucketId = src_item.decode()?;
                 let dest_item = runtime_mut.workspace_invoke(WorkspaceAction::Get, invoke_args![dest].into())?;
@@ -444,12 +443,12 @@ where
 
     fn update_component_template(
         template_provider: &TTemplateProvider,
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         component: ComponentReference,
         new_template: TemplateAddress,
         migrate: Option<MigrateFunction>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
-        let (component_address, component) = runtime.interface_mut().load_component(component)?;
+        let (component_address, component) = runtime.interface().load_component(component)?;
 
         let template = template_provider
             .get_template(&new_template)
@@ -460,12 +459,10 @@ where
             .ok_or(TransactionErrorKind::TemplateNotFound { address: new_template })?;
 
         runtime
-            .interface_mut()
+            .interface()
             .track_template_loaded(&new_template, template.code_size())?;
 
-        let component_lock = runtime
-            .interface_mut()
-            .lock_component(component_address, LockFlag::Write)?;
+        let component_lock = runtime.interface().lock_component(component_address, LockFlag::Write)?;
 
         let migration_function = migrate
             .as_ref()
@@ -535,41 +532,41 @@ where
         // component being migrated is the caller's. Only the target template's own migration function
         // executes in this frame, so the template identity is honest — but `template(...)` (and
         // `direct_caller_template(...)`) would become forgeable if any other code ever ran here.
-        runtime.interface_mut().push_call_frame(call_frame)?;
+        runtime.interface().push_call_frame(call_frame, None)?;
         // This must come after the call frame as that defines the authorization scope
         runtime
-            .interface_mut()
+            .interface()
             .check_component_ownership(NativeAction::UpdateComponentTemplate.into())?;
         // A migration with no `migrate` function never reaches `invoke_template`, so this frame's call boundary
         // ends here.
-        runtime.interface_mut().revoke_boundary_proofs()?;
+        runtime.interface().revoke_boundary_proofs()?;
 
-        runtime.interface_mut().update_component_template(new_template)?;
+        runtime.interface().update_component_template(new_template)?;
 
         let returned = if let Some(function_def) = migration_function {
             // Migrate function is defined, so we need to call it
             let result = Self::invoke_template(template, runtime.clone(), &function_def, &final_args)?;
-            runtime.interface_mut().validate_return_value(&result.indexed)?;
+            runtime.interface().validate_return_value(&result.indexed)?;
             result.indexed
         } else {
             IndexedValue::default()
         };
 
-        runtime.interface_mut().pop_call_frame(returned.well_known_types())?;
+        runtime.interface().pop_call_frame(returned.well_known_types())?;
 
         Ok(InstructionResult::empty())
     }
 
     fn pay_fee_from_bucket(
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         bucket: WorkspaceOffsetId,
     ) -> Result<InstructionResult, TransactionErrorKind> {
-        runtime.interface_mut().pay_fee(PayFee::FromBucket { bucket })?;
+        runtime.interface().pay_fee(PayFee::FromBucket { bucket })?;
         Ok(InstructionResult::empty())
     }
 
     fn stealth_transfer(
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<WorkspaceOffsetId>,
@@ -584,39 +581,38 @@ where
                 })
             })
             .transpose()?;
-        let maybe_bucket =
-            runtime
-                .interface_mut()
-                .stealth_transfer(resource_address, statement, revealed_funds_bucket)?;
+        let maybe_bucket = runtime
+            .interface()
+            .stealth_transfer(resource_address, statement, revealed_funds_bucket)?;
         runtime
-            .interface_mut()
+            .interface()
             .set_last_instruction_output(IndexedValue::from_type(&maybe_bucket.map(Bucket::from_id))?)?;
         Ok(InstructionResult::empty())
     }
 
-    fn put_output_on_workspace_with_id(runtime: &mut Runtime, key: WorkspaceId) -> Result<(), TransactionErrorKind> {
+    fn put_output_on_workspace_with_id(runtime: &Runtime, key: WorkspaceId) -> Result<(), TransactionErrorKind> {
         runtime
-            .interface_mut()
+            .interface()
             .workspace_invoke(WorkspaceAction::PutLastInstructionOutput, invoke_args![key].into())?;
         Ok(())
     }
 
-    fn drop_all_proofs_in_workspace(runtime: &mut Runtime) -> Result<(), TransactionErrorKind> {
+    fn drop_all_proofs_in_workspace(runtime: &Runtime) -> Result<(), TransactionErrorKind> {
         runtime
-            .interface_mut()
+            .interface()
             .workspace_invoke(WorkspaceAction::DropAllProofs, invoke_args![].into())?;
         Ok(())
     }
 
     /// Allocating a new address for the given [`AllocatableAddressType`].
     fn allocate_address(
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         substate_type: AllocatableAddressType,
         workspace_id: WorkspaceId,
     ) -> Result<InstructionResult, TransactionErrorKind> {
-        let entity_id = runtime.interface_mut().next_entity_id()?;
+        let entity_id = runtime.interface().next_entity_id()?;
         let result = runtime
-            .interface_mut()
+            .interface()
             .allocate_address(substate_type, entity_id, workspace_id)?;
 
         match result {
@@ -638,7 +634,7 @@ where
     /// Load, validate template binary and adds it to TemplateProvider.
     /// Adds a template artifact if successful
     fn publish_template(
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         binary: &[u8],
         metadata_hash: Option<MetadataHash>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
@@ -655,14 +651,14 @@ where
 
         // The compile is the most expensive thing a single instruction can ask of a validator, so it
         // is paid for before it runs. The size cap above is what keeps this charge affordable.
-        runtime.interface_mut().charge_template_compile(binary.len() as u64)?;
+        runtime.interface().charge_template_compile(binary.len() as u64)?;
 
         let template_def = WasmModule::compile_prevalidated(binary, shape)?;
         // The size cap above holds the binary within `MAX_TEMPLATE_BLOB_WIRE_BYTES` — a const assertion keeps the two
         // ordered — so constructing TemplateBlob is infallible.
         let blob = TemplateBlob::new_checked(binary).expect("template binary size verified above");
         runtime
-            .interface_mut()
+            .interface()
             .publish_template(blob, metadata_hash, template_def)?;
 
         Ok(InstructionResult::empty())
@@ -670,7 +666,7 @@ where
 
     fn create_account(
         template_provider: &TTemplateProvider,
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         public_key_address: &RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<ComponentAccessRules>,
@@ -696,7 +692,7 @@ where
         let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
 
         let maybe_existing_account = runtime
-            .interface_mut()
+            .interface()
             .load_component(ComponentReference::Address(account_address))
             .optional()?;
 
@@ -735,12 +731,13 @@ where
                         &component,
                         ACCOUNT_DEPOSIT_METHOD,
                         args,
+                        None,
                     )?;
                 }
 
                 // The instruction output is always the ComponentAddress
                 runtime
-                    .interface_mut()
+                    .interface()
                     .set_last_instruction_output(IndexedValue::from_type(&account_address)?)?;
 
                 Ok(InstructionResult::empty())
@@ -776,21 +773,22 @@ where
                     .map(IndexedWellKnownTypes::from_value)
                     .collect::<Result<_, _>>()?;
 
-                runtime.interface_mut().push_call_frame(PushCallFrame::Static {
-                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
-                    module_name: template.template_name().to_string(),
-                    arg_scope,
-                    entity_id: account_address.entity_id(),
-                })?;
+                runtime.interface().push_call_frame(
+                    PushCallFrame::Static {
+                        template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                        module_name: template.template_name().to_string(),
+                        arg_scope,
+                        entity_id: account_address.entity_id(),
+                    },
+                    None,
+                )?;
 
                 let result = Self::invoke_template(template, runtime.clone(), &function_def, &resolved_args)?;
 
-                runtime.interface_mut().validate_return_value(&result.indexed)?;
+                runtime.interface().validate_return_value(&result.indexed)?;
+                runtime.interface().pop_call_frame(result.indexed.well_known_types())?;
                 runtime
-                    .interface_mut()
-                    .pop_call_frame(result.indexed.well_known_types())?;
-                runtime
-                    .interface_mut()
+                    .interface()
                     .set_last_instruction_output(IndexedValue::from_type(&account_address)?)?;
 
                 Ok(InstructionResult::empty())
@@ -800,10 +798,11 @@ where
 
     pub(crate) fn call_function(
         template_provider: &TTemplateProvider,
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         template_address: &TemplateAddress,
         function: &str,
         args: Vec<InstructionArg>,
+        restrict_frame_to: Option<FrameWriteMode>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         // An account lives at an address derived from its public key, so which rules a component may be created
         // there under is that key's decision. `CreateAccount` is the sole route to the constructor and is where
@@ -823,7 +822,7 @@ where
             })?;
 
         runtime
-            .interface_mut()
+            .interface()
             .track_template_loaded(template_address, template.code_size())?;
 
         let function_def = template.template_def().get_function(function).cloned().ok_or_else(|| {
@@ -847,29 +846,28 @@ where
             template_address: *template_address,
             module_name: template.template_name().to_string(),
             arg_scope,
-            entity_id: runtime.interface_mut().next_entity_id()?,
+            entity_id: runtime.interface().next_entity_id()?,
         };
 
-        runtime.interface_mut().push_call_frame(frame)?;
+        runtime.interface().push_call_frame(frame, restrict_frame_to)?;
 
         let result = Self::invoke_template(template, runtime.clone(), &function_def, &resolved_args)?;
 
-        runtime.interface_mut().validate_return_value(&result.indexed)?;
-        runtime
-            .interface_mut()
-            .pop_call_frame(result.indexed.well_known_types())?;
+        runtime.interface().validate_return_value(&result.indexed)?;
+        runtime.interface().pop_call_frame(result.indexed.well_known_types())?;
 
         Ok(result)
     }
 
     pub(crate) fn call_method(
         template_provider: &TTemplateProvider,
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         call: ComponentReference,
         method: &str,
         args: Vec<InstructionArg>,
+        restrict_frame_to: Option<FrameWriteMode>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
-        let (component_address, component) = runtime.interface_mut().load_component(call)?;
+        let (component_address, component) = runtime.interface().load_component(call)?;
         let template_address = *component.template_address();
 
         let template = template_provider
@@ -883,19 +881,29 @@ where
             })?;
 
         runtime
-            .interface_mut()
+            .interface()
             .track_template_loaded(&template_address, template.code_size())?;
 
-        Self::invoke_component(template, runtime, component_address, &component, method, args)
+        Self::invoke_component(
+            template,
+            runtime,
+            component_address,
+            &component,
+            method,
+            args,
+            restrict_frame_to,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn invoke_component(
         template: LoadedTemplate,
-        runtime: &mut Runtime,
+        runtime: &Runtime,
         component_address: ComponentAddress,
         component: &Component,
         method: &str,
         args: Vec<InstructionArg>,
+        restrict_frame_to: Option<FrameWriteMode>,
     ) -> Result<InstructionResult, TransactionErrorKind> {
         let function_def = template.template_def().get_function(method).cloned().ok_or_else(|| {
             TransactionErrorKind::FunctionNotFound {
@@ -915,7 +923,7 @@ where
             LockFlag::Read
         };
 
-        let component_lock = runtime.interface_mut().lock_component(component_address, lock_flag)?;
+        let component_lock = runtime.interface().lock_component(component_address, lock_flag)?;
 
         let resolved_args = runtime
             .interface()
@@ -928,24 +936,25 @@ where
 
         let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
 
-        runtime.interface_mut().push_call_frame(PushCallFrame::ForComponent {
-            template_address: component.header.template_address,
-            module_name: template.template_name().to_string(),
-            component_scope,
-            component_lock,
-            arg_scope: Box::new(arg_scope),
-            entity_id: component.header.entity_id,
-        })?;
+        runtime.interface().push_call_frame(
+            PushCallFrame::ForComponent {
+                template_address: component.header.template_address,
+                module_name: template.template_name().to_string(),
+                component_scope,
+                component_lock,
+                arg_scope: Box::new(arg_scope),
+                entity_id: component.header.entity_id,
+            },
+            restrict_frame_to,
+        )?;
 
         // This must come after the call frame as that defines the authorization scope
-        runtime.interface_mut().check_component_access_rules(method)?;
+        runtime.interface().check_component_access_rules(method)?;
 
         let result = Self::invoke_template(template, runtime.clone(), &function_def, &resolved_args)?;
 
-        runtime.interface_mut().validate_return_value(&result.indexed)?;
-        runtime
-            .interface_mut()
-            .pop_call_frame(result.indexed.well_known_types())?;
+        runtime.interface().validate_return_value(&result.indexed)?;
+        runtime.interface().pop_call_frame(result.indexed.well_known_types())?;
         Ok(result)
     }
 
@@ -955,17 +964,17 @@ where
     /// and its `Proof` arguments.
     fn invoke_template(
         module: LoadedTemplate,
-        mut runtime: Runtime,
+        runtime: Runtime,
         function_def: &FunctionDef,
         args: &[tari_bor::Value],
     ) -> Result<InstructionResult, TransactionErrorKind> {
-        runtime.interface_mut().revoke_boundary_proofs()?;
+        runtime.interface().revoke_boundary_proofs()?;
 
         let result = match module {
             LoadedTemplate::Wasm(loaded) => {
                 // Instantiation runs before the first metered operator, so it is charged against
                 // the same allowance and per-block budget the call's execution draws on.
-                runtime.interface_mut().charge_template_instantiation(&loaded.shape())?;
+                runtime.interface().charge_template_instantiation(&loaded.shape())?;
                 let mut store = loaded.create_store();
                 let mut process = WasmProcess::init(&mut store, loaded, runtime)?;
                 process.invoke(&mut store, function_def, args)?

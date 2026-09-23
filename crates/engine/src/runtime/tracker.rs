@@ -20,6 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::cell::{Cell, RefCell};
+
 use log::*;
 use ootle_network::Network;
 use tari_engine_types::{
@@ -105,16 +107,21 @@ pub enum ComputeFunding {
     Payment,
 }
 
+/// The transaction's execution state, shared by every frame that runs under it.
+///
+/// A nested call re-enters the engine against the same tracker the outer frame is running on, so
+/// mutation goes through `&self` and an internal borrow. Every such borrow closes before the
+/// statement that took it ends, which is what keeps a nested call from finding one open.
 #[derive(Debug)]
 pub struct StateTracker<TStore> {
-    working_state: Option<WorkingState<TStore>>,
-    fee_checkpoint: Option<WorkingState<TStore>>,
+    working_state: RefCell<Option<WorkingState<TStore>>>,
+    fee_checkpoint: RefCell<Option<WorkingState<TStore>>>,
     transaction_weight: TransactionWeight,
     wasm_metering_rate: WasmMeteringRate,
     /// Stealth transfers performed so far in the fee intent. Lives here rather than in `WorkingState` because the fee
     /// intent is delimited by `fee_checkpoint`, and because the checkpoint clones the working state — a count held
     /// there would be duplicated into the clone.
-    fee_intent_stealth_transfers: usize,
+    fee_intent_stealth_transfers: Cell<usize>,
 }
 
 impl<TStore: StateReader> StateTracker<TStore> {
@@ -132,7 +139,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         dry_run: bool,
     ) -> Self {
         Self {
-            working_state: Some(WorkingState::new(
+            working_state: RefCell::new(Some(WorkingState::new(
                 state_store,
                 virtual_substates,
                 initial_call_scope,
@@ -141,11 +148,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 burn_rate,
                 network,
                 dry_run,
-            )),
-            fee_checkpoint: None,
+            ))),
+            fee_checkpoint: RefCell::new(None),
             transaction_weight,
             wasm_metering_rate,
-            fee_intent_stealth_transfers: 0,
+            fee_intent_stealth_transfers: Cell::new(0),
         }
     }
 
@@ -178,7 +185,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// it, so it bounds the unpaid work rather than reducing it to zero.
     pub fn compute_allowance(&self) -> Option<ComputeAllowance> {
         let rate = self.wasm_metering_rate;
-        let is_fee_intent = self.fee_checkpoint.is_none();
+        let is_fee_intent = self.fee_checkpoint.borrow().is_none();
         self.read_with(|state| {
             if !rate.prices_execution() {
                 return None;
@@ -216,7 +223,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| state.get_current_epoch_hash())
     }
 
-    pub fn get_pseudorandom_bytes(&mut self, length: usize) -> Result<Vec<u8>, RuntimeError> {
+    pub fn get_pseudorandom_bytes(&self, length: usize) -> Result<Vec<u8>, RuntimeError> {
         self.write_with(|state| {
             // TODO: epoch_hash is a bad source of entropy. Agreeing on randomness at a consensus level is challenging
             // in multi-sharded consensus.
@@ -226,12 +233,12 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    pub fn add_event(&mut self, event: Event) -> Result<(), RuntimeError> {
+    pub fn add_event(&self, event: Event) -> Result<(), RuntimeError> {
         debug!(target: LOG_TARGET, "Emit: {event}");
         self.write_with(|state| state.push_event(event))
     }
 
-    pub fn add_log(&mut self, log: LogEntry) -> Result<(), RuntimeError> {
+    pub fn add_log(&self, log: LogEntry) -> Result<(), RuntimeError> {
         self.write_with(|state| state.push_log(log))
     }
 
@@ -239,11 +246,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// state, `false` thereafter. Callers use this to dedupe `FeeSource::TemplateLoad` charges:
     /// the validator pays the cold compile/deserialise cost at most once per template per
     /// process, so charging it on every entry over-bills the user.
-    pub fn record_template_load_charge(&mut self, address: TemplateAddress) -> bool {
+    pub fn record_template_load_charge(&self, address: TemplateAddress) -> bool {
         self.write_with(|state| state.record_template_load_charge(address))
     }
 
-    pub fn take_events(&mut self) -> Vec<Event> {
+    pub fn take_events(&self) -> Vec<Event> {
         self.write_with(|state| state.take_events())
     }
 
@@ -256,7 +263,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     }
 
     pub fn new_component(
-        &mut self,
+        &self,
         component_state: tari_bor::Value,
         owner_rule: SubstateOwnerRule,
         access_rules: ComponentAccessRules,
@@ -313,18 +320,18 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    pub fn lock_substate(&mut self, address: SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
+    pub fn lock_substate(&self, address: SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         self.write_with(|state| match lock_flag {
             LockFlag::Read => state.read_lock_substate(address),
             LockFlag::Write => state.write_lock_substate(address),
         })
     }
 
-    pub fn unlock_substate(&mut self, locked: LockedSubstate) -> Result<(), RuntimeError> {
+    pub fn unlock_substate(&self, locked: LockedSubstate) -> Result<(), RuntimeError> {
         self.write_with(|state| state.unlock_substate(locked))
     }
 
-    pub fn push_call_frame(&mut self, push_frame: PushCallFrame) -> Result<(), RuntimeError> {
+    pub fn push_call_frame(&self, push_frame: PushCallFrame) -> Result<(), RuntimeError> {
         self.write_with(|state| {
             // If substates used in args are in scope for the current frame, we can bring then into scope for the new
             // frame
@@ -342,11 +349,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    pub fn pop_call_frame(&mut self, returned: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
+    pub fn pop_call_frame(&self, returned: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
         self.write_with(|state| state.pop_frame(returned))
     }
 
-    pub fn take_last_instruction_output(&mut self) -> Option<IndexedValue> {
+    pub fn take_last_instruction_output(&self) -> Option<IndexedValue> {
         self.write_with(|state| state.take_last_instruction_output())
     }
 
@@ -354,11 +361,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.read_with(|state| f(state.workspace()))
     }
 
-    pub fn with_workspace_mut<F: FnOnce(&mut Workspace) -> R, R>(&mut self, f: F) -> R {
+    pub fn with_workspace_mut<F: FnOnce(&mut Workspace) -> R, R>(&self, f: F) -> R {
         self.write_with(|state| f(state.workspace_mut()))
     }
 
-    pub fn add_fee_charge(&mut self, source: FeeSource, amount: u64) {
+    pub fn add_fee_charge(&self, source: FeeSource, amount: u64) {
         if amount == 0 {
             debug!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
             return;
@@ -370,7 +377,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    pub fn accumulate_wasm_points(&mut self, points: u64) {
+    pub fn accumulate_wasm_points(&self, points: u64) {
         self.write_with(|state| state.fee_state_mut().accumulate_wasm_points(points))
     }
 
@@ -389,7 +396,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// execution, or a dry run past the fee checkpoint — the charge only accumulates, so those
     /// estimates stay accurate. A dry run's fee intent is bound by the credit as a real one is,
     /// since the credit is the same figure either way.
-    pub fn charge_native_execution(&mut self, points: u64) -> Result<(), RuntimeError> {
+    pub fn charge_native_execution(&self, points: u64) -> Result<(), RuntimeError> {
         // Hard per-transaction ceiling, independent of what the transaction pays: it bounds how far a block may
         // overshoot the propose-time execution budget, which the validation budget has to leave room for.
         let native_total = self.accumulated_native_points().saturating_add(points);
@@ -432,7 +439,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// Split out from [`Self::finalize`] so the runtime can run its modules against the chosen state
     /// before its fees are settled.
     pub fn select_finalized_state(
-        &mut self,
+        &self,
         failure: Option<RejectReason>,
     ) -> Result<FinalizedState<TStore>, RuntimeError> {
         let total_fees_required = self.read_with(|state| state.fee_state().total_charges());
@@ -477,7 +484,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         })
     }
 
-    pub fn finalize(&mut self, finalized: FinalizedState<TStore>) -> Result<FinalizeResult, RuntimeError> {
+    pub fn finalize(&self, finalized: FinalizedState<TStore>) -> Result<FinalizeResult, RuntimeError> {
         let FinalizedState {
             mut state,
             outcome,
@@ -559,27 +566,31 @@ impl<TStore: StateReader> StateTracker<TStore> {
         .with_total_fees_required(total_fees_required))
     }
 
-    fn take_fee_checkpoint(&mut self) -> Option<WorkingState<TStore>> {
-        self.fee_checkpoint.take()
+    fn take_fee_checkpoint(&self) -> Option<WorkingState<TStore>> {
+        self.fee_checkpoint.borrow_mut().take()
     }
 
-    fn take_working_state(&mut self) -> Result<WorkingState<TStore>, RuntimeError> {
-        self.working_state.take().ok_or_else(|| RuntimeError::InvariantError {
-            function: "StateTracker::take_working_state",
-            details: "Working state has already been taken (double finalize?)".to_string(),
-        })
+    fn take_working_state(&self) -> Result<WorkingState<TStore>, RuntimeError> {
+        self.working_state
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| RuntimeError::InvariantError {
+                function: "StateTracker::take_working_state",
+                details: "Working state has already been taken (double finalize?)".to_string(),
+            })
     }
 
     /// The working state, as a module may charge against it.
     ///
     /// The fee module uses this to compute its finalization charges before the state to persist has
     /// been chosen; once it has been, the same computation runs against that state directly.
-    pub fn chargeable_state(&mut self) -> ChargeableState<'_, TStore> {
-        ChargeableState::new(
+    pub fn with_chargeable_state<R, F: FnOnce(&mut ChargeableState<'_, TStore>) -> R>(&self, f: F) -> R {
+        f(&mut ChargeableState::new(
             self.working_state
+                .borrow_mut()
                 .as_mut()
-                .expect("BUG: chargeable_state called after finalize consumed working state"),
-        )
+                .expect("BUG: with_chargeable_state called after finalize consumed working state"),
+        ))
     }
 
     pub fn are_fees_paid_in_full(&self) -> bool {
@@ -617,6 +628,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// effectful host ops that bypass the lock layer.
     pub fn current_frame_write_mode(&self) -> FrameWriteMode {
         self.working_state
+            .borrow()
             .as_ref()
             .map(|state| state.current_frame_write_mode())
             .unwrap_or(FrameWriteMode::Full)
@@ -625,19 +637,21 @@ impl<TStore: StateReader> StateTracker<TStore> {
     pub(super) fn read_with<R, F: FnOnce(&WorkingState<TStore>) -> R>(&self, f: F) -> R {
         f(self
             .working_state
+            .borrow()
             .as_ref()
             .expect("BUG: read_with called after finalize consumed working state"))
     }
 
-    pub(super) fn write_with<R, F: FnOnce(&mut WorkingState<TStore>) -> R>(&mut self, f: F) -> R {
+    pub(super) fn write_with<R, F: FnOnce(&mut WorkingState<TStore>) -> R>(&self, f: F) -> R {
         f(self
             .working_state
+            .borrow_mut()
             .as_mut()
             .expect("BUG: write_with called after finalize consumed working state"))
     }
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
-        self.fee_checkpoint.is_some()
+        self.fee_checkpoint.borrow().is_some()
     }
 
     /// Accounts one more stealth transfer against [`limits::StealthLimits::max_fee_intent_transfers`]; a no-op once
@@ -648,21 +662,22 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// calling `ResourceManager::stealth_transfer` — both reach this through `RuntimeInterfaceImpl::stealth_transfer`.
     /// Counting instructions alone would leave the WASM route uncapped, and so make the more expensive route the way
     /// to exceed the limit.
-    pub(super) fn account_fee_intent_stealth_transfer(&mut self) -> Result<(), RuntimeError> {
+    pub(super) fn account_fee_intent_stealth_transfer(&self) -> Result<(), RuntimeError> {
         if self.is_fee_intent_checkpointed() {
             return Ok(());
         }
         let max_transfers = limits::STEALTH_LIMITS.max_fee_intent_transfers;
-        if self.fee_intent_stealth_transfers + 1 > max_transfers {
+        if self.fee_intent_stealth_transfers.get() + 1 > max_transfers {
             return Err(ArgumentValidationError::MaxFeeIntentStealthTransfersExceeded { max_transfers }.into());
         }
-        self.fee_intent_stealth_transfers += 1;
+        self.fee_intent_stealth_transfers
+            .set(self.fee_intent_stealth_transfers.get() + 1);
         Ok(())
     }
 }
 
 impl<TStore: StateReader + Clone> StateTracker<TStore> {
-    pub fn fee_checkpoint(&mut self) -> Result<(), RuntimeError> {
+    pub fn fee_checkpoint(&self) -> Result<(), RuntimeError> {
         let state = self.write_with(|state| {
             // Check that the checkpoint is in a valid state
             state.validate_finalized()?;
@@ -677,7 +692,7 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
             Ok::<_, RuntimeError>(checkpoint_state)
         })?;
 
-        self.fee_checkpoint = Some(state);
+        *self.fee_checkpoint.borrow_mut() = Some(state);
         Ok(())
     }
 }

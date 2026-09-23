@@ -4,9 +4,9 @@
 import { ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { swarmRpc } from "../api/rpc";
+import { readChannels } from "../consensus";
 import { useSwarm } from "../state/context";
 import { ActionButton, Live, Segmented, Tag } from "../ui";
-import { readChannels } from "../consensus";
 
 const RATES = [
   { label: "1s", value: 1000 },
@@ -16,9 +16,7 @@ const RATES = [
 ];
 
 function useTheme() {
-  const [theme, setTheme] = useState(
-    () => document.documentElement.dataset.theme ?? "dark",
-  );
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? "dark");
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("swarm.theme", theme);

@@ -19,12 +19,13 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib_types::{UtxoAddress, crypto::RistrettoPublicKeyBytes};
-use tokio::{
-    task::{AbortHandle, spawn_blocking},
-    time::Instant,
-};
+use tokio::{task::spawn_blocking, time::Instant};
 
-use crate::handlers::{HandlerContext, helpers::invalid_params};
+use crate::handlers::{
+    HandlerContext,
+    helpers::invalid_params,
+    value_lookup::{AbortQueuedOnDropGuard, ValueRangeRequest},
+};
 
 const LOG_TARGET: &str = "tari::ootle::walletd::handlers::stealth_utxos";
 
@@ -105,8 +106,7 @@ pub async fn handle_decrypt_value(
     // Get view secret key
     let view_key = sdk.key_manager_api().get_key(req.view_key_id)?;
 
-    let min_expected = req.minimum_expected_value;
-    let max_expected = req.maximum_expected_value;
+    let value_range = ValueRangeRequest::resolve(req.minimum_expected_value, req.maximum_expected_value);
 
     // NOTE: we iterate in a random order (HashMap) but collect into a deterministic order (IndexMap) so that the
     // results are always in the same order for the same input
@@ -133,33 +133,17 @@ pub async fn handle_decrypt_value(
             lookup_file.as_deref(),
             view_key.secret(),
             &elgamal_proofs,
-            min_expected,
-            max_expected,
+            value_range,
         )
     });
-    struct AbortOnDropGuard {
-        handle: AbortHandle,
-    }
-
-    impl Drop for AbortOnDropGuard {
-        fn drop(&mut self) {
-            if !self.handle.is_finished() {
-                info!(target: LOG_TARGET, "Aborting brute force balance lookup task");
-                self.handle.abort();
-            }
-        }
-    }
-
-    // If this request is abandoned, abort the blocking task
-    let _drop_guard = AbortOnDropGuard {
-        handle: handle.abort_handle(),
-    };
-    let balances = handle.await??;
+    let _drop_guard = AbortQueuedOnDropGuard::new(handle.abort_handle());
+    let recovery = handle.await??;
 
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(StealthUtxosDecryptValueResponse {
-        values: proofs.into_keys().zip(balances).collect(),
+        values: proofs.into_keys().zip(recovery.balances).collect(),
+        searched: recovery.searched,
     })
 }
 

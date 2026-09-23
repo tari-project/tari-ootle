@@ -4,11 +4,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { webauthnAlreadyRegistered } from "@utils/json_rpc";
 
-export const useWebauthnAlreadyRegistered = (username: string) => {
+export const useWebauthnAlreadyRegistered = () => {
   return useQuery({
-    queryKey: ["webauthn_already_registered", username],
+    queryKey: ["webauthn_already_registered"],
     queryFn: () => {
-      return webauthnAlreadyRegistered(username);
+      return webauthnAlreadyRegistered();
     },
     refetchInterval: false,
     notifyOnChangeProps: ["data", "error"],

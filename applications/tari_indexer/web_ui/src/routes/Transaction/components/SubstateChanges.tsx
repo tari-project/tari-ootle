@@ -20,25 +20,21 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import ArrowCircleDownRoundedIcon from "@mui/icons-material/ArrowCircleDownRounded";
+import ArrowCircleUpRoundedIcon from "@mui/icons-material/ArrowCircleUpRounded";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import Chip from "@mui/material/Chip";
+import Stack from "@mui/material/Stack";
+import { useTheme } from "@mui/material/styles";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import Stack from "@mui/material/Stack";
-import {
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-} from "../../../Components/Accordion";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import Chip from "@mui/material/Chip";
+import { useEffect, useState } from "react";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../../Components/Accordion";
 import { DataTableCell } from "../../../Components/StyledComponents";
-import { useState, useEffect } from "react";
-import ArrowCircleUpRoundedIcon from "@mui/icons-material/ArrowCircleUpRounded";
-import ArrowCircleDownRoundedIcon from "@mui/icons-material/ArrowCircleDownRounded";
-import { useTheme } from "@mui/material/styles";
 
 interface AcceptResult {
   Accept: {
@@ -95,75 +91,44 @@ function SubstateChanges({
             <TableBody>
               {result.Accept.down_substates && (
                 <TableRow>
-                  <TableCell style={{ verticalAlign: "top" }}>
-                    Down Substates
-                  </TableCell>
+                  <TableCell style={{ verticalAlign: "top" }}>Down Substates</TableCell>
                   <DataTableCell>
-                    <Stack
-                      spacing={1}
-                      direction="column"
-                      alignItems="flex-start"
-                    >
-                      {result.Accept.down_substates.map(
-                        (substate: any, index: number) => (
-                          <Stack
-                            key={index}
-                            direction="row"
-                            spacing={1}
-                            alignItems="center"
-                          >
-                            <ArrowCircleDownRoundedIcon
-                              sx={{
-                                color: theme.palette.warning.main,
-                                fontSize: 24,
-                              }}
-                              fontSize="small"
-                            />
-                            <Chip label={substate[0]} variant="filled" />
-                            <Typography variant="inherit">
-                              v{substate[1]}
-                            </Typography>
-                          </Stack>
-                        )
-                      )}
+                    <Stack spacing={1} direction="column" alignItems="flex-start">
+                      {result.Accept.down_substates.map((substate: any, index: number) => (
+                        <Stack key={index} direction="row" spacing={1} alignItems="center">
+                          <ArrowCircleDownRoundedIcon
+                            sx={{
+                              color: theme.palette.warning.main,
+                              fontSize: 24,
+                            }}
+                            fontSize="small"
+                          />
+                          <Chip label={substate[0]} variant="filled" />
+                          <Typography variant="inherit">v{substate[1]}</Typography>
+                        </Stack>
+                      ))}
                     </Stack>
                   </DataTableCell>
                 </TableRow>
               )}
               {result.Accept.up_substates && (
                 <TableRow>
-                  <TableCell style={{ verticalAlign: "top" }}>
-                    Up Substates
-                  </TableCell>
+                  <TableCell style={{ verticalAlign: "top" }}>Up Substates</TableCell>
                   <DataTableCell>
-                    <Stack
-                      spacing={1}
-                      direction="column"
-                      alignItems="flex-start"
-                      justifyContent="flex-start"
-                    >
-                      {result.Accept.up_substates.map(
-                        (substate: any, index: number) => (
-                          <Stack
-                            key={index}
-                            direction="row"
-                            spacing={1}
-                            alignItems="center"
-                          >
-                            <ArrowCircleUpRoundedIcon
-                              sx={{
-                                color: theme.palette.success.main,
-                                fontSize: 24,
-                              }}
-                              fontSize="small"
-                            />
-                            <Chip label={substate[0]} variant="filled" />
-                            <Typography variant="inherit">
-                              v{substate[1].version}
-                            </Typography>
-                          </Stack>
-                        )
-                      )}
+                    <Stack spacing={1} direction="column" alignItems="flex-start" justifyContent="flex-start">
+                      {result.Accept.up_substates.map((substate: any, index: number) => (
+                        <Stack key={index} direction="row" spacing={1} alignItems="center">
+                          <ArrowCircleUpRoundedIcon
+                            sx={{
+                              color: theme.palette.success.main,
+                              fontSize: 24,
+                            }}
+                            fontSize="small"
+                          />
+                          <Chip label={substate[0]} variant="filled" />
+                          <Typography variant="inherit">v{substate[1].version}</Typography>
+                        </Stack>
+                      ))}
                     </Stack>
                   </DataTableCell>
                 </TableRow>

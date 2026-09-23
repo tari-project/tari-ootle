@@ -20,11 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { SubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { toHexString } from "../routes/VN/Components/helpers";
-import { ShardGroup, SubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 
 export const renderJson = (json: any) => {
-
   if (json && Array.isArray(json)) {
     //eslint-disable-next-line eqeqeq
     if (json.length == 32) {
@@ -95,7 +94,6 @@ export function emptyRows(page: number, rowsPerPage: number, array: any[]) {
   return page > 0 ? Math.max(0, (1 + page) * rowsPerPage - array.length) : 0;
 }
 
-
 export interface Duration {
   secs: number;
   nanos: number;
@@ -121,4 +119,3 @@ export function displayDuration(duration: Duration) {
   }
   return `${duration.secs}s`;
 }
-

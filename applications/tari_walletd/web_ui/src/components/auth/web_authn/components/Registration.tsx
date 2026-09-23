@@ -1,7 +1,7 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { APP_NAME, DEFAULT_PERMISSIONS, WebauthnProps } from "@components/auth/web_authn/Webauthn";
+import { APP_NAME, WebauthnProps } from "@components/auth/web_authn/Webauthn";
 import Loading from "@components/Loading";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -109,7 +109,6 @@ function WebauthnRegistration(props: WebauthnProps) {
       const { token } = await webauthnFinishRegistration({
         credential,
         session_id: regSessionId,
-        requested_permissions: DEFAULT_PERMISSIONS,
       });
 
       let client = await getClientInstance();

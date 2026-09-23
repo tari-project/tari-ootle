@@ -16,14 +16,15 @@ use tari_ootle_common_types::{Epoch, NodeHeight, committee::Committee, displayab
 use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use crate::{
-    hotstuff::HotStuffError,
+    hotstuff::{HotStuffError, HotstuffConfig, LeaderSkipSet},
     messages::{HotstuffMessage, NewViewMessage},
-    traits::{CertificateStore, ConsensusSpec, LeaderStrategy, OutboundMessaging, ValidatorSignerService},
+    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_next_sync_view";
 
 pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
+    config: HotstuffConfig,
     store: TConsensusSpec::StateStore,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     leader_strategy: TConsensusSpec::LeaderStrategy,
@@ -33,12 +34,14 @@ pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
 
 impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
     pub fn new(
+        config: HotstuffConfig,
         store: TConsensusSpec::StateStore,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         leader_strategy: TConsensusSpec::LeaderStrategy,
         signer_service: TConsensusSpec::SignerService,
     ) -> Self {
         Self {
+            config,
             store,
             outbound_messaging,
             leader_strategy,
@@ -65,10 +68,28 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             {
                 timeout_height = last_sent_new_view + NodeHeight(1);
             }
-            // Skipping the next height since the leader failed to propose
-            let (next_leader, _) = self.leader_strategy.get_leader(local_committee, timeout_height);
             let high_pc = HighPc::get(tx, epoch)?;
             let high_pc = ProposalCertificate::get(tx, epoch, high_pc.id())?;
+            // Skipping the next height since the leader failed to propose. The certificate we report
+            // is the one the next proposal will carry, so it anchors the liveness state that decides
+            // who that proposer is - and it is in the message, so the receiver checks itself against
+            // the same anchor.
+            //
+            // This is the one selection site whose anchor is local rather than committed: at the
+            // moment of a leader failure, replicas that received the failed view's block hold a
+            // certificate one height above those that did not. A liveness state that changes on
+            // exactly that boundary sends the committee's NEWVIEWs to two leaders, neither reaches
+            // 2f+1 and the view is lost. That is accepted: it costs one more timeout, the next view
+            // re-rolls the anchor, and there is nothing every sender agrees on at a timeout to
+            // anchor on instead.
+            let skip_set = LeaderSkipSet::load_for_justify(
+                tx,
+                epoch,
+                high_pc.height(),
+                local_committee,
+                &self.config.consensus_constants.liveness_thresholds(),
+            )?;
+            let (next_leader, _) = skip_set.effective_leader(&self.leader_strategy, local_committee, timeout_height);
             let last_sent_vote = LastSentVote::get(tx, epoch)
                 .optional()?
                 .filter(|vote| high_pc.height() < vote.block_height());

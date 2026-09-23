@@ -43,9 +43,10 @@ use tari_template_lib::{
 
 use crate::runtime::{EngineArgs, RuntimeError};
 
-/// The fewest bytes a [`RistrettoPublicKeyBytes`] can occupy inside an encoded list: 32 bytes of key and the
-/// CBOR byte-string header in front of them. `encoded_point_len_is_at_least_the_minimum` pins it.
-const MIN_ENCODED_POINT_LEN: u64 = 33;
+/// The fewest bytes one multi-scalar-multiplication term — a point or a scalar — can occupy inside an encoded
+/// list: 32 bytes of value and the CBOR byte-string header in front of them.
+/// `encoded_term_len_is_at_least_the_minimum` pins it.
+const MIN_ENCODED_TERM_LEN: u64 = 33;
 
 /// The metering points an intrinsic call costs, derived from its declared arguments alone.
 ///
@@ -63,12 +64,15 @@ pub fn price(intrinsic: IntrinsicId, args: &EngineArgs) -> Result<u64, RuntimeEr
         I::RISTRETTO_MUL => NativeExecutionPoints::PER_RISTRETTO_MUL,
         I::RISTRETTO_MUL_BASE => NativeExecutionPoints::PER_RISTRETTO_MUL_BASE,
         I::RISTRETTO_MSM => {
-            // Priced off the encoded length of the point list rather than a decoded one: pricing must not do
-            // work proportional to the input it is pricing, and that decode is unmetered. Dividing by the
-            // smallest a point can encode to bounds the term count from above, so the charge is never short. A
-            // mismatch against the scalar count is rejected in `dispatch`, after this charge — a caller cannot
-            // get free work out of an argument this never looks at.
-            let terms = args.arg_encoded_len(0) / MIN_ENCODED_POINT_LEN;
+            // Priced off the encoded lengths of both lists rather than decoded ones: pricing must not do work
+            // proportional to the input it is pricing, and that decode is unmetered. Dividing by the smallest a
+            // term can encode to bounds each list's length from above, so the charge is never short. The count
+            // mismatch is only rejected in `dispatch`, after both lists have been decoded, so the longer list is
+            // what the charge has to cover — reading either one alone leaves the other free.
+            let terms = args
+                .arg_encoded_len(0)
+                .max(args.arg_encoded_len(1))
+                .div_euclid(MIN_ENCODED_TERM_LEN);
             NativeExecutionPoints::PER_RISTRETTO_MSM
                 .saturating_add(NativeExecutionPoints::PER_RISTRETTO_MSM_TERM.saturating_mul(terms))
         },
@@ -320,17 +324,42 @@ fn encode_scalar(s: RistrettoSecretKey) -> Result<InvokeResult, RuntimeError> {
 mod tests {
     use super::*;
 
-    /// `price` bounds an MSM's term count by dividing the encoded argument by [`MIN_ENCODED_POINT_LEN`], which
-    /// only bounds from above while a point never encodes to less than that.
+    /// `price` bounds an MSM's term count by dividing the encoded arguments by [`MIN_ENCODED_TERM_LEN`], which
+    /// only bounds from above while neither a point nor a scalar encodes to less than that.
     #[test]
-    fn encoded_point_len_is_at_least_the_minimum() {
+    fn encoded_term_len_is_at_least_the_minimum() {
         for len in [1usize, 2, 32, 1000] {
-            let points = vec![RistrettoPublicKeyBytes::zero(); len];
-            let encoded = tari_bor::encode(&points).unwrap().len() as u64;
+            let points = tari_bor::encode(&vec![RistrettoPublicKeyBytes::zero(); len])
+                .unwrap()
+                .len() as u64;
+            let scalars = tari_bor::encode(&vec![Scalar32Bytes::zero(); len]).unwrap().len() as u64;
+            for (kind, encoded) in [("points", points), ("scalars", scalars)] {
+                assert!(
+                    encoded >= MIN_ENCODED_TERM_LEN * len as u64,
+                    "{len} {kind} encode to {encoded} bytes, under the {MIN_ENCODED_TERM_LEN} per term assumed when \
+                     pricing"
+                );
+            }
+        }
+    }
+
+    /// The charge must cover every argument `dispatch` decodes, not only the one the term count is read
+    /// from. A caller declaring one list empty and the other long makes the engine decode the long one before
+    /// the count mismatch is caught, so either side being the long one has to be priced.
+    #[test]
+    fn msm_prices_every_argument_it_decodes() {
+        let points = |n: usize| Bytes::from(tari_bor::encode(&vec![RistrettoPublicKeyBytes::zero(); n]).unwrap());
+        let scalars = |n: usize| Bytes::from(tari_bor::encode(&vec![Scalar32Bytes::zero(); n]).unwrap());
+        let msm = |a: Bytes, b: Bytes| price(IntrinsicId::RISTRETTO_MSM, &EngineArgs::from(vec![a, b])).unwrap();
+
+        let empty = msm(points(0), scalars(0));
+        for (side, lopsided) in [
+            ("scalars", msm(points(0), scalars(1000))),
+            ("points", msm(points(1000), scalars(0))),
+        ] {
             assert!(
-                encoded >= MIN_ENCODED_POINT_LEN * len as u64,
-                "{len} points encode to {encoded} bytes, under the {MIN_ENCODED_POINT_LEN} per point assumed when \
-                 pricing"
+                lopsided > empty,
+                "1000 unpriced {side} cost the same {empty} points as none",
             );
         }
     }

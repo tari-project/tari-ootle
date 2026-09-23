@@ -134,6 +134,11 @@ impl Component {
         self
     }
 
+    pub fn set_owner_rule(&mut self, owner_rule: SubstateOwnerRule) -> &mut Self {
+        self.header.owner_rule = owner_rule;
+        self
+    }
+
     pub fn set_template_address(&mut self, template_address: TemplateAddress) -> &mut Self {
         self.header.template_address = template_address;
         self

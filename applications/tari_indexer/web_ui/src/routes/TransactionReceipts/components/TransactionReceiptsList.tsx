@@ -21,8 +21,8 @@ import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { CURRENCY } from "../../../utils/constants";
 import { formatCurrency } from "../../../utils/helpers";
-import { shortenString } from "../../VN/Components/helpers";
 import TransactionFilter from "../../RecentTransactions/components/SearchFilter";
+import { shortenString } from "../../VN/Components/helpers";
 
 type ReceiptEntry = {
   id: string;

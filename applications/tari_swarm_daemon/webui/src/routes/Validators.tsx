@@ -4,9 +4,9 @@
 import { useEffect } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { swarmRpc } from "../api/rpc";
+import { InstanceControls, LogLinks, Running } from "../components/NodeCard";
 import { readChannels } from "../consensus";
 import { distinguish } from "../names";
-import { InstanceControls, LogLinks, Running } from "../components/NodeCard";
 import { useSwarm } from "../state/context";
 import { ActionButton, Copyable, Empty, Live, Panel, Tag } from "../ui";
 
@@ -186,9 +186,7 @@ export default function Validators() {
               }
             >
               <div className="stack">
-                {detail?.error && (
-                  <Tag tone="down">{detail.error}</Tag>
-                )}
+                {detail?.error && <Tag tone="down">{detail.error}</Tag>}
                 <dl className="kv">
                   <dt>Consensus</dt>
                   <dd className="num">
@@ -200,9 +198,7 @@ export default function Validators() {
                       }
                     />
                     {channel.deficit.kind === "blocks" && (
-                      <span style={{ color: "var(--lag)" }}>
-                        {`  ${channel.deficit.n} blocks behind the tip`}
-                      </span>
+                      <span style={{ color: "var(--lag)" }}>{`  ${channel.deficit.n} blocks behind the tip`}</span>
                     )}
                     {channel.deficit.kind === "epochs" && (
                       <span style={{ color: "var(--lag)" }}>
@@ -221,17 +217,13 @@ export default function Validators() {
                   <dt>Base layer</dt>
                   <dd className="num">
                     {epoch ? (
-                      <Live
-                        value={`epoch ${epoch.current_epoch} · scanned h${epoch.current_block_height}`}
-                      />
+                      <Live value={`epoch ${epoch.current_epoch} · scanned h${epoch.current_block_height}`} />
                     ) : (
                       "—"
                     )}
                     {epoch && (
                       <span className="faint">
-                        {epoch.start_epoch === null
-                          ? "  inactive"
-                          : `  active since epoch ${epoch.start_epoch}`}
+                        {epoch.start_epoch === null ? "  inactive" : `  active since epoch ${epoch.start_epoch}`}
                       </span>
                     )}
                   </dd>

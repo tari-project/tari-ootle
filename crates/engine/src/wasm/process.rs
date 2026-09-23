@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use tari_bor::{ByteCounter, decode_exact, encode_into_writer, encoded_len};
+use tari_bor::{ByteCounter, decode_exact_with_max_depth, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{
     CallInfo,
@@ -340,7 +340,7 @@ impl WasmProcess {
             // call could spend its whole metering allowance and still pass mid-call checks that
             // read the stale end-of-invocation total.
             if let Some(delta) = env_mut.take_unsynced_in_flight_points(&mut store) &&
-                let Err(err) = env_mut.state_mut().interface_mut().record_wasm_execution(delta)
+                let Err(err) = env_mut.state().interface().record_wasm_execution(delta)
             {
                 env_mut.set_last_engine_error(err);
                 return WasmPtr::null();
@@ -351,50 +351,50 @@ impl WasmProcess {
 
         let result = match op {
             EngineOp::EmitLog => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: EmitLogArg| {
-                state.interface_mut().emit_log(arg.level, arg.message)
+                state.interface().emit_log(arg.level, arg.message)
             }),
             EngineOp::ComponentInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: ComponentInvokeArg| {
                     state
-                        .interface_mut()
+                        .interface()
                         .component_invoke(arg.component_ref, arg.action, arg.args.into())
                 })
             },
             EngineOp::ResourceInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: ResourceInvokeArg| {
                     state
-                        .interface_mut()
+                        .interface()
                         .resource_invoke(arg.resource_ref, arg.action, arg.args.into())
                 })
             },
             EngineOp::VaultInvoke => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: VaultInvokeArg| {
                 state
-                    .interface_mut()
+                    .interface()
                     .vault_invoke(arg.vault_ref, arg.action, arg.args.into())
             }),
             EngineOp::BucketInvoke => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: BucketInvokeArg| {
                 state
-                    .interface_mut()
+                    .interface()
                     .bucket_invoke(arg.bucket_ref, arg.action, arg.args.into())
             }),
             EngineOp::NonFungibleInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: NonFungibleInvokeArg| {
                     state
-                        .interface_mut()
+                        .interface()
                         .non_fungible_invoke(arg.address, arg.action, arg.args.into())
                 })
             },
             EngineOp::GenerateUniqueId => Self::handle(&mut env, op, arg_ptr, arg_len, |state, _arg: ()| {
-                state.interface_mut().generate_uuid()
+                state.interface().generate_uuid()
             }),
             EngineOp::ConsensusInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: ConsensusInvokeArg| {
-                    state.interface_mut().consensus_invoke(arg.action)
+                    state.interface().consensus_invoke(arg.action)
                 })
             },
             EngineOp::CallerContextInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: CallerContextInvokeArg| {
-                    state.interface_mut().caller_context_invoke(arg.action, arg.args.into())
+                    state.interface().caller_context_invoke(arg.action, arg.args.into())
                 })
             },
             EngineOp::AddressAllocationInvoke => Self::handle(
@@ -402,22 +402,22 @@ impl WasmProcess {
                 op,
                 arg_ptr,
                 arg_len,
-                |state, arg: AddressAllocationInvokeArg| state.interface_mut().allocate_address_invoke(arg),
+                |state, arg: AddressAllocationInvokeArg| state.interface().allocate_address_invoke(arg),
             ),
             EngineOp::GenerateRandomInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: GenerateRandomInvokeArg| {
-                    state.interface_mut().generate_random_invoke(arg.action)
+                    state.interface().generate_random_invoke(arg.action)
                 })
             },
             EngineOp::EmitEvent => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: EmitEventArg| {
-                state.interface_mut().emit_event(arg.topic, arg.payload)
+                state.interface().emit_event(arg.topic, arg.payload)
             }),
             EngineOp::CallInvoke => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: CallInvokeArg| {
-                state.interface_mut().call_invoke(arg.action, arg.args.into())
+                state.interface().call_invoke(arg.action, arg.args.into())
             }),
             EngineOp::ProofInvoke => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: ProofInvokeArg| {
                 state
-                    .interface_mut()
+                    .interface()
                     .proof_invoke(arg.proof_ref, arg.action, arg.args.into())
             }),
             EngineOp::BuiltinTemplateInvoke => Self::handle(
@@ -425,16 +425,16 @@ impl WasmProcess {
                 op,
                 arg_ptr,
                 arg_len,
-                |state, arg: BuiltinTemplateInvokeArg| state.interface_mut().builtin_template_invoke(arg.action),
+                |state, arg: BuiltinTemplateInvokeArg| state.interface().builtin_template_invoke(arg.action),
             ),
             EngineOp::IntrinsicInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: IntrinsicInvokeArg| {
-                    state.interface_mut().intrinsic_invoke(arg.intrinsic, arg.args.into())
+                    state.interface().intrinsic_invoke(arg.intrinsic, arg.args.into())
                 })
             },
             EngineOp::SpendContextInvoke => {
                 Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: SpendContextInvokeArg| {
-                    state.interface_mut().spend_context_invoke(arg.action)
+                    state.interface().spend_context_invoke(arg.action)
                 })
             },
         };
@@ -453,7 +453,7 @@ impl WasmProcess {
         op: EngineOp,
         arg_ptr: WasmPtr<u8>,
         arg_len: u32,
-        f: fn(&mut Runtime, T) -> Result<U, E>,
+        f: fn(&Runtime, T) -> Result<U, E>,
     ) -> Result<WasmPtr<u8>, WasmExecutionError>
     where
         T: for<'b> tari_bor::Decode<'b, ()>,
@@ -471,7 +471,9 @@ impl WasmProcess {
             // SAFETY: WasmProcess is not used concurrently and templates are not able to spawn threads
             unsafe {
                 env_mut.with_memory_slice(&mut store, arg_ptr, arg_len, |arg| {
-                    decode_exact(arg).map_err(|e| {
+                    // An engine op's payload is whatever the guest wrote into its memory, decoded
+                    // here on the validator's own stack.
+                    decode_exact_with_max_depth(arg, limits::MAX_CBOR_NESTING_DEPTH).map_err(|e| {
                         log::error!(target: LOG_TARGET, "Failed to decode args for engine call: {}", e);
                         WasmExecutionError::EngineArgDecodeFailed(e)
                     })
@@ -481,7 +483,7 @@ impl WasmProcess {
         sample.decode_ns = span.finish();
 
         let span = abi_metrics::Span::start();
-        let resp = f(env.data_mut().state_mut(), decoded)?;
+        let resp = f(env.data().state(), decoded)?;
         sample.handler_ns = span.finish();
 
         let span = abi_metrics::Span::start();
@@ -604,9 +606,9 @@ impl Invokable<Store> for WasmProcess {
         // Record only the tail not already synced to the transaction total by mid-call host calls.
         let already_synced = self.env_mut(store).end_metered_invocation();
         // Charging happens before we return the result so fees are recorded even on failure paths.
-        self.env_mut(store)
-            .state_mut()
-            .interface_mut()
+        self.env(store)
+            .state()
+            .interface()
             .record_wasm_execution(points_consumed.saturating_sub(already_synced))?;
 
         // An engine error recorded during the invocation fails the call on both paths.
@@ -637,9 +639,9 @@ impl Invokable<Store> for WasmProcess {
         match outcome {
             InvocationOutcome::Returned(value) => {
                 self.env(store).state().interface().validate_return_value(&value)?;
-                self.env_mut(store)
-                    .state_mut()
-                    .interface_mut()
+                self.env(store)
+                    .state()
+                    .interface()
                     .set_last_instruction_output(value.clone())?;
 
                 Ok(InstructionResult {

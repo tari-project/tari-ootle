@@ -30,7 +30,7 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_bor::{BorError, decode, decode_exact, encode};
+use tari_bor::{BorError, decode_exact_with_max_depth, decode_with_max_depth, encode};
 use tari_template_lib::types::{
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
@@ -57,6 +57,7 @@ use crate::{
     confidential::ClaimedOutputTombstone,
     confidential_output::ConfidentialOutput,
     hashing::{EngineHashDomainLabel, hasher32, substate_value_hasher32},
+    limits,
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
@@ -104,7 +105,7 @@ impl Substate {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BorError> {
-        decode(bytes)
+        decode_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)
     }
 
     pub fn to_value_hash(&self, network: Network, epoch: Epoch) -> Hash32 {
@@ -239,7 +240,7 @@ impl SubstateId {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BorError> {
-        decode_exact(bytes)
+        decode_exact_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)
     }
 
     pub fn to_object_key(&self) -> ObjectKey {
@@ -907,7 +908,7 @@ impl SubstateValue {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BorError> {
-        decode_exact(bytes)
+        decode_exact_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)
     }
 
     pub fn as_hash_message(&self, proto_version: ProtocolVersion) -> SubstateHashMessage<'_> {

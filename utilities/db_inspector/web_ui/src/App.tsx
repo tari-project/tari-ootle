@@ -1,13 +1,13 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import "./App.css";
 import { Route } from "react-router-dom";
-import Layout from "./theme/LayoutMain.tsx";
-import Home from "./routes/Home.tsx";
+import "./App.css";
 import ErrorPage from "./routes/ErrorPage.tsx";
-import ListColumnFamilies from "./routes/ListColumnFamilies.tsx";
+import Home from "./routes/Home.tsx";
 import InspectCf from "./routes/InspectCf.tsx";
+import ListColumnFamilies from "./routes/ListColumnFamilies.tsx";
+import Layout from "./theme/LayoutMain.tsx";
 
 function App() {
   return (

@@ -5,32 +5,48 @@ use axum_extra::{extract::CookieJar, headers::authorization::Bearer};
 use axum_jrpc::JsonRpcResponse;
 use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_ootle_walletd_client::types::{
-    WebauthnAlreadyRegisteredRequest,
-    WebauthnAlreadyRegisteredResponse,
-    WebauthnFinishRegisterRequest,
-    WebauthnFinishRegisterResponse,
-    WebauthnStartAuthRequest,
-    WebauthnStartAuthResponse,
-    WebauthnStartRegisterRequest,
-    WebauthnStartRegisterResponse,
+use tari_ootle_walletd_client::{
+    permissions::{Permission, Permissions},
+    types::{
+        WebauthnAlreadyRegisteredRequest,
+        WebauthnAlreadyRegisteredResponse,
+        WebauthnFinishRegisterRequest,
+        WebauthnFinishRegisterResponse,
+        WebauthnStartAuthRequest,
+        WebauthnStartAuthResponse,
+        WebauthnStartRegisterRequest,
+        WebauthnStartRegisterResponse,
+    },
 };
 use uuid::Uuid;
 use webauthn_rs::Webauthn;
 
 use crate::{
     handlers::{HandlerContext, auth::REFRESH_TOKEN_COOKIE, helpers::invalid_request},
-    services::WebauthnService,
+    services::{WebauthnService, WebauthnServiceError},
 };
 
-fn is_user_already_registered(context: &HandlerContext, username: &str) -> Result<bool, anyhow::Error> {
-    let is_registered = webauthn_service(context)?.is_user_registered(username)?;
-    Ok(is_registered)
+/// The permissions granted to the credential this wallet is enrolled with. Registration is
+/// unauthenticated — it is the path that brings the wallet's first credential into existence — so the
+/// set it mints is the daemon's to decide. A single-user wallet has exactly one owner, and the owner
+/// is an administrator of their own wallet.
+const BOOTSTRAP_PERMISSIONS: [Permission; 1] = [Permission::Admin];
+
+fn is_enrolled(context: &HandlerContext) -> Result<bool, anyhow::Error> {
+    Ok(webauthn_service(context)?.is_enrolled()?)
 }
 
-fn assert_user_not_registered(context: &HandlerContext, username: &str) -> Result<(), anyhow::Error> {
-    if is_user_already_registered(context, username)? {
-        return Err(invalid_request("User is already registered"));
+/// Reject enrolment once the wallet holds a credential. The wallet is single-user, so enrolment is a
+/// property of the wallet itself and must not turn on the username, which the caller chooses freely.
+///
+/// This is the early rejection. Two concurrent enrolments both pass it, so the boundary that decides
+/// the race is [`WebauthnService::finish_registration`], where the same check shares a transaction
+/// with the insert.
+fn assert_not_enrolled(context: &HandlerContext) -> Result<(), anyhow::Error> {
+    if is_enrolled(context)? {
+        return Err(invalid_request(
+            "This wallet is already enrolled. A new credential must be added from an authenticated session",
+        ));
     }
 
     Ok(())
@@ -48,13 +64,16 @@ fn webauthn_service(context: &HandlerContext) -> Result<&WebauthnService<SqliteW
         .ok_or_else(|| invalid_request("Webauthn is disabled for this wallet"))
 }
 
+/// Answer whether this wallet has been set up yet. The wallet is single-user, so the answer is
+/// wallet-level and the request's `username` is not consulted — an unauthenticated caller learns
+/// nothing about which usernames exist.
 pub async fn handle_already_registered(
     context: &HandlerContext,
     _token: Option<&Bearer>,
-    request: WebauthnAlreadyRegisteredRequest,
+    _request: WebauthnAlreadyRegisteredRequest,
 ) -> Result<WebauthnAlreadyRegisteredResponse, anyhow::Error> {
     webauthn(context)?;
-    let registered = is_user_already_registered(context, &request.username)?;
+    let registered = is_enrolled(context)?;
     Ok(WebauthnAlreadyRegisteredResponse { registered })
 }
 
@@ -64,7 +83,7 @@ pub async fn handle_start_registration(
     request: WebauthnStartRegisterRequest,
 ) -> Result<WebauthnStartRegisterResponse, anyhow::Error> {
     let webauthn = webauthn(context)?;
-    assert_user_not_registered(context, &request.username)?;
+    assert_not_enrolled(context)?;
     let (response, passkey_reg) = webauthn.start_passkey_registration(
         Uuid::new_v4(),
         request.username.as_str(),
@@ -91,14 +110,18 @@ pub async fn handle_finish_registration(
     let webauthn = webauthn(context)?;
     let webauthn_service = webauthn_service(context)?;
     let session_data = webauthn_service.get_session(&request.session_id).await?;
-    assert_user_not_registered(context, session_data.username())?;
+    assert_not_enrolled(context)?;
     let passkey = webauthn.finish_passkey_registration(&request.credential, session_data.passkey_reg())?;
     webauthn_service
         .finish_registration(request.session_id, passkey)
-        .await?;
+        .await
+        .map_err(|e| match e {
+            WebauthnServiceError::AlreadyEnrolled => invalid_request(e),
+            e => e.into(),
+        })?;
 
     let jwt = context.jwt_api();
-    let claims = jwt.generate_auth_claims(request.requested_permissions.into())?;
+    let claims = jwt.generate_auth_claims(Permissions::from(BOOTSTRAP_PERMISSIONS.to_vec()))?;
     let token = jwt.grant(&claims)?;
     let refresh_token = context
         .refresh_token_store()

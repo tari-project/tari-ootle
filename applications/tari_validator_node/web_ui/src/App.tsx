@@ -20,23 +20,23 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Routes, Route } from "react-router-dom";
-import Mempool from "./routes/Mempool/Mempool";
-import ValidatorNode from "./routes/VN/ValidatorNode";
-import Connections from "./routes/Connections/Connections";
-import Fees from "./routes/Fees/Fees";
-import Blocks from "./routes/Blocks/Blocks";
-import Diagnostics from "./routes/Diagnostics/Diagnostics";
-import ValidatorNodes from "./routes/ValidatorNodes/ValidatorNodes";
-import ErrorPage from "./routes/ErrorPage";
-import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
-import Layout from "./theme/LayoutMain";
-import CommitteeMembers from "./routes/Committees/CommitteeMembers";
-import { createContext, useState, useEffect } from "react";
-import { getEpochManagerStats, getIdentity, getShardKey } from "./utils/json_rpc";
-import TransactionDetails from "./routes/Transactions/TransactionDetails";
-import BlockDetails from "./routes/Blocks/BlockDetails";
 import type { GetEpochManagerStatsResponse, VNGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
+import { createContext, useEffect, useState } from "react";
+import { Route, Routes } from "react-router-dom";
+import BlockDetails from "./routes/Blocks/BlockDetails";
+import Blocks from "./routes/Blocks/Blocks";
+import CommitteeMembers from "./routes/Committees/CommitteeMembers";
+import Connections from "./routes/Connections/Connections";
+import Diagnostics from "./routes/Diagnostics/Diagnostics";
+import ErrorPage from "./routes/ErrorPage";
+import Fees from "./routes/Fees/Fees";
+import Mempool from "./routes/Mempool/Mempool";
+import TransactionDetails from "./routes/Transactions/TransactionDetails";
+import ValidatorNodes from "./routes/ValidatorNodes/ValidatorNodes";
+import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
+import ValidatorNode from "./routes/VN/ValidatorNode";
+import Layout from "./theme/LayoutMain";
+import { getEpochManagerStats, getIdentity, getShardKey } from "./utils/json_rpc";
 
 interface IContext {
   epoch?: GetEpochManagerStatsResponse;

@@ -1,26 +1,11 @@
 //  Copyright 2024 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-import {
-  Fragment,
-  ReactNode,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { describeError, swarmRpc } from "../api/rpc";
+import { CHUNK_BYTES, Chunk, MAX_SCAN_CHUNKS, formatBytes, trimBuffer } from "./logBuffer";
 import { LEVELS, Level, Line, TARGET_RE, TIME_RE, parse, toEntries } from "./logFormat";
-import {
-  CHUNK_BYTES,
-  Chunk,
-  MAX_SCAN_CHUNKS,
-  formatBytes,
-  trimBuffer,
-} from "./logBuffer";
 
 const FOLLOW_MS = 2000;
 /** Distance from the older end of the view at which the next chunk starts loading. */
@@ -164,8 +149,7 @@ export default function LogView() {
   );
 
   const countVisible = useCallback(
-    (candidates: Chunk[]) =>
-      candidates.reduce((total, chunk) => total + chunk.entries.filter(matches).length, 0),
+    (candidates: Chunk[]) => candidates.reduce((total, chunk) => total + chunk.entries.filter(matches).length, 0),
     [matches],
   );
 
@@ -227,10 +211,7 @@ export default function LogView() {
     [chunks],
   );
 
-  const visible = useMemo(
-    () => (entries === null ? [] : entries.filter(matches).flat()),
-    [entries, matches],
-  );
+  const visible = useMemo(() => (entries === null ? [] : entries.filter(matches).flat()), [entries, matches]);
 
   useLayoutEffect(() => {
     const el = view.current;
@@ -256,21 +237,13 @@ export default function LogView() {
   // Level filters can leave too few lines to fill the view, which would strand it with nothing to scroll.
   useEffect(() => {
     const el = view.current;
-    if (
-      el &&
-      !follow &&
-      !loadingOlder &&
-      !atStartOfFile &&
-      !scanExhausted &&
-      el.scrollHeight <= el.clientHeight
-    ) {
+    if (el && !follow && !loadingOlder && !atStartOfFile && !scanExhausted && el.scrollHeight <= el.clientHeight) {
       void loadOlder();
     }
   }, [visible, follow, loadingOlder, atStartOfFile, scanExhausted, loadOlder]);
 
   /** Bytes the buffer currently spans, which is what the filters have been applied to. */
-  const scannedBytes =
-    chunks && chunks.length ? chunks[0].end - chunks[chunks.length - 1].start : 0;
+  const scannedBytes = chunks && chunks.length ? chunks[0].end - chunks[chunks.length - 1].start : 0;
 
   const counts = useMemo(() => {
     const tally: Record<string, number> = {};
@@ -361,11 +334,7 @@ export default function LogView() {
         ))}
         {!error && visible.length > 0 && (
           <p className="logend">
-            {loadingOlder
-              ? "Loading older lines…"
-              : atStartOfFile
-                ? "Start of file"
-                : "Scroll down for older lines"}
+            {loadingOlder ? "Loading older lines…" : atStartOfFile ? "Start of file" : "Scroll down for older lines"}
           </p>
         )}
       </div>

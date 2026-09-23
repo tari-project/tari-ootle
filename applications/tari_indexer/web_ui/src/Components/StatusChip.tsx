@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Chip, Avatar } from "@mui/material";
-import { IoCheckmarkOutline, IoCloseOutline, IoWarningOutline } from "react-icons/io5";
+import { Avatar, Chip } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import type { Decision } from "@tari-project/ootle-ts-bindings";
-import {ReactNode} from "react";
+import { ReactNode } from "react";
+import { IoCheckmarkOutline, IoCloseOutline, IoWarningOutline } from "react-icons/io5";
 
 interface StatusChipProps {
   status: Decision;
@@ -40,59 +40,27 @@ const colorList: Record<string, string> = {
   Abort: "#DB7E7E",
 };
 
-export default function StatusChip({
-  status,
-  showTitle = true,
-  feeOnly = false,
-}: StatusChipProps) {
+export default function StatusChip({ status, showTitle = true, feeOnly = false }: StatusChipProps) {
   const theme = useTheme();
 
   const statusKey = feeOnly ? "PartialCommit" : typeof status === "string" ? status : "Abort";
-  const statusLabel = feeOnly
-    ? "Partial Commit"
-    : typeof status === "string"
-      ? status
-      : `Abort: ${status.Abort}`;
+  const statusLabel = feeOnly ? "Partial Commit" : typeof status === "string" ? status : `Abort: ${status.Abort}`;
 
   const iconList: Record<string, ReactNode> = {
-    Commit: (
-      <IoCheckmarkOutline
-        style={{ height: 14, width: 14 }}
-        color={theme.palette.background.paper}
-      />
-    ),
-    PartialCommit: (
-      <IoWarningOutline
-        style={{ height: 14, width: 14 }}
-        color={theme.palette.background.paper}
-      />
-    ),
-    Abort: (
-      <IoCloseOutline
-        style={{ height: 14, width: 14 }}
-        color={theme.palette.background.paper}
-      />
-    ),
-
+    Commit: <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
+    PartialCommit: <IoWarningOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
+    Abort: <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
   };
 
   let bgColor = colorList[statusKey];
   let background = null;
 
   if (!showTitle) {
-    return (
-      <Avatar sx={{ bgcolor: bgColor, height: 22, width: 22 }}>
-        {iconList[statusKey]}
-      </Avatar>
-    );
+    return <Avatar sx={{ bgcolor: bgColor, height: 22, width: 22 }}>{iconList[statusKey]}</Avatar>;
   } else {
     return (
       <Chip
-        avatar={
-          <Avatar sx={{ bgcolor: bgColor, background: background }}>
-            {iconList[statusKey]}
-          </Avatar>
-        }
+        avatar={<Avatar sx={{ bgcolor: bgColor, background: background }}>{iconList[statusKey]}</Avatar>}
         label={statusLabel}
         style={{
           color: colorList[statusKey],

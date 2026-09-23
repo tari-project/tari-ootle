@@ -36,11 +36,11 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
+import { useQueryClient } from "@tanstack/react-query";
 import type {
   IndexerGetTransactionResultRequest,
   ListRecentTransactionsResponse,
 } from "@tari-project/ootle-ts-bindings";
-import { useQueryClient } from "@tanstack/react-query";
 import { saveAs } from "file-saver";
 import { useState } from "react";
 import { useGetTransaction, useGetTransactionResult } from "../../../api/hooks/useTransactions";

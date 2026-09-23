@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_wallet_cli"
+publish = false
 description = "The Tari wallet CLI"
 version.workspace = true
 edition.workspace = true

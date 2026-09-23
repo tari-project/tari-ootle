@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Collapse } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
-import CopyToClipboard from "../../Components/CopyToClipboard";
-import { renderJson } from "../../utils/helpers";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockDialog from "../../Components/CodeBlock";
+import { Collapse, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import { Event, shortenString, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import CodeBlockDialog from "../../Components/CodeBlock";
+import CopyToClipboard from "../../Components/CopyToClipboard";
+import { AccordionIconButton, DataTableCell } from "../../Components/StyledComponents";
+import { renderJson } from "../../utils/helpers";
 
 function RowData({ substate_id, template_address, topic, payload }: Event) {
   const [open, setOpen] = useState(false);

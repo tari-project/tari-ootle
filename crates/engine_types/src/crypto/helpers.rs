@@ -16,9 +16,6 @@ use tari_template_lib::types::{Amount, crypto::SchnorrSignatureBytes};
 
 use crate::hashing::EngineSchnorrSignature;
 
-// TODO RistrettoSecretKey should provide a constant ZERO
-pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u8; 32]) };
-
 // Note that the BP-plus implementation currently does not support bit lengths over 64
 const BP_BIT_LENGTH: usize = u64::BITS as usize;
 

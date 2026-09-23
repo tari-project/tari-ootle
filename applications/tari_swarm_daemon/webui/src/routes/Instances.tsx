@@ -15,12 +15,7 @@ export default function Instances() {
     const needle = query.trim().toLowerCase();
     return swarm.instances
       .filter((i) => !runningOnly || i.is_running)
-      .filter(
-        (i) =>
-          !needle ||
-          i.name.toLowerCase().includes(needle) ||
-          i.instance_type.toLowerCase().includes(needle),
-      )
+      .filter((i) => !needle || i.name.toLowerCase().includes(needle) || i.instance_type.toLowerCase().includes(needle))
       .sort((a, b) => a.id - b.id);
   }, [swarm.instances, query, runningOnly]);
 
@@ -44,10 +39,7 @@ export default function Instances() {
               onChange={(e) => setQuery(e.target.value)}
               style={{ width: 220 }}
             />
-            <button
-              className={`btn sm${runningOnly ? " primary" : ""}`}
-              onClick={() => setRunningOnly(!runningOnly)}
-            >
+            <button className={`btn sm${runningOnly ? " primary" : ""}`} onClick={() => setRunningOnly(!runningOnly)}>
               Running only
             </button>
           </>

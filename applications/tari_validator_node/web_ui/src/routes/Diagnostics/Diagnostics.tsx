@@ -1,8 +1,6 @@
 //  Copyright 2026. The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -28,20 +26,22 @@ import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import type { DiagnosticEventRecord, DiagnosticLevel } from "@tari-project/ootle-ts-bindings";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  IoCheckmarkCircleOutline,
   IoChevronDown,
   IoChevronForward,
-  IoCheckmarkCircleOutline,
   IoRefresh,
   IoSearch,
   IoTrashOutline,
 } from "react-icons/io5";
-import type { DiagnosticEventRecord, DiagnosticLevel } from "@tari-project/ootle-ts-bindings";
+import { Link as RouterLink } from "react-router-dom";
+import CopyToClipboard from "../../Components/CopyToClipboard";
 import PageHeading from "../../Components/PageHeading";
 import { StyledPaper } from "../../Components/StyledComponents";
-import CopyToClipboard from "../../Components/CopyToClipboard";
-import { clearDiagnosticEvents, getDiagnosticEvents } from "../../utils/json_rpc";
 import theme from "../../theme/theme";
+import { clearDiagnosticEvents, getDiagnosticEvents } from "../../utils/json_rpc";
 import { LEVELS, LEVEL_ORDER, fieldLink, formatRelative, formatTimestamp, topicIcon } from "./DiagnosticsHelpers";
 
 const PAGE_SIZE = 50;

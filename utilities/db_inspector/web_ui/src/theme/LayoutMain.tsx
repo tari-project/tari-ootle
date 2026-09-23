@@ -20,25 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useMemo, useState } from "react";
-import { createTheme, styled } from "@mui/material/styles";
-import CssBaseline from "@mui/material/CssBaseline";
-import MuiDrawer from "@mui/material/Drawer";
-import Box from "@mui/material/Box";
-import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
-import Toolbar from "@mui/material/Toolbar";
-import List from "@mui/material/List";
-import IconButton from "@mui/material/IconButton";
 import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
-import MenuItems from "../components/MenuItems";
 import { ThemeProvider } from "@mui/material";
-import { Outlet } from "react-router-dom";
+import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
+import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
+import CssBaseline from "@mui/material/CssBaseline";
+import MuiDrawer from "@mui/material/Drawer";
 import Grid from "@mui/material/Grid";
+import IconButton from "@mui/material/IconButton";
+import List from "@mui/material/List";
+import { createTheme, styled } from "@mui/material/styles";
+import Toolbar from "@mui/material/Toolbar";
+import { useMemo, useState } from "react";
+import { Outlet } from "react-router-dom";
+import MenuItems from "../components/MenuItems";
 import useThemeStore from "../store/theme";
-import { componentSettings, dark, light } from "./theme";
 import { lightAlpha } from "./colors";
+import { componentSettings, dark, light } from "./theme";
 
 const drawerWidth = 300;
 
@@ -101,7 +101,7 @@ export default function Layout() {
   };
 
   const theme = useMemo(() => {
-    const themeOptions = (mode: string) => mode === "light" ? light : dark;
+    const themeOptions = (mode: string) => (mode === "light" ? light : dark);
     return createTheme({
       ...themeOptions(themeMode),
       ...componentSettings,
@@ -183,8 +183,7 @@ export default function Layout() {
                     alignItems: "center",
                     borderBottom: `1px solid ${theme.palette.divider}`,
                   }}
-                >
-                </div>
+                ></div>
               </Grid>
               <Outlet />
             </Grid>

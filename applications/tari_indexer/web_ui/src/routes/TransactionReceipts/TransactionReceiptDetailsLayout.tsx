@@ -1,9 +1,9 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
 import { useParams } from "react-router-dom";
+import PageHeading from "../../Components/PageHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
 import TransactionReceiptDetails from "./components/TransactionReceiptDetails";
 
 function TransactionReceiptDetailsLayout() {

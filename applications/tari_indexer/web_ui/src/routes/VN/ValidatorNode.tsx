@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import Grid from "@mui/material/Grid";
+import type { IndexerGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
-import Connections from "./Components/Connections";
-import Info from "./Components/Info";
+import SecondaryHeading from "../../Components/SecondaryHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
 import { getIdentity } from "../../utils/api";
 import RecentTransactions from "../RecentTransactions/components/RecentTransactions";
+import Connections from "./Components/Connections";
+import Info from "./Components/Info";
 import "./ValidatorNode.css";
-import { StyledPaper } from "../../Components/StyledComponents";
-import Grid from "@mui/material/Grid";
-import SecondaryHeading from "../../Components/SecondaryHeading";
-import type { IndexerGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
 
 function ValidatorNode() {
   const [identity, setIdentity] = useState<IndexerGetIdentityResponse>();

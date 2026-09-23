@@ -1,6 +1,7 @@
 //  Copyright 2026. The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
+import type { DiagnosticLevel } from "@tari-project/ootle-ts-bindings";
 import type { ReactNode } from "react";
 import {
   IoAlertCircle,
@@ -14,7 +15,6 @@ import {
   IoTime,
   IoWarning,
 } from "react-icons/io5";
-import type { DiagnosticLevel } from "@tari-project/ootle-ts-bindings";
 
 export interface LevelStyle {
   label: string;

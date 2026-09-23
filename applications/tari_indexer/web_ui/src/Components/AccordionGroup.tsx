@@ -20,33 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, {
-  useState,
-  Children,
-  cloneElement,
-  useCallback,
-  useRef,
-  useEffect,
-  useMemo,
-} from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
 import { styled } from "@mui/material/styles";
+import React, { Children, cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface AccordionGroupProps {
   children: React.ReactNode;
 }
 
 const StyledButton = styled(Button)(() => ({
-  minHeight: "30px",
-  boxShadow: "none",
-  textTransform: "none",
-  fontSize: "0.8rem",
-  fontWeight: 500,
-  fontFamily: '"AvenirMedium", sans-serif',
-  borderRadius: "32px",
-  padding: "6px 32px",
+  "minHeight": "30px",
+  "boxShadow": "none",
+  "textTransform": "none",
+  "fontSize": "0.8rem",
+  "fontWeight": 500,
+  "fontFamily": '"AvenirMedium", sans-serif',
+  "borderRadius": "32px",
+  "padding": "6px 32px",
   "&:hover": {
     boxShadow: "none",
   },
@@ -61,9 +53,7 @@ function AccordionGroup({ children }: AccordionGroupProps) {
 
   useEffect(() => {
     setAccordionStates(new Array(childrenArray.length).fill(false));
-    accordionStateCallbacks.current = new Array(childrenArray.length).fill(
-      null
-    );
+    accordionStateCallbacks.current = new Array(childrenArray.length).fill(null);
   }, [childrenArray.length]);
 
   const handleExpandAll = useCallback((event: React.MouseEvent) => {
@@ -76,16 +66,13 @@ function AccordionGroup({ children }: AccordionGroupProps) {
     setCollapseAllTrigger((prev) => prev + 1);
   }, []);
 
-  const updateAccordionState = useCallback(
-    (index: number, expanded: boolean) => {
-      setAccordionStates((prev) => {
-        const newStates = [...prev];
-        newStates[index] = expanded;
-        return newStates;
-      });
-    },
-    []
-  );
+  const updateAccordionState = useCallback((index: number, expanded: boolean) => {
+    setAccordionStates((prev) => {
+      const newStates = [...prev];
+      newStates[index] = expanded;
+      return newStates;
+    });
+  }, []);
 
   const allExpanded = accordionStates.every((state) => state);
   const allCollapsed = accordionStates.every((state) => !state);
@@ -96,8 +83,7 @@ function AccordionGroup({ children }: AccordionGroupProps) {
         return cloneElement(child, {
           expandAllTrigger,
           collapseAllTrigger,
-          onExpandedChange: (expanded: boolean) =>
-            updateAccordionState(index, expanded),
+          onExpandedChange: (expanded: boolean) => updateAccordionState(index, expanded),
         } as any);
       }
       return child;
@@ -106,26 +92,11 @@ function AccordionGroup({ children }: AccordionGroupProps) {
 
   return (
     <Box>
-      <Stack
-        direction="row"
-        justifyContent={"flex-end"}
-        spacing={1}
-        sx={{ marginBottom: 2 }}
-      >
-        <StyledButton
-          variant="outlined"
-          size="small"
-          onClick={handleExpandAll}
-          disabled={allExpanded}
-        >
+      <Stack direction="row" justifyContent={"flex-end"} spacing={1} sx={{ marginBottom: 2 }}>
+        <StyledButton variant="outlined" size="small" onClick={handleExpandAll} disabled={allExpanded}>
           Expand All
         </StyledButton>
-        <StyledButton
-          variant="outlined"
-          size="small"
-          onClick={handleCollapseAll}
-          disabled={allCollapsed}
-        >
+        <StyledButton variant="outlined" size="small" onClick={handleCollapseAll} disabled={allCollapsed}>
           Collapse All
         </StyledButton>
       </Stack>

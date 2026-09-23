@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_wallet_sdk_tests"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

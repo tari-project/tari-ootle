@@ -64,6 +64,23 @@ impl AccessRule {
             )
         })
     }
+
+    /// Returns the first [`RequireRule::MOfN`] whose threshold is zero or larger than its number of
+    /// requirements. A zero threshold admits every caller and an unreachable one admits none, so either one is a
+    /// miscomputed threshold rather than a rule anyone means to write.
+    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+        match self {
+            Self::AllowAll | Self::DenyAll => None,
+            Self::Restricted(rule) => rule.find_invalid_m_of_n(),
+        }
+    }
+}
+
+/// An `m_of_n` rule whose threshold `m` is zero or exceeds its `n` requirements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidMOfN {
+    pub threshold: u16,
+    pub num_requirements: usize,
 }
 
 /// An enum that represents the possible ways to restrict access to components or resources
@@ -107,6 +124,13 @@ impl RestrictedAccessRule {
             Self::AllOf(rules) => rules.iter().any(|rule| rule.contains_requirement(predicate)),
         }
     }
+
+    fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+        match self {
+            Self::Require(rule) => rule.find_invalid_m_of_n(),
+            Self::AnyOf(rules) | Self::AllOf(rules) => rules.iter().find_map(Self::find_invalid_m_of_n),
+        }
+    }
 }
 
 impl RequireRule {
@@ -116,6 +140,18 @@ impl RequireRule {
             Self::AnyOf(requirements) => requirements.iter().any(predicate),
             Self::AllOf(requirements) => requirements.iter().any(predicate),
             Self::MOfN(_, requirements) => requirements.iter().any(predicate),
+        }
+    }
+
+    fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+        match self {
+            Self::MOfN(threshold, requirements) if *threshold == 0 || usize::from(*threshold) > requirements.len() => {
+                Some(InvalidMOfN {
+                    threshold: *threshold,
+                    num_requirements: requirements.len(),
+                })
+            },
+            _ => None,
         }
     }
 }
@@ -310,7 +346,7 @@ pub struct ComponentAccessRules {
 impl ComponentAccessRules {
     /// Builds a new set of access rules for a component.
     /// By default, all methods of the component are inaccessible and must be explicitly allowed
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             method_access: BTreeMap::new(),
             default: AccessRule::DenyAll,
@@ -376,6 +412,14 @@ impl ComponentAccessRules {
             self.method_access
                 .values()
                 .any(AccessRule::contains_scoped_to_component_or_template)
+    }
+
+    /// Returns the first invalid `m_of_n` in the default rule or any method rule. See
+    /// [`AccessRule::find_invalid_m_of_n`].
+    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+        self.default
+            .find_invalid_m_of_n()
+            .or_else(|| self.method_access.values().find_map(AccessRule::find_invalid_m_of_n))
     }
 }
 
@@ -639,6 +683,59 @@ impl ResourceAccessRules {
             ResourceAuthAction::UpdateMetadata => &self.metadata_updater,
             ResourceAuthAction::Freeze => &self.freeze_updater,
         }
+    }
+
+    /// Returns the first invalid `m_of_n` in any access rule or updater rule. See
+    /// [`AccessRule::find_invalid_m_of_n`].
+    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+        // Destructured so that a rule added to the struct fails to compile here rather than going unchecked.
+        let Self {
+            mint,
+            mint_updater,
+            burn,
+            burn_updater,
+            recall,
+            recall_updater,
+            withdraw,
+            withdraw_updater,
+            deposit,
+            deposit_updater,
+            update_nft_data,
+            nft_data_updater,
+            freeze,
+            freeze_updater,
+            update_metadata,
+            metadata_updater,
+            auth_hook_updater,
+        } = self;
+
+        let updaters = [
+            mint_updater,
+            burn_updater,
+            recall_updater,
+            withdraw_updater,
+            deposit_updater,
+            nft_data_updater,
+            freeze_updater,
+            metadata_updater,
+            auth_hook_updater,
+        ];
+        [
+            mint,
+            burn,
+            recall,
+            withdraw,
+            deposit,
+            update_nft_data,
+            freeze,
+            update_metadata,
+        ]
+        .into_iter()
+        .chain(updaters.into_iter().filter_map(|updater| match updater {
+            UpdateRule::AccessRule(rule) => Some(rule),
+            UpdateRule::Locked | UpdateRule::Owner => None,
+        }))
+        .find_map(AccessRule::find_invalid_m_of_n)
     }
 
     /// Replaces the access rule for the specified action without changing its updater rule.
@@ -1236,5 +1333,33 @@ mod tests {
             .method_access
             .insert("foo".to_string(), rule!(component(address)));
         assert!(degenerate.contains_scoped_to_component_or_template());
+    }
+
+    #[test]
+    fn find_invalid_m_of_n_finds_a_nested_threshold_outside_one_to_n() {
+        let pk = RistrettoPublicKeyBytes::default();
+        let invalid = |threshold, num_requirements| {
+            Some(InvalidMOfN {
+                threshold,
+                num_requirements,
+            })
+        };
+
+        assert_eq!(rule!(m_of_n(1, public_key(pk))).find_invalid_m_of_n(), None);
+        assert_eq!(
+            rule!(m_of_n(2, public_key(pk), public_key(pk))).find_invalid_m_of_n(),
+            None
+        );
+        assert_eq!(rule!(m_of_n(0, public_key(pk))).find_invalid_m_of_n(), invalid(0, 1));
+        assert_eq!(
+            rule!(m_of_n(3, public_key(pk), public_key(pk))).find_invalid_m_of_n(),
+            invalid(3, 2)
+        );
+
+        let nested = rule!(public_key(pk)).and(rule!(m_of_n(0, public_key(pk))).or(rule!(public_key(pk))));
+        assert_eq!(nested.find_invalid_m_of_n(), invalid(0, 1));
+
+        let resource_rules = ResourceAccessRules::new().burnable(AccessRule::DenyAll, rule!(m_of_n(2, public_key(pk))));
+        assert_eq!(resource_rules.find_invalid_m_of_n(), invalid(2, 1));
     }
 }

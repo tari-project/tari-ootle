@@ -20,7 +20,9 @@ pub use cache::{
 };
 
 mod bulk_metering;
+mod engine_config;
 mod metering;
+mod module_shape;
 mod process;
 
 pub use process::WasmProcess;

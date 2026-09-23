@@ -1,5 +1,6 @@
 [package]
 name = "tari_indexer_lib"
+publish = false
 description = "Network scanning and indexing library"
 version.workspace = true
 edition.workspace = true

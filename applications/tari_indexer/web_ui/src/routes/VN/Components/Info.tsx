@@ -20,14 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import "./Info.css";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableRow from "@mui/material/TableRow";
-import { DataTableCell } from "../../../Components/StyledComponents";
 import type { IndexerGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
+import { DataTableCell } from "../../../Components/StyledComponents";
+import "./Info.css";
 
 function Info({ identity }: { identity: IndexerGetIdentityResponse }) {
   return (
@@ -41,9 +41,7 @@ function Info({ identity }: { identity: IndexerGetIdentityResponse }) {
             </TableRow>
             <TableRow>
               <TableCell>Listen addresses</TableCell>
-              <DataTableCell>
-                {identity.public_addresses?.join(", ")}
-              </DataTableCell>
+              <DataTableCell>{identity.public_addresses?.join(", ")}</DataTableCell>
             </TableRow>
             <TableRow>
               <TableCell>Public key</TableCell>

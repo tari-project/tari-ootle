@@ -36,8 +36,8 @@ const useThemeStore = create<Store>()(
     }),
     {
       name: "tari-theme",
-    }
-  )
+    },
+  ),
 );
 
 export default useThemeStore;

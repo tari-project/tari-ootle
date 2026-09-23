@@ -205,9 +205,11 @@ fn check_require_rule<TStore: StateReader>(
             Ok(true)
         },
         RequireRule::MOfN(n, requirements) => {
-            // 0-of-N is vacuously satisfied: no requirements need to be met
+            // The engine rejects a threshold of zero or above `requirements.len()` wherever it stores a rule. A stealth
+            // output commits only to a hash of its spend conditions, so its rules are first seen here and an invalid
+            // threshold must fail closed.
             if *n == 0 {
-                return Ok(true);
+                return Ok(false);
             }
             let mut satisfied = 0u16;
             for requirement in requirements {

@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState, useEffect, useContext } from "react";
-import { useParams } from "react-router-dom";
-import { getCommittee } from "../../utils/json_rpc";
 import { Grid } from "@mui/material";
-import { StyledPaper } from "../../Components/StyledComponents";
-import PageHeading from "../../Components/PageHeading";
-import Committee from "./CommitteeSingle";
-import { VNContext } from "../../App";
 import { CommitteeMember } from "@tari-project/ootle-ts-bindings";
+import { useContext, useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { VNContext } from "../../App";
+import PageHeading from "../../Components/PageHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
+import { getCommittee } from "../../utils/json_rpc";
+import Committee from "./CommitteeSingle";
 
 async function getMembers(currentEpoch: number, shardKey: string, publicKey: string) {
   const committee = await getCommittee({ epoch: currentEpoch, substate_address: shardKey });

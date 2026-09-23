@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 import { useQuery } from "@tanstack/react-query";
 import type { TransactionReceiptAddress } from "@tari-project/ootle-ts-bindings";
-import { listTransactionReceipts, getTransactionReceipt } from "../../utils/api";
+import { getTransactionReceipt, listTransactionReceipts } from "../../utils/api";
 
 export const useListTransactionReceipts = (limit: number) => {
   return useQuery({

@@ -258,9 +258,8 @@ def report_downstream(tag: str) -> None:
         print(f"  {mark(MISSING)} ootle-py   — vendors ootle-wasm {upstream or '?'}, release has {version}")
         print(f"      make update-wasm WASM_VERSION={version}, then PR + tag (PyPI publishes on the tag)")
 
-    print(f"\n{BOLD}Testnet infra (manual){NC}")
-    print(f"  · devops ansible/group_vars/ootle_esmeralda.yaml: tari_ootle_image_tag: {tag}")
-    print("  · ansible-playbook ootle.yaml, then confirm the fleet is on the new binary")
+    print(f"\n{BOLD}Deploy (manual){NC}")
+    print("  · ready to deploy — confirm your nodes are on the new binary afterwards")
     print("  See checklists/release.md for the order and the gates between them.")
 
 

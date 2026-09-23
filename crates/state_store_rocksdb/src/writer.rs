@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{cmp, collections::HashSet, iter, ops::Deref, time::Instant};
+use std::{collections::HashSet, iter, ops::Deref, time::Instant};
 
 use indexmap::IndexMap;
 use log::*;
@@ -82,7 +82,6 @@ use tari_ootle_storage::{
         TransactionPoolStage,
         TransactionPoolStatusUpdate,
         TransactionRecord,
-        ValidatorConsensusStats,
         ValidatorStatsUpdate,
         VoteEquivocation,
     },
@@ -152,6 +151,7 @@ use crate::{
         transaction_pool::TransactionPoolCf,
         transaction_pool_state_update,
         transaction_pool_state_update::{TransactionPoolStateUpdateCf, TransactionPoolStateUpdateData},
+        validator_liveness_log::{self, ValidatorLivenessLogCf},
         validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
         vote_equivocation,
     },
@@ -1685,37 +1685,24 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn validator_epoch_stats_updates<'a, I: IntoIterator<Item = ValidatorStatsUpdate<'a>>>(
         &mut self,
         epoch: Epoch,
+        committed_height: NodeHeight,
         updates: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "validator_epoch_stats_updates";
 
         let cf = self.db().cf(ValidatorNodeEpochStatsCf)?;
+        let log_cf = self.db().cf(ValidatorLivenessLogCf)?;
         for update in updates {
-            let existing = cf.get(&(epoch, *update.public_key()), OPERATION).optional()?;
-
-            match existing {
-                Some(mut existing) => match update.missed_proposal_change() {
-                    Some(0) => {
-                        existing.participation_shares += update.participation_shares_increment();
-                        existing.missed_proposals = 0;
-                        cf.put(&(epoch, *update.public_key()), &existing, OPERATION)?;
-                    },
-                    Some(n) => {
-                        // NOTE: n can be negative
-                        existing.participation_shares += update.participation_shares_increment();
-                        existing.missed_proposals = cmp::max(existing.missed_proposals as i64 + n, 0) as u64;
-                        cf.put(&(epoch, *update.public_key()), &existing, OPERATION)?;
-                    },
-                    None => {},
-                },
-                None => {
-                    let leader_failure_inc = update.missed_proposal_change().map_or(0i64, |set| set.max(0));
-                    let rec = ValidatorConsensusStats {
-                        participation_shares: update.participation_shares_increment(),
-                        missed_proposals: leader_failure_inc as u64,
-                    };
-                    cf.put(&(epoch, *update.public_key()), &rec, OPERATION)?;
-                },
+            let key = (epoch, *update.public_key());
+            let mut stats = cf.get(&key, OPERATION).optional()?.unwrap_or_default();
+            let liveness_changed = stats.apply(&update, committed_height);
+            cf.put(&key, &stats, OPERATION)?;
+            if liveness_changed {
+                log_cf.put(
+                    &(epoch, *update.public_key(), committed_height),
+                    &stats.counters(),
+                    OPERATION,
+                )?;
             }
         }
 
@@ -1741,6 +1728,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         cleanup::cleanup_blocks_for_epoch(&db, prune_epoch)?;
         cleanup::cleanup_qcs_for_epoch(&db, prune_epoch)?;
         cleanup::vote_equivocations_for_epoch(&db, prune_epoch)?;
+        cleanup::validator_liveness_log_for_epoch(&db, prune_epoch)?;
         cleanup::foreign_proposals_for_epoch(&db, prune_epoch)?;
         if self.options.prune_transaction_history {
             cleanup::cleanup_finalized_transactions_for_epoch(&db, prune_epoch)?;
@@ -1964,6 +1952,32 @@ mod cleanup {
             count,
             up_to_epoch
         );
+
+        Ok(())
+    }
+
+    /// The log answers for heights of the epoch it belongs to, so it lives exactly as long as that
+    /// epoch's blocks.
+    pub fn validator_liveness_log_for_epoch(db: &DbWriteContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+        const OPERATION: &str = "cleanup::validator_liveness_log_for_epoch";
+        let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
+
+        let cf = db.cf(validator_liveness_log::ValidatorLivenessLogCf)?;
+        let mut count = 0usize;
+        for key in db
+            .cf(validator_liveness_log::ByEpochQuery)?
+            .query_range_key_iterator(Ordering::Ascending, Epoch::zero()..up_to_epoch)
+        {
+            cf.delete(&key?, OPERATION)?;
+            count += 1;
+        }
+
+        if count > 0 {
+            info!(
+                target: LOG_TARGET,
+                "🗑️ Pruned {count} validator liveness log entries up to epoch {}", up_to_epoch - Epoch(1),
+            );
+        }
 
         Ok(())
     }

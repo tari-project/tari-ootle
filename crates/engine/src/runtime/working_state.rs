@@ -598,7 +598,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             .into());
         }
 
-        for (vault_id, vault) in self.store.new_vaults() {
+        for (vault_id, vault) in self.store.new_vaults()? {
             // A confidential vault's locked value is a set of commitments whose amounts are hidden, so the locked
             // balance alone reports zero for it.
             if vault.has_locked_funds() {
@@ -1565,8 +1565,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
         IdProvider::new(entity_id, self.transaction_hash, &mut self.object_ids)
     }
 
-    pub fn new_bucket_id(&mut self) -> BucketId {
-        self.object_ids.next_bucket_id()
+    pub fn new_bucket_id(&mut self) -> Result<BucketId, RuntimeError> {
+        Ok(self.object_ids.next_bucket_id()?)
     }
 
     /// Returns the component that is currently in scope (if any)

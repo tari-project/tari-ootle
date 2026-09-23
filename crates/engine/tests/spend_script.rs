@@ -29,6 +29,7 @@ use tari_template_lib::types::{
     bytes::Bytes,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::{NoSignatureDomain, PublicKey, RistrettoPublicKeyBytes, Signature},
+    rule,
     stealth::{BuiltinPredicate, Covenant, HashAlg, MerkleProof, SpendCondition, SpendWitness, TemplateFunction},
 };
 use tari_template_test_tooling::{
@@ -200,6 +201,26 @@ fn script_path_access_rule_leaf_denies_spend() {
     let (resx, mint) = mint_utxo(
         &mut test,
         conditions(vec![SpendCondition::access_rule(AccessRule::DenyAll)]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Access Denied");
+}
+
+#[test]
+fn script_path_zero_of_n_access_rule_leaf_denies_spend() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let signer = test.to_public_key_bytes();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        conditions(vec![SpendCondition::access_rule(rule!(m_of_n(0, public_key(signer))))]),
     );
 
     let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));

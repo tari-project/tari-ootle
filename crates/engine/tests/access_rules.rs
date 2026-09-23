@@ -336,6 +336,361 @@ mod component_access_rules {
     }
 }
 
+mod component_owner_rule {
+    use ootle_byte_type::ToByteType;
+    use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+    use tari_engine_types::{commit_result::RejectReason, substate::SubstateId};
+    use tari_template_lib::types::{NonFungibleAddress, SubstateOwnerRule};
+
+    use super::*;
+
+    struct Owner {
+        proof: NonFungibleAddress,
+        public_key: RistrettoPublicKey,
+        secret_key: RistrettoSecretKey,
+    }
+
+    impl Owner {
+        fn new(test: &mut TemplateTest) -> Self {
+            let (proof, public_key, secret_key) = test.create_owner_proof();
+            Self {
+                proof,
+                public_key,
+                secret_key,
+            }
+        }
+
+        fn as_owner_rule(&self) -> SubstateOwnerRule {
+            SubstateOwnerRule::ByPublicKey(self.public_key.to_byte_type())
+        }
+    }
+
+    /// Creates a component owned by `owner` whose methods anyone may call, so only the owner rule gates the
+    /// component actions under test.
+    fn create_component(test: &mut TemplateTest, owner: &Owner) -> ComponentAddress {
+        let template = test.get_template_address("AccessRulesTest");
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new(),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner.secret_key),
+            vec![owner.proof.clone()],
+        );
+        result.finalize.execution_results[0]
+            .decode::<ComponentAddress>()
+            .unwrap()
+    }
+
+    fn set_owner_rule(caller: &Owner, component: ComponentAddress, owner_rule: SubstateOwnerRule) -> Transaction {
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(component, "set_component_owner_rule", args![owner_rule])
+            .build_and_seal(&caller.secret_key)
+    }
+
+    fn set_access_rules(caller: &Owner, component: ComponentAddress) -> Transaction {
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(component, "set_component_access_rules", args![
+                ComponentAccessRules::new().default(AccessRule::AllowAll)
+            ])
+            .build_and_seal(&caller.secret_key)
+    }
+
+    fn succeeds(test: &mut TemplateTest, caller: &Owner, transaction: Transaction) {
+        test.execute_expect_success(transaction, vec![caller.proof.clone()]);
+    }
+
+    fn fails(test: &mut TemplateTest, caller: &Owner, transaction: Transaction) -> RejectReason {
+        test.execute_expect_failure(transaction, vec![caller.proof.clone()])
+    }
+
+    fn owner_rule_of(test: &TemplateTest, component: ComponentAddress) -> SubstateOwnerRule {
+        test.read_only_state_store()
+            .get_substate(&SubstateId::Component(component))
+            .unwrap()
+            .substate_value()
+            .component()
+            .unwrap()
+            .owner_rule()
+            .clone()
+    }
+
+    fn version_of(test: &TemplateTest, component: ComponentAddress) -> u32 {
+        test.read_only_state_store()
+            .get_substate(&SubstateId::Component(component))
+            .unwrap()
+            .version()
+    }
+
+    fn owner_required() -> RuntimeError {
+        RuntimeError::AccessDeniedOwnerRequired {
+            action: ComponentAction::SetOwnerRule.into(),
+        }
+    }
+
+    #[test]
+    fn the_owner_can_set_the_owner_rule_and_a_non_owner_cannot() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let owner = Owner::new(&mut test);
+        let stranger = Owner::new(&mut test);
+        let component = create_component(&mut test, &owner);
+
+        let reason = fails(
+            &mut test,
+            &stranger,
+            set_owner_rule(&stranger, component, stranger.as_owner_rule()),
+        );
+        assert_reject_reason(reason, owner_required());
+        assert_eq!(owner_rule_of(&test, component), owner.as_owner_rule());
+
+        let council = SubstateOwnerRule::ByAccessRule(rule!(any_of(
+            non_fungible(owner.proof.clone()),
+            non_fungible(stranger.proof.clone())
+        )));
+        succeeds(&mut test, &owner, set_owner_rule(&owner, component, council.clone()));
+        assert_eq!(owner_rule_of(&test, component), council);
+    }
+
+    #[test]
+    fn handing_over_ownership_locks_out_the_previous_owner() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let outgoing = Owner::new(&mut test);
+        let incoming = Owner::new(&mut test);
+        let component = create_component(&mut test, &outgoing);
+
+        succeeds(
+            &mut test,
+            &outgoing,
+            set_owner_rule(&outgoing, component, incoming.as_owner_rule()),
+        );
+
+        let reason = fails(&mut test, &outgoing, set_access_rules(&outgoing, component));
+        assert_reject_reason(reason, RuntimeError::AccessDeniedOwnerRequired {
+            action: ComponentAction::SetAccessRules.into(),
+        });
+        let reason = fails(
+            &mut test,
+            &outgoing,
+            set_owner_rule(&outgoing, component, outgoing.as_owner_rule()),
+        );
+        assert_reject_reason(reason, owner_required());
+
+        succeeds(&mut test, &incoming, set_access_rules(&incoming, component));
+        succeeds(
+            &mut test,
+            &incoming,
+            set_owner_rule(&incoming, component, outgoing.as_owner_rule()),
+        );
+        assert_eq!(owner_rule_of(&test, component), outgoing.as_owner_rule());
+    }
+
+    #[test]
+    fn an_owner_rule_of_none_is_final() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let owner = Owner::new(&mut test);
+        let component = create_component(&mut test, &owner);
+
+        succeeds(
+            &mut test,
+            &owner,
+            set_owner_rule(&owner, component, SubstateOwnerRule::None),
+        );
+
+        let reason = fails(
+            &mut test,
+            &owner,
+            set_owner_rule(&owner, component, owner.as_owner_rule()),
+        );
+        assert_reject_reason(reason, owner_required());
+        let reason = fails(&mut test, &owner, set_access_rules(&owner, component));
+        assert_reject_reason(reason, RuntimeError::AccessDeniedOwnerRequired {
+            action: ComponentAction::SetAccessRules.into(),
+        });
+        assert_eq!(owner_rule_of(&test, component), SubstateOwnerRule::None);
+    }
+
+    #[test]
+    fn get_owner_proof_sees_an_owner_rule_set_earlier_in_the_transaction() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let outgoing = Owner::new(&mut test);
+        let incoming = Owner::new(&mut test);
+        let component = create_component(&mut test, &outgoing);
+
+        let reason = fails(
+            &mut test,
+            &outgoing,
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component, "set_component_owner_rule_then_get_owner_proof", args![
+                    incoming.as_owner_rule()
+                ])
+                .build_and_seal(&outgoing.secret_key),
+        );
+        assert_reject_reason(reason, RuntimeError::SignerBadgeNotInScope {
+            public_key: incoming.public_key.to_byte_type(),
+        });
+    }
+
+    #[test]
+    fn setting_the_current_owner_rule_leaves_the_component_unchanged() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let owner = Owner::new(&mut test);
+        let component = create_component(&mut test, &owner);
+        let version = version_of(&test, component);
+
+        succeeds(
+            &mut test,
+            &owner,
+            set_owner_rule(&owner, component, owner.as_owner_rule()),
+        );
+
+        assert_eq!(version_of(&test, component), version);
+    }
+
+    #[test]
+    fn an_owner_rule_scoped_to_a_component_is_rejected() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let owner = Owner::new(&mut test);
+        let component = create_component(&mut test, &owner);
+
+        let scoped = SubstateOwnerRule::ByAccessRule(AccessRule::Restricted(RestrictedAccessRule::Require(
+            RequireRule::Require(RuleRequirement::ScopedToComponent(component)),
+        )));
+        let reason = fails(&mut test, &owner, set_owner_rule(&owner, component, scoped));
+        assert_reject_reason(reason, RuntimeError::InvalidArgument {
+            argument: "owner_rule",
+            reason: "component(..)/template(..) cannot be used in a component owner rule".to_string(),
+        });
+        assert_eq!(owner_rule_of(&test, component), owner.as_owner_rule());
+    }
+}
+
+mod m_of_n_threshold {
+    use tari_template_lib::types::{NonFungibleAddress, SubstateOwnerRule};
+
+    use super::*;
+
+    fn invalid_threshold(argument: &'static str, threshold: u16, num_requirements: usize) -> RuntimeError {
+        RuntimeError::InvalidMOfNThreshold {
+            argument,
+            threshold,
+            num_requirements,
+        }
+    }
+
+    fn signer_badge(test: &TemplateTest) -> NonFungibleAddress {
+        NonFungibleAddress::from_public_key(test.to_public_key_bytes())
+    }
+
+    fn zero_of_one(badge: &NonFungibleAddress) -> AccessRule {
+        rule!(m_of_n(0, non_fungible(badge.clone())))
+    }
+
+    fn two_of_one(badge: &NonFungibleAddress) -> AccessRule {
+        rule!(m_of_n(2, non_fungible(badge.clone())))
+    }
+
+    fn create_component(
+        test: &TemplateTest,
+        owner_rule: OwnerRule,
+        component_rules: ComponentAccessRules,
+        resource_rules: ResourceAccessRules,
+    ) -> Transaction {
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(
+                test.get_template_address("AccessRulesTest"),
+                "with_configured_rules",
+                args![owner_rule, component_rules, resource_rules, AccessRule::DenyAll,],
+            )
+            .build_and_seal(test.secret_key())
+    }
+
+    #[test]
+    fn creating_a_component_or_resource_with_an_invalid_threshold_is_rejected() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let badge = signer_badge(&test);
+
+        let component_rule = create_component(
+            &test,
+            OwnerRule::OwnedBySigner,
+            ComponentAccessRules::new().default(zero_of_one(&badge)),
+            ResourceAccessRules::new(),
+        );
+        let resource_updater = create_component(
+            &test,
+            OwnerRule::OwnedBySigner,
+            ComponentAccessRules::new(),
+            ResourceAccessRules::new().set_auth_hook_updater(two_of_one(&badge)),
+        );
+        let nested_owner_rule = create_component(
+            &test,
+            OwnerRule::ByAccessRule(rule!(resource(TARI_TOKEN)).or(zero_of_one(&badge))),
+            ComponentAccessRules::new(),
+            ResourceAccessRules::new(),
+        );
+
+        let reason = test.execute_expect_failure(component_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, invalid_threshold("access_rules", 0, 1));
+        let reason = test.execute_expect_failure(resource_updater, vec![badge.clone()]);
+        assert_reject_reason(reason, invalid_threshold("resource_access_rules", 2, 1));
+        let component_owner_rule = Transaction::builder_localnet(Epoch(1))
+            .call_function(
+                test.get_template_address("AccessRulesTest"),
+                "with_component_owner_rule",
+                args![OwnerRule::ByAccessRule(two_of_one(&badge))],
+            )
+            .build_and_seal(test.secret_key());
+
+        let reason = test.execute_expect_failure(nested_owner_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, invalid_threshold("resource_owner_rule", 0, 1));
+        let reason = test.execute_expect_failure(component_owner_rule, vec![badge]);
+        assert_reject_reason(reason, invalid_threshold("owner_rule", 2, 1));
+    }
+
+    #[test]
+    fn changing_a_rule_to_an_invalid_threshold_is_rejected() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let badge = signer_badge(&test);
+        let result = test.execute_expect_success(
+            create_component(
+                &test,
+                OwnerRule::OwnedBySigner,
+                ComponentAccessRules::new().default(AccessRule::AllowAll),
+                ResourceAccessRules::new().mintable(AccessRule::DenyAll, UpdateRule::Owner),
+            ),
+            vec![badge.clone()],
+        );
+        let component = result.finalize.execution_results[0]
+            .decode::<ComponentAddress>()
+            .unwrap();
+
+        let call = |method: &str, args| {
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component, method, args)
+                .build_and_seal(test.secret_key())
+        };
+        let set_owner_rule = call("set_component_owner_rule", args![SubstateOwnerRule::ByAccessRule(
+            zero_of_one(&badge)
+        )]);
+        let set_access_rules = call("set_component_access_rules", args![
+            ComponentAccessRules::new().method("set_value", two_of_one(&badge))
+        ]);
+        let update_resource_rule = call("update_tokens_access_rule", args![
+            ResourceAuthAction::Mint,
+            zero_of_one(&badge)
+        ]);
+
+        let reason = test.execute_expect_failure(set_owner_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, invalid_threshold("owner_rule", 0, 1));
+        let reason = test.execute_expect_failure(set_access_rules, vec![badge.clone()]);
+        assert_reject_reason(reason, invalid_threshold("access_rules", 2, 1));
+        let reason = test.execute_expect_failure(update_resource_rule, vec![badge]);
+        assert_reject_reason(reason, invalid_threshold("new_rule", 0, 1));
+    }
+}
+
 mod resource_access_rules {
     use tari_engine::runtime::NativeAction;
     use tari_template_lib::{invoke_args, types::Amount};

@@ -97,6 +97,8 @@ pub enum ComponentAction {
     GetTemplateAddress,
     #[n(5)]
     GetOwnerProof,
+    #[n(6)]
+    SetOwnerRule,
 }
 
 /// Encapsulates all the ways that a component can be referenced

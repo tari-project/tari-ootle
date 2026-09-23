@@ -1,5 +1,6 @@
 [package]
 name = "tari_rpc_macros"
+publish = false
 description = "RPC service proc macro"
 version.workspace = true
 edition.workspace = true

@@ -24,15 +24,23 @@ import { Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow 
 import type { LogEntry } from "@tari-project/ootle-ts-bindings";
 import { DataTableCell } from "../../../Components/StyledComponents";
 
-function getLogLevelColor(level: string): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
+function getLogLevelColor(
+  level: string,
+): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
   switch (level.toLowerCase()) {
-    case "error": return "error";
+    case "error":
+      return "error";
     case "warn":
-    case "warning": return "warning";
-    case "info": return "info";
-    case "debug": return "secondary";
-    case "trace": return "default";
-    default: return "primary";
+    case "warning":
+      return "warning";
+    case "info":
+      return "info";
+    case "debug":
+      return "secondary";
+    case "trace":
+      return "default";
+    default:
+      return "primary";
   }
 }
 

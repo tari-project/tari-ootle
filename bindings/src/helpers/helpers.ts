@@ -6,7 +6,6 @@ import { RejectReason } from "../types/RejectReason";
 import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
-import { NonFungibleId } from "../types/NonFungibleId";
 
 // TODO: this function should be deprecated
 export function substateIdToString(substateId: SubstateId | string | null | undefined): string {

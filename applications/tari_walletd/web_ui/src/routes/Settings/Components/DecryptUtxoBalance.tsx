@@ -34,6 +34,8 @@ import {
 import { stealthDecryptUtxoBalance } from "@utils/json_rpc";
 import { useState } from "react";
 
+import SearchedRange from "./SearchedRange";
+
 const KEY_BRANCHES: KeyBranch[] = [
   "account",
   "transaction",
@@ -78,6 +80,8 @@ function DecryptUtxoBalanceForm() {
         </Box>
       );
     });
+
+  const searched = balance && <SearchedRange searched={balance.searched} />;
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormState({
@@ -152,6 +156,7 @@ function DecryptUtxoBalanceForm() {
           Decrypt
         </Button>
       </Box>
+      {searched}
       {balances && (
         <>
           <Typography variant="h3">Balances</Typography>

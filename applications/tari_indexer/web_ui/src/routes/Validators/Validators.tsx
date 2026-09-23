@@ -1,7 +1,6 @@
 //  Copyright 2026. The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -16,11 +15,12 @@ import type {
   ValidatorInfo,
   ValidatorStatus,
 } from "@tari-project/ootle-ts-bindings";
-import PageHeading from "../../Components/PageHeading";
-import {StyledPaper} from "../../Components/StyledComponents";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CopyToClipboard from "../../Components/CopyToClipboard";
-import {shortenString} from "../VN/Components/helpers";
-import {getNetworkStats, listValidators} from "../../utils/api";
+import PageHeading from "../../Components/PageHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
+import { getNetworkStats, listValidators } from "../../utils/api";
+import { shortenString } from "../VN/Components/helpers";
 
 const REFRESH_INTERVAL_MS = 5000;
 
@@ -247,9 +247,9 @@ function Validators() {
       </Grid>
       <Grid size={12}>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          The full validator roster for the current epoch as tracked by the epoch manager. The indexer also
-          periodically syncs state from random validators and records their self-reported (unverified) consensus
-          status; where a snapshot exists for a validator, its last known status and the snapshot age are shown.
+          The full validator roster for the current epoch as tracked by the epoch manager. The indexer also periodically
+          syncs state from random validators and records their self-reported (unverified) consensus status; where a
+          snapshot exists for a validator, its last known status and the snapshot age are shown.
         </Typography>
       </Grid>
       <Grid size={12}>

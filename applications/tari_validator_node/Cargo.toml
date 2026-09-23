@@ -1,5 +1,6 @@
 [package]
 name = "tari_validator_node"
+publish = false
 description = "The Tari validator node implementation"
 version.workspace = true
 edition.workspace = true

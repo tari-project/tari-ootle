@@ -66,7 +66,10 @@ pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a UnspentOutput>>(
         ));
     }
 
-    let public_statement = RistrettoAggregatedPublicStatement::init(statements).unwrap();
+    // `init` rejects exactly one thing: a statement count that is not a power of two. The padding above is
+    // what establishes that count.
+    let public_statement = RistrettoAggregatedPublicStatement::init(statements)
+        .map_err(|e| ResourceError::InvariantError(format!("range proof statement set: {e}")))?;
 
     let proofs = vec![range_proof.as_ref()];
     get_static_range_proof_service(agg_factor)

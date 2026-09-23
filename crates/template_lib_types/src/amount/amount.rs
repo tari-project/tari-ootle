@@ -189,6 +189,14 @@ impl Amount {
         }
     }
 
+    /// Returns the remainder of dividing two amounts, returning `None` if the divisor is zero.
+    pub const fn checked_rem(&self, other: Self) -> Option<Self> {
+        match self.into_inner_value().checked_rem(other.into_inner_value()) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
     /// Returns the quotient of two amounts, returning `None` if the divisor is zero or if the result overflows.
     pub const fn checked_div_ceil(&self, other: Self) -> Option<Self> {
         if other.is_zero() {
@@ -211,7 +219,10 @@ impl Amount {
             Some(Self(div))
         } else {
             // Otherwise, we round up
-            Some(Self(div + 1))
+            match div.checked_add(1) {
+                Some(value) => Some(Self(value)),
+                None => None,
+            }
         }
     }
 
@@ -317,8 +328,14 @@ impl Amount {
     }
 
     /// Returns the amount raised to the power of `exp`.
+    ///
+    /// # Panics
+    /// If the result overflows.
     pub const fn pow(&self, exp: u32) -> Self {
-        Self(self.into_inner_value().pow(exp))
+        match self.checked_pow(exp) {
+            Some(value) => value,
+            None => panic!("attempt to multiply with overflow"),
+        }
     }
 
     /// Returns the amount raised to the power of `exp`, returning `None` if the result overflows.
@@ -517,7 +534,7 @@ mod borsh_impl {
 
 impl Sum for Amount {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        Self(iter.map(|a| a.into_inner_value()).sum())
+        iter.fold(Self::ZERO, |acc, amount| acc + amount)
     }
 }
 
@@ -539,6 +556,62 @@ mod tests {
         assert_eq!(e, 24i64);
         let f = b / a;
         assert_eq!(f, 1i64);
+    }
+
+    /// The operators must reject an unrepresentable result on their own rather than leaning on the
+    /// `overflow-checks` profile flag, which does not travel with the published crate or with a template
+    /// author's own build.
+    mod operators_reject_unrepresentable_results {
+        use super::*;
+
+        #[test]
+        #[should_panic(expected = "attempt to add with overflow")]
+        fn add() {
+            let _ = Amount::MAX + Amount::ONE;
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to subtract with overflow")]
+        fn sub() {
+            let _ = Amount::ZERO - Amount::ONE;
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to multiply with overflow")]
+        fn mul() {
+            let _ = Amount::MAX * Amount::TEN;
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to divide by zero")]
+        fn div() {
+            let _ = Amount::ONE / Amount::ZERO;
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to calculate the remainder with a divisor of zero")]
+        fn rem() {
+            let _ = Amount::ONE % Amount::ZERO;
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to subtract with overflow")]
+        fn sub_assign() {
+            let mut a = Amount::ZERO;
+            a -= Amount::ONE;
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to add with overflow")]
+        fn sum() {
+            let _: Amount = [Amount::MAX, Amount::ONE].into_iter().sum();
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to multiply with overflow")]
+        fn pow() {
+            let _ = Amount::MAX.pow(2);
+        }
     }
 
     #[test]

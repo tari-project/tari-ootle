@@ -44,10 +44,7 @@ async function settle<T>(work: Promise<T>, fallback: T): Promise<T> {
  * `wallet-daemon-00`, so deducing the owner from the path handed both instances' files to whichever matched
  * first and left the other showing nothing.
  */
-function assignToInstances(
-  logFiles: LogFile[],
-  stdoutFiles: StdoutFile[],
-): Record<number, InstanceLogs> {
+function assignToInstances(logFiles: LogFile[], stdoutFiles: StdoutFile[]): Record<number, InstanceLogs> {
   const byInstance: Record<number, InstanceLogs> = {};
 
   for (const file of logFiles) {
@@ -69,9 +66,7 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
   const [baseNodeHeight, setBaseNodeHeight] = useState<number | null>(null);
   const [isMining, setIsMining] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [intervalMs, setIntervalMsState] = useState(() =>
-    Number(localStorage.getItem("swarm.interval") ?? 2000),
-  );
+  const [intervalMs, setIntervalMsState] = useState(() => Number(localStorage.getItem("swarm.interval") ?? 2000));
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Identities never change for the life of an instance, so they are fetched once.
@@ -143,9 +138,7 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
     setIndexers(indexerList.nodes);
     setIsMining(mining.result);
 
-    const baseNode = allInstances.instances.find(
-      (i) => i.instance_type === "MinoTariNode" && i.is_running,
-    );
+    const baseNode = allInstances.instances.find((i) => i.instance_type === "MinoTariNode" && i.is_running);
     if (baseNode) {
       const resp = await settle<{ height: number | null }>(
         swarmRpc("get_minotari_node", { instance_id: baseNode.id }),
@@ -157,9 +150,7 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
     }
 
     const detailList = await Promise.all(vnList.nodes.map(pollValidator));
-    setDetails(
-      Object.fromEntries(vnList.nodes.map((vn, i) => [vn.instance_id, detailList[i]])),
-    );
+    setDetails(Object.fromEntries(vnList.nodes.map((vn, i) => [vn.instance_id, detailList[i]])));
 
     const logResults = await Promise.all(
       LOGGED_TYPES.map((instance_type) =>

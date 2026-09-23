@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { IoExpandOutline } from "react-icons/io5";
-import { ReactNode, useState } from "react";
-import Dialog from "@mui/material/Dialog";
-import IconButton from "@mui/material/IconButton";
-import Typography from "@mui/material/Typography";
 import CloseIcon from "@mui/icons-material/Close";
 import { Box } from "@mui/material";
-import { CodeBlock } from "./StyledComponents";
-import useMediaQuery from "@mui/material/useMediaQuery";
+import Dialog from "@mui/material/Dialog";
+import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
+import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { ReactNode, useState } from "react";
+import { IoExpandOutline } from "react-icons/io5";
+import { CodeBlock } from "./StyledComponents";
 
 interface Props {
   title: string;
@@ -81,7 +81,8 @@ export default function CodeBlockDialog({ title, children, contentsWhenUnexpande
           >
             <IoExpandOutline style={{ height: 16, width: 16 }} />
           </IconButton>
-        </CodeBlock>)}
+        </CodeBlock>
+      )}
       <Dialog fullScreen={matches} open={open} onClose={handleClose} maxWidth="xl" fullWidth>
         <Box
           style={{

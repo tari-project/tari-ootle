@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_transaction_validation"
+publish = false
 description = "Mempool/ingress transaction validators for Tari Ootle, shared by the validator node and indexer"
 version.workspace = true
 edition.workspace = true

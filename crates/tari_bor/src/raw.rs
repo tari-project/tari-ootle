@@ -42,6 +42,11 @@ impl RawCbor {
         decode_exact(&self.0)
     }
 
+    /// Decodes the item into `T`, rejecting input nested deeper than `max_depth`.
+    pub fn decode_with_max_depth<T: for<'b> minicbor::Decode<'b, ()>>(&self, max_depth: usize) -> Result<T, BorError> {
+        crate::decode_exact_with_max_depth(&self.0, max_depth)
+    }
+
     /// Decodes the item into a dynamic value tree.
     pub fn to_value(&self) -> Result<Value, BorError> {
         self.decode()

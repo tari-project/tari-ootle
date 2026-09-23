@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import Container from "@mui/material/Container";
+import Grid from "@mui/material/Grid";
+import Typography from "@mui/material/Typography";
 import { useRouteError } from "react-router-dom";
 import { StyledPaper } from "../Components/StyledComponents";
-import Typography from "@mui/material/Typography";
-import Grid from "@mui/material/Grid";
-import Container from "@mui/material/Container";
 
 export default function ErrorPage() {
   const error: any = useRouteError();

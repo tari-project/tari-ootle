@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Button } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import { IoMoonOutline, IoSunny } from "react-icons/io5";
 import useThemeStore from "../store/theme.ts";
-import { useTheme } from "@mui/material/styles";
 
 const ThemeSwitcher = () => {
   const { themeMode, setThemeMode } = useThemeStore();

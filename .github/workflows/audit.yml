@@ -2,15 +2,6 @@
 name: Security audit
 
 'on':
-  # push:
-  #   paths:
-  #     # Run if workflow changes
-  #     - '.github/workflows/audit.yml'
-  #     # Run on changed dependencies
-  #     - '**/Cargo.toml'
-  #     - '**/Cargo.lock'
-  #     # Run if the configuration file changes
-  #     - '**/audit.toml'
   # Rerun periodicly to pick up new advisories
   schedule:
     - cron: '43 05 * * *'
@@ -20,6 +11,8 @@ name: Security audit
 permissions: {}
 
 jobs:
+  # Advisories, nightly and on demand. The tree carries a backlog of live ones, so this reports and
+  # opens an issue per finding; `.github/workflows/cargo-deny.yml` is the per-change gate.
   security_audit:
     runs-on: ubuntu-latest
     permissions:

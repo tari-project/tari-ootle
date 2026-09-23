@@ -20,19 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useEffect, useState } from "react";
-import { getAllVns } from "../../../utils/json_rpc";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
+import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import TablePagination from "@mui/material/TablePagination";
+import type { BaseLayerValidatorNode } from "@tari-project/ootle-ts-bindings";
+import React, { useEffect, useState } from "react";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { emptyRows } from "../../../utils/helpers";
-import type { BaseLayerValidatorNode } from "@tari-project/ootle-ts-bindings";
+import { getAllVns } from "../../../utils/json_rpc";
 
 function AllVNs({ epoch }: { epoch: number }) {
   const [vns, setVns] = useState<BaseLayerValidatorNode[]>([]);

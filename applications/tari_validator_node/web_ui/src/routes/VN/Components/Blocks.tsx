@@ -20,26 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useEffect, useState } from "react";
-import { getIdentity, getBlocks, getFilteredBlocksCount } from "../../../utils/json_rpc";
-import { Link } from "react-router-dom";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import Fade from "@mui/material/Fade";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import { DataTableCell, BoxHeading2 } from "../../../Components/StyledComponents";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import TablePagination from "@mui/material/TablePagination";
+import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import HeadingMenu from "../../../Components/HeadingMenu";
-import Filter from "../../../Components/Filter";
-import Fade from "@mui/material/Fade";
-import StatusChip from "../../../Components/StatusChip";
-import { Ordering, type Block } from "@tari-project/ootle-ts-bindings";
 import type { VNGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
+import { Ordering, type Block } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import Filter from "../../../Components/Filter";
+import HeadingMenu from "../../../Components/HeadingMenu";
+import StatusChip from "../../../Components/StatusChip";
+import { BoxHeading2, DataTableCell } from "../../../Components/StyledComponents";
+import { getBlocks, getFilteredBlocksCount, getIdentity } from "../../../utils/json_rpc";
 
 function Blocks() {
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -336,6 +336,9 @@ function Blocks() {
           </TableHead>
           <TableBody>
             {blocks.map((block) => {
+              // @ts-ignore `commit_qc_id` is absent from the generated Block type.
+              const isCommitted = Boolean(block.commit_qc_id);
+              const status = !block.header.signature ? "Dummy" : isCommitted ? "Commit" : "Pending";
               return (
                 <TableRow key={block.header.id}>
                   <DataTableCell>
@@ -346,12 +349,7 @@ function Blocks() {
                   <DataTableCell>{block.header.epoch}</DataTableCell>
                   <DataTableCell>{block.header.height}</DataTableCell>
                   <DataTableCell>
-                    <StatusChip
-                      status={!block.header.signature ? "Dummy" :
-                        /* @ts-ignore */
-                        block.commit_qc_id ? "Commit" : "Pending"}
-                      showTitle
-                    />
+                    <StatusChip status={status} showTitle />
                   </DataTableCell>
                   <DataTableCell>{block.commands.length}</DataTableCell>
                   <DataTableCell>

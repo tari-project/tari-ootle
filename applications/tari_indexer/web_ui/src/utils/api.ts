@@ -20,14 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { IndexerClient } from "@tari-project/indexer-client";
 import type {
   GetNetworkEconomicsResponse,
   GetNetworkSyncStateResponse,
-  IndexerGetConnectionsResponse,
-  IndexerGetIdentityResponse,
   GetNonFungiblesRequest,
   GetNonFungiblesResponse,
   GetTransactionReceiptResponse,
+  IndexerGetConnectionsResponse,
+  IndexerGetIdentityResponse,
   IndexerGetSubstateResponse,
   IndexerGetTransactionResponse,
   IndexerGetTransactionResultRequest,
@@ -41,12 +42,11 @@ import type {
   ListWatchedSubstatesRequest,
   ListWatchedSubstatesResponse,
   ListWatchedTemplatesResponse,
-  SubstateId,
-  TransactionReceiptAddress,
   QueryTransactionEventsRequest,
   QueryTransactionEventsResponse,
+  SubstateId,
+  TransactionReceiptAddress,
 } from "@tari-project/ootle-ts-bindings";
-import { IndexerClient } from "@tari-project/indexer-client";
 
 const CONFIGURED_API_ADDRESS = import.meta.env.VITE_INDEXER_API_ADDRESS || import.meta.env.VITE_API_ADDRESS;
 

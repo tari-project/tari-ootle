@@ -64,7 +64,11 @@ function ResultRowData({ result, index }: { result: any; index: number }) {
       { key: "metadata", label: "Metadata", color: "default" },
       { key: "published_template_addresses", label: "Published Template Addresses", color: "primary" },
       { key: "transaction_receipt_addresses", label: "Transaction Receipt Addresses", color: "info" },
-      { key: "unclaimed_confidential_output_address", label: "Unclaimed Confidential Output Address", color: "warning" },
+      {
+        key: "unclaimed_confidential_output_address",
+        label: "Unclaimed Confidential Output Address",
+        color: "warning",
+      },
       { key: "utxos", label: "UTXOs", color: "success" },
       { key: "validator_node_fee_pools", label: "Validator Node Fee Pools", color: "secondary" },
     ];
@@ -95,9 +99,7 @@ function ResultRowData({ result, index }: { result: any; index: number }) {
       <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider" }}>
         <Chip label={returnTypeLabel} size="small" color="secondary" variant="outlined" />
       </DataTableCell>
-      <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider" }}>
-        {renderValue() || "--"}
-      </DataTableCell>
+      <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider" }}>{renderValue() || "--"}</DataTableCell>
       <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider" }}>
         {renderIndexedData() && <Box sx={{ mb: 2 }}>{renderIndexedData()}</Box>}
       </DataTableCell>

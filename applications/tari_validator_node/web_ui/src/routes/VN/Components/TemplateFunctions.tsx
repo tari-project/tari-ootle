@@ -20,20 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
-import { getTemplate } from "../../../utils/json_rpc";
+import Grid from "@mui/material/Grid";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { DataTableCell, BoxHeading, BoxHeading2 } from "../../../Components/StyledComponents";
-import PageHeading from "../../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../../Components/StyledComponents";
 import type { GetTemplateResponse } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import PageHeading from "../../../Components/PageHeading";
+import { BoxHeading, BoxHeading2, DataTableCell, StyledPaper } from "../../../Components/StyledComponents";
+import { getTemplate } from "../../../utils/json_rpc";
 
 function TemplateFunctions() {
   const { address } = useParams();

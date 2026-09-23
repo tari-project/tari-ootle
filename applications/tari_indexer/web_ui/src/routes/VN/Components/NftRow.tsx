@@ -20,11 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableRow, Avatar, Box, Typography, Stack } from "@mui/material";
-import { DataTableCell } from "../../../Components/StyledComponents";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
+import { Avatar, Box, Stack, TableRow, Typography } from "@mui/material";
 import { NonFungibleSubstate } from "@tari-project/ootle-ts-bindings";
-import { shortenString } from "./helpers";
+import { DataTableCell } from "../../../Components/StyledComponents";
 
 export interface NftData {
   img: string | null;

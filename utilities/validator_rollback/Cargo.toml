@@ -1,5 +1,6 @@
 [package]
 name = "tari_validator_rollback"
+publish = false
 description = "Offline break-glass rollback tool for Tari Ootle validator nodes"
 version.workspace = true
 edition.workspace = true

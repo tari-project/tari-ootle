@@ -10,6 +10,7 @@ extern crate alloc;
 use alloc::{format, vec::Vec};
 
 pub mod adapters;
+mod depth;
 mod error;
 mod macros;
 mod raw;
@@ -24,6 +25,7 @@ mod walker;
 mod byte_counter;
 
 pub use byte_counter::ByteCounter;
+pub use depth::check_nesting_depth;
 pub use error::BorError;
 pub use macros::__cbor_macro;
 pub use minicbor::{self, CborLen, Decode, Encode};
@@ -31,7 +33,7 @@ pub use raw::RawCbor;
 #[cfg(feature = "serde")]
 pub use serde::{self, Deserialize, Serialize, de::DeserializeOwned};
 pub use tag::*;
-pub use value::{MAX_DECODE_DEPTH, Value};
+pub use value::{INTEGER_RANGE, MAX_DECODE_DEPTH, Value};
 pub use walker::*;
 
 /// Encode a value into a freshly allocated `Vec<u8>` using the unit context.
@@ -146,8 +148,18 @@ pub fn from_value<T: for<'b> Decode<'b, ()>>(val: &Value) -> Result<T, BorError>
 }
 
 /// Decode a single value from a byte slice (unit context). Extra trailing bytes are ignored.
+///
+/// The target type's recursion is bounded by the stack, so decoding untrusted input on a native
+/// stack wants [`decode_with_max_depth`] and a bound of the caller's choosing.
 pub fn decode<T: for<'b> Decode<'b, ()>>(input: &[u8]) -> Result<T, BorError> {
     minicbor::decode(input).map_err(BorError::from)
+}
+
+/// Decode a single value from a byte slice (unit context), rejecting input nested deeper than
+/// `max_depth`. Extra trailing bytes are ignored.
+pub fn decode_with_max_depth<T: for<'b> Decode<'b, ()>>(input: &[u8], max_depth: usize) -> Result<T, BorError> {
+    check_nesting_depth(input, max_depth)?;
+    decode(input)
 }
 
 /// Decode a single value from a byte slice using a user-provided context. Extra trailing bytes are ignored.
@@ -158,8 +170,18 @@ where T: for<'b> Decode<'b, C> {
 
 /// Decode a single value from a byte slice (unit context). Returns an error if any bytes remain after
 /// decoding.
+///
+/// The target type's recursion is bounded by the stack, so decoding untrusted input on a native
+/// stack wants [`decode_exact_with_max_depth`] and a bound of the caller's choosing.
 pub fn decode_exact<T: for<'b> Decode<'b, ()>>(input: &[u8]) -> Result<T, BorError> {
     decode_exact_with(input, &mut ())
+}
+
+/// Decode a single value from a byte slice (unit context), rejecting input nested deeper than
+/// `max_depth`, and returning an error if any bytes remain after decoding.
+pub fn decode_exact_with_max_depth<T: for<'b> Decode<'b, ()>>(input: &[u8], max_depth: usize) -> Result<T, BorError> {
+    check_nesting_depth(input, max_depth)?;
+    decode_exact(input)
 }
 
 /// Decode a single value from a byte slice using a user-provided context. Returns an error if any bytes

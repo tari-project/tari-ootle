@@ -3,19 +3,17 @@
 
 import { Box, Button, Divider, Grid, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { useDatabaseCfsList } from "../store/databases.ts";
-import { Link as RouterLink, useParams } from "react-router-dom";
 import { DataGrid, GridSortModel } from "@mui/x-data-grid";
-import { useState } from "react";
 import prettyBytes from "pretty-bytes";
+import { useState } from "react";
+import { Link as RouterLink, useParams } from "react-router-dom";
+import { useDatabaseCfsList } from "../store/databases.ts";
 
 export default function ListColumnFamilies() {
   const theme = useTheme();
   const { dbName } = useParams();
   const [selectedCf, setSelectedCf] = useState<string | number | null>(null);
-  const [sortModel, setSortModel] = useState<GridSortModel>([
-    { field: "name", sort: "asc" },
-  ]);
+  const [sortModel, setSortModel] = useState<GridSortModel>([{ field: "name", sort: "asc" }]);
 
   const { data, isLoading } = useDatabaseCfsList(dbName || "<NOTHING>");
 
@@ -68,10 +66,7 @@ export default function ListColumnFamilies() {
             alignItems: "left",
           }}
         >
-          <Typography
-            variant="h4"
-            style={{ paddingBottom: theme.spacing(2) }}
-          >
+          <Typography variant="h4" style={{ paddingBottom: theme.spacing(2) }}>
             {dbName} - Select Column Family
             <Button
               style={{ margin: theme.spacing(2) }}
@@ -80,46 +75,45 @@ export default function ListColumnFamilies() {
               component={RouterLink}
               to={`/databases/${dbName}/column-families/${selectedCf}`}
               disabled={!selectedCf}
-            >Inspect</Button>
+            >
+              Inspect
+            </Button>
           </Typography>
         </Box>
         <Divider />
       </Grid>
       <Grid size={{ xs: 12, md: 12, lg: 12 }}>
-          <DataGrid
-            rows={cfNames.map((name) => ({ name }))}
-            columns={[{
-                field: "name",
-                headerName: "Name",
-                width: 400,
-              }]}
-            getRowId={(row) => row.name}
-            initialState={{
-              pagination: {
-                paginationModel: {
-                  pageSize: 20,
-                },
+        <DataGrid
+          rows={cfNames.map((name) => ({ name }))}
+          columns={[
+            {
+              field: "name",
+              headerName: "Name",
+              width: 400,
+            },
+          ]}
+          getRowId={(row) => row.name}
+          initialState={{
+            pagination: {
+              paginationModel: {
+                pageSize: 20,
               },
-            }}
-            sortModel={sortModel}
-            onSortModelChange={setSortModel}
-            sortingOrder={["desc", "asc", null]}
-            disableMultipleRowSelection
-            onRowSelectionModelChange={(selections) => {
-              const first = selections.ids.values().next().value;
-              onSelectedRowChange(first ?? null);
-            }}
-            checkboxSelection
-          />
+            },
+          }}
+          sortModel={sortModel}
+          onSortModelChange={setSortModel}
+          sortingOrder={["desc", "asc", null]}
+          disableMultipleRowSelection
+          onRowSelectionModelChange={(selections) => {
+            const first = selections.ids.values().next().value;
+            onSelectedRowChange(first ?? null);
+          }}
+          checkboxSelection
+        />
       </Grid>
 
       <Grid size={{ xs: 12, md: 12, lg: 12 }}>
-        <DataGrid
-          rows={cfs}
-          columns={cols}
-          getRowId={(row) => row.name}
-          disableRowSelectionOnClick
-        />
+        <DataGrid rows={cfs} columns={cols} getRowId={(row) => row.name} disableRowSelectionOnClick />
       </Grid>
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 12, lg: 12 }}>

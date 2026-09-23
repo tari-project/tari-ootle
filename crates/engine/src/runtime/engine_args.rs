@@ -4,7 +4,8 @@
 use std::any::type_name;
 
 use serde::de::DeserializeOwned;
-use tari_bor::decode_exact;
+use tari_bor::decode_exact_with_max_depth;
+use tari_engine_types::limits;
 use tari_template_lib::types::bytes::Bytes;
 
 use crate::runtime::RuntimeError;
@@ -31,7 +32,9 @@ impl EngineArgs {
     where T: DeserializeOwned + for<'b> tari_bor::Decode<'b, ()> {
         self.args
             .get(index)
-            .map(|arg| decode_exact(arg))
+            // An argument is an opaque blob inside the transaction, so the bound the transaction
+            // was decoded under did not reach into it.
+            .map(|arg| decode_exact_with_max_depth(arg, limits::MAX_CBOR_NESTING_DEPTH))
             .transpose()
             .map_err(|e| RuntimeError::InvalidArgument {
                 argument: type_name::<T>(),

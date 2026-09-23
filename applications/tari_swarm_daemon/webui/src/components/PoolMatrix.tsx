@@ -62,12 +62,7 @@ export default function PoolMatrix({ validators }: { validators: ValidatorNode[]
     () =>
       running.map((vn) => ({
         vn,
-        byId: new Map(
-          (swarm.details[vn.instance_id]?.pool ?? []).map((record) => [
-            record.transaction_id,
-            record,
-          ]),
-        ),
+        byId: new Map((swarm.details[vn.instance_id]?.pool ?? []).map((record) => [record.transaction_id, record])),
       })),
     [running, swarm.details],
   );

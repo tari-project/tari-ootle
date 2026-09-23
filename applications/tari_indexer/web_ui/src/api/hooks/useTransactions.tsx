@@ -22,18 +22,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { IndexerGetTransactionResultResponse, TransactionSource } from "@tari-project/ootle-ts-bindings";
-import {
-  listRecentTransactions,
-  getTransaction,
-  getTransactionResult,
-} from "../../utils/api";
+import { getTransaction, getTransactionResult, listRecentTransactions } from "../../utils/api";
 
 // A settled result is `{ Finalized: {...} }` or `{ Rejected: {...} }`; a pending one is the
 // string "Pending". Both settled states are terminal.
 const isSettledResult = (data: IndexerGetTransactionResultResponse | undefined): boolean =>
-  data?.result != null &&
-  typeof data.result === "object" &&
-  ("Finalized" in data.result || "Rejected" in data.result);
+  data?.result != null && typeof data.result === "object" && ("Finalized" in data.result || "Rejected" in data.result);
 
 interface UseListRecentTransactionsProps {
   last_id: string | null;
@@ -41,11 +35,7 @@ interface UseListRecentTransactionsProps {
   source?: TransactionSource | null;
 }
 
-export const useListRecentTransactions = ({
-                                            last_id,
-                                            limit,
-                                            source = null,
-                                          }: UseListRecentTransactionsProps) => {
+export const useListRecentTransactions = ({ last_id, limit, source = null }: UseListRecentTransactionsProps) => {
   return useQuery({
     queryKey: ["recent_transactions", source],
     queryFn: () => {

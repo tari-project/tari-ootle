@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_app_utilities"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

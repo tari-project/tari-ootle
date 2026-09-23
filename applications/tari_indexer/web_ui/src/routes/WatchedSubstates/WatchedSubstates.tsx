@@ -20,28 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
-import {
-  Chip,
-  IconButton,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  Typography,
-} from "@mui/material";
-import { useEffect, useState } from "react";
-import { truncateText } from "../../utils/helpers";
 import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import { listWatchedTemplates, listWatchedSubstates } from "../../utils/api";
-import CopyToClipboard from "../../Components/CopyToClipboard";
-import { Link } from "react-router-dom";
+import { Chip, IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import Grid from "@mui/material/Grid";
 import type { WatchedSubstateItem, WatchedTemplateItem } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import CopyToClipboard from "../../Components/CopyToClipboard";
+import PageHeading from "../../Components/PageHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
+import { listWatchedSubstates, listWatchedTemplates } from "../../utils/api";
+import { truncateText } from "../../utils/helpers";
 
 const PAGE_SIZE = 20;
 
@@ -105,9 +95,9 @@ function WatchedSubstatesLayout() {
         <StyledPaper>
           <Typography variant="body2" color="textSecondary" sx={{ marginBottom: 3 }}>
             The indexer monitors configured template addresses for component creation events. When a transaction creates
-            a component using a watched template, it is tracked here. This is useful for discovering
-            components such as liquidity pools without scanning the entire substate space.
-            Each indexer may configure different or no templates to watch.
+            a component using a watched template, it is tracked here. This is useful for discovering components such as
+            liquidity pools without scanning the entire substate space. Each indexer may configure different or no
+            templates to watch.
           </Typography>
           <Typography variant="h6" sx={{ marginBottom: 2 }}>
             Watched Templates

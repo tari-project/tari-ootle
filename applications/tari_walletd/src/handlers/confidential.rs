@@ -32,15 +32,26 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib_types::{Amount, ConfidentialOutputAddress};
-use tokio::{task::block_in_place, time::Instant};
+use tokio::{task::spawn_blocking, time::Instant};
 
 use crate::handlers::{
     HandlerContext,
     auth::jwt::enforce_scopes,
     helpers::{get_account_or_default, invalid_params, invalid_request},
+    value_lookup::{AbortQueuedOnDropGuard, ValueRangeRequest},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc::confidential";
+
+/// Largest number of confidential commitments `confidential.view_vault_balance` will recover in one
+/// request.
+///
+/// A vault's commitment set is whatever the indexer returned for the vault the caller named, so this
+/// is what bounds one request's fan-out: a `ConfidentialOutput` fetch per commitment, and the output
+/// bodies held in memory while they are scanned. The request covers a whole vault in one call, so the
+/// ceiling sits well above any realistic vault and a vault that reaches it is refused with an error
+/// naming its size.
+const MAX_VAULT_COMMITMENTS_PER_REQUEST: usize = 1_000;
 
 #[allow(clippy::too_many_lines)]
 pub async fn handle_create_transfer_proof(
@@ -358,6 +369,16 @@ pub async fn handle_view_vault_balance(
     let commitments = vault
         .get_confidential_commitments()
         .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
+    if commitments.len() > MAX_VAULT_COMMITMENTS_PER_REQUEST {
+        return Err(invalid_params(
+            "vault_id",
+            Some(format!(
+                "This vault holds {} confidential commitments; at most {MAX_VAULT_COMMITMENTS_PER_REQUEST} can be \
+                 viewed in one request",
+                commitments.len(),
+            )),
+        ));
+    }
     let resource_address = *vault.resource_address();
 
     // Get view secret key
@@ -394,18 +415,22 @@ pub async fn handle_view_vault_balance(
     }
 
     let elgamal_proofs = viewable.iter().map(|(_, proof)| proof.clone()).collect::<Vec<_>>();
+    let value_range = ValueRangeRequest::resolve(req.minimum_expected_value, req.maximum_expected_value);
 
     let timer = Instant::now();
-    let balances = block_in_place(|| {
+    let lookup_file = context.config().value_lookup_table_file.clone();
+    let scan_sdk = sdk.clone();
+    let handle = spawn_blocking(move || {
         crate::handlers::value_lookup::brute_force_viewable_balances(
-            &sdk.viewable_balance_api(),
-            context.config().value_lookup_table_file.as_deref(),
+            &scan_sdk.viewable_balance_api(),
+            lookup_file.as_deref(),
             &view_key.key,
             &elgamal_proofs,
-            req.minimum_expected_value,
-            req.maximum_expected_value,
+            value_range,
         )
-    })?;
+    });
+    let _drop_guard = AbortQueuedOnDropGuard::new(handle.abort_handle());
+    let recovery = handle.await??;
 
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
@@ -413,7 +438,8 @@ pub async fn handle_view_vault_balance(
         balances: viewable
             .iter()
             .map(|(commitment, _)| *commitment)
-            .zip(balances)
+            .zip(recovery.balances)
             .collect(),
+        searched: recovery.searched,
     })
 }

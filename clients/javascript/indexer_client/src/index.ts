@@ -7,11 +7,11 @@ import type {
   Event,
   GetEpochManagerStatsResponse,
   GetNetworkEconomicsResponse,
+  GetNetworkInfoResponse,
   GetNetworkSyncStateResponse,
   GetNonFungiblesRequest,
   GetNonFungiblesResponse,
   GetResourceResponse,
-  ResourceAddress,
   GetSubstatesRequest,
   GetSubstatesResponse,
   GetTransactionReceiptResponse,
@@ -27,34 +27,32 @@ import type {
   ListTemplatesResponse,
   ListTransactionReceiptsRequest,
   ListTransactionReceiptsResponse,
+  ListValidatorsRequest,
+  ListValidatorsResponse,
+  ListWatchedSubstatesRequest,
+  ListWatchedSubstatesResponse,
+  ListWatchedTemplatesResponse,
+  QueryTransactionEventsRequest,
+  QueryTransactionEventsResponse,
   rejectReasonToString,
-  stringToSubstateId,
+  ResourceAddress,
   StreamTransactionEventsRequest,
+  stringToSubstateId,
   SubstateId,
   substateIdToString,
   TemplatesGetResponse,
-  TemplatesListAuthoredRequest,
-  TemplatesListAuthoredResponse,
   TransactionId,
   TransactionReceiptAddress,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
-  QueryTransactionEventsRequest,
-  QueryTransactionEventsResponse,
-  GetNetworkInfoResponse,
-  ListWatchedSubstatesRequest,
-  ListWatchedSubstatesResponse,
-  ListWatchedTemplatesResponse,
-  ListValidatorsRequest,
-  ListValidatorsResponse,
 } from "@tari-project/ootle-ts-bindings";
-import { FetchTransport, HttpTransport } from "./transports";
 import type { SseStream } from "./sse";
+import { FetchTransport, HttpTransport } from "./transports";
 
-export * as transports from "./transports";
 export type { SseEvent, SseStream, SseStreamOptions } from "./sse";
+export * as transports from "./transports";
 
-export { substateIdToString, stringToSubstateId, rejectReasonToString };
+export { rejectReasonToString, stringToSubstateId, substateIdToString };
 
 /**
  * A template-emitted event with its originating transaction ID.

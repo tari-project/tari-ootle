@@ -20,24 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { addPeer, getConnections } from "../../../utils/json_rpc";
-import { shortenString } from "./helpers";
+import AddIcon from "@mui/icons-material/Add";
+import { TextField } from "@mui/material";
+import Button from "@mui/material/Button";
+import Fade from "@mui/material/Fade";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { DataTableCell, BoxHeading2 } from "../../../Components/StyledComponents";
-import AddIcon from "@mui/icons-material/Add";
-import Button from "@mui/material/Button";
-import { TextField } from "@mui/material";
-import { Form } from "react-router-dom";
-import Fade from "@mui/material/Fade";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
 import type { VNConnection } from "@tari-project/ootle-ts-bindings";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Form } from "react-router-dom";
+import CopyToClipboard from "../../../Components/CopyToClipboard";
+import { BoxHeading2, DataTableCell } from "../../../Components/StyledComponents";
 import { displayDuration } from "../../../utils/helpers";
+import { addPeer, getConnections } from "../../../utils/json_rpc";
+import { shortenString } from "./helpers";
 
 const useInterval = (fn: () => Promise<unknown>, ms: number) => {
   const timeout = useRef<number>(0);

@@ -20,26 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useMemo } from "react";
-import { useParams } from "react-router-dom";
 import {
+  Box,
   Grid,
   Stack,
-  Typography,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Box,
+  Typography,
 } from "@mui/material";
 import { convertCborValue, NonFungibleSubstate, shortenString } from "@tari-project/ootle-ts-bindings";
-import { useGetSubstate, useGetNonFungibles } from "../../../api/hooks/useSubstates";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
+import { useMemo } from "react";
+import { useParams } from "react-router-dom";
+import { useGetNonFungibles, useGetSubstate } from "../../../api/hooks/useSubstates";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
-import NftRow, { type NftData } from "./NftRow";
+import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { formatCurrency } from "../../../utils/helpers";
+import NftRow, { type NftData } from "./NftRow";
 
 function Resources() {
   const { resourceAddress } = useParams();
@@ -195,7 +195,9 @@ function Resources() {
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Total Supply:</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {resource?.total_supply ? formatCurrency(resource.total_supply, resource.divisibility, resource.metadata["SYMBOL"]): "--"}
+                  {resource?.total_supply
+                    ? formatCurrency(resource.total_supply, resource.divisibility, resource.metadata["SYMBOL"])
+                    : "--"}
                 </Typography>
               </Stack>
             </Grid>

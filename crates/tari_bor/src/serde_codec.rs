@@ -112,8 +112,16 @@ pub fn to_vec<T: Serialize>(val: T) -> Result<Vec<u8>, EncodeError<core::convert
     Ok(v)
 }
 
+/// The target type's recursion is bounded by the stack, so deserializing untrusted input on a
+/// native stack wants [`from_slice_with_max_depth`] and a bound of the caller's choosing.
 pub fn from_slice<'de, T: Deserialize<'de>>(b: &'de [u8]) -> Result<T, DecodeError> {
     T::deserialize(&mut Deserializer::new(b))
+}
+
+/// Deserialize, rejecting input nested deeper than `max_depth`.
+pub fn from_slice_with_max_depth<'de, T: Deserialize<'de>>(b: &'de [u8], max_depth: usize) -> Result<T, DecodeError> {
+    crate::check_nesting_depth(b, max_depth)?;
+    from_slice(b)
 }
 
 // ============================================================================

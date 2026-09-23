@@ -13,6 +13,8 @@ use tari_ootle_storage::{
 use super::vote_collector::{ProposalVoteCollector, TimeoutVoteCollector};
 use crate::{
     hotstuff::{
+        HotstuffConfig,
+        LeaderSkipSet,
         ProposalValidationError,
         epoch_state::EpochState,
         error::HotStuffError,
@@ -20,13 +22,14 @@ use crate::{
     },
     messages::NewViewMessage,
     tracing::TraceTimer,
-    traits::{CertificateStore, ConsensusSpec, LeaderStrategy},
+    traits::{CertificateStore, ConsensusSpec},
     validations::check_quorum_certificate_signatures,
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_new_view";
 
 pub struct OnReceiveNewViewHandler<TConsensusSpec: ConsensusSpec> {
+    config: HotstuffConfig,
     local_validator_addr: TConsensusSpec::Addr,
     store: TConsensusSpec::StateStore,
     leader_strategy: TConsensusSpec::LeaderStrategy,
@@ -39,6 +42,7 @@ impl<TConsensusSpec> OnReceiveNewViewHandler<TConsensusSpec>
 where TConsensusSpec: ConsensusSpec
 {
     pub fn new(
+        config: HotstuffConfig,
         local_validator_addr: TConsensusSpec::Addr,
         store: TConsensusSpec::StateStore,
         leader_strategy: TConsensusSpec::LeaderStrategy,
@@ -47,6 +51,7 @@ where TConsensusSpec: ConsensusSpec
         timeout_vote_collector: TimeoutVoteCollector<TConsensusSpec>,
     ) -> Self {
         Self {
+            config,
             local_validator_addr,
             store,
             leader_strategy,
@@ -86,12 +91,21 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        // A NEWVIEW is addressed to the leader of the view it names. Anyone else is not going to act on it, so
-        // establish that before verifying the certificate's 2f+1 signatures, which is the expensive part of
-        // handling this message.
-        let (leader, _) = self
-            .leader_strategy
-            .get_leader(epoch_state.local_committee(), timeout_height);
+        // A NEWVIEW is addressed to the effective leader of the view it names. Anyone else is not going to act
+        // on it, so establish that before verifying the certificate's 2f+1 signatures, which is the expensive
+        // part of handling this message. The sender picked that leader from the liveness state anchored on the
+        // certificate it reports, so the same certificate decides it here.
+        let skip_set = self.store.with_read_tx(|tx| {
+            LeaderSkipSet::load_for_justify(
+                tx,
+                epoch_state.epoch(),
+                high_pc.height(),
+                epoch_state.local_committee(),
+                &self.config.consensus_constants.liveness_thresholds(),
+            )
+        })?;
+        let (leader, _) =
+            skip_set.effective_leader(&self.leader_strategy, epoch_state.local_committee(), timeout_height);
 
         if *leader != self.local_validator_addr {
             warn!(target: LOG_TARGET, "❌ NEWVIEW failed, leader is {} at {}. Our address is {}", leader, timeout_height, self.local_validator_addr);

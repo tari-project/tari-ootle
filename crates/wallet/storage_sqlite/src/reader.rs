@@ -1586,15 +1586,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
         })
     }
 
-    fn webauthn_is_user_registered(&mut self, username: &str) -> Result<bool, WalletStorageError> {
+    fn webauthn_has_any_registration(&mut self) -> Result<bool, WalletStorageError> {
         use crate::schema::webauthn_registrations;
-        let count: i64 = webauthn_registrations::table
-            .count()
-            .filter(webauthn_registrations::username.eq(username))
-            .limit(1)
-            .get_result(self.connection())
-            .map_err(|e| WalletStorageError::general("webauthn_reg_count", e))?;
-        Ok(count > 0)
+        diesel::select(diesel::dsl::exists(
+            webauthn_registrations::table.select(webauthn_registrations::id),
+        ))
+        .get_result(self.connection())
+        .map_err(|e| WalletStorageError::general("webauthn_has_any_registration", e))
     }
 
     fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError> {

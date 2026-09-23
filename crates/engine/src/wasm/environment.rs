@@ -313,10 +313,6 @@ impl<T> WasmEnv<T> {
         &self.state
     }
 
-    pub fn state_mut(&mut self) -> &mut T {
-        &mut self.state
-    }
-
     fn get_memory(&self) -> Result<&Memory, WasmExecutionError> {
         let memory = self.memory.as_ref().ok_or_else(|| WasmExecutionError::MemoryNotSet)?;
         Ok(memory)

@@ -1,5 +1,6 @@
 [package]
 name = "tari_state_store_rocksdb"
+publish = false
 description = "RocksDB implementation of Tari state store"
 version.workspace = true
 edition.workspace = true

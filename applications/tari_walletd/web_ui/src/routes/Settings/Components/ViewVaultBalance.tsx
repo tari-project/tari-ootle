@@ -30,6 +30,8 @@ import { ConfidentialViewVaultBalanceRequest } from "@tari-project/ootle-ts-bind
 import { confidentialViewVaultBalance } from "@utils/json_rpc";
 import { useState } from "react";
 
+import SearchedRange from "./SearchedRange";
+
 function ViewVaultBalanceForm() {
   const [formState, setFormState] = useState({
     vaultId: "",
@@ -54,6 +56,8 @@ function ViewVaultBalanceForm() {
 
     setVaultBalance(resp);
   };
+
+  const searched = vaultBalance && <SearchedRange searched={vaultBalance.searched} />;
 
   const balances =
     vaultBalance &&
@@ -96,6 +100,7 @@ function ViewVaultBalanceForm() {
           Fetch Balance
         </Button>
       </Box>
+      {searched}
       {balances && (
         <>
           <Typography variant="h3">Balances</Typography>

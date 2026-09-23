@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Dialog, DialogTitle } from "@mui/material";
-import IconButton from "@mui/material/IconButton";
-import DialogContent from "@mui/material/DialogContent";
 import CloseIcon from "@mui/icons-material/Close";
+import { Dialog, DialogTitle } from "@mui/material";
 import Box from "@mui/material/Box";
-import { renderJson } from "../utils/helpers";
+import DialogContent from "@mui/material/DialogContent";
+import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
+import { renderJson } from "../utils/helpers";
 
 interface JsonDialogProps {
   open: boolean;
@@ -37,12 +37,7 @@ interface JsonDialogProps {
 function JsonDialog(props: JsonDialogProps) {
   const theme = useTheme();
   return (
-    <Dialog
-      open={props.open}
-      onClose={props.onClose}
-      fullWidth={true}
-      maxWidth="lg"
-    >
+    <Dialog open={props.open} onClose={props.onClose} fullWidth={true} maxWidth="lg">
       <Box sx={{ paddingX: 4, borderRadius: 4 }}>
         <Box>
           <DialogTitle sx={{ display: "flex", justifyContent: "right" }}>

@@ -1,8 +1,8 @@
 //  Copyright 2024 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-import { Tone } from "./ui/tone";
 import { ValidatorNode, VnDetail } from "./types";
+import { Tone } from "./ui/tone";
 
 /** Height jitter of a block or two is normal propagation, not divergence. */
 export const IN_STEP = 1;

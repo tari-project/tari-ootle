@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery } from "@tanstack/react-query";
-import { getSubstate, getNonFungibles } from "../../utils/api";
+import { getNonFungibles, getSubstate } from "../../utils/api";
 
 interface UseGetSubstateProps {
   address: any;
@@ -31,21 +31,12 @@ interface UseGetSubstateProps {
 }
 
 export const useGetSubstate = (props: UseGetSubstateProps) => {
-  const {
-    address,
-    version = null,
-    local_search_only = false,
-    enabled = true,
-  } = props;
+  const { address, version = null, local_search_only = false, enabled = true } = props;
   return useQuery({
     queryKey: ["substate", address, version, local_search_only],
     queryFn: async () => {
       // @ts-ignore
-      return await getSubstate(
-        address,
-        version,
-        local_search_only,
-      );
+      return await getSubstate(address, version, local_search_only);
     },
     enabled: enabled && !!address,
     staleTime: 5 * 60 * 1000,
@@ -61,11 +52,11 @@ interface UseGetNonFungiblesProps {
 }
 
 export const useGetNonFungibles = ({
-                                     address,
-                                     start_index = 0n,
-                                     end_index = 10n,
-                                     enabled = true,
-                                   }: UseGetNonFungiblesProps) => {
+  address,
+  start_index = 0n,
+  end_index = 10n,
+  enabled = true,
+}: UseGetNonFungiblesProps) => {
   return useQuery({
     queryKey: ["nonFungibles", address, start_index, end_index],
     queryFn: async () => {

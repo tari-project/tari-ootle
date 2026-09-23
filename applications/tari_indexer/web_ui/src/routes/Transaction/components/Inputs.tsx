@@ -20,7 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Box, Chip, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import {
+  Box,
+  Chip,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+} from "@mui/material";
 import { SubstateRequirement, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import { DataTableCell } from "../../../Components/StyledComponents";
@@ -40,16 +51,26 @@ function getSubstateType(substateId: string): string {
 
 function getTypeColor(type: string): "primary" | "secondary" | "success" | "warning" | "info" | "error" {
   switch (type) {
-    case "Component": return "primary";
-    case "Vault": return "success";
-    case "Resource": return "secondary";
-    case "NFT": return "info";
-    case "Commitment": return "warning";
-    case "Transaction Receipt": return "error";
-    case "Template": return "info";
-    case "Utxo": return "success";
-    case "VnFeePool": return "secondary";
-    default: return "primary";
+    case "Component":
+      return "primary";
+    case "Vault":
+      return "success";
+    case "Resource":
+      return "secondary";
+    case "NFT":
+      return "info";
+    case "Commitment":
+      return "warning";
+    case "Transaction Receipt":
+      return "error";
+    case "Template":
+      return "info";
+    case "Utxo":
+      return "success";
+    case "VnFeePool":
+      return "secondary";
+    default:
+      return "primary";
   }
 }
 

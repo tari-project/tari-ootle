@@ -60,11 +60,7 @@ export default function ConsensusSpine({
           <div className="spine-row" key={channel.vn.instance_id}>
             <div className="spine-name">
               <i className="dot" style={{ color: colour }} />
-              <Link
-                className="truncate"
-                to={`/validators/${channel.vn.instance_id}`}
-                title={channel.vn.name}
-              >
+              <Link className="truncate" to={`/validators/${channel.vn.instance_id}`} title={channel.vn.name}>
                 {label(channel.vn.name)}
               </Link>
             </div>
@@ -80,9 +76,7 @@ export default function ConsensusSpine({
               ) : (
                 <>
                   <span className={`spine-line ${channel.tone}`} style={{ left: 0, width: `${x}%` }} />
-                  {x < RAIL_PCT && (
-                    <span className="spine-gap" style={{ left: `${x}%`, width: `${RAIL_PCT - x}%` }} />
-                  )}
+                  {x < RAIL_PCT && <span className="spine-gap" style={{ left: `${x}%`, width: `${RAIL_PCT - x}%` }} />}
                 </>
               )}
               <span className="spine-head" style={{ left: `${x}%`, color: colour }} />

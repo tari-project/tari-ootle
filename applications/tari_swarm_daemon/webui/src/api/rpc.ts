@@ -19,8 +19,7 @@ async function call(address: string, method: string, params: unknown): Promise<a
   return json.result;
 }
 
-const DAEMON_ADDRESS =
-  import.meta.env.VITE_JSON_RPC_ADDRESS || import.meta.env.VITE_JRPC_ADDRESS || "/json_rpc";
+const DAEMON_ADDRESS = import.meta.env.VITE_JSON_RPC_ADDRESS || import.meta.env.VITE_JRPC_ADDRESS || "/json_rpc";
 
 /** Calls the swarm daemon that serves this UI. */
 export function swarmRpc(method: string, params: unknown = {}): Promise<any> {

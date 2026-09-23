@@ -1,5 +1,6 @@
 [package]
 name = "tari_consensus"
+publish = false
 description = "Tari template runtime engine"
 version.workspace = true
 edition.workspace = true

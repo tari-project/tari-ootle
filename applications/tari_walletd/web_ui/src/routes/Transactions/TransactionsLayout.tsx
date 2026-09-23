@@ -56,12 +56,7 @@ function TransactionsLayout() {
           <Stack direction="row" justifyContent="flex-end" sx={{ mb: 2 }}>
             <FormControl size="small" style={{ minWidth: 240 }}>
               <InputLabel id="transactions-account-filter">Account</InputLabel>
-              <Select
-                labelId="transactions-account-filter"
-                label="Account"
-                value={selected}
-                onChange={onChange}
-              >
+              <Select labelId="transactions-account-filter" label="Account" value={selected} onChange={onChange}>
                 <MenuItem value={ALL_ACCOUNTS}>All accounts</MenuItem>
                 {accounts.map(({ account }) => (
                   <MenuItem key={account.component_address} value={account.component_address}>

@@ -3,6 +3,81 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.41.2](https://github.com/tari-project/tari-ootle/compare/v0.41.1...v0.41.2) (2026-09-23)
+
+The engine and wallet security review release. It closes the ways a crafted template or payload
+could crash a validator, a wallet daemon that let anyone enrol an admin credential, and a module
+cache that trusted what it read from disk. Also: validators that stop proposing are skipped instead
+of costing the network a timeout, and templates compile before the transaction that needs them.
+
+### ⚠️ Upgrade notes
+
+- **Coordinated upgrade required.** Leader selection and execution change in ways that cannot be
+  epoch-gated, so every validator and indexer restarts on the new binary together. No reset.
+- **Operators — every cached template recompiles once.** The on-disk module cache is keyed to the
+  new engine fingerprint, so existing artifacts are ignored after the upgrade.
+- **Wallet — a WebAuthn wallet accepts no second enrolment.** Once one credential is registered,
+  `webauthn.reg_start` and `reg_finish` refuse, and the requested permissions are no longer taken
+  from the caller.
+- **A client holding only `settings:update` can no longer change the indexer URL.** That one field of
+  `settings.set` now needs `admin`; the remaining fields are unchanged, and the web UI already holds
+  `admin`.
+- **`ConfidentialViewVaultBalanceResponse` and `StealthUtxosDecryptValueResponse` carry a new
+  `searched` field.** Additive on the wire; Rust callers that construct either response must set it.
+- **Rust API** — `WalletStoreReader::webauthn_is_user_registered` is now
+  `webauthn_has_any_registration`; `WebauthnAlreadyRegisteredRequest` drops `username` and
+  `WebauthnFinishRegisterRequest` drops `requested_permissions`.
+
+### Consensus
+
+- `feat!` — **A validator that stops proposing is skipped as leader** instead of costing the network
+  a timeout each time its slot comes round. Its votes keep counting, and it gets its slot back once
+  it is seen participating again. (#2652)
+- `feat` — **A node withholds its vote from a proposer it caught equivocating.** (#2652)
+
+### Wallet
+
+- `fix!` — **Any process that could reach a WebAuthn wallet's RPC port could enrol itself as an
+  admin.** Enrolment is now refused once the wallet has a credential. (#2671)
+- `fix!` — **Choosing which indexer the wallet trusts now takes an administrative token.** A
+  preference-level permission could decide which server the wallet believes is the chain, and the URL
+  itself was unchecked. (#2673)
+- `fix` — **JSON-RPC parameters are no longer written to the log.** Under the shipped log config an
+  imported spending key was left in plaintext in `json_rpc.log`. (#2673)
+- `fix` — **One balance-recovery request can no longer occupy a thread indefinitely.** The
+  brute-force value scan is bounded whatever the caller asks for, a vault's proof count is bounded,
+  and the work no longer runs on a runtime worker thread. (#2673)
+- `feat!` — **A balance recovery now reports which values it searched**, so an undecryptable balance
+  can be told apart from one the search never reached. `confidential.view_vault_balance` and
+  `stealth_utxos.decrypt_value` both gain a `searched` field. (#2673)
+
+### Engine
+
+- `feat!` — **A component's owner can now replace its owner rule**, including handing ownership to
+  someone else or setting it to `None`, which is final. (#2677)
+- `fix!` — **`ComponentManager::get_owner_proof` returns `Option<Proof>`** and no longer panics for a
+  component whose owner is not a single public key. (#2677)
+- `fix!` — **An `m_of_n` rule must require between 1 and all of its requirements.** A zero threshold
+  used to admit everyone and one above the count admitted no one; both are now rejected. (#2678)
+- `fix!` — **A deeply nested CBOR payload can no longer crash a validator**, including one hidden in
+  a published template's definition. (#2666)
+- `fix!` — **CBOR integers the encoder cannot produce are rejected on decode.** (#2666)
+- `fix!` — **Removes undefined behaviour in how nested calls share the runtime.** (#2667)
+- `fix!` — **A corrupted or stale module cache file is recompiled instead of loaded.** (#2668)
+- `fix!` — **Closes the rest of the engine review**: a multi-scalar multiplication priced by only
+  one of its arguments, amount arithmetic that could wrap, and four panic sites beside the
+  execution path. (#2672)
+- `feat` — **Templates compile in the background** as soon as a node learns it will need them,
+  instead of inside the block that first calls them. (#2660)
+- `perf` — **Writing a compiled template to the disk cache no longer blocks execution.** (#2661)
+- `fix` — **Module cache and engine log lines reach the engine log** instead of being dropped.
+  (#2663)
+
+### Other
+
+- `chore` — **All open dependency advisories are closed**, and advisories now fail CI. (#2670)
+- `docs` — **New guide: burning Minotari and claiming TARI.** (#2680)
+
 ## [0.41.1](https://github.com/tari-project/tari-ootle/compare/v0.41.0...v0.41.1) (2026-09-21)
 
 The consensus audit release. It closes the ways a byzantine leader could fork a committee, stall it

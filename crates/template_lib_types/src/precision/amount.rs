@@ -277,6 +277,23 @@ impl PrecisionAmount {
         }
     }
 
+    /// Returns the remainder of dividing two amounts, returning `None` if the divisor is zero or if the
+    /// result overflows, which for a signed type means `MIN % -1`.
+    pub const fn checked_rem(&self, other: Self) -> Option<Self> {
+        match self.into_inner_value().checked_rem(other.into_inner_value()) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    /// Returns the negation of this amount, returning `None` if the result is not representable.
+    pub const fn checked_neg(&self) -> Option<Self> {
+        match self.into_inner_value().checked_neg() {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
     /// Returns the quotient of two amounts, returning `None` if the divisor is zero or if the result overflows.
     pub const fn checked_div_ceil(&self, other: Self) -> Option<Self> {
         if other.is_zero() {
@@ -299,7 +316,10 @@ impl PrecisionAmount {
             Some(Self(div))
         } else {
             // Otherwise, we round up
-            Some(Self(div.add(I192::ONE)))
+            match div.checked_add(I192::ONE) {
+                Some(value) => Some(Self(value)),
+                None => None,
+            }
         }
     }
 
@@ -419,8 +439,14 @@ impl PrecisionAmount {
     }
 
     /// Returns the amount raised to the power of `exp`.
+    ///
+    /// # Panics
+    /// If the result overflows.
     pub const fn pow(&self, exp: u32) -> Self {
-        Self(self.into_inner_value().pow(exp))
+        match self.checked_pow(exp) {
+            Some(value) => value,
+            None => panic!("attempt to multiply with overflow"),
+        }
     }
 
     /// Returns the amount raised to the power of `exp`, returning `None` if the result overflows.
@@ -647,7 +673,7 @@ mod borsh_impl {
 
 impl Sum for PrecisionAmount {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        Self(iter.map(|a| a.into_inner_value()).sum())
+        iter.fold(Self::zero(), |acc, amount| acc + amount)
     }
 }
 
@@ -658,6 +684,62 @@ mod tests {
     use serde_json::json;
 
     use super::{PrecisionAmount as Amount, *};
+
+    /// `bnum` gates its own overflow check on `debug_assertions`, which the release profile's
+    /// `overflow-checks = true` does not turn on. The operators must therefore check for themselves, so that a
+    /// release build refuses an unrepresentable result instead of wrapping to one.
+    mod operators_reject_unrepresentable_results {
+        use super::*;
+
+        #[test]
+        #[should_panic(expected = "attempt to add with overflow")]
+        fn add() {
+            let _ = Amount::MAX + Amount::from(1);
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to subtract with overflow")]
+        fn sub() {
+            let _ = Amount::MIN - Amount::from(1);
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to multiply with overflow")]
+        fn mul() {
+            let _ = Amount::MAX * Amount::from(10);
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to divide by zero")]
+        fn div() {
+            let _ = Amount::from(1) / Amount::zero();
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to calculate the remainder with a divisor of zero")]
+        fn rem() {
+            let _ = Amount::from(1) % Amount::zero();
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to add with overflow")]
+        fn add_assign() {
+            let mut a = Amount::MAX;
+            a += Amount::from(1);
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to add with overflow")]
+        fn sum() {
+            let _: Amount = [Amount::MAX, Amount::from(1)].into_iter().sum();
+        }
+
+        #[test]
+        #[should_panic(expected = "attempt to multiply with overflow")]
+        fn pow() {
+            let _ = Amount::MAX.pow(2);
+        }
+    }
 
     #[test]
     fn can_decode_cbor_string() {

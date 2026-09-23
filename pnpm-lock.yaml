@@ -197,6 +197,16 @@ importers:
       '@tari-project/wallet_jrpc_client':
         specifier: link:clients/javascript/wallet_daemon_client
         version: link:clients/javascript/wallet_daemon_client
+    devDependencies:
+      prettier:
+        specifier: ^3.8.1
+        version: 3.8.1
+      prettier-plugin-organize-imports:
+        specifier: ^4.3.0
+        version: 4.3.0(prettier@3.8.1)(typescript@5.9.3)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
 
   applications/tari_indexer/web_ui:
     dependencies:

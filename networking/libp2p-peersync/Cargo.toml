@@ -1,7 +1,9 @@
 [package]
 name = "libp2p-peersync"
+publish = false
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }

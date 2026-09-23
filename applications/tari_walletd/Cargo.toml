@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_walletd"
+publish = false
 description = "The Tari wallet daemon"
 version.workspace = true
 edition.workspace = true

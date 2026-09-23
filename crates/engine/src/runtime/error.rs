@@ -116,6 +116,15 @@ pub enum RuntimeError {
     #[error("Invalid argument {argument}: {reason}")]
     InvalidArgument { argument: &'static str, reason: String },
     #[error(
+        "{argument} has an m_of_n rule requiring {threshold} of {num_requirements} requirements; the threshold must \
+         be at least 1 and at most the number of requirements"
+    )]
+    InvalidMOfNThreshold {
+        argument: &'static str,
+        threshold: u16,
+        num_requirements: usize,
+    },
+    #[error(
         "Intrinsic {intrinsic} is not supported by this validator. The template requires a newer engine — validators \
          and indexers must be upgraded before it can be called."
     )]
@@ -192,8 +201,8 @@ pub enum RuntimeError {
     NoLastInstructionOutput,
     #[error(transparent)]
     TransactionCommitError(#[from] TransactionCommitError),
-    #[error("Transaction generated too many outputs: {0}")]
-    TooManyOutputs(#[from] IdProviderError),
+    #[error(transparent)]
+    IdAllocation(#[from] IdProviderError),
     #[error("Transaction generated too many new entities: {0}")]
     TooManyEntities(#[from] EntityIdProviderError),
     #[error("Duplicate NFT token id: {token_id}")]

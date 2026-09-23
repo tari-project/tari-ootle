@@ -3,8 +3,8 @@
 
 import { swarmRpc } from "../api/rpc";
 import ConsensusSpine from "../components/ConsensusSpine";
-import { readChannels } from "../consensus";
 import PoolMatrix from "../components/PoolMatrix";
+import { readChannels } from "../consensus";
 import { useSwarm } from "../state/context";
 import { ActionButton, Panel } from "../ui";
 
@@ -33,18 +33,14 @@ export default function Overview() {
           <ActionButton
             busyTitle="Starting — each validator compiles first if its executable is out of date"
             onAct={() =>
-              swarm.act("Start all validators", () =>
-                swarmRpc("start_all", { instance_type: "TariValidatorNode" }),
-              )
+              swarm.act("Start all validators", () => swarmRpc("start_all", { instance_type: "TariValidatorNode" }))
             }
           >
             Start all validators
           </ActionButton>
           <ActionButton
             onAct={() =>
-              swarm.act("Stop all validators", () =>
-                swarmRpc("stop_all", { instance_type: "TariValidatorNode" }),
-              )
+              swarm.act("Stop all validators", () => swarmRpc("stop_all", { instance_type: "TariValidatorNode" }))
             }
           >
             Stop all validators

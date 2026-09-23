@@ -20,29 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { styled } from "@mui/material/styles";
 import KeyboardArrowRightRoundedIcon from "@mui/icons-material/KeyboardArrowRightRounded";
 import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
-import MuiAccordionSummary, {
-  AccordionSummaryProps,
-} from "@mui/material/AccordionSummary";
-import MuiAccordionDetails, {
-  AccordionDetailsProps,
-} from "@mui/material/AccordionDetails";
+import MuiAccordionDetails, { AccordionDetailsProps } from "@mui/material/AccordionDetails";
+import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
+import { styled } from "@mui/material/styles";
 
-export const Accordion: React.FC<AccordionProps> = styled(
-  (props: AccordionProps) => (
-    <MuiAccordion disableGutters elevation={0} {...props} />
-  )
-)(({ theme }) => ({
-  borderRadius: 12,
-  boxShadow:
-    theme.palette.mode === "dark" ? "none" : "3px 3px 12px rgba(0,0,0,0.08)",
-  backgroundColor:
-    theme.palette.mode === "dark"
-      ? theme.palette.divider
-      : theme.palette.background.paper,
-  marginBottom: "8px",
+export const Accordion: React.FC<AccordionProps> = styled((props: AccordionProps) => (
+  <MuiAccordion disableGutters elevation={0} {...props} />
+))(({ theme }) => ({
+  "borderRadius": 12,
+  "boxShadow": theme.palette.mode === "dark" ? "none" : "3px 3px 12px rgba(0,0,0,0.08)",
+  "backgroundColor": theme.palette.mode === "dark" ? theme.palette.divider : theme.palette.background.paper,
+  "marginBottom": "8px",
   "&:not(:last-child)": {
     borderBottom: 0,
   },
@@ -51,15 +41,10 @@ export const Accordion: React.FC<AccordionProps> = styled(
   },
 }));
 
-export const AccordionSummary: React.FC<AccordionSummaryProps> = styled(
-  (props: AccordionSummaryProps) => (
-    <MuiAccordionSummary
-      expandIcon={<KeyboardArrowRightRoundedIcon />}
-      {...props}
-    />
-  )
-)(({ theme }) => ({
-  flexDirection: "row",
+export const AccordionSummary: React.FC<AccordionSummaryProps> = styled((props: AccordionSummaryProps) => (
+  <MuiAccordionSummary expandIcon={<KeyboardArrowRightRoundedIcon />} {...props} />
+))(({ theme }) => ({
+  "flexDirection": "row",
   "& .MuiAccordionSummary-expandIconWrapper.Mui-expanded": {
     transform: "rotate(90deg)",
   },
@@ -68,8 +53,6 @@ export const AccordionSummary: React.FC<AccordionSummaryProps> = styled(
   },
 }));
 
-export const AccordionDetails: React.FC<AccordionDetailsProps> = styled(
-  MuiAccordionDetails
-)(({ theme }) => ({
+export const AccordionDetails: React.FC<AccordionDetailsProps> = styled(MuiAccordionDetails)(({ theme }) => ({
   padding: theme.spacing(2),
 }));

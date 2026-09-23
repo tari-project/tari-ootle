@@ -3,49 +3,53 @@
 
 use tari_template_abi::rust::ops;
 
-use crate::{op_impl, precision::PrecisionAmount};
+use crate::{op_assign_impl, op_impl, precision::PrecisionAmount};
 
-op_impl!(PrecisionAmount, Add, add);
-op_impl!(PrecisionAmount, Sub, sub);
-op_impl!(PrecisionAmount, Mul, mul);
-op_impl!(PrecisionAmount, Div, div);
-op_impl!(PrecisionAmount, Rem, rem);
+op_impl!(PrecisionAmount, Add, add, checked_add, "attempt to add with overflow");
+op_impl!(
+    PrecisionAmount,
+    Sub,
+    sub,
+    checked_sub,
+    "attempt to subtract with overflow"
+);
+op_impl!(
+    PrecisionAmount,
+    Mul,
+    mul,
+    checked_mul,
+    "attempt to multiply with overflow"
+);
+op_impl!(
+    PrecisionAmount,
+    Div,
+    div,
+    checked_div,
+    "attempt to divide with overflow",
+    "attempt to divide by zero"
+);
+op_impl!(
+    PrecisionAmount,
+    Rem,
+    rem,
+    checked_rem,
+    "attempt to calculate the remainder with overflow",
+    "attempt to calculate the remainder with a divisor of zero"
+);
 
-impl ops::AddAssign<PrecisionAmount> for PrecisionAmount {
-    fn add_assign(&mut self, other: PrecisionAmount) {
-        let this = self;
-        this.0.add_assign(other.0)
-    }
-}
-
-impl ops::SubAssign<PrecisionAmount> for PrecisionAmount {
-    fn sub_assign(&mut self, other: PrecisionAmount) {
-        self.0.sub_assign(other.0)
-    }
-}
-impl ops::MulAssign<PrecisionAmount> for PrecisionAmount {
-    fn mul_assign(&mut self, other: PrecisionAmount) {
-        let this = self;
-        this.0.mul_assign(other.0)
-    }
-}
-impl ops::DivAssign<PrecisionAmount> for PrecisionAmount {
-    fn div_assign(&mut self, other: PrecisionAmount) {
-        let this = self;
-        this.0.div_assign(other.0)
-    }
-}
-impl ops::RemAssign<PrecisionAmount> for PrecisionAmount {
-    fn rem_assign(&mut self, other: PrecisionAmount) {
-        let this = self;
-        this.0.rem_assign(other.0)
-    }
-}
+op_assign_impl!(PrecisionAmount, AddAssign, add_assign, Add, add);
+op_assign_impl!(PrecisionAmount, SubAssign, sub_assign, Sub, sub);
+op_assign_impl!(PrecisionAmount, MulAssign, mul_assign, Mul, mul);
+op_assign_impl!(PrecisionAmount, DivAssign, div_assign, Div, div);
+op_assign_impl!(PrecisionAmount, RemAssign, rem_assign, Rem, rem);
 
 impl ops::Neg for PrecisionAmount {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        PrecisionAmount(self.0.neg())
+        match self.checked_neg() {
+            Some(value) => value,
+            None => panic!("attempt to negate with overflow"),
+        }
     }
 }

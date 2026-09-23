@@ -20,21 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import { TableContainer, Table, TableRow, TableBody, Collapse } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
-import { renderJson } from "../../utils/helpers";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockDialog from "../../Components/CodeBlock";
+import { Collapse, Table, TableBody, TableContainer, TableRow } from "@mui/material";
 import type { Instruction } from "@tari-project/ootle-ts-bindings";
+import { useState } from "react";
+import CodeBlockDialog from "../../Components/CodeBlock";
+import { AccordionIconButton, DataTableCell } from "../../Components/StyledComponents";
+import { renderJson } from "../../utils/helpers";
 
 interface InstructionsProps {
-    data: Instruction[];
-    index?: number
+  data: Instruction[];
+  index?: number;
 }
-interface RowDataProps  { title: string; data: Instruction, index:number };
-function RowData({ title, data, index }:RowDataProps) {
+interface RowDataProps {
+  title: string;
+  data: Instruction;
+  index: number;
+}
+function RowData({ title, data, index }: RowDataProps) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -64,7 +68,7 @@ function RowData({ title, data, index }:RowDataProps) {
   );
 }
 
-export default function Instructions({ data, }:InstructionsProps) {
+export default function Instructions({ data }: InstructionsProps) {
   return (
     <TableContainer>
       <Table>

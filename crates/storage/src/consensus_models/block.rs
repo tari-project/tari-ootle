@@ -55,6 +55,7 @@ use super::{
     BookkeepingModel,
     ForeignProposalAtom,
     ForeignProposalRecord,
+    LivenessThresholds,
     LockedEpoch,
     PendingShardStateTreeDiff,
     SubstateDestroy,
@@ -1063,28 +1064,29 @@ impl Block {
         ForeignProposalRecord::get_any(tx, self.all_foreign_proposals().map(|p| &p.block_id))
     }
 
+    /// Charges the missed proposal that this dummy block stands for to the validator it is
+    /// attributed to, which is the effective leader of the view it fills.
     pub fn increment_leader_failure_count<TTx: StateStoreWriteTransaction>(
         &self,
         tx: &mut TTx,
-        max_missed_proposal_cap: u64,
+        thresholds: LivenessThresholds,
     ) -> Result<(), StorageError> {
         tx.validator_epoch_stats_updates(
             self.epoch(),
-            iter::once(
-                ValidatorStatsUpdate::new(self.proposed_by())
-                    .add_missed_proposal()
-                    .set_max_missed_proposals_cap(max_missed_proposal_cap),
-            ),
+            self.height(),
+            iter::once(ValidatorStatsUpdate::new(self.proposed_by(), thresholds).add_missed_proposal()),
         )
     }
 
     pub fn clear_leader_failure_count<TTx: StateStoreWriteTransaction>(
         &self,
         tx: &mut TTx,
+        thresholds: LivenessThresholds,
     ) -> Result<(), StorageError> {
         tx.validator_epoch_stats_updates(
             self.epoch(),
-            iter::once(ValidatorStatsUpdate::new(self.proposed_by()).reset_missed_proposals()),
+            self.height(),
+            iter::once(ValidatorStatsUpdate::new(self.proposed_by(), thresholds).reset_missed_proposals()),
         )
     }
 }

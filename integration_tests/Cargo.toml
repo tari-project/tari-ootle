@@ -1,5 +1,6 @@
 [package]
 name = "integration_tests"
+publish = false
 description = "The Tari integration tests"
 version.workspace = true
 edition.workspace = true
@@ -55,7 +56,7 @@ tari_p2p = "5.7.0-pre.5"
 
 anyhow = { workspace = true }
 config = { workspace = true }
-cucumber = { version = "0.21.1", features = [
+cucumber = { version = "0.23.0", features = [
     "default",
     "libtest",
     "output-junit",

@@ -46,4 +46,3 @@ export const useDatabaseCfsList = (dbName: string) => {
     refetchOnWindowFocus: false,
   });
 };
-

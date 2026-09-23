@@ -16,6 +16,9 @@ import {
   TablePagination,
   TableRow,
 } from "@mui/material";
+import PlaceHolder from "@routes/StealthUtxoList/components/PlaceHolder";
+import SortableHeader from "@routes/StealthUtxoList/components/SortableHeader";
+import StatusChip from "@routes/StealthUtxoList/components/StatusChip";
 import { Account, OutputStatus, TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import {
   bigintToDecimalString,
@@ -27,9 +30,6 @@ import {
 } from "@utils/helpers";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import PlaceHolder from "@routes/StealthUtxoList/components/PlaceHolder";
-import SortableHeader from "@routes/StealthUtxoList/components/SortableHeader";
-import StatusChip from "@routes/StealthUtxoList/components/StatusChip";
 
 function ConfidentialOutputList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);

@@ -3,6 +3,7 @@
 
 use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine_types::limits::MAX_CBOR_NESTING_DEPTH;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VotePower};
 use tari_sidechain::{SidechainBlockCommitProof, SidechainProofValidationError};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -27,8 +28,8 @@ impl CommittedBlockProof {
     /// Decodes a proof from the CBOR encoding produced by [`CommittedBlockProof::to_bytes`]
     /// (matching `tari_bor::adapters::serde_bridge`, as used for [`super::EpochCheckpoint`]).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, CommittedBlockProofError> {
-        let proof =
-            tari_bor::serde_codec::from_slice(bytes).map_err(|e| CommittedBlockProofError::Decode(e.to_string()))?;
+        let proof = tari_bor::serde_codec::from_slice_with_max_depth(bytes, MAX_CBOR_NESTING_DEPTH)
+            .map_err(|e| CommittedBlockProofError::Decode(e.to_string()))?;
         Ok(Self::new(proof))
     }
 

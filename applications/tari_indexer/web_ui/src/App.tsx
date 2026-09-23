@@ -20,21 +20,21 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Routes, Route } from "react-router-dom";
-import ValidatorNode from "./routes/VN/ValidatorNode";
+import { Route, Routes } from "react-router-dom";
 import Connections from "./routes/Connections/Connections";
 import Economics from "./routes/Economics/Economics";
+import ErrorPage from "./routes/ErrorPage";
+import Events from "./routes/Events/Events";
 import RecentTransactions from "./routes/RecentTransactions/RecentTransactionsLayout";
 import Resources from "./routes/Resources/Resources";
-import Events from "./routes/Events/Events";
 import Substates from "./routes/Substates/Substates";
 import Templates from "./routes/Templates/Templates";
 import TransactionDetails from "./routes/Transaction/TransactionDetails";
-import TransactionReceipts from "./routes/TransactionReceipts/TransactionReceiptsLayout";
 import TransactionReceiptDetails from "./routes/TransactionReceipts/TransactionReceiptDetailsLayout";
+import TransactionReceipts from "./routes/TransactionReceipts/TransactionReceiptsLayout";
 import Validators from "./routes/Validators/Validators";
+import ValidatorNode from "./routes/VN/ValidatorNode";
 import WatchedSubstates from "./routes/WatchedSubstates/WatchedSubstates";
-import ErrorPage from "./routes/ErrorPage";
 import Layout from "./theme/LayoutMain";
 
 export const breadcrumbRoutes = [

@@ -1,5 +1,6 @@
 [package]
 name = "tari_validator_node_rpc"
+publish = false
 description = "Peer-to-peer RPC implementation for the Validator Node"
 version.workspace = true
 edition.workspace = true

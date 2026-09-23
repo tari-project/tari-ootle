@@ -20,23 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import { Stack } from "@mui/material";
+import Chip from "@mui/material/Chip";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
-import Chip from "@mui/material/Chip";
-import {
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-} from "../../../Components/Accordion";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { DataTableCell } from "../../../Components/StyledComponents";
-import { Stack } from "@mui/material";
-import { useState, useEffect } from "react";
 import type { FeeReceipt } from "@tari-project/ootle-ts-bindings";
+import { useEffect, useState } from "react";
+import { Accordion, AccordionDetails, AccordionSummary } from "../../../Components/Accordion";
+import { DataTableCell } from "../../../Components/StyledComponents";
 import { formatXTM } from "../../../utils/helpers";
 
 const FEE_SOURCE_LABELS: Record<string, string> = {
@@ -57,14 +53,14 @@ interface FeeInformationProps extends FeeReceipt {
 }
 
 function FeeInformation({
-                          total_fee_payment,
-                          total_fees_paid,
-                          total_fee_overcharge,
-                          cost_breakdown,
-                          expandAllTrigger = 0,
-                          collapseAllTrigger = 0,
-                          onExpandedChange,
-                        }: FeeInformationProps) {
+  total_fee_payment,
+  total_fees_paid,
+  total_fee_overcharge,
+  cost_breakdown,
+  expandAllTrigger = 0,
+  collapseAllTrigger = 0,
+  onExpandedChange,
+}: FeeInformationProps) {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -88,7 +84,10 @@ function FeeInformation({
     setExpanded(isExpanded);
   };
 
-  const totalCost = Object.entries(cost_breakdown.breakdown).reduce((sum, [_, value]) => BigInt(sum) + BigInt(value), BigInt(0));
+  const totalCost = Object.entries(cost_breakdown.breakdown).reduce(
+    (sum, [_, value]) => BigInt(sum) + BigInt(value),
+    BigInt(0),
+  );
 
   return (
     <Accordion expanded={expanded} onChange={handleChange}>
@@ -105,27 +104,24 @@ function FeeInformation({
               </TableRow>
               <TableRow>
                 <TableCell>Total Fees Paid</TableCell>
-                <DataTableCell>{formatXTM(total_fees_paid)}{total_fee_overcharge > 0 ? ` Overcharge: ${total_fee_overcharge}` : ""}</DataTableCell>
+                <DataTableCell>
+                  {formatXTM(total_fees_paid)}
+                  {total_fee_overcharge > 0 ? ` Overcharge: ${total_fee_overcharge}` : ""}
+                </DataTableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Cost Breakdown</TableCell>
                 <DataTableCell>
                   <Stack direction="row" spacing={1}>
-                    {Object.entries(cost_breakdown.breakdown).map(
-                      ([key, value]) => (
-                        <Chip
-                          key={key}
-                          label={`${FEE_SOURCE_LABELS[key] ?? key}: ${value}`}
-                          variant="filled"
-                          color="default"
-                        />
-                      ),
-                    )}
-                    <Chip
-                      label={`Total: ${totalCost}`}
-                      variant="outlined"
-                      color="primary"
-                    />
+                    {Object.entries(cost_breakdown.breakdown).map(([key, value]) => (
+                      <Chip
+                        key={key}
+                        label={`${FEE_SOURCE_LABELS[key] ?? key}: ${value}`}
+                        variant="filled"
+                        color="default"
+                      />
+                    ))}
+                    <Chip label={`Total: ${totalCost}`} variant="outlined" color="primary" />
                   </Stack>
                 </DataTableCell>
               </TableRow>

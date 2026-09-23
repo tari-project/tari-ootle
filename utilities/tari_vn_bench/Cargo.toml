@@ -1,5 +1,6 @@
 [package]
 name = "tari_vn_bench"
+publish = false
 description = "Measures whether a machine can keep up with validator-node consensus, and reports the spec it implies"
 version.workspace = true
 edition.workspace = true

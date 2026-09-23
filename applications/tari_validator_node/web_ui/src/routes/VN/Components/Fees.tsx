@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import EChartsReact from "echarts-for-react";
 import { useContext, useEffect, useState } from "react";
 import { VNContext } from "../../../App";
-import EChartsReact from "echarts-for-react";
 
 function Fees() {
   const [totalFeesPerEpoch, setTotalFeesPerEpoch] = useState<number[]>([]);

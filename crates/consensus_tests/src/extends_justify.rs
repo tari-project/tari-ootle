@@ -14,7 +14,12 @@
 use std::collections::BTreeSet;
 
 use tari_common_types::types::FixedHash;
-use tari_consensus::hotstuff::{ProposalValidationError, calculate_dummy_blocks_from_justify, check_extends_justify};
+use tari_consensus::hotstuff::{
+    LeaderSkipSet,
+    ProposalValidationError,
+    calculate_dummy_blocks_from_justify,
+    check_extends_justify,
+};
 use tari_consensus_types::{BlockId, LeafBlock, ProposalCertificate, ShardGroupAccumulatedData, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_ootle_common_types::{
@@ -115,6 +120,7 @@ fn dummy_chain(justify_block: &Block, candidate_height: NodeHeight) -> Vec<Block
         justify_block,
         &RoundRobinLeaderStrategy::new(),
         &committee(),
+        &LeaderSkipSet::none(),
     )
 }
 
@@ -140,6 +146,7 @@ fn extends_justify_when_parent_is_the_justify_block() {
         &justify_block,
         &RoundRobinLeaderStrategy::new(),
         &committee(),
+        &LeaderSkipSet::none(),
     )
     .unwrap();
     assert!(dummy_blocks.is_empty(), "a contiguous candidate needs no dummy blocks");
@@ -157,6 +164,7 @@ fn rejects_parent_that_is_not_the_justify_block() {
         &justify_block,
         &RoundRobinLeaderStrategy::new(),
         &committee(),
+        &LeaderSkipSet::none(),
     )
     .unwrap_err();
     assert!(
@@ -183,6 +191,7 @@ fn extends_justify_through_a_full_dummy_chain() {
         &justify_block,
         &RoundRobinLeaderStrategy::new(),
         &committee(),
+        &LeaderSkipSet::none(),
     )
     .unwrap();
     assert_eq!(
@@ -213,6 +222,7 @@ fn rejects_truncated_dummy_chain() {
         &justify_block,
         &RoundRobinLeaderStrategy::new(),
         &committee(),
+        &LeaderSkipSet::none(),
     )
     .unwrap_err();
     assert!(
@@ -240,6 +250,7 @@ fn rejects_view_gap_without_a_timeout_certificate() {
         &justify_block,
         &RoundRobinLeaderStrategy::new(),
         &committee(),
+        &LeaderSkipSet::none(),
     )
     .unwrap_err();
     assert!(
@@ -266,6 +277,7 @@ fn rejects_parent_that_is_not_the_last_dummy_block() {
         &justify_block,
         &RoundRobinLeaderStrategy::new(),
         &committee(),
+        &LeaderSkipSet::none(),
     )
     .unwrap_err();
     assert!(

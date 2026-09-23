@@ -20,25 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import "./Info.css";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableRow from "@mui/material/TableRow";
+import type { GetEpochManagerStatsResponse, VNGetIdentityResponse } from "@tari-project/ootle-ts-bindings";
 import { DataTableCell } from "../../../Components/StyledComponents";
-import { TextField } from "@mui/material";
-import type {
-  GetEpochManagerStatsResponse,
-  VNGetIdentityResponse,
-} from "@tari-project/ootle-ts-bindings";
+import "./Info.css";
 
 function Info({
-                epoch,
-                identity,
-                shardKey,
-              }: {
+  epoch,
+  identity,
+  shardKey,
+}: {
   epoch: GetEpochManagerStatsResponse;
   identity: VNGetIdentityResponse;
   shardKey: string | null;
@@ -62,9 +57,11 @@ function Info({
               <TableCell>Listen addresses</TableCell>
               <DataTableCell>{identity.public_addresses?.join("\n")}</DataTableCell>
             </TableRow>
-            <TableRow><TableCell>Public key</TableCell> <DataTableCell>{identity.public_key}</DataTableCell>
+            <TableRow>
+              <TableCell>Public key</TableCell> <DataTableCell>{identity.public_key}</DataTableCell>
             </TableRow>
-            <TableRow><TableCell>Claim key</TableCell> <DataTableCell>{identity.fee_claim_public_key}</DataTableCell>
+            <TableRow>
+              <TableCell>Claim key</TableCell> <DataTableCell>{identity.fee_claim_public_key}</DataTableCell>
             </TableRow>
             <TableRow>
               <TableCell>Shard key</TableCell>

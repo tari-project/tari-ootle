@@ -1,5 +1,6 @@
 [package]
 name = "tari_ootle_wallet_sdk_services"
+publish = false
 description = "High-level wallet services and abstractions for the Tari Ootle wallet"
 version = "0.34.2"
 edition.workspace = true

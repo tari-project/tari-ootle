@@ -20,30 +20,28 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { NavLink } from "react-router-dom";
+import Fade from "@mui/material/Fade";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
-import {
-  IoHomeOutline,
-  IoHome,
-  IoBarChart,
-  IoGitNetworkOutline,
-  IoGitNetwork,
-  IoCalculatorOutline,
-  IoCalculator,
-  IoCheckmarkCircleOutline,
-  IoCheckmarkCircle,
-  IoLayersOutline,
-  IoLayers,
-  IoCodeDownloadOutline,
-  IoCodeDownload,
-  IoBarChartSharp,
-  IoPulseOutline,
-  IoPulse,
-} from "react-icons/io5";
 import Tooltip from "@mui/material/Tooltip";
-import Fade from "@mui/material/Fade";
+import {
+  IoBarChart,
+  IoBarChartSharp,
+  IoCalculator,
+  IoCalculatorOutline,
+  IoCheckmarkCircle,
+  IoCheckmarkCircleOutline,
+  IoGitNetwork,
+  IoGitNetworkOutline,
+  IoHome,
+  IoHomeOutline,
+  IoLayers,
+  IoLayersOutline,
+  IoPulse,
+  IoPulseOutline,
+} from "react-icons/io5";
+import { NavLink } from "react-router-dom";
 import theme from "../theme/theme";
 
 const iconStyle = {

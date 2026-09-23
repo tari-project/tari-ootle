@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Paper from "@mui/material/Paper";
-import TableCell from "@mui/material/TableCell";
-import { styled } from "@mui/material/styles";
 import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
-import theme from "../theme/theme";
+import Paper from "@mui/material/Paper";
+import TableCell from "@mui/material/TableCell";
 import Typography from "@mui/material/Typography";
+import { styled } from "@mui/material/styles";
+import theme from "../theme/theme";
 
 interface IAccordionIconButton {
   open: boolean;

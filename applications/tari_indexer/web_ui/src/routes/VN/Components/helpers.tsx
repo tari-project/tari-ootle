@@ -120,4 +120,4 @@ function shortenString(string: string, start: number = 8, end: number = 8) {
   return string.substring(0, start) + "..." + string.slice(-end);
 }
 
-export { U256, compare, toHexString, fromHexString, shortenString };
+export { U256, compare, fromHexString, shortenString, toHexString };

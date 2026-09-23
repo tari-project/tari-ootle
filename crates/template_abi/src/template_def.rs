@@ -191,3 +191,101 @@ impl std::fmt::Display for Type {
         }
     }
 }
+
+#[cfg(all(test, feature = "std"))]
+mod nesting_depth_tests {
+    use super::*;
+
+    // The bound the engine applies at its trust boundaries
+    // (`tari_engine_types::limits::MAX_CBOR_NESTING_DEPTH`). Named here rather than imported
+    // because `tari_engine_types` depends on this crate, not the other way around.
+    const MAX_NESTING_DEPTH: usize = 256;
+
+    // `Type` is self-recursive through `Vec`/`Tuple`/`Option` and both of its decoders are derived,
+    // so neither can thread a nesting bound of its own. The bound belongs to `tari_bor`'s decode
+    // entry points, and these payloads are what prove it is there: without it the decoder recurses
+    // once per level and the stack overflow aborts the process instead of returning an error.
+    const PAST_THE_BOUND: usize = 100_000;
+
+    // The smallest stack untrusted decode runs on: a tokio worker. Whatever the bound admits has to
+    // decode within it, or the bound is not a bound.
+    const WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
+
+    // Repeats one `Type::Vec` wrapper's worth of framing, taken from a real encode so the fixture
+    // follows whatever framing the codec emits.
+    fn nested_payload(one_level: &[u8], innermost: &[u8], levels: usize) -> Vec<u8> {
+        let prefix = &one_level[..one_level.len() - innermost.len()];
+        let mut bytes = Vec::with_capacity(prefix.len() * levels + innermost.len());
+        for _ in 0..levels {
+            bytes.extend_from_slice(prefix);
+        }
+        bytes.extend_from_slice(innermost);
+        bytes
+    }
+
+    // The deepest payload the bound lets through, found by asking the bound rather than by counting
+    // wire levels per `Type` level — that count is the codec's business and differs between the two.
+    fn deepest_payload_within_bound(build: impl Fn(usize) -> Vec<u8>) -> Vec<u8> {
+        (1..=MAX_NESTING_DEPTH)
+            .rev()
+            .map(build)
+            .find(|bytes| tari_bor::check_nesting_depth(bytes, MAX_NESTING_DEPTH).is_ok())
+            .expect("no nesting level is within the bound")
+    }
+
+    fn on_a_worker_sized_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(WORKER_STACK_BYTES)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn minicbor_payload(levels: usize) -> Vec<u8> {
+        let innermost = tari_bor::encode(&Type::Unit).unwrap();
+        let one_level = tari_bor::encode(&Type::Vec(Box::new(Type::Unit))).unwrap();
+        nested_payload(&one_level, &innermost, levels)
+    }
+
+    #[test]
+    fn deeply_nested_type_is_rejected_by_the_minicbor_decoder() {
+        let bytes = minicbor_payload(PAST_THE_BOUND);
+        assert!(tari_bor::decode_with_max_depth::<Type>(&bytes, MAX_NESTING_DEPTH).is_err());
+    }
+
+    #[test]
+    fn minicbor_decode_at_the_bound_fits_a_worker_stack() {
+        let bytes = deepest_payload_within_bound(minicbor_payload);
+        on_a_worker_sized_stack(move || {
+            tari_bor::decode_with_max_depth::<Type>(&bytes, MAX_NESTING_DEPTH).unwrap();
+        });
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_route {
+        use tari_bor::serde_codec;
+
+        use super::*;
+
+        fn serde_payload(levels: usize) -> Vec<u8> {
+            let innermost = serde_codec::to_vec(Type::Unit).unwrap();
+            let one_level = serde_codec::to_vec(Type::Vec(Box::new(Type::Unit))).unwrap();
+            nested_payload(&one_level, &innermost, levels)
+        }
+
+        #[test]
+        fn deeply_nested_type_is_rejected_by_the_serde_decoder() {
+            let bytes = serde_payload(PAST_THE_BOUND);
+            assert!(serde_codec::from_slice_with_max_depth::<Type>(&bytes, MAX_NESTING_DEPTH).is_err());
+        }
+
+        #[test]
+        fn serde_decode_at_the_bound_fits_a_worker_stack() {
+            let bytes = deepest_payload_within_bound(serde_payload);
+            on_a_worker_sized_stack(move || {
+                serde_codec::from_slice_with_max_depth::<Type>(&bytes, MAX_NESTING_DEPTH).unwrap();
+            });
+        }
+    }
+}

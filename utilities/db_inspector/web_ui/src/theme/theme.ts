@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ThemeOptions } from "@mui/material/styles";
-import { tariPurple, blue, red, green, orange, grey, teal, gothic } from "./colors";
+import { blue, gothic, green, grey, orange, red, tariPurple, teal } from "./colors";
 
 export const componentSettings: ThemeOptions = {
   shape: {

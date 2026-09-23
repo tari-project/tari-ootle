@@ -3,8 +3,8 @@
 
 import { Box, Card, CardActionArea, CardContent, Divider, Grid, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import { useDatabasesList } from "../store/databases.ts";
 import { Link as RouterLink } from "react-router-dom";
+import { useDatabasesList } from "../store/databases.ts";
 
 export default function Home() {
   const theme = useTheme();

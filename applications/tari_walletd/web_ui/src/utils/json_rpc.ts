@@ -186,8 +186,8 @@ const client = getClientInstance;
 
 export const authGetMethod = (): Promise<AuthGetMethodResponse> => client().then((c) => c.authGetMethod());
 
-export const webauthnAlreadyRegistered = (username: string): Promise<WebauthnAlreadyRegisteredResponse> =>
-  client().then((c) => c.webauthnAlreadyRegistered({ username }));
+export const webauthnAlreadyRegistered = (): Promise<WebauthnAlreadyRegisteredResponse> =>
+  client().then((c) => c.webauthnAlreadyRegistered({}));
 
 export const webauthnStartRegistration = (
   request: WebauthnStartRegisterRequest,

@@ -20,9 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import {
   Box,
   Button,
@@ -36,16 +35,17 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import React, { useEffect, useState } from "react";
-import { truncateText } from "../../utils/helpers";
-import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
-import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import saveAs from "file-saver";
-import JsonDialog from "../../Components/JsonDialog";
-import { queryTransactionEvents } from "../../utils/api";
-import CopyToClipboard from "../../Components/CopyToClipboard";
-import { Link } from "react-router-dom";
+import Grid from "@mui/material/Grid";
 import { Event, TransactionId } from "@tari-project/ootle-ts-bindings";
+import saveAs from "file-saver";
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import CopyToClipboard from "../../Components/CopyToClipboard";
+import JsonDialog from "../../Components/JsonDialog";
+import PageHeading from "../../Components/PageHeading";
+import { StyledPaper } from "../../Components/StyledComponents";
+import { queryTransactionEvents } from "../../utils/api";
+import { truncateText } from "../../utils/helpers";
 
 const PAGE_SIZE = 10;
 
@@ -60,8 +60,7 @@ function EventsLayout() {
   });
 
   useEffect(() => {
-    getEvents(page, PAGE_SIZE, filter)
-      .then(setEvents)
+    getEvents(page, PAGE_SIZE, filter).then(setEvents);
   }, []);
 
   async function getEvents(offset: number, limit: number, filter: any) {
@@ -72,7 +71,6 @@ function EventsLayout() {
       offset,
     });
 
-
     return resp.events;
   }
 
@@ -82,7 +80,6 @@ function EventsLayout() {
     setEvents(events);
     setPage(newPage);
   }
-
 
   const handlePayloadDownload = (txId: TransactionId, event: Event) => {
     const data = event.payload;
@@ -126,18 +123,14 @@ function EventsLayout() {
             name="topic"
             label="Topic"
             value={filter.topic}
-            onChange={async (e: React.ChangeEvent<HTMLInputElement>) =>
-              onFilterChange(e)
-            }
+            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e)}
             style={{ flexGrow: 1 }}
           />
           <TextField
             name="substate_id"
             label="Substate Id"
             value={filter.substate_id}
-            onChange={async (e: React.ChangeEvent<HTMLInputElement>) =>
-              onFilterChange(e)
-            }
+            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e)}
             style={{ flexGrow: 1 }}
           />
         </Box>
@@ -184,16 +177,10 @@ function EventsLayout() {
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={2} alignItems="left">
-                      <Button
-                        variant="outlined"
-                        onClick={() => handlePayloadView(event)}
-                      >
+                      <Button variant="outlined" onClick={() => handlePayloadView(event)}>
                         View
                       </Button>
-                      <Button
-                        variant="outlined"
-                        onClick={() => handlePayloadDownload(txId, event)}
-                      >
+                      <Button variant="outlined" onClick={() => handlePayloadDownload(txId, event)}>
                         Download
                       </Button>
                     </Stack>
@@ -202,33 +189,18 @@ function EventsLayout() {
               ))}
             </TableBody>
           </Table>
-          <Stack
-            direction="row"
-            justifyContent="right"
-            spacing={2}
-            alignItems="center"
-          >
-            <IconButton
-              aria-label="copy"
-              onClick={() => handleChangePage(Math.max(page - 1, 0))}
-            >
+          <Stack direction="row" justifyContent="right" spacing={2} alignItems="center">
+            <IconButton aria-label="copy" onClick={() => handleChangePage(Math.max(page - 1, 0))}>
               <KeyboardArrowLeftIcon />
             </IconButton>
             <Typography sx={{}}>{page}</Typography>
-            <IconButton
-              aria-label="copy"
-              onClick={() => handleChangePage(page + 1)}
-            >
+            <IconButton aria-label="copy" onClick={() => handleChangePage(page + 1)}>
               <KeyboardArrowRightIcon />
             </IconButton>
           </Stack>
         </StyledPaper>
       </Grid>
-      <JsonDialog
-        open={jsonDialogOpen}
-        onClose={handleJsonDialogClose}
-        data={selectedPayload}
-      />
+      <JsonDialog open={jsonDialogOpen} onClose={handleJsonDialogClose} data={selectedPayload} />
     </>
   );
 }

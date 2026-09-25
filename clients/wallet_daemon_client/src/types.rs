@@ -1933,7 +1933,6 @@ pub struct ResourcesGetManyRequest {
 pub struct ResourcesGetManyResponse {
     /// The requested resources this wallet has stored. An address the wallet has no record of is
     /// absent from the map.
-    #[cfg_attr(feature = "ts", ts(type = "Record<string, Resource>"))]
     pub resources: HashMap<ResourceAddress, Resource>,
 }
 

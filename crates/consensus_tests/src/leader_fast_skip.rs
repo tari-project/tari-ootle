@@ -220,7 +220,10 @@ async fn a_returning_validator_is_restored() {
     commit_a_block(&mut test).await;
     is_muted.store(true, Ordering::SeqCst);
 
-    while liveness_state_of(&test, "1", &returning, &SHORT_PROBATION) != LivenessState::Suspended {
+    // Suspended is short-lived here: two counted votes earn the probation slot, so polling for the
+    // state can miss it and leave the validator muted through that slot. The missed-proposal count
+    // only rises while it is muted, so it is a condition the loop cannot step past.
+    while stats_for(&test, "1", &returning).missed_proposals < SUSPEND_AFTER_MISSED {
         let height = commit_a_block(&mut test).await;
         assert!(
             height < NodeHeight(40),

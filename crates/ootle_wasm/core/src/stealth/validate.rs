@@ -64,7 +64,7 @@ mod tests {
             auth: SpendAuthorization::Key(owner_pk.to_byte_type()),
             tag: UtxoTag::new(0),
         }];
-        let transfer = create_transfer_statement(inputs, Amount::zero(), outputs.iter(), Amount::zero()).unwrap();
+        let transfer = create_transfer_statement(inputs, Amount::zero(), outputs.iter(), None).unwrap();
         let json = serde_json::to_string(&transfer).unwrap();
 
         validate_stealth_transfer(&json, None).unwrap();
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn rejects_a_noop_transfer() {
-        let transfer = create_transfer_statement(iter::empty(), Amount::zero(), iter::empty(), Amount::zero()).unwrap();
+        let transfer = create_transfer_statement(iter::empty(), Amount::zero(), iter::empty(), None).unwrap();
         let json = serde_json::to_string(&transfer).unwrap();
         let err = validate_stealth_transfer(&json, None).unwrap_err();
         assert!(matches!(err, OotleWasmError::StealthValidation(_)));

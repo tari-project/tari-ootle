@@ -538,7 +538,10 @@ mod tests {
                     .collect(),
                 Amount::zero(),
             ),
-            outputs_statement: StealthOutputsStatement::new_revealed_only(Amount::zero()),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(
+                Amount::zero(),
+                RistrettoPublicKeyBytes::zero(),
+            ),
             balance_proof: None,
             covenant_claims: vec![],
         };

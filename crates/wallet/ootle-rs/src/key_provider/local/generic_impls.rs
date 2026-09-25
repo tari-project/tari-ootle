@@ -28,10 +28,10 @@ use tari_ootle_wallet_crypto::{
     viewable_balance_proof::generate_elgamal_viewable_balance_proof,
 };
 use tari_template_lib_types::{
-    Amount,
     EncryptedData,
     crypto::RistrettoPublicKeyBytes,
     stealth::{
+        RevealedOutput,
         StealthInputsStatement,
         StealthOutputsStatement,
         StealthTransferStatement,
@@ -91,7 +91,7 @@ impl<C: OutputMaskProvider + Send + Sync> StealthOutputStatementFactory for Loca
     async fn generate_outputs_statement(
         &self,
         specs: Vec<Output>,
-        revealed_output_amount: Amount,
+        revealed_output: Option<RevealedOutput>,
     ) -> StealthResult<(StealthOutputsStatement, RistrettoSecretKey)> {
         let mut outputs = Vec::with_capacity(specs.len());
         let mut witnesses = Vec::with_capacity(specs.len());
@@ -133,7 +133,7 @@ impl<C: OutputMaskProvider + Send + Sync> StealthOutputStatementFactory for Loca
         Ok((
             StealthOutputsStatement {
                 outputs,
-                revealed_output_amount,
+                revealed_output,
                 agg_range_proof,
             },
             agg_output_mask,
@@ -157,7 +157,7 @@ where LocalKeyProvider<C>: StealthOutputStatementFactory + InputDecryptor + Send
             inputs,
             revealed_input_amount,
             outputs,
-            revealed_output_amount,
+            revealed_output,
         } = spec;
 
         let mut agg_input_mask = RistrettoSecretKey::default();
@@ -170,13 +170,16 @@ where LocalKeyProvider<C>: StealthOutputStatementFactory + InputDecryptor + Send
             statement_inputs.push(resolved.input);
         }
 
-        let (outputs_statement, agg_output_mask) =
-            self.generate_outputs_statement(outputs, revealed_output_amount).await?;
+        let (outputs_statement, agg_output_mask) = self.generate_outputs_statement(outputs, revealed_output).await?;
 
         let inputs_statement = StealthInputsStatement {
             inputs: statement_inputs,
             revealed_amount: revealed_input_amount,
         };
+
+        // This provider spends only key-path inputs, so no partition gates on a covenant and there is nothing to
+        // claim. The claims are bound by the balance proof, so they must be settled before it is signed.
+        let covenant_claims = vec![];
 
         let balance_proof = requires_balance_proof.then(|| {
             generate_stealth_balance_proof_signature(
@@ -184,13 +187,15 @@ where LocalKeyProvider<C>: StealthOutputStatementFactory + InputDecryptor + Send
                 &agg_output_mask,
                 &inputs_statement,
                 &outputs_statement,
+                &covenant_claims,
             )
         });
 
         if let Some(balance_proof) = &balance_proof {
             // Every proof above is generated from our own key material, so a balance proof that does not
             // verify means the caller's input and output values do not balance.
-            if !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement) {
+            if !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement, &covenant_claims)
+            {
                 return Err(StealthProviderError::UnbalancedTransfer {
                     total_revealed_input,
                     output_amount: total_output_amount,
@@ -321,7 +326,7 @@ mod tests {
     use tari_crypto::keys::SecretKey;
     use tari_ootle_common_types::engine_types::{crypto::OutputBody, stealth::validate_transfer};
     use tari_ootle_wallet_crypto::MaskAndValue;
-    use tari_template_lib_types::{ResourceAddress, constants::TARI_TOKEN, stealth::StealthInput};
+    use tari_template_lib_types::{Amount, ResourceAddress, constants::TARI_TOKEN, stealth::StealthInput};
 
     use super::*;
     use crate::{
@@ -331,6 +336,12 @@ mod tests {
     };
 
     const VALUE: u64 = 1_000_000;
+
+    /// A stand-in receiver for a revealed output. These tests exercise statement construction, not the engine's
+    /// badge check, so any canonical key will do.
+    fn a_receiver() -> RistrettoPublicKeyBytes {
+        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(9u64)).to_byte_type()
+    }
 
     fn resource() -> ResourceAddress {
         TARI_TOKEN
@@ -347,7 +358,7 @@ mod tests {
             NonZeroU64::new(value).expect("test value is non-zero"),
         );
         let (statement, _agg_mask) = provider
-            .generate_outputs_statement(vec![spec], Amount::zero())
+            .generate_outputs_statement(vec![spec], None)
             .await
             .expect("minting a stealth output must succeed");
 
@@ -379,7 +390,7 @@ mod tests {
                 inputs: vec![input],
                 revealed_input_amount: Amount::zero(),
                 outputs: vec![output_to_self(&provider, VALUE)],
-                revealed_output_amount: Amount::zero(),
+                revealed_output: None,
             })
             .await
             .expect("a balanced transfer must produce a statement");
@@ -405,7 +416,7 @@ mod tests {
                 inputs,
                 revealed_input_amount: Amount::zero(),
                 outputs: vec![output_to_self(&provider, VALUE), output_to_self(&provider, VALUE * 2)],
-                revealed_output_amount: Amount::zero(),
+                revealed_output: None,
             })
             .await
             .expect("a balanced transfer must produce a statement");
@@ -425,7 +436,7 @@ mod tests {
                 inputs: vec![],
                 revealed_input_amount: Amount::from(VALUE),
                 outputs: vec![output_to_self(&provider, VALUE)],
-                revealed_output_amount: Amount::zero(),
+                revealed_output: None,
             })
             .await
             .expect("a balanced transfer must produce a statement");
@@ -447,7 +458,7 @@ mod tests {
                 revealed_input_amount: Amount::zero(),
                 // Spend more than the input holds.
                 outputs: vec![output_to_self(&provider, VALUE + 1)],
-                revealed_output_amount: Amount::zero(),
+                revealed_output: None,
             })
             .await
             .expect_err("an unbalanced transfer must be rejected");
@@ -469,7 +480,7 @@ mod tests {
                 inputs: vec![],
                 revealed_input_amount: Amount::from(VALUE),
                 outputs: vec![],
-                revealed_output_amount: Amount::from(VALUE),
+                revealed_output: Some(RevealedOutput::new(Amount::from(VALUE), a_receiver())),
             })
             .await
             .expect("a revealed-only transfer must produce a statement");
@@ -490,7 +501,7 @@ mod tests {
                 inputs: vec![alices_input],
                 revealed_input_amount: Amount::zero(),
                 outputs: vec![output_to_self(&bob, VALUE)],
-                revealed_output_amount: Amount::zero(),
+                revealed_output: None,
             })
             .await
             .expect_err("bob must not be able to spend alice's output");
@@ -511,7 +522,7 @@ mod tests {
             inputs: vec![],
             revealed_input_amount: Amount::zero(),
             outputs: vec![output_to_self(&provider, 300), output_to_self(&provider, 700)],
-            revealed_output_amount: Amount::from(1000u128),
+            revealed_output: Some(RevealedOutput::new(Amount::from(1000u128), a_receiver())),
         };
         assert_eq!(spec.total_output_amount(), Amount::from(2000u128));
     }
@@ -523,7 +534,7 @@ mod tests {
             inputs: vec![],
             revealed_input_amount: Amount::from(VALUE),
             outputs: vec![],
-            revealed_output_amount: Amount::from(VALUE),
+            revealed_output: Some(RevealedOutput::new(Amount::from(VALUE), a_receiver())),
         };
         assert!(!revealed_only.requires_balance_proof());
 
@@ -560,7 +571,7 @@ mod tests {
                 encrypted_data,
                 sender_offset_public_key,
                 output: output_to_self(&provider, VALUE - FEE),
-                revealed_output_amount: Amount::from(u128::from(FEE)),
+                revealed_output: Some(RevealedOutput::new(Amount::from(u128::from(FEE)), a_receiver())),
             })
             .await
             .expect("a balanced burn claim must produce a statement");

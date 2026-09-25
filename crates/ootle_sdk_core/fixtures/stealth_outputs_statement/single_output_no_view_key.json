@@ -56,7 +56,7 @@
           "tag": 1462557849
         }
       ],
-      "revealed_output_amount": "0"
+      "revealed_output": null
     },
     "aggregated_output_mask": "b13520ba294ee6b7eb58a1577981412c1f7b7a661f9bbc7cb642c245607ce903"
   }

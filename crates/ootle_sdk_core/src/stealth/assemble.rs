@@ -36,7 +36,7 @@ use tari_template_lib_types::{
     Amount,
     ComponentAddress,
     ResourceAddress,
-    crypto::PedersenCommitmentBytes,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     stealth::{StealthInput, StealthInputsStatement, StealthOutputsStatement, StealthTransferStatement},
 };
 
@@ -47,6 +47,7 @@ use crate::{
         inputs::spend_secrets_map,
         outputs::build_stealth_outputs_statement_from_entropy,
         partial::{StealthPartialTransaction, StealthSignatureRequirementsState},
+        sign_seal::{StealthKeys, seal_public_key},
     },
     types::{
         bytes::{BuildSeed, SecretKeyBytes},
@@ -116,6 +117,10 @@ pub fn assemble_stealth_transfer_statement(
     // transfer needs no balance proof.
     let requires_balance_proof = !inputs_statement.inputs.is_empty() || !outputs_statement.outputs.is_empty();
 
+    // This path spends only key-path inputs, so no partition gates on a covenant and there is nothing to claim. The
+    // claims are bound by the balance proof, so they must be settled before it is signed.
+    let covenant_claims = vec![];
+
     // Generate the balance proof (not byte-stable — internal RNG nonce).
     let balance_proof = requires_balance_proof.then(|| {
         generate_stealth_balance_proof_signature(
@@ -123,13 +128,14 @@ pub fn assemble_stealth_transfer_statement(
             &agg_output_mask,
             &inputs_statement,
             &outputs_statement,
+            &covenant_claims,
         )
     });
 
     // Local pre-flight: the inputs and outputs must balance. The only way a freshly-generated proof
     // fails to verify is an input/output value imbalance.
     if let Some(balance_proof) = &balance_proof &&
-        !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement)
+        !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement, &covenant_claims)
     {
         return Err(OotleSdkError::Stealth("inputs and outputs do not balance".to_string()));
     }
@@ -139,7 +145,7 @@ pub fn assemble_stealth_transfer_statement(
         inputs_statement,
         outputs_statement,
         balance_proof,
-        covenant_claims: vec![],
+        covenant_claims,
     };
 
     // Full pre-flight: the engine's own validation must accept the statement. `None` view key — the
@@ -344,6 +350,7 @@ pub fn apply_fetched_substates_stealth(
     network: Network,
     fetched: &[FetchedSubstate],
     spend_secrets: &[SecretKeyBytes],
+    keys: &StealthKeys,
 ) -> Result<StealthResolution, OotleSdkError> {
     // The stashed context (intent + entropy) must be present for assembly on the final round; take it
     // out and put it back if this round is not yet resolved (so the next round still has it).
@@ -356,7 +363,7 @@ pub fn apply_fetched_substates_stealth(
 
     match apply_fetched_substates_with_secrets(partial, fetched, &secrets)? {
         Resolution::Resolved(resolved) => {
-            let assembled = assemble_resolved_stealth(network, &ctx.intent, resolved, &ctx.entropy)?;
+            let assembled = assemble_resolved_stealth(network, &ctx.intent, resolved, &ctx.entropy, keys)?;
             Ok(StealthResolution::Resolved(Box::new(assembled)))
         },
         Resolution::NeedMore {
@@ -442,6 +449,29 @@ fn resolve_stealth_inputs(
     }
 }
 
+/// The key authorised to take this transfer's revealed output, or `None` when it reveals nothing.
+///
+/// The ephemeral seal case draws its key at seal time and has neither stealth inputs nor a revealed input, so a
+/// statement built under it carries no spendable input and cannot reveal an output either — a revealed output there
+/// is an error, not a key to invent.
+fn resolve_revealed_receiver(
+    network: Network,
+    intent: &StealthTransferIntent,
+    sig_reqs: &StealthSignatureRequirementsState,
+    keys: &StealthKeys,
+) -> Result<Option<RistrettoPublicKeyBytes>, OotleSdkError> {
+    if intent.revealed_output_amount == 0 {
+        return Ok(None);
+    }
+    let account_secret = parse_mask(&keys.account_secret)?;
+    let receiver = seal_public_key(network, &account_secret, sig_reqs)?.ok_or_else(|| {
+        OotleSdkError::Validation(
+            "a revealed output needs a receiver that signs, but this transfer has no signer to seal with".to_string(),
+        )
+    })?;
+    Ok(Some(receiver))
+}
+
 /// The shared assembly tail — runs the post-resolution work (outputs statement from `entropy`, balance
 /// proof, the `validate_transfer` pre-flight, and building the [`StealthPartialTransaction`]) on a
 /// fully-resolved resolver. Called by **both** the one-shot path
@@ -452,12 +482,20 @@ fn assemble_resolved_stealth(
     intent: &StealthTransferIntent,
     partial: PartialTransaction,
     entropy: &StealthEntropy,
+    keys: &StealthKeys,
 ) -> Result<StealthPartialTransaction, OotleSdkError> {
+    let sig_reqs = signature_requirements_from_partial(&partial);
+
+    // The revealed output names the key that will take it, and the balance proof binds that name, so the receiver has
+    // to be settled here rather than at seal time. Taking it from `seal_public_key` — the same derivation `plan_seal`
+    // seals with — is what keeps the named receiver and the transaction's actual signer the same key.
+    let revealed_receiver = resolve_revealed_receiver(network, intent, &sig_reqs, keys)?;
+
     // Outputs statement + aggregate output mask (expanded entropy).
-    let (outputs_statement, agg_output_mask) = build_stealth_outputs_statement_from_entropy(network, intent, entropy)?;
+    let (outputs_statement, agg_output_mask) =
+        build_stealth_outputs_statement_from_entropy(network, intent, entropy, revealed_receiver)?;
 
     let agg_input_mask = partial.agg_input_mask().clone();
-    let sig_reqs = signature_requirements_from_partial(&partial);
     let resolved_utxo_inputs = partial.resolved_inputs().to_vec();
 
     // Assemble + validate + build.
@@ -490,6 +528,7 @@ pub fn build_stealth_transfer_unsigned_with_seed(
     intent: &StealthTransferIntent,
     fetched_utxos: &[FetchedSubstate],
     spend_secrets: &[SecretKeyBytes],
+    keys: &StealthKeys,
     seed: &BuildSeed,
 ) -> Result<StealthPartialTransaction, OotleSdkError> {
     seed.validate_nonzero()?;
@@ -501,7 +540,7 @@ pub fn build_stealth_transfer_unsigned_with_seed(
     let partial = resolve_stealth_inputs(network, intent, &entropy, fetched_utxos, &secrets)?;
 
     // The shared assembly tail (also used by the looped `apply` path).
-    assemble_resolved_stealth(network, intent, partial, &entropy)
+    assemble_resolved_stealth(network, intent, partial, &entropy, keys)
 }
 
 /// The random-nonce default full-pipeline entry point: expands the proof entropy from a fresh OS-RNG
@@ -511,11 +550,12 @@ pub fn build_stealth_transfer_unsigned(
     intent: &StealthTransferIntent,
     fetched_utxos: &[FetchedSubstate],
     spend_secrets: &[SecretKeyBytes],
+    keys: &StealthKeys,
 ) -> Result<StealthPartialTransaction, OotleSdkError> {
     let entropy = StealthEntropy::from_os_rng(intent.outputs.len());
     let secrets = spend_secrets_map(intent, spend_secrets)?;
     let partial = resolve_stealth_inputs(network, intent, &entropy, fetched_utxos, &secrets)?;
-    assemble_resolved_stealth(network, intent, partial, &entropy)
+    assemble_resolved_stealth(network, intent, partial, &entropy, keys)
 }
 
 #[cfg(test)]
@@ -683,7 +723,21 @@ mod tests {
     ) -> Result<StealthPartialTransaction, OotleSdkError> {
         let secrets = spend_secrets_map(intent, &[])?;
         let partial = resolve_stealth_inputs(Network::LocalNet, intent, entropy, &[], &secrets)?;
-        assemble_resolved_stealth(Network::LocalNet, intent, partial, entropy)
+        assemble_resolved_stealth(Network::LocalNet, intent, partial, entropy, &test_keys())
+    }
+
+    /// The account key these tests seal with. A revealed output names its public key, since that is the key
+    /// `plan_seal` will seal with for an intent that draws on the account.
+    fn test_keys() -> StealthKeys {
+        StealthKeys::new(SecretKeyBytes::from_bytes(RistrettoSecretKey::from(42u64).as_bytes()).unwrap())
+    }
+
+    /// The public key [`test_keys`] seals with — the receiver these tests expect on a revealed output.
+    fn test_account_pk() -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from_bytes(
+            tari_crypto::ristretto::RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(42u64)).as_bytes(),
+        )
+        .unwrap()
     }
 
     fn stealth_transfer_instructions(unsigned: &UnsignedTransaction) -> Vec<&Instruction> {
@@ -795,8 +849,13 @@ mod tests {
 
         // Output side: gives the output commitment + the aggregate output mask.
         let intent_out = balanced_intent(value, 0); // revealed_input 0 ⇒ no bucket
-        let (outputs_statement, agg_output_mask) =
-            build_stealth_outputs_statement_from_entropy(Network::LocalNet, &intent_out, &entropy).unwrap();
+        let (outputs_statement, agg_output_mask) = build_stealth_outputs_statement_from_entropy(
+            Network::LocalNet,
+            &intent_out,
+            &entropy,
+            Some(test_account_pk()),
+        )
+        .unwrap();
 
         // Input side: a fabricated stealth input of the same value with a freely-chosen mask.
         let input_mask = RistrettoSecretKey::from_canonical_bytes(secret(150).as_bytes()).unwrap();
@@ -881,7 +940,8 @@ mod tests {
 
         // Direct outputs statement.
         let (direct_outputs, _) =
-            build_stealth_outputs_statement_from_entropy(Network::LocalNet, &intent, &entropy).unwrap();
+            build_stealth_outputs_statement_from_entropy(Network::LocalNet, &intent, &entropy, Some(test_account_pk()))
+                .unwrap();
         let direct_inputs = build_inputs_statement(&intent).unwrap();
 
         let partial = assemble_from_intent(&intent, &entropy).unwrap();
@@ -919,8 +979,8 @@ mod tests {
         assert_eq!(sa.inputs_statement, sb.inputs_statement);
         assert_eq!(sa.outputs_statement.outputs, sb.outputs_statement.outputs);
         assert_eq!(
-            sa.outputs_statement.revealed_output_amount,
-            sb.outputs_statement.revealed_output_amount
+            sa.outputs_statement.revealed_output,
+            sb.outputs_statement.revealed_output
         );
     }
 
@@ -1023,9 +1083,15 @@ mod tests {
         };
 
         let spend_secrets = vec![SecretKeyBytes::from_bytes(view_secret.as_bytes()).unwrap()];
-        let partial =
-            build_stealth_transfer_unsigned_with_seed(Network::LocalNet, &intent, &fetched, &spend_secrets, &seed)
-                .unwrap();
+        let partial = build_stealth_transfer_unsigned_with_seed(
+            Network::LocalNet,
+            &intent,
+            &fetched,
+            &spend_secrets,
+            &test_keys(),
+            &seed,
+        )
+        .unwrap();
 
         // One StealthTransfer, no revealed-input bucket, balance proof present.
         let txs = stealth_transfer_instructions(partial.unsigned());
@@ -1133,9 +1199,15 @@ mod tests {
         };
 
         let spend_secrets = vec![SecretKeyBytes::from_bytes(view_secret.as_bytes()).unwrap()];
-        let partial =
-            build_stealth_transfer_unsigned_with_seed(Network::LocalNet, &intent, &fetched, &spend_secrets, &seed)
-                .unwrap();
+        let partial = build_stealth_transfer_unsigned_with_seed(
+            Network::LocalNet,
+            &intent,
+            &fetched,
+            &spend_secrets,
+            &test_keys(),
+            &seed,
+        )
+        .unwrap();
 
         // The account key seals; the stealth input is demoted to a required signer (not the seal signer).
         let sig_reqs = partial.signature_requirements();
@@ -1252,7 +1324,7 @@ mod tests {
                     account_substate_for(id).or_else(|| (id == &substate_id.to_string()).then(|| fetched[0].clone()))
                 })
                 .collect();
-            match apply_fetched_substates_stealth(p, Network::LocalNet, &batch, &spend_secrets).unwrap() {
+            match apply_fetched_substates_stealth(p, Network::LocalNet, &batch, &spend_secrets, &test_keys()).unwrap() {
                 StealthResolution::Resolved(a) => break *a,
                 StealthResolution::NeedMore { partial, fetch_ids } => {
                     if fetch_ids.iter().any(|id| id == &substate_id.to_string()) {
@@ -1269,9 +1341,15 @@ mod tests {
 
         // The looped product matches the one-shot path for the same inputs (deterministic statement
         // fields — the proofs are non-byte-stable, so compare the structural statement).
-        let one_shot =
-            build_stealth_transfer_unsigned_with_seed(Network::LocalNet, &intent, &fetched, &spend_secrets, &seed)
-                .unwrap();
+        let one_shot = build_stealth_transfer_unsigned_with_seed(
+            Network::LocalNet,
+            &intent,
+            &fetched,
+            &spend_secrets,
+            &test_keys(),
+            &seed,
+        )
+        .unwrap();
 
         let looped_stmt = transfer_statement(assembled.unsigned());
         let one_shot_stmt = transfer_statement(one_shot.unsigned());
@@ -1357,7 +1435,7 @@ mod tests {
         let err = loop {
             let p = partial_opt.take().unwrap();
             let batch: Vec<FetchedSubstate> = to_serve.iter().filter_map(|id| account_substate_for(id)).collect();
-            match apply_fetched_substates_stealth(p, Network::LocalNet, &batch, &spend_secrets) {
+            match apply_fetched_substates_stealth(p, Network::LocalNet, &batch, &spend_secrets, &test_keys()) {
                 Ok(StealthResolution::Resolved(_)) => panic!("must not resolve without the UTXO"),
                 Ok(StealthResolution::NeedMore { partial, fetch_ids }) => {
                     to_serve = fetch_ids;

@@ -162,7 +162,9 @@ async fn main() {
 
     let (claim_transfer, _) = StealthTransfer::new(tari_token, &provider)
         .spend_stealth_input(my_address.clone(), swap_input)
-        .to_revealed_output(FEE)
+        // This claim is sealed by the account key chosen below, not by the builder's own requirements, so the key the
+        // builder would infer is not the one that ends up signing. Name the receiver.
+        .to_revealed_output_for(FEE, *my_address.account_public_key())
         .to_stealth_output(Output::new(
             my_address.clone(),
             tari_token,

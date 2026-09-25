@@ -125,7 +125,10 @@
                           "tag": 930317972
                         }
                       ],
-                      "revealed_output_amount": "500000"
+                      "revealed_output": {
+                        "amount": "500000",
+                        "receiver": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42"
+                      }
                     }
                   }
                 }

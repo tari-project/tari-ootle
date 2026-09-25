@@ -732,7 +732,7 @@ fn public_handle_to_stealth_apply_is_invalid_not_ub() {
     let net = network_byte(&serde_json::json!("esmeralda"));
     let empty = CArg::new("[]");
 
-    let r = unsafe { ootle_apply_fetched_substates_stealth(stealth, net, empty.ptr(), empty.ptr()) };
+    let r = unsafe { ootle_apply_fetched_substates_stealth(stealth, net, empty.ptr(), empty.ptr(), empty.ptr()) };
     assert!(!ok(&r), "a misrouted public handle must error");
     assert_eq!(error_code(&r), "INVALID");
     assert!(r.handle.is_null());
@@ -1326,8 +1326,15 @@ fn stealth_two_phase_handle_flow() {
 
     // 2a) apply the from-account component + vault → the account wants resolve.
     let account = account_substates_batch();
-    let applied =
-        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, account.ptr(), a.spend_secrets.ptr()) };
+    let applied = unsafe {
+        ootle_apply_fetched_substates_stealth(
+            handle,
+            a.network,
+            account.ptr(),
+            a.spend_secrets.ptr(),
+            a.account_only_keys.ptr(),
+        )
+    };
     assert!(ok(&applied), "stealth apply failed: {}", error_code(&applied));
     assert!(!applied.handle.is_null(), "apply threads the handle forward");
     assert_eq!(
@@ -1378,8 +1385,15 @@ fn stealth_two_phase_multi_round_converges() {
 
     // Round 1: empty batch → need_more with the discovered UTXO id in fetch_ids.
     let empty = CArg::new("[]");
-    let applied1 =
-        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, empty.ptr(), a.spend_secrets.ptr()) };
+    let applied1 = unsafe {
+        ootle_apply_fetched_substates_stealth(
+            handle,
+            a.network,
+            empty.ptr(),
+            a.spend_secrets.ptr(),
+            a.account_only_keys.ptr(),
+        )
+    };
     assert!(ok(&applied1), "round 1 apply failed: {}", error_code(&applied1));
     let status1 = data_json(&applied1);
     assert_eq!(
@@ -1397,8 +1411,15 @@ fn stealth_two_phase_multi_round_converges() {
 
     // Round 2: fetch the named ids (from-account component + vault + the UTXO) → resolves.
     let batch = account_plus_fixture_batch(&fx);
-    let applied2 =
-        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, batch.ptr(), a.spend_secrets.ptr()) };
+    let applied2 = unsafe {
+        ootle_apply_fetched_substates_stealth(
+            handle,
+            a.network,
+            batch.ptr(),
+            a.spend_secrets.ptr(),
+            a.account_only_keys.ptr(),
+        )
+    };
     assert!(ok(&applied2), "round 2 apply failed: {}", error_code(&applied2));
     assert_eq!(
         data_json(&applied2)["status"],
@@ -1432,8 +1453,15 @@ fn stealth_apply_missing_required_utxo_errors() {
 
     let empty = CArg::new("[]");
     // Round 1: empty → need_more (the from-account component, vault, and UTXO are all requested).
-    let applied1 =
-        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, empty.ptr(), a.spend_secrets.ptr()) };
+    let applied1 = unsafe {
+        ootle_apply_fetched_substates_stealth(
+            handle,
+            a.network,
+            empty.ptr(),
+            a.spend_secrets.ptr(),
+            a.account_only_keys.ptr(),
+        )
+    };
     assert!(ok(&applied1));
     assert_eq!(data_json(&applied1)["status"], "need_more");
     handle = applied1.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
@@ -1442,8 +1470,15 @@ fn stealth_apply_missing_required_utxo_errors() {
     // Round 2: serve the from-account component + vault but NOT the UTXO → the account resolves while
     // the requested UTXO id is now definitively absent → error, handle consumed.
     let account = account_substates_batch();
-    let applied2 =
-        unsafe { ootle_apply_fetched_substates_stealth(handle, a.network, account.ptr(), a.spend_secrets.ptr()) };
+    let applied2 = unsafe {
+        ootle_apply_fetched_substates_stealth(
+            handle,
+            a.network,
+            account.ptr(),
+            a.spend_secrets.ptr(),
+            a.account_only_keys.ptr(),
+        )
+    };
     assert!(!ok(&applied2), "a missing required UTXO must error");
     assert_eq!(error_code(&applied2), "INVALID");
     assert!(
@@ -1730,7 +1765,9 @@ fn stealth_error_envelopes() {
     unsafe { ootle_result_free(r) };
 
     // Null handle to stealth apply → INVALID, consumes nothing.
-    let r = unsafe { ootle_apply_fetched_substates_stealth(std::ptr::null_mut(), net, empty.ptr(), empty.ptr()) };
+    let r = unsafe {
+        ootle_apply_fetched_substates_stealth(std::ptr::null_mut(), net, empty.ptr(), empty.ptr(), empty.ptr())
+    };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
@@ -1924,7 +1961,12 @@ fn stealth_build_outputs_statement_reproduces_vector_fields() {
         let args = outputs_statement_args(&fx);
 
         let result = unsafe {
-            ootle_build_stealth_outputs_statement_with_seed(args.network, args.intent.ptr(), args.seed_hex.ptr())
+            ootle_build_stealth_outputs_statement_with_seed(
+                args.network,
+                args.intent.ptr(),
+                args.seed_hex.ptr(),
+                std::ptr::null(),
+            )
         };
         assert!(ok(&result), "fixture {rel}: build failed: {}", error_code(&result));
         assert!(
@@ -1975,7 +2017,9 @@ fn stealth_build_outputs_statement_error_envelopes() {
 
     // Malformed intent JSON → PARSE.
     let bad_intent = CArg::new("{not json");
-    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, bad_intent.ptr(), args.seed_hex.ptr()) };
+    let r = unsafe {
+        ootle_build_stealth_outputs_statement_with_seed(net, bad_intent.ptr(), args.seed_hex.ptr(), std::ptr::null())
+    };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "PARSE");
     assert!(r.handle.is_null());
@@ -1983,26 +2027,34 @@ fn stealth_build_outputs_statement_error_envelopes() {
 
     // An all-zero seed is rejected by the rail → VALIDATION.
     let zero_seed = CArg::new(&"00".repeat(32));
-    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, args.intent.ptr(), zero_seed.ptr()) };
+    let r = unsafe {
+        ootle_build_stealth_outputs_statement_with_seed(net, args.intent.ptr(), zero_seed.ptr(), std::ptr::null())
+    };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "VALIDATION");
     unsafe { ootle_result_free(r) };
 
     // A wrong-length seed hex → PARSE.
     let short_seed = CArg::new(&"aa".repeat(16));
-    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, args.intent.ptr(), short_seed.ptr()) };
+    let r = unsafe {
+        ootle_build_stealth_outputs_statement_with_seed(net, args.intent.ptr(), short_seed.ptr(), std::ptr::null())
+    };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "PARSE");
     unsafe { ootle_result_free(r) };
 
     // Null intent arg → INVALID.
-    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(net, std::ptr::null(), args.seed_hex.ptr()) };
+    let r = unsafe {
+        ootle_build_stealth_outputs_statement_with_seed(net, std::ptr::null(), args.seed_hex.ptr(), std::ptr::null())
+    };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
 
     // Unknown network byte → INVALID.
-    let r = unsafe { ootle_build_stealth_outputs_statement_with_seed(0xff, args.intent.ptr(), args.seed_hex.ptr()) };
+    let r = unsafe {
+        ootle_build_stealth_outputs_statement_with_seed(0xff, args.intent.ptr(), args.seed_hex.ptr(), std::ptr::null())
+    };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
@@ -2200,14 +2252,27 @@ fn no_leaks_over_many_round_trips() {
         let mut sh = sbuilt.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
         unsafe { ootle_result_free(sbuilt) };
 
-        let sapplied1 =
-            unsafe { ootle_apply_fetched_substates_stealth(sh, s.network, empty_batch.ptr(), s.spend_secrets.ptr()) };
+        let sapplied1 = unsafe {
+            ootle_apply_fetched_substates_stealth(
+                sh,
+                s.network,
+                empty_batch.ptr(),
+                s.spend_secrets.ptr(),
+                s.account_only_keys.ptr(),
+            )
+        };
         assert!(ok(&sapplied1));
         sh = sapplied1.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
         unsafe { ootle_result_free(sapplied1) };
 
         let sapplied2 = unsafe {
-            ootle_apply_fetched_substates_stealth(sh, s.network, account_utxo_batch.ptr(), s.spend_secrets.ptr())
+            ootle_apply_fetched_substates_stealth(
+                sh,
+                s.network,
+                account_utxo_batch.ptr(),
+                s.spend_secrets.ptr(),
+                s.account_only_keys.ptr(),
+            )
         };
         assert!(ok(&sapplied2));
         sh = sapplied2.handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
@@ -2254,8 +2319,15 @@ fn no_leaks_over_many_round_trips() {
         let pmis_handle = pmis.handle;
         unsafe { ootle_result_free(pmis) };
         let pmis_stealth = pmis_handle as *mut ootle_sdk_ffi_c::OotleStealthPartialTransaction;
-        let rej =
-            unsafe { ootle_apply_fetched_substates_stealth(pmis_stealth, net2, empty_batch.ptr(), empty_batch.ptr()) };
+        let rej = unsafe {
+            ootle_apply_fetched_substates_stealth(
+                pmis_stealth,
+                net2,
+                empty_batch.ptr(),
+                empty_batch.ptr(),
+                empty_batch.ptr(),
+            )
+        };
         assert!(!ok(&rej) && error_code(&rej) == "INVALID");
         unsafe { ootle_result_free(rej) };
         unsafe { ootle_stealth_partial_transaction_free(pmis_stealth) }; // no-op
@@ -2278,8 +2350,14 @@ fn no_leaks_over_many_round_trips() {
         unsafe { ootle_result_free(fscan) };
 
         // stealth build outputs statement: deterministic statement + mask.
-        let ostmt =
-            unsafe { ootle_build_stealth_outputs_statement_with_seed(os.network, os.intent.ptr(), os.seed_hex.ptr()) };
+        let ostmt = unsafe {
+            ootle_build_stealth_outputs_statement_with_seed(
+                os.network,
+                os.intent.ptr(),
+                os.seed_hex.ptr(),
+                std::ptr::null(),
+            )
+        };
         assert!(ok(&ostmt));
         unsafe { ootle_result_free(ostmt) };
 

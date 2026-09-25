@@ -4,7 +4,7 @@
 use std::{cmp, time::Duration};
 
 use log::*;
-use ootle_byte_type::{ConvertFromByteType, FromByteType};
+use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use ootle_network::Network;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
@@ -24,7 +24,7 @@ use tari_template_lib::{
         ResourceAddress,
         UtxoAddress,
         constants::TARI_TOKEN,
-        stealth::{StealthTransferStatement, StealthUnspentOutput},
+        stealth::{RevealedOutput, StealthTransferStatement, StealthUnspentOutput},
     },
 };
 use tokio::{sync::Semaphore, task::block_in_place};
@@ -430,7 +430,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             inputs: &fee_inputs_to_spend.inputs,
             input_revealed_amount: fee_inputs_to_spend.revealed,
             outputs: fee_change_output,
-            output_revealed_amount: fee_amount_to_spend,
+            // The fee signer is the only key that authorises this statement's revealed funds.
+            revealed_output: (!fee_amount_to_spend.is_zero())
+                .then(|| RevealedOutput::new(fee_amount_to_spend, fee_signer.public_key().to_byte_type())),
         })?;
 
         // Add the unconfirmed fee change output to the wallet store
@@ -737,7 +739,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .into_iter()
                     .chain(change_output)
                     .filter(|o| o.amount > 0),
-                output_revealed_amount,
+                // The main intent's signer takes this statement's revealed funds; a merged transaction has no main
+                // intent of its own, so the fee signer is the transaction's only signer.
+                revealed_output: (!output_revealed_amount.is_zero()).then(|| {
+                    let signer = main_intent_signer.as_ref().unwrap_or(&fee_signer);
+                    RevealedOutput::new(output_revealed_amount, signer.public_key().to_byte_type())
+                }),
             })?;
 
             // Add the unconfirmed change output to the wallet store
@@ -971,7 +978,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         };
 
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
-        let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
+        let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount();
 
         let transaction = Transaction::builder(network.as_byte(), params.max_epoch)
             .with_dry_run(params.is_dry_run)

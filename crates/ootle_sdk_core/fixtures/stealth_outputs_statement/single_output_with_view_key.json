@@ -65,7 +65,7 @@
           "tag": 372632453
         }
       ],
-      "revealed_output_amount": "0"
+      "revealed_output": null
     },
     "aggregated_output_mask": "1ac8fb104c30df1801da6093e08c1bef6f3eb8ef98e5479e3e674a1f1fea420b"
   }

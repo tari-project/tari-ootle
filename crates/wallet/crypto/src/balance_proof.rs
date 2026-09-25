@@ -15,7 +15,7 @@ use tari_template_lib_types::{
     Amount,
     Hash32,
     crypto::{BalanceProofSignature, PedersenCommitmentBytes},
-    stealth::{StealthInputsStatement, StealthOutputsStatement},
+    stealth::{CovenantBalanceClaim, StealthInputsStatement, StealthOutputsStatement},
 };
 use tari_utilities::ByteArrayError;
 
@@ -49,6 +49,7 @@ pub fn generate_stealth_balance_proof_signature(
     agg_output_mask: &RistrettoSecretKey,
     inputs_statement: &StealthInputsStatement,
     outputs_statement: &StealthOutputsStatement,
+    covenant_claims: &[CovenantBalanceClaim],
 ) -> BalanceProofSignature {
     let secret_excess = agg_input_mask - agg_output_mask;
     if secret_excess == RistrettoSecretKey::default() {
@@ -57,7 +58,13 @@ pub fn generate_stealth_balance_proof_signature(
     }
     let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
     let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-    let message = messages::stealth_balance_proof64(&public_excess, &public_nonce, inputs_statement, outputs_statement);
+    let message = messages::stealth_balance_proof64(
+        &public_excess,
+        &public_nonce,
+        inputs_statement,
+        outputs_statement,
+        covenant_claims,
+    );
 
     let sig = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();
     sig.to_byte_type()
@@ -98,6 +105,7 @@ pub fn validate_balance_proof_signature(
     signature: &BalanceProofSignature,
     inputs_statement: &StealthInputsStatement,
     outputs_statement: &StealthOutputsStatement,
+    covenant_claims: &[CovenantBalanceClaim],
 ) -> bool {
     let Ok(sig) = EngineSchnorrSignature::convert_from_byte_type(signature) else {
         warn!(target: LOG_TARGET, "Malformed balance proof signature");
@@ -136,9 +144,10 @@ pub fn validate_balance_proof_signature(
         return false;
     };
 
-    let Some(revealed_output_commit) =
-        commit_amount(&RistrettoSecretKey::default(), outputs_statement.revealed_output_amount)
-    else {
+    let Some(revealed_output_commit) = commit_amount(
+        &RistrettoSecretKey::default(),
+        outputs_statement.revealed_output_amount(),
+    ) else {
         warn!(target: LOG_TARGET, "Revealed output amount must be non-negative");
         return false;
     };
@@ -151,6 +160,12 @@ pub fn validate_balance_proof_signature(
         return false;
     };
 
-    let message = messages::stealth_balance_proof64(&public_excess, &public_nonce, inputs_statement, outputs_statement);
+    let message = messages::stealth_balance_proof64(
+        &public_excess,
+        &public_nonce,
+        inputs_statement,
+        outputs_statement,
+        covenant_claims,
+    );
     sig.verify_raw_uniform(&public_excess, &message)
 }

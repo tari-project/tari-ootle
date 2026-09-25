@@ -36,7 +36,7 @@ use tari_template_lib::types::{
     UtxoAddress,
     access_rules::AccessRule,
     crypto::PedersenCommitmentBytes,
-    stealth::{SpendAuthorization, StealthTransferStatement},
+    stealth::{RevealedOutput, SpendAuthorization, StealthTransferStatement},
 };
 
 use crate::{
@@ -1000,8 +1000,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             .collect::<Result<Vec<_>, _>>()?;
         let total_input_amount =
             unblinded_inputs.iter().map(|i| Amount::from(i.value())).sum::<Amount>() + params.input_revealed_amount;
-        let total_output_amount =
-            outputs.iter().map(|o| Amount::from(o.witness.amount)).sum::<Amount>() + params.output_revealed_amount;
+        let total_output_amount = outputs.iter().map(|o| Amount::from(o.witness.amount)).sum::<Amount>() +
+            params.revealed_output.map_or(Amount::ZERO, |r| r.amount);
         if total_input_amount != total_output_amount {
             return Err(StealthOutputsApiError::InvalidParameter {
                 param: "inputs/outputs",
@@ -1016,7 +1016,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             unblinded_inputs.into_iter().map(|i| i.witness),
             params.input_revealed_amount,
             outputs.iter(),
-            params.output_revealed_amount,
+            params.revealed_output,
         )?;
         Ok(statement)
     }
@@ -1063,7 +1063,9 @@ pub struct TransferStatementParams<'a, I> {
     pub inputs: &'a [InputSpendData],
     pub input_revealed_amount: Amount,
     pub outputs: I,
-    pub output_revealed_amount: Amount,
+    /// The revealed output and the key authorised to take it. The receiver must be a signer of the transaction that
+    /// carries this statement, or the engine will not create the bucket.
+    pub revealed_output: Option<RevealedOutput>,
 }
 
 #[derive(Debug, thiserror::Error)]

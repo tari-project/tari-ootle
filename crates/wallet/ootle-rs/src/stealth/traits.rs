@@ -6,10 +6,9 @@ use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 use tari_ootle_common_types::engine_types::crypto::OutputBody;
 use tari_ootle_wallet_crypto::DecryptedData;
 use tari_template_lib_types::{
-    Amount,
     EncryptedData,
     crypto::PedersenCommitmentBytes,
-    stealth::{StealthOutputsStatement, StealthTransferStatement},
+    stealth::{RevealedOutput, StealthOutputsStatement, StealthTransferStatement},
 };
 
 use crate::stealth::{BurnClaimStatementSpec, Output, ResolvedStealthTransferSpec, error::StealthProviderError};
@@ -54,7 +53,7 @@ pub(crate) trait StealthOutputStatementFactory {
     async fn generate_outputs_statement(
         &self,
         specs: Vec<Output>,
-        revealed_output_amount: Amount,
+        revealed_output: Option<RevealedOutput>,
     ) -> StealthResult<(StealthOutputsStatement, RistrettoSecretKey)>;
 }
 

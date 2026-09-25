@@ -149,6 +149,7 @@ export * from "./types/ResourceAddressRef";
 export * from "./types/ResourceContainer";
 export * from "./types/ResourceType";
 export * from "./types/RestrictedAccessRule";
+export * from "./types/RevealedOutput";
 export * from "./types/RistrettoPublicKeyBytes";
 export * from "./types/RuleRequirement";
 export * from "./types/Scalar32Bytes";

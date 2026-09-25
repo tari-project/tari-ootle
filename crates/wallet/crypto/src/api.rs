@@ -16,7 +16,7 @@ use tari_template_lib_types::{
     ResourceAddress,
     confidential::ConfidentialOutputStatement,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes, UtxoTag},
-    stealth::StealthTransferStatement,
+    stealth::{RevealedOutput, StealthTransferStatement},
 };
 
 use crate::{
@@ -62,7 +62,7 @@ impl StealthCryptoApi {
         inputs: Inputs,
         input_revealed_amount: A,
         output_statements: Outputs,
-        output_revealed_amount: A,
+        revealed_output: Option<RevealedOutput>,
     ) -> Result<StealthTransferStatement, StealthCryptoApiError>
     where
         A: Into<Amount>,
@@ -78,10 +78,7 @@ impl StealthCryptoApi {
                 .non_negative_checked()
                 .ok_or(StealthCryptoApiError::NegativeAmount)?,
             output_statements,
-            output_revealed_amount
-                .into()
-                .non_negative_checked()
-                .ok_or(StealthCryptoApiError::NegativeAmount)?,
+            revealed_output,
         )?;
         Ok(stmt)
     }

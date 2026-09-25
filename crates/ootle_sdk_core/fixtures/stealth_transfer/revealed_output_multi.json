@@ -150,7 +150,10 @@
                           "tag": 1352421003
                         }
                       ],
-                      "revealed_output_amount": "1500000"
+                      "revealed_output": {
+                        "amount": "1500000",
+                        "receiver": "bce83f8ba5dd2fa572864c24ba1810f9522bc6004afe95877ac73241cafdab42"
+                      }
                     }
                   }
                 }

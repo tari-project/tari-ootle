@@ -20,6 +20,7 @@ use tari_template_lib_types::{
     crypto::RistrettoPublicKeyBytes,
     stealth::{
         CovenantBalanceClaim,
+        RevealedOutput,
         SpendAuthorization,
         SpendCondition,
         SpendWitness,
@@ -141,7 +142,7 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
     inputs: Inputs,
     revealed_input_amount: Amount,
     output_statements: Outputs,
-    revealed_output_amount: Amount,
+    revealed_output: Option<RevealedOutput>,
 ) -> Result<StealthTransferStatement, WalletCryptoError>
 where
     Inputs: IntoIterator<Item = StealthInputWitness>,
@@ -155,17 +156,19 @@ where
             details: format!("Revealed input amount must be non-negative: {revealed_input_amount}"),
         });
     }
-    if revealed_output_amount.is_negative() {
+    if let Some(revealed) = revealed_output &&
+        !revealed.amount.is_positive()
+    {
         return Err(WalletCryptoError::InvalidArgument {
-            name: "revealed_output_amount",
-            details: format!("Revealed output amount must be non-negative: {revealed_output_amount}"),
+            name: "revealed_output",
+            details: format!("Revealed output amount must be positive: {}", revealed.amount),
         });
     }
 
     let inputs = inputs.into_iter().collect::<Vec<_>>();
     let num_inputs = inputs.len();
 
-    let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output_amount)?;
+    let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output)?;
     let output_witnesses = output_statements.into_iter().collect::<Vec<_>>();
     let num_outputs = output_witnesses.len();
 
@@ -201,6 +204,9 @@ where
         revealed_amount: revealed_input_amount,
     };
 
+    // The claims are bound by the balance proof, so they must exist before it is signed.
+    let covenant_claims = generate_covenant_claims(&inputs, &output_witnesses)?;
+
     let requires_balance_proof = num_inputs > 0 || num_outputs > 0;
     let balance_proof = requires_balance_proof.then(|| {
         generate_stealth_balance_proof_signature(
@@ -208,10 +214,9 @@ where
             &agg_output_mask,
             &inputs_statement,
             &outputs_statement,
+            &covenant_claims,
         )
     });
-
-    let covenant_claims = generate_covenant_claims(&inputs, &output_witnesses)?;
 
     Ok(StealthTransferStatement {
         inputs_statement,
@@ -305,7 +310,7 @@ fn generate_covenant_claims(
 
 pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone>(
     output_statements: Outputs,
-    revealed_output_amount: Amount,
+    revealed_output: Option<RevealedOutput>,
 ) -> Result<StealthOutputsStatement, StealthProofError> {
     let outputs = output_statements
         .clone()
@@ -340,7 +345,7 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutp
 
     Ok(StealthOutputsStatement {
         outputs,
-        revealed_output_amount,
+        revealed_output,
         agg_range_proof: output_range_proof,
     })
 }
@@ -373,7 +378,7 @@ mod tests {
                 auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
                 tag: UtxoTag::new(0),
             }],
-            Amount::zero(),
+            None,
         )
         .unwrap()
     }
@@ -393,7 +398,10 @@ mod tests {
             [input.clone(), input],
             Amount::zero(),
             &[] as &[StealthOutputWitness],
-            Amount::from(200u64),
+            Some(RevealedOutput::new(
+                Amount::from(200u64),
+                RistrettoPublicKeyBytes::default(),
+            )),
         )
         .unwrap_err();
 

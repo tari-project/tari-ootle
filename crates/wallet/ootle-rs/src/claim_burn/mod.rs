@@ -48,7 +48,7 @@ pub use tari_ootle_common_types::engine_types::confidential::{ClaimBurnOutputDat
 use tari_ootle_common_types::engine_types::stealth::validate_transfer;
 use tari_ootle_transaction::{Epoch, Transaction, UnsealedTransaction, UnsignedTransaction};
 use tari_ootle_wallet_crypto::{StealthCryptoApi, memo::Memo};
-use tari_template_lib_types::{Amount, EncryptedData, constants::TARI_TOKEN};
+use tari_template_lib_types::{Amount, EncryptedData, constants::TARI_TOKEN, stealth::RevealedOutput};
 
 use crate::{
     Address,
@@ -208,7 +208,8 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
                 encrypted_data: encrypted_data.clone(),
                 sender_offset_public_key,
                 output,
-                revealed_output_amount: Amount::from(max_fee),
+                // The claim key seals this transaction, so it is the only badge in scope to take the revealed fee.
+                revealed_output: Some(RevealedOutput::new(Amount::from(max_fee), stealth_claim_pk)),
             })
             .await?;
 

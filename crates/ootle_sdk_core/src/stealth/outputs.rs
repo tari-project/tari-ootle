@@ -60,8 +60,15 @@ use tari_template_lib_types::{
     EncryptedData,
     ResourceAddress,
     access_rules::AccessRule,
-    crypto::UtxoTag,
-    stealth::{SpendAuthorization, SpendCondition, StealthOutputsStatement, StealthUnspentOutput, UnspentOutput},
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    stealth::{
+        RevealedOutput,
+        SpendAuthorization,
+        SpendCondition,
+        StealthOutputsStatement,
+        StealthUnspentOutput,
+        UnspentOutput,
+    },
 };
 
 use crate::types::{
@@ -197,6 +204,7 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
     network: Network,
     intent: &StealthTransferIntent,
     entropy: &StealthEntropy,
+    revealed_receiver: Option<RistrettoPublicKeyBytes>,
 ) -> Result<(StealthOutputsStatement, SecretKeyBytes), OotleSdkError> {
     if intent.outputs.len() != entropy.per_output.len() {
         return Err(OotleSdkError::Validation(format!(
@@ -271,9 +279,19 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
     let agg_range_proof = generate_extended_bullet_proof(witnesses.iter().map(|(w, _)| &w.witness))
         .map_err(|e| OotleSdkError::Stealth(format!("range proof failed: {e}")))?;
 
+    let revealed_output = match (intent.revealed_output_amount, revealed_receiver) {
+        (0, _) => None,
+        (amount, Some(receiver)) => Some(RevealedOutput::new(Amount::from_u64(amount), receiver)),
+        (_, None) => {
+            return Err(OotleSdkError::Validation(
+                "a revealed output must name the receiver authorised to take it".to_string(),
+            ));
+        },
+    };
+
     let statement = StealthOutputsStatement {
         outputs,
-        revealed_output_amount: Amount::from_u64(intent.revealed_output_amount),
+        revealed_output,
         agg_range_proof,
     };
 
@@ -290,10 +308,11 @@ pub fn build_stealth_outputs_statement_with_seed(
     network: Network,
     intent: &StealthTransferIntent,
     seed: &BuildSeed,
+    revealed_receiver: Option<RistrettoPublicKeyBytes>,
 ) -> Result<(StealthOutputsStatement, SecretKeyBytes), OotleSdkError> {
     seed.validate_nonzero()?;
     let entropy = StealthEntropy::from_seed(seed, intent.outputs.len());
-    build_stealth_outputs_statement_from_entropy(network, intent, &entropy)
+    build_stealth_outputs_statement_from_entropy(network, intent, &entropy, revealed_receiver)
 }
 
 /// The random-nonce default entry point: expands a fresh OS-RNG seed, then builds the statement. The
@@ -302,9 +321,10 @@ pub fn build_stealth_outputs_statement_with_seed(
 pub fn build_stealth_outputs_statement(
     network: Network,
     intent: &StealthTransferIntent,
+    revealed_receiver: Option<RistrettoPublicKeyBytes>,
 ) -> Result<(StealthOutputsStatement, SecretKeyBytes), OotleSdkError> {
     let entropy = StealthEntropy::from_os_rng(intent.outputs.len());
-    build_stealth_outputs_statement_from_entropy(network, intent, &entropy)
+    build_stealth_outputs_statement_from_entropy(network, intent, &entropy, revealed_receiver)
 }
 
 #[cfg(test)]
@@ -406,14 +426,14 @@ mod tests {
     fn deterministic_path_is_reproducible_except_bulletproof() {
         let it = intent(vec![output_spec(1000, false)], 0);
         let e = entropy_for(&[(10, false)]);
-        let (s1, m1) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
-        let (s2, m2) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
+        let (s1, m1) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap();
+        let (s2, m2) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap();
         assert_eq!(m1, m2, "aggregated mask must be reproducible");
         assert_eq!(
             s1.outputs, s2.outputs,
             "deterministic output fields must be reproducible"
         );
-        assert_eq!(s1.revealed_output_amount, s2.revealed_output_amount);
+        assert_eq!(s1.revealed_output, s2.revealed_output);
         // The bulletproof is expected to differ — both are still valid proofs.
         validate_stealth_outputs_statement(&s1, None).unwrap();
         validate_stealth_outputs_statement(&s2, None).unwrap();
@@ -424,7 +444,7 @@ mod tests {
     fn built_statement_validates() {
         let it = intent(vec![output_spec(5000, false)], 0);
         let e = entropy_for(&[(20, false)]);
-        let (stmt, _) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
+        let (stmt, _) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
         assert_eq!(stmt.outputs.len(), 1);
     }
@@ -436,7 +456,7 @@ mod tests {
         spec.minimum_value_promise = 101;
         let it = intent(vec![spec], 0);
         let e = entropy_for(&[(30, false)]);
-        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap_err();
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
 
@@ -445,7 +465,7 @@ mod tests {
     fn rejects_output_entropy_count_mismatch() {
         let it = intent(vec![output_spec(100, false), output_spec(200, false)], 0);
         let e = entropy_for(&[(40, false)]); // only one slice for two outputs
-        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap_err();
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
 
@@ -453,7 +473,7 @@ mod tests {
     #[test]
     fn production_path_validates() {
         let it = intent(vec![output_spec(7777, false)], 0);
-        let (stmt, _) = build_stealth_outputs_statement(Network::LocalNet, &it).unwrap();
+        let (stmt, _) = build_stealth_outputs_statement(Network::LocalNet, &it, None).unwrap();
         validate_stealth_outputs_statement(&stmt, None).unwrap();
     }
 
@@ -462,7 +482,7 @@ mod tests {
     fn view_key_output_has_viewable_balance_proof() {
         let it = intent(vec![output_spec(9000, true)], 0);
         let e = entropy_for(&[(50, true)]);
-        let (stmt, _) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
+        let (stmt, _) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap();
         assert!(stmt.outputs[0].output.viewable_balance_proof.is_some());
         // The view key validation path accepts it.
         let view_key = RistrettoPublicKey::from_canonical_bytes(pk_bytes(5).as_bytes()).unwrap();
@@ -474,7 +494,7 @@ mod tests {
     fn view_key_output_without_zk_nonces_is_rejected() {
         let it = intent(vec![output_spec(9000, true)], 0);
         let e = entropy_for(&[(50, false)]); // no elgamal/zk nonces
-        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap_err();
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
 
@@ -483,11 +503,31 @@ mod tests {
     fn no_output_revealed_only() {
         let it = intent(vec![], 1_000_000);
         let e = entropy_for(&[]);
-        let (stmt, mask) = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e).unwrap();
+        let (stmt, mask) =
+            build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, Some(a_receiver())).unwrap();
         assert!(stmt.outputs.is_empty());
         assert!(stmt.agg_range_proof.is_empty());
         assert_eq!(mask, SecretKeyBytes::from_array([0u8; 32]));
         validate_stealth_outputs_statement(&stmt, None).unwrap();
+    }
+
+    /// A stand-in receiver for a revealed output. These tests build the outputs statement directly, so nothing here
+    /// checks the key against a signer; that check is the engine's.
+    fn a_receiver() -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from_bytes(
+            tari_crypto::ristretto::RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(7u64)).as_bytes(),
+        )
+        .unwrap()
+    }
+
+    // A revealed output with no receiver has no key authorised to take it, so it is refused at build time rather
+    // than emitted for the engine to reject.
+    #[test]
+    fn revealed_output_without_a_receiver_is_rejected() {
+        let it = intent(vec![], 1_000_000);
+        let e = entropy_for(&[]);
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap_err();
+        assert!(matches!(err, OotleSdkError::Validation(_)), "unexpected error: {err}");
     }
 
     // The witness build is decryptable by the recipient (sanity that the AEAD-injected path is correct).
@@ -549,14 +589,14 @@ mod tests {
     fn with_seed_is_reproducible_modulo_bulletproof() {
         let seed = BuildSeed::from_array([0x77; 32]);
         let it = intent(vec![output_spec(1_000_000, true)], 0);
-        let (a, ma) = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &seed).unwrap();
-        let (b, mb) = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &seed).unwrap();
+        let (a, ma) = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &seed, None).unwrap();
+        let (b, mb) = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &seed, None).unwrap();
         assert_eq!(ma, mb, "aggregated output mask is reproducible");
         assert_eq!(
             a.outputs, b.outputs,
             "every output field (incl. the viewable proof) is reproducible"
         );
-        assert_eq!(a.revealed_output_amount, b.revealed_output_amount);
+        assert_eq!(a.revealed_output, b.revealed_output);
         // The aggregated bulletproof is the only non-byte-stable field — deliberately not compared.
     }
 
@@ -564,8 +604,9 @@ mod tests {
     #[test]
     fn with_seed_zero_seed_is_a_validation_error() {
         let it = intent(vec![output_spec(1_000_000, false)], 0);
-        let err = build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &BuildSeed::from_array([0u8; 32]))
-            .unwrap_err();
+        let err =
+            build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &BuildSeed::from_array([0u8; 32]), None)
+                .unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
     }
 }

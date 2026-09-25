@@ -8,6 +8,8 @@ use tari_template_lib::types::{
     Hash32,
     crypto::PedersenCommitmentBytes,
     stealth::{
+        CovenantBalanceClaim,
+        RevealedOutput,
         StealthInput,
         StealthInputsStatement,
         StealthOutputsStatement,
@@ -68,13 +70,14 @@ pub fn stealth_balance_proof64(
     public_nonce: &RistrettoPublicKey,
     stealth_inputs_statement: &StealthInputsStatement,
     stealth_outputs_statement: &StealthOutputsStatement,
+    covenant_claims: &[CovenantBalanceClaim],
 ) -> Hash64 {
     stealth_balance_proof64_from_parts(public_excess, public_nonce, &StealthBalanceProofParts {
         input_commitments: stealth_inputs_statement.inputs.iter().map(|i| &i.commitment),
         revealed_input_amount: &stealth_inputs_statement.revealed_amount,
         outputs: stealth_outputs_statement.outputs.iter().map(StealthOutputBinding::from),
-        revealed_output_amount: &stealth_outputs_statement.revealed_output_amount,
-        aux_digest: &stealth_balance_proof_aux32(stealth_inputs_statement, stealth_outputs_statement),
+        revealed_output: stealth_outputs_statement.revealed_output,
+        aux_digest: &stealth_balance_proof_aux32(stealth_inputs_statement, stealth_outputs_statement, covenant_claims),
     })
 }
 
@@ -114,11 +117,13 @@ where
 pub fn stealth_balance_proof_aux32(
     stealth_inputs_statement: &StealthInputsStatement,
     stealth_outputs_statement: &StealthOutputsStatement,
+    covenant_claims: &[CovenantBalanceClaim],
 ) -> Hash32 {
     hasher32(EngineHashDomainLabel::StealthBalanceProofAux)
         .chain(&StealthBalanceProofAux {
             inputs: stealth_inputs_statement,
             outputs: stealth_outputs_statement,
+            covenant_claims,
         })
         .result()
 }
@@ -126,6 +131,7 @@ pub fn stealth_balance_proof_aux32(
 struct StealthBalanceProofAux<'a> {
     inputs: &'a StealthInputsStatement,
     outputs: &'a StealthOutputsStatement,
+    covenant_claims: &'a [CovenantBalanceClaim],
 }
 
 impl BorshSerialize for StealthBalanceProofAux<'_> {
@@ -139,7 +145,7 @@ impl BorshSerialize for StealthBalanceProofAux<'_> {
         } = self.inputs;
         let StealthOutputsStatement {
             outputs,
-            revealed_output_amount: _,
+            revealed_output: _,
             agg_range_proof,
         } = self.outputs;
 
@@ -167,6 +173,21 @@ impl BorshSerialize for StealthBalanceProofAux<'_> {
 
         agg_range_proof.serialize(writer)?;
 
+        // Each claim carries its own proof over its partition; binding the list here is what makes the *set* of
+        // claims part of the signed statement, so a partition that requires one keeps it through the pre-seal window
+        // in which partial statements circulate.
+        (self.covenant_claims.len() as u32).serialize(writer)?;
+        for CovenantBalanceClaim {
+            partition_input_index,
+            revealed_amount,
+            signature,
+        } in self.covenant_claims
+        {
+            partition_input_index.serialize(writer)?;
+            revealed_amount.serialize(writer)?;
+            signature.serialize(writer)?;
+        }
+
         Ok(())
     }
 }
@@ -182,7 +203,7 @@ pub struct StealthBalanceProofParts<'a, I, O> {
     pub input_commitments: I,
     pub revealed_input_amount: &'a Amount,
     pub outputs: O,
-    pub revealed_output_amount: &'a Amount,
+    pub revealed_output: Option<RevealedOutput>,
     pub aux_digest: &'a Hash32,
 }
 
@@ -224,7 +245,7 @@ where
             output.commitment.serialize(writer)?;
             output.minimum_value_promise.serialize(writer)?;
         }
-        self.revealed_output_amount.serialize(writer)?;
+        self.revealed_output.serialize(writer)?;
 
         self.aux_digest.serialize(writer)?;
 

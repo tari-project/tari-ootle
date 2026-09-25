@@ -142,6 +142,10 @@ use crate::{
         KeysSetActiveResponse,
         PublishTemplateRequest,
         PublishTemplateResponse,
+        ResourcesGetManyRequest,
+        ResourcesGetManyResponse,
+        ResourcesGetRequest,
+        ResourcesGetResponse,
         SettingsGetResponse,
         SettingsSetRequest,
         SettingsSetResponse,
@@ -842,6 +846,22 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<SwapPoolsListResponse, WalletDaemonClientError> {
         self.send_request("swap_pools.list", req.borrow()).await
+    }
+
+    /// Fetches a resource this wallet has stored.
+    pub async fn resources_get<T: Borrow<ResourcesGetRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<ResourcesGetResponse, WalletDaemonClientError> {
+        self.send_request("resources.get", req.borrow()).await
+    }
+
+    /// Fetches the resources this wallet has stored out of the given addresses.
+    pub async fn resources_get_many<T: Borrow<ResourcesGetManyRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<ResourcesGetManyResponse, WalletDaemonClientError> {
+        self.send_request("resources.get_many", req.borrow()).await
     }
 
     /// Fetches a template by its address, including its function definitions.

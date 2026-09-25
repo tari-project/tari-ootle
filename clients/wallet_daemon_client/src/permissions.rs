@@ -37,6 +37,7 @@ pub enum Permission {
     Substates(ReadOnly),
     BurnProofs(ReadOnly),
     SwapPools(ReadOnly),
+    Resources(ReadOnly),
     Webrtc,
 }
 
@@ -109,6 +110,7 @@ impl Permission {
             (Permission::Substates(_), Permission::Substates(_)) => true,
             (Permission::BurnProofs(_), Permission::BurnProofs(_)) => true,
             (Permission::SwapPools(_), Permission::SwapPools(_)) => true,
+            (Permission::Resources(_), Permission::Resources(_)) => true,
             (Permission::Webrtc, Permission::Webrtc) => true,
             _ => false,
         }
@@ -204,6 +206,7 @@ impl Display for Permission {
             Permission::Substates(_) => write!(f, "substates:read"),
             Permission::BurnProofs(_) => write!(f, "burn_proofs:read"),
             Permission::SwapPools(_) => write!(f, "swap_pools:read"),
+            Permission::Resources(_) => write!(f, "resources:read"),
         }
     }
 }
@@ -256,6 +259,7 @@ impl FromStr for Permission {
             "substates" => parse_read_only(action_str, entity_str, Permission::Substates),
             "burn_proofs" => parse_read_only(action_str, entity_str, Permission::BurnProofs),
             "swap_pools" => parse_read_only(action_str, entity_str, Permission::SwapPools),
+            "resources" => parse_read_only(action_str, entity_str, Permission::Resources),
             other => Err(InvalidPermissionsFormat(format!("unknown resource '{other}'"))),
         }
     }
@@ -519,6 +523,7 @@ mod tests {
         round_trip(Permission::Substates(ReadOnly::Read));
         round_trip(Permission::BurnProofs(ReadOnly::Read));
         round_trip(Permission::SwapPools(ReadOnly::Read));
+        round_trip(Permission::Resources(ReadOnly::Read));
     }
 
     // ---------- FromStr rejection cases ----------

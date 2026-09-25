@@ -34,6 +34,7 @@ use crate::handlers::{
     error::HandlerError,
     keys,
     nfts,
+    resources,
     settings,
     swap_pools,
     transaction,
@@ -265,6 +266,11 @@ async fn handler(
         Some(("swap_pools", method)) => match method {
             "get_exchange_rate" => call_handler(context, value, token, swap_pools::handle_get_exchange_rate).await,
             "list" => call_handler(context, value, token, swap_pools::handle_list).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("resources", method)) => match method {
+            "get" => call_handler(context, value, token, resources::handle_get).await,
+            "get_many" => call_handler(context, value, token, resources::handle_get_many).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("address_book", method)) => match method {

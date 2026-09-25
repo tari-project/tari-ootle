@@ -128,6 +128,11 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
     description: "Read NFT data the wallet holds.",
   },
   {
+    value: "resources:read",
+    label: "resources:read",
+    description: "Read resource definitions stored by the wallet.",
+  },
+  {
     value: "settings:read",
     label: "settings:read",
     description: "Read wallet daemon settings.",

@@ -102,6 +102,10 @@ import type {
   SettingsSetResponse,
   SignTemplateMetadataRequest,
   SignTemplateMetadataResponse,
+  ResourcesGetManyRequest,
+  ResourcesGetManyResponse,
+  ResourcesGetRequest,
+  ResourcesGetResponse,
   StealthTransferRequest,
   StealthTransferResponse,
   StealthUtxosDecryptValueRequest,
@@ -620,6 +624,14 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     params: StealthUtxosGetValueLookupInfoRequest,
   ): Promise<StealthUtxosGetValueLookupInfoResponse> {
     return this.sendRequest("stealth_utxos.get_value_lookup_info", params);
+  }
+
+  public resourcesGet(params: ResourcesGetRequest): Promise<ResourcesGetResponse> {
+    return this.sendRequest("resources.get", params);
+  }
+
+  public resourcesGetMany(params: ResourcesGetManyRequest): Promise<ResourcesGetManyResponse> {
+    return this.sendRequest("resources.get_many", params);
   }
 
   // Address book

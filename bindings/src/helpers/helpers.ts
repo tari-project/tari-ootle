@@ -151,11 +151,12 @@ export function permissionToString(permission: Permission): string {
   }
 
   // Read-only resources: { Substates: "Read" } / { BurnProofs: "Read" } /
-  // { SwapPools: "Read" } — render with the resource name in snake_case
+  // { SwapPools: "Read" } / { Resources: "Read" } — render with the resource name in snake_case
   // plus explicit `:read`.
   if ("Substates" in permission) return "substates:read";
   if ("BurnProofs" in permission) return "burn_proofs:read";
   if ("SwapPools" in permission) return "swap_pools:read";
+  if ("Resources" in permission) return "resources:read";
 
   // Unscoped CRUD resources: { Keys: "Read" } -> "keys:read".
   if ("Keys" in permission) return `keys:${permission.Keys.toLowerCase()}`;

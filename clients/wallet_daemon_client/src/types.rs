@@ -28,6 +28,7 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     confidential::MinotariBurnClaimProof,
+    resource::Resource,
     substate::{Substate, SubstateId},
 };
 use tari_ootle_address::OotleAddress;
@@ -1907,6 +1908,33 @@ pub struct SwapPoolsListRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct SwapPoolsListResponse {
     pub pools: Vec<SwapPoolInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ResourcesGetRequest {
+    pub address: ResourceAddress,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ResourcesGetResponse {
+    pub resource: Resource,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ResourcesGetManyRequest {
+    pub addresses: Vec<ResourceAddress>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ResourcesGetManyResponse {
+    /// The requested resources this wallet has stored. An address the wallet has no record of is
+    /// absent from the map.
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, Resource>"))]
+    pub resources: HashMap<ResourceAddress, Resource>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

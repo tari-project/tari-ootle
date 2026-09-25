@@ -32,4 +32,5 @@ export type Permission =
   | { Substates: ReadOnly }
   | { BurnProofs: ReadOnly }
   | { SwapPools: ReadOnly }
+  | { Resources: ReadOnly }
   | "Webrtc";

@@ -11,6 +11,7 @@ pub mod error;
 pub(crate) mod helpers;
 pub mod keys;
 pub mod nfts;
+pub mod resources;
 pub mod settings;
 pub mod stealth_utxos;
 pub mod substates;

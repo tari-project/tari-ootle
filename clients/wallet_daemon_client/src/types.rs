@@ -583,12 +583,15 @@ pub struct KeysCreateResponse {
 
 /// Imports an externally-generated secret key into the wallet's keystore. The `secret_key` is transmitted as hex.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct KeysImportRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub secret_key: RistrettoSecretKey,
     pub key_type: KeyType,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct KeysImportResponse {
     pub key_id: KeyId,
     pub public_key: RistrettoPublicKeyBytes,

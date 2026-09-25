@@ -4,6 +4,7 @@
  */
 
 import type {
+  AccountGetByKeyIndexRequest,
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
@@ -11,6 +12,8 @@ import type {
   AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
+  AccountsCreateOrGetRequest,
+  AccountsCreateOrGetResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
   AccountsCreateStealthTransferStatementRequest,
@@ -55,20 +58,26 @@ import type {
   BurnProofsGetResponse,
   BurnProofsListRequest,
   BurnProofsListResponse,
+  CallInstructionRequest,
   ClaimBurnRequest,
   ClaimBurnResponse,
   ClaimValidatorFeesRequest,
   ClaimValidatorFeesResponse,
+  ConfidentialCreateOutputProofRequest,
+  ConfidentialCreateOutputProofResponse,
   ConfidentialOutputsListRequest,
   ConfidentialOutputsListResponse,
   ConfidentialTransferRequest,
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
   ConfidentialViewVaultBalanceResponse,
+  GetNftRequest,
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
   KeysCreateRequest,
   KeysCreateResponse,
+  KeysImportRequest,
+  KeysImportResponse,
   KeysListRequest,
   KeysListResponse,
   KeysSetActiveRequest,
@@ -77,17 +86,28 @@ import type {
   ListNftsResponse,
   MintFaucetNftRequest,
   MintFaucetNftResponse,
+  NonFungibleToken,
   Permission,
+  ProofsCancelRequest,
+  ProofsCancelResponse,
+  ProofsFinalizeRequest,
+  ProofsFinalizeResponse,
+  ProofsGenerateRequest,
+  ProofsGenerateResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
   rejectReasonToString,
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
+  SignTemplateMetadataRequest,
+  SignTemplateMetadataResponse,
   StealthTransferRequest,
   StealthTransferResponse,
   StealthUtxosDecryptValueRequest,
   StealthUtxosDecryptValueResponse,
+  StealthUtxosGetValueLookupInfoRequest,
+  StealthUtxosGetValueLookupInfoResponse,
   StealthUtxosListRequest,
   StealthUtxosListResponse,
   stringToSubstateId,
@@ -384,6 +404,14 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("accounts.get", params);
   }
 
+  public accountsGetByKeyIndex(params: AccountGetByKeyIndexRequest): Promise<AccountGetResponse> {
+    return this.sendRequest("accounts.get_by_key_index", params);
+  }
+
+  public accountsCreateOrGet(params: AccountsCreateOrGetRequest): Promise<AccountsCreateOrGetResponse> {
+    return this.sendRequest("accounts.create_or_get", params);
+  }
+
   public accountsTransfer(params: AccountsTransferRequest): Promise<AccountsTransferResponse> {
     return this.sendRequest("accounts.transfer", params);
   }
@@ -412,6 +440,10 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {
     return this.sendRequest("transactions.submit", params);
+  }
+
+  public submitInstruction(params: CallInstructionRequest): Promise<TransactionSubmitResponse> {
+    return this.sendRequest("transactions.submit_instruction", params);
   }
 
   public submitTransactionDryRun(params: TransactionSubmitRequest): Promise<TransactionSubmitDryRunResponse> {
@@ -472,6 +504,10 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("templates.list_authored", params);
   }
 
+  public templatesSignMetadata(params: SignTemplateMetadataRequest): Promise<SignTemplateMetadataResponse> {
+    return this.sendRequest("templates.sign_metadata", params);
+  }
+
   public createFreeTestCoins(params: AccountsCreateFreeTestCoinsRequest): Promise<AccountsCreateFreeTestCoinsResponse> {
     return this.sendRequest("accounts.create_free_test_coins", params);
   }
@@ -488,12 +524,38 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("keys.list", params);
   }
 
+  public importKey(params: KeysImportRequest): Promise<KeysImportResponse> {
+    return this.sendRequest("keys.import", params);
+  }
+
   public viewVaultBalance(params: ConfidentialViewVaultBalanceRequest): Promise<ConfidentialViewVaultBalanceResponse> {
     return this.sendRequest("confidential.view_vault_balance", params);
   }
 
+  public confidentialCreateTransferProof(params: ProofsGenerateRequest): Promise<ProofsGenerateResponse> {
+    return this.sendRequest("confidential.create_transfer_proof", params);
+  }
+
+  public confidentialFinalize(params: ProofsFinalizeRequest): Promise<ProofsFinalizeResponse> {
+    return this.sendRequest("confidential.finalize", params);
+  }
+
+  public confidentialCancel(params: ProofsCancelRequest): Promise<ProofsCancelResponse> {
+    return this.sendRequest("confidential.cancel", params);
+  }
+
+  public confidentialCreateOutputProof(
+    params: ConfidentialCreateOutputProofRequest,
+  ): Promise<ConfidentialCreateOutputProofResponse> {
+    return this.sendRequest("confidential.create_output_proof", params);
+  }
+
   public nftsList(params: ListNftsRequest): Promise<ListNftsResponse> {
     return this.sendRequest("nfts.list", params);
+  }
+
+  public nftsGet(params: GetNftRequest): Promise<NonFungibleToken> {
+    return this.sendRequest("nfts.get", params);
   }
 
   public nftTransfer(params: TransferNftRequest): Promise<TransferNftResponse> {
@@ -552,6 +614,12 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public stealthUtxosDecryptValue(params: StealthUtxosDecryptValueRequest): Promise<StealthUtxosDecryptValueResponse> {
     return this.sendRequest("stealth_utxos.decrypt_value", params);
+  }
+
+  public stealthUtxosGetValueLookupInfo(
+    params: StealthUtxosGetValueLookupInfoRequest,
+  ): Promise<StealthUtxosGetValueLookupInfoResponse> {
+    return this.sendRequest("stealth_utxos.get_value_lookup_info", params);
   }
 
   // Address book

@@ -248,6 +248,7 @@ pub type DerivedKeyIndex = u64;
 pub type ImportedKeyId = u64;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum KeyType {
     /// View only key
     ViewOnly,

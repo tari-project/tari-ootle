@@ -13,6 +13,8 @@ import type {
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountsCreateStealthTransferStatementRequest,
+  AccountsCreateStealthTransferStatementResponse,
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
   AccountsGetBalanceChangesRequest,
@@ -392,6 +394,12 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public stealthTransfer(params: StealthTransferRequest): Promise<StealthTransferResponse> {
     return this.sendRequest("accounts.stealth_transfer", params);
+  }
+
+  public accountsCreateStealthTransferStatement(
+    params: AccountsCreateStealthTransferStatementRequest,
+  ): Promise<AccountsCreateStealthTransferStatementResponse> {
+    return this.sendRequest("accounts.create_stealth_transfer_statement", params);
   }
 
   public accountsGetDefault(params: AccountGetDefaultRequest): Promise<AccountGetResponse> {

@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.41.3](https://github.com/tari-project/tari-ootle/compare/v0.41.2...v0.41.3) (2026-09-26)
+
+Hotfix on v0.41.2. A `ClaimBurn` transaction with a crafted merkle proof aborted every validator
+that executed it, and kept aborting them on restart because the transaction stays in the pool.
+
+### ⚠️ Upgrade notes
+
+- **Every validator upgrades together.** A validator still on v0.41.2 aborts when it executes such
+  a transaction; a patched one rejects it. No reset, no data migration.
+
+### Engine
+
+- `fix` — **A claim's merkle proof is decoded with every length prefix bounded by the input.**
+  `tari_mmr` preallocated the declared hash count, so a count of 2^52 aborted the node on an
+  allocation failure before verification could reject it.
+
 ## [0.41.2](https://github.com/tari-project/tari-ootle/compare/v0.41.1...v0.41.2) (2026-09-23)
 
 The engine and wallet security review release. It closes the ways a crafted template or payload

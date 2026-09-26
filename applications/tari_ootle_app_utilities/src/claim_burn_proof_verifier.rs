@@ -106,19 +106,11 @@ where
         claim_proof: &MinotariBurnClaimProof,
     ) -> Result<(), String> {
         // 1. Decode the merkle proof
-        let (proof, read) = bincode::serde::decode_from_slice::<tari_mmr::MerkleProof, _>(
-            claim_proof.encoded_merkle_proof.encoded_merkle_proof.as_slice(),
-            // L1 uses bincode v1
-            bincode::config::legacy(),
-        )
-        .map_err(|e| {
-            warn!(target: LOG_TARGET, "Claim burn failed - malformed merkle proof: {}", e);
-            format!("malformed merkle proof: {}", e)
-        })?;
-        if read != claim_proof.encoded_merkle_proof.encoded_merkle_proof.len() {
-            warn!(target: LOG_TARGET, "Claim burn failed - malformed merkle proof: read length mismatch");
-            return Err("malformed merkle proof: read length mismatch".to_string());
-        }
+        let proof =
+            decode_merkle_proof(claim_proof.encoded_merkle_proof.encoded_merkle_proof.as_slice()).map_err(|e| {
+                warn!(target: LOG_TARGET, "Claim burn failed - malformed merkle proof: {}", e);
+                format!("malformed merkle proof: {}", e)
+            })?;
 
         // 2. Fetch the block header for this proof
         let block_header = {
@@ -197,6 +189,59 @@ where
 
         Ok(())
     }
+}
+
+/// Decodes an L1 `tari_mmr::MerkleProof` from its bincode v1 (legacy, fixint) encoding: `mmr_size: u64`,
+/// then `path` and `peaks`, each a `u64` count of hashes where every hash is a `u64` length followed by
+/// its bytes.
+///
+/// The proof comes from the transaction, so every length prefix is attacker-controlled. This does not go
+/// through serde: `tari_mmr` preallocates each hash vector from the declared count, so a crafted count
+/// aborts the node on allocation failure before a single hash is read. Here every count and length is
+/// checked against the bytes actually remaining before anything is allocated. Trailing bytes are rejected.
+fn decode_merkle_proof(bytes: &[u8]) -> Result<tari_mmr::MerkleProof, String> {
+    fn read_u64(bytes: &mut &[u8]) -> Result<u64, String> {
+        let (head, rest) = bytes
+            .split_first_chunk::<8>()
+            .ok_or_else(|| "unexpected end of input".to_string())?;
+        *bytes = rest;
+        Ok(u64::from_le_bytes(*head))
+    }
+
+    fn read_len(bytes: &mut &[u8], min_item_size: usize) -> Result<usize, String> {
+        let len = read_u64(bytes)?;
+        // Every item occupies at least `min_item_size` bytes, so a count the remaining input cannot
+        // hold is rejected before it is used as a capacity
+        let max = bytes.len() / min_item_size;
+        usize::try_from(len)
+            .ok()
+            .filter(|len| *len <= max)
+            .ok_or_else(|| format!("length {} exceeds the {} remaining bytes", len, bytes.len()))
+    }
+
+    fn read_hashes(bytes: &mut &[u8]) -> Result<Vec<tari_mmr::Hash>, String> {
+        // Each hash carries at least its own 8-byte length prefix
+        let count = read_len(bytes, 8)?;
+        let mut hashes = Vec::with_capacity(count);
+        for _ in 0..count {
+            let len = read_len(bytes, 1)?;
+            let (hash, rest) = bytes.split_at(len);
+            hashes.push(hash.to_vec());
+            *bytes = rest;
+        }
+        Ok(hashes)
+    }
+
+    let mut bytes = bytes;
+    let mmr_size = read_u64(&mut bytes)?;
+    let mmr_size = usize::try_from(mmr_size).map_err(|_| format!("mmr_size {} does not fit in usize", mmr_size))?;
+    let path = read_hashes(&mut bytes)?;
+    let peaks = read_hashes(&mut bytes)?;
+    if !bytes.is_empty() {
+        return Err(format!("{} trailing bytes", bytes.len()));
+    }
+
+    Ok(tari_mmr::MerkleProof { mmr_size, path, peaks })
 }
 
 pub struct KnowledgeProofVerifier {
@@ -284,7 +329,7 @@ mod tests {
     use tari_ootle_transaction::Network;
     use tari_template_lib::types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-    use super::KnowledgeProofVerifier;
+    use super::{KnowledgeProofVerifier, decode_merkle_proof};
 
     /// Mints a `MinotariBurnClaimProof` whose `ownership_proof` Schnorr signature is bound to
     /// `claimant_pk` (the key the message commits to in `H(commitment ‖ claimant_pk ‖ sidechain_id)`)
@@ -435,5 +480,61 @@ mod tests {
             result.is_err(),
             "an unbound proof must not verify on a chain that expects a sidechain id"
         );
+    }
+
+    fn encode_legacy(proof: &tari_mmr::MerkleProof) -> Vec<u8> {
+        bincode::serde::encode_to_vec(proof, bincode::config::legacy()).unwrap()
+    }
+
+    #[test]
+    fn decode_merkle_proof_matches_bincode_legacy() {
+        let proofs = [tari_mmr::MerkleProof::default(), tari_mmr::MerkleProof {
+            mmr_size: 12345,
+            path: vec![vec![1; 32], vec![2; 32], vec![3; 32]],
+            peaks: vec![vec![4; 32], vec![]],
+        }];
+        for proof in proofs {
+            let encoded = encode_legacy(&proof);
+            assert_eq!(decode_merkle_proof(&encoded).unwrap(), proof);
+        }
+    }
+
+    #[test]
+    fn decode_merkle_proof_rejects_oversized_hash_count() {
+        // The shape that aborted validators: a hash count of 2^52 made tari_mmr try to preallocate
+        // 2^52 * size_of::<Vec<u8>>() bytes
+        let mut encoded = 7u64.to_le_bytes().to_vec();
+        encoded.extend_from_slice(&(1u64 << 52).to_le_bytes());
+        encoded.extend_from_slice(&[0; 64]);
+        assert!(decode_merkle_proof(&encoded).is_err());
+
+        let mut encoded = 7u64.to_le_bytes().to_vec();
+        encoded.extend_from_slice(&u64::MAX.to_le_bytes());
+        assert!(decode_merkle_proof(&encoded).is_err());
+    }
+
+    #[test]
+    fn decode_merkle_proof_rejects_oversized_hash_length() {
+        let mut encoded = 7u64.to_le_bytes().to_vec();
+        encoded.extend_from_slice(&1u64.to_le_bytes());
+        encoded.extend_from_slice(&33u64.to_le_bytes());
+        encoded.extend_from_slice(&[0; 32]);
+        assert!(decode_merkle_proof(&encoded).is_err());
+    }
+
+    #[test]
+    fn decode_merkle_proof_rejects_truncated_and_trailing_input() {
+        let proof = tari_mmr::MerkleProof {
+            mmr_size: 3,
+            path: vec![vec![1; 32]],
+            peaks: vec![vec![2; 32]],
+        };
+        let encoded = encode_legacy(&proof);
+        for len in 0..encoded.len() {
+            assert!(decode_merkle_proof(&encoded[..len]).is_err(), "truncated to {len}");
+        }
+        let mut trailing = encoded;
+        trailing.push(0);
+        assert!(decode_merkle_proof(&trailing).is_err());
     }
 }

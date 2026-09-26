@@ -30,7 +30,6 @@ ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 anyhow = { workspace = true }
 blake2 = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 dirs-next = { workspace = true }
 libp2p-identity = { workspace = true, optional = true }
@@ -49,6 +48,7 @@ config = { workspace = true }
 tari_consensus = { workspace = true, optional = true }
 
 [dev-dependencies]
+bincode = { workspace = true, features = ["serde"] }
 bounded-vec = { workspace = true }
 tempfile = { workspace = true }
 

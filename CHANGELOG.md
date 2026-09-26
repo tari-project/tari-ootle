@@ -3,6 +3,31 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.41.4](https://github.com/tari-project/tari-ootle/compare/v0.41.3...v0.41.4) (2026-09-26)
+
+Hotfix on v0.41.3 to get a testnet that stopped committing, and an indexer that could not sync,
+running again. Both changes are stopgaps until the next testnet reset.
+
+### ⚠️ Upgrade notes
+
+- **Every validator upgrades together.** Replicas vote on blocks v0.41.3 refused, so a mixed
+  committee disagrees on votes. No reset, no data migration.
+
+### Consensus
+
+- `fix` — **Replicas no longer refuse blocks for lock conflicts an honest proposer defers**
+  (#2650's audit H3 guard). A replica's lock state after `prepare` can differ from the proposer's,
+  so every replica refused blocks an honest proposer built and the chain stopped committing. The
+  proposer still defers such transactions; the replica-side check returns once the two lock views
+  are proven identical.
+
+### Engine
+
+- `fix` — **Receipts written before v0.41.0 decode again.** v0.41.0 removed the
+  `SignatureVerification` fee source, so a stored receipt that charged it failed to decode and state
+  sync aborted on it. The variant is restored for decoding only: it is never charged and is left out
+  of `FeeSource::ALL`, so fees are unchanged.
+
 ## [0.41.3](https://github.com/tari-project/tari-ootle/compare/v0.41.2...v0.41.3) (2026-09-26)
 
 Hotfix on v0.41.2. A `ClaimBurn` transaction with a crafted merkle proof aborted every validator

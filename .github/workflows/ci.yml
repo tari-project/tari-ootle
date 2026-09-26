@@ -182,6 +182,10 @@ jobs:
           components: clippy
 
       - uses: ./.github/actions/rust-cache
+        with:
+          # Only development's cache is reused (every ref can restore from the default branch);
+          # a PR's own entries evict it from the 10 GB repo cap.
+          save-if: ${{ github.ref == 'refs/heads/development' }}
 
       - name: wasm target install
         run: rustup target add wasm32-unknown-unknown
@@ -288,7 +292,7 @@ jobs:
 
       - uses: ./.github/actions/rust-cache
         with:
-          save-if: ${{ matrix.partition == '1/3' }}
+          save-if: ${{ matrix.partition == '1/3' && github.ref == 'refs/heads/development' }}
 
       - name: wasm target install
         run: rustup target add wasm32-unknown-unknown
@@ -379,6 +383,10 @@ jobs:
           toolchain: ${{ env.rust_toolchain }}
 
       - uses: ./.github/actions/rust-cache
+        with:
+          # Only development's cache is reused (every ref can restore from the default branch);
+          # a PR's own entries evict it from the 10 GB repo cap.
+          save-if: ${{ github.ref == 'refs/heads/development' }}
 
       - name: wasm target install
         run: rustup target add wasm32-unknown-unknown

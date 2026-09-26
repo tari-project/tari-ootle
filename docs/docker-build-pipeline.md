@@ -9,7 +9,8 @@ Reference document for engineers working on the Tari Ootle Docker build.
 - One image: `ghcr.io/<owner>/ootle` containing all 7 binaries
 - Platform: `linux/amd64` only
 - Registry: GitHub Container Registry (GHCR) only
-- Caching: BuildKit cache mounts + GHA cache (`type=gha,mode=max`)
+- Caching: BuildKit cache mounts + registry cache (`ghcr.io/<owner>/ootle-buildcache`, `mode=max`)
+- Runner: self-hosted `ubuntu-high-cpu`
 - Rust deps prewarmed via [`cargo-chef`](https://github.com/LukeMathWalker/cargo-chef)
 
 ## Binaries shipped
@@ -237,7 +238,7 @@ Three reasons we use them everywhere:
 
 1. **Smaller image layers**: Cargo's `target/` directory can be 5-15 GB
    for a project this size. Baking it into a layer would bloat the image
-   and the GHA cache.
+   and the registry cache.
 2. **Cross-build reuse**: When the layer cache is invalidated (e.g.
    source changed), the cache mount survives and cargo's incremental
    compilation reuses object files.

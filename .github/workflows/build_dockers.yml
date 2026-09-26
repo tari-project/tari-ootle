@@ -28,7 +28,7 @@ env:
 jobs:
   build:
     name: Build and push ootle image (linux/amd64)
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-high-cpu ]
 
     steps:
       - name: Checkout
@@ -74,11 +74,11 @@ jobs:
           platforms: linux/amd64
           push: true
           provenance: false
-          # GHA cache: free, 10 GB/repo cap with LRU eviction.
-          # If eviction becomes a problem, switch to registry cache:
-          #   type=registry,ref=ghcr.io/${{ github.repository_owner }}/ootle-buildcache
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Registry cache, not GHA: the repo's 10 GB Actions cache is taken by the rust caches, so
+          # the cooked-dependency layer was evicted before the next build could use it and every
+          # build started cold. ghcr has no such cap.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}-buildcache,mode=max,image-manifest=true,oci-mediatypes=true
           build-args: |
             VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}

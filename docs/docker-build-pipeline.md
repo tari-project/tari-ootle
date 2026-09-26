@@ -6,7 +6,7 @@ Reference document for engineers working on the Tari Ootle Docker build.
 
 - One Dockerfile: `docker/ootle.Dockerfile`
 - One workflow: `.github/workflows/build_dockers.yml`
-- One image: `ghcr.io/<owner>/ootle` containing all 7 binaries
+- One image: `ghcr.io/<owner>/ootle` containing the network node binaries, `tari_validator_node` and `tari_indexer`
 - Platform: `linux/amd64` only
 - Registry: GitHub Container Registry (GHCR) only
 - Caching: BuildKit cache mounts + registry cache (`ghcr.io/<owner>/ootle-buildcache`, `mode=max`)
@@ -17,16 +17,14 @@ Reference document for engineers working on the Tari Ootle Docker build.
 
 | Binary | Purpose |
 |---|---|
-| `tari_ootle_walletd` | Wallet daemon (JSON-RPC API + embedded web UI) |
 | `tari_indexer` | Substate indexer (JSON-RPC API + embedded web UI) |
 | `tari_validator_node` | Validator node daemon (consensus + embedded web UI) |
-| `tari_swarm_daemon` | Local dev orchestrator (spawns multi-node test networks) |
-| `tari_ootle_wallet_cli` | Command-line wallet client |
-| `tari_watcher` | Validator node monitoring/registration tool |
-| `tari_validator_rollback` | Operations tool for rolling back validator state |
 
-The 4 daemon binaries each embed a React web UI at compile time via the
-`include_dir!` macro pointing at `web_ui/dist/` (or `webui/dist/` for swarm).
+Only what a deployed network node runs. The wallet, swarm and operations
+tools ship as release binaries, not in the image.
+
+Both binaries embed a React web UI at compile time via the
+`include_dir!` macro pointing at `web_ui/dist/`.
 This means the Dockerfile must build the web UIs before `cargo build`,
 otherwise the embedded asset directory is empty.
 
@@ -43,7 +41,7 @@ otherwise the embedded asset directory is empty.
 
 ```bash
 docker run --rm ghcr.io/tari-project/ootle:latest tari_validator_node --help
-docker run --rm -p 18000:18000 ghcr.io/tari-project/ootle:latest tari_swarm_daemon start
+docker run --rm ghcr.io/tari-project/ootle:latest tari_indexer --help
 ```
 
 `tini` is bundled (not relying on `docker run --init`) because Kubernetes
@@ -147,19 +145,14 @@ total wall-clock; a full cold build takes ~20-25 minutes.
 COPY . .
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
-RUN --mount=type=cache,target=/root/.npm \
-    cd applications/tari_swarm_daemon/webui && npm ci
 ```
 
 The repo has a pnpm workspace at root (`pnpm-workspace.yaml`) covering all
 3 daemon web UIs plus shared packages (`bindings`, `clients/javascript/*`,
 `applications/theming`). One `pnpm install` warms them all.
 
-`tari_swarm_daemon/webui` is **not** in the pnpm workspace — it uses npm.
-We `npm ci` it separately.
-
-Both installs use cache mounts for the pnpm store and npm cache, so the
-network fetch happens once across all builds on a given runner.
+The install uses a cache mount for the pnpm store, so the network fetch
+happens once across all builds on a given runner.
 
 **Phase 3c — Build binaries:**
 ```dockerfile
@@ -169,20 +162,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/root/.local/share/pnpm/store \
     --mount=type=cache,target=/root/.npm \
     cargo build --release --locked \
-      --bin tari_ootle_walletd \
-      --bin tari_indexer \
       --bin tari_validator_node \
-      --bin tari_swarm_daemon \
-      --bin tari_ootle_wallet_cli \
-      --bin tari_watcher \
-      --bin tari_validator_rollback \
+      --bin tari_indexer \
     && mkdir -p /out \
-    && cp target/release/{tari_ootle_walletd,tari_indexer,...} /out/
+    && cp target/release/{tari_validator_node,tari_indexer} /out/
 ```
 
-Each daemon's `build.rs` invokes `pnpm` (or `npm` for swarm) to compile
-its web UI into `web_ui/dist/`. Because node_modules were warmed in Phase
-3b and the pnpm/npm caches are mounted here, web UI builds are fast.
+Each daemon's `build.rs` invokes `pnpm` to compile its web UI into
+`web_ui/dist/`. Because node_modules were warmed in Phase 3b and the pnpm
+cache is mounted here, web UI builds are fast.
 
 **Why copy to `/out/` inside the same RUN:** the binaries get extracted
 to `/out/` so the runtime stage can grab them via a single
@@ -196,11 +184,9 @@ Minimal Debian 13. Installs only runtime libraries:
 
 - `tini` (PID 1 init)
 - `ca-certificates`, `openssl` (TLS)
-- `libsqlite3-0`, `libreadline8` (linked at runtime by daemons)
-- `libdbus-1-3` (required by `tari_ootle_walletd` for secret-service /
-  desktop keyring integration on Linux)
+- `libsqlite3-0` (linked at runtime by both daemons)
 
-Creates `tari` user (uid/gid 1000), copies the 7 binaries from `/out/`,
+Creates `tari` user (uid/gid 1000), copies the 2 binaries from `/out/`,
 drops to `USER tari`, sets `WORKDIR /home/tari`, and sets
 `ENTRYPOINT ["/usr/bin/tini", "--"]`.
 
@@ -289,7 +275,7 @@ zombie-reaping + signal forwarding in every deployment.
 
 ### Why no `CMD`?
 
-The image ships 7 binaries with no canonical entrypoint. Picking one as
+The image ships 2 binaries with no canonical entrypoint. Picking one as
 the default would mislead users of the others. Making the binary part
 of `docker run` is explicit.
 
@@ -352,16 +338,7 @@ should be 30 seconds to 5 minutes depending on what changed.
 
 ```bash
 docker run --rm ootle:local tari_validator_node --version
-docker run --rm ootle:local tari_ootle_wallet_cli --help
-```
-
-### Run the swarm daemon (local dev network)
-
-```bash
-docker run --rm -p 18000:18000 -v $PWD/data:/home/tari/data \
-  ootle:local tari_swarm_daemon start \
-    --webui-listen-address=0.0.0.0:18000 \
-    --base-dir /home/tari/data
+docker run --rm ootle:local tari_indexer --help
 ```
 
 ### Inspect the image

@@ -61,7 +61,7 @@ jobs:
           labels: |
             org.opencontainers.image.vendor=Tari Labs
             org.opencontainers.image.title=${{ env.IMAGE_NAME }}
-            org.opencontainers.image.description=Tari Ootle binaries (walletd, indexer, validator_node, swarm_daemon, wallet_cli, watcher, validator_rollback)
+            org.opencontainers.image.description=Tari Ootle network node binaries (validator_node, indexer)
             org.opencontainers.image.url=https://github.com/${{ github.repository }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 

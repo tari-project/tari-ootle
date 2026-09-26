@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# Tari Ootle Docker image.
+# Tari Ootle network node image: tari_validator_node and tari_indexer.
 #
 # See docs/docker-build-pipeline.md for an architecture overview.
 #
@@ -140,6 +140,7 @@ FROM chef AS builder
 # Phase 3a: cook Rust dependencies only. Workspace members are stubbed,
 # so no application build.rs runs and pnpm is not needed yet. This layer
 # is reused as long as Cargo.lock and feature selections are unchanged.
+# Only the dependencies of the shipped binaries are cooked.
 #
 # /base/target is intentionally NOT a cache mount: cargo-chef relies on
 # the compiled deps written to target/ to persist as a regular image
@@ -149,30 +150,27 @@ FROM chef AS builder
 COPY --from=planner /recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    cargo chef cook --release --recipe-path recipe.json
+    cargo chef cook --release --recipe-path recipe.json \
+      --bin tari_validator_node \
+      --bin tari_indexer
 
 # Phase 3b: copy full source and warm JS dependencies.
 COPY . .
 
-# pnpm workspace (covers walletd, indexer, validator_node web UIs plus
+# pnpm workspace (covers the indexer and validator_node web UIs plus
 # shared packages: bindings, clients/javascript/*, applications/theming).
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile
 
 # Pre-build shared workspace packages so leaf web UIs can import them.
-# The walletd build.rs builds these itself, but indexer and validator_node
-# build.rs scripts assume the shared dists already exist. Doing it once
-# here is deterministic and faster than relying on cargo build ordering.
+# The indexer and validator_node build.rs scripts assume the shared dists
+# already exist.
 RUN pnpm --filter "@tari-project/ootle-ts-bindings" run build-dev \
  && pnpm --filter "@tari-project/ootle-web-ui-theming" run build \
  && pnpm --filter "@tari-project/wallet_jrpc_client" run build \
  && pnpm --filter "@tari-project/indexer-client" run build
 
-# tari_swarm_daemon/webui is standalone (not in pnpm workspace, uses npm).
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    cd applications/tari_swarm_daemon/webui && npm ci
-
-# Phase 3c: build the binaries. Each daemon's build.rs invokes pnpm/npm
+# Phase 3c: build the binaries. Each daemon's build.rs invokes pnpm
 # to compile its embedded web UI; node_modules and package manager
 # caches from Phase 3b are reused. /base/target inherits the cooked
 # dependencies as a layer from Phase 3a - cargo's incremental build
@@ -182,22 +180,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
     --mount=type=cache,target=/root/.npm,sharing=locked \
     cargo build --release --locked \
-      --bin tari_ootle_walletd \
-      --bin tari_indexer \
       --bin tari_validator_node \
-      --bin tari_swarm_daemon \
-      --bin tari_ootle_wallet_cli \
-      --bin tari_watcher \
-      --bin tari_validator_rollback && \
+      --bin tari_indexer && \
     mkdir -p /out && \
     cp \
-      target/release/tari_ootle_walletd \
-      target/release/tari_indexer \
       target/release/tari_validator_node \
-      target/release/tari_swarm_daemon \
-      target/release/tari_ootle_wallet_cli \
-      target/release/tari_watcher \
-      target/release/tari_validator_rollback \
+      target/release/tari_indexer \
       /out/
 
 
@@ -213,8 +201,7 @@ ARG DEBIAN_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Runtime libraries only - no -dev packages, no toolchain.
-# - libdbus-1-3 is needed by tari_ootle_walletd (linked via secret-service crate)
-# - libsqlite3-0, libreadline8 linked by daemons
+# - libsqlite3-0 linked by both daemons
 # - openssl + ca-certificates for TLS
 # - tini as PID 1 init
 RUN apt-get update && \
@@ -222,9 +209,7 @@ RUN apt-get update && \
       tini \
       ca-certificates \
       openssl \
-      libsqlite3-0 \
-      libreadline8 \
-      libdbus-1-3 && \
+      libsqlite3-0 && \
     rm -rf /var/lib/apt/lists/*
 
 # Non-root user.

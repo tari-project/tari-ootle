@@ -342,14 +342,15 @@ jobs:
 
       # A tag run restores the dependency cache the scheduled runs on the default branch save, but
       # never writes one: the cache a release build reads must be one that was produced before the
-      # tag existed. rust-cache keeps only dependencies, so every workspace crate — and the binary
+      # tag existed. Other branches don't save either; nothing restores their entries, and they
+      # evict development's from the 10 GB repo cap. rust-cache keeps only dependencies, so every workspace crate — and the binary
       # itself — is still compiled from source on the tag's own commit.
       - name: Cache cargo files and outputs
         if: ${{ ( ! matrix.builds.cross ) && ( env.CARGO_CACHE ) }}
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.builds.runs-on }}-${{ matrix.builds.target }}-${{ matrix.builds.name }}
-          save-if: ${{ ! startsWith(github.ref, 'refs/tags/v') }}
+          save-if: ${{ github.ref == 'refs/heads/development' }}
 
       - name: Install and setup cargo cross
         if: ${{ matrix.builds.cross }}

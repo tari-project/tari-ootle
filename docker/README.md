@@ -17,17 +17,15 @@ and pnpm caches and are typically 30 seconds to 5 minutes.
 
 ## Quick run
 
-The image ships seven binaries with no default `CMD`. Pick one when running:
+The image ships the network node binaries, `tari_validator_node` and
+`tari_indexer`, with no default `CMD`. Pick one when running:
 
 ```bash
 docker run --rm ootle:local tari_validator_node --help
-docker run --rm ootle:local tari_ootle_walletd --help
-docker run --rm ootle:local tari_ootle_wallet_cli --help
 docker run --rm ootle:local tari_indexer --help
-docker run --rm ootle:local tari_swarm_daemon --help
-docker run --rm ootle:local tari_watcher --help
-docker run --rm ootle:local tari_validator_rollback --help
 ```
+
+The wallet, swarm and operations tools are not in the image; use the release binaries.
 
 The container runs as the non-root user `tari` (uid 1000), with `tini`
 as PID 1 for signal forwarding and zombie reaping.

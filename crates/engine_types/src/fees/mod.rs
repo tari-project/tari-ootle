@@ -354,7 +354,12 @@ pub enum FeeSource {
     Storage = 2,
     #[n(3)]
     TransactionWeight = 3,
-    // 4 Reserved for future use
+    /// Never charged. Slot 4 carried signature verification before it moved onto native intrinsics
+    /// (`NativeExecution`). The variant remains so receipts persisted before v0.41.0 still decode;
+    /// it is left out of [`FeeSource::ALL`] so it does not widen [`FeeReceipt::widest`]. It can go at
+    /// the next testnet reset.
+    #[n(4)]
+    SignatureVerification = 4,
     #[n(5)]
     TemplateLoad = 5,
     #[n(6)]
@@ -524,6 +529,8 @@ mod tests {
                 FeeSource::TemplatePublish |
                 FeeSource::Reserved |
                 FeeSource::NativeExecution => {},
+                // Decode-only: listing it would widen `FeeReceipt::widest` and change every fee.
+                FeeSource::SignatureVerification => panic!("SignatureVerification must stay out of FeeSource::ALL"),
             }
         }
     }

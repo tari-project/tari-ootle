@@ -166,7 +166,7 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
 ///
 /// ```no_run
 /// use tari_ootle_app_utilities::fee_tables::get_fee_table_by_network;
-/// use tari_ootle_common_types::Network;
+/// use tari_ootle_transaction::Network;
 ///
 /// let fee_table = get_fee_table_by_network(Network::Igor);
 /// println!(

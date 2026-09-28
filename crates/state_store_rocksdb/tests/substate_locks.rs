@@ -132,8 +132,9 @@ fn gen_locks(transaction_id: TransactionId, num: usize) -> impl Iterator<Item = 
 
 /// A block grants several locks on one substate in command order, and the chain's answer is the last of them.
 ///
-/// The ids here are ordered so that key order contradicts grant order, and the sibling branch is written between the
-/// two reads: the answer belongs to b9's chain, so neither may move it.
+/// The lock granted first also sorts first by transaction id, so the last-granted lock is not the one key order reaches
+/// first and the assertion can tell the two apart. The sibling branch is written between the two reads: the answer
+/// belongs to b9's chain, so neither read may move it.
 #[test]
 fn the_latest_lock_does_not_depend_on_other_branches() {
     let (db, _tmp) = create_rocksdb();
@@ -145,8 +146,6 @@ fn the_latest_lock_does_not_depend_on_other_branches() {
     let b9 = chain[9].as_leaf();
 
     let substate_id = create_random_substate_id();
-    // Order the ids so that the lock granted first is also the one that sorts first, which is what makes a key-ordered
-    // answer differ from the granted one.
     let (granted_first, granted_last) = ordered_transaction_ids();
 
     tx.substate_locks_insert_all(&b8, &two_locks(&substate_id, granted_first, granted_last))
@@ -307,7 +306,8 @@ fn removing_a_block_releases_every_lock_it_granted() {
     tx.rollback().unwrap();
 }
 
-/// Two transaction ids, the lower first, so that granting in that order puts the latest lock last in key order too.
+/// Two transaction ids, the lower first. Granting in this order makes transaction-id order agree with grant order, so
+/// the last-granted lock is the last in key order rather than the first.
 fn ordered_transaction_ids() -> (TransactionId, TransactionId) {
     let mut ids = [transaction_id_from_seed(1), transaction_id_from_seed(2)];
     ids.sort();

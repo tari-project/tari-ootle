@@ -97,9 +97,9 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::foreign_parked_blocks::ForeignParkedBlockCf,
         column_families::foreign_parked_blocks::MissingTransactionsModel,
         column_families::substate_locks::SubstateLockModel,
-        column_families::substate_locks::HeadIndex,
         column_families::substate_locks::BlockIdIndex,
         column_families::substate_locks::SubstateIdIndex,
+        column_families::substate_locks::ChainOrderIndex,
         column_families::substate::SubstateCf,
         column_families::substate::HeadIndex,
         column_families::substate::UnprunedDownedValuesIndex,
@@ -208,7 +208,7 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::substate::SubstateCf)
         .register_cf(column_families::substate::UnprunedDownedValuesIndex)
         .register_cf(column_families::substate_locks::BlockIdIndex)
-        .register_cf(column_families::substate_locks::HeadIndex)
+        .register_cf(column_families::substate_locks::ChainOrderIndex)
         .register_cf(column_families::substate_locks::SubstateIdIndex)
         .register_cf(column_families::substate_locks::SubstateLockModel)
         .register_cf(column_families::transaction::TransactionCf)

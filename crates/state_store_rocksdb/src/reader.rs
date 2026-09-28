@@ -1637,9 +1637,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
     /// Returns the lock most recently granted on a substate by the chain ending at `leaf_block`, searching its pending
     /// blocks and then the committed chain beneath them.
     ///
-    /// The answer is a property of that chain alone: locks granted by blocks on other branches are skipped, and the
-    /// chain-order index makes "most recently granted" a single descending scan rather than a choice between an index
-    /// shortcut and a per-block walk that could disagree.
+    /// The answer is a property of that chain alone: locks granted by blocks on other branches are skipped. The
+    /// chain-order index orders a substate's locks by (block_height, grant_seq), which totally orders the locks any one
+    /// chain holds, so the first entry the descending scan accepts is the answer.
     ///
     /// # Used for:
     /// Local proposal conflict resolution, to check if a substate is locked by another transaction.

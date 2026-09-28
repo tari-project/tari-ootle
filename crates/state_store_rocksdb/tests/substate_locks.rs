@@ -132,9 +132,8 @@ fn gen_locks(transaction_id: TransactionId, num: usize) -> impl Iterator<Item = 
 
 /// A block grants several locks on one substate in command order, and the chain's answer is the last of them.
 ///
-/// Key order follows the transaction id, which has nothing to do with the order the block granted the locks, so a
-/// lookup that resolves the ordering from the key shape answers differently depending on which path it took - and which
-/// path it takes depends on which other branches the node happens to have written.
+/// The ids here are ordered so that key order contradicts grant order, and the sibling branch is written between the
+/// two reads: the answer belongs to b9's chain, so neither may move it.
 #[test]
 fn the_latest_lock_does_not_depend_on_other_branches() {
     let (db, _tmp) = create_rocksdb();

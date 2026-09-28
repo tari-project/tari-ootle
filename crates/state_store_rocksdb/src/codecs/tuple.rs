@@ -78,3 +78,46 @@ where
         Ok(((a, b), n_a + n_b))
     }
 }
+
+impl<A, B, C, D, CA, CB, CC, CD> DbEncoder<(A, B, C, D)> for (CA, CB, CC, CD)
+where
+    CA: DbEncoder<A>,
+    CB: DbEncoder<B>,
+    CC: DbEncoder<C>,
+    CD: DbEncoder<D>,
+{
+    fn encode_len(&self, value: &(A, B, C, D)) -> Result<usize, RocksDbStorageError> {
+        let (ca, cb, cc, cd) = &self;
+        let a_len = ca.encode_len(&value.0)?;
+        let b_len = cb.encode_len(&value.1)?;
+        let c_len = cc.encode_len(&value.2)?;
+        let d_len = cd.encode_len(&value.3)?;
+        Ok(a_len + b_len + c_len + d_len)
+    }
+
+    fn encode_into<W: Write>(&self, (a, b, c, d): &(A, B, C, D), writer: &mut W) -> Result<(), RocksDbStorageError> {
+        let (ca, cb, cc, cd) = &self;
+        ca.encode_into(a, writer)?;
+        cb.encode_into(b, writer)?;
+        cc.encode_into(c, writer)?;
+        cd.encode_into(d, writer)?;
+        Ok(())
+    }
+}
+
+impl<A, B, C, D, CA, CB, CC, CD> DbDecoder<(A, B, C, D)> for (CA, CB, CC, CD)
+where
+    CA: DbDecoder<A>,
+    CB: DbDecoder<B>,
+    CC: DbDecoder<C>,
+    CD: DbDecoder<D>,
+{
+    fn decode(&self, bytes: &[u8]) -> Result<((A, B, C, D), usize), RocksDbStorageError> {
+        let (ca, cb, cc, cd) = &self;
+        let (a, n_a) = ca.decode(bytes)?;
+        let (b, n_b) = cb.decode(&bytes[n_a..])?;
+        let (c, n_c) = cc.decode(&bytes[n_a + n_b..])?;
+        let (d, n_d) = cd.decode(&bytes[n_a + n_b + n_c..])?;
+        Ok(((a, b, c, d), n_a + n_b + n_c + n_d))
+    }
+}

@@ -1634,8 +1634,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(None)
     }
 
-    /// Returns the latest substate lock for a given substate ID, searching through the pending chain and committed
-    /// chain.
+    /// Returns the lock most recently granted on a substate by the chain ending at `leaf_block`, searching its pending
+    /// blocks and then the committed chain beneath them.
+    ///
+    /// The answer is a property of that chain alone: locks granted by blocks on other branches are skipped, and the
+    /// chain-order index makes "most recently granted" a single descending scan rather than a choice between an index
+    /// shortcut and a per-block walk that could disagree.
     ///
     /// # Used for:
     /// Local proposal conflict resolution, to check if a substate is locked by another transaction.
@@ -1647,56 +1651,44 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "substate_locks_get_latest_for_substate";
         let cf = self.db().cf(SubstateLockModel)?;
 
-        let pending_chain = self.get_pending_chain_ordered(leaf_block.block_id())?;
+        let pending_chain = self
+            .get_pending_chain_ordered(leaf_block.block_id())?
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let commit_block = self.get_commit_block()?;
+        let pending_chain_idx = self.db().cf(chain::PendingChainIndex)?;
 
-        // Check if the substate lock is in the head index (typical case optimisation)
-        let head_idx = self.db().cf(substate_locks::HeadIndex)?;
-        if let Some(head) = head_idx.get(substate_id, OPERATION).optional()? &&
-            pending_chain.contains(&head.block_id)
-        {
-            let lock = cf.get(&head, OPERATION)?;
+        let query = self.db().cf(substate_locks::ByChainOrderQuery)?;
+        for result in query.query_prefix_range_iterator(Ordering::Descending, substate_id) {
+            let ((_, block_height, block_id, _), transaction_id) = result?;
+            let is_on_chain = if pending_chain.contains(&block_id) {
+                true
+            } else {
+                // Committing a block removes it from the pending chain, and every pending block sits above the commit
+                // block. So a lock at or below the commit height whose block has left the pending chain was granted by
+                // the one chain that committed that height; a branch block that still lingers there was not.
+                block_height <= commit_block.height && !pending_chain_idx.exists(&block_id, OPERATION)?
+            };
+            if !is_on_chain {
+                continue;
+            }
+
+            let lock = cf.get(
+                &substate_locks::SubstateLockKey {
+                    block_id,
+                    block_height,
+                    substate_id: substate_id.clone(),
+                    transaction_id,
+                },
+                OPERATION,
+            )?;
             return Ok(lock);
         }
 
-        let query = self.db().cf(substate_locks::ByBlockIdSubstateIdQuery)?;
-
-        // TODO: this is on the critical path, improve performance
-        for block_id in &pending_chain {
-            let mut iter =
-                query.query_prefix_range_key_iterator(Ordering::default(), &(*block_id, substate_id.clone()));
-            if let Some(result) = iter.next() {
-                let key = result?;
-                let lock = cf.get(&key, OPERATION)?;
-                return Ok(lock);
-            }
-        }
-
-        // In the committed chain? This index is ordered by (substate_id, transaction_id, block_id, height), not by
-        // height, so scan every committed lock for the substate and keep the one from the highest block (the latest).
-        let commit_block = self.get_commit_block()?;
-        let query = self.db().cf(substate_locks::BySubstateIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
-        let mut latest: Option<substate_locks::SubstateLockKey> = None;
-        for result in iter {
-            let key = result?;
-            if key.block_height > commit_block.height {
-                continue;
-            }
-            let is_later = match &latest {
-                Some(prev) => prev.block_height < key.block_height,
-                None => true,
-            };
-            if is_later {
-                latest = Some(key);
-            }
-        }
-        let key = latest.ok_or_else(|| StorageError::NotFound {
+        Err(StorageError::NotFound {
             item: "SubstateLock",
             key: format!("for substate {substate_id} in block {leaf_block}"),
-        })?;
-
-        let lock = cf.get(&key, OPERATION)?;
-        Ok(lock)
+        })
     }
 
     fn pending_state_tree_diffs_get_all_up_to_commit_block(

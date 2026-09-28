@@ -44,7 +44,7 @@ pub enum KeyPrefix {
     ParkedBlocks = 30,
     PendingStateTreeDiff = 31,
     SubstateLocks = 32,
-    SubstateLockHeadIndex = 33,
+    // 33 was SubstateLockHeadIndex
     SubstateLocksBlockIdIndex = 34,
     SubstateLockSubstateIdIndex = 35,
     Substates = 36,
@@ -60,6 +60,7 @@ pub enum KeyPrefix {
     DiagnosticEvents = 46,
     VoteEquivocations = 47,
     ValidatorLivenessLog = 48,
+    SubstateLockChainOrderIndex = 49,
 }
 
 impl KeyPrefix {

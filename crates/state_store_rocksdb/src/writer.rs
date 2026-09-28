@@ -236,6 +236,36 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
 
         Ok((data.block, data.foreign_proposals))
     }
+
+    /// Removes the chain-order entry for one lock record.
+    ///
+    /// The chain-order key carries the block's grant sequence rather than the transaction, so the transaction's entry
+    /// is found by scanning the locks its block granted on the substate - at most one per transaction, and only the
+    /// transactions that locked that substate in that block.
+    fn substate_locks_chain_order_delete_for_transaction(
+        &self,
+        lock_key: &SubstateLockKey,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "substate_locks_chain_order_delete_for_transaction";
+
+        let chain_order_cf = self.db().cf(substate_locks::ChainOrderIndex)?;
+        let prefix = (lock_key.substate_id.clone(), lock_key.block_height, lock_key.block_id);
+        let keys = self
+            .db()
+            .cf(substate_locks::ByChainOrderBlockQuery)?
+            .query_prefix_range_iterator(Ordering::Ascending, &prefix)
+            .filter_map(|result| match result {
+                Ok((key, transaction_id)) => (transaction_id == lock_key.transaction_id).then_some(Ok(key)),
+                Err(err) => Some(Err(err)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for key in keys {
+            chain_order_cf.delete(&key, OPERATION)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbStateStoreWriteTransaction<'tx, TAddr> {
@@ -1154,23 +1184,31 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(SubstateLockModel)?;
         let index_cf = self.db().cf(substate_locks::BlockIdIndex)?;
         let substate_index_cf = self.db().cf(substate_locks::SubstateIdIndex)?;
-        let head_index = self.db().cf(substate_locks::HeadIndex)?;
+        let chain_order_cf = self.db().cf(substate_locks::ChainOrderIndex)?;
         for (substate_id, locks) in locks {
-            let mut last_key = None;
-            for lock in locks {
+            // The primary key is (transaction_id, substate_id, block_id, height), so a transaction that takes more than
+            // one lock on a substate in one block keeps only its last. The chain-order index must agree with the record
+            // it points at, so it indexes that last lock at the position the block granted it.
+            let mut grant_seqs = IndexMap::with_capacity(locks.len());
+            for (seq, lock) in locks.iter().enumerate() {
+                grant_seqs.insert(*lock.transaction_id(), (seq as u32, lock));
+            }
+
+            for (transaction_id, (grant_seq, lock)) in grant_seqs {
                 let key = SubstateLockKey {
                     block_id: *block.block_id(),
                     block_height: block.height(),
                     substate_id: substate_id.clone(),
-                    transaction_id: *lock.transaction_id(),
+                    transaction_id,
                 };
                 cf.put(&key, lock, OPERATION)?;
                 index_cf.put(&key, &(), OPERATION)?;
                 substate_index_cf.put(&key, &lock.lock_type(), OPERATION)?;
-                last_key = Some(key);
-            }
-            if let Some(key) = last_key {
-                head_index.put(substate_id, &key, OPERATION)?;
+                chain_order_cf.put(
+                    &(substate_id.clone(), block.height(), *block.block_id(), grant_seq),
+                    &transaction_id,
+                    OPERATION,
+                )?;
             }
         }
 
@@ -1191,7 +1229,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(SubstateLockModel)?;
         let query_cf = self.db().cf(substate_locks::ByTransactionIdQuery)?;
         let substate_index_cf = self.db().cf(substate_locks::SubstateIdIndex)?;
-        let head_index_cf = self.db().cf(substate_locks::HeadIndex)?;
         let index_cf = self.db().cf(substate_locks::BlockIdIndex)?;
         for tx_id in transaction_ids {
             let iter = query_cf.query_prefix_range_key_iterator(Ordering::default(), tx_id);
@@ -1204,14 +1241,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 cf.delete(&key, OPERATION)?;
                 index_cf.delete(&key, OPERATION)?;
                 substate_index_cf.delete(&key, OPERATION)?;
-                // TODO: this could leave the head index in an inconsistent state - I suspect we should implement locks
-                // in-memory instead of in persistence perhaps (or not) persisting the entire lock state asynchronously
-                // as blocks are processed (to account for node restarts)
-                if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? &&
-                    head_key.transaction_id == key.transaction_id
-                {
-                    head_index_cf.delete(&key.substate_id, OPERATION)?;
-                }
+                self.substate_locks_chain_order_delete_for_transaction(&key)?;
             }
         }
 
@@ -1224,7 +1254,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(SubstateLockModel)?;
         let index_cf = self.db().cf(substate_locks::BlockIdIndex)?;
         let substate_index_cf = self.db().cf(substate_locks::SubstateIdIndex)?;
-        let head_index_cf = self.db().cf(substate_locks::HeadIndex)?;
+        let chain_order_cf = self.db().cf(substate_locks::ChainOrderIndex)?;
+        let chain_order_query_cf = self.db().cf(substate_locks::ByChainOrderBlockQuery)?;
         let query_cf = self.db().cf(substate_locks::ByBlockIdQuery)?;
         let iter = query_cf.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
         for result in iter {
@@ -1232,10 +1263,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             cf.delete(&key, OPERATION)?;
             index_cf.delete(&key, OPERATION)?;
             substate_index_cf.delete(&key, OPERATION)?;
-            if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? &&
-                head_key.block_id == key.block_id
-            {
-                head_index_cf.delete(&key.substate_id, OPERATION)?;
+            // Every chain-order entry under this prefix belongs to the block being removed
+            let prefix = (key.substate_id.clone(), key.block_height, key.block_id);
+            let chain_order_keys = chain_order_query_cf
+                .query_prefix_range_key_iterator(Ordering::Ascending, &prefix)
+                .collect::<Result<Vec<_>, _>>()?;
+            for chain_order_key in chain_order_keys {
+                chain_order_cf.delete(&chain_order_key, OPERATION)?;
             }
         }
 

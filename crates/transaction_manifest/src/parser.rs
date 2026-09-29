@@ -49,6 +49,7 @@ use tari_template_lib_types::{
 use crate::{
     cbor_literal::{cbor_from_macro, metadata_from_macro, negative_int_value},
     error::ManifestError,
+    value::MAX_LIST_DEPTH,
 };
 
 #[derive(Debug, Clone)]
@@ -555,9 +556,6 @@ fn parse_publish_template_args(tokens: TokenStream) -> Result<ManifestIntent, sy
         tokens,
     )
 }
-
-/// Bounds how deeply list arguments nest, matching the bound on a `cbor!` literal.
-const MAX_LIST_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
 
 fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>, syn::Error> {
     args.into_iter().map(|arg| build_argument(arg, 0)).collect()

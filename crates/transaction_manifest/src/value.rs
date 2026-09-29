@@ -161,48 +161,62 @@ impl FromStr for ManifestValue {
     type Err = ManifestParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(inner) = s.trim().strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            return split_list(inner)
-                .ok_or_else(|| ManifestParseError(s.to_string()))?
-                .into_iter()
-                .map(|elem| {
-                    elem.parse::<ManifestValue>()?
-                        .to_value()
-                        .map_err(|_| ManifestParseError(elem.to_string()))
-                })
-                .collect::<Result<_, _>>()
-                .map(|items| ManifestValue::Value(tari_bor::Value::Array(items)));
-        }
-
-        SubstateId::from_str(s)
-            .ok()
-            .map(ManifestValue::SubstateId)
-            .or_else(|| {
-                let id = NonFungibleId::try_from_canonical_string(s).ok()?;
-                Some(ManifestValue::NonFungibleId(id))
-            })
-            .or_else(|| {
-                let tokens = s.parse().ok()?;
-                let lit: Lit = parse2(tokens).ok()?;
-                // Reject literals that are not supported or have unrecognized suffixes (e.g. hex strings
-                // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
-                match &lit {
-                    Lit::Str(_) | Lit::Bool(_) | Lit::ByteStr(_) | Lit::Byte(_) | Lit::Char(_) => {},
-                    Lit::Int(i) => match i.suffix() {
-                        "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
-                        _ => return None,
-                    },
-                    _ => return None,
-                }
-                Some(ManifestValue::Literal(lit))
-            })
-            .or_else(|| {
-                // Try parsing as hex bytes (e.g. public keys)
-                let bytes = bytes_from_hex(s).ok()?;
-                Some(ManifestValue::Value(tari_bor::Value::Bytes(bytes)))
-            })
-            .ok_or_else(|| ManifestParseError(s.to_string()))
+        parse_value(s, 0)
     }
+}
+
+/// Bounds how deeply a list nests, whether written in a manifest or passed as a variable. The engine
+/// decodes nothing deeper, and the bound keeps parsing an untrusted variable off a deep native stack.
+pub(crate) const MAX_LIST_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
+
+/// Parses `s` as a value nested `depth` lists deep.
+fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseError> {
+    if let Some(inner) = s.trim().strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        if depth >= MAX_LIST_DEPTH {
+            return Err(ManifestParseError(format!(
+                "list nested deeper than {MAX_LIST_DEPTH} levels"
+            )));
+        }
+        return split_list(inner)
+            .ok_or_else(|| ManifestParseError(s.to_string()))?
+            .into_iter()
+            .map(|elem| {
+                parse_value(elem, depth + 1)?
+                    .to_value()
+                    .map_err(|_| ManifestParseError(elem.to_string()))
+            })
+            .collect::<Result<_, _>>()
+            .map(|items| ManifestValue::Value(tari_bor::Value::Array(items)));
+    }
+
+    SubstateId::from_str(s)
+        .ok()
+        .map(ManifestValue::SubstateId)
+        .or_else(|| {
+            let id = NonFungibleId::try_from_canonical_string(s).ok()?;
+            Some(ManifestValue::NonFungibleId(id))
+        })
+        .or_else(|| {
+            let tokens = s.parse().ok()?;
+            let lit: Lit = parse2(tokens).ok()?;
+            // Reject literals that are not supported or have unrecognized suffixes (e.g. hex strings
+            // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
+            match &lit {
+                Lit::Str(_) | Lit::Bool(_) | Lit::ByteStr(_) | Lit::Byte(_) | Lit::Char(_) => {},
+                Lit::Int(i) => match i.suffix() {
+                    "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
+                    _ => return None,
+                },
+                _ => return None,
+            }
+            Some(ManifestValue::Literal(lit))
+        })
+        .or_else(|| {
+            // Try parsing as hex bytes (e.g. public keys)
+            let bytes = bytes_from_hex(s).ok()?;
+            Some(ManifestValue::Value(tari_bor::Value::Bytes(bytes)))
+        })
+        .ok_or_else(|| ManifestParseError(s.to_string()))
 }
 
 /// The comma-separated elements of a list's contents, split at the commas outside any nested list
@@ -294,6 +308,11 @@ mod tests {
         assert_eq!(list(&format!("[{component}]")), vec![
             ManifestValue::from_str(component).unwrap().to_value().unwrap()
         ]);
+
+        let deep = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
+        assert!(deep(MAX_LIST_DEPTH).parse::<ManifestValue>().is_ok());
+        assert!(deep(MAX_LIST_DEPTH + 1).parse::<ManifestValue>().is_err());
+        assert!(deep(1_000_000).parse::<ManifestValue>().is_err());
 
         for invalid in ["[1,,2]", "[,]", "[1", "[[1]", "[\"a]", "[1]]", "[nope]"] {
             assert!(invalid.parse::<ManifestValue>().is_err(), "{invalid} parsed");

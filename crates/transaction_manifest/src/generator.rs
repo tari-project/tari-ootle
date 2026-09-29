@@ -21,7 +21,7 @@ use crate::{
     ast::ManifestAst,
     error::ManifestError,
     parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, OutputBinding, SpecialLiteral},
-    value::{address_value, arg_to_value, lit_to_arg},
+    value::{MAX_LIST_DEPTH, address_value, arg_to_value, lit_to_arg},
 };
 
 const MAX_CALL_DEPTH: usize = 16;
@@ -346,7 +346,14 @@ impl ManifestInstructionGenerator {
                     .into_iter()
                     .map(|item| self.list_element_value(item))
                     .collect::<Result<_, _>>()?;
-                Ok(InstructionArg::literal(tari_bor::Value::Array(items))?)
+                let bytes = tari_bor::encode(&tari_bor::Value::Array(items))?;
+                // An element can be a `cbor!` literal or a list-valued variable, so the bracket count
+                // alone does not bound the depth of the encoded value. Decoding it applies the same
+                // bound as every other value.
+                tari_bor::decode::<tari_bor::Value>(&bytes).map_err(|_| ManifestError::InvalidInstruction {
+                    reason: format!("list argument nests deeper than {MAX_LIST_DEPTH} levels"),
+                })?;
+                Ok(InstructionArg::raw_literal_bytes(bytes))
             },
             ManifestLiteral::Special(SpecialLiteral::Null) => {
                 Ok(InstructionArg::literal(tari_bor::Value::Null).expect("Null literal serialization should not fail"))

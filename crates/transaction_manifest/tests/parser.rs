@@ -1082,3 +1082,51 @@ fn list_valued_input_variable() {
     };
     assert_eq!(args[1], literal(tari_bor::to_value(&council).unwrap()));
 }
+
+#[test]
+fn list_depth_counts_nested_cbor() {
+    let cbor_depth = tari_bor::MAX_DECODE_DEPTH;
+    let list_depth = 1;
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            MyTemplate::create({open}cbor!({cbor_open}{cbor_close}){close});
+        }}
+    "#,
+        open = "[".repeat(list_depth),
+        close = "]".repeat(list_depth),
+        cbor_open = "[".repeat(cbor_depth),
+        cbor_close = "]".repeat(cbor_depth),
+    );
+
+    let err = parse_manifest(&manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("a list nested past the decode depth is rejected");
+    assert!(err.to_string().contains("nests deeper"), "{err}");
+}
+
+#[test]
+fn list_passes_a_tuple() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            MyTemplate::create([123, "hello"]);
+        }}
+    "#
+    );
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(&manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallFunction { args, .. } = &instructions[0] else {
+        panic!("expected a function call");
+    };
+    let bytes = args[0].as_literal_bytes().unwrap();
+    assert_eq!(bytes, tari_bor::encode(&(123u64, "hello".to_string())).unwrap());
+    let decoded: (u64, String) = tari_bor::decode(bytes).unwrap();
+    assert_eq!(decoded, (123, "hello".to_string()));
+}

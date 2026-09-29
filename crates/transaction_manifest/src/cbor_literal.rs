@@ -261,7 +261,7 @@ fn nested_macro_value(mac: Macro) -> syn::Result<Value> {
                 name.value()
             ),
         )),
-        ManifestLiteral::Array(_) => unreachable!("an argument macro never writes a list"),
+        ManifestLiteral::Array(_) => Err(syn::Error::new(span, "a list cannot be written into a literal")),
         ManifestLiteral::Lit(lit) => lit_value(lit),
     }
 }

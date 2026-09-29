@@ -287,7 +287,7 @@ where TConsensusSpec: ConsensusSpec
         // Store used for transactions that have inputs without specific versions.
         // It lives through the entire block so multiple transactions can be sequenced together in the same block
         let mut substate_store =
-            PendingSubstateStore::new(tx, block.as_leaf(), self.config.consensus_constants.num_preshards)?;
+            PendingSubstateStore::init(tx, block.as_leaf(), self.config.consensus_constants.num_preshards)?;
         let mut total_leader_fee = 0;
         let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
         let max_validation_execution_points = self.config.consensus_constants.max_block_validation_execution_points;

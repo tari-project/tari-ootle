@@ -54,7 +54,7 @@ pub struct PendingSubstateStore<'store, TTx: StateStoreReadTransaction> {
 }
 
 impl<'a, TTx: StateStoreReadTransaction> PendingSubstateStore<'a, TTx> {
-    pub fn new(store: &'a TTx, parent_block: LeafBlock, num_preshards: NumPreshards) -> Result<Self, StorageError> {
+    pub fn init(store: &'a TTx, parent_block: LeafBlock, num_preshards: NumPreshards) -> Result<Self, StorageError> {
         let parent_chain = store.pending_chain_get(parent_block.block_id())?;
         Ok(Self {
             store,

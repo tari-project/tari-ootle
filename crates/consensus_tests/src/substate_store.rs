@@ -538,7 +538,7 @@ fn create_store() -> (TestStore, TempDir) {
 fn create_pending_store<'a, 'tx, TStore: StateStore>(
     tx: &'a TStore::ReadTransaction<'tx>,
 ) -> PendingSubstateStore<'a, TStore::ReadTransaction<'tx>> {
-    PendingSubstateStore::new(
+    PendingSubstateStore::init(
         tx,
         LeafBlock {
             block_id: BlockId::zero(),

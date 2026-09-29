@@ -13,6 +13,7 @@ use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{NodeHeight, ShardGroup, displayable::Displayable, optional::Optional, shard::Shard};
 use tari_ootle_storage::{
+    PendingChain,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -334,10 +335,12 @@ impl ProposedBlockChangeSet {
         Ok(self)
     }
 
+    /// Returns the pool record as this change set leaves it, or as the chain up to its leaf left it if this change set
+    /// has not updated it.
     pub fn get_transaction_pool_record<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-        leaf_block: &LeafBlock,
+        chain: &PendingChain,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, TransactionPoolError> {
         let rec = self
@@ -349,7 +352,7 @@ impl ProposedBlockChangeSet {
                         target: LOG_TARGET,
                         "Found cached transaction update for {} in block {}",
                         transaction_id,
-                        leaf_block.block_id()
+                        chain.leaf()
                     );
                     u.transaction()
                 })
@@ -357,7 +360,7 @@ impl ProposedBlockChangeSet {
             .cloned()
             .map(Ok)
             .or_else(|| {
-                TransactionPoolRecord::get(tx, leaf_block.block_id(), transaction_id)
+                TransactionPoolRecord::get(tx, chain, transaction_id)
                     .optional()
                     .inspect(|a| {
                         a.as_ref().inspect(|a| {
@@ -365,7 +368,7 @@ impl ProposedBlockChangeSet {
                                 target: LOG_TARGET,
                                 "LOADED transaction pool record for {} in block {}: {:#}",
                                 transaction_id,
-                                leaf_block.block_id(),
+                                chain.leaf(),
                                 a.evidence()
                             );
                         });

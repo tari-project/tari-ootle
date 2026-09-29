@@ -548,6 +548,7 @@ fn create_pending_store<'a, 'tx, TStore: StateStore>(
         },
         TEST_NUM_PRESHARDS,
     )
+    .unwrap()
 }
 
 fn new_substate_id(seed: u8) -> SubstateId {

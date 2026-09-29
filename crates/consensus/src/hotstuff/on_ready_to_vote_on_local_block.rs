@@ -287,7 +287,7 @@ where TConsensusSpec: ConsensusSpec
         // Store used for transactions that have inputs without specific versions.
         // It lives through the entire block so multiple transactions can be sequenced together in the same block
         let mut substate_store =
-            PendingSubstateStore::new(tx, block.as_leaf(), self.config.consensus_constants.num_preshards);
+            PendingSubstateStore::new(tx, block.as_leaf(), self.config.consensus_constants.num_preshards)?;
         let mut total_leader_fee = 0;
         let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
         let max_validation_execution_points = self.config.consensus_constants.max_block_validation_execution_points;
@@ -353,7 +353,7 @@ where TConsensusSpec: ConsensusSpec
                 },
                 Command::SomeAccept(atom) => {
                     if let Some(reason) =
-                        self.evaluate_some_accept_command(tx, block, atom, proposed_block_change_set)?
+                        self.evaluate_some_accept_command(tx, block, atom, &substate_store, proposed_block_change_set)?
                     {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -581,7 +581,7 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate LocalOnly command");
         let Some(mut pool_tx) = proposed_block_change_set
-            .get_transaction_pool_record(tx, &block.as_leaf(), atom.id())
+            .get_transaction_pool_record(tx, substate_store.parent_chain(), atom.id())
             .optional()?
         else {
             warn!(
@@ -989,7 +989,7 @@ where TConsensusSpec: ConsensusSpec
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let Some(mut tx_rec) = proposed_block_change_set
-            .get_transaction_pool_record(tx, &block.as_leaf(), atom.id())
+            .get_transaction_pool_record(tx, substate_store.parent_chain(), atom.id())
             .optional()?
         else {
             warn!(
@@ -1072,7 +1072,7 @@ where TConsensusSpec: ConsensusSpec
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let Some(mut tx_rec) = proposed_block_change_set
-            .get_transaction_pool_record(tx, &block.as_leaf(), atom.id())
+            .get_transaction_pool_record(tx, substate_store.parent_chain(), atom.id())
             .optional()?
         else {
             warn!(
@@ -1333,7 +1333,7 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let Some(mut tx_rec) = proposed_block_change_set
-            .get_transaction_pool_record(tx, &block.as_leaf(), atom.id())
+            .get_transaction_pool_record(tx, substate_store.parent_chain(), atom.id())
             .optional()?
         else {
             warn!(
@@ -1528,6 +1528,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &TTx,
         block: &Block,
         atom: &MultiShardAtom,
+        substate_store: &PendingSubstateStore<TTx>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         if atom.decision.is_commit() {
@@ -1543,7 +1544,7 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let Some(mut tx_rec) = proposed_block_change_set
-            .get_transaction_pool_record(tx, &block.as_leaf(), atom.id())
+            .get_transaction_pool_record(tx, substate_store.parent_chain(), atom.id())
             .optional()?
         else {
             warn!(

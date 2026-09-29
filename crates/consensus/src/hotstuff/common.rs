@@ -22,6 +22,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_storage::{
+    PendingChain,
     ShardScopedTreeStoreReader,
     StateStoreReadTransaction,
     consensus_models::{
@@ -519,7 +520,7 @@ pub fn process_newly_justified_block<TTx: StateStoreReadTransaction>(
     fn process_newly_justified_block_inner<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         block: &Block,
-        new_leaf_block: &LeafBlock,
+        new_leaf_chain: &PendingChain,
         justify_id: PcId,
         local_committee_info: &CommitteeInfo,
         change_set: &mut ProposedBlockChangeSet,
@@ -551,10 +552,10 @@ pub fn process_newly_justified_block<TTx: StateStoreReadTransaction>(
 
             let atom = cmd.transaction().expect("Command must be a transaction");
 
-            // NOTE: we use new_leaf_block here to ensure that we are always updating the latest evidence for the
-            // transaction.
+            // NOTE: we read at the new leaf block here to ensure that we are always updating the latest evidence for
+            // the transaction.
             let Some(mut pool_tx) = change_set
-                .get_transaction_pool_record(tx, new_leaf_block, atom.id())
+                .get_transaction_pool_record(tx, new_leaf_chain, atom.id())
                 .optional()?
             else {
                 // Finalizing a transaction removes its pool record, and a finalized transaction has no evidence
@@ -643,9 +644,16 @@ pub fn process_newly_justified_block<TTx: StateStoreReadTransaction>(
         blocks_to_process.len(),
     );
 
-    let leaf = new_leaf_block.as_leaf();
+    let new_leaf_chain = tx.pending_chain_get(new_leaf_block.id())?;
     for block in blocks_to_process.iter().rev().chain(iter::once(new_leaf_block)) {
-        process_newly_justified_block_inner::<TTx>(tx, block, &leaf, justify_id, local_committee_info, change_set)?;
+        process_newly_justified_block_inner::<TTx>(
+            tx,
+            block,
+            &new_leaf_chain,
+            justify_id,
+            local_committee_info,
+            change_set,
+        )?;
     }
 
     Ok(blocks_to_process)

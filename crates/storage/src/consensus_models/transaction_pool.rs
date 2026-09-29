@@ -28,6 +28,7 @@ use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::TransactionReceiptAddress;
 
 use crate::{
+    PendingChain,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -860,12 +861,13 @@ impl TransactionPoolRecord {
         Ok(recs)
     }
 
+    /// Returns the pool record with the latest update recorded by the chain up to its leaf applied.
     pub fn get<TTx: StateStoreReadTransaction>(
         tx: &TTx,
-        to_block_id: &BlockId,
+        chain: &PendingChain,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, TransactionPoolError> {
-        let rec = tx.transaction_pool_get_for_blocks(to_block_id, transaction_id)?;
+        let rec = tx.transaction_pool_get_for_blocks_in_chain(chain, transaction_id)?;
         Ok(rec)
     }
 

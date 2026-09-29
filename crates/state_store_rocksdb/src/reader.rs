@@ -63,6 +63,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     Ordering,
+    PendingChain,
     StateStoreReadTransaction,
     StorageError,
     consensus_models::{
@@ -209,12 +210,6 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr, ReadOnlyTransaction<
     }
 }
 
-/// The blocks a chain-scoped read accepts rows from: its pending blocks, plus the committed chain beneath them.
-pub(super) struct ChainScope {
-    pending: HashSet<BlockId>,
-    commit_height: NodeHeight,
-}
-
 impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksReader>
     RocksDbStateStoreReadTransaction<'a, TAddr, R>
 {
@@ -254,40 +249,97 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
             .collect()
     }
 
-    /// Returns the blocks until the end_block (inclusive) ordered from the end_block to the commit block (height
-    /// descending).
+    /// Reads the pending chain ending at `leaf` in one walk of the pending-chain index.
+    pub(super) fn read_pending_chain(&self, leaf: &BlockId) -> Result<PendingChain, RocksDbStorageError> {
+        const OPERATION: &str = "read_pending_chain";
+        let chain_cf = self.db().cf(chain::PendingChainIndex)?;
+
+        let mut walk = Vec::new();
+        if chain_cf.exists(leaf, OPERATION)? {
+            walk.push(*leaf);
+            let mut block_id = *leaf;
+            while let Some(parent_id) = chain_cf.get(&block_id, OPERATION).optional()? {
+                walk.push(parent_id);
+                if parent_id.is_zero() {
+                    break;
+                }
+                block_id = parent_id;
+            }
+        }
+
+        let commit = self
+            .get_commit_block()
+            .optional()?
+            .map(|commit| (commit.block_id, commit.height));
+        Ok(PendingChain::from_walk(*leaf, walk, commit))
+    }
+
+    /// Panics in debug builds if `chain` differs from the pending chain its leaf has in this transaction now, which is
+    /// what reading it before a write to the pending-chain index and using it after would cause.
+    fn debug_assert_chain_is_current(&self, chain: &PendingChain) -> Result<(), RocksDbStorageError> {
+        if !cfg!(debug_assertions) {
+            return Ok(());
+        }
+        let until = self.get_pending_chain_until(chain.leaf())?;
+        assert_eq!(
+            &until,
+            chain.ancestry(),
+            "pending chain for {} is stale: its ancestry differs from the pending-chain index",
+            chain.leaf()
+        );
+        if chain.commit_height().is_some() {
+            let ordered = self.get_pending_chain_ordered(chain.leaf())?;
+            assert_eq!(
+                ordered,
+                chain.blocks(),
+                "pending chain for {} is stale: its blocks differ from the pending-chain index",
+                chain.leaf()
+            );
+        }
+        Ok(())
+    }
+
     /// The blocks whose rows belong to the chain ending at `leaf_block`.
     ///
     /// A lock, and anything else a block writes and a later block reads back, is a property of one branch. Rows written
     /// by a block on another branch must not answer a question asked about this one.
-    pub(super) fn chain_scope(&self, leaf_block: &BlockId) -> Result<ChainScope, RocksDbStorageError> {
-        Ok(ChainScope {
-            pending: self.get_pending_chain_ordered(leaf_block)?.into_iter().collect(),
-            commit_height: self.get_commit_block()?.height,
-        })
+    pub(super) fn chain_scope(&self, leaf_block: &BlockId) -> Result<PendingChain, RocksDbStorageError> {
+        let chain = self.read_pending_chain(leaf_block)?;
+        self.require_commit_height(&chain)?;
+        Ok(chain)
     }
 
-    /// Whether `block` is on the scoped chain.
+    fn require_commit_height(&self, chain: &PendingChain) -> Result<NodeHeight, RocksDbStorageError> {
+        match chain.commit_height() {
+            Some(height) => Ok(height),
+            // Raises the missing commit block as the error the direct read gives.
+            None => Ok(self.get_commit_block()?.height),
+        }
+    }
+
+    /// Whether `block` is on the chain `scope` ends in.
     ///
     /// Committing a block removes it from the pending chain, and every pending block sits above the commit block. So a
     /// block at or below the commit height that has left the pending chain was committed by the chain that committed
     /// that height, while a branch block still lingering there was not.
     pub(super) fn is_in_chain_scope(
         &self,
-        scope: &ChainScope,
+        scope: &PendingChain,
         block: &BlockId,
         height: NodeHeight,
     ) -> Result<bool, RocksDbStorageError> {
         const OPERATION: &str = "is_in_chain_scope";
-        if scope.pending.contains(block) {
+        if scope.contains_pending(block) {
             return Ok(true);
         }
-        if height > scope.commit_height {
+        if height > self.require_commit_height(scope)? {
             return Ok(false);
         }
         Ok(!self.db().cf(chain::PendingChainIndex)?.exists(block, OPERATION)?)
     }
 
+    /// Returns the blocks until the end_block (inclusive) ordered from the end_block to the commit block (height
+    /// descending).
     pub(super) fn get_pending_chain_ordered(&self, end_block: &BlockId) -> Result<Vec<BlockId>, RocksDbStorageError> {
         // TODO: only difference between get_pending_chain_until is that this returns a Vec - worth DRYing up
         const OPERATION: &str = "get_pending_chain_ordered";
@@ -397,7 +449,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
         Ok(blocks)
     }
 
-    /// Returns the key of the last change to `substate_id` on the branch ending at `end_block`, or `None` if the
+    /// Returns the key of the last change to `substate_id` on the branch ending at the chain's leaf, or `None` if the
     /// branch contains no change for it. If `version` is given, only changes to that version are considered.
     ///
     /// Changes recorded by blocks that are not in the branch (forked-out siblings, other subtrees) are never
@@ -405,19 +457,17 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
     /// version.
     fn block_diffs_select_last_change(
         &self,
-        end_block: &BlockId,
+        chain: &PendingChain,
         substate_id: &SubstateId,
         version: Option<SubstateVersion>,
     ) -> Result<Option<BlockDiffKey>, RocksDbStorageError> {
-        let applicable_blocks = self.get_pending_chain_until(end_block)?;
-
         let query = self.db().cf(block_diff::BySubstateIdQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
 
         let mut last_change = None::<BlockDiffKey>;
         for result in iter {
             let key = result?;
-            if version.is_some_and(|v| v != key.version) || !applicable_blocks.contains(&key.block_id) {
+            if version.is_some_and(|v| v != key.version) || !chain.contains_with_base(&key.block_id) {
                 continue;
             }
             // A DOWN is the last change a version can have, so with the version fixed there is nothing left to find.
@@ -433,6 +483,17 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
         }
 
         Ok(last_change)
+    }
+
+    /// Fails with a query error if the chain's leaf block does not exist. A leaf in the pending-chain index always
+    /// does, so only an empty chain needs the lookup.
+    fn require_leaf_block_exists(&self, chain: &PendingChain, operation: &str) -> Result<(), StorageError> {
+        if chain.is_empty() && !self.blocks_exists(chain.leaf())? {
+            return Err(StorageError::QueryError {
+                reason: format!("{operation}: Block {} does not exist", chain.leaf()),
+            });
+        }
+        Ok(())
     }
 
     pub fn get_commit_block(&self) -> Result<CommitBlock, RocksDbStorageError> {
@@ -1161,75 +1222,69 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(diff)
     }
 
-    fn block_diffs_get_last_change_for_substate(
+    fn pending_chain_get(&self, leaf: &BlockId) -> Result<PendingChain, StorageError> {
+        Ok(self.read_pending_chain(leaf)?)
+    }
+
+    fn block_diffs_get_last_change_for_substate_in_chain(
         &self,
-        block_id: &BlockId,
+        chain: &PendingChain,
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError> {
         const OPERATION: &str = "block_diffs_get_last_change_for_substate";
-        if !self.blocks_exists(block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("{OPERATION}: Block {} does not exist", block_id),
-            });
-        }
+        self.debug_assert_chain_is_current(chain)?;
+        self.require_leaf_block_exists(chain, OPERATION)?;
 
         let key = self
-            .block_diffs_select_last_change(block_id, substate_id, None)?
+            .block_diffs_select_last_change(chain, substate_id, None)?
             .ok_or_else(|| StorageError::NotFound {
                 item: "SubstateChange",
-                key: format!("{substate_id} in {block_id}"),
+                key: format!("{substate_id} in {}", chain.leaf()),
             })?;
 
         let change = self.db().cf(BlockDiffCf)?.get(&key, OPERATION)?;
         Ok(change)
     }
 
-    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+    fn block_diffs_get_change_for_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
-        block_id: &BlockId,
+        chain: &PendingChain,
         substate_id: T,
     ) -> Result<SubstateChange, StorageError> {
         const OPERATION: &str = "block_diffs_get_change_for_versioned_substate";
-        if !self.blocks_exists(block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("{OPERATION}: Block {} does not exist", block_id),
-            });
-        }
+        self.debug_assert_chain_is_current(chain)?;
+        self.require_leaf_block_exists(chain, OPERATION)?;
 
         let versioned = substate_id.into();
 
         let key = self
-            .block_diffs_select_last_change(block_id, versioned.substate_id(), Some(versioned.version()))?
+            .block_diffs_select_last_change(chain, versioned.substate_id(), Some(versioned.version()))?
             .ok_or_else(|| StorageError::NotFound {
                 item: "SubstateChange",
-                key: format!("{versioned} in {block_id}"),
+                key: format!("{versioned} in {}", chain.leaf()),
             })?;
 
         let change = self.db().cf(BlockDiffCf)?.get(&key, OPERATION)?;
         Ok(change)
     }
 
-    fn block_diffs_contains_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+    fn block_diffs_contains_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
-        block_id: &BlockId,
+        chain: &PendingChain,
         substate_id: T,
     ) -> Result<bool, StorageError> {
         const OPERATION: &str = "block_diffs_contains_versioned_substate";
-        if !self.blocks_exists(block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("{OPERATION}: Block {} does not exist", block_id),
-            });
-        }
+        self.debug_assert_chain_is_current(chain)?;
+        self.require_leaf_block_exists(chain, OPERATION)?;
 
         let versioned = substate_id.into();
-        let applicable_blocks = self.get_pending_chain_until(block_id)?;
 
         let query = self.db().cf(block_diff::BySubstateIdQuery)?;
         // Existence only: the first key for this version in the branch answers it, and the change value - which for
         // an UP is the whole substate - is never read.
         for result in query.query_prefix_range_key_iterator(Ordering::default(), versioned.substate_id()) {
             let key = result?;
-            if key.version == versioned.version() && applicable_blocks.contains(&key.block_id) {
+            if key.version == versioned.version() && chain.contains_with_base(&key.block_id) {
                 return Ok(true);
             }
         }
@@ -1285,17 +1340,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(tcs)
     }
 
-    fn transaction_pool_get_for_blocks(
+    fn transaction_pool_get_for_blocks_in_chain(
         &self,
-        to_block_id: &BlockId,
+        chain: &PendingChain,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError> {
         const OPERATION: &str = "transaction_pool_get_for_blocks";
-        if !self.blocks_exists(to_block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("transaction_pool_get_for_blocks: Block {} does not exist", to_block_id),
-            });
-        }
+        self.debug_assert_chain_is_current(chain)?;
+        self.require_leaf_block_exists(chain, OPERATION)?;
 
         let cf = self.db().cf(TransactionPoolCf)?;
         let query = self
@@ -1304,16 +1356,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
         let mut transaction = cf.get(transaction_id, OPERATION)?;
 
-        let pending_chain = self.get_pending_chain_ordered(to_block_id)?;
-
         trace!(
             target: LOG_TARGET,
             "{OPERATION}: pending_chain: {} for block {}",
-            pending_chain.display(), to_block_id
+            chain.blocks().display(), chain.leaf()
         );
 
-        for block_id in pending_chain {
-            if let Some(update) = query.get(&(block_id, *transaction_id), OPERATION).optional()? {
+        for block_id in chain.blocks() {
+            if let Some(update) = query.get(&(*block_id, *transaction_id), OPERATION).optional()? {
                 debug!(
                     target: LOG_TARGET,
                     "{OPERATION}: found update {} for block {}: {:#} -> {:#}",
@@ -1679,8 +1729,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(None)
     }
 
-    /// Returns the lock most recently granted on a substate by the chain ending at `leaf_block`, searching its pending
-    /// blocks and then the committed chain beneath them.
+    /// Returns the lock most recently granted on a substate by the chain ending at the chain's leaf, searching its
+    /// pending blocks and then the committed chain beneath them.
     ///
     /// The answer is a property of that chain alone: locks granted by blocks on other branches are skipped. The
     /// chain-order index orders a substate's locks by (block_height, grant_seq), which totally orders the locks any one
@@ -1688,20 +1738,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
     ///
     /// # Used for:
     /// Local proposal conflict resolution, to check if a substate is locked by another transaction.
-    fn substate_locks_get_latest_for_substate(
+    fn substate_locks_get_latest_for_substate_in_chain(
         &self,
-        leaf_block: &LeafBlock,
+        scope: &PendingChain,
         substate_id: &SubstateId,
     ) -> Result<SubstateLock, StorageError> {
         const OPERATION: &str = "substate_locks_get_latest_for_substate";
+        self.debug_assert_chain_is_current(scope)?;
         let cf = self.db().cf(SubstateLockModel)?;
-
-        let scope = self.chain_scope(leaf_block.block_id())?;
 
         let query = self.db().cf(substate_locks::ByChainOrderQuery)?;
         for result in query.query_prefix_range_iterator(Ordering::Descending, substate_id) {
             let ((_, block_height, block_id, grant_seq), transaction_id) = result?;
-            if !self.is_in_chain_scope(&scope, &block_id, block_height)? {
+            if !self.is_in_chain_scope(scope, &block_id, block_height)? {
                 continue;
             }
 
@@ -1725,7 +1774,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
         Err(StorageError::NotFound {
             item: "SubstateLock",
-            key: format!("for substate {substate_id} in block {leaf_block}"),
+            key: format!("for substate {substate_id} in block {}", scope.leaf()),
         })
     }
 

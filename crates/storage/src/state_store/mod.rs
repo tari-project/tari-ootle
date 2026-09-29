@@ -1,11 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+mod pending_chain;
 mod shard_scoped_state_tree;
 mod substate_value_proof;
 use std::{collections::HashMap, ops::Deref};
 
 use indexmap::IndexMap;
+pub use pending_chain::*;
 use serde::{Deserialize, Serialize};
 pub use shard_scoped_state_tree::*;
 pub use substate_value_proof::*;
@@ -209,6 +211,10 @@ pub trait StateStoreReadTransaction: Sized {
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError>;
 
+    /// Returns the pending chain ending at `leaf`, for the `_in_chain` reads to share. See [`PendingChain`] for when
+    /// it goes stale.
+    fn pending_chain_get(&self, leaf: &BlockId) -> Result<PendingChain, StorageError>;
+
     /// Returns the last change to `substate_id` recorded by the branch ending at `block_id`, or `NotFound` if the
     /// branch contains no change for it.
     ///
@@ -219,6 +225,15 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         block_id: &BlockId,
         substate_id: &SubstateId,
+    ) -> Result<SubstateChange, StorageError> {
+        let chain = self.pending_chain_get(block_id)?;
+        self.block_diffs_get_last_change_for_substate_in_chain(&chain, substate_id)
+    }
+    /// [`Self::block_diffs_get_last_change_for_substate`] for the branch ending at the chain's leaf.
+    fn block_diffs_get_last_change_for_substate_in_chain(
+        &self,
+        chain: &PendingChain,
+        substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError>;
     /// Returns the last change to the given substate version recorded by the branch ending at `block_id`, or
     /// `NotFound` if the branch contains no change for it. Selection follows the same rules as
@@ -226,6 +241,15 @@ pub trait StateStoreReadTransaction: Sized {
     fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
         block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        let chain = self.pending_chain_get(block_id)?;
+        self.block_diffs_get_change_for_versioned_substate_in_chain(&chain, substate_id)
+    }
+    /// [`Self::block_diffs_get_change_for_versioned_substate`] for the branch ending at the chain's leaf.
+    fn block_diffs_get_change_for_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        chain: &PendingChain,
         substate_id: T,
     ) -> Result<SubstateChange, StorageError>;
     /// Returns whether the branch ending at `block_id` records any change for the given substate version. Selection
@@ -235,6 +259,15 @@ pub trait StateStoreReadTransaction: Sized {
     fn block_diffs_contains_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
         block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<bool, StorageError> {
+        let chain = self.pending_chain_get(block_id)?;
+        self.block_diffs_contains_versioned_substate_in_chain(&chain, substate_id)
+    }
+    /// [`Self::block_diffs_contains_versioned_substate`] for the branch ending at the chain's leaf.
+    fn block_diffs_contains_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        chain: &PendingChain,
         substate_id: T,
     ) -> Result<bool, StorageError>;
 
@@ -256,6 +289,15 @@ pub trait StateStoreReadTransaction: Sized {
     fn transaction_pool_get_for_blocks(
         &self,
         to_block_id: &BlockId,
+        transaction_id: &TransactionId,
+    ) -> Result<TransactionPoolRecord, StorageError> {
+        let chain = self.pending_chain_get(to_block_id)?;
+        self.transaction_pool_get_for_blocks_in_chain(&chain, transaction_id)
+    }
+    /// [`Self::transaction_pool_get_for_blocks`] up to the chain's leaf.
+    fn transaction_pool_get_for_blocks_in_chain(
+        &self,
+        chain: &PendingChain,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError>;
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError>;
@@ -333,6 +375,15 @@ pub trait StateStoreReadTransaction: Sized {
     fn substate_locks_get_latest_for_substate(
         &self,
         leaf_block: &LeafBlock,
+        substate_id: &SubstateId,
+    ) -> Result<SubstateLock, StorageError> {
+        let chain = self.pending_chain_get(leaf_block.block_id())?;
+        self.substate_locks_get_latest_for_substate_in_chain(&chain, substate_id)
+    }
+    /// [`Self::substate_locks_get_latest_for_substate`] for the chain ending at the chain's leaf.
+    fn substate_locks_get_latest_for_substate_in_chain(
+        &self,
+        chain: &PendingChain,
         substate_id: &SubstateId,
     ) -> Result<SubstateLock, StorageError>;
 

@@ -14,6 +14,7 @@ use tari_ootle_common_types::{
     optional::Optional,
 };
 use tari_ootle_storage::{
+    PendingChain,
     StateStoreReadTransaction,
     consensus_models::{
         BlockPledge,
@@ -55,6 +56,11 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");
+    debug_assert_eq!(
+        local_leaf.block_id(),
+        substate_store.parent_chain().leaf(),
+        "process_foreign_block: the substate store must build on the local leaf"
+    );
 
     // The proposal is proved against the layer-1 shaped header, which carries a metadata hash and not
     // the extra data the rate lives in, so the rate for its epoch is resolved here instead. Every shard
@@ -108,7 +114,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
                     &atom.id,
-                    local_leaf,
+                    substate_store.parent_chain(),
                     &foreign_block_id,
                     proposed_block_change_set,
                 )?
@@ -230,7 +236,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     // complex/unsafe, and we need to abort.
                     let conflicting_tx = proposed_block_change_set.get_transaction_pool_record(
                         tx,
-                        local_leaf,
+                        substate_store.parent_chain(),
                         &conflicting_transaction_id,
                     )?;
                     let has_conflicts = conflicting_tx
@@ -397,7 +403,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
                     &atom.id,
-                    local_leaf,
+                    substate_store.parent_chain(),
                     &foreign_block_id,
                     proposed_block_change_set,
                 )?
@@ -750,12 +756,12 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
     num_preshards: NumPreshards,
     num_committees: u32,
     transaction_id: &TransactionId,
-    local_leaf: &LeafBlock,
+    local_chain: &PendingChain,
     foreign_block_id: &BlockId,
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<Option<TransactionPoolRecord>, HotStuffError> {
     match proposed_block_change_set
-        .get_transaction_pool_record(tx, local_leaf, transaction_id)
+        .get_transaction_pool_record(tx, local_chain, transaction_id)
         .optional()?
     {
         Some(tx_rec) => Ok(Some(tx_rec)),

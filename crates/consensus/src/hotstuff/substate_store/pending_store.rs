@@ -22,7 +22,9 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_storage::{
+    PendingChain,
     StateStoreReadTransaction,
+    StorageError,
     consensus_models::{BlockDiff, LockConflict, SubstateChange, SubstateLock, SubstateRecord},
 };
 use tari_ootle_transaction::TransactionId;
@@ -45,20 +47,30 @@ pub struct PendingSubstateStore<'store, TTx: StateStoreReadTransaction> {
     changes: Vec<SubstateChange>,
     new_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
     parent_block: LeafBlock,
+    /// Read once for every branch-scoped read at `parent_block`. `store` is borrowed shared for as long as this lives,
+    /// so nothing can write to the pending chain while the store is in use.
+    parent_chain: PendingChain,
     num_preshards: NumPreshards,
 }
 
 impl<'a, TTx: StateStoreReadTransaction> PendingSubstateStore<'a, TTx> {
-    pub fn new(store: &'a TTx, parent_block: LeafBlock, num_preshards: NumPreshards) -> Self {
-        Self {
+    pub fn new(store: &'a TTx, parent_block: LeafBlock, num_preshards: NumPreshards) -> Result<Self, StorageError> {
+        let parent_chain = store.pending_chain_get(parent_block.block_id())?;
+        Ok(Self {
             store,
             pending: HashMap::new(),
             head: HashMap::new(),
             changes: Vec::new(),
             new_locks: IndexMap::new(),
             parent_block,
+            parent_chain,
             num_preshards,
-        }
+        })
+    }
+
+    /// The pending chain ending at the block this store builds on.
+    pub fn parent_chain(&self) -> &PendingChain {
+        &self.parent_chain
     }
 
     pub fn read_transaction(&self) -> &'a TTx {
@@ -67,8 +79,7 @@ impl<'a, TTx: StateStoreReadTransaction> PendingSubstateStore<'a, TTx> {
 
     fn get_latest_change_from_store(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
         if let Some(change) =
-            BlockDiff::get_last_change_for_substate(self.read_transaction(), self.parent_block.block_id(), id)
-                .optional()?
+            BlockDiff::get_last_change_for_substate(self.read_transaction(), &self.parent_chain, id).optional()?
         {
             return Ok(change);
         }
@@ -207,8 +218,7 @@ impl<'store, TTx: StateStoreReadTransaction> ReadableSubstateStore for PendingSu
         }
 
         if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
-                .optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_chain, id).optional()?
         {
             return change
                 .into_up()
@@ -318,8 +328,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         }
 
         if let Some(change) =
-            BlockDiff::get_last_change_for_substate(self.read_transaction(), self.parent_block.block_id(), id)
-                .optional()?
+            BlockDiff::get_last_change_for_substate(self.read_transaction(), &self.parent_chain, id).optional()?
         {
             let version = change.versioned_substate_id().version();
             return Ok(LatestSubstateVersion {
@@ -461,8 +470,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
 
         let versioned_substate_id = requested_lock.to_versioned_substate_id_ref();
 
-        let Some(existing) = self.get_latest_lock_by_id(&self.parent_block, versioned_substate_id.substate_id())?
-        else {
+        let Some(existing) = self.get_latest_lock_by_id(versioned_substate_id.substate_id())? else {
             if requested_lock_type.is_input() {
                 self.lock_assert_is_up(versioned_substate_id)?;
             }
@@ -715,18 +723,14 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         self.changes.push(change)
     }
 
-    pub fn get_latest_lock_by_id(
-        &self,
-        block: &LeafBlock,
-        id: &SubstateId,
-    ) -> Result<Option<Cow<'_, SubstateLock>>, SubstateStoreError> {
+    pub fn get_latest_lock_by_id(&self, id: &SubstateId) -> Result<Option<Cow<'_, SubstateLock>>, SubstateStoreError> {
         if let Some(lock) = self.new_locks.get(id).and_then(|locks| locks.last()) {
             return Ok(Some(Cow::Borrowed(lock)));
         }
 
         let maybe_lock = self
             .read_transaction()
-            .substate_locks_get_latest_for_substate(block, id)
+            .substate_locks_get_latest_for_substate_in_chain(&self.parent_chain, id)
             .optional()?;
         Ok(maybe_lock.map(Cow::Owned))
     }
@@ -786,8 +790,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         );
 
         if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
-                .optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_chain, id).optional()?
         {
             if change.is_up() {
                 return Ok(());
@@ -825,8 +828,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         }
 
         if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
-                .optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_chain, id).optional()?
         {
             if change.is_up() {
                 return Err(SubstateStoreError::ExpectedSubstateDown { id: id.to_owned() });
@@ -860,7 +862,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             return Err(LockFailedError::SubstateExists { id: id.to_owned() }.into());
         }
 
-        if BlockDiff::contains_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)? {
+        if BlockDiff::contains_versioned_substate(self.read_transaction(), &self.parent_chain, id)? {
             return Err(LockFailedError::SubstateExists { id: id.to_owned() }.into());
         }
 

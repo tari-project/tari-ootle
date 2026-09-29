@@ -403,7 +403,7 @@ where TConsensusSpec: ConsensusSpec
         let mut accumulated_data = *state_anchor.header().accumulated_data();
 
         let mut substate_store =
-            PendingSubstateStore::new(tx, state_anchor_leaf, self.config.consensus_constants.num_preshards);
+            PendingSubstateStore::new(tx, state_anchor_leaf, self.config.consensus_constants.num_preshards)?;
 
         let mut executed_transactions = HashMap::new();
 

@@ -85,8 +85,11 @@ prefixed!(SubstateLockChainOrderPrefix, KeyPrefix::SubstateLockChainOrderIndex);
 ///
 /// `grant_seq` is a lock's position in the sequence its block granted for the substate. A chain holds one block per
 /// height, so `(block_height, grant_seq)` totally orders every lock a chain holds on the substate, and a descending
-/// scan filtered to one chain's blocks yields its most recently granted lock first. `block_id` sits between the two so
-/// that one block's entries stay contiguous, keeping a chain's run together as the scan walks a height.
+/// scan filtered to one chain's blocks yields its most recently granted lock first.
+///
+/// `block_id` is what makes the key unique: sibling blocks at one height each number their grants from zero, so without
+/// it the second block written would overwrite the first block's entries for the substate. Its position between the two
+/// ordering components also keeps one block's entries contiguous.
 pub struct ChainOrderIndex;
 
 impl Cf for ChainOrderIndex {

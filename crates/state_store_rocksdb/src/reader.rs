@@ -1673,15 +1673,20 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
                 continue;
             }
 
-            let lock = cf.get(
-                &substate_locks::SubstateLockKey {
-                    block_id,
-                    block_height,
-                    substate_id: substate_id.clone(),
-                    transaction_id,
-                },
-                OPERATION,
-            )?;
+            let lock_key = substate_locks::SubstateLockKey {
+                block_id,
+                block_height,
+                substate_id: substate_id.clone(),
+                transaction_id,
+            };
+            let Some(lock) = cf.get(&lock_key, OPERATION).optional()? else {
+                // The index entry and the record it names are written and removed together. Reporting the substate as
+                // unlocked here would let a transaction conflicting with a live lock through, so an index entry that
+                // outlived its record is raised rather than read past.
+                return Err(StorageError::DataInconsistency {
+                    details: format!("{lock_key} is in the substate lock chain-order index but has no lock record"),
+                });
+            };
             return Ok(lock);
         }
 

@@ -366,9 +366,9 @@ fn a_lock_from_a_branch_below_the_commit_height_is_not_found() {
 
 /// Releasing locks must clear every index entry, over a loop long enough to matter.
 ///
-/// Both release paths delete the rows they are iterating, and the many-entry case is the one where a lost iterator
-/// position would leave a lock behind. A leftover lock is not visible as corruption; it silently blocks the substate
-/// for good, so the assertion is on the substate being lockable again rather than on any index's contents.
+/// Each release path rebuilds a lock's chain-order key from a `grant_seq` it reads back, so it can address the wrong
+/// entry and leave one behind. A record whose index entry outlives it is caught here because the lookup raises
+/// `DataInconsistency` rather than reporting the substate as unlocked.
 #[test]
 fn releasing_many_locks_leaves_none_behind() {
     let (db, _tmp) = create_rocksdb();

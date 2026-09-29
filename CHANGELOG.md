@@ -44,6 +44,8 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
 - `feat!` — **`metadata!` and `cbor!` take a JSON-shaped value with typed values nested in it**, e.g.
   `metadata!({"resource": address!("resource_..")})`. Negative numbers and the full `u64` range now
   parse, where the old `cbor!` rejected the first and turned the second into a float. (#2679)
+- `feat` — **Manifests take list arguments**, e.g. `gov.set_council(1u16, [var!["k1"], var!["k2"]])`,
+  and a variable passed as `"[a, b]"` is a list. `var!` may now be written directly as an argument.
 
 ### Indexer
 

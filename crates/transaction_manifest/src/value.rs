@@ -48,9 +48,27 @@ impl ManifestValue {
             },
             ManifestValue::Literal(lit) => lit_to_arg(lit),
             ManifestValue::NonFungibleId(id) => Ok(call_arg!(id.clone())),
-            ManifestValue::Value(blob) => Ok(InstructionArg::literal(blob.clone()).unwrap()),
+            ManifestValue::Value(blob) => Ok(InstructionArg::literal(blob.clone())?),
         }
     }
+
+    /// The CBOR value this passes as an argument, so that it can be an element of a list.
+    pub fn to_value(&self) -> Result<tari_bor::Value, ManifestError> {
+        match self {
+            ManifestValue::Value(value) => Ok(value.clone()),
+            _ => arg_to_value(self.to_arg()?),
+        }
+    }
+}
+
+/// The CBOR value a literal argument holds.
+pub(crate) fn arg_to_value(arg: InstructionArg) -> Result<tari_bor::Value, ManifestError> {
+    let bytes = arg
+        .as_literal_bytes()
+        .ok_or_else(|| ManifestError::InvalidInstruction {
+            reason: format!("{arg:?} is not a literal"),
+        })?;
+    Ok(tari_bor::decode(bytes)?)
 }
 
 /// The CBOR value `address!` writes for `id`: the typed address it holds, which is what a template
@@ -143,6 +161,19 @@ impl FromStr for ManifestValue {
     type Err = ManifestParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(inner) = s.trim().strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            return split_list(inner)
+                .ok_or_else(|| ManifestParseError(s.to_string()))?
+                .into_iter()
+                .map(|elem| {
+                    elem.parse::<ManifestValue>()?
+                        .to_value()
+                        .map_err(|_| ManifestParseError(elem.to_string()))
+                })
+                .collect::<Result<_, _>>()
+                .map(|items| ManifestValue::Value(tari_bor::Value::Array(items)));
+        }
+
         SubstateId::from_str(s)
             .ok()
             .map(ManifestValue::SubstateId)
@@ -174,6 +205,48 @@ impl FromStr for ManifestValue {
     }
 }
 
+/// The comma-separated elements of a list's contents, split at the commas outside any nested list
+/// or quoted literal. A trailing comma is allowed; an empty element is not.
+fn split_list(inner: &str) -> Option<Vec<&str>> {
+    let mut elems = Vec::new();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut start = 0;
+    for (i, c) in inner.char_indices() {
+        if let Some(q) = quote {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                _ if c == q => quote = None,
+                _ => {},
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => quote = Some(c),
+            '[' => depth += 1,
+            ']' => depth = depth.checked_sub(1)?,
+            ',' if depth == 0 => {
+                elems.push(inner[start..i].trim());
+                start = i + 1;
+            },
+            _ => {},
+        }
+    }
+    if depth != 0 || quote.is_some() {
+        return None;
+    }
+    let last = inner[start..].trim();
+    if !last.is_empty() {
+        elems.push(last);
+    }
+    if elems.iter().any(|e| e.is_empty()) {
+        return None;
+    }
+    Some(elems)
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("Invalid manifest value '{0}'")]
 pub struct ManifestParseError(String);
@@ -194,6 +267,37 @@ mod tests {
         // Hex string that looks like a float literal (contains 'e')
         let val = "1e2345".parse::<ManifestValue>().unwrap();
         assert!(matches!(val, ManifestValue::Value(tari_bor::Value::Bytes(_))));
+    }
+
+    #[test]
+    fn it_parses_lists() {
+        let pk = "044bccd4d01ceb41816bc9106a836806e6f9412646ecda4c2d726d8372b2c843";
+        let pk_bytes = tari_bor::Value::Bytes(bytes_from_hex(pk).unwrap());
+        let list = |s: &str| match s.parse::<ManifestValue>().unwrap() {
+            ManifestValue::Value(tari_bor::Value::Array(items)) => items,
+            v => panic!("{s} parsed as {v:?}"),
+        };
+
+        assert_eq!(list(&format!("[{pk}, {pk}]")), vec![pk_bytes.clone(), pk_bytes.clone()]);
+        assert_eq!(list(&format!(" [ {pk} ,] ")), vec![pk_bytes]);
+        assert_eq!(list("[]"), vec![]);
+        assert_eq!(list(r#"["a,]b", 'c', 1u8]"#), vec![
+            tari_bor::Value::Text("a,]b".to_string()),
+            tari_bor::Value::Text("c".to_string()),
+            tari_bor::Value::Integer(1),
+        ]);
+        assert_eq!(list("[[1], []]"), vec![
+            tari_bor::Value::Array(vec![tari_bor::Value::Integer(1)]),
+            tari_bor::Value::Array(vec![]),
+        ]);
+        let component = "component_0000000000000000000000000000000000000000000000000000000000000000";
+        assert_eq!(list(&format!("[{component}]")), vec![
+            ManifestValue::from_str(component).unwrap().to_value().unwrap()
+        ]);
+
+        for invalid in ["[1,,2]", "[,]", "[1", "[[1]", "[\"a]", "[1]]", "[nope]"] {
+            assert!(invalid.parse::<ManifestValue>().is_err(), "{invalid} parsed");
+        }
     }
 
     #[test]

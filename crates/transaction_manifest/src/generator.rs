@@ -21,7 +21,7 @@ use crate::{
     ast::ManifestAst,
     error::ManifestError,
     parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, OutputBinding, SpecialLiteral},
-    value::{address_value, lit_to_arg},
+    value::{address_value, arg_to_value, lit_to_arg},
 };
 
 const MAX_CALL_DEPTH: usize = 16;
@@ -332,29 +332,69 @@ impl ManifestInstructionGenerator {
     }
 
     fn process_args(&mut self, args: Vec<ManifestLiteral>) -> Result<Vec<InstructionArg>, ManifestError> {
-        args.into_iter()
-            .map(|arg| match arg {
-                ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
-                ManifestLiteral::Workspace(ident) => self.get_ident(&ident.to_string()),
-                ManifestLiteral::Blob(ident) => self.resolve_blob_arg(&ident.to_string()),
-                ManifestLiteral::Special(SpecialLiteral::Null) => {
-                    Ok(InstructionArg::literal(tari_bor::Value::Null)
-                        .expect("Null literal serialization should not fail"))
-                },
-                ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
-                ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
-                ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => Ok(InstructionArg::literal(value)?),
-                ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
-                ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
-                    OrVar::Var(ident) => self.get_ident(&ident.to_string()),
-                    OrVar::Value(id) => Ok(call_arg!(id)),
-                },
-                ManifestLiteral::Special(SpecialLiteral::Address(var_or_id)) => match var_or_id {
-                    OrVar::Var(ident) => self.get_ident(&ident.to_string()),
-                    OrVar::Value(id) => Ok(InstructionArg::literal(address_value(&id)?)?),
-                },
-            })
-            .collect()
+        args.into_iter().map(|arg| self.process_arg(arg)).collect()
+    }
+
+    fn process_arg(&mut self, arg: ManifestLiteral) -> Result<InstructionArg, ManifestError> {
+        match arg {
+            ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
+            ManifestLiteral::Workspace(ident) => self.get_ident(&ident.to_string()),
+            ManifestLiteral::Blob(ident) => self.resolve_blob_arg(&ident.to_string()),
+            ManifestLiteral::Global(name) => self.get_global(&name.value())?.to_arg(),
+            ManifestLiteral::Array(items) => {
+                let items = items
+                    .into_iter()
+                    .map(|item| self.list_element_value(item))
+                    .collect::<Result<_, _>>()?;
+                Ok(InstructionArg::literal(tari_bor::Value::Array(items))?)
+            },
+            ManifestLiteral::Special(SpecialLiteral::Null) => {
+                Ok(InstructionArg::literal(tari_bor::Value::Null).expect("Null literal serialization should not fail"))
+            },
+            ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
+            ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
+            ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => Ok(InstructionArg::literal(value)?),
+            ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
+            ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
+                OrVar::Var(ident) => self.get_ident(&ident.to_string()),
+                OrVar::Value(id) => Ok(call_arg!(id)),
+            },
+            ManifestLiteral::Special(SpecialLiteral::Address(var_or_id)) => match var_or_id {
+                OrVar::Var(ident) => self.get_ident(&ident.to_string()),
+                OrVar::Value(id) => Ok(InstructionArg::literal(address_value(&id)?)?),
+            },
+        }
+    }
+
+    /// The value `item` holds as an element of a list, which is written into the transaction as
+    /// one literal and so cannot hold a workspace value or a blob.
+    fn list_element_value(&mut self, item: ManifestLiteral) -> Result<tari_bor::Value, ManifestError> {
+        match &item {
+            ManifestLiteral::Workspace(ident) |
+            ManifestLiteral::Special(
+                SpecialLiteral::SubstateId(OrVar::Var(ident)) | SpecialLiteral::Address(OrVar::Var(ident)),
+            ) => {
+                let name = ident.to_string();
+                if !self.globals.contains_key(&name) &&
+                    !self.global_aliases.contains_key(&name) &&
+                    self.workspace_ids.contains_key(&name)
+                {
+                    return Err(ManifestError::InvalidInstruction {
+                        reason: format!(
+                            "'{name}' is a workspace value, which is only known when the transaction runs, so it \
+                             cannot be an element of a list"
+                        ),
+                    });
+                }
+            },
+            ManifestLiteral::Blob(ident) => {
+                return Err(ManifestError::InvalidInstruction {
+                    reason: format!("blob!({ident}) refers to a transaction blob and cannot be an element of a list"),
+                });
+            },
+            _ => {},
+        }
+        arg_to_value(self.process_arg(item)?)
     }
 
     /// Resolve `blob!(name)` to an `InstructionArg::Blob(idx)`. The name must have a payload

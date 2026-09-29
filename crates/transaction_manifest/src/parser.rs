@@ -7,6 +7,7 @@ use proc_macro2::{Ident, TokenStream};
 use syn::{
     Block,
     Expr,
+    ExprArray,
     ExprCall,
     ExprLit,
     ExprMacro,
@@ -138,6 +139,12 @@ pub enum ManifestLiteral {
     /// A reference to a transaction blob by caller-supplied name. The generator resolves the
     /// name to a `BlobIndex` against the blobs map passed to `parse_manifest`.
     Blob(Ident),
+    /// An input variable named by `var!`/`arg!`/`global!`, resolved against the globals passed to
+    /// `parse_manifest`.
+    Global(LitStr),
+    /// A list of arguments, passed as one CBOR array. Every element must be known when the manifest
+    /// is generated, so a workspace value or a blob cannot be an element.
+    Array(Vec<ManifestLiteral>),
     Special(SpecialLiteral),
 }
 
@@ -549,48 +556,66 @@ fn parse_publish_template_args(tokens: TokenStream) -> Result<ManifestIntent, sy
     )
 }
 
-fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>, syn::Error> {
-    args.into_iter()
-        .map(|arg| match arg {
-            Expr::Lit(lit) => Ok(ManifestLiteral::Lit(lit.lit)),
+/// Bounds how deeply list arguments nest, matching the bound on a `cbor!` literal.
+const MAX_LIST_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
 
-            Expr::Path(ExprPath { path, .. }) => {
-                if let Some(seg) = path.segments.first() {
-                    if seg.ident == "None" {
-                        Ok(ManifestLiteral::Special(SpecialLiteral::Null))
-                    } else if seg.ident == "XTR" || seg.ident == "TARI" {
-                        Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(
-                            TARI_TOKEN.into(),
-                        ))))
-                    } else {
-                        Ok(ManifestLiteral::Workspace(seg.ident.clone()))
-                    }
+fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>, syn::Error> {
+    args.into_iter().map(|arg| build_argument(arg, 0)).collect()
+}
+
+fn build_argument(arg: Expr, depth: usize) -> Result<ManifestLiteral, syn::Error> {
+    match arg {
+        Expr::Lit(lit) => Ok(ManifestLiteral::Lit(lit.lit)),
+
+        Expr::Path(ExprPath { path, .. }) => {
+            if let Some(seg) = path.segments.first() {
+                if seg.ident == "None" {
+                    Ok(ManifestLiteral::Special(SpecialLiteral::Null))
+                } else if seg.ident == "XTR" || seg.ident == "TARI" {
+                    Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(
+                        TARI_TOKEN.into(),
+                    ))))
                 } else {
-                    Err(syn::Error::new_spanned(
-                        path,
-                        "Invalid path, only single segment paths are supported",
-                    ))
+                    Ok(ManifestLiteral::Workspace(seg.ident.clone()))
                 }
-            },
-            Expr::Unary(ExprUnary {
-                op: UnOp::Neg(_), expr, ..
-            }) => match *expr {
-                Expr::Lit(ExprLit { lit: Lit::Int(lit), .. }) => Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(
-                    negative_int_value(&lit)?,
-                ))),
-                expr => Err(syn::Error::new_spanned(expr, "expected an integer after `-`")),
-            },
-            Expr::Call(ExprCall { func, .. }) => Err(syn::Error::new_spanned(&func, match macro_for_call(&func) {
-                Some(mac) => format!("function-call literals are not supported, use `{mac}!(..)` instead"),
-                None => "function calls are not supported as arguments".to_string(),
-            })),
-            Expr::Macro(ExprMacro { mac, .. }) => Ok(handle_macro_argument(mac)?),
-            _ => Err(syn::Error::new_spanned(
-                arg,
-                "Invalid argument, only literals and variables are supported",
-            )),
-        })
-        .collect()
+            } else {
+                Err(syn::Error::new_spanned(
+                    path,
+                    "Invalid path, only single segment paths are supported",
+                ))
+            }
+        },
+        Expr::Unary(ExprUnary {
+            op: UnOp::Neg(_), expr, ..
+        }) => match *expr {
+            Expr::Lit(ExprLit { lit: Lit::Int(lit), .. }) => Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(
+                negative_int_value(&lit)?,
+            ))),
+            expr => Err(syn::Error::new_spanned(expr, "expected an integer after `-`")),
+        },
+        Expr::Call(ExprCall { func, .. }) => Err(syn::Error::new_spanned(&func, match macro_for_call(&func) {
+            Some(mac) => format!("function-call literals are not supported, use `{mac}!(..)` instead"),
+            None => "function calls are not supported as arguments".to_string(),
+        })),
+        Expr::Macro(ExprMacro { mac, .. }) => Ok(handle_macro_argument(mac)?),
+        Expr::Array(ExprArray { elems, .. }) => {
+            if depth >= MAX_LIST_DEPTH {
+                return Err(syn::Error::new_spanned(
+                    elems,
+                    format!("lists nest at most {MAX_LIST_DEPTH} levels deep"),
+                ));
+            }
+            elems
+                .into_iter()
+                .map(|elem| build_argument(elem, depth + 1))
+                .collect::<Result<_, _>>()
+                .map(ManifestLiteral::Array)
+        },
+        _ => Err(syn::Error::new_spanned(
+            arg,
+            "Invalid argument, only literals, lists and variables are supported",
+        )),
+    }
 }
 
 /// The argument macro for a function-call literal named after the macro's type, e.g. `amount!` for
@@ -620,6 +645,7 @@ pub(crate) fn handle_macro_argument(mac: Macro) -> Result<ManifestLiteral, syn::
         .ok_or_else(|| syn::Error::new_spanned(&mac.path, "macro path must have a single segment"))?;
 
     match name.to_string().as_str() {
+        "global" | "var" | "arg" => Ok(ManifestLiteral::Global(parse2(mac.tokens)?)),
         "cbor" => Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(cbor_from_macro(&mac)?))),
         "metadata" => Ok(ManifestLiteral::Special(SpecialLiteral::Metadata(metadata_from_macro(
             &mac,
@@ -686,8 +712,8 @@ pub(crate) fn handle_macro_argument(mac: Macro) -> Result<ManifestLiteral, syn::
         _ => Err(syn::Error::new_spanned(
             name,
             format!(
-                "Invalid argument macro '{name}', supported macros: cbor!, metadata!, amount!, hex_bytes!, bytes!, \
-                 public_key!, address!, substate_id!, non_fungible_id!, blob!"
+                "Invalid argument macro '{name}', supported macros: var!, arg!, global!, cbor!, metadata!, amount!, \
+                 hex_bytes!, bytes!, public_key!, address!, substate_id!, non_fungible_id!, blob!"
             ),
         )),
     }

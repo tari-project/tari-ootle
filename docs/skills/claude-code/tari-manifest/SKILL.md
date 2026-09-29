@@ -103,6 +103,7 @@ account.deposit(item);
 | PublicKey | `public_key!("hex")` | `public_key!("ab12...cd34")` |
 | HexBytes | `hex_bytes!("hex")` | `hex_bytes!("deadbeef")` |
 | CBOR | `cbor!(value)` | `cbor!({"key": [1, -2], "owner": address!("component_ab12...")})` |
+| List | `[elem, ...]` | `gov.set_council(1u16, [var!["k1"], var!["k2"]])` (elements must not be workspace vars or blobs) |
 | Tari token | `TARI` | `account.withdraw(TARI, 100)` (`XTR` is a deprecated alias that still works but should not be used in new manifests; when describing transactions to users, call the token **tTARI** on testnet or **$TARI** on mainnet) |
 | Workspace var | bare identifier | `bucket` (from prior `let bucket = ...`) |
 

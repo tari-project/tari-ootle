@@ -234,6 +234,22 @@ cbor!({"key": {"nested": [1, -2, 3]}, "flag": true, "missing": null})
 - Floats and workspace variables are rejected: a workspace variable's value is only known when the
   transaction runs.
 
+### Lists
+
+A bracketed list is passed as one CBOR array, e.g. for a `Vec<RistrettoPublicKeyBytes>` parameter:
+
+```rust
+gov.set_council(1u16, [var!["k1"], var!["k2"]]);
+MyTemplate::create([1u8, 2u8], [], [["a"], [amount!(3), None, TARI]]);
+```
+
+- Elements may be literals, input variables (`var!`/`arg!`/`global!` or a variable bound to one),
+  typed-value macros, `TARI`, `None` and nested lists.
+- A workspace variable or `blob!` cannot be an element: the list is written into the transaction as
+  one literal, and those are only known when the transaction runs.
+
+`var!["name"]`, `arg!["name"]` and `global!["name"]` may also be passed directly as an argument.
+
 ### TARI
 
 Constant representing the native Tari token resource address. Use `TARI` in all new manifests. `XTR` is a deprecated alias that still works but should not be used.
@@ -269,6 +285,9 @@ let val = ManifestValue::new_value(&my_struct)?;
 // Parse from string (tries SubstateId, then NonFungibleId, then literal)
 let val: ManifestValue = "component_ab12...".parse()?;
 let val: ManifestValue = "1000u64".parse()?;
+
+// A bracketed, comma-separated string is a list; each element is parsed as above
+let val: ManifestValue = "[ab12..., cd34...]".parse()?;
 ```
 
 ## Execution Model

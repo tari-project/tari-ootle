@@ -28,16 +28,19 @@ use tari_ootle_transaction::{
     AllocatableAddressType,
     ComponentReference,
     Instruction,
-    args::WorkspaceOffsetId,
+    args::{InstructionArg, WorkspaceOffsetId},
+    call_arg,
     call_args,
 };
 use tari_template_lib_types::{
+    Amount,
     ComponentAddress,
     ObjectKey,
     ResourceAddress,
     TemplateAddress,
     constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
+    hex::bytes_from_hex,
 };
 use tari_transaction_manifest::{ManifestInstructions, ManifestValue, parse_manifest};
 
@@ -873,4 +876,209 @@ fn put_into_bucket_unknown_variable_errors() {
         Err(e) => e.to_string(),
     };
     assert!(err.contains("missing"), "unexpected error: {err}");
+}
+
+const LIST_TEMPLATE: &str = "c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7";
+const PK1: &str = "044bccd4d01ceb41816bc9106a836806e6f9412646ecda4c2d726d8372b2c843";
+const PK2: &str = "5e8b3e7e6e3aa6d8f9c3a3c4e5d9b1f2a7c6e8d0f1a2b3c4d5e6f708192a3b4c";
+
+fn literal(value: tari_bor::Value) -> InstructionArg {
+    InstructionArg::literal(value).unwrap()
+}
+
+fn list_globals() -> HashMap<String, ManifestValue> {
+    HashMap::from([
+        ("k1".to_string(), PK1.parse().unwrap()),
+        ("k2".to_string(), PK2.parse().unwrap()),
+        (
+            "gov".to_string(),
+            "component_0104000000000000000000000000000000000000000000000000000000000000"
+                .parse()
+                .unwrap(),
+        ),
+    ])
+}
+
+#[test]
+fn list_of_literals() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            MyTemplate::create([1u8, 2u8,], [], ["a", -1]);
+        }}
+    "#
+    );
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(&manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+    assert_eq!(instructions, vec![Instruction::CallFunction {
+        address: TemplateAddress::from_hex(LIST_TEMPLATE).unwrap(),
+        function: "create".try_into().unwrap(),
+        args: vec![
+            literal(cbor!([1, 2])),
+            literal(cbor!([])),
+            literal(tari_bor::Value::Array(vec![cbor!("a"), cbor!(-1)])),
+        ],
+    }]);
+}
+
+#[test]
+fn list_of_input_variables() {
+    let manifest = r#"
+        fn main() {
+            let gov = var!["gov"];
+            let k2 = var!["k2"];
+            gov.set_council(1u16, [var!["k1"], k2]);
+        }
+    "#;
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, list_globals(), Default::default(), Default::default()).unwrap();
+
+    let council = vec![
+        RistrettoPublicKeyBytes::from_hex(PK1).unwrap(),
+        RistrettoPublicKeyBytes::from_hex(PK2).unwrap(),
+    ];
+    let council_arg = literal(tari_bor::to_value(&council).unwrap());
+    // A `Vec<RistrettoPublicKeyBytes>` parameter reads a CBOR array of byte strings.
+    assert_eq!(
+        council_arg,
+        literal(tari_bor::Value::Array(
+            council
+                .iter()
+                .map(|pk| tari_bor::Value::Bytes(pk.as_bytes().to_vec()))
+                .collect()
+        ))
+    );
+    assert_eq!(instructions, vec![Instruction::CallMethod {
+        call: ComponentReference::Address(
+            ComponentAddress::from_hex("0104000000000000000000000000000000000000000000000000000000000000").unwrap()
+        ),
+        method: "set_council".try_into().unwrap(),
+        args: vec![call_arg!(1u16), council_arg],
+    }]);
+}
+
+#[test]
+fn input_variable_macro_as_argument() {
+    let manifest = r#"
+        fn main() {
+            let gov = var!["gov"];
+            gov.add(var!["k1"], arg!["k2"]);
+        }
+    "#;
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, list_globals(), Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallMethod { args, .. } = &instructions[0] else {
+        panic!("expected a method call");
+    };
+    assert_eq!(*args, vec![
+        literal(tari_bor::Value::Bytes(bytes_from_hex(PK1).unwrap())),
+        literal(tari_bor::Value::Bytes(bytes_from_hex(PK2).unwrap())),
+    ]);
+}
+
+#[test]
+fn nested_lists() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            MyTemplate::create([[1u8], [2u8, amount!(3)], [None, TARI]]);
+        }}
+    "#
+    );
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(&manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallFunction { args, .. } = &instructions[0] else {
+        panic!("expected a function call");
+    };
+    assert_eq!(*args, vec![literal(tari_bor::Value::Array(vec![
+        cbor!([1]),
+        tari_bor::Value::Array(vec![cbor!(2), tari_bor::to_value(&Amount::new(3)).unwrap()]),
+        tari_bor::Value::Array(vec![tari_bor::Value::Null, tari_bor::to_value(&TARI_TOKEN).unwrap()]),
+    ]))]);
+}
+
+#[test]
+fn list_rejects_workspace_values() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            let bucket = MyTemplate::make();
+            MyTemplate::create([1u8, bucket]);
+        }}
+    "#
+    );
+
+    let err = parse_manifest(&manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("a workspace value cannot be a list element");
+    assert!(err.to_string().contains("bucket"), "{err}");
+}
+
+#[test]
+fn list_rejects_blobs() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            MyTemplate::create([blob!(data)]);
+        }}
+    "#
+    );
+
+    let blobs = HashMap::from([("data".to_string(), tari_ootle_transaction::Blob::from(vec![1u8, 2, 3]))]);
+    assert!(parse_manifest(&manifest, HashMap::new(), Default::default(), blobs).is_err());
+}
+
+#[test]
+fn cbor_literal_rejects_input_variables() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            MyTemplate::create(cbor!([var!["k1"]]));
+        }}
+    "#
+    );
+
+    assert!(parse_manifest(&manifest, list_globals(), Default::default(), Default::default()).is_err());
+}
+
+#[test]
+fn list_valued_input_variable() {
+    let manifest = r#"
+        fn main() {
+            let gov = var!["gov"];
+            gov.set_council(1u16, var!["council"]);
+        }
+    "#;
+
+    let mut globals = list_globals();
+    globals.insert("council".to_string(), format!("[{PK1}, {PK2}]").parse().unwrap());
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
+
+    let council = vec![
+        RistrettoPublicKeyBytes::from_hex(PK1).unwrap(),
+        RistrettoPublicKeyBytes::from_hex(PK2).unwrap(),
+    ];
+    let Instruction::CallMethod { args, .. } = &instructions[0] else {
+        panic!("expected a method call");
+    };
+    assert_eq!(args[1], literal(tari_bor::to_value(&council).unwrap()));
 }

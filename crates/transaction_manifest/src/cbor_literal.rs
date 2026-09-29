@@ -254,6 +254,14 @@ fn nested_macro_value(mac: Macro) -> syn::Result<Value> {
             span,
             "blob! refers to a transaction blob and cannot be written into a literal",
         )),
+        ManifestLiteral::Global(name) => Err(syn::Error::new(
+            span,
+            format!(
+                "input variable \"{}\" cannot be written into a literal; pass it as its own argument or in a list",
+                name.value()
+            ),
+        )),
+        ManifestLiteral::Array(_) => unreachable!("an argument macro never writes a list"),
         ManifestLiteral::Lit(lit) => lit_value(lit),
     }
 }

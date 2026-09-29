@@ -68,6 +68,11 @@ impl<'a, TTx: StateStoreReadTransaction> PendingSubstateStore<'a, TTx> {
         })
     }
 
+    /// The block this store builds on.
+    pub fn parent_block(&self) -> LeafBlock {
+        self.parent_block
+    }
+
     /// The pending chain ending at the block this store builds on.
     pub fn parent_chain(&self) -> &PendingChain {
         &self.parent_chain

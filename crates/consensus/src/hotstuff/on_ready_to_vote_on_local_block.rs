@@ -1651,7 +1651,6 @@ where TConsensusSpec: ConsensusSpec
         if let Err(err) = process_foreign_block(
             tx,
             self.config.network,
-            &local_block.as_leaf(),
             fp.proposal(),
             local_committee_info,
             substate_store,

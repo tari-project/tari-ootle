@@ -49,18 +49,13 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::foreign_proposal_pro
 pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     network: Network,
-    local_leaf: &LeafBlock,
     proposal: &ForeignProposal,
     local_committee_info: &CommitteeInfo,
     substate_store: &mut PendingSubstateStore<TTx>,
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");
-    debug_assert_eq!(
-        local_leaf.block_id(),
-        substate_store.parent_chain().leaf(),
-        "process_foreign_block: the substate store must build on the local leaf"
-    );
+    let local_leaf = &substate_store.parent_block();
 
     // The proposal is proved against the layer-1 shaped header, which carries a metadata hash and not
     // the extra data the rate lives in, so the rate for its epoch is resolved here instead. Every shard

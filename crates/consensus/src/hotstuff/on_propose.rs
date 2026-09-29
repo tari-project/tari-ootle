@@ -449,14 +449,13 @@ where TConsensusSpec: ConsensusSpec
                 (!batch.foreign_proposals.is_empty()).then(|| change_set.clone());
 
             for fp in &batch.foreign_proposals {
-                // Resolves pending transaction pool records along the chain up to this block, so it must be
-                // the anchor the substate store this call also writes to is built on: the justify block
-                // under a dummy chain, the extended leaf otherwise. A replica passes the block it is
-                // evaluating, whose parent chain runs back through any dummies to the justify block.
+                // Resolves pending transaction pool records along the chain the substate store is built on:
+                // the justify block under a dummy chain, the extended leaf otherwise. A replica's store is
+                // built on the block it is evaluating, whose parent chain runs back through any dummies to
+                // the justify block.
                 if let Err(err) = process_foreign_block(
                     tx,
                     self.config.network,
-                    &state_anchor_leaf,
                     fp,
                     local_committee_info,
                     &mut substate_store,

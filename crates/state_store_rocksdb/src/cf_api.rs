@@ -471,6 +471,47 @@ impl<'db, TQuery: QueryCf, DB: RocksReader> CfContext<'db, DB, TQuery> {
         >(ordering, rocksdb::PrefixRange(key))
     }
 
+    /// Collects the keys of a prefix range before returning.
+    ///
+    /// A write transaction's iterator reads through the transaction's own write batch, and RocksDB documents that
+    /// updating the batch at the key the iterator is standing on invalidates that position - the state only *may*
+    /// recover once the iterator steps on (`rocksdb/utilities/write_batch_with_index.h`, `NewIteratorWithBase`). A loop
+    /// that writes the rows it reads must therefore take them all before writing any.
+    pub fn query_prefix_range_keys(
+        &self,
+        ordering: Ordering,
+        key: &TQuery::Key,
+    ) -> Result<Vec<<TQuery::Cf as Cf>::Key>, RocksDbStorageError> {
+        self.query_prefix_range_key_iterator(ordering, key).collect()
+    }
+
+    /// Collects the entries of a prefix range before returning. See [`Self::query_prefix_range_keys`] for why.
+    pub fn query_prefix_range_entries(
+        &self,
+        prefix: &TQuery::Key,
+        ordering: Ordering,
+    ) -> Result<Vec<QueryCfKv<TQuery>>, RocksDbStorageError> {
+        self.query_prefix_range_iterator(ordering, prefix).collect()
+    }
+
+    /// Collects the keys of a range before returning. See [`Self::query_prefix_range_keys`] for why.
+    pub fn query_range_keys<B: Borrow<TQuery::Key>>(
+        &self,
+        ordering: Ordering,
+        range: Range<B>,
+    ) -> Result<Vec<<TQuery::Cf as Cf>::Key>, RocksDbStorageError> {
+        self.query_range_key_iterator(ordering, range).collect()
+    }
+
+    /// Collects the entries below `end_key` before returning. See [`Self::query_prefix_range_keys`] for why.
+    pub fn query_end_range_entries(
+        &self,
+        ordering: Ordering,
+        end_key: &TQuery::Key,
+    ) -> Result<Vec<QueryCfKv<TQuery>>, RocksDbStorageError> {
+        self.query_end_range_iterator(ordering, end_key).collect()
+    }
+
     pub fn query_prefix_range_value_iterator(
         &self,
         ordering: Ordering,

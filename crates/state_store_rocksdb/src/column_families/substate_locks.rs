@@ -39,7 +39,6 @@ use crate::{
         SubstateIdCodec,
         SubstateLockKeyCodec,
         TransactionIdCodec,
-        UnitCodec,
     },
     column_families::cf_names,
     prefixed,
@@ -111,15 +110,6 @@ impl QueryCf for ByChainOrderQuery {
     type KeyCodec = SubstateIdCodec;
 }
 
-/// The locks one block granted on one substate.
-pub struct ByChainOrderBlockQuery;
-
-impl QueryCf for ByChainOrderBlockQuery {
-    type Cf = ChainOrderIndex;
-    type Key = (SubstateId, NodeHeight, BlockId);
-    type KeyCodec = (SubstateIdCodec, NodeHeightCodec, BlockIdCodec);
-}
-
 pub struct ByTransactionIdQuery;
 
 impl QueryCf for ByTransactionIdQuery {
@@ -132,12 +122,14 @@ prefixed!(SubstatesBlockIdIndexPrefix, KeyPrefix::SubstateLocksBlockIdIndex);
 
 pub struct BlockIdIndex;
 
+/// The value is the lock's `grant_seq`, which completes its [`ChainOrderIndex`] key. Holding it here lets a lock be
+/// removed from that index by exact key, since every path that removes a lock reaches it by block or by transaction.
 impl Cf for BlockIdIndex {
     type Key = SubstateLockKey;
     type KeyCodec = SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId, NodeHeight)>;
     type Prefix = SubstatesBlockIdIndexPrefix;
-    type Value = ();
-    type ValueCodec = UnitCodec;
+    type Value = u32;
+    type ValueCodec = NumberCodec<u32>;
 
     fn name() -> &'static str {
         cf_names::SUBSTATES

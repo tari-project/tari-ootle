@@ -236,36 +236,6 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
 
         Ok((data.block, data.foreign_proposals))
     }
-
-    /// Removes the chain-order entry for one lock record.
-    ///
-    /// The chain-order key carries the block's grant sequence rather than the transaction, so the transaction's entry
-    /// is found by scanning the locks its block granted on the substate - at most one per transaction, and only the
-    /// transactions that locked that substate in that block.
-    fn substate_locks_chain_order_delete_for_transaction(
-        &self,
-        lock_key: &SubstateLockKey,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "substate_locks_chain_order_delete_for_transaction";
-
-        let chain_order_cf = self.db().cf(substate_locks::ChainOrderIndex)?;
-        let prefix = (lock_key.substate_id.clone(), lock_key.block_height, lock_key.block_id);
-        let keys = self
-            .db()
-            .cf(substate_locks::ByChainOrderBlockQuery)?
-            .query_prefix_range_iterator(Ordering::Ascending, &prefix)
-            .filter_map(|result| match result {
-                Ok((key, transaction_id)) => (transaction_id == lock_key.transaction_id).then_some(Ok(key)),
-                Err(err) => Some(Err(err)),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        for key in keys {
-            chain_order_cf.delete(&key, OPERATION)?;
-        }
-
-        Ok(())
-    }
 }
 
 impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbStateStoreWriteTransaction<'tx, TAddr> {
@@ -438,9 +408,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(BlockDiffCf)?;
         let index_cf = self.db().cf(block_diff::SubstateIdIndex)?;
         let query = self.db().cf(block_diff::ByBlockIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
-        for result in iter {
-            let key = result?;
+        for key in query.query_prefix_range_keys(Ordering::Ascending, block_id)? {
             cf.delete(&key, OPERATION)?;
             index_cf.delete(&key, OPERATION)?;
         }
@@ -660,10 +628,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let db = self.db();
 
         let cf = db.cf(foreign_proposal::ByProposedInBlockIndexQuery)?;
-        let proposed_iter = cf.query_prefix_range_key_iterator(Ordering::default(), proposed_in_block);
+        let proposed_keys = cf.query_prefix_range_keys(Ordering::default(), proposed_in_block)?;
 
-        for result in proposed_iter {
-            let (proposed_in_block, fp_id) = result?;
+        for (proposed_in_block, fp_id) in proposed_keys {
             let mut fp = db.cf(ForeignProposalCf)?.get(&fp_id, OPERATION)?;
             if fp.proposed_in_block() == Some(&proposed_in_block) {
                 // Setting the status to New in this case
@@ -739,9 +706,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let exec_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let exec_index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
 
-        let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), tx_id);
-        for result in iter {
-            let (tx_id, block_id, height) = result?;
+        for (tx_id, block_id, height) in exec_query.query_prefix_range_keys(Ordering::default(), tx_id)? {
             exec_cf.delete(&(tx_id, block_id, height), OPERATION)?;
             exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
         }
@@ -811,9 +776,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(BlockTransactionExecutionCf)?;
         let index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
 
-        let iter = query.query_prefix_range_key_iterator(Ordering::default(), block_id);
-        for result in iter {
-            let key = result?;
+        for key in query.query_prefix_range_keys(Ordering::default(), block_id)? {
             index_cf.delete(&key, OPERATION)?;
             let (block_id, tx_id, height) = key;
             cf.delete(&(tx_id, block_id, height), OPERATION)?;
@@ -833,12 +796,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // Remove any executions prior to this block - we do this only if this block has an execution (if not, iter will
         // be empty). By the time the block that finalizes a transaction is committed - there will only be one
         // execution.
-        let iter = block_query.query_prefix_range_key_iterator(Ordering::default(), lock_block.block_id());
-        for result in iter {
-            let (_, tx_id, locked_height) = result?;
-            let tx_iter = tx_query.query_prefix_range_key_iterator(Ordering::default(), &tx_id);
-            for result in tx_iter {
-                let (tx_id, block_id, height) = result?;
+        for (_, tx_id, locked_height) in
+            block_query.query_prefix_range_keys(Ordering::default(), lock_block.block_id())?
+        {
+            for (tx_id, block_id, height) in tx_query.query_prefix_range_keys(Ordering::default(), &tx_id)? {
                 // Don't remove for this block or any later blocks (higher height)
                 if height > locked_height {
                     trace!(
@@ -976,12 +937,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let by_block_query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
 
-        let iter = by_block_query.query_prefix_range_iterator(Ordering::Ascending, block.block_id());
+        let entries = by_block_query.query_prefix_range_entries(block.block_id(), Ordering::Ascending)?;
 
         let updates_cf = self.db().cf(TransactionPoolStateUpdateCf)?;
         let pool_cf = self.db().cf(TransactionPoolCf)?;
-        for result in iter {
-            let (key, update) = result?;
+        for (key, update) in entries {
             updates_cf.delete(&key, OPERATION)?;
 
             // Update the transaction pool record accordingly
@@ -1015,11 +975,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "transaction_pool_state_updates_remove_any_by_block_id";
         let by_block_query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
 
-        let iter = by_block_query.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
+        let keys = by_block_query.query_prefix_range_keys(Ordering::Ascending, block_id)?;
 
         let updates_cf = self.db().cf(TransactionPoolStateUpdateCf)?;
-        for result in iter {
-            let key = result?;
+        for key in keys {
             updates_cf.delete(&key, OPERATION)?;
         }
 
@@ -1137,12 +1096,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(ForeignParkedBlockCf)?;
         let query = self.db().cf(foreign_parked_blocks::ByTransactionIdQuery)?;
         let missing_cf = self.db().cf(foreign_parked_blocks::MissingTransactionsModel)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
+        let keys = query.query_prefix_range_keys(Ordering::default(), transaction_id)?;
 
         // Remove the transaction ids from the missing list
         let mut block_ids = HashSet::new();
-        for result in iter {
-            let (transaction_id, block_id) = result?;
+        for (transaction_id, block_id) in keys {
             block_ids.insert(block_id);
             missing_cf.delete(&(transaction_id, block_id), OPERATION)?;
         }
@@ -1202,7 +1160,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     transaction_id,
                 };
                 cf.put(&key, lock, OPERATION)?;
-                index_cf.put(&key, &(), OPERATION)?;
+                index_cf.put(&key, &grant_seq, OPERATION)?;
                 substate_index_cf.put(&key, &lock.lock_type(), OPERATION)?;
                 chain_order_cf.put(
                     &(substate_id.clone(), block.height(), *block.block_id(), grant_seq),
@@ -1230,18 +1188,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let query_cf = self.db().cf(substate_locks::ByTransactionIdQuery)?;
         let substate_index_cf = self.db().cf(substate_locks::SubstateIdIndex)?;
         let index_cf = self.db().cf(substate_locks::BlockIdIndex)?;
+        let chain_order_cf = self.db().cf(substate_locks::ChainOrderIndex)?;
         for tx_id in transaction_ids {
-            let iter = query_cf.query_prefix_range_key_iterator(Ordering::default(), tx_id);
-            for result in iter {
-                let key = result?;
+            for key in query_cf.query_prefix_range_keys(Ordering::default(), tx_id)? {
                 trace!(
                     target: LOG_TARGET,
                     "Removing substate locks {key}",
                 );
+                let grant_seq = index_cf.get(&key, OPERATION)?;
                 cf.delete(&key, OPERATION)?;
                 index_cf.delete(&key, OPERATION)?;
                 substate_index_cf.delete(&key, OPERATION)?;
-                self.substate_locks_chain_order_delete_for_transaction(&key)?;
+                chain_order_cf.delete(
+                    &(key.substate_id.clone(), key.block_height, key.block_id, grant_seq),
+                    OPERATION,
+                )?;
             }
         }
 
@@ -1255,22 +1216,15 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let index_cf = self.db().cf(substate_locks::BlockIdIndex)?;
         let substate_index_cf = self.db().cf(substate_locks::SubstateIdIndex)?;
         let chain_order_cf = self.db().cf(substate_locks::ChainOrderIndex)?;
-        let chain_order_query_cf = self.db().cf(substate_locks::ByChainOrderBlockQuery)?;
         let query_cf = self.db().cf(substate_locks::ByBlockIdQuery)?;
-        let iter = query_cf.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
-        for result in iter {
-            let key = result?;
+        for (key, grant_seq) in query_cf.query_prefix_range_entries(block_id, Ordering::Ascending)? {
             cf.delete(&key, OPERATION)?;
             index_cf.delete(&key, OPERATION)?;
             substate_index_cf.delete(&key, OPERATION)?;
-            // Every chain-order entry under this prefix belongs to the block being removed
-            let prefix = (key.substate_id.clone(), key.block_height, key.block_id);
-            let chain_order_keys = chain_order_query_cf
-                .query_prefix_range_key_iterator(Ordering::Ascending, &prefix)
-                .collect::<Result<Vec<_>, _>>()?;
-            for chain_order_key in chain_order_keys {
-                chain_order_cf.delete(&chain_order_key, OPERATION)?;
-            }
+            chain_order_cf.delete(
+                &(key.substate_id.clone(), key.block_height, key.block_id, grant_seq),
+                OPERATION,
+            )?;
         }
 
         Ok(())
@@ -1373,12 +1327,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let db = self.db();
         let unpruned_query = db.cf(substate::UnprunedDownedValuesEpochQuery)?;
         let unpruned_index = db.cf(substate::UnprunedDownedValuesIndex)?;
-        let iter = unpruned_query.query_prefix_range_iterator(Ordering::Ascending, &epoch);
+        let entries = unpruned_query.query_prefix_range_entries(&epoch, Ordering::Ascending)?;
         let substates_cf = db.cf(SubstateCf)?;
         let mut count = 0usize;
-        for result in iter {
-            let (key, addresses) = result?;
-
+        for (key, addresses) in entries {
             // TODO(perf): consider storing the actual values in a separate column family to avoid get/set
             for substate_addr in addresses {
                 let mut substate = substates_cf.get(&substate_addr, OPERATION)?;
@@ -1424,9 +1376,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let query = self.db().cf(foreign_substate_pledge::ByTransactionIdQuery)?;
 
         for transaction_id in transaction_ids {
-            let iter = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
-            for result in iter {
-                let key = result?;
+            for key in query.query_prefix_range_keys(Ordering::default(), transaction_id)? {
                 cf.delete(&key, OPERATION)?;
             }
         }
@@ -1456,10 +1406,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "pending_state_tree_diffs_remove_by_block";
         let cf = self.db().cf(PendingStateTreeDiffCf)?;
         let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
+        let keys = query.query_prefix_range_keys(Ordering::Ascending, block_id)?;
 
-        for result in iter {
-            let key = result?;
+        for key in keys {
             cf.delete(&key, OPERATION)?;
         }
 
@@ -1473,11 +1422,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "pending_state_tree_diffs_remove_and_return_by_block";
         let cf = self.db().cf(PendingStateTreeDiffCf)?;
         let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
-        let iter = query.query_prefix_range_iterator(Ordering::Ascending, block_id);
+        let entries = query.query_prefix_range_entries(block_id, Ordering::Ascending)?;
 
         let mut diffs = IndexMap::new();
-        for result in iter {
-            let (key, diff) = result?;
+        for (key, diff) in entries {
             let (_, shard) = &key;
             diffs.entry(*shard).or_insert_with(Vec::new).push(diff);
             cf.delete(&key, OPERATION)?;
@@ -1523,6 +1471,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(StateTreeCf)?;
         let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
+        let stale_nodes_cf = self.db().cf(StateTreeStaleNodesCf)?;
 
         let mut delete_buffer = Vec::new();
         let mut total_num_deleted = 0usize;
@@ -1530,18 +1479,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for shard in shards {
             let timer = Instant::now();
             let mut num_deleted = 0;
-            let stale_iter = stale_cf.query_prefix_range_iterator(Ordering::Ascending, &shard);
+            // Only the keys are taken up front: this loop deletes the stale-node record it is reading, and a write
+            // transaction's iterator must not be written through at the key it is standing on. The node lists stay out
+            // of memory, fetched one version at a time, so the delete buffer below still bounds what is held.
+            let stale_keys = stale_cf.query_prefix_range_keys(Ordering::Ascending, &shard)?;
             let max_version = versions_cf.get(&shard, OPERATION).optional()?.unwrap_or(0);
             let Some(to_version) = max_version.checked_sub(self.options.state_history_length) else {
                 trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.state_history_length);
                 continue;
             };
-            for result in stale_iter {
-                let ((shard, version), nodes) = result?;
+            for (shard, version) in stale_keys {
                 // Only delete up to history length back from the max version
                 if version > to_version {
                     break;
                 }
+                let nodes = stale_nodes_cf.get(&(shard, version), OPERATION)?;
 
                 for node in nodes {
                     // Deletes are buffered to ensure that we delete entire subtrees at once.
@@ -1603,9 +1555,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 }
 
                 // Finally delete the stale node record
-                self.db()
-                    .cf(StateTreeStaleNodesCf)?
-                    .delete(&(shard, version), OPERATION)?;
+                stale_nodes_cf.delete(&(shard, version), OPERATION)?;
             }
 
             if num_deleted > 0 {
@@ -1682,9 +1632,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let query = db.cf(lock_conflict::ByTransactionIdQuery)?;
 
         for tx_id in transaction_ids {
-            let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, tx_id);
-            for result in iter {
-                let key = result?;
+            for key in query.query_prefix_range_keys(Ordering::Ascending, tx_id)? {
                 cf.delete(&key, OPERATION)?;
                 // Delete if the dependent transaction and depending transaction are swapped
                 let (transaction_id, block_id, depends_on_tx_id) = key;
@@ -1704,9 +1652,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let query_cf = self.db().cf(lock_conflict::ByBlockIdQuery)?;
         let index_cf = self.db().cf(lock_conflict::LockConflictBlockIdIndex)?;
 
-        let iter = query_cf.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
-        for result in iter {
-            let key = result?;
+        for key in query_cf.query_prefix_range_keys(Ordering::Ascending, block_id)? {
             index_cf.delete(&key, OPERATION)?;
             let (block_id, transaction_id, depends_on_tx) = key;
             cf.delete(&(transaction_id, block_id, depends_on_tx), OPERATION)?;
@@ -1887,11 +1833,10 @@ mod cleanup {
         const OPERATION: &str = "cleanup::foreign_proposals_for_epoch";
         let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
         let cf = db.cf(foreign_proposal::ByEpochQuery)?;
-        let iter = cf.query_end_range_iterator(Ordering::Ascending, &up_to_epoch);
+        let entries = cf.query_end_range_entries(Ordering::Ascending, &up_to_epoch)?;
 
         let mut count = 0;
-        for result in iter {
-            let ((epoch, _), data) = result?;
+        for ((epoch, _), data) in entries {
             db.cf(ForeignProposalCf)?.delete(&data.block_id, OPERATION)?;
             db.cf(foreign_proposal::EpochIndex)?
                 .delete(&(epoch, data.block_id), OPERATION)?;
@@ -1921,11 +1866,10 @@ mod cleanup {
         let index_cf = db.cf(block::EpochHeightIndex)?;
 
         // Don't delete epoch 0 blocks (i.e the zero block)
-        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch(1)..up_to_epoch);
+        let keys = query.query_range_keys(Ordering::Ascending, Epoch(1)..up_to_epoch)?;
 
         let mut count = 0usize;
-        for result in iter {
-            let (epoch, height, block_id) = result?;
+        for (epoch, height, block_id) in keys {
             cf.delete(&block_id, OPERATION)?;
             committed_cf.delete(&block_id, OPERATION)?;
             index_cf.delete(&(epoch, height, block_id), OPERATION)?;
@@ -1963,16 +1907,13 @@ mod cleanup {
         let exec_index_cf = db.cf(block_transaction_execution::BlockIndex)?;
 
         let query = db.cf(finalized_transaction::ByEpochQuery)?;
-        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch::zero()..up_to_epoch);
+        let keys = query.query_range_keys(Ordering::Ascending, Epoch::zero()..up_to_epoch)?;
 
         let mut count = 0usize;
-        for result in iter {
-            let (epoch, tx_id) = result?;
+        for (epoch, tx_id) in keys {
             tx_cf.delete(&tx_id, OPERATION)?;
             link_cf.delete(&tx_id, OPERATION)?;
-            let exec_iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), &tx_id);
-            for result in exec_iter {
-                let (tx_id, block_id, height) = result?;
+            for (tx_id, block_id, height) in exec_query.query_prefix_range_keys(Ordering::default(), &tx_id)? {
                 exec_cf.delete(&(tx_id, block_id, height), OPERATION)?;
                 exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
             }
@@ -2000,9 +1941,9 @@ mod cleanup {
         let mut count = 0usize;
         for key in db
             .cf(validator_liveness_log::ByEpochQuery)?
-            .query_range_key_iterator(Ordering::Ascending, Epoch::zero()..up_to_epoch)
+            .query_range_keys(Ordering::Ascending, Epoch::zero()..up_to_epoch)?
         {
-            cf.delete(&key?, OPERATION)?;
+            cf.delete(&key, OPERATION)?;
             count += 1;
         }
 
@@ -2026,9 +1967,9 @@ mod cleanup {
         let mut count = 0usize;
         for key in db
             .cf(vote_equivocation::ByEpochQuery)?
-            .query_range_key_iterator(Ordering::Ascending, Epoch::zero()..up_to_epoch)
+            .query_range_keys(Ordering::Ascending, Epoch::zero()..up_to_epoch)?
         {
-            cf.delete(&key?, OPERATION)?;
+            cf.delete(&key, OPERATION)?;
             count += 1;
         }
 
@@ -2049,11 +1990,10 @@ mod cleanup {
         let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
         let cf = db.cf(ProposalCertificateCf)?;
         let query = db.cf(certificates::proposal::ByEpochQuery)?;
-        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch(1)..up_to_epoch);
+        let keys = query.query_range_keys(Ordering::Ascending, Epoch(1)..up_to_epoch)?;
 
         let mut count = 0usize;
-        for result in iter {
-            let key = result?;
+        for key in keys {
             cf.delete(&key, OPERATION)?;
             count += 1;
         }
@@ -2067,11 +2007,10 @@ mod cleanup {
 
         let cf = db.cf(TimeoutCertificateCf)?;
         let query = db.cf(certificates::timeout::ByEpochQuery)?;
-        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch(1)..up_to_epoch);
+        let keys = query.query_range_keys(Ordering::Ascending, Epoch(1)..up_to_epoch)?;
 
         let mut count = 0usize;
-        for result in iter {
-            let key = result?;
+        for key in keys {
             cf.delete(&key, OPERATION)?;
             count += 1;
         }

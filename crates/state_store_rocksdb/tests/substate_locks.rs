@@ -22,6 +22,7 @@ use crate::helpers::{
     create_chain,
     create_random_substate_id,
     create_rocksdb,
+    substate_id_seed,
     substate_id_tx_seed,
     transaction_id_from_seed,
 };
@@ -361,4 +362,56 @@ fn a_lock_from_a_branch_below_the_commit_height_is_not_found() {
     assert!(lock.is_none());
 
     tx.rollback().unwrap();
+}
+
+/// Releasing locks must clear every index entry, over a loop long enough to matter.
+///
+/// Both release paths delete the rows they are iterating, and the many-entry case is the one where a lost iterator
+/// position would leave a lock behind. A leftover lock is not visible as corruption; it silently blocks the substate
+/// for good, so the assertion is on the substate being lockable again rather than on any index's contents.
+#[test]
+fn releasing_many_locks_leaves_none_behind() {
+    let (db, _tmp) = create_rocksdb();
+
+    for by_block in [true, false] {
+        let mut tx = db.create_write_tx().unwrap();
+        let chain = create_chain(10);
+        commit_chain(&mut tx, &chain);
+        let b8 = chain[8].as_leaf();
+        let b9 = chain[9].as_leaf();
+
+        let (granted_first, granted_last) = ordered_transaction_ids();
+        let substate_ids = (0..50).map(substate_id_seed).collect::<Vec<_>>();
+
+        let mut locks = IndexMap::new();
+        for id in &substate_ids {
+            locks.insert(id.clone(), vec![
+                SubstateLock::new(granted_first, SubstateVersion::new(0), SubstateLockType::Read, true),
+                SubstateLock::new(granted_last, SubstateVersion::new(1), SubstateLockType::Output, true),
+            ]);
+        }
+        tx.substate_locks_insert_all(&b8, &locks).unwrap();
+
+        for id in &substate_ids {
+            assert!(tx.substate_locks_get_latest_for_substate(&b9, id).is_ok());
+        }
+
+        if by_block {
+            tx.substate_locks_remove_any_by_block_id(b8.block_id()).unwrap();
+        } else {
+            tx.substate_locks_remove_many_for_transactions([&granted_first, &granted_last])
+                .unwrap();
+        }
+
+        for id in &substate_ids {
+            let lock = tx.substate_locks_get_latest_for_substate(&b9, id).optional().unwrap();
+            assert!(lock.is_none(), "lock left behind for {id} (by_block={by_block})");
+        }
+        for tx_id in [&granted_first, &granted_last] {
+            let locked = tx.substate_locks_get_locked_substates_for_transaction(tx_id).unwrap();
+            assert!(locked.is_empty(), "{tx_id} still holds locks (by_block={by_block})");
+        }
+
+        tx.rollback().unwrap();
+    }
 }

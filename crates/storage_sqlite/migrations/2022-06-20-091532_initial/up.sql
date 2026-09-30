@@ -53,33 +53,6 @@ CREATE TABLE committees
 CREATE INDEX committees_validator_node_id_epoch_index ON committees (validator_node_id, epoch);
 
 
-create table templates
-(
-    id                Integer primary key autoincrement not null,
-    -- template name
-    template_name     text                              not null,
-    expected_hash     blob                              not null,
-    -- the address is the hash of the content
-    template_address  blob                              not null,
-    -- where to find the template code
-    url               text                              null,
-    -- the epoch in which the template was published
-    epoch             bigint                            not null,
-    -- The type of template, used to create an enum in code
-    template_type     text                              not null,
-    author_public_key blob                              not null,
-
-    -- template code for the given template type
-    code              blob                              null,
-    status            VARCHAR(20)                       NOT NULL DEFAULT 'New',
-    added_at          timestamp                         NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-
--- fetching by the template_address will be a very common operation
-create unique index templates_template_address_index on templates (template_address);
-
-
 create table epochs
 (
     epoch      bigint primary key not null,

@@ -17,7 +17,7 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
   is written `{"String": ".."}`; `EventSummary::payload` and the indexer's GraphQL event `payload`
   carry each value's JSON form. (#2679)
 - **L1 code template registrations are ignored.** Publish templates on Ootle instead. The node's
-  global database drops its `templates` table on upgrade. (#2725)
+  global database no longer has a `templates` table. (#2725)
 - **Testnet reset: every network starts at `ProtocolVersion::V0`.** The V0 substate preimage now
   covers `exhaust_burn` and `auth_hook_updater`, so every node must wipe its data before
   upgrading.

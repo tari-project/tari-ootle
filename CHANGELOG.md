@@ -3,10 +3,23 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-## [Unreleased]
+## [0.42.0](https://github.com/tari-project/tari-ootle/compare/v0.41.4...v0.42.0) (2026-09-30)
+
+The testnet reset release. Every network restarts at `ProtocolVersion::V0` with a wiped state.
+Metadata values become CBOR, transactions declare read or write intent per input, burn claims prove
+the L1 burn output, a council sets the exhaust burn rate, and the consensus audit's lock and
+certificate fixes land.
 
 ### ⚠️ Upgrade notes
 
+- **Testnet reset: every node wipes its data before upgrading.** Every network starts at
+  `ProtocolVersion::V0`; the V0 substate preimage now covers `exhaust_burn` and
+  `auth_hook_updater`, the substate version is a `u64`, and the storage schemas restart with no
+  migration.
+- **Operators — the validator's web UI is served from its JSON-RPC port, and CORS is off.** Remove
+  `validator_node.web_ui_listener_address` and `validator_node.json_rpc_public_url` from
+  `config.toml`; a stale key fails to load. Set `validator_node.enable_permissive_cors = true` or
+  pass `--enable-permissive-cors` to allow cross-origin browsers. (#2726)
 - **Metadata values are CBOR, not strings.** `Metadata::get` returns the raw encoding: read a value
   with `get_as::<T>()` or `get_str()`, and pass `insert` any encodable value by reference. The
   engine's `std.*` event payloads carry typed amounts and addresses. (#2679)
@@ -16,11 +29,33 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
 - **SDK `ArgValue::Metadata` maps to `ArgValue`s, and event payload values are JSON.** A text value
   is written `{"String": ".."}`; `EventSummary::payload` and the indexer's GraphQL event `payload`
   carry each value's JSON form. (#2679)
+- **Transaction inputs declare read or write intent.** `Transaction::inputs` holds
+  `InputDeclaration`s, and a write to a read-declared input aborts the transaction. (#2640)
+- **A burn claim proves the L1 burn output and must be signed by its claim key.**
+  `MinotariBurnClaimProof` is replaced in place; a claim without the claim key among the
+  transaction's signers is rejected with `AccessDenied`. (#2709)
+- **A stealth statement's revealed amount names its receiver.**
+  `StealthOutputsStatement::revealed_output` pairs the amount with a public key whose badge must be
+  in the transaction's auth scope. (#2645)
 - **L1 code template registrations are ignored.** Publish templates on Ootle instead. The node's
   global database no longer has a `templates` table. (#2725)
-- **Testnet reset: every network starts at `ProtocolVersion::V0`.** The V0 substate preimage now
-  covers `exhaust_burn` and `auth_hook_updater`, so every node must wipe its data before
-  upgrading.
+
+### Consensus
+
+- `feat!` — **A council sets the exhaust burn rate without a release.** A builtin
+  `BurnRateGovernance` component holds the schedule; the rate for each epoch is ratified in the
+  end-of-epoch block header. (#2675)
+- `feat!` — **The timeout certificate binds the committee's high certificate, and the block header
+  commits to it.** (#2636, #2642)
+- `fix!` — **A block id commits to whether the block is a dummy**, so an empty proposal no longer
+  collides with its dummy. (#2694)
+- `feat!` — **LocalOnly commands carry no evidence.** (#2688)
+- `fix!` — **A substate's lock is resolved from the chain that granted it**, so two honest nodes with
+  different branch history agree on it. Pledges and foreign conflict checks read one chain too, and
+  every lock a block grants on one substate is kept. (#2711, #2716, #2720, #2722)
+- `fix` — **Votes and proposals are fsynced before they are sent.** (#2721)
+- `perf` — **The pending chain is read once per block, RocksDB point lookups are cheaper, and epoch
+  and state tree GC run in small transactions.** (#2718, #2719, #2723)
 
 ### Engine
 
@@ -28,18 +63,23 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
   than 64 hex characters. Substate hashes change; this ships with the testnet reset. (#2679)
 - `feat!` — **Metadata is indexed like the rest of a substate**: an address in it counts as a
   reference, and a bucket or proof in it is rejected as transient. (#2679)
-
+- `feat!` — **The substate version is a `u64`**, so a hot substate cannot overflow it. (#2596, #2687)
 - `fix!` — **A fee claim no longer writes the validator fee pool into the transaction diff**: the
   receipt records the claim only as a fee withdrawal, and the pool is no longer priced as storage.
-
+  (#2693)
 - `feat!` — **Transaction receipts list the substates a transaction spent**: `DiffSummary::downed`
   records each substate downed without a later version, such as a spent UTXO. Receipt hashes and
-  stealth fee estimates change; this ships with the testnet reset.
-
+  stealth fee estimates change; this ships with the testnet reset. (#2692)
+- `fix` — **A write to a read-declared input aborts when the substate is kept, not when it is
+  locked.** (#2715)
 - `fix` — **A burn claim must cite an L1 header from an earlier epoch**, so every validator reaches the
   same verdict; a claim citing the current epoch is not yet valid and is retried in the next one.
+  (#2686, #2706)
 - `fix` — **A node that cannot read its own L1 headers aborts the transaction's execution** instead
   of rejecting a claim that may be valid.
+- `perf` — **One WASM instance per template is reused within a transaction, and guest memory
+  reservations are pooled.** Fees are unchanged. (#2697, #2701)
+- `perf` — **Transaction signatures are batch-verified.** (#2695)
 
 ### Transaction manifest
 
@@ -48,6 +88,14 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
   parse, where the old `cbor!` rejected the first and turned the second into a float. (#2679)
 - `feat` — **Manifests take list arguments**, e.g. `gov.set_council(1u16, [var!["k1"], var!["k2"]])`,
   and a variable passed as `"[a, b]"` is a list. `var!` may now be written directly as an argument.
+  (#2717)
+
+### Validator node
+
+- `fix!` — **The web UI is served from the JSON-RPC port and CORS is opt-in.** A page open in a
+  browser on the validator's host can no longer call its JSON-RPC. (#2726)
+- `feat!` — **Each base-layer header stores the L1 `block_output_mr`.** (#2707)
+- `fix` — **The state store is released at shutdown.** (#2714)
 
 ### Indexer
 
@@ -56,13 +104,57 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
   `probed_at_unix_s` and `probe_error`. (#2691)
 - `refactor!` — **`/templates/cached` is removed; use `/templates/catalogue`.** The Rust client's
   `list_cached_templates` and the JS client's `templatesListCached` go with it. (#2725)
+- `fix` — **Failed sync peers are forgotten when the epoch moves.** (#2689)
 
 ### Wallet
 
 - `feat!` — **Public testnets start with an empty tTARI faucet.** Claim tTARI by burning on L1; anyone can
-  refill the faucet through its `deposit` method. LocalNet keeps a funded faucet.
+  refill the faucet through its `deposit` method. LocalNet keeps a funded faucet. (#2724)
 - `feat` — **The web UI disables "Claim Testnet Funds" while the faucet is empty.** `accounts.get_faucet_balance`
-  reports the balance, and a claim against an empty faucet fails with error code `1002`.
+  reports the balance, and a claim against an empty faucet fails with error code `1002`. (#2724)
+- `feat` — **`resources.get` and `resources.get_many` JSON-RPC methods.** (#2700)
+- `fix` — **The JS client covers every walletd JSON-RPC route.** (#2699)
+
+## [0.41.4](https://github.com/tari-project/tari-ootle/compare/v0.41.3...v0.41.4) (2026-09-26)
+
+Hotfix on v0.41.3 to get a testnet that stopped committing, and an indexer that could not sync,
+running again. Both changes are stopgaps until the next testnet reset.
+
+### ⚠️ Upgrade notes
+
+- **Every validator upgrades together.** Replicas vote on blocks v0.41.3 refused, so a mixed
+  committee disagrees on votes. No reset, no data migration.
+
+### Consensus
+
+- `fix` — **Replicas no longer refuse blocks for lock conflicts an honest proposer defers**
+  (#2650's audit H3 guard). A replica's lock state after `prepare` can differ from the proposer's,
+  so every replica refused blocks an honest proposer built and the chain stopped committing. The
+  proposer still defers such transactions; the replica-side check returns once the two lock views
+  are proven identical.
+
+### Engine
+
+- `fix` — **Receipts written before v0.41.0 decode again.** v0.41.0 removed the
+  `SignatureVerification` fee source, so a stored receipt that charged it failed to decode and state
+  sync aborted on it. The variant is restored for decoding only: it is never charged and is left out
+  of `FeeSource::ALL`, so fees are unchanged.
+
+## [0.41.3](https://github.com/tari-project/tari-ootle/compare/v0.41.2...v0.41.3) (2026-09-26)
+
+Hotfix on v0.41.2. A `ClaimBurn` transaction with a crafted merkle proof aborted every validator
+that executed it, and kept aborting them on restart because the transaction stays in the pool.
+
+### ⚠️ Upgrade notes
+
+- **Every validator upgrades together.** A validator still on v0.41.2 aborts when it executes such
+  a transaction; a patched one rejects it. No reset, no data migration.
+
+### Engine
+
+- `fix` — **A claim's merkle proof is decoded with every length prefix bounded by the input.**
+  `tari_mmr` preallocated the declared hash count, so a count of 2^52 aborted the node on an
+  allocation failure before verification could reject it.
 
 ## [0.41.2](https://github.com/tari-project/tari-ootle/compare/v0.41.1...v0.41.2) (2026-09-23)
 

@@ -103,12 +103,13 @@ pub struct ValidatorNodeConfig {
     pub p2p: P2pConfig,
     /// P2P RPC configuration
     pub rpc: RpcConfig,
-    /// JSON-RPC address of the validator node  application
+    /// JSON-RPC address of the validator node application. The Web UI is served from the same address.
     pub json_rpc_listener_address: Option<SocketAddr>,
-    /// The public JSON-RPC url that the Web UI uses, if specified.
-    pub json_rpc_public_url: Option<String>,
-    /// The address to listen on for the Web UI
-    pub web_ui_listener_address: Option<SocketAddr>,
+    /// Allow cross-origin browser requests to the JSON-RPC. Browsers on other origins, such as a Vite dev
+    /// server or the swarm daemon UI, can then drive every JSON-RPC method, including signing layer-one
+    /// transactions. Leave off unless the listener is only reachable by trusted pages.
+    #[serde(default)]
+    pub enable_permissive_cors: bool,
     /// Template config
     pub templates: TemplateConfig,
     /// Fee claim public key
@@ -316,8 +317,7 @@ impl Default for ValidatorNodeConfig {
             p2p: P2pConfig::default(),
             rpc: RpcConfig::default(),
             json_rpc_listener_address: Some("127.0.0.1:18200".parse().unwrap()),
-            json_rpc_public_url: None,
-            web_ui_listener_address: Some("127.0.0.1:5001".parse().unwrap()),
+            enable_permissive_cors: false,
             templates: TemplateConfig::default(),
             // Burn your fees
             fee_claim_public_key: RistrettoPublicKey::default(),

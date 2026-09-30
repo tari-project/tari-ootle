@@ -59,30 +59,15 @@ import type {
   VNSubmitTransactionResponse,
 } from "@tari-project/ootle-ts-bindings";
 
-const DEFAULT_ADDRESS = new URL(
-  import.meta.env.VITE_JRPC_ADDRESS || import.meta.env.VITE_JSON_RPC_ADDRESS || "http://localhost:18200",
-);
-
-export async function getClientAddress(): Promise<URL> {
-  try {
-    let resp = await fetch("/json_rpc_address");
-    if (resp.status === 200) {
-      let url = await resp.text();
-      console.log("Got URL from server:", url);
-      return new URL(url);
-    }
-  } catch (e) {
-    console.warn(e);
-  }
-
-  return DEFAULT_ADDRESS;
-}
+// The validator serves this UI from its JSON-RPC listener, so the same origin is the default.
+// A Vite dev server sets VITE_JSON_RPC_ADDRESS to reach a validator started with --enable-permissive-cors.
+const JSON_RPC_ADDRESS: string =
+  import.meta.env.VITE_JRPC_ADDRESS || import.meta.env.VITE_JSON_RPC_ADDRESS || "/json_rpc";
 
 async function jsonRpc(method: string, params: any = null) {
   let id = 0;
   id += 1;
-  let address = await getClientAddress();
-  let response = await fetch(address, {
+  let response = await fetch(new URL(JSON_RPC_ADDRESS, window.location.origin), {
     method: "POST",
     body: JSON.stringify({
       method: method,

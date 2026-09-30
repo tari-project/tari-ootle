@@ -102,31 +102,6 @@ impl<'a> ProcessContext<'a> {
         self.settings.get(key).map(|s| s.as_str())
     }
 
-    pub fn get_public_json_rpc_url(&self) -> Url {
-        match self.settings.get("public_json_rpc_url") {
-            Some(url) => url.parse().expect("Invalid JSON RPC URL"),
-            None => {
-                let public_ip = self
-                    .settings
-                    .get("public_ip")
-                    .map(|s| {
-                        if s == "127.0.0.1" {
-                            return "localhost";
-                        }
-                        s.as_str()
-                    })
-                    .unwrap_or("localhost");
-                let port = self
-                    .port_allocator
-                    .get("jrpc")
-                    .expect("JSON-rpc port must be allocated before calling get_public_json_rpc_url");
-                format!("http://{public_ip}:{port}")
-                    .parse()
-                    .expect("Invalid JSON RPC URL")
-            },
-        }
-    }
-
     pub fn get_public_api_url(&self) -> Url {
         match self.settings.get("public_api_url") {
             Some(url) => url.parse().expect("Invalid API URL"),

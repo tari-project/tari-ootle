@@ -24,13 +24,12 @@ impl ProcessDefinition for ValidatorNode {
     async fn get_command(&self, mut context: ProcessContext<'_>) -> anyhow::Result<Command> {
         let mut command = Command::new(context.bin());
         let jrpc_port = context.get_free_port("jrpc").await?;
-        let web_ui_port = context.get_free_port("web").await?;
+        // The web UI is served from the JSON-RPC port. Some other components expect a "web" port.
+        context.port_allocator_mut().set_port("web", jrpc_port);
         let p2p_port = context.get_free_port("p2p").await?;
         let listen_ip = context.listen_ip();
 
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
-        let json_rpc_public_url = context.get_public_json_rpc_url();
-        let web_ui_address = format!("{listen_ip}:{web_ui_port}");
 
         let base_node = context
             .minotari_nodes()
@@ -65,13 +64,13 @@ impl ProcessDefinition for ValidatorNode {
             .arg(context.base_path())
             .arg("--network")
             .arg(context.network().to_string())
-            .arg(format!("--json-rpc-public-url={json_rpc_public_url}"))
+            // The swarm web UI polls each validator's JSON-RPC from its own origin
+            .arg("--enable-permissive-cors")
             .arg(format!(
                 "-pepoch_oracle.base_layer.base_node_grpc_url={base_node_grpc_url}"
             ))
             .arg(format!("-pvalidator_node.p2p.listener_port={p2p_port}"))
             .arg(format!("-pvalidator_node.json_rpc_listener_address={json_rpc_address}"))
-            .arg(format!("-pvalidator_node.web_ui_listener_address={web_ui_address}"))
             .arg(format!(
                 "-pvalidator_node.localnet_consensus_constants_file={}",
                 context.consensus_constants_file().display()

@@ -18,11 +18,11 @@
 # The relative path to store persistent data (default = "data/validator_node")
 #data_dir = "data/validator_node"
 
-# JSON-RPC listener address (default = "127.0.0.1:18200")
-#json_rpc_address = "127.0.0.1:18200"
+# JSON-RPC and web UI listener address (default = "127.0.0.1:18200")
+#json_rpc_listener_address = "127.0.0.1:18200"
 
-# HTTP UI listener address (default = "127.0.0.1:5000")
-#web_ui_address = "127.0.0.1:5000"
+# Allow cross-origin browser requests to the JSON-RPC (default = false)
+#enable_permissive_cors = false
 
 # Set to true to enable auto registration for each epoch (default = true)
 #auto_register = true

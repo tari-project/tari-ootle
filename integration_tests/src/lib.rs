@@ -377,10 +377,9 @@ impl TariWorld {
         // vns
         for (name, node) in &self.validator_nodes {
             cucumber_log!(
-                "Validator node \"{}\": json rpc port \"{}\", web ui port \"{}\", temp dir path \"{:?}\"",
+                "Validator node \"{}\": json rpc port \"{}\", temp dir path \"{:?}\"",
                 name,
                 node.json_rpc_port,
-                node.web_ui_port,
                 node.temp_dir_path
             );
         }

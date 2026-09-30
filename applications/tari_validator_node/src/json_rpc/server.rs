@@ -39,6 +39,7 @@ use tokio::task::JoinHandle;
 use tower_http::cors::CorsLayer;
 
 use super::handlers::JsonRpcHandlers;
+use crate::http_ui;
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc";
 
@@ -48,12 +49,13 @@ const LOG_TARGET: &str = "tari::validator_node::json_rpc";
 /// push the handle into `Services.handles` so `join_all` awaits it.
 pub async fn spawn_json_rpc(
     preferred_address: SocketAddr,
+    enable_permissive_cors: bool,
     handlers: JsonRpcHandlers,
     mut shutdown_signal: ShutdownSignal,
     #[cfg(feature = "metrics")] registry: prometheus_client::registry::Registry,
 ) -> Result<(SocketAddr, JoinHandle<Result<(), anyhow::Error>>), anyhow::Error> {
     let router = Router::new()
-        .route("/", post(handler))
+        .route("/", get(http_ui::handler).post(handler))
         .route("/json_rpc", post(handler))
         .route("/health", get(health_check));
     #[cfg(feature = "metrics")]
@@ -62,8 +64,13 @@ pub async fn spawn_json_rpc(
         axum::routing::get(super::metrics::MetricsHandler::new(registry)),
     );
     let router = router
+        .fallback(http_ui::handler)
         .layer(Extension(Arc::new(handlers)))
-        .layer(CorsLayer::permissive());
+        .layer(if enable_permissive_cors {
+            CorsLayer::permissive()
+        } else {
+            CorsLayer::new()
+        });
 
     let listener = try_bind_with_fallback(preferred_address).await?;
     let server = axum::serve(listener, router).with_graceful_shutdown(async move {

@@ -50,7 +50,7 @@ use tokio::task;
 use crate::{
     TariWorld,
     cucumber_log,
-    helpers::{check_join_handle, get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
+    helpers::{check_join_handle, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
 };
 
@@ -60,7 +60,6 @@ pub struct ValidatorNodeProcess {
     pub public_key: RistrettoPublicKeyBytes,
     pub p2p_port: u16,
     pub json_rpc_port: u16,
-    pub web_ui_port: u16,
     pub base_node_grpc_port: u16,
     pub handle: task::JoinHandle<Result<(), anyhow::Error>>,
     pub temp_dir_path: PathBuf,
@@ -212,7 +211,6 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
         localnet_consensus_constants_file,
     } = spawn;
     let (port, json_rpc_port) = get_os_assigned_ports();
-    let web_ui_port = get_os_assigned_port();
     let shutdown = Shutdown::new();
     let handle = task::spawn({
         let shutdown = shutdown.clone();
@@ -236,7 +234,6 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
             config.validator_node.p2p.enable_mdns = false;
             config.validator_node.json_rpc_listener_address =
                 Some(format!("127.0.0.1:{}", json_rpc_port).parse().unwrap());
-            config.validator_node.web_ui_listener_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
             config.validator_node.p2p.listener_port = port;
             config.validator_node.fee_claim_public_key = fee_claim_public_key;
             config.validator_node.localnet_consensus_constants_file = localnet_consensus_constants_file;
@@ -259,7 +256,6 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
         public_key,
         p2p_port: port,
         base_node_grpc_port,
-        web_ui_port,
         handle,
         json_rpc_port,
         temp_dir_path: temp_dir,

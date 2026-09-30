@@ -30,7 +30,6 @@ mod epoch_metrics;
 mod event_subscription;
 mod file_l1_submitter;
 mod genesis_state;
-#[cfg(feature = "web_ui")]
 mod http_ui;
 #[cfg(feature = "metrics")]
 mod inbound_queue_metrics;
@@ -159,6 +158,7 @@ pub async fn run_validator_node(
         let handlers = JsonRpcHandlers::new(&services);
         let (bound_addr, jrpc_handle) = spawn_json_rpc(
             *jrpc_address,
+            config.validator_node.enable_permissive_cors,
             handlers,
             shutdown.to_signal(),
             #[cfg(feature = "metrics")]
@@ -170,26 +170,7 @@ pub async fn run_validator_node(
         // what guarantees the final `Arc<TransactionDB>` clone held by the handlers is
         // dropped before `run_validator_node` returns.
         services.handles.push(jrpc_handle);
-
-        // Run the web ui
-        #[cfg(feature = "web_ui")]
-        if let Some(address) = config.validator_node.web_ui_listener_address {
-            tokio::spawn(http_ui::server::run_http_ui_server(
-                address,
-                config
-                    .validator_node
-                    .json_rpc_public_url
-                    .clone()
-                    .unwrap_or_else(|| jrpc_address.to_string()),
-            ));
-        }
     }
-    #[cfg(not(feature = "web_ui"))]
-    info!(
-        target: LOG_TARGET,
-        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml"
-    );
-
     fs::write(config.common.base_path.join("pid"), process::id().to_string())
         .map_err(|e| ExitError::new(ExitCode::UnknownError, e))?;
     let node = ValidatorNode::new(services);

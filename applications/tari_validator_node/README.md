@@ -17,7 +17,7 @@
 
 ### Web GUI
 
-React frontend that uses the JSON-RPC backend running. By default runs on port 5000.
+React frontend served from the JSON-RPC listener (default `http://127.0.0.1:18200`).
 Shows all information about the VN:
 
 - pub keys
@@ -33,7 +33,9 @@ Source code for this is in the `tari_validator_node_web_ui`
 
 ### JSON-RPC
 
-Server is running by default on port 18145. Exposing all the functionality.
+Server is running by default on `127.0.0.1:18200`, at `/json_rpc`. It exposes every operator function without
+authentication, so keep it off public interfaces. Cross-origin browser requests are refused unless the node is started
+with `--enable-permissive-cors`.
 
 - submit_transaction
 - register_template

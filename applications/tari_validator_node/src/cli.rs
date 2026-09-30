@@ -47,10 +47,9 @@ pub struct Cli {
     /// Bind address for JSON-rpc server
     #[clap(long, alias = "json-rpc-address")]
     pub json_rpc_listener_address: Option<SocketAddr>,
-    #[clap(long, env = "TARI_VN_WEB_UI_LISTENER_ADDRESS", alias = "http-ui-address")]
-    pub web_ui_listener_address: Option<SocketAddr>,
-    #[clap(long, env = "TARI_VN_JSON_RPC_PUBLIC_URL")]
-    pub json_rpc_public_url: Option<String>,
+    /// Allow cross-origin browser requests to the JSON-RPC
+    #[clap(long)]
+    pub enable_permissive_cors: bool,
     #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_VN_MINOTARI_NODE_GRPC_URL")]
     pub epoch_oracle_minotari_node_grpc_url: Option<Url>,
     #[clap(long, alias = "oracle-config")]
@@ -103,17 +102,8 @@ impl ConfigOverrideProvider for Cli {
                 json_rpc_address.to_string(),
             ));
         }
-        if let Some(ref json_rpc_url) = self.json_rpc_public_url {
-            overrides.push((
-                "validator_node.json_rpc_public_url".to_string(),
-                json_rpc_url.to_string(),
-            ));
-        }
-        if let Some(ref web_ui_address) = self.web_ui_listener_address {
-            overrides.push((
-                "validator_node.web_ui_listener_address".to_string(),
-                web_ui_address.to_string(),
-            ));
+        if self.enable_permissive_cors {
+            overrides.push(("validator_node.enable_permissive_cors".to_string(), "true".to_string()));
         }
         if !self.peer_seeds.is_empty() {
             overrides.push((

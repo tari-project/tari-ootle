@@ -83,10 +83,6 @@ impl DryRunTransactionProcessor {
         })
     }
 
-    pub fn template_provider(&self) -> &DryRunTemplateProvider {
-        &self.template_provider
-    }
-
     pub async fn process_transaction(
         &self,
         transaction: Transaction,

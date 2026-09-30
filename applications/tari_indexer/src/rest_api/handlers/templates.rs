@@ -1,11 +1,18 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::borrow::Cow;
+
 use axum::{
     Extension,
     Json,
     extract::{Path, Query},
     response::Response,
+};
+use tari_engine_types::{
+    published_template::PublishedTemplateAddress,
+    static_template_def::extract_template_def,
+    substate::SubstateId,
 };
 use tari_indexer_client::types::{
     GetTemplateDefinitionResponse,
@@ -13,9 +20,9 @@ use tari_indexer_client::types::{
     ListTemplateCatalogueResponse,
     TemplateCatalogueItem,
 };
-use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
+use tari_ootle_common_types::{SubstateRequirementRef, optional::Optional};
+use tari_template_builtin::try_get_template_builtin;
 use tari_template_lib_types::TemplateAddress;
-use tokio::task;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -33,17 +40,33 @@ pub async fn get_template_definition(
     Extension(context): Extension<HandlerContext>,
     Path(template_address): Path<TemplateAddress>,
 ) -> HandlerResult<Response> {
-    let template_provider = context.dry_run_transaction_processor().template_provider().clone();
-    let template = task::spawn_blocking(move || template_provider.get_template(&template_address))
-        .await
-        .map_err(ErrorResponse::anyhow)?
-        .map_err(|err| ErrorResponse::internal_error(format!("Error fetching template: {}", err)))?
-        .ok_or_else(|| ErrorResponse::not_found(format!("Template with address {} not found", template_address)))?;
+    let binary = match try_get_template_builtin(&template_address) {
+        Some(builtin) => Cow::Borrowed(builtin),
+        None => {
+            let id = SubstateId::from(PublishedTemplateAddress::from_template_address(template_address));
+            let substate = context
+                .substate_manager()
+                .get_substate(SubstateRequirementRef::unversioned(&id))
+                .await
+                .optional()
+                .map_err(|err| ErrorResponse::internal_error(format!("Error fetching template: {}", err)))?
+                .ok_or_else(|| {
+                    ErrorResponse::not_found(format!("Template with address {} not found", template_address))
+                })?;
+            let template = substate
+                .into_substate_value()
+                .into_template()
+                .ok_or_else(|| ErrorResponse::internal_error(format!("Substate {} is not a published template", id)))?;
+            Cow::Owned(template.binary.into_bytes().into_vec())
+        },
+    };
+    let definition = extract_template_def(&binary)
+        .map_err(|err| ErrorResponse::internal_error(format!("Invalid template definition: {}", err)))?;
 
     let resp = Json(GetTemplateDefinitionResponse {
-        definition: template.template_def().clone(),
-        name: template.template_name().to_string(),
-        code_size: template.code_size(),
+        name: definition.template_name().to_string(),
+        definition,
+        code_size: binary.len(),
     });
 
     Ok(context.apply_cache_control(resp, 120 * 60))

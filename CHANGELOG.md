@@ -16,6 +16,8 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
 - **SDK `ArgValue::Metadata` maps to `ArgValue`s, and event payload values are JSON.** A text value
   is written `{"String": ".."}`; `EventSummary::payload` and the indexer's GraphQL event `payload`
   carry each value's JSON form. (#2679)
+- **L1 code template registrations are ignored.** Publish templates on Ootle instead. The node's
+  global database drops its `templates` table on upgrade. (#2725)
 - **Testnet reset: every network starts at `ProtocolVersion::V0`.** The V0 substate preimage now
   covers `exhaust_burn` and `auth_hook_updater`, so every node must wipe its data before
   upgrading.
@@ -52,6 +54,8 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
 - `feat!` — **The Validators page marks a snapshot stale when the latest probe failed, and shows the
   failure.** `/network/stats` nests each validator's snapshot under `snapshot`, beside
   `probed_at_unix_s` and `probe_error`. (#2691)
+- `refactor!` — **`/templates/cached` is removed; use `/templates/catalogue`.** The Rust client's
+  `list_cached_templates` and the JS client's `templatesListCached` go with it. (#2725)
 
 ### Wallet
 

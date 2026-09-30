@@ -43,8 +43,6 @@ use crate::{
         ListRecentTransactionsResponse,
         ListTemplateCatalogueRequest,
         ListTemplateCatalogueResponse,
-        ListTemplatesRequest,
-        ListTemplatesResponse,
         ListTransactionReceiptsRequest,
         ListTransactionReceiptsResponse,
         ListUtxosRequest,
@@ -162,13 +160,6 @@ impl IndexerRestApiClient {
         req: ListRecentTransactionsRequest,
     ) -> Result<ListRecentTransactionsResponse, IndexerRestClientError> {
         self.send_get("transactions/recent", req).await
-    }
-
-    pub async fn list_cached_templates(
-        &self,
-        req: ListTemplatesRequest,
-    ) -> Result<ListTemplatesResponse, IndexerRestClientError> {
-        self.send_get("templates/cached", req).await
     }
 
     pub async fn get_template_definition(

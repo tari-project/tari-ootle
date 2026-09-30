@@ -28,7 +28,6 @@ use cucumber::{ScenarioType, World, WriterExt, gherkin::Step, given, then, when,
 use integration_tests::{
     TariWorld,
     cucumber_log,
-    http_server::MockHttpServer,
     logging::{create_log_config_file, get_base_dir},
     miner::{mine_blocks, register_miner_process},
     validator_node_client,
@@ -82,11 +81,7 @@ async fn main() {
             log::info!(target: LOG_TARGET, "-------------------------------------------------------");
             log::info!(target: LOG_TARGET, "\n\n\n");
             world.current_scenario_name = Some(scenario.name.clone());
-            Box::pin(async move {
-                // Each scenario gets a mock connection. As each connection is dropped after the scenario, all the mock
-                // urls are deregistered
-                world.http_server = Some(MockHttpServer::connect().await);
-            })
+            Box::pin(future::ready(()))
         })
         .after(move |_feature, _rule, scenario, _finished, maybe_world| {
             if let Some(world) = maybe_world {

@@ -25,7 +25,7 @@ use std::sync::Arc;
 use super::{BlockHeaderDb, EpochDb, validator_node_db::ValidatorNodeDb};
 use crate::{
     StorageError,
-    global::{backend_adapter::GlobalDbAdapter, metadata_db::MetadataDb, template_db::TemplateDb},
+    global::{backend_adapter::GlobalDbAdapter, metadata_db::MetadataDb},
 };
 
 pub trait DbFactory: Sync + Send + 'static {
@@ -85,13 +85,6 @@ impl<TGlobalDbAdapter: GlobalDbAdapter> GlobalDb<TGlobalDbAdapter> {
         let mut tx = self.create_transaction()?;
         let ret = f(&mut tx)?;
         Ok(ret)
-    }
-
-    pub fn templates<'a, 'tx>(
-        &'a self,
-        tx: &'tx mut TGlobalDbAdapter::DbTransaction<'a>,
-    ) -> TemplateDb<'a, 'tx, TGlobalDbAdapter> {
-        TemplateDb::new(&self.adapter, tx)
     }
 
     pub fn metadata<'a, 'tx>(

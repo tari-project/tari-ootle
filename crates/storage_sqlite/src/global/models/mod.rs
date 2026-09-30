@@ -24,9 +24,6 @@ mod metadata;
 
 pub use metadata::*;
 
-mod template;
-pub use template::*;
-
 mod epoch;
 pub use epoch::*;
 

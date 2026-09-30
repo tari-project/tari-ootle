@@ -111,9 +111,6 @@ Main indexer application settings.
 # Sidechain ID to listen on (optional, hex string)
 #sidechain_id = "a1b2c3d4e5f6..."
 
-# Templates sidechain ID (optional, hex string)
-#templates_sidechain_id = "a1b2c3d4e5f6..."
-
 # Burnt UTXO sidechain ID (optional, hex string)
 #burnt_utxo_sidechain_id = "a1b2c3d4e5f6..."
 ```

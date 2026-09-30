@@ -13,7 +13,7 @@ use integration_tests::{
     claim_proof::CucumberClaimProof,
     cucumber_log,
     template,
-    template::{RegisteredTemplate, send_template_registration},
+    template::RegisteredTemplate,
     validator_node::{ValidatorNodeProcess, spawn_validator_node},
 };
 use libp2p::Multiaddr;
@@ -191,32 +191,6 @@ async fn publish_template(
     world.templates.insert(template_name, registered_template);
 
     world.mark_point_in_logs("End publishing template");
-}
-
-#[when(expr = "base wallet {word} registers the template \"{word}\"")]
-async fn register_template(world: &mut TariWorld, step: &Step, wallet_name: String, template_name: String) {
-    cucumber_log!("==== Step: {}", step.value);
-    world.mark_point_in_logs("Start register template");
-    let template_address = match send_template_registration(world, template_name.clone(), wallet_name).await {
-        Ok(resp) => resp,
-        Err(e) => {
-            cucumber_log!("register_template error = {}", e);
-            panic!("register_template error = {}", e);
-        },
-    };
-    assert!(!template_address.is_empty());
-
-    // store the template address for future reference
-    let registered_template = RegisteredTemplate {
-        name: template_name.clone(),
-        address: template_address,
-    };
-    world.templates.insert(template_name, registered_template);
-
-    world
-        .wait_until_base_nodes_have_transaction_in_mempool(1, Duration::from_secs(10))
-        .await;
-    world.mark_point_in_logs("End register template");
 }
 
 #[then(expr = "all validator nodes are listed as registered")]

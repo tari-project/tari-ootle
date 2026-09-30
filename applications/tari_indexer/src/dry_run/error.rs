@@ -24,11 +24,10 @@ use tari_engine::state_store::StateStoreError;
 use tari_epoch_manager::EpochManagerError;
 use tari_indexer_lib::error::IndexerError;
 use tari_ootle_app_utilities::transaction_executor::TransactionProcessorError;
-use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_rpc_framework::RpcStatus;
 use thiserror::Error;
 
-use crate::{substate_manager::SubstateManagerError, template_manager::TemplateManagerError};
+use crate::substate_manager::SubstateManagerError;
 
 #[derive(Error, Debug)]
 pub enum DryRunTransactionProcessorError {
@@ -46,17 +45,6 @@ pub enum DryRunTransactionProcessorError {
     NonDryRunTransaction,
     #[error("Failed to spawn blocking task: {0}")]
     SpawnBlockingTaskError(#[from] tokio::task::JoinError),
-    #[error("TemplateManager error: {0}")]
-    TemplateManagerError(#[from] TemplateManagerError),
     #[error("SubstateManager error: {0}")]
     SubstateManagerError(#[from] SubstateManagerError),
-}
-
-impl IsNotFoundError for DryRunTransactionProcessorError {
-    fn is_not_found_error(&self) -> bool {
-        match self {
-            DryRunTransactionProcessorError::TemplateManagerError(err) => err.is_not_found_error(),
-            _ => false,
-        }
-    }
 }

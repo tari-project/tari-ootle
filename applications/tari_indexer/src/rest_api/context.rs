@@ -29,7 +29,6 @@ use crate::{
     storage_sqlite::SqliteIndexerStore,
     store::ReadOnlyStore,
     substate_manager::SubstateManager,
-    template_manager::TemplateManager,
     transaction_manager::TransactionManager,
 };
 
@@ -52,7 +51,6 @@ impl HandlerContext {
                 public_key: services.keypair.public_key().to_byte_type(),
                 substate_manager: services.substate_manager.clone(),
                 transaction_manager: services.transaction_manager.clone(),
-                template_manager: services.template_manager.clone(),
                 dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
                 subscriber: services.event_notifier.to_subscriber(),
                 transaction_event_subscriber: services.transaction_event_notifier.to_subscriber(),
@@ -105,10 +103,6 @@ impl HandlerContext {
         &self.inner.read_only_store
     }
 
-    pub fn template_manager(&self) -> &TemplateManager {
-        &self.inner.template_manager
-    }
-
     pub fn dry_run_transaction_processor(&self) -> &DryRunTransactionProcessor {
         &self.inner.dry_run_transaction_processor
     }
@@ -155,7 +149,6 @@ struct InnerContext {
     transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
     read_only_store: ReadOnlyStore<SqliteIndexerStore>,
-    template_manager: TemplateManager,
     dry_run_transaction_processor: DryRunTransactionProcessor,
     subscriber: Subscriber<IndexerEvent>,
     transaction_event_subscriber: Subscriber<TransactionEvent>,

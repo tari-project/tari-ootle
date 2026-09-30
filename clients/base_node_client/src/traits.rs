@@ -8,7 +8,6 @@ use tari_common_types::types::FixedHash;
 use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction_components::transaction_components::CodeTemplateRegistration;
 use tonic::codegen::tokio_stream::Stream;
 
 use crate::{
@@ -34,11 +33,6 @@ pub trait BaseNodeClient: Send + Sync + Clone {
             BaseNodeClientError,
         >,
     > + Send;
-    fn get_template_registrations(
-        &mut self,
-        start_hash: Option<FixedHash>,
-        count: u64,
-    ) -> impl Future<Output = Result<Vec<CodeTemplateRegistration>, BaseNodeClientError>> + Send;
     fn get_header_by_hash(
         &mut self,
         block_hash: &FixedHash,

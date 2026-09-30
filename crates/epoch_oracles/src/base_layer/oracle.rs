@@ -1081,7 +1081,7 @@ mod tests {
     use tari_ootle_common_types::Epoch;
     use tari_ootle_storage::global::BlockHeaderModel;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-    use tari_transaction_components::{tari_amount::MicroMinotari, transaction_components::CodeTemplateRegistration};
+    use tari_transaction_components::tari_amount::MicroMinotari;
 
     use super::{BaseLayerOracle, BaseLayerOracleInner, hash_header, lookup_epoch_boundary_hash};
     use crate::{
@@ -1277,14 +1277,6 @@ mod tests {
             Ok(stream::iter(
                 Vec::<Result<BaseLayerValidatorNode, BaseNodeClientError>>::new(),
             ))
-        }
-
-        async fn get_template_registrations(
-            &mut self,
-            _start_hash: Option<FixedHash>,
-            _count: u64,
-        ) -> Result<Vec<CodeTemplateRegistration>, BaseNodeClientError> {
-            unimplemented!("not used by the reorg tests")
         }
 
         async fn get_header_by_hash(&mut self, block_hash: &FixedHash) -> Result<BlockHeader, BaseNodeClientError> {

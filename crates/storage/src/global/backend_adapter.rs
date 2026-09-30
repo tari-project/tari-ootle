@@ -25,16 +25,10 @@ use std::collections::{HashMap, HashSet};
 use serde::{Serialize, de::DeserializeOwned};
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, SubstateAddress, VotePower, committee::Committee};
-use tari_template_lib_types::{Hash32, TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
-use super::{BlockHeaderModel, EpochData, TemplateStatus};
-use crate::{
-    atomic::AtomicDb,
-    global::{
-        models::ValidatorNode,
-        template_db::{DbTemplate, DbTemplateUpdate},
-    },
-};
+use super::{BlockHeaderModel, EpochData};
+use crate::{atomic::AtomicDb, global::models::ValidatorNode};
 
 pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
     type Addr: NodeAddressable;
@@ -49,41 +43,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         key: &[u8],
         value: &T,
-    ) -> Result<(), Self::Error>;
-
-    fn template_exists(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        key: &TemplateAddress,
-        status: Option<TemplateStatus>,
-    ) -> Result<bool, Self::Error>;
-
-    fn set_status(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        key: &TemplateAddress,
-        status: TemplateStatus,
-    ) -> Result<(), Self::Error>;
-
-    fn get_template(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<Option<DbTemplate>, Self::Error>;
-    fn get_templates(&self, tx: &mut Self::DbTransaction<'_>, limit: usize) -> Result<Vec<DbTemplate>, Self::Error>;
-    fn get_templates_by_addresses<'a, I: IntoIterator<Item = &'a TemplateAddress>>(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        addresses: I,
-    ) -> Result<Vec<DbTemplate>, Self::Error>;
-    fn get_pending_templates(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        limit: usize,
-    ) -> Result<Vec<DbTemplate>, Self::Error>;
-
-    fn insert_template(&self, tx: &mut Self::DbTransaction<'_>, template: DbTemplate) -> Result<(), Self::Error>;
-    fn update_template(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        key: &[u8],
-        template: DbTemplateUpdate,
     ) -> Result<(), Self::Error>;
 
     fn insert_validator_node(

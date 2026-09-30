@@ -64,7 +64,6 @@ const result = await client.submitTransaction({ transaction, is_dry_run: false }
 | Method | HTTP | Path | Description |
 |--------|------|------|-------------|
 | `templatesGet(address)` | GET | `/templates/{template_address}` | Fetch a template definition by its address |
-| `templatesListCached(limit)` | GET | `/templates/cached` | List all templates cached by this indexer |
 
 ### Resources & Non-Fungibles
 

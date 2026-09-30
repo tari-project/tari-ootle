@@ -62,7 +62,6 @@ cucumber = { version = "0.23.0", features = [
     "output-junit",
 ] }
 hex = { workspace = true }
-httpmock = { version = "0.8.0-alpha.1", features = ["remote"] }
 indexmap = { workspace = true }
 multiaddr = { workspace = true }
 libp2p = { workspace = true }

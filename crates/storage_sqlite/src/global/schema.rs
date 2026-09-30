@@ -55,23 +55,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    templates (id) {
-        id -> Integer,
-        template_name -> Text,
-        expected_hash -> Binary,
-        template_address -> Binary,
-        url -> Nullable<Text>,
-        epoch -> BigInt,
-        template_type -> Text,
-        author_public_key -> Binary,
-        code -> Nullable<Binary>,
-        status -> Text,
-        added_at -> Timestamp,
-        metadata_hash -> Nullable<Binary>,
-    }
-}
-
-diesel::table! {
     validator_nodes (id) {
         id -> Integer,
         public_key -> Binary,
@@ -93,6 +76,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     epochs,
     layer_one_transactions,
     metadata,
-    templates,
     validator_nodes,
 );

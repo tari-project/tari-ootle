@@ -63,7 +63,6 @@ streaming interface for consuming UTXO updates from a running indexer.
 | Method | HTTP | Path | Description |
 |--------|------|------|-------------|
 | `get_template_definition(address)` | GET | `/templates/{template_address}` | Fetch a template definition by its address |
-| `list_cached_templates(req)` | GET | `/templates/cached` | List all templates cached by this indexer |
 
 ### Resources & Non-Fungibles
 

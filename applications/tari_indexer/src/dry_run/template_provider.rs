@@ -19,14 +19,10 @@ use crate::substate_manager::{SubstateManager, SubstateManagerError};
 
 /// The dry-run template provider chain, mirroring the validator node:
 /// `[in-memory cache + concurrent-load coalescing] -> [precompiled-module disk cache] -> [network fetch]`.
-///
-/// It deliberately does not read or write the global-db `templates` table, so that table and its associated
-/// `TemplateManager` code can be retired independently.
 pub type DryRunTemplateProvider = MemoryCacheTemplateProvider<DiskCachedWasmTemplateProvider<NetworkTemplateProvider>>;
 
 /// Builds the shared dry-run template provider. `handle` must belong to the runtime that dry runs execute on.
-/// `wasm_cache` is the compiled-module cache instance shared with the
-/// [`crate::template_manager::TemplateManager`]; both work the same directory.
+/// `wasm_cache` is the precompiled-module disk cache.
 pub fn build_dry_run_template_provider(
     handle: Handle,
     substate_manager: SubstateManager,

@@ -63,7 +63,6 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::transactions::get_transaction,
     handlers::transactions::get_transaction_result,
     handlers::templates::get_template_definition,
-    handlers::templates::list_cached_templates,
     handlers::templates::list_template_catalogue,
     handlers::templates::get_template_catalogue_entry,
     handlers::utxos::fetch_utxos,
@@ -207,7 +206,6 @@ impl Server {
                     .route_layer(middleware::from_fn_with_state(sse_limiter("/transactions/events/stream"), sse_limit_middleware)))
             )
             .nest("/templates", Router::new()
-                .route("/cached", get(handlers::templates::list_cached_templates))
                 .route("/watched", get(handlers::watched::list_watched_templates))
                 .route("/catalogue", get(handlers::templates::list_template_catalogue))
                 .route(

@@ -134,7 +134,6 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
                 GrpcMethod::GetTipInfo,
                 GrpcMethod::GetActiveValidatorNodes,
                 GrpcMethod::GetShardKey,
-                GrpcMethod::GetTemplateRegistrations,
                 GrpcMethod::GetHeaderByHash,
                 GrpcMethod::GetSideChainUtxos,
                 GrpcMethod::GetValidatorNodeChanges,

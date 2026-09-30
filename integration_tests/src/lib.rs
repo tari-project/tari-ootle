@@ -30,7 +30,6 @@ use std::{
 
 use base_node::BaseNodeProcess;
 use cucumber::gherkin::Scenario;
-use http_server::MockHttpServer;
 use indexer::IndexerProcess;
 use indexmap::IndexMap;
 use miner::MinerProcess;
@@ -64,7 +63,6 @@ use crate::{
 pub mod base_node;
 pub mod claim_proof;
 pub mod helpers;
-pub mod http_server;
 pub mod indexer;
 pub mod logging;
 pub mod miner;
@@ -88,8 +86,6 @@ pub struct TariWorld {
     pub miners: IndexMap<String, MinerProcess>,
     pub templates: IndexMap<String, RegisteredTemplate>,
     pub outputs: IndexMap<String, IndexMap<String, SubstateRequirement>>,
-    pub http_server: Option<MockHttpServer>,
-    pub template_mock_server_port: Option<u16>,
     pub current_scenario_name: Option<String>,
     /// The consensus constants file every node in this scenario is pointed at. Consensus constants
     /// have to agree across a network, so a scenario authors one file and hands it to each node it
@@ -130,8 +126,6 @@ impl TariWorld {
             miners: IndexMap::new(),
             templates: IndexMap::new(),
             outputs: IndexMap::new(),
-            http_server: None,
-            template_mock_server_port: None,
             current_scenario_name: None,
             consensus_constants_file: None,
             claim_proofs: HashMap::new(),
@@ -193,10 +187,6 @@ impl TariWorld {
 
     pub fn get_current_scenario_name(&self) -> &str {
         self.current_scenario_name.as_deref().expect("No current scenario")
-    }
-
-    pub fn get_mock_server(&self) -> &MockHttpServer {
-        self.http_server.as_ref().unwrap()
     }
 
     pub fn get_miner(&self, name: &str) -> &MinerProcess {
@@ -275,8 +265,6 @@ impl TariWorld {
     }
 
     pub fn after(&mut self, _scenario: &Scenario) {
-        let _drop = self.http_server.take();
-
         for (name, mut p) in self.indexers.drain(..) {
             cucumber_log!("Shutting down indexer {}", name);
             p.shutdown.trigger();
@@ -444,8 +432,6 @@ impl Debug for TariWorld {
             .field("miners", &self.miners.keys())
             .field("templates", &self.templates.keys())
             .field("outputs", &self.outputs.keys())
-            .field("http_server", &self.http_server)
-            .field("template_mock_server_port", &self.template_mock_server_port)
             .field("current_scenario_name", &self.current_scenario_name)
             .field("claim_proofs", &self.claim_proofs.keys())
             .field("addresses", &self.substate_ids.keys())

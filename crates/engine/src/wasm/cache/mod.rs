@@ -17,8 +17,7 @@
 //!
 //! Two surfaces are exposed:
 //!
-//! - [`WasmModuleCache`] — low-level helper for callers that sit outside a `TemplateProvider` chain (e.g. the indexer's
-//!   `TemplateManager`).
+//! - [`WasmModuleCache`] — low-level helper for callers that sit outside a `TemplateProvider` chain.
 //! - [`DiskCachedWasmTemplateProvider`] — a `TemplateProvider` middleware that wraps a raw `PublishedTemplate` provider
 //!   and outputs `LoadedTemplate`, doing compile-or-deserialize behind the scenes.
 
@@ -997,16 +996,12 @@ impl<TStore> DiskCachedWasmTemplateProvider<TStore> {
 /// substate had been resolved before it was written, and templates are immutable and are never
 /// destroyed, so an artifact that was right when written stays right.
 ///
-/// Each writer establishes that for itself, and there are two. This provider stores only what
-/// `inner.get_template` has just served. The indexer's `TemplateManager` shares the same
-/// `WasmModuleCache` and stores from its own `templates` table, where the rows that reach it are
-/// written by `add_and_load_template` after the template's substate was fetched. Its builtin rows are
-/// `Active` as well and stay out of the directory: `load_template_with_cache` answers a builtin from
-/// its own precache, and this provider resolves builtin addresses without consulting the cache at
-/// all — their addresses are constants rather than hashes of their binaries, so an artifact filed
-/// under one would outlive the binary it came from.
+/// This provider is the directory's only writer, and it stores only what `inner.get_template` has
+/// just served. It resolves builtin addresses without consulting the cache at all — their addresses are constants
+/// rather than hashes of their binaries, so an artifact filed under one would outlive the binary it
+/// came from.
 ///
-/// A third writer owes this path the same guarantee. `call_function` resolves a template through the
+/// Any other writer owes this path the same guarantee. `call_function` resolves a template through the
 /// provider and nothing else, so a node serving an artifact for a substate that does not exist
 /// executes a call every other node aborts.
 impl<TStore> TemplateProvider for DiskCachedWasmTemplateProvider<TStore>

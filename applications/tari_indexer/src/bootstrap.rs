@@ -83,7 +83,6 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::all_builtin_templates;
 use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
-use tokio::task;
 
 use crate::{
     ApplicationConfig,
@@ -99,7 +98,6 @@ use crate::{
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
     substate_cache::SqliteSubstateCache,
     substate_manager::SubstateManager,
-    template_manager::TemplateManager,
     transaction_gossip::TransactionGossipService,
     transaction_manager::TransactionManager,
     transaction_pruner::TransactionPruner,
@@ -328,9 +326,7 @@ pub async fn spawn_services(
     )
     .spawn(shutdown.clone());
 
-    // Template manager
     let wasm_cache_dir = config.to_data_dir().join("wasm_cache");
-    // One instance serves every consumer of the directory, each holding a clone.
     let wasm_cache = WasmModuleCache::open(&wasm_cache_dir, config.indexer.templates.max_disk_cache_size_bytes())
         .map_err(|e| {
             anyhow!(
@@ -339,18 +335,6 @@ pub async fn spawn_services(
                 e,
             )
         })?;
-
-    let template_manager = task::spawn_blocking({
-        let global_db = global_db.clone();
-        let substate_manager = substate_manager.clone();
-        let wasm_cache = wasm_cache.clone();
-        move || {
-            let manager = TemplateManager::initialize(global_db, substate_manager, wasm_cache)?;
-            anyhow::Ok(manager)
-        }
-    })
-    .await
-    .context("template manager init thread panicked")??;
 
     // Dry run - use a shorter cache TTL for more accurate fee estimates. A nonexistent input is held
     // for the shorter of the two: an input resolved as absent estimates a transaction that would in
@@ -455,7 +439,6 @@ pub async fn spawn_services(
         _validator_node_client_factory: validator_node_client_factory,
         store,
         global_db,
-        template_manager,
         substate_manager,
         transaction_manager,
         dry_run_transaction_processor,
@@ -476,7 +459,6 @@ pub struct Services {
     pub _validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     pub store: SqliteIndexerStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-    pub template_manager: TemplateManager,
     pub substate_manager: SubstateManager,
     pub transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,

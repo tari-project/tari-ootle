@@ -182,41 +182,6 @@ pub struct SubmitTransactionDryRunResponse {
     pub result: ExecuteResult,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListTemplatesRequest {
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListTemplatesResponse {
-    pub templates: Vec<TemplateMeta>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct TemplateMeta {
-    pub name: String,
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub address: TemplateAddress,
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub binary_sha: Hash32,
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub author_public_key: RistrettoPublicKeyBytes,
-    pub code_size: usize,
-    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
-    pub epoch: Epoch,
-    /// Optional multihash of off-chain CBOR metadata
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub metadata_hash: Option<MetadataHash>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]

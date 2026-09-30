@@ -29,8 +29,6 @@ use tari_ootle_storage::StorageError;
 use tari_template_lib::types::HashParseError;
 use thiserror::Error;
 
-use crate::global::models::TemplateConversionError;
-
 #[derive(Debug, Error)]
 pub enum SqliteStorageError {
     #[error("{item} not found with key {key}")]
@@ -76,8 +74,6 @@ pub enum SqliteStorageError {
     },
     #[error("Hash parsing error: {0}")]
     HashParse(#[from] HashParseError),
-    #[error("Template conversion error: {0}")]
-    TemplateConversion(#[from] TemplateConversionError),
 }
 
 impl From<SqliteStorageError> for StorageError {

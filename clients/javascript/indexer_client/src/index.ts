@@ -24,7 +24,6 @@ import type {
   IndexerReadyResponse,
   ListRecentTransactionsRequest,
   ListRecentTransactionsResponse,
-  ListTemplatesResponse,
   ListTransactionReceiptsRequest,
   ListTransactionReceiptsResponse,
   ListValidatorsRequest,
@@ -162,10 +161,6 @@ export class IndexerClient {
 
   public templatesGet(template_address: string): Promise<TemplatesGetResponse> {
     return this.transport.sendGet(`templates/${encodeURIComponent(template_address)}`, {});
-  }
-
-  public templatesListCached(limit: number = 0): Promise<ListTemplatesResponse> {
-    return this.transport.sendGet(`templates/cached`, { limit });
   }
 
   public resourcesGet(address: ResourceAddress): Promise<GetResourceResponse> {

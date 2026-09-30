@@ -32,7 +32,6 @@ use tari_common_types::types::FixedHash;
 use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateVersion};
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
-use tari_transaction_components::transaction_components::CodeTemplateRegistration;
 use tari_utilities::ByteArray;
 use tonic::codegen::tokio_stream::Stream;
 use url::Url;
@@ -187,48 +186,6 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             });
 
         Ok(Box::pin(stream))
-    }
-
-    async fn get_template_registrations(
-        &mut self,
-        start_hash: Option<FixedHash>,
-        count: u64,
-    ) -> Result<Vec<CodeTemplateRegistration>, BaseNodeClientError> {
-        let inner = self.connection().await?;
-        let request = grpc::GetTemplateRegistrationsRequest {
-            start_hash: start_hash.map(|v| v.to_vec()).unwrap_or_default(),
-            count,
-        };
-        let mut templates = vec![];
-        let mut stream = inner.get_template_registrations(request).await?.into_inner();
-        loop {
-            match stream.message().await {
-                Ok(Some(val)) => {
-                    let template_registration: CodeTemplateRegistration = val
-                        .registration
-                        .ok_or_else(|| {
-                            BaseNodeClientError::InvalidPeerMessage(
-                                "Base node returned no template registration".to_string(),
-                            )
-                        })?
-                        .try_into()
-                        .map_err(|_| {
-                            BaseNodeClientError::InvalidPeerMessage("invalid template registration".to_string())
-                        })?;
-                    templates.push(template_registration);
-                },
-                Ok(None) => {
-                    break;
-                },
-                Err(e) => {
-                    return Err(BaseNodeClientError::InvalidPeerMessage(format!(
-                        "Error reading stream: {}",
-                        e
-                    )));
-                },
-            }
-        }
-        Ok(templates)
     }
 
     async fn get_header_by_hash(&mut self, block_hash: &FixedHash) -> Result<BlockHeader, BaseNodeClientError> {

@@ -23,6 +23,7 @@
 //! Serves the embedded Web UI from the JSON-RPC listener.
 
 use axum::{
+    body::Body,
     http::{HeaderValue, Response, StatusCode, Uri, header},
     response::IntoResponse,
 };
@@ -53,11 +54,11 @@ fn default_page(title: &str, message: &str) -> String {
     )
 }
 
-fn html_response(body: String) -> Response<String> {
+fn html_response(body: String) -> Response<Body> {
     Response::builder()
         .header(header::CONTENT_TYPE, HeaderValue::from_static("text/html"))
         .status(StatusCode::OK)
-        .body(body)
+        .body(Body::from(body))
         .unwrap()
 }
 
@@ -79,7 +80,7 @@ mod enabled {
         if let Some(body) = PROJECT_DIR
             .get_file(path)
             .or_else(|| PROJECT_DIR.get_file("index.html"))
-            .and_then(|file| file.contents_utf8())
+            .map(|file| file.contents())
         {
             let mime_type =
                 mime_guess::from_path(path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
@@ -88,7 +89,7 @@ mod enabled {
             return Response::builder()
                 .header(header::CONTENT_TYPE, content_type)
                 .status(StatusCode::OK)
-                .body(body.to_owned())
+                .body(Body::from(body))
                 .unwrap();
         }
         html_response(default_page(

@@ -404,7 +404,7 @@ pub enum TransactionRejectionStatus {
 
 /// Filters for the event queries. A `topic` containing `*` is matched segment-wise, as
 /// [`EventFilter::topic_matches`] matches the live stream; any other topic must match exactly.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EventQuery {
     pub topic: Option<String>,
     pub substate_id: Option<SubstateId>,

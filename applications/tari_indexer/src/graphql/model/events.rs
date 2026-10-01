@@ -76,6 +76,9 @@ pub struct EventQuery;
 
 #[Object]
 impl EventQuery {
+    /// Events newest first. A wildcard `topic` examines only the newest 10,000 events, so a short
+    /// or empty result does not mean the history holds no older match; page past that window with
+    /// REST `/transactions/events` and `before_id`.
     pub async fn get_events(
         &self,
         ctx: &Context<'_>,

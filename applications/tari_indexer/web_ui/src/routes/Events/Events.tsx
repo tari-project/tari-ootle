@@ -49,9 +49,14 @@ import { truncateText } from "../../utils/helpers";
 
 const PAGE_SIZE = 10;
 
+type Cursor = number | bigint | string;
+
 function EventsLayout() {
   const [events, setEvents] = useState<Array<[string, Event]>>([]);
   const [page, setPage] = useState(0);
+  // cursors[n] is the before_id that loads page n; page 0 starts from the newest event.
+  const [cursors, setCursors] = useState<Array<Cursor | null>>([null]);
+  const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
   const [selectedPayload, setSelectedPayload] = useState({});
   const [filter, setFilter] = useState({
@@ -60,24 +65,33 @@ function EventsLayout() {
   });
 
   useEffect(() => {
-    getEvents(page, PAGE_SIZE, filter).then(setEvents);
+    loadPage(null, filter);
   }, []);
 
-  async function getEvents(offset: number, limit: number, filter: any) {
+  async function loadPage(beforeId: Cursor | null, filter: any) {
     const resp = await queryTransactionEvents({
       topic: filter.topic,
       substate_id: filter.substate_id || null,
-      limit,
-      offset,
+      limit: PAGE_SIZE,
+      offset: null,
+      before_id: beforeId,
     });
-
-    return resp.events;
+    setEvents(resp.events);
+    setNextCursor(resp.next_before_id ?? null);
   }
 
   async function handleChangePage(newPage: number) {
-    const offset = newPage * PAGE_SIZE;
-    const events = await getEvents(offset, PAGE_SIZE, filter);
-    setEvents(events);
+    if (newPage > page) {
+      if (nextCursor === null) {
+        return;
+      }
+      setCursors([...cursors.slice(0, newPage), nextCursor]);
+      await loadPage(nextCursor, filter);
+    } else if (newPage < page) {
+      await loadPage(cursors[newPage], filter);
+    } else {
+      return;
+    }
     setPage(newPage);
   }
 
@@ -106,9 +120,8 @@ function EventsLayout() {
 
     setFilter(newFilter);
 
-    const offset = 0;
-    let events = await getEvents(offset, PAGE_SIZE, newFilter);
-    setEvents(events);
+    setCursors([null]);
+    await loadPage(null, newFilter);
     setPage(0);
   };
 
@@ -194,7 +207,7 @@ function EventsLayout() {
               <KeyboardArrowLeftIcon />
             </IconButton>
             <Typography sx={{}}>{page}</Typography>
-            <IconButton aria-label="copy" onClick={() => handleChangePage(page + 1)}>
+            <IconButton aria-label="copy" disabled={nextCursor === null} onClick={() => handleChangePage(page + 1)}>
               <KeyboardArrowRightIcon />
             </IconButton>
           </Stack>

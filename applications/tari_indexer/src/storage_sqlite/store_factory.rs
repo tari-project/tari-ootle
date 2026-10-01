@@ -1670,8 +1670,10 @@ mod tests {
     fn topic_query(topic: &str, wildcard_scan_limit: u32) -> crate::store::EventQuery {
         crate::store::EventQuery {
             topic: Some(topic.to_string()),
+            substate_id: None,
+            template_address: None,
+            resource_address: None,
             wildcard_scan_limit,
-            ..Default::default()
         }
     }
 

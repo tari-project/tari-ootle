@@ -31,6 +31,9 @@ const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::transaction_events"
 const MAX_REPLAY_EVENTS: u32 = 10_000;
 /// Page size for DB replay queries.
 const REPLAY_PAGE_SIZE: u32 = 500;
+/// Pages one catch-up may read. A wildcard page can examine `WILDCARD_TOPIC_SCAN_LIMIT` rows and
+/// deliver none, so the budget counts pages rather than delivered events.
+const MAX_REPLAY_PAGES: u32 = MAX_REPLAY_EVENTS / REPLAY_PAGE_SIZE;
 
 #[utoipa::path(
     get,
@@ -143,33 +146,13 @@ async fn run_replay_then_live(
     tx: &tokio::sync::mpsc::Sender<Result<sse::Event, axum::Error>>,
 ) -> Result<(), anyhow::Error> {
     // Phase 1: Replay from DB
-    let mut highest_id = after_id;
-    let mut total_replayed = 0u32;
-
     let query = replay_query(&filter);
-    loop {
-        let page = store
-            .get_events_after_id(query.clone(), highest_id, REPLAY_PAGE_SIZE)
-            .await?;
+    let Some(mut highest_id) = replay_stored(&store, &query, after_id, tx).await? else {
+        // Client disconnected
+        return Ok(());
+    };
 
-        for (id, transaction_id, event) in &page.events {
-            highest_id = *id;
-            total_replayed += 1;
-
-            let sse_event = encode_replay_event(*id, transaction_id, event);
-            if tx.send(sse_event).await.is_err() {
-                // Client disconnected
-                return Ok(());
-            }
-        }
-
-        match page.next_cursor {
-            Some(cursor) if total_replayed < MAX_REPLAY_EVENTS => highest_id = cursor,
-            _ => break,
-        }
-    }
-
-    debug!(target: LOG_TARGET, "SSE replay complete: {} events replayed (highest_id={})", total_replayed, highest_id);
+    debug!(target: LOG_TARGET, "SSE replay complete (highest_id={})", highest_id);
 
     // Phase 2: Live stream with dedup
     loop {
@@ -191,24 +174,9 @@ async fn run_replay_then_live(
             },
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                 warn!(target: LOG_TARGET, "SSE broadcast lagged by {} events, catching up from DB (highest_id={})", n, highest_id);
-                // Iteratively catch up from DB in pages until we've replayed everything
-                loop {
-                    let page = store
-                        .get_events_after_id(query.clone(), highest_id, REPLAY_PAGE_SIZE)
-                        .await?;
-
-                    for (id, transaction_id, event) in &page.events {
-                        highest_id = *id;
-                        let sse_event = encode_replay_event(*id, transaction_id, event);
-                        if tx.send(sse_event).await.is_err() {
-                            return Ok(());
-                        }
-                    }
-
-                    match page.next_cursor {
-                        Some(cursor) => highest_id = cursor,
-                        None => break,
-                    }
+                match replay_stored(&store, &query, highest_id, tx).await? {
+                    Some(caught_up_to) => highest_id = caught_up_to,
+                    None => return Ok(()),
                 }
             },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -216,6 +184,37 @@ async fn run_replay_then_live(
             },
         }
     }
+}
+
+/// Sends the stored events matching `query` with id above `after_id`, reading at most
+/// `MAX_REPLAY_PAGES` pages. Returns the id the client has been brought up to, or `None` if the
+/// client disconnected.
+async fn replay_stored(
+    store: &ReadOnlyStore<SqliteIndexerStore>,
+    query: &EventQuery,
+    after_id: i64,
+    tx: &tokio::sync::mpsc::Sender<Result<sse::Event, axum::Error>>,
+) -> Result<Option<i64>, anyhow::Error> {
+    let mut highest_id = after_id;
+    for _ in 0..MAX_REPLAY_PAGES {
+        let page = store
+            .get_events_after_id(query.clone(), highest_id, REPLAY_PAGE_SIZE)
+            .await?;
+
+        for (id, transaction_id, event) in &page.events {
+            highest_id = *id;
+            let sse_event = encode_replay_event(*id, transaction_id, event);
+            if tx.send(sse_event).await.is_err() {
+                return Ok(None);
+            }
+        }
+
+        match page.next_cursor {
+            Some(cursor) => highest_id = cursor,
+            None => break,
+        }
+    }
+    Ok(Some(highest_id))
 }
 
 fn replay_query(filter: &EventFilter) -> EventQuery {

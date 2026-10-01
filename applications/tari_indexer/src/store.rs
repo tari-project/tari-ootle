@@ -116,26 +116,24 @@ pub trait IndexerStoreReadTransaction {
         offset: usize,
     ) -> Result<Vec<NonFungibleSubstate>, StorageError>;
 
+    /// Returns the events matching `query` with id below `before_id` (or from the newest when
+    /// `None`), newest first, skipping the first `offset` matches.
     fn get_events(
         &mut self,
-        substate_id_filter: Option<&SubstateId>,
-        topic_filter: Option<&str>,
-        resource_address_filter: Option<&ResourceAddress>,
+        query: &EventQuery,
+        before_id: Option<i64>,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<(TransactionId, Event)>, StorageError>;
+    ) -> Result<EventsPage, StorageError>;
 
-    /// Get events with id > after_id, ordered ascending by id.
-    /// Used for SSE catch-up/replay.
+    /// Returns the events matching `query` with id above `after_id`, oldest first. Used for SSE
+    /// catch-up/replay.
     fn get_events_after_id(
         &mut self,
+        query: &EventQuery,
         after_id: i64,
-        topic_filter: Option<&str>,
-        substate_id_filter: Option<&SubstateId>,
-        template_address_filter: Option<&TemplateAddress>,
-        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
-    ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError>;
+    ) -> Result<EventsPage, StorageError>;
 
     /// Lists stored transactions newest first, optionally restricted to a single source.
     fn list_recent_transactions(
@@ -404,6 +402,34 @@ pub enum TransactionRejectionStatus {
     },
 }
 
+/// Filters for the event queries. A `topic` containing `*` is matched segment-wise, as
+/// [`EventFilter::topic_matches`] matches the live stream; any other topic must match exactly.
+#[derive(Debug, Clone, Default)]
+pub struct EventQuery {
+    pub topic: Option<String>,
+    pub substate_id: Option<SubstateId>,
+    pub template_address: Option<TemplateAddress>,
+    pub resource_address: Option<ResourceAddress>,
+    /// The most rows a wildcard topic query examines per call. A wildcard cannot use an index, so
+    /// this bounds the call's cost however rare the matches are; `next_cursor` resumes the scan.
+    pub wildcard_scan_limit: u32,
+}
+
+impl EventQuery {
+    pub fn wildcard_topic(&self) -> Option<&str> {
+        self.topic.as_deref().filter(|t| t.contains('*'))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EventsPage {
+    pub events: Vec<(i64, TransactionId, Event)>,
+    /// The id to resume from (`before_id` or `after_id`, matching the query's direction), or
+    /// `None` once no further rows can match. A page can be shorter than the limit, or empty,
+    /// and still carry a cursor when a wildcard scan stopped at its limit.
+    pub next_cursor: Option<i64>,
+}
+
 /// An event that was inserted into the database, with its assigned auto-increment ID.
 #[derive(Debug, Clone)]
 pub struct InsertedEvent {
@@ -532,52 +558,24 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
 
     pub async fn get_events(
         &self,
-        substate_id_filter: Option<&SubstateId>,
-        topic_filter: Option<&str>,
-        resource_address_filter: Option<&ResourceAddress>,
+        query: EventQuery,
+        before_id: Option<i64>,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
-        let substate_id_filter = substate_id_filter.cloned();
-        let topic_filter = topic_filter.map(str::to_owned);
-        let resource_address_filter = resource_address_filter.copied();
+    ) -> Result<EventsPage, StorageError> {
         self.inner
-            .with_read_tx(move |tx| {
-                tx.get_events(
-                    substate_id_filter.as_ref(),
-                    topic_filter.as_deref(),
-                    resource_address_filter.as_ref(),
-                    offset,
-                    limit,
-                )
-            })
+            .with_read_tx(move |tx| tx.get_events(&query, before_id, offset, limit))
             .await
     }
 
     pub async fn get_events_after_id(
         &self,
+        query: EventQuery,
         after_id: i64,
-        topic_filter: Option<&str>,
-        substate_id_filter: Option<&SubstateId>,
-        template_address_filter: Option<&TemplateAddress>,
-        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
-    ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
-        let topic_filter = topic_filter.map(str::to_owned);
-        let substate_id_filter = substate_id_filter.cloned();
-        let template_address_filter = template_address_filter.copied();
-        let resource_address_filter = resource_address_filter.copied();
+    ) -> Result<EventsPage, StorageError> {
         self.inner
-            .with_read_tx(move |tx| {
-                tx.get_events_after_id(
-                    after_id,
-                    topic_filter.as_deref(),
-                    substate_id_filter.as_ref(),
-                    template_address_filter.as_ref(),
-                    resource_address_filter.as_ref(),
-                    limit,
-                )
-            })
+            .with_read_tx(move |tx| tx.get_events_after_id(&query, after_id, limit))
             .await
     }
 

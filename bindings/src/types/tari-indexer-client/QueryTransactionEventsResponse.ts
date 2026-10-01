@@ -2,4 +2,12 @@
 import type { Event } from "../Event";
 import type { TransactionId } from "../TransactionId";
 
-export type QueryTransactionEventsResponse = { events: Array<[TransactionId, Event]> };
+export type QueryTransactionEventsResponse = {
+  events: Array<[TransactionId, Event]>;
+  /**
+   * The `before_id` for the next page, or `None` once no older event can match. A wildcard
+   * topic query examines a bounded number of events per request, so a page can be short, or
+   * empty, and still carry a cursor.
+   */
+  next_before_id?: bigint | null;
+};

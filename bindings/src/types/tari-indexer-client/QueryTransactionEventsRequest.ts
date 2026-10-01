@@ -15,5 +15,12 @@ export type QueryTransactionEventsRequest = {
    */
   resource_address?: ResourceAddress | null;
   limit: number | null;
+  /**
+   * Matches to skip, at most 10,000. Page deeper with `before_id`.
+   */
   offset: number | null;
+  /**
+   * Return only events older than this cursor. Pass the previous page's `next_before_id`.
+   */
+  before_id?: number | bigint | string | null;
 };

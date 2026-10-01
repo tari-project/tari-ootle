@@ -1643,15 +1643,15 @@ mod tests {
         assert!(put(&store, &substate(9), SubstateVersion::new(1), 100).await);
     }
 
-    #[tokio::test]
-    async fn a_wildcard_topic_filter_matches_underscores_literally() {
+    /// A store holding one event per topic, with ids 1.. in the order given.
+    async fn store_with_events(topics: &[&str]) -> (tempfile::TempDir, SqliteIndexerStore) {
         use crate::storage_sqlite::{models::NewEvent, schema::events, serialization::serialize_json};
 
         let (dir, store) = temp_store().await;
         let mut conn = SqliteConnection::establish(dir.path().join("indexer.db").to_str().unwrap()).unwrap();
         let tx_hash = FixedHash::zero().to_string();
         let payload = serialize_json(&tari_template_lib_types::Metadata::new()).unwrap();
-        for topic in ["my_template.minted", "myXtemplate.minted"] {
+        for topic in topics {
             diesel::insert_into(events::table)
                 .values(NewEvent {
                     template_address: FixedHash::zero().to_string(),
@@ -1664,19 +1664,118 @@ mod tests {
                 .execute(&mut conn)
                 .unwrap();
         }
+        (dir, store)
+    }
 
-        let events = store
-            .with_read_tx(|tx| tx.get_events(None, Some("my_template.*"), None, 0, 10))
+    fn topic_query(topic: &str, wildcard_scan_limit: u32) -> crate::store::EventQuery {
+        crate::store::EventQuery {
+            topic: Some(topic.to_string()),
+            wildcard_scan_limit,
+            ..Default::default()
+        }
+    }
+
+    fn page_ids(page: &crate::store::EventsPage) -> Vec<i64> {
+        page.events.iter().map(|(id, _, _)| *id).collect()
+    }
+
+    #[tokio::test]
+    async fn a_wildcard_topic_filter_matches_underscores_literally() {
+        let (_dir, store) = store_with_events(&["my_template.minted", "myXtemplate.minted"]).await;
+        let query = topic_query("my_template.*", 100);
+
+        let q = query.clone();
+        let page = store
+            .with_read_tx(move |tx| tx.get_events(&q, None, 0, 10))
             .await
             .unwrap();
-        let topics = events.iter().map(|(_, e)| e.topic()).collect::<Vec<_>>();
-        assert_eq!(topics, vec!["my_template.minted"]);
+        assert_eq!(page_ids(&page), vec![1]);
 
-        let events = store
-            .with_read_tx(|tx| tx.get_events_after_id(0, Some("my_template.*"), None, None, None, 10))
+        let page = store
+            .with_read_tx(move |tx| tx.get_events_after_id(&query, 0, 10))
             .await
             .unwrap();
-        let topics = events.iter().map(|(_, _, e)| e.topic()).collect::<Vec<_>>();
-        assert_eq!(topics, vec!["my_template.minted"]);
+        assert_eq!(page_ids(&page), vec![1]);
+    }
+
+    #[tokio::test]
+    async fn a_wildcard_matches_exactly_one_topic_segment() {
+        let (_dir, store) = store_with_events(&["std.vault.deposit", "std.mint", "std.vault.deposit.extra"]).await;
+
+        for (pattern, expected) in [("std.*", vec![2]), ("std.*.deposit", vec![1])] {
+            let query = topic_query(pattern, 100);
+            let page = store
+                .with_read_tx(move |tx| tx.get_events_after_id(&query, 0, 10))
+                .await
+                .unwrap();
+            assert_eq!(page_ids(&page), expected, "pattern {pattern}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_wildcard_query_examines_at_most_the_scan_limit_and_resumes_by_cursor() {
+        // Only the oldest of 25 events matches.
+        let mut topics = vec!["rare.hit"];
+        topics.extend(std::iter::repeat_n("common.miss", 24));
+        let (_dir, store) = store_with_events(&topics).await;
+        let query = topic_query("rare.*", 10);
+
+        let mut cursor = None;
+        let mut calls = 0;
+        let mut found = Vec::new();
+        loop {
+            let q = query.clone();
+            let page = store
+                .with_read_tx(move |tx| tx.get_events(&q, cursor, 0, 5))
+                .await
+                .unwrap();
+            calls += 1;
+            found.extend(page_ids(&page));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        assert_eq!(found, vec![1]);
+        // 25 rows at 10 per call: the first two calls return empty pages that still carry a cursor.
+        assert_eq!(calls, 3);
+
+        let mut after = 0;
+        let mut found = Vec::new();
+        loop {
+            let q = topic_query("common.*", 10);
+            let page = store
+                .with_read_tx(move |tx| tx.get_events_after_id(&q, after, 100))
+                .await
+                .unwrap();
+            found.extend(page_ids(&page));
+            match page.next_cursor {
+                Some(next) => after = next,
+                None => break,
+            }
+        }
+        assert_eq!(found, (2..=25).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn before_id_pages_through_every_event_newest_first() {
+        let (_dir, store) = store_with_events(&["a.b"; 7]).await;
+        let query = topic_query("a.b", 100);
+
+        let mut cursor = None;
+        let mut found = Vec::new();
+        loop {
+            let q = query.clone();
+            let page = store
+                .with_read_tx(move |tx| tx.get_events(&q, cursor, 0, 3))
+                .await
+                .unwrap();
+            found.extend(page_ids(&page));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        assert_eq!(found, vec![7, 6, 5, 4, 3, 2, 1]);
     }
 }

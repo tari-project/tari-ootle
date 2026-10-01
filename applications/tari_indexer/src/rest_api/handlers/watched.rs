@@ -13,6 +13,9 @@ use tari_ootle_common_types::optional::Optional;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
+/// SQLite walks every skipped row, so the offset is bounded like the limit.
+const MAX_WATCHED_SUBSTATES_OFFSET: u64 = 10_000;
+
 #[utoipa::path(
     get,
     path = "/substates/watched",
@@ -20,7 +23,7 @@ use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::H
     params(
         ("template_address" = Option<String>, Query, description = "Filter by template address"),
         ("limit" = Option<u64>, Query, description = "Maximum number of results (default: 50, max: 200)"),
-        ("offset" = Option<u64>, Query, description = "Offset for pagination (default: 0)"),
+        ("offset" = Option<u64>, Query, description = "Offset for pagination (default: 0, max: 10000)"),
     ),
     responses(
         (status = 200, description = "List of watched component addresses", body = ListWatchedSubstatesResponse),
@@ -33,6 +36,11 @@ pub async fn list_watched_substates(
 ) -> HandlerResult<Json<ListWatchedSubstatesResponse>> {
     let limit = req.limit.unwrap_or(50).min(200);
     let offset = req.offset.unwrap_or(0);
+    if offset > MAX_WATCHED_SUBSTATES_OFFSET {
+        return Err(ErrorResponse::bad_request(format!(
+            "Offset cannot be greater than {MAX_WATCHED_SUBSTATES_OFFSET}"
+        )));
+    }
 
     let entries = context
         .read_only_store()

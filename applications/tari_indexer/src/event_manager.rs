@@ -27,10 +27,17 @@ use tari_template_lib_types::ResourceAddress;
 
 use crate::{
     storage_sqlite::SqliteIndexerStore,
-    store::{IndexerStoreReadTransaction, IndexerStoreReader},
+    store::{EventQuery, IndexerStoreReadTransaction, IndexerStoreReader},
 };
 
 const LOG_TARGET: &str = "tari::indexer::event_manager";
+
+/// The deepest `offset` an event query accepts. SQLite walks every skipped row, so an unbounded
+/// offset makes a single request scan the whole events table.
+pub const MAX_EVENT_QUERY_OFFSET: u32 = 10_000;
+
+/// The most rows one wildcard topic query examines.
+pub const WILDCARD_TOPIC_SCAN_LIMIT: u32 = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct EventManager {
@@ -50,21 +57,21 @@ impl EventManager {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, anyhow::Error> {
-        let topic = topic.map(str::to_owned);
-        let substate_id = substate_id.cloned();
-        let resource_address = resource_address.copied();
+        let query = EventQuery {
+            topic: topic.map(str::to_owned),
+            substate_id: substate_id.cloned(),
+            template_address: None,
+            resource_address: resource_address.copied(),
+            wildcard_scan_limit: WILDCARD_TOPIC_SCAN_LIMIT,
+        };
         let events = self
             .substate_store
-            .with_read_tx(move |tx| {
-                tx.get_events(
-                    substate_id.as_ref(),
-                    topic.as_deref(),
-                    resource_address.as_ref(),
-                    offset,
-                    limit,
-                )
-            })
-            .await?;
+            .with_read_tx(move |tx| tx.get_events(&query, None, offset, limit))
+            .await?
+            .events
+            .into_iter()
+            .map(|(_, transaction_id, event)| (transaction_id, event))
+            .collect::<Vec<_>>();
 
         debug!(target: LOG_TARGET, "Found {} events", events.len());
         Ok(events)

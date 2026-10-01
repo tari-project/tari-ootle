@@ -24,8 +24,10 @@ use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::RpcStatusCode;
 
 use crate::{
+    event_manager::{MAX_EVENT_QUERY_OFFSET, WILDCARD_TOPIC_SCAN_LIMIT},
     network_client::NetworkClientError,
     rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult},
+    store::EventQuery,
     transaction_manager::error::TransactionManagerError,
 };
 
@@ -275,27 +277,41 @@ pub async fn query_transaction_events(
     }
 
     let offset = req.offset.unwrap_or(0);
+    if offset > MAX_EVENT_QUERY_OFFSET {
+        return Err(ErrorResponse::bad_request(format!(
+            "Offset cannot be greater than {MAX_EVENT_QUERY_OFFSET}; page with before_id instead"
+        )));
+    }
+    // Ids are SQLite rowids, so a cursor above i64::MAX bounds nothing.
+    let before_id = req.before_id.map(|id| i64::try_from(id).unwrap_or(i64::MAX));
 
     debug!(target: LOG_TARGET,
-        "Querying transaction events with filters - substate_id: {}, topic: {}, resource_address: {}, offset: {}, limit: {}",
-        req.substate_id.display(), req.topic.display(), req.resource_address.display(), offset, limit
+        "Querying transaction events with filters - substate_id: {}, topic: {}, resource_address: {}, before_id: {}, offset: {}, limit: {}",
+        req.substate_id.display(), req.topic.display(), req.resource_address.display(), req.before_id.display(), offset, limit
     );
 
-    let events = context
+    let query = EventQuery {
+        topic: req.topic.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
+        substate_id: req.substate_id,
+        template_address: None,
+        resource_address: req.resource_address,
+        wildcard_scan_limit: WILDCARD_TOPIC_SCAN_LIMIT,
+    };
+    let page = context
         .read_only_store()
-        .get_events(
-            req.substate_id.as_ref(),
-            req.topic.as_deref().map(|t| t.trim()).filter(|t| !t.is_empty()),
-            req.resource_address.as_ref(),
-            offset,
-            limit,
-        )
+        .get_events(query, before_id, offset, limit)
         .await
         .map_err(|e| {
             error!(target: LOG_TARGET, "DB error when fetching events: {}", e);
             ErrorResponse::internal_error("DB error when fetching events")
         })?;
 
-    debug!(target: LOG_TARGET, "Found {} events", events.len());
-    Ok(Json(QueryTransactionEventsResponse { events }))
+    debug!(target: LOG_TARGET, "Found {} events", page.events.len());
+    let events = page
+        .events
+        .into_iter()
+        .map(|(_, transaction_id, event)| (transaction_id, event))
+        .collect();
+    let next_before_id = page.next_cursor.and_then(|id| u64::try_from(id).ok());
+    Ok(Json(QueryTransactionEventsResponse { events, next_before_id }))
 }

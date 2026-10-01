@@ -18,10 +18,11 @@ use tari_template_lib_types::{Metadata, TemplateAddress};
 use tokio_stream::StreamExt;
 
 use crate::{
+    event_manager::WILDCARD_TOPIC_SCAN_LIMIT,
     network_state_sync::EventFilter,
     rest_api::{context::HandlerContext, handlers::HandlerResult, streaming::disable_proxy_buffering},
     storage_sqlite::SqliteIndexerStore,
-    store::ReadOnlyStore,
+    store::{EventQuery, ReadOnlyStore},
 };
 
 const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::transaction_events";
@@ -145,24 +146,13 @@ async fn run_replay_then_live(
     let mut highest_id = after_id;
     let mut total_replayed = 0u32;
 
+    let query = replay_query(&filter);
     loop {
-        let batch = store
-            .get_events_after_id(
-                highest_id,
-                filter.topic.as_deref(),
-                filter.substate_id.as_ref(),
-                filter.template_address.as_ref(),
-                filter.resource_address.as_ref(),
-                REPLAY_PAGE_SIZE,
-            )
+        let page = store
+            .get_events_after_id(query.clone(), highest_id, REPLAY_PAGE_SIZE)
             .await?;
 
-        let len = batch.len();
-        if len == 0 {
-            break;
-        }
-
-        for (id, transaction_id, event) in &batch {
+        for (id, transaction_id, event) in &page.events {
             highest_id = *id;
             total_replayed += 1;
 
@@ -173,8 +163,9 @@ async fn run_replay_then_live(
             }
         }
 
-        if len < REPLAY_PAGE_SIZE as usize || total_replayed >= MAX_REPLAY_EVENTS {
-            break;
+        match page.next_cursor {
+            Some(cursor) if total_replayed < MAX_REPLAY_EVENTS => highest_id = cursor,
+            _ => break,
         }
     }
 
@@ -202,22 +193,11 @@ async fn run_replay_then_live(
                 warn!(target: LOG_TARGET, "SSE broadcast lagged by {} events, catching up from DB (highest_id={})", n, highest_id);
                 // Iteratively catch up from DB in pages until we've replayed everything
                 loop {
-                    let batch = store
-                        .get_events_after_id(
-                            highest_id,
-                            filter.topic.as_deref(),
-                            filter.substate_id.as_ref(),
-                            filter.template_address.as_ref(),
-                            filter.resource_address.as_ref(),
-                            REPLAY_PAGE_SIZE,
-                        )
+                    let page = store
+                        .get_events_after_id(query.clone(), highest_id, REPLAY_PAGE_SIZE)
                         .await?;
 
-                    if batch.is_empty() {
-                        break;
-                    }
-
-                    for (id, transaction_id, event) in &batch {
+                    for (id, transaction_id, event) in &page.events {
                         highest_id = *id;
                         let sse_event = encode_replay_event(*id, transaction_id, event);
                         if tx.send(sse_event).await.is_err() {
@@ -225,8 +205,9 @@ async fn run_replay_then_live(
                         }
                     }
 
-                    if batch.len() < REPLAY_PAGE_SIZE as usize {
-                        break;
+                    match page.next_cursor {
+                        Some(cursor) => highest_id = cursor,
+                        None => break,
                     }
                 }
             },
@@ -234,6 +215,16 @@ async fn run_replay_then_live(
                 return Ok(());
             },
         }
+    }
+}
+
+fn replay_query(filter: &EventFilter) -> EventQuery {
+    EventQuery {
+        topic: filter.topic.as_deref().map(str::to_owned),
+        substate_id: filter.substate_id.clone(),
+        template_address: filter.template_address,
+        resource_address: filter.resource_address,
+        wildcard_scan_limit: WILDCARD_TOPIC_SCAN_LIMIT,
     }
 }
 

@@ -16,7 +16,6 @@ use diesel::{
     dsl,
     sql_types,
 };
-use log::info;
 use serde::de::DeserializeOwned;
 use tari_common_types::types::FixedHash;
 use tari_engine_types::{
@@ -74,11 +73,9 @@ use crate::{
         },
         serialization::{deserialize_cbor, deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
-    store::{IndexerStoreReadTransaction, TransactionRejectionStatus},
+    store::{EventQuery, EventsPage, IndexerStoreReadTransaction, TransactionRejectionStatus},
     substate_manager::SubstateResponse,
 };
-
-const LOG_TARGET: &str = "tari::indexer::storage_sqlite::reader";
 
 /// Denormalized (outcome, total_fees_paid, created_at) columns left-joined from transaction_receipts.
 type ReceiptSummaryRow = Option<(String, i64, PrimitiveDateTime)>;
@@ -113,6 +110,135 @@ impl<'a> SqliteStoreReadTransaction<'a> {
     pub(super) fn connection(&mut self) -> &mut SqliteConnection {
         self.transaction.connection()
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EventRange {
+    /// Ids below the bound (all ids when `None`), newest first.
+    Before(Option<i64>),
+    /// Ids above the bound, oldest first.
+    After(i64),
+}
+
+impl SqliteStoreReadTransaction<'_> {
+    fn query_events(
+        &mut self,
+        query: &EventQuery,
+        range: EventRange,
+        offset: u32,
+        limit: u32,
+    ) -> Result<EventsPage, StorageError> {
+        const OPERATION: &str = "query_events";
+        use crate::storage_sqlite::schema::events;
+
+        let query_err = |e: diesel::result::Error| StorageError::QueryError {
+            reason: format!("{OPERATION}: {e}"),
+        };
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+
+        let Some(pattern) = query.wildcard_topic() else {
+            let rows = filtered_events(query, range)
+                .offset(i64::from(offset))
+                .limit(limit as i64)
+                .load::<EventRecord>(self.connection())
+                .map_err(query_err)?;
+            let next_cursor = rows.last().filter(|_| rows.len() == limit).map(|row| row.id);
+            let events = rows.into_iter().map(decode_event_row).collect::<Result<_, _>>()?;
+            return Ok(EventsPage { events, next_cursor });
+        };
+
+        let scan_limit = usize::try_from(query.wildcard_scan_limit).unwrap_or(usize::MAX);
+        let window = filtered_events(query, range)
+            .select((events::id, events::topic))
+            .limit(scan_limit as i64)
+            .load::<(i64, String)>(self.connection())
+            .map_err(query_err)?;
+        let matched = window
+            .iter()
+            .filter(|(_, topic)| EventFilter::topic_matches(pattern, topic))
+            .map(|(id, _)| *id)
+            .skip(offset as usize)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let next_cursor = if matched.len() == limit {
+            matched.last().copied()
+        } else if window.len() == scan_limit {
+            window.last().map(|(id, _)| *id)
+        } else {
+            None
+        };
+
+        let rows = events::table.filter(events::id.eq_any(&matched)).into_boxed();
+        let rows = match range {
+            EventRange::Before(_) => rows.order(events::id.desc()),
+            EventRange::After(_) => rows.order(events::id.asc()),
+        };
+        let events = rows
+            .load::<EventRecord>(self.connection())
+            .map_err(query_err)?
+            .into_iter()
+            .map(decode_event_row)
+            .collect::<Result<_, _>>()?;
+        Ok(EventsPage { events, next_cursor })
+    }
+}
+
+/// The events matching `query`'s indexed filters within `range`, ordered in the range's
+/// direction. A wildcard topic is left for the caller to match.
+fn filtered_events<'a>(
+    query: &EventQuery,
+    range: EventRange,
+) -> crate::storage_sqlite::schema::events::BoxedQuery<'a, diesel::sqlite::Sqlite> {
+    use crate::storage_sqlite::schema::events;
+
+    let mut rows = events::table.into_boxed();
+    if let Some(topic) = query.topic.as_deref().filter(|t| !t.contains('*')) {
+        rows = rows.filter(events::topic.eq(topic.to_string()));
+    }
+    if let Some(substate_id) = &query.substate_id {
+        rows = rows.filter(events::substate_id.eq(substate_id.to_string()));
+    }
+    if let Some(template_address) = &query.template_address {
+        rows = rows.filter(events::template_address.eq(template_address.to_string()));
+    }
+    if let Some(resource_address) = &query.resource_address {
+        rows = rows.filter(events::resource_address.eq(resource_address.to_string()));
+    }
+    match range {
+        EventRange::Before(Some(before_id)) => rows.filter(events::id.lt(before_id)).order(events::id.desc()),
+        EventRange::Before(None) => rows.order(events::id.desc()),
+        EventRange::After(after_id) => rows.filter(events::id.gt(after_id)).order(events::id.asc()),
+    }
+}
+
+fn decode_event_row(row: EventRecord) -> Result<(i64, TransactionId, Event), StorageError> {
+    let substate_id = row
+        .substate_id
+        .as_deref()
+        .map(SubstateId::from_str)
+        .transpose()
+        .map_err(|e| StorageError::DataInconsistency {
+            details: format!(
+                "Invalid substate_id {} in events table: {}",
+                row.substate_id.display(),
+                e
+            ),
+        })?;
+    let template_address = Hash32::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+        details: format!(
+            "Invalid template_address {} in events table: {}",
+            row.template_address, e
+        ),
+    })?;
+    let tx_hash = Hash32::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
+        details: format!("Invalid tx_hash {} in events table: {}", row.tx_hash, e),
+    })?;
+    let payload = deserialize_json(&row.payload)?;
+    Ok((
+        row.id,
+        TransactionId::from(tx_hash),
+        Event::new(substate_id, template_address, row.topic, payload),
+    ))
 }
 
 impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
@@ -283,172 +409,21 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
     fn get_events(
         &mut self,
-        substate_id_filter: Option<&SubstateId>,
-        topic_filter: Option<&str>,
-        resource_address_filter: Option<&ResourceAddress>,
+        query: &EventQuery,
+        before_id: Option<i64>,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
-        info!(
-            target: LOG_TARGET,
-            "Querying substate scanner database: get_events with substate_id_filter = {:?}, \
-            topic_filter = {:?}, resource_address_filter = {:?}",
-            substate_id_filter,
-            topic_filter,
-            resource_address_filter
-        );
-        use crate::storage_sqlite::schema::events;
-
-        let mut query = events::table.into_boxed();
-
-        if let Some(substate_id) = substate_id_filter {
-            query = query.filter(events::substate_id.eq(substate_id.to_string()));
-        }
-
-        if let Some(topic) = topic_filter {
-            match EventFilter::topic_to_like_pattern(topic) {
-                Some(pattern) => {
-                    query = query.filter(events::topic.like(pattern).escape('\\'));
-                },
-                None => {
-                    query = query.filter(events::topic.eq(topic));
-                },
-            }
-        }
-
-        if let Some(resource_address) = resource_address_filter {
-            query = query.filter(events::resource_address.eq(resource_address.to_string()));
-        }
-
-        let event_rows = query
-            .offset(offset.into())
-            .limit(limit.into())
-            .order(events::id.desc())
-            .load_iter::<EventRecord, _>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_events: {}", e),
-            })?;
-
-        event_rows
-            .map(|res| {
-                res.map_err(|e| StorageError::QueryError {
-                    reason: format!("get_events: {}", e),
-                })
-                .and_then(|row| {
-                    let substate_id = row
-                        .substate_id
-                        .as_ref()
-                        .map(|str| SubstateId::from_str(str))
-                        .transpose()
-                        .map_err(|e| StorageError::DataInconsistency {
-                            details: format!(
-                                "Invalid substate_id {} in events table: {}",
-                                row.substate_id.display(),
-                                e
-                            ),
-                        })?;
-                    let template_address =
-                        Hash32::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
-                            details: format!(
-                                "Invalid template_address {} in events table: {}",
-                                row.template_address, e
-                            ),
-                        })?;
-                    let tx_hash = Hash32::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
-                        details: format!("Invalid tx_hash {} in events table: {}", row.tx_hash, e),
-                    })?;
-                    let topic = row.topic;
-                    let payload = deserialize_json(&row.payload)?;
-                    Ok((
-                        TransactionId::from(tx_hash),
-                        Event::new(substate_id, template_address, topic, payload),
-                    ))
-                })
-            })
-            .collect()
+    ) -> Result<EventsPage, StorageError> {
+        self.query_events(query, EventRange::Before(before_id), offset, limit)
     }
 
     fn get_events_after_id(
         &mut self,
+        query: &EventQuery,
         after_id: i64,
-        topic_filter: Option<&str>,
-        substate_id_filter: Option<&SubstateId>,
-        template_address_filter: Option<&TemplateAddress>,
-        resource_address_filter: Option<&ResourceAddress>,
         limit: u32,
-    ) -> Result<Vec<(i64, TransactionId, Event)>, StorageError> {
-        use crate::storage_sqlite::schema::events;
-
-        let mut query = events::table.into_boxed();
-        query = query.filter(events::id.gt(after_id));
-
-        if let Some(topic) = topic_filter {
-            match EventFilter::topic_to_like_pattern(topic) {
-                Some(pattern) => {
-                    query = query.filter(events::topic.like(pattern).escape('\\'));
-                },
-                None => {
-                    query = query.filter(events::topic.eq(topic));
-                },
-            }
-        }
-        if let Some(substate_id) = substate_id_filter {
-            query = query.filter(events::substate_id.eq(substate_id.to_string()));
-        }
-        if let Some(template_address) = template_address_filter {
-            query = query.filter(events::template_address.eq(template_address.to_string()));
-        }
-        if let Some(resource_address) = resource_address_filter {
-            query = query.filter(events::resource_address.eq(resource_address.to_string()));
-        }
-
-        let event_rows = query
-            .order(events::id.asc())
-            .limit(limit.into())
-            .load_iter::<EventRecord, _>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_events_after_id: {}", e),
-            })?;
-
-        event_rows
-            .map(|res| {
-                res.map_err(|e| StorageError::QueryError {
-                    reason: format!("get_events_after_id: {}", e),
-                })
-                .and_then(|row| {
-                    let id = row.id;
-                    let substate_id = row
-                        .substate_id
-                        .as_ref()
-                        .map(|str| SubstateId::from_str(str))
-                        .transpose()
-                        .map_err(|e| StorageError::DataInconsistency {
-                            details: format!(
-                                "Invalid substate_id {} in events table: {}",
-                                row.substate_id.display(),
-                                e
-                            ),
-                        })?;
-                    let template_address =
-                        Hash32::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
-                            details: format!(
-                                "Invalid template_address {} in events table: {}",
-                                row.template_address, e
-                            ),
-                        })?;
-                    let tx_hash = Hash32::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
-                        details: format!("Invalid tx_hash {} in events table: {}", row.tx_hash, e),
-                    })?;
-                    let topic = row.topic;
-                    let payload = deserialize_json(&row.payload)?;
-                    Ok((
-                        id,
-                        TransactionId::from(tx_hash),
-                        Event::new(substate_id, template_address, topic, payload),
-                    ))
-                })
-            })
-            .collect()
+    ) -> Result<EventsPage, StorageError> {
+        self.query_events(query, EventRange::After(after_id), 0, limit)
     }
 
     fn list_recent_transactions(

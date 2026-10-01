@@ -82,17 +82,6 @@ impl EventFilter {
         event.substate_id().and_then(|s| s.as_resource_address())
     }
 
-    /// Convert a topic filter with `*` wildcards to a SQL LIKE pattern.
-    /// `*` segments become `%`. Returns `None` if no wildcards are present. The pattern escapes
-    /// LIKE metacharacters with `\`, so callers must match it with `ESCAPE '\'`.
-    pub fn topic_to_like_pattern(filter: &str) -> Option<String> {
-        if !filter.contains('*') {
-            return None;
-        }
-        let escaped = filter.replace('\\', r"\\").replace('%', r"\%").replace('_', r"\_");
-        Some(escaped.replace('*', "%"))
-    }
-
     /// Match a topic filter against an event topic using dot-separated segments.
     ///
     /// `*` matches any single segment. Examples:

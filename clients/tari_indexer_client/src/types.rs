@@ -285,7 +285,12 @@ pub struct QueryTransactionEventsRequest {
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     pub resource_address: Option<ResourceAddress>,
     pub limit: Option<u32>,
+    /// Matches to skip, at most 10,000. Page deeper with `before_id`.
     pub offset: Option<u32>,
+    /// Return only events older than this cursor. Pass the previous page's `next_before_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "number | bigint | string | null"))]
+    pub before_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -294,6 +299,11 @@ pub struct QueryTransactionEventsRequest {
 pub struct QueryTransactionEventsResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, Object)>))]
     pub events: Vec<(TransactionId, Event)>,
+    /// The `before_id` for the next page, or `None` once no older event can match. A wildcard
+    /// topic query examines a bounded number of events per request, so a page can be short, or
+    /// empty, and still carry a cursor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_before_id: Option<u64>,
 }
 
 /// Filter parameters for the transaction events SSE stream.

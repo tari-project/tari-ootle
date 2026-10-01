@@ -200,7 +200,9 @@ impl Server {
                     get(handlers::transactions::get_transaction)
                     .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware))
                 )
-                .route("/events", get(handlers::transactions::query_transaction_events))
+                // GET /transactions/events – per-IP rate limit (rate_limits.transactions_rate)
+                .route("/events", get(handlers::transactions::query_transaction_events)
+                    .route_layer(middleware::from_fn_with_state(transactions_fetch_limiter.clone(), rate_limit_middleware)))
                 // SSE stream – per-IP concurrent connection limit
                 .route("/events/stream", get(handlers::transaction_events::sse_transaction_events)
                     .route_layer(middleware::from_fn_with_state(sse_limiter("/transactions/events/stream"), sse_limit_middleware)))

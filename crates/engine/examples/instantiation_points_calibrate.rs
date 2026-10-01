@@ -263,6 +263,27 @@ fn wasm_rate_points_per_ms() -> f64 {
     (points_r2 - points_r1) as f64 / (ms_r2 - ms_r1)
 }
 
+/// A module of nothing but `count` empty functions, the most functions a binary of its size holds.
+fn module_of_empty_functions(count: usize) -> Vec<u8> {
+    let mut wat = String::from("(module (type (func))");
+    wat.extend(std::iter::repeat_n("(func (type 0))", count));
+    wat.push(')');
+    wat::parse_str(wat).expect("valid wat")
+}
+
+/// Best compile time of `code` over [`COMPILE_TRIALS`]. The module need not be a loadable template:
+/// a refusal for a missing definition comes after the compile it times.
+fn compile_ms(code: &[u8]) -> f64 {
+    let mut best = f64::MAX;
+    for _ in 0..COMPILE_TRIALS {
+        let start = Instant::now();
+        let loaded = WasmModule::load_template_from_code(code);
+        best = best.min(start.elapsed().as_nanos() as f64 / 1e6);
+        drop(loaded);
+    }
+    best
+}
+
 /// Times instantiation of a real compiled template, so the price a `code_size`-based charge would
 /// ask can be compared against what the template actually costs.
 fn real_template_ms(path: &str) -> (f64, usize, u64, u64, f64) {
@@ -363,6 +384,21 @@ fn main() {
             charged_points(&code),
         );
     }
+
+    // Cranelift's cost per function, expressed as the bytes the byte price charges for the same
+    // time. `TEMPLATE_COMPILE_BYTES_PER_FUNCTION` must stay above it.
+    let few = 1024;
+    let many = limits::WASM_LIMITS.max_module_functions;
+    let per_function_ms = (compile_ms(&module_of_empty_functions(many)) - compile_ms(&module_of_empty_functions(few))) /
+        (many - few) as f64;
+    println!();
+    println!(
+        "per function: {:.1} us -> {} points, the byte price of {:.0} bytes (billed as {})",
+        per_function_ms * 1000.0,
+        (per_function_ms * rate).ceil() as u64,
+        per_function_ms * rate / limits::PER_TEMPLATE_COMPILE_BYTE as f64,
+        limits::TEMPLATE_COMPILE_BYTES_PER_FUNCTION,
+    );
 
     println!();
     if let Ok(dir) = std::env::var("TEMPLATE_WASM_DIR") {

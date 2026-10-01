@@ -45,7 +45,7 @@ use crate::{
         WasmProcess,
         WasmValidationError,
         engine,
-        module_shape::validate_module_structure,
+        module_shape::{ModuleStructure, validate_module_structure},
     },
 };
 
@@ -65,12 +65,12 @@ impl WasmModule {
     /// Split out from [`Self::validate_code`] so a publisher can be charged for the compile between
     /// this and [`Self::compile_prevalidated`]: cranelift is the expensive half, and a module
     /// refused by a rule here never reaches it, so it must not be billed as though it had.
-    pub fn prevalidate_code(code: &[u8]) -> Result<ModuleShape, TemplateLoaderError> {
+    pub fn prevalidate_code(code: &[u8]) -> Result<ModuleStructure, TemplateLoaderError> {
         // Reject custom sections the engine does not consume. Only the registration path runs this;
         // already-stored templates (and built-ins) load via `load_template_from_code` without it.
         reject_disallowed_custom_sections(code).map_err(WasmExecutionError::from)?;
-        let shape = validate_module_structure(code).map_err(WasmExecutionError::from)?;
-        Ok(shape)
+        let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
+        Ok(structure)
     }
 
     /// Compiles a module whose [`Self::prevalidate_code`] pass has already run, so neither of that
@@ -82,13 +82,13 @@ impl WasmModule {
     }
 
     pub fn validate_code(code: &[u8]) -> Result<TemplateDef, TemplateLoaderError> {
-        let shape = Self::prevalidate_code(code)?;
-        Self::compile_prevalidated(code, shape)
+        let structure = Self::prevalidate_code(code)?;
+        Self::compile_prevalidated(code, structure.shape)
     }
 
     pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
-        let shape = validate_module_structure(code).map_err(WasmExecutionError::from)?;
-        Self::compile(code, shape)
+        let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
+        Self::compile(code, structure.shape)
     }
 
     fn compile(code: &[u8], shape: ModuleShape) -> Result<LoadedTemplate, TemplateLoaderError> {

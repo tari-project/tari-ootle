@@ -25,6 +25,7 @@ mod metering;
 mod module_shape;
 mod process;
 
+pub use module_shape::ModuleStructure;
 pub use process::WasmProcess;
 
 mod instance_cache;

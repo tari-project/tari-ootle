@@ -143,6 +143,8 @@ pub enum WasmValidationError {
     TooManyTables { count: usize, max_tables: usize },
     #[error("Module declares {count} globals, the maximum is {max_globals}")]
     TooManyGlobals { count: usize, max_globals: usize },
+    #[error("Module contains {count} functions, the maximum is {max_functions}")]
+    TooManyModuleFunctions { count: u64, max_functions: usize },
     #[error("Module does not export `{name}`")]
     MissingExport { name: String },
     #[error("Export `{name}` has signature `{signature}`, expected `{expected}`")]
@@ -218,6 +220,7 @@ impl WasmValidationError {
             Self::StartSectionNotAllowed |
             Self::TooManyTables { .. } |
             Self::TooManyGlobals { .. } |
+            Self::TooManyModuleFunctions { .. } |
             Self::MissingExport { .. } |
             Self::InvalidExportSignature { .. } => ExecutionFailureCode::TemplateError,
         }

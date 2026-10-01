@@ -27,16 +27,26 @@
 //! source. A cache hit serves these counts verbatim out of the file header without re-deriving
 //! them, and they price `instantiation_points` into a committed fee receipt, so a node that
 //! counted differently when it wrote the file charges a different fee than one compiling fresh.
-//! The limits enforced here are in the same position: `max_tables` and `max_globals` are checked
-//! at compile time only, and a hit never reaches them.
+//! The limits enforced here are in the same position: `max_tables`, `max_globals` and
+//! `max_module_functions` are checked at compile time only, and a hit never reaches them.
 
 use tari_engine_types::limits::{self, ModuleShape};
-use wasmer::wasmparser::{DataKind, ElementItems, ElementKind, Parser, Payload};
+use wasmer::wasmparser::{DataKind, ElementItems, ElementKind, Parser, Payload, TypeRef};
 
 use crate::wasm::WasmValidationError;
 
+/// What [`validate_module_structure`] reads out of a module before it is compiled.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleStructure {
+    /// The counts that price each instantiation.
+    pub shape: ModuleShape,
+    /// Functions the module contains, imported and defined together, each of which the compile
+    /// emits code for.
+    pub function_count: u64,
+}
+
 /// Checks what only the module bytes show: that the module declares no start function, and no more
-/// tables or globals than the limits.
+/// tables, globals or functions than the limits.
 ///
 /// A start function runs on every instantiation, before the engine has installed this call's
 /// metering allowance and outside any invocation it could attribute effects to. Templates have no
@@ -46,14 +56,30 @@ use crate::wasm::WasmValidationError;
 /// declaration far smaller than what it claims. Each table's element count is bounded by the
 /// tunables, which see one table at a time, so the number of tables is what bounds the storage all
 /// of them together claim; a global's slot is fixed, so its count is the whole bound.
-pub(crate) fn validate_module_structure(code: &[u8]) -> Result<ModuleShape, WasmValidationError> {
+///
+/// Functions are bounded because the compile's cost per function is far above what the function's
+/// bytes are priced at, and the compile runs before anything else could refuse the module.
+pub(crate) fn validate_module_structure(code: &[u8]) -> Result<ModuleStructure, WasmValidationError> {
     let mut shape = ModuleShape::default();
+    let mut function_count = 0u64;
     for payload in Parser::new(0).parse_all(code) {
         // Malformed wasm: stop and let the cranelift compile in
         // `load_template_from_code` report the canonical CompileError.
         let Ok(payload) = payload else { break };
         match payload {
             Payload::StartSection { .. } => return Err(WasmValidationError::StartSectionNotAllowed),
+            Payload::ImportSection(reader) => {
+                for import in reader.into_imports().flatten() {
+                    if matches!(import.ty, TypeRef::Func(_) | TypeRef::FuncExact(_)) {
+                        function_count = function_count.saturating_add(1);
+                    }
+                }
+                check_function_count(function_count)?;
+            },
+            Payload::FunctionSection(reader) => {
+                function_count = function_count.saturating_add(u64::from(reader.count()));
+                check_function_count(function_count)?;
+            },
             Payload::TableSection(reader) => {
                 let count = reader.count() as usize;
                 if count > limits::WASM_LIMITS.max_tables {
@@ -102,5 +128,13 @@ pub(crate) fn validate_module_structure(code: &[u8]) -> Result<ModuleShape, Wasm
             _ => {},
         }
     }
-    Ok(shape)
+    Ok(ModuleStructure { shape, function_count })
+}
+
+fn check_function_count(count: u64) -> Result<(), WasmValidationError> {
+    let max_functions = limits::WASM_LIMITS.max_module_functions;
+    if count > max_functions as u64 {
+        return Err(WasmValidationError::TooManyModuleFunctions { count, max_functions });
+    }
+    Ok(())
 }

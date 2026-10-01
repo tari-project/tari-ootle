@@ -501,7 +501,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     }
                 },
 
-                Some(result) = self.on_inbound_message.next_message(epoch_state.epoch(), current_height, self.worker_state.has_processed_first_block) => {
+                Some(result) = self.on_inbound_message.next_message(&epoch_state, current_height, self.worker_state.has_processed_first_block) => {
                     if let Err(e) = self.on_unvalidated_message(&epoch_state, current_height, result).await {
                         self.on_failure("on_unvalidated_message", &e).await;
                         return Err(e);

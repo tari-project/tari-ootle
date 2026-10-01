@@ -66,6 +66,22 @@ pub fn validate_covenant_balance_proof(
     sig.verify_raw_uniform(&public_excess, &message)
 }
 
+/// Native points for one [`validate_covenant_balance_proof`] over a partition of `num_inputs` inputs and `num_outputs`
+/// outputs. Each commitment is decompressed, folded into its side's aggregate and hashed into the challenge; the
+/// revealed amount is committed against the basepoint; the signature is verified once.
+pub fn covenant_balance_proof_native_points(num_inputs: usize, num_outputs: usize) -> u64 {
+    use crate::limits::NativeExecutionPoints as P;
+    /// The challenge's fixed preimage: excess, nonce and condition root (32 bytes each) and the revealed amount.
+    const FIXED_CHALLENGE_BYTES: u64 = 3 * 32 + 16;
+    let num_commitments = (num_inputs as u64).saturating_add(num_outputs as u64);
+    let challenge_bytes = FIXED_CHALLENGE_BYTES.saturating_add(num_commitments.saturating_mul(32));
+    P::PER_SCHNORR_VERIFY
+        .saturating_add(P::PER_RISTRETTO_MUL_BASE)
+        .saturating_add(P::PER_INPUT.saturating_mul(num_commitments))
+        .saturating_add(P::PER_HASH)
+        .saturating_add(P::PER_HASH_BYTE.saturating_mul(challenge_bytes))
+}
+
 fn aggregate_commitments<'a, I: IntoIterator<Item = &'a PedersenCommitmentBytes>>(
     commitments: I,
 ) -> Option<RistrettoPublicKey> {

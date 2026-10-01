@@ -401,10 +401,12 @@ pub struct StealthLimits {
     /// [`StealthLimits::max_total_outputs_per_transaction`] does that.
     pub max_outputs: usize,
     /// Maximum number of conditions in a single `SpendCondition` conjunction (TIP-0006). A revealed leaf is
-    /// evaluated in full at spend time, and a builtin predicate (e.g. a covenant balance proof or a hashlock) runs
-    /// native, unmetered work — so an unbounded conjunction would be a denial-of-service amplifier. This caps the
-    /// worst-case work of evaluating one leaf. The condition tree itself supplies breadth (a spender reveals only one
-    /// leaf plus a logarithmic inclusion proof), so the tree's size is not a spend-time cost and is not bounded here.
+    /// evaluated in full at spend time, and a builtin predicate (e.g. a timelock or a hashlock) runs native,
+    /// unmetered work — so an unbounded conjunction would be a denial-of-service amplifier. This caps the
+    /// worst-case work of evaluating one leaf. A covenant balance proof is metered and verified once per partition,
+    /// so repeating it within a leaf costs only a cached lookup. The condition tree itself supplies breadth (a spender
+    /// reveals only one leaf plus a logarithmic inclusion proof), so the tree's size is not a spend-time cost and
+    /// is not bounded here.
     pub max_conditions_per_conjunction: usize,
     /// Maximum size, in bytes, of the witness `data` blob a script-path spend may supply (`SpendWitness::ScriptPath`).
     /// The blob is processed natively by the revealed leaf's predicates, so it is bounded to cap that work. A hashlock

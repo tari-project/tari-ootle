@@ -160,7 +160,7 @@ use super::{
     NativeAction,
     Runtime,
     RuntimeEvent,
-    spend_script_execution::SpendScriptExecution,
+    spend_script_execution::{SpendScriptExecution, StatementSpendView},
     working_state::{WorkingState, reject_transient_values_in},
 };
 use crate::{
@@ -822,6 +822,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         if statement.inputs_statement.inputs.is_empty() {
             return Ok(());
         }
+        // Covenant predicates look claims up by partition, so the claim list is bounded before any predicate runs.
+        stealth::validate_covenant_claims(statement)?;
         let resolved = self
             .tracker
             .read_with(|state| state.resolve_resource_address_ref(resource_address))?;
@@ -838,7 +840,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         // A covenant predicate partitions inputs by `condition_root`, so it needs the roots of all inputs, not just the
         // one it gates. Key-path inputs (which never join a covenant partition) contribute `None`.
-        let input_condition_roots = statement
+        let input_condition_roots: Vec<_> = statement
             .inputs_statement
             .inputs
             .iter()
@@ -850,7 +852,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                     auth.condition_root().copied()
                 }
             })
-            .collect::<Vec<_>>();
+            .collect();
+        let view = Rc::new(StatementSpendView::new(statement, input_condition_roots));
 
         for (index, input) in statement.inputs_statement.inputs.iter().enumerate() {
             match &input.witness {
@@ -877,15 +880,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                     }
                 },
                 SpendWitness::ScriptPath { leaf, proof, data } => {
-                    self.verify_script_path_authorization(
-                        leaf,
-                        proof,
-                        data,
-                        index,
-                        input,
-                        statement,
-                        &input_condition_roots,
-                    )?;
+                    self.verify_script_path_authorization(leaf, proof, data, index, input, &view)?;
                 },
             }
         }
@@ -894,7 +889,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
     /// Verifies one script-path input authorisation: bounds the spender-supplied witness data and inclusion proof,
     /// validates the revealed leaf's structure, binds it to the committed `condition_root`, then evaluates it.
-    #[allow(clippy::too_many_arguments)]
     fn verify_script_path_authorization(
         &self,
         leaf: &SpendCondition,
@@ -902,11 +896,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         data: &Bytes,
         index: usize,
         input: &StealthInput,
-        statement: &StealthTransferStatement,
-        input_condition_roots: &[Option<Hash32>],
+        view: &Rc<StatementSpendView>,
     ) -> Result<(), RuntimeError> {
         // A `condition_root` is required to spend via the script path.
-        let root = input_condition_roots[index].ok_or_else(|| {
+        let root = view.input_condition_roots[index].ok_or_else(|| {
             RuntimeError::ResourceError(ResourceError::InvalidSpend {
                 details: format!(
                     "Script-path witness provided for stealth UTXO {} which has no condition_root",
@@ -951,15 +944,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 ),
             }));
         }
-        self.evaluate_condition_leaf(
-            leaf,
-            index as u32,
-            input.commitment,
-            root,
-            statement,
-            input_condition_roots,
-            data.as_slice(),
-        )
+        self.evaluate_condition_leaf(leaf, index as u32, input.commitment, root, view, data.as_slice())
     }
 
     /// Validates a revealed condition leaf's structure before it is hashed or evaluated. The rule itself lives in
@@ -980,42 +965,30 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// conjunction: every atom must hold (logical AND). The single witness `data` blob is shared by the whole leaf;
     /// each atom interprets it as it expects (a data-consuming builtin owns it entirely, which
     /// `validate_condition_structure` guarantees by rejecting any other consumer).
-    #[allow(clippy::too_many_arguments)]
     fn evaluate_condition_leaf(
         &self,
         leaf: &SpendCondition,
         input_index: u32,
         input_commitment: PedersenCommitmentBytes,
         root: Hash32,
-        statement: &StealthTransferStatement,
-        input_condition_roots: &[Option<Hash32>],
+        view: &Rc<StatementSpendView>,
         data: &[u8],
     ) -> Result<(), RuntimeError> {
         for condition in leaf.conditions() {
-            self.evaluate_atomic_condition(
-                condition,
-                input_index,
-                input_commitment,
-                root,
-                statement,
-                input_condition_roots,
-                data,
-            )?;
+            self.evaluate_atomic_condition(condition, input_index, input_commitment, root, view, data)?;
         }
         Ok(())
     }
 
     /// Evaluates a single [`AtomicCondition`] of a conjunction leaf: an access rule against the auth scope, a WASM
     /// [`TemplateFunction`], a native [`BuiltinPredicate`], or a native [`Covenant`].
-    #[allow(clippy::too_many_arguments)]
     fn evaluate_atomic_condition(
         &self,
         condition: &AtomicCondition,
         input_index: u32,
         input_commitment: PedersenCommitmentBytes,
         root: Hash32,
-        statement: &StealthTransferStatement,
-        input_condition_roots: &[Option<Hash32>],
+        view: &Rc<StatementSpendView>,
         data: &[u8],
     ) -> Result<(), RuntimeError> {
         match condition {
@@ -1030,28 +1003,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 }
             },
             AtomicCondition::TemplateFunction(tf) => {
-                self.evaluate_spend_script(
-                    tf,
-                    input_index,
-                    input_commitment,
-                    root,
-                    statement,
-                    input_condition_roots,
-                    data,
-                )?;
+                self.evaluate_spend_script(tf, input_index, input_commitment, root, view, data)?;
             },
             AtomicCondition::Builtin(predicate) => {
                 self.evaluate_builtin(predicate, data)?;
             },
             AtomicCondition::Covenant(covenant) => {
-                self.evaluate_covenant(
-                    covenant,
-                    input_index,
-                    input_commitment,
-                    root,
-                    statement,
-                    input_condition_roots,
-                )?;
+                self.evaluate_covenant(covenant, root, view)?;
             },
         }
         Ok(())
@@ -1078,34 +1036,23 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Evaluates a single native [`Covenant`] over the spending transfer, rejecting the spend with
-    /// [`RuntimeError::SpendConditionNotMet`] if it does not hold. Every covenant introspects the transfer's outputs,
-    /// so it builds a [`SpendScriptExecution`] (which clones the input/output views). `witness_data` is empty: only a
-    /// WASM `TemplateFunction` reads it, via the host op.
-    #[allow(clippy::too_many_arguments)]
+    /// [`RuntimeError::SpendConditionNotMet`] if it does not hold. `root` is the committed `condition_root` of the
+    /// input being spent, which keys its covenant partition.
     fn evaluate_covenant(
         &self,
         covenant: &Covenant,
-        input_index: u32,
-        input_commitment: PedersenCommitmentBytes,
-        current_input_condition_root: Hash32,
-        statement: &StealthTransferStatement,
-        input_condition_roots: &[Option<Hash32>],
+        root: Hash32,
+        view: &StatementSpendView,
     ) -> Result<(), RuntimeError> {
-        let exec = SpendScriptExecution::new(
-            statement,
-            input_condition_roots,
-            input_index,
-            input_commitment,
-            current_input_condition_root,
-            Vec::new(),
-        );
         let satisfied = match covenant {
-            Covenant::OutputPreservesCondition => exec.output_preserves_condition(),
+            Covenant::OutputPreservesCondition => view.output_preserves_condition(&root),
             Covenant::OutputTo {
                 condition_root,
                 min_value,
-            } => exec.has_output_to(condition_root, *min_value),
-            Covenant::BalancePreserved(max_revealed) => exec.covenant_balanced(*max_revealed),
+            } => view.has_output_to(condition_root, *min_value),
+            Covenant::BalancePreserved(max_revealed) => view.covenant_balanced(&root, *max_revealed, |points| {
+                self.tracker.charge_native_execution(points)
+            })?,
         };
         if !satisfied {
             return Err(RuntimeError::SpendConditionNotMet {
@@ -1118,29 +1065,26 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// Invokes a single `TemplateFunction` spend-condition predicate inside a read-only restricted frame. Returning
     /// normally authorises the spend; any panic — a deliberate `assert!`, out-of-gas, or a blocked state mutation
     /// (`WriteInReadOnlyContext`) — aborts it as `SpendScriptRejected`.
-    #[allow(clippy::too_many_arguments)]
     fn evaluate_spend_script(
         &self,
         tf: &TemplateFunction,
         input_index: u32,
         input_commitment: PedersenCommitmentBytes,
         current_input_condition_root: Hash32,
-        statement: &StealthTransferStatement,
-        input_condition_roots: &[Option<Hash32>],
+        view: &Rc<StatementSpendView>,
         witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
         // and bound-arg encoding are validated immediately before invoking.
         self.validate_template_function(tf)?;
 
-        let exec = SpendScriptExecution::new(
-            statement,
-            input_condition_roots,
-            input_index,
-            input_commitment,
+        let exec = SpendScriptExecution {
+            statement: view.clone(),
+            current_input_index: input_index,
+            current_input_commitment: input_commitment,
             current_input_condition_root,
-            witness_data.to_vec(),
-        );
+            witness_data: witness_data.to_vec(),
+        };
 
         // Assemble the call args as [bound args..., injected SpendContext handle], exactly as the auth hook appends
         // its injected `auth_caller`. The generated dispatcher decodes each slot positionally with `decode_exact::<T>`.
@@ -4138,17 +4082,24 @@ where
         let ctx = ctx.as_ref().ok_or(RuntimeError::SpendContextUnavailable)?;
 
         match action {
-            SpendContextAction::Inputs => Ok(InvokeResult::encode(&ctx.inputs)?),
-            SpendContextAction::Outputs => Ok(InvokeResult::encode(&ctx.outputs)?),
+            SpendContextAction::Inputs => Ok(InvokeResult::encode(&ctx.statement.inputs)?),
+            SpendContextAction::Outputs => Ok(InvokeResult::encode(&ctx.statement.outputs)?),
             SpendContextAction::CurrentInput => Ok(InvokeResult::encode(&CurrentInputView {
                 index: ctx.current_input_index,
                 commitment: ctx.current_input_commitment,
                 condition_root: Some(ctx.current_input_condition_root),
             })?),
-            SpendContextAction::RevealedInputAmount => Ok(InvokeResult::encode(&ctx.revealed_input_amount)?),
-            SpendContextAction::RevealedOutputAmount => Ok(InvokeResult::encode(&ctx.revealed_output_amount)?),
+            SpendContextAction::RevealedInputAmount => Ok(InvokeResult::encode(&ctx.statement.revealed_input_amount)?),
+            SpendContextAction::RevealedOutputAmount => {
+                Ok(InvokeResult::encode(&ctx.statement.revealed_output_amount)?)
+            },
             SpendContextAction::AssertCovenantBalanced { max_revealed } => {
-                Ok(InvokeResult::encode(&ctx.covenant_balanced(max_revealed))?)
+                let balanced =
+                    ctx.statement
+                        .covenant_balanced(&ctx.current_input_condition_root, max_revealed, |points| {
+                            self.tracker.charge_native_execution(points)
+                        })?;
+                Ok(InvokeResult::encode(&balanced)?)
             },
             SpendContextAction::WitnessData => Ok(InvokeResult::encode(&ctx.witness_data)?),
         }

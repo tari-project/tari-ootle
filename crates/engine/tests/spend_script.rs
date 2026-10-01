@@ -10,6 +10,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_engine_types::{
+    crypto::covenant_balance_proof_native_points,
     limits::STEALTH_LIMITS,
     stealth::{MerkleTree, hashlock_digest},
 };
@@ -1459,4 +1460,82 @@ fn two_data_consuming_builtins_in_one_leaf_are_rejected() {
         key_path(test.to_public_key_bytes()),
     );
     submit_expect_rejected(&mut test, resx, transfer, "at most one may consume the witness data");
+}
+
+// -------------------------------- Covenant proof metering -------------------------------- //
+
+/// Spends `num_inputs` 100-unit UTXOs, each gated by the single-leaf tree `leaf`, into one output re-locked under
+/// `leaf`, and returns the native points the transaction consumed.
+fn covenant_spend_native_points(leaf: SpendCondition, num_inputs: usize) -> u64 {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (resx, mint) = mint_utxos(&mut test, (0..num_inputs).map(|_| leaf.clone().into()).collect());
+    let inputs = (0..num_inputs)
+        .map(|i| {
+            (
+                MaskAndValue {
+                    mask: mint.output_masks[i].clone(),
+                    value: 100,
+                },
+                leaf.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let transfer = stealth::generate_transfer_data(inputs, 0u64, [out(100 * num_inputs as u64, leaf)], 0u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    )
+    .native_execution_points
+}
+
+#[test]
+fn covenant_balance_proof_is_charged() {
+    let unproven = covenant_spend_native_points(covenant(Covenant::OutputPreservesCondition), 1);
+    let proven = covenant_spend_native_points(covenant(Covenant::BalancePreserved(0)), 1);
+    assert_eq!(proven - unproven, covenant_balance_proof_native_points(1, 1));
+}
+
+#[test]
+fn covenant_balance_proof_is_charged_once_per_partition() {
+    let unproven = covenant_spend_native_points(covenant(Covenant::OutputPreservesCondition), 3);
+    let proven = covenant_spend_native_points(covenant(Covenant::BalancePreserved(0)), 3);
+    assert_eq!(proven - unproven, covenant_balance_proof_native_points(3, 1));
+}
+
+#[test]
+fn repeated_covenant_balance_atoms_are_charged_once() {
+    let once = covenant_spend_native_points(covenant(Covenant::BalancePreserved(0)), 1);
+    let repeated = covenant_spend_native_points(
+        all(vec![
+            covenant(Covenant::BalancePreserved(0)),
+            covenant(Covenant::BalancePreserved(0)),
+            covenant(Covenant::BalancePreserved(5)),
+        ]),
+        1,
+    );
+    assert_eq!(repeated, once);
+}
+
+#[test]
+fn covenant_balance_claim_for_an_already_claimed_partition_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = covenant(Covenant::BalancePreserved(0));
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    let mut transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
+    let claim = transfer.statement.covenant_claims[0].clone();
+    transfer.statement.covenant_claims.push(claim);
+    submit_expect_rejected(&mut test, resx, transfer, "already claimed");
+}
+
+#[test]
+fn covenant_balance_claim_for_a_missing_input_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let covenant = covenant(Covenant::BalancePreserved(0));
+    let (resx, mint) = mint_utxo(&mut test, covenant.clone());
+    let mut transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
+    transfer.statement.covenant_claims[0].partition_input_index = 1;
+    submit_expect_rejected(&mut test, resx, transfer, "out of range");
 }

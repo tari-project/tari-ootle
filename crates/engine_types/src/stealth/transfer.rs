@@ -173,6 +173,25 @@ pub fn validate_transfer(
     })
 }
 
+/// Checks that each covenant balance claim names a distinct input of `transfer`. A claim names its partition by the
+/// index of the partition's first input, so a valid statement carries at most one claim per input.
+pub fn validate_covenant_claims(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
+    let mut claimed = BTreeSet::new();
+    for claim in &transfer.covenant_claims {
+        let index = claim.partition_input_index;
+        if index as usize >= transfer.inputs_statement.inputs.len() || !claimed.insert(index) {
+            return Err(ResourceError::InvalidSpend {
+                details: format!(
+                    "Covenant balance claim names input {index}, which is out of range or already claimed, in a \
+                     transfer of {} inputs",
+                    transfer.inputs_statement.inputs.len()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
     // The excess folds the inputs positionally, so a commitment listed n times contributes n times its value to a
     // balance proof its spender can still construct, while the spend downs the one UTXO once.
@@ -184,6 +203,8 @@ fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), Resource
             });
         }
     }
+
+    validate_covenant_claims(transfer)?;
 
     if transfer.inputs_statement.revealed_amount.is_negative() {
         return Err(ResourceError::InvalidBalanceProof {

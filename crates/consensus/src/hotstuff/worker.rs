@@ -69,7 +69,7 @@ use crate::{
         exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
         on_catch_up_sync::OnCatchUpSync,
         on_catch_up_sync_request::OnSyncRequest,
-        on_inbound_message::OnInboundMessage,
+        on_inbound_message::{InboundMessage, OnInboundMessage},
         on_leader_timeout::LeaderTimeout,
         on_message_validate::{MessageValidationResult, OnMessageValidate},
         on_next_sync_view::OnNextSyncViewHandler,
@@ -561,9 +561,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
-        result: Result<(TConsensusSpec::Addr, HotstuffMessage), HotStuffError>,
+        result: Result<InboundMessage<TConsensusSpec::Addr>, HotStuffError>,
     ) -> Result<(), HotStuffError> {
-        let (from, msg) = result?;
+        let (from, msg) = match result? {
+            InboundMessage::Ready { from, message } => (from, message),
+            InboundMessage::ProposalAhead { from, justify } => {
+                return self
+                    .on_proposal_ahead(epoch_state, current_height, from, &justify)
+                    .await;
+            },
+        };
 
         match self
             .on_message_validate
@@ -823,6 +830,46 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             },
         }
 
+        Ok(())
+    }
+
+    /// Catches up from `from`, which proposed on the certified block `justify` while this node lags more than one
+    /// view behind it. The proposal itself waits in the view buffer until catch-up imports its ancestors.
+    async fn on_proposal_ahead(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+        from: TConsensusSpec::Addr,
+        justify: &ProposalCertificate,
+    ) -> Result<(), HotStuffError> {
+        if self.worker_state.is_active_catch_up() || from == self.local_validator_addr {
+            return Ok(());
+        }
+        // A certified block we already hold, e.g. one parked on missing transactions, is not fetched by catching
+        // up.
+        let block_id = justify.calculate_block_id();
+        if self
+            .state_store
+            .with_read_tx(|tx| Block::record_exists(tx, &block_id))?
+        {
+            return Ok(());
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "⏩ {from} proposed on certified block {}/{} while this node is at {current_height}. Catching up from {from}.",
+            justify.epoch(),
+            justify.height(),
+        );
+        self.on_catch_up_sync
+            .request_sync(epoch_state.epoch(), from.clone())
+            .await?;
+        self.worker_state.catch_up = Some(CatchUp::new(
+            justify.height(),
+            current_height,
+            self.config.catch_up_request_timeout,
+            from,
+        ));
         Ok(())
     }
 

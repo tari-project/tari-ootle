@@ -19,7 +19,17 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::inbound_messages";
 
-type IncomingMessageResult<TAddr> = Result<Option<(TAddr, HotstuffMessage)>, HotStuffError>;
+type IncomingMessageResult<TAddr> = Result<Option<InboundMessage<TAddr>>, HotStuffError>;
+
+/// What the message buffer hands to the consensus worker.
+pub enum InboundMessage<TAddr> {
+    /// A message for the current view.
+    Ready { from: TAddr, message: HotstuffMessage },
+    /// A committee member proposed on a certified block more than one view ahead of this node, in its epoch. The
+    /// blocks in between are missing here and no buffered proposal supplies them, so the node catches up now
+    /// instead of waiting out leader timeouts. The certificate's quorum signatures have been verified.
+    ProposalAhead { from: TAddr, justify: ProposalCertificate },
+}
 
 pub struct OnInboundMessage<TConsensusSpec: ConsensusSpec> {
     message_buffer: MessageBuffer<TConsensusSpec>,
@@ -47,17 +57,18 @@ impl<TConsensusSpec: ConsensusSpec> OnInboundMessage<TConsensusSpec> {
         current_epoch: Epoch,
         current_height: NodeHeight,
         has_processed_first_block: bool,
-    ) -> Option<Result<(TConsensusSpec::Addr, HotstuffMessage), HotStuffError>> {
+    ) -> Option<Result<InboundMessage<TConsensusSpec::Addr>, HotStuffError>> {
         // Then incoming messages for the current epoch/height
         let result = self
             .message_buffer
             .next(current_epoch, current_height, has_processed_first_block)
             .await;
         match result {
-            Ok(Some((from, msg))) => {
-                self.hooks.on_message_received(&msg);
-                Some(Ok((from, msg)))
+            Ok(Some(InboundMessage::Ready { from, message })) => {
+                self.hooks.on_message_received(&message);
+                Some(Ok(InboundMessage::Ready { from, message }))
             },
+            Ok(Some(ahead @ InboundMessage::ProposalAhead { .. })) => Some(Ok(ahead)),
             Ok(None) => {
                 // Inbound messages terminated
                 None
@@ -106,6 +117,9 @@ const MAX_VIEW_LOOKAHEAD: NodeHeight = NodeHeight(20);
 pub struct MessageBuffer<TConsensusSpec: ConsensusSpec> {
     network: Network,
     buffer: ViewBuffer<(TConsensusSpec::Addr, HotstuffMessage)>,
+    /// The highest justify certificate already reported as [`InboundMessage::ProposalAhead`], so that each
+    /// certificate's signatures are checked and reported at most once.
+    highest_reported_ahead: Option<View>,
     inbound_messaging: TConsensusSpec::InboundMessaging,
     epoch_manager: TConsensusSpec::EpochManager,
     signer_service: TConsensusSpec::SignerService,
@@ -121,6 +135,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         Self {
             network,
             buffer: ViewBuffer::new(MAX_BUFFERED_MESSAGES, MAX_BUFFERED_BYTES),
+            highest_reported_ahead: None,
             inbound_messaging,
             epoch_manager,
             signer_service,
@@ -148,8 +163,8 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         );
         if has_processed_first_block {
             // Drain all buffered messages for the current view
-            if let Some(msg_tuple) = self.buffer.pop_front(&next_view) {
-                return Ok(Some(msg_tuple));
+            if let Some((from, message)) = self.buffer.pop_front(&next_view) {
+                return Ok(Some(InboundMessage::Ready { from, message }));
             }
         }
 
@@ -191,7 +206,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
 
             match msg_relative_view(&msg, current_epoch, current_height, has_processed_first_block) {
                 MessageRelativeView::Current => {
-                    return Ok(Some((from, msg)));
+                    return Ok(Some(InboundMessage::Ready { from, message: msg }));
                 },
                 MessageRelativeView::Past { epoch, height } => {
                     info!(target: LOG_TARGET, "🗑️ Discard message {} is for previous view {}/{}. Current view {}/{}", msg, epoch, height, current_epoch, current_height);
@@ -202,7 +217,17 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                     } else {
                         info!(target: LOG_TARGET, "🔮 Message {msg} is for future view {height} (Current view: {current_epoch}, {current_height})");
                     }
-                    self.push_to_buffer(View::new(current_epoch, current_height), epoch, height, from, msg);
+                    let justify_ahead = self.verified_justify_ahead(&msg, current_epoch, current_height).await?;
+                    self.push_to_buffer(
+                        View::new(current_epoch, current_height),
+                        epoch,
+                        height,
+                        from.clone(),
+                        msg,
+                    );
+                    if let Some(justify) = justify_ahead {
+                        return Ok(Some(InboundMessage::ProposalAhead { from, justify }));
+                    }
                 },
                 MessageRelativeView::Discard => {
                     warn!(target: LOG_TARGET, "🗑️ Discard non-applicable message {}. Current view {}/{}", msg, current_epoch, current_height);
@@ -225,6 +250,84 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
 
     pub fn clear_buffer(&mut self) {
         self.buffer.clear();
+        self.highest_reported_ahead = None;
+    }
+
+    /// Returns a proposal's justify certificate when it certifies a block in our epoch more than one view ahead of
+    /// ours, carries a valid quorum, and is higher than any certificate already reported.
+    async fn verified_justify_ahead(
+        &mut self,
+        msg: &HotstuffMessage,
+        current_epoch: Epoch,
+        current_height: NodeHeight,
+    ) -> Result<Option<ProposalCertificate>, HotStuffError> {
+        let HotstuffMessage::Proposal(proposal) = msg else {
+            return Ok(None);
+        };
+        let justify = proposal.block.justify();
+        if justify.epoch() != current_epoch || justify.height() <= current_height + NodeHeight(1) {
+            return Ok(None);
+        }
+        let view = View::new(justify.epoch(), justify.height());
+        if self.highest_reported_ahead.is_some_and(|reported| view <= reported) {
+            return Ok(None);
+        }
+        if !self.has_valid_quorum(justify).await? {
+            return Ok(None);
+        }
+        self.highest_reported_ahead = Some(view);
+        Ok(Some(justify.clone()))
+    }
+
+    /// True when `qc` carries a valid quorum of signatures from its shard group's committee. False when the local
+    /// oracle has not observed the QC's epoch or assigned that committee yet, or when the signatures fail.
+    async fn has_valid_quorum(&self, qc: &ProposalCertificate) -> Result<bool, HotStuffError> {
+        if qc.justifies_zero_block() {
+            return Ok(false);
+        }
+
+        // Did the local oracle observe the QC's epoch? If not, we cannot fetch the committee or verify the
+        // signatures.
+        if self
+            .epoch_manager
+            .get_epoch_hash(qc.epoch())
+            .await
+            .optional()?
+            .is_none()
+        {
+            return Ok(false);
+        }
+
+        // `get_committee_by_shard_group` surfaces an unassigned committee as `NoEpochFound`
+        // (see `epoch_manager.rs:get_committee_for_shard_group`), so `.optional()` covers both
+        // the "oracle hasn't observed the epoch" and "committee not yet assigned for this
+        // shard group" cases, and avoids any reliance on cached empty committees.
+        let Some(committee) = self
+            .epoch_manager
+            .get_committee_by_shard_group(qc.epoch(), qc.shard_group())
+            .await
+            .optional()?
+        else {
+            return Ok(false);
+        };
+
+        match check_quorum_certificate_signatures::<TConsensusSpec>(
+            self.network,
+            qc.into(),
+            &committee,
+            &self.signer_service,
+        ) {
+            Ok(()) => Ok(true),
+            Err(err) => {
+                debug!(
+                    target: LOG_TARGET,
+                    "Ignoring QC for {}/{}: signature check failed ({err})",
+                    qc.epoch(),
+                    qc.height()
+                );
+                Ok(false)
+            },
+        }
     }
 
     /// Returns `Some(reason)` if `msg` carries a 2f+1-signed QC for an epoch strictly ahead of
@@ -256,58 +359,26 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         };
 
         let qc_epoch = qc.epoch();
-        if qc_epoch <= current_epoch || qc.justifies_zero_block() {
+        if qc_epoch <= current_epoch {
             return Ok(None);
         }
 
-        // Did the local oracle observe `qc_epoch`? If not, we cannot fetch the committee or
-        // verify the signatures; buffer and try again on the next incoming future-epoch
-        // message (peers keep proposing in the new epoch, so this retries naturally).
-        if self.epoch_manager.get_epoch_hash(qc_epoch).await.optional()?.is_none() {
+        // An unverifiable QC is either a forgery from a current-epoch peer or a transient committee mismatch (the
+        // oracle has not observed the epoch yet). Don't escalate; the message is buffered or dropped as usual, and
+        // the next future-epoch message re-probes.
+        if !self.has_valid_quorum(qc).await? {
             return Ok(None);
         }
 
-        // `get_committee_by_shard_group` surfaces an unassigned committee as `NoEpochFound`
-        // (see `epoch_manager.rs:get_committee_for_shard_group`), so `.optional()` covers both
-        // the "oracle hasn't observed the epoch" and "committee not yet assigned for this
-        // shard group" cases. Returning `Ok(None)` here keeps the buffer / discard fall-through
-        // intact and avoids any reliance on cached empty committees.
-        let Some(committee) = self
-            .epoch_manager
-            .get_committee_by_shard_group(qc_epoch, qc.shard_group())
-            .await
-            .optional()?
-        else {
-            return Ok(None);
-        };
-
-        match check_quorum_certificate_signatures::<TConsensusSpec>(
-            self.network,
-            qc.into(),
-            &committee,
-            &self.signer_service,
-        ) {
-            Ok(()) => {
-                let reason = format!(
-                    "Received valid 2f+1 QC for {} ({} signatures) while consensus view is still in {}: network \
-                     rolled over without us — escalating to state sync.",
-                    qc_epoch,
-                    qc.signatures().len(),
-                    current_epoch,
-                );
-                warn!(target: LOG_TARGET, "🚨 {reason}");
-                Ok(Some(reason))
-            },
-            Err(err) => {
-                // Unverifiable QC — either a forgery from a current-epoch peer or a transient
-                // committee mismatch. Don't escalate; drop silently and buffer the message.
-                debug!(
-                    target: LOG_TARGET,
-                    "Ignoring future-epoch QC for {qc_epoch}: signature check failed ({err})"
-                );
-                Ok(None)
-            },
-        }
+        let reason = format!(
+            "Received valid 2f+1 QC for {} ({} signatures) while consensus view is still in {}: network rolled over \
+             without us — escalating to state sync.",
+            qc_epoch,
+            qc.signatures().len(),
+            current_epoch,
+        );
+        warn!(target: LOG_TARGET, "🚨 {reason}");
+        Ok(Some(reason))
     }
 
     fn push_to_buffer(

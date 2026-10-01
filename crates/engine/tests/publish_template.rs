@@ -237,6 +237,11 @@ fn a_module_dense_in_functions_is_charged_for_each_function() {
             vec![owner_proof],
         )
         .expect("execution failed");
+    let (_, reason) = result
+        .finalize
+        .fee_accept_transaction_reject()
+        .expect("the publish should fail after the fee is paid");
+    assert_reject_reason(reason, TEMPLATE_DEF_CUSTOM_SECTION);
 
     let compile = template_compile_points(code.len() as u64, &CompileCounts {
         functions: functions as u64,
@@ -295,11 +300,13 @@ fn a_module_with_too_many_functions_is_refused_before_the_compile() {
     );
 }
 
-/// A module of one function declaring `locals` locals, in a single `(count, type)` run of a few bytes.
-fn module_of_one_function_with_locals(locals: usize) -> Vec<u8> {
-    let mut wat = String::from("(module (func (local");
-    wat.extend(iter::repeat_n(" i64", locals));
-    wat.push_str(")))");
+/// A module of `functions` functions each declaring `locals` locals, in a single `(count, type)` run
+/// of a few bytes. Valid while `locals` is within wasmparser's per-function limit of 50,000.
+fn module_of_functions_with_locals(functions: usize, locals: usize) -> Vec<u8> {
+    let func = format!("(func (local{}))", " i64".repeat(locals));
+    let mut wat = String::from("(module");
+    wat.extend(iter::repeat_n(func.as_str(), functions));
+    wat.push(')');
     wat::parse_str(wat).unwrap()
 }
 
@@ -309,8 +316,9 @@ fn module_of_one_function_with_locals(locals: usize) -> Vec<u8> {
 fn a_module_dense_in_locals_is_charged_for_each_local() {
     use tari_engine_types::limits::{CompileCounts, template_compile_points};
 
-    let locals = 200_000;
-    let code = module_of_one_function_with_locals(locals);
+    let functions = 8;
+    let locals = functions * 25_000;
+    let code = module_of_functions_with_locals(functions, locals / functions);
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
@@ -327,9 +335,14 @@ fn a_module_dense_in_locals_is_charged_for_each_local() {
             vec![owner_proof],
         )
         .expect("execution failed");
+    let (_, reason) = result
+        .finalize
+        .fee_accept_transaction_reject()
+        .expect("the publish should fail after the fee is paid");
+    assert_reject_reason(reason, TEMPLATE_DEF_CUSTOM_SECTION);
 
     let compile = template_compile_points(code.len() as u64, &CompileCounts {
-        functions: 1,
+        functions: functions as u64,
         variables: locals as u64,
     });
     assert!(
@@ -350,7 +363,9 @@ fn a_module_dense_in_locals_is_charged_for_each_local() {
 fn a_module_with_too_many_locals_is_refused_before_the_compile() {
     use tari_engine_types::limits::{CompileCounts, WASM_LIMITS, template_compile_points};
 
-    let code = module_of_one_function_with_locals(WASM_LIMITS.max_module_variables + 1);
+    let locals_per_function = 25_000;
+    let functions = WASM_LIMITS.max_module_variables / locals_per_function + 1;
+    let code = module_of_functions_with_locals(functions, locals_per_function);
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();

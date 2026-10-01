@@ -31,8 +31,8 @@ const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::transaction_events"
 const MAX_REPLAY_EVENTS: u32 = 10_000;
 /// Page size for DB replay queries.
 const REPLAY_PAGE_SIZE: u32 = 500;
-/// Pages one catch-up may read. A wildcard page can examine `WILDCARD_TOPIC_SCAN_LIMIT` rows and
-/// deliver none, so the budget counts pages rather than delivered events.
+/// Pages a reconnect replay may read. A wildcard page can examine `WILDCARD_TOPIC_SCAN_LIMIT`
+/// rows and deliver none, so the budget counts pages rather than delivered events.
 const MAX_REPLAY_PAGES: u32 = MAX_REPLAY_EVENTS / REPLAY_PAGE_SIZE;
 
 #[utoipa::path(
@@ -147,7 +147,7 @@ async fn run_replay_then_live(
 ) -> Result<(), anyhow::Error> {
     // Phase 1: Replay from DB
     let query = replay_query(&filter);
-    let Some(mut highest_id) = replay_stored(&store, &query, after_id, tx).await? else {
+    let Some(mut highest_id) = replay_stored(&store, &query, after_id, MAX_REPLAY_PAGES, tx).await? else {
         // Client disconnected
         return Ok(());
     };
@@ -162,10 +162,12 @@ async fn run_replay_then_live(
                 if tx_event.id <= highest_id {
                     continue;
                 }
+                // Every received event advances the cursor, matched or not, so a lag catch-up
+                // starts at the last event received.
+                highest_id = tx_event.id;
                 if !filter.matches(&tx_event.event) {
                     continue;
                 }
-                highest_id = tx_event.id;
 
                 let sse_event = encode_transaction_event(&tx_event);
                 if tx.send(sse_event).await.is_err() {
@@ -174,7 +176,9 @@ async fn run_replay_then_live(
             },
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                 warn!(target: LOG_TARGET, "SSE broadcast lagged by {} events, catching up from DB (highest_id={})", n, highest_id);
-                match replay_stored(&store, &query, highest_id, tx).await? {
+                // The catch-up spans only the events the broadcast dropped, so it runs to the end:
+                // stopping early would lose them without telling the client.
+                match replay_stored(&store, &query, highest_id, u32::MAX, tx).await? {
                     Some(caught_up_to) => highest_id = caught_up_to,
                     None => return Ok(()),
                 }
@@ -187,16 +191,17 @@ async fn run_replay_then_live(
 }
 
 /// Sends the stored events matching `query` with id above `after_id`, reading at most
-/// `MAX_REPLAY_PAGES` pages. Returns the id the client has been brought up to, or `None` if the
-/// client disconnected.
+/// `max_pages` pages. Returns the id the client has been brought up to, or `None` if the client
+/// disconnected.
 async fn replay_stored(
     store: &ReadOnlyStore<SqliteIndexerStore>,
     query: &EventQuery,
     after_id: i64,
+    max_pages: u32,
     tx: &tokio::sync::mpsc::Sender<Result<sse::Event, axum::Error>>,
 ) -> Result<Option<i64>, anyhow::Error> {
     let mut highest_id = after_id;
-    for _ in 0..MAX_REPLAY_PAGES {
+    for _ in 0..max_pages {
         let page = store
             .get_events_after_id(query.clone(), highest_id, REPLAY_PAGE_SIZE)
             .await?;
@@ -283,5 +288,69 @@ impl<'a> From<&'a tari_engine_types::events::Event> for EventMinimal<'a> {
             template_address: event.template_address(),
             payload: event.payload(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use tari_engine_types::events::Event;
+    use tokio::sync::{broadcast, mpsc};
+
+    use super::*;
+    use crate::storage_sqlite::insert_test_events;
+
+    fn live_event(id: i64, topic: &str) -> TransactionEvent {
+        TransactionEvent {
+            id,
+            transaction_id: TransactionId::default(),
+            event: Arc::new(Event::new(
+                None,
+                TemplateAddress::default(),
+                topic.to_string(),
+                Metadata::new(),
+            )),
+        }
+    }
+
+    async fn next_event_id(rx: &mut mpsc::Receiver<Result<sse::Event, axum::Error>>) -> Option<String> {
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.ok()??;
+        // sse::Event renders as text; the `id:` line carries the event's database id.
+        let rendered = format!("{:?}", event.unwrap());
+        rendered
+            .split("id: ")
+            .nth(1)
+            .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect())
+    }
+
+    #[tokio::test]
+    async fn a_lag_catch_up_recovers_the_matching_events_the_broadcast_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("indexer.db");
+        let store = SqliteIndexerStore::try_create(db_path.clone()).unwrap();
+        insert_test_events(&db_path, &["common.miss"; 4]);
+
+        let (publisher, broadcast_rx) = broadcast::channel(1);
+        let (tx, mut rx) = mpsc::channel(256);
+        let filter = EventFilter {
+            topic: Some("rare.*".into()),
+            ..Default::default()
+        };
+        tokio::spawn(
+            async move { run_replay_then_live(ReadOnlyStore::new(store), broadcast_rx, filter, 0, &tx).await },
+        );
+
+        // Id 5 reaches the client by replay or live; either way the replay is finished once it does.
+        insert_test_events(&db_path, &["rare.hit"]);
+        publisher.send(live_event(5, "rare.hit")).unwrap();
+        assert_eq!(next_event_id(&mut rx).await.as_deref(), Some("5"));
+
+        // A capacity-1 broadcast drops 6 and 7 before the subscriber runs; only 8 survives.
+        insert_test_events(&db_path, &["common.miss", "rare.hit", "common.miss"]);
+        for (id, topic) in [(6, "common.miss"), (7, "rare.hit"), (8, "common.miss")] {
+            publisher.send(live_event(id, topic)).unwrap();
+        }
+        assert_eq!(next_event_id(&mut rx).await.as_deref(), Some("7"));
     }
 }

@@ -153,6 +153,31 @@ fn apply_pragmas(conn: &mut SqliteConnection) -> Result<(), diesel::result::Erro
     Ok(())
 }
 
+/// Appends one event per topic to the store at `db_path`, taking the next ids in the order given.
+#[cfg(test)]
+pub(crate) fn insert_test_events(db_path: &std::path::Path, topics: &[&str]) {
+    use tari_common_types::types::FixedHash;
+
+    use crate::storage_sqlite::{models::NewEvent, schema::events, serialization::serialize_json};
+
+    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap()).unwrap();
+    let tx_hash = FixedHash::zero().to_string();
+    let payload = serialize_json(&tari_template_lib_types::Metadata::new()).unwrap();
+    for topic in topics {
+        diesel::insert_into(events::table)
+            .values(NewEvent {
+                template_address: FixedHash::zero().to_string(),
+                tx_hash: &tx_hash,
+                topic,
+                payload: payload.clone(),
+                substate_id: None,
+                resource_address: None,
+            })
+            .execute(&mut conn)
+            .unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1643,27 +1668,9 @@ mod tests {
         assert!(put(&store, &substate(9), SubstateVersion::new(1), 100).await);
     }
 
-    /// A store holding one event per topic, with ids 1.. in the order given.
     async fn store_with_events(topics: &[&str]) -> (tempfile::TempDir, SqliteIndexerStore) {
-        use crate::storage_sqlite::{models::NewEvent, schema::events, serialization::serialize_json};
-
         let (dir, store) = temp_store().await;
-        let mut conn = SqliteConnection::establish(dir.path().join("indexer.db").to_str().unwrap()).unwrap();
-        let tx_hash = FixedHash::zero().to_string();
-        let payload = serialize_json(&tari_template_lib_types::Metadata::new()).unwrap();
-        for topic in topics {
-            diesel::insert_into(events::table)
-                .values(NewEvent {
-                    template_address: FixedHash::zero().to_string(),
-                    tx_hash: &tx_hash,
-                    topic,
-                    payload: payload.clone(),
-                    substate_id: None,
-                    resource_address: None,
-                })
-                .execute(&mut conn)
-                .unwrap();
-        }
+        insert_test_events(&dir.path().join("indexer.db"), topics);
         (dir, store)
     }
 

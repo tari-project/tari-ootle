@@ -271,6 +271,15 @@ fn module_of_empty_functions(count: usize) -> Vec<u8> {
     wat::parse_str(wat).expect("valid wat")
 }
 
+/// A module of `functions` functions each declaring `locals` locals in one `(count, type)` run.
+fn module_of_functions_with_locals(functions: usize, locals: usize) -> Vec<u8> {
+    let func = format!("(func (local{}))", " i64".repeat(locals));
+    let mut wat = String::from("(module");
+    wat.extend(std::iter::repeat_n(func.as_str(), functions));
+    wat.push(')');
+    wat::parse_str(wat).expect("valid wat")
+}
+
 /// Best compile time of `code` over [`COMPILE_TRIALS`]. The module need not be a loadable template:
 /// a refusal for a missing definition comes after the compile it times.
 fn compile_ms(code: &[u8]) -> f64 {
@@ -321,6 +330,39 @@ fn real_template_ms(path: &str) -> (f64, usize, u64, u64, f64) {
         loaded.shape().element_segment_entries,
         compile_ms,
     )
+}
+
+/// Prints Cranelift's cost per function and per declared local, each expressed as the bytes the
+/// byte price charges for the same time.
+fn print_compile_costs(rate: f64) {
+    // Cranelift's cost per function, expressed as the bytes the byte price charges for the same
+    // time. `TEMPLATE_COMPILE_BYTES_PER_FUNCTION` must stay above it.
+    let few = 1024;
+    let many = limits::WASM_LIMITS.max_module_functions;
+    let per_function_ms = (compile_ms(&module_of_empty_functions(many)) - compile_ms(&module_of_empty_functions(few))) /
+        (many - few) as f64;
+    println!(
+        "per function: {:.1} us -> {} points, the byte price of {:.0} bytes (billed as {})",
+        per_function_ms * 1000.0,
+        (per_function_ms * rate).ceil() as u64,
+        per_function_ms * rate / limits::PER_TEMPLATE_COMPILE_BYTE as f64,
+        limits::TEMPLATE_COMPILE_BYTES_PER_FUNCTION,
+    );
+
+    // Cranelift's cost per declared local, expressed the same way.
+    // `TEMPLATE_COMPILE_BYTES_PER_VARIABLE` must stay above it.
+    let functions = 64;
+    let locals = 8_000;
+    let per_local_ms = (compile_ms(&module_of_functions_with_locals(functions, locals)) -
+        compile_ms(&module_of_functions_with_locals(functions, 0))) /
+        (functions * locals) as f64;
+    println!(
+        "per local: {:.1} ns -> {} points, the byte price of {:.2} bytes (billed as {})",
+        per_local_ms * 1e6,
+        (per_local_ms * rate).ceil() as u64,
+        per_local_ms * rate / limits::PER_TEMPLATE_COMPILE_BYTE as f64,
+        limits::TEMPLATE_COMPILE_BYTES_PER_VARIABLE,
+    );
 }
 
 fn main() {
@@ -385,20 +427,7 @@ fn main() {
         );
     }
 
-    // Cranelift's cost per function, expressed as the bytes the byte price charges for the same
-    // time. `TEMPLATE_COMPILE_BYTES_PER_FUNCTION` must stay above it.
-    let few = 1024;
-    let many = limits::WASM_LIMITS.max_module_functions;
-    let per_function_ms = (compile_ms(&module_of_empty_functions(many)) - compile_ms(&module_of_empty_functions(few))) /
-        (many - few) as f64;
-    println!();
-    println!(
-        "per function: {:.1} us -> {} points, the byte price of {:.0} bytes (billed as {})",
-        per_function_ms * 1000.0,
-        (per_function_ms * rate).ceil() as u64,
-        per_function_ms * rate / limits::PER_TEMPLATE_COMPILE_BYTE as f64,
-        limits::TEMPLATE_COMPILE_BYTES_PER_FUNCTION,
-    );
+    print_compile_costs(rate);
 
     println!();
     if let Ok(dir) = std::env::var("TEMPLATE_WASM_DIR") {

@@ -136,7 +136,7 @@ fn publish_template_without_a_template_def_section() {
 /// transaction that cannot cover it does none of the work.
 #[test]
 fn the_compile_a_publish_pays_for_is_charged_before_it_runs() {
-    use tari_engine_types::limits::template_compile_points;
+    use tari_engine_types::limits::{CompileCounts, template_compile_points};
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
@@ -153,7 +153,7 @@ fn the_compile_a_publish_pays_for_is_charged_before_it_runs() {
     );
 
     let native_points = result.native_execution_points;
-    let compile = template_compile_points(binary_len, 0);
+    let compile = template_compile_points(binary_len, &CompileCounts::default());
     assert!(
         native_points >= compile,
         "a {binary_len}-byte publish charged {native_points} native points, under the {compile} its compile costs"
@@ -166,7 +166,7 @@ fn the_compile_a_publish_pays_for_is_charged_before_it_runs() {
 /// that never ran.
 #[test]
 fn a_module_refused_before_the_compile_is_not_charged_for_it() {
-    use tari_engine_types::limits::template_compile_points;
+    use tari_engine_types::limits::{CompileCounts, template_compile_points};
 
     // Rejected by `validate_module_structure`, which needs no compile: the start section is refused
     // before cranelift is reached.
@@ -199,7 +199,7 @@ fn a_module_refused_before_the_compile_is_not_charged_for_it() {
         .expect("execution failed");
 
     assert!(
-        result.native_execution_points < template_compile_points(code.len() as u64, 0),
+        result.native_execution_points < template_compile_points(code.len() as u64, &CompileCounts::default()),
         "a module refused before the compile was charged {} native points",
         result.native_execution_points
     );
@@ -217,9 +217,9 @@ fn module_of_empty_functions(count: usize) -> Vec<u8> {
 /// a module dense in functions is billed by its function count rather than its size.
 #[test]
 fn a_module_dense_in_functions_is_charged_for_each_function() {
-    use tari_engine_types::limits::template_compile_points;
+    use tari_engine_types::limits::{CompileCounts, template_compile_points};
 
-    let functions = 2048;
+    let functions = 1024;
     let code = module_of_empty_functions(functions);
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
@@ -238,9 +238,12 @@ fn a_module_dense_in_functions_is_charged_for_each_function() {
         )
         .expect("execution failed");
 
-    let compile = template_compile_points(code.len() as u64, functions as u64);
+    let compile = template_compile_points(code.len() as u64, &CompileCounts {
+        functions: functions as u64,
+        variables: 0,
+    });
     assert!(
-        compile > template_compile_points(code.len() as u64, 0),
+        compile > template_compile_points(code.len() as u64, &CompileCounts::default()),
         "a {}-byte module of {functions} functions is billed no more than its size",
         code.len()
     );
@@ -255,7 +258,7 @@ fn a_module_dense_in_functions_is_charged_for_each_function() {
 /// pays for none.
 #[test]
 fn a_module_with_too_many_functions_is_refused_before_the_compile() {
-    use tari_engine_types::limits::{WASM_LIMITS, template_compile_points};
+    use tari_engine_types::limits::{CompileCounts, WASM_LIMITS, template_compile_points};
 
     let code = module_of_empty_functions(WASM_LIMITS.max_module_functions + 1);
 
@@ -280,15 +283,104 @@ fn a_module_with_too_many_functions_is_refused_before_the_compile() {
     assert_reject_reason_with_code(
         reason,
         format!(
-            "Module contains {} functions, the maximum is {}",
-            WASM_LIMITS.max_module_functions + 1,
+            "Module contains more than {} functions",
             WASM_LIMITS.max_module_functions
         ),
         ExecutionFailureCode::TemplateError,
     );
     assert!(
-        result.native_execution_points < template_compile_points(code.len() as u64, 0),
+        result.native_execution_points < template_compile_points(code.len() as u64, &CompileCounts::default()),
         "a module refused for its function count was charged {} native points",
+        result.native_execution_points
+    );
+}
+
+/// A module of one function declaring `locals` locals, in a single `(count, type)` run of a few bytes.
+fn module_of_one_function_with_locals(locals: usize) -> Vec<u8> {
+    let mut wat = String::from("(module (func (local");
+    wat.extend(iter::repeat_n(" i64", locals));
+    wat.push_str(")))");
+    wat::parse_str(wat).unwrap()
+}
+
+/// Cranelift declares every parameter and local as a variable of its own, which the few bytes of a
+/// `(count, type)` run do not pay for, so a module dense in them is billed by their count.
+#[test]
+fn a_module_dense_in_locals_is_charged_for_each_local() {
+    use tari_engine_types::limits::{CompileCounts, template_compile_points};
+
+    let locals = 200_000;
+    let code = module_of_one_function_with_locals(locals);
+
+    let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+    let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
+    test.enable_fees();
+
+    // Refused after the compile for lacking a template definition, by which point the compile has
+    // been charged.
+    let result = test
+        .try_execute(
+            Transaction::builder_localnet(Epoch(1))
+                .pay_fee_from_component(account, 2_000_000u64)
+                .publish_template(code.clone())
+                .build_and_seal(&key),
+            vec![owner_proof],
+        )
+        .expect("execution failed");
+
+    let compile = template_compile_points(code.len() as u64, &CompileCounts {
+        functions: 1,
+        variables: locals as u64,
+    });
+    assert!(
+        compile > template_compile_points(code.len() as u64, &CompileCounts::default()),
+        "a {}-byte module of {locals} locals is billed no more than its size",
+        code.len()
+    );
+    assert!(
+        result.native_execution_points >= compile,
+        "a publish of {locals} locals charged {} native points, under the {compile} its compile costs",
+        result.native_execution_points
+    );
+}
+
+/// The variable cap is checked before the compile, so a module over it does no Cranelift work and
+/// pays for none.
+#[test]
+fn a_module_with_too_many_locals_is_refused_before_the_compile() {
+    use tari_engine_types::limits::{CompileCounts, WASM_LIMITS, template_compile_points};
+
+    let code = module_of_one_function_with_locals(WASM_LIMITS.max_module_variables + 1);
+
+    let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+    let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
+    test.enable_fees();
+
+    let result = test
+        .try_execute(
+            Transaction::builder_localnet(Epoch(1))
+                .pay_fee_from_component(account, 2_000_000u64)
+                .publish_template(code.clone())
+                .build_and_seal(&key),
+            vec![owner_proof],
+        )
+        .expect("execution failed");
+
+    let (_, reason) = result
+        .finalize
+        .fee_accept_transaction_reject()
+        .expect("the publish should fail after the fee is paid");
+    assert_reject_reason_with_code(
+        reason,
+        format!(
+            "Module's functions declare more than {} parameters and locals",
+            WASM_LIMITS.max_module_variables
+        ),
+        ExecutionFailureCode::TemplateError,
+    );
+    assert!(
+        result.native_execution_points < template_compile_points(code.len() as u64, &CompileCounts::default()),
+        "a module refused for its local count was charged {} native points",
         result.native_execution_points
     );
 }

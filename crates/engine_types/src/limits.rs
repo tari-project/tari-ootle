@@ -10,11 +10,13 @@ pub struct WasmLimits {
     pub max_functions: usize,
     /// Maximum number of functions a module may contain, imported and defined together. Every one
     /// of them is Cranelift-compiled at publish, at a cost per function that its bytes do not
-    /// reflect: an empty function is four bytes of binary. Sized so a module at the cap is charged
-    /// no more by [`template_compile_points`] than one at
-    /// [`EngineLimits::max_template_binary_size_bytes`], which keeps every module within both caps
-    /// affordable. `rustc`'s wasm32 output for the built-in templates holds 150 to 360.
+    /// reflect: an empty function is four bytes of binary. `rustc`'s wasm32 output for the
+    /// built-in templates holds 150 to 360.
     pub max_module_functions: usize,
+    /// Maximum number of parameters and locals a module's functions may declare, summed over every
+    /// function. Cranelift declares each as a variable of its own, while a run of locals is a
+    /// single `(count, type)` pair of a few bytes. The built-in templates declare 1,000 to 3,300.
+    pub max_module_variables: usize,
     /// Maximum memory size in pages (64KiB each)
     pub max_memory_pages: usize,
     /// Maximum number of globals a module may declare. Each one occupies a slot in the instance's
@@ -39,7 +41,8 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_function_arguments: 32,
     max_function_name_length: 256,
     max_functions: 8192,
-    max_module_functions: 4096,
+    max_module_functions: 2048,
+    max_module_variables: 512 * 1024,
     max_memory_pages: 32, // ~2MiB = 32 * 64KiB
     max_globals: 1024,
     max_tables: 4,
@@ -146,16 +149,21 @@ pub const FREE_COMPUTE_GRACE_POINTS: u64 = 32_000_000;
 /// unaffordable publish is refused for its size rather than part-way through paying for it.
 ///
 /// The binary is billed at [`PER_TEMPLATE_COMPILE_BYTE`] for whichever is larger: its size, or
-/// [`TEMPLATE_COMPILE_BYTES_PER_FUNCTION`] for each function it contains. The byte price is fitted
-/// over templates whose functions average 800 to 1500 bytes, so it carries their per-function cost
-/// within it; a module denser in functions than that is billed by its function count.
+/// [`TEMPLATE_COMPILE_BYTES_PER_FUNCTION`] for each function it contains plus
+/// [`TEMPLATE_COMPILE_BYTES_PER_VARIABLE`] for each parameter and local those functions declare.
+/// The byte price is fitted over templates whose functions average 800 to 1500 bytes and declare
+/// under one variable per hundred bytes, so it carries those costs within it; a module denser in
+/// either is billed by its counts.
 ///
 /// From `cargo run -p tari_engine --release --example instantiation_points_calibrate`, fitted over
 /// the built-in templates and converted at the calibrated ~8.4M points/ms, rounded up.
-pub const fn template_compile_points(binary_bytes: u64, functions: u64) -> u64 {
-    let function_bytes = functions.saturating_mul(TEMPLATE_COMPILE_BYTES_PER_FUNCTION);
-    let billed_bytes = if function_bytes > binary_bytes {
-        function_bytes
+pub const fn template_compile_points(binary_bytes: u64, counts: &CompileCounts) -> u64 {
+    let count_bytes = counts
+        .functions
+        .saturating_mul(TEMPLATE_COMPILE_BYTES_PER_FUNCTION)
+        .saturating_add(counts.variables.saturating_mul(TEMPLATE_COMPILE_BYTES_PER_VARIABLE));
+    let billed_bytes = if count_bytes > binary_bytes {
+        count_bytes
     } else {
         binary_bytes
     };
@@ -180,16 +188,30 @@ pub const PER_TEMPLATE_COMPILE_BYTE: u64 = 2_100;
 
 /// The fewest bytes a function is billed as by [`template_compile_points`]. Cranelift spends ~47 µs
 /// on a function however small it is, mostly compiling the metering check injected into its entry,
-/// and that is what [`PER_TEMPLATE_COMPILE_BYTE`] charges for ~215 bytes. Rounded up to the figure
-/// that makes [`WasmLimits::max_module_functions`] functions cost exactly
-/// [`EngineLimits::max_template_binary_size_bytes`] bytes.
+/// and that is what [`PER_TEMPLATE_COMPILE_BYTE`] charges for ~215 bytes. Rounded up with a
+/// ~1.2x margin.
 pub const TEMPLATE_COMPILE_BYTES_PER_FUNCTION: u64 = 256;
 
+/// The fewest bytes a parameter or local is billed as by [`template_compile_points`]. Cranelift
+/// spends ~50 ns declaring a local and ~110 ns a parameter, against the ~250 ns of compile
+/// [`PER_TEMPLATE_COMPILE_BYTE`] charges for.
+pub const TEMPLATE_COMPILE_BYTES_PER_VARIABLE: u64 = 1;
+
 const _: () = assert!(
-    WASM_LIMITS.max_module_functions as u64 * TEMPLATE_COMPILE_BYTES_PER_FUNCTION <=
+    WASM_LIMITS.max_module_functions as u64 * TEMPLATE_COMPILE_BYTES_PER_FUNCTION +
+        WASM_LIMITS.max_module_variables as u64 * TEMPLATE_COMPILE_BYTES_PER_VARIABLE <=
         ENGINE_LIMITS.max_template_binary_size_bytes as u64,
-    "a module at the function cap must not cost more to publish than one at the size cap"
+    "a module at the function and variable caps must not cost more to publish than one at the size cap"
 );
+
+/// What a module asks the compile to emit beyond its bytes. Priced by [`template_compile_points`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CompileCounts {
+    /// Functions, imported and defined together.
+    pub functions: u64,
+    /// Parameters and locals, summed over every function.
+    pub variables: u64,
+}
 
 /// Fixed cost of one instantiation: mapping the memory, wiring the imports and building the tables.
 /// Measured at 0.008 to 0.010 ms across runs, taken at the top of that spread.
@@ -521,8 +543,10 @@ mod publish_budget_tests {
     #[test]
     fn the_largest_publishable_binary_leaves_room_to_source_a_fee() {
         let largest = ENGINE_LIMITS.max_template_binary_size_bytes as u64;
-        let most_functions = WASM_LIMITS.max_module_functions as u64;
-        let compile = template_compile_points(largest, most_functions);
+        let compile = template_compile_points(largest, &CompileCounts {
+            functions: WASM_LIMITS.max_module_functions as u64,
+            variables: WASM_LIMITS.max_module_variables as u64,
+        });
 
         assert!(
             compile + FREE_COMPUTE_GRACE_POINTS <= MAX_NATIVE_POINTS_PER_TRANSACTION,
@@ -533,7 +557,7 @@ mod publish_budget_tests {
 
         // Without an upper bound the reserve could swallow the cap and nobody would notice.
         assert!(
-            template_compile_points(largest + 128 * 1024, 0) + FREE_COMPUTE_GRACE_POINTS >
+            template_compile_points(largest + 128 * 1024, &CompileCounts::default()) + FREE_COMPUTE_GRACE_POINTS >
                 MAX_NATIVE_POINTS_PER_TRANSACTION,
             "the publish cap is well under what the budget admits and is costing publishers room"
         );

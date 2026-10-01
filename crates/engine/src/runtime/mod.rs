@@ -62,7 +62,7 @@ use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     fees::FeeReceipt,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
-    limits::ModuleShape,
+    limits::{CompileCounts, ModuleShape},
     lock::LockFlag,
     published_template::TemplateBlob,
 };
@@ -285,7 +285,7 @@ pub trait RuntimeInterface {
 
     /// Charges the Cranelift compile a `PublishTemplate` instruction makes every validator run,
     /// before the compile starts. Priced by [`tari_engine_types::limits::template_compile_points`].
-    fn charge_template_compile(&self, binary_bytes: u64, functions: u64) -> Result<(), RuntimeError>;
+    fn charge_template_compile(&self, binary_bytes: u64, counts: &CompileCounts) -> Result<(), RuntimeError>;
 
     /// Total Wasmer metering points consumed by the transaction so far, across every template
     /// invocation. Used by `WasmProcess::invoke` to enforce `MAX_WASM_POINTS_PER_TRANSACTION`.

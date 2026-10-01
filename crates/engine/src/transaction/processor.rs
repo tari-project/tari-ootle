@@ -667,11 +667,11 @@ where
         let structure = WasmModule::prevalidate_code(binary)?;
 
         // The compile is the most expensive thing a single instruction can ask of a validator, so it
-        // is paid for before it runs. The size cap above and the function cap in the prevalidation
-        // are what keep this charge affordable.
+        // is paid for before it runs. The size cap above and the function and variable caps in the
+        // prevalidation are what keep this charge affordable.
         runtime
             .interface()
-            .charge_template_compile(binary.len() as u64, structure.function_count)?;
+            .charge_template_compile(binary.len() as u64, &structure.compile)?;
 
         let template_def = WasmModule::compile_prevalidated(binary, structure.shape)?;
         // The size cap above holds the binary within `MAX_TEMPLATE_BLOB_WIRE_BYTES` — a const assertion keeps the two

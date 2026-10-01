@@ -41,7 +41,7 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
     limits,
-    limits::ModuleShape,
+    limits::{CompileCounts, ModuleShape},
     lock::LockFlag,
     logs::LogEntry,
     proof::{ContainerRef, LockedResource},
@@ -4258,12 +4258,9 @@ where
         &self.wasm_instances
     }
 
-    fn charge_template_compile(&self, binary_bytes: u64, functions: u64) -> Result<(), RuntimeError> {
+    fn charge_template_compile(&self, binary_bytes: u64, counts: &CompileCounts) -> Result<(), RuntimeError> {
         self.tracker
-            .charge_native_execution(tari_engine_types::limits::template_compile_points(
-                binary_bytes,
-                functions,
-            ))
+            .charge_native_execution(tari_engine_types::limits::template_compile_points(binary_bytes, counts))
     }
 
     fn wasm_points_consumed(&self) -> u64 {

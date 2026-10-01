@@ -179,13 +179,17 @@ pub fn validate_covenant_claims(transfer: &StealthTransferStatement) -> Result<(
     let mut claimed = BTreeSet::new();
     for claim in &transfer.covenant_claims {
         let index = claim.partition_input_index;
-        if index as usize >= transfer.inputs_statement.inputs.len() || !claimed.insert(index) {
+        let num_inputs = transfer.inputs_statement.inputs.len();
+        if index as usize >= num_inputs {
             return Err(ResourceError::InvalidSpend {
                 details: format!(
-                    "Covenant balance claim names input {index}, which is out of range or already claimed, in a \
-                     transfer of {} inputs",
-                    transfer.inputs_statement.inputs.len()
+                    "Covenant balance claim names input {index}, but the transfer has {num_inputs} inputs"
                 ),
+            });
+        }
+        if !claimed.insert(index) {
+            return Err(ResourceError::InvalidSpend {
+                details: format!("Transfer carries a second claim for input {index}"),
             });
         }
     }

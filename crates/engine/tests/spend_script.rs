@@ -1464,10 +1464,11 @@ fn two_data_consuming_builtins_in_one_leaf_are_rejected() {
 
 // -------------------------------- Covenant proof metering -------------------------------- //
 
-/// Spends `num_inputs` 100-unit UTXOs, each gated by the single-leaf tree `leaf`, into one output re-locked under
-/// `leaf`, and returns the native points the transaction consumed.
-fn covenant_spend_native_points(leaf: SpendCondition, num_inputs: usize) -> u64 {
+/// Spends `num_inputs` 100-unit UTXOs, each gated by the single-leaf tree `leaf` (built against the `SpendScripts`
+/// template address), into one output re-locked under it, and returns the native points the transaction consumed.
+fn covenant_spend_native_points(leaf: impl Fn(TemplateAddress) -> SpendCondition, num_inputs: usize) -> u64 {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let leaf = leaf(test.get_template_address(SCRIPT_TEMPLATE));
     let (resx, mint) = mint_utxos(&mut test, (0..num_inputs).map(|_| leaf.clone().into()).collect());
     let inputs = (0..num_inputs)
         .map(|i| {
@@ -1493,30 +1494,62 @@ fn covenant_spend_native_points(leaf: SpendCondition, num_inputs: usize) -> u64 
 
 #[test]
 fn covenant_balance_proof_is_charged() {
-    let unproven = covenant_spend_native_points(covenant(Covenant::OutputPreservesCondition), 1);
-    let proven = covenant_spend_native_points(covenant(Covenant::BalancePreserved(0)), 1);
+    let unproven = covenant_spend_native_points(|_| covenant(Covenant::OutputPreservesCondition), 1);
+    let proven = covenant_spend_native_points(|_| covenant(Covenant::BalancePreserved(0)), 1);
     assert_eq!(proven - unproven, covenant_balance_proof_native_points(1, 1));
 }
 
 #[test]
 fn covenant_balance_proof_is_charged_once_per_partition() {
-    let unproven = covenant_spend_native_points(covenant(Covenant::OutputPreservesCondition), 3);
-    let proven = covenant_spend_native_points(covenant(Covenant::BalancePreserved(0)), 3);
+    let unproven = covenant_spend_native_points(|_| covenant(Covenant::OutputPreservesCondition), 3);
+    let proven = covenant_spend_native_points(|_| covenant(Covenant::BalancePreserved(0)), 3);
     assert_eq!(proven - unproven, covenant_balance_proof_native_points(3, 1));
 }
 
 #[test]
 fn repeated_covenant_balance_atoms_are_charged_once() {
-    let once = covenant_spend_native_points(covenant(Covenant::BalancePreserved(0)), 1);
+    let once = covenant_spend_native_points(|_| covenant(Covenant::BalancePreserved(0)), 1);
     let repeated = covenant_spend_native_points(
-        all(vec![
-            covenant(Covenant::BalancePreserved(0)),
-            covenant(Covenant::BalancePreserved(0)),
-            covenant(Covenant::BalancePreserved(5)),
-        ]),
+        |_| {
+            all(vec![
+                covenant(Covenant::BalancePreserved(0)),
+                covenant(Covenant::BalancePreserved(0)),
+                covenant(Covenant::BalancePreserved(5)),
+            ])
+        },
         1,
     );
     assert_eq!(repeated, once);
+}
+
+#[test]
+fn spend_script_covenant_balance_proof_is_charged() {
+    let unproven = covenant_spend_native_points(|t| script_condition(t, "always_ok", vec![]), 1);
+    let proven = covenant_spend_native_points(|t| script_condition(t, "preserve_balance", vec![]), 1);
+    assert_eq!(proven - unproven, covenant_balance_proof_native_points(1, 1));
+}
+
+#[test]
+fn native_and_spend_script_covenants_share_one_proof() {
+    let native_only = covenant_spend_native_points(
+        |t| {
+            all(vec![
+                covenant(Covenant::BalancePreserved(0)),
+                script_condition(t, "always_ok", vec![]),
+            ])
+        },
+        1,
+    );
+    let both = covenant_spend_native_points(
+        |t| {
+            all(vec![
+                covenant(Covenant::BalancePreserved(0)),
+                script_condition(t, "preserve_balance", vec![]),
+            ])
+        },
+        1,
+    );
+    assert_eq!(both, native_only);
 }
 
 #[test]
@@ -1527,7 +1560,7 @@ fn covenant_balance_claim_for_an_already_claimed_partition_is_rejected() {
     let mut transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
     let claim = transfer.statement.covenant_claims[0].clone();
     transfer.statement.covenant_claims.push(claim);
-    submit_expect_rejected(&mut test, resx, transfer, "already claimed");
+    submit_expect_rejected(&mut test, resx, transfer, "a second claim for input 0");
 }
 
 #[test]
@@ -1537,5 +1570,10 @@ fn covenant_balance_claim_for_a_missing_input_is_rejected() {
     let (resx, mint) = mint_utxo(&mut test, covenant.clone());
     let mut transfer = spend_with_covenant(&mint, &covenant, vec![out(100, covenant.clone())]);
     transfer.statement.covenant_claims[0].partition_input_index = 1;
-    submit_expect_rejected(&mut test, resx, transfer, "out of range");
+    submit_expect_rejected(
+        &mut test,
+        resx,
+        transfer,
+        "names input 1, but the transfer has 1 inputs",
+    );
 }

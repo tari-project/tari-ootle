@@ -16,6 +16,7 @@ pub struct NetworkStateMetrics {
     fee_volume: Gauge,
     receipt_exhaust_burned: Gauge,
     transaction_receipt_count: Gauge,
+    validator_claimable_fees: Gauge,
     exhaust_rate_bps: Gauge,
 }
 
@@ -52,6 +53,11 @@ impl NetworkStateMetrics {
                 "Number of transaction receipts the indexer has stored",
                 registry,
             ),
+            validator_claimable_fees: Gauge::default().register_at(
+                "validator_claimable_fees_microtari",
+                "Leader fees (microTARI) held in validator fee pools and not yet claimed",
+                registry,
+            ),
             exhaust_rate_bps: Gauge::default().register_at(
                 "exhaust_rate_bps",
                 "Target exhaust burn rate in basis points in effect at the current epoch",
@@ -68,6 +74,8 @@ impl NetworkStateMetrics {
             .set(amount_to_gauge(economics.receipt_exhaust_burned));
         self.transaction_receipt_count
             .set(i64::try_from(economics.transaction_receipt_count).unwrap_or(i64::MAX));
+        self.validator_claimable_fees
+            .set(amount_to_gauge(economics.validator_claimable_fees));
         self.exhaust_rate_bps.set(i64::from(target_burn_rate_bps));
     }
 }
@@ -95,6 +103,7 @@ mod tests {
                 fee_volume: Amount::from(800u64),
                 receipt_exhaust_burned: Amount::from(40u64),
                 transaction_receipt_count: 7,
+                validator_claimable_fees: Amount::from(600u64),
             },
             500,
         );
@@ -107,6 +116,7 @@ mod tests {
         assert!(out.contains("network_fee_volume_microtari 800"), "{out}");
         assert!(out.contains("network_receipt_exhaust_burned_microtari 40"), "{out}");
         assert!(out.contains("network_transaction_receipt_count 7"), "{out}");
+        assert!(out.contains("network_validator_claimable_fees_microtari 600"), "{out}");
         assert!(out.contains("network_exhaust_rate_bps 500"), "{out}");
     }
 }

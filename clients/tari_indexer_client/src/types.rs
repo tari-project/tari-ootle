@@ -999,6 +999,11 @@ pub struct GetNetworkEconomicsResponse {
     /// Circulating L2 supply: `total_claimed - receipt_exhaust_burned`.
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub total_supply: Amount,
+    /// Leader fees sitting in validator fee pools that validators have not yet claimed: the sum of every pool's
+    /// current balance.
+    #[serde(default)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub validator_claimable_fees: Amount,
     /// Number of transaction receipts the indexer has stored.
     pub transaction_receipt_count: u64,
     /// The share of collected fees burned rather than paid to leaders, in basis points, in effect at `current_epoch`.

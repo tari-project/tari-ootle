@@ -47,6 +47,7 @@ use tari_ootle_storage::{Ordering, StorageError, consensus_models::EpochCheckpoi
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_template_lib_types::{
+    Amount,
     Hash32,
     ResourceAddress,
     TemplateAddress,
@@ -669,6 +670,27 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         u64::try_from(count).map_err(|_| StorageError::DataInconsistency {
             details: format!("{OPERATION}: negative receipt count {count}"),
         })
+    }
+
+    fn sum_validator_fee_pool_balances(&mut self) -> Result<Amount, StorageError> {
+        const OPERATION: &str = "sum_validator_fee_pool_balances";
+        use crate::storage_sqlite::schema::substates;
+
+        let total = substates::table
+            .select(dsl::sql::<sql_types::Nullable<sql_types::BigInt>>(
+                "SUM(json_extract(data, '$.ValidatorFeePool.amount'))",
+            ))
+            .filter(substates::address.like(format!("{}_%", SubstateType::ValidatorFeePool.as_prefix_str())))
+            .get_result::<Option<i64>>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?
+            .unwrap_or(0);
+        u64::try_from(total)
+            .map(Amount::from)
+            .map_err(|_| StorageError::DataInconsistency {
+                details: format!("{OPERATION}: negative fee pool balance {total}"),
+            })
     }
 
     // -------------------------------- KeyValues -------------------------------- //

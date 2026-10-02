@@ -30,6 +30,11 @@ export type GetNetworkEconomicsResponse = {
    */
   total_supply: Amount;
   /**
+   * Leader fees sitting in validator fee pools that validators have not yet claimed: the sum of every pool's
+   * current balance.
+   */
+  validator_claimable_fees: Amount;
+  /**
    * Number of transaction receipts the indexer has stored.
    */
   transaction_receipt_count: bigint;

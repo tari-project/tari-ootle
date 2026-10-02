@@ -51,7 +51,7 @@ pub async fn get(Extension(context): Extension<HandlerContext>) -> HandlerResult
 #[utoipa::path(
     get,
     path = "/network/economics",
-    description = "Get network-wide TARI economic totals (claimed, burned, fee volume, supply, target rate and the rate changes scheduled ahead)",
+    description = "Get network-wide TARI economic totals (claimed, burned, fee volume, supply, fees claimable by validators, target rate and the rate changes scheduled ahead)",
     responses(
         (status = 200, body = GetNetworkEconomicsResponse),
         (status = INTERNAL_SERVER_ERROR, body = ErrorResponse),
@@ -82,6 +82,7 @@ pub async fn get_economics(Extension(context): Extension<HandlerContext>) -> Han
             receipt_exhaust_burned: econ.receipt_exhaust_burned,
             total_supply,
             transaction_receipt_count: econ.transaction_receipt_count,
+            validator_claimable_fees: econ.validator_claimable_fees,
             target_burn_rate_bps: outlook.current.as_bps(),
             scheduled_burn_rates: outlook
                 .scheduled

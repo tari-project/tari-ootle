@@ -10,7 +10,13 @@ import Typography from "@mui/material/Typography";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { Amount, ScheduledBurnRate } from "@tari-project/ootle-ts-bindings";
 import { useRef, type ReactNode } from "react";
-import { IoCashOutline, IoFlameOutline, IoReceiptOutline, IoWalletOutline } from "react-icons/io5";
+import {
+  IoCashOutline,
+  IoFlameOutline,
+  IoReceiptOutline,
+  IoShieldCheckmarkOutline,
+  IoWalletOutline,
+} from "react-icons/io5";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
 import PageHeading from "../../Components/PageHeading";
 import { StyledPaper } from "../../Components/StyledComponents";
@@ -290,14 +296,14 @@ function EconomicsContent({ data }: { data: NonNullable<ReturnType<typeof useNet
         </StyledPaper>
       </Grid>
 
-      <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         <StatTile
           icon={<IoWalletOutline />}
           label="Total claimed"
           value={<TariValue amount={toBigInt(data.total_claimed)} />}
         />
       </Grid>
-      <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         <StatTile
           icon={<IoCashOutline />}
           label="Fee volume"
@@ -305,12 +311,19 @@ function EconomicsContent({ data }: { data: NonNullable<ReturnType<typeof useNet
           delta={feeDelta > 0n && <Delta>{formatTari(feeDelta)} TARI</Delta>}
         />
       </Grid>
-      <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         <StatTile
           icon={<IoReceiptOutline />}
           label="Transactions"
           value={txCount.toLocaleString()}
           delta={txDelta > 0 && <Delta>{txDelta.toLocaleString()}</Delta>}
+        />
+      </Grid>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+        <StatTile
+          icon={<IoShieldCheckmarkOutline />}
+          label="Claimable by validators"
+          value={<TariValue amount={toBigInt(data.validator_claimable_fees)} />}
         />
       </Grid>
 
@@ -362,7 +375,8 @@ function EconomicsContent({ data }: { data: NonNullable<ReturnType<typeof useNet
 
       <Grid size={12}>
         <Typography variant="body2" color="textSecondary" align="center" sx={{ fontSize: 12 }}>
-          Cumulative network totals since genesis · refreshes every 30 seconds
+          Cumulative network totals since genesis; validator claimable fees are the current unclaimed balance ·
+          refreshes every 30 seconds
         </Typography>
       </Grid>
     </>

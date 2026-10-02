@@ -172,6 +172,9 @@ pub trait IndexerStoreReadTransaction {
 
     fn count_transaction_receipts(&mut self) -> Result<u64, StorageError>;
 
+    /// The sum of every validator fee pool balance: the leader fees validators have earned and not yet claimed.
+    fn sum_validator_fee_pool_balances(&mut self) -> Result<Amount, StorageError>;
+
     // -------------------------------- KeyValues -------------------------------- //
     fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError>;
     fn key_value_get_raw<K: AsRef<str>>(&mut self, key: K) -> Result<KeyValue<String>, StorageError>;
@@ -455,6 +458,8 @@ pub struct XtrEconomics {
     pub receipt_exhaust_burned: Amount,
     /// Number of transaction receipts the indexer has stored.
     pub transaction_receipt_count: u64,
+    /// Leader fees validators have earned and not yet claimed, summed over every validator fee pool.
+    pub validator_claimable_fees: Amount,
 }
 
 impl<T: IndexerStoreReader + Clone> Clone for ReadOnlyStore<T> {
@@ -538,6 +543,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
                     .optional()?
                     .unwrap_or_default();
                 let transaction_receipt_count = tx.count_transaction_receipts()?;
+                let validator_claimable_fees = tx.sum_validator_fee_pool_balances()?;
 
                 Ok(XtrEconomics {
                     total_claimed,
@@ -545,6 +551,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
                     fee_volume,
                     receipt_exhaust_burned,
                     transaction_receipt_count,
+                    validator_claimable_fees,
                 })
             })
             .await

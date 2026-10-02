@@ -398,6 +398,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn validator_claimable_fees_sums_the_latest_pool_balances() {
+        use tari_engine_types::{ValidatorFeePool, substate::SubstateValue};
+        use tari_ootle_storage::consensus_models::SubstateData;
+        use tari_template_lib_types::{Amount, ValidatorFeePoolAddress, crypto::RistrettoPublicKeyBytes};
+
+        use crate::store::ReadOnlyStore;
+
+        fn pool(n: u8, version: u64, amount: u64) -> SubstateData {
+            SubstateData {
+                substate_id: SubstateId::ValidatorFeePool(ValidatorFeePoolAddress::from_array([n; 32])),
+                version: SubstateVersion::new(version),
+                value: SubstateValue::from(ValidatorFeePool::new(RistrettoPublicKeyBytes::default(), amount)).into(),
+                template_metadata: None,
+            }
+        }
+
+        let (_dir, store) = temp_store().await;
+        let econ = ReadOnlyStore::new(store.clone()).get_tari_economics().await.unwrap();
+        assert_eq!(econ.validator_claimable_fees, Amount::zero());
+
+        store
+            .with_write_tx(|tx| {
+                tx.upsert_substate(&pool(1, 0, 300))?;
+                tx.upsert_substate(&pool(2, 0, 200))?;
+                // A claim of 250 from the first pool.
+                tx.upsert_substate(&pool(1, 1, 50))
+            })
+            .await
+            .unwrap();
+
+        let econ = ReadOnlyStore::new(store.clone()).get_tari_economics().await.unwrap();
+        assert_eq!(econ.validator_claimable_fees, Amount::from(250u64));
+    }
+
+    #[tokio::test]
     async fn tari_total_supply_nets_receipt_burn_not_header() {
         use tari_template_lib_types::Amount;
 

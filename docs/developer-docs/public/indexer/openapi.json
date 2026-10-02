@@ -1011,7 +1011,7 @@
         "tags": [
           "handlers::transactions"
         ],
-        "description": "List recent transactions, newest first.\n\nBEST EFFORT: this lists what this indexer happens to hold — transactions submitted through it, plus those it observed on the network gossip topic while it was running and subscribed. It is not a complete record of network activity and absence from this listing does not mean a transaction does not exist. An indexer misses a transaction if it was offline or still starting up when it was gossiped, if its inbound gossip queue was full, or if the transaction has since aged past its retention window (see `transaction_retention_epochs` on /info).\n\nTransaction receipts are different: they are synced from network state rather than gossip, are complete from genesis, and are recovered after downtime. A committed transaction whose gossip this indexer missed therefore has a receipt but no entry here — list it from /transaction-receipts instead. Transactions that never committed (mempool-rejected, aborted or expired) never get a receipt, so gossip is the only source for them and coverage is best effort with no fallback.",
+        "description": "List recent transactions, newest first.\n\nBEST EFFORT: this lists what this indexer happens to hold — transactions submitted through it, plus those it observed on the network gossip topic while it was running and subscribed. It is not a complete record of network activity and absence from this listing does not mean a transaction does not exist. An indexer misses a transaction if it was offline or still starting up when it was gossiped, if its inbound gossip queue was full, or if the transaction has since aged past its retention window (see `transaction_retention_epochs` on /info).\n\nTransaction receipts are different: they are synced from network state rather than gossip, are complete from genesis back to the indexer's receipt retention window (see `transaction_receipt_retention_epochs` on /info), and are recovered after downtime. A committed transaction whose gossip this indexer missed therefore has a receipt but no entry here — list it from /transaction-receipts instead. Transactions that never committed (mempool-rejected, aborted or expired) never get a receipt, so gossip is the only source for them and coverage is best effort with no fallback.",
         "operationId": "list_recent_transactions",
         "responses": {
           "200": {
@@ -1052,7 +1052,7 @@
         "tags": [
           "handlers::transactions"
         ],
-        "description": "Get a transaction (including its instructions, fee instructions and signatures) by transaction ID.\n\nBEST EFFORT: this reads the indexer's local transaction store, which holds transactions submitted through this indexer and — when gossip indexing is enabled, see `index_gossiped_transactions` on /info — those it observed on the network gossip topic. A 404 means this indexer has no body for the transaction, not that the transaction does not exist: it may have been gossiped while the indexer was offline, dropped from a full inbound queue, or pruned once past its retention window.\n\nTwo endpoints answer authoritatively where this one cannot. /transactions/{transaction_id}/result queries the transaction's committee, so it resolves the outcome of any transaction regardless of where it was submitted. /transaction-receipts is synced from network state rather than gossip and is complete from genesis, so a committed transaction always has a receipt there even when its body is missing here.",
+        "description": "Get a transaction (including its instructions, fee instructions and signatures) by transaction ID.\n\nBEST EFFORT: this reads the indexer's local transaction store, which holds transactions submitted through this indexer and — when gossip indexing is enabled, see `index_gossiped_transactions` on /info — those it observed on the network gossip topic. A 404 means this indexer has no body for the transaction, not that the transaction does not exist: it may have been gossiped while the indexer was offline, dropped from a full inbound queue, or pruned once past its retention window.\n\nTwo endpoints answer authoritatively where this one cannot. /transactions/{transaction_id}/result queries the transaction's committee, so it resolves the outcome of any transaction regardless of where it was submitted. /transaction-receipts is synced from network state rather than gossip and is complete back to its retention window (see `transaction_receipt_retention_epochs` on /info), which is never shorter than the transaction one, so a committed transaction always has a receipt there even when its body is missing here.",
         "operationId": "get_transaction",
         "responses": {
           "200": {
@@ -1509,7 +1509,7 @@
           },
           "index_gossiped_transactions": {
             "type": "boolean",
-            "description": "Whether this indexer stores transactions observed on the network gossip topic in addition to\nthose submitted directly to it. When false, a transaction submitted elsewhere is unknown to\nthis indexer until its receipt is synced.\n\nEven when true the stored set of transactions is best effort: an indexer misses whatever was\ngossiped while it was offline or while its inbound queue was full, and there is no backfill.\nTransaction receipts carry no such caveat — they are synced from network state and are\ncomplete from genesis — so a committed transaction always has a receipt even when its body is\nmissing here. Transactions that never committed get no receipt, so gossip is the only source\nfor them."
+            "description": "Whether this indexer stores transactions observed on the network gossip topic in addition to\nthose submitted directly to it. When false, a transaction submitted elsewhere is unknown to\nthis indexer until its receipt is synced.\n\nEven when true the stored set of transactions is best effort: an indexer misses whatever was\ngossiped while it was offline or while its inbound queue was full, and there is no backfill.\nTransaction receipts carry no such caveat — they are synced from network state and are\ncomplete back to `transaction_receipt_retention_epochs` — so a committed transaction always\nhas a receipt even when its body is missing here. Transactions that never committed get no receipt, so gossip is the only source\nfor them."
           },
           "indexes_all_events": {
             "type": "boolean",
@@ -1542,7 +1542,25 @@
               "null"
             ],
             "format": "int64",
-            "description": "How many epochs past its terminal epoch this indexer retains a transaction before pruning the\nrecord. `None` means transactions are retained indefinitely. Transaction receipts are retained\nregardless of this setting. A client paginating transaction history hits this floor rather\nthan the start of the chain.",
+            "description": "How many epochs past its terminal epoch this indexer retains a transaction before pruning the\nrecord. `None` means transactions are retained indefinitely. A client paginating transaction\nhistory hits this floor rather than the start of the chain.",
+            "minimum": 0
+          },
+          "transaction_receipt_retention_epochs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many epochs past the epoch its transaction committed in this indexer retains a transaction\nreceipt before pruning it. `None` means receipts are retained indefinitely. Never shorter than\n`transaction_retention_epochs`, so a retained transaction always has its receipt.",
+            "minimum": 0
+          },
+          "event_retention_epochs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many epochs past the epoch its transaction committed in this indexer retains an event\nbefore pruning it. `None` means events are retained indefinitely. Event queries and the event\nstream's catch-up answer no further back than this.",
             "minimum": 0
           },
           "verify_substate_proofs": {

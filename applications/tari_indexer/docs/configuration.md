@@ -84,8 +84,8 @@ Main indexer application settings.
 # never sequenced ages out on the same schedule as one that commits. Unset (the default) retains
 # transactions forever; 0 keeps only those that can still commit or committed in the current epoch.
 # Only the submitted transaction body and its locally recorded mempool rejection reason are pruned;
-# transaction receipts synced from the network are retained regardless, so a pruned transaction still
-# resolves to its receipt-backed outcome. Set this well above the longest a client may take to poll
+# transaction receipts synced from the network follow transaction_receipt_retention_epochs, which may
+# not be shorter, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above the longest a client may take to poll
 # for a result: once pruned, a transaction no longer appears in the recent-transactions listing or
 # single transaction lookup. Transactions stored before this indexer recorded a terminal epoch carry
 # epoch 0, so the first pass after enabling this prunes that entire backlog.
@@ -93,10 +93,22 @@ Main indexer application settings.
 # pages rather than shrinking the file.
 #transaction_retention_epochs = 100
 
-# How long the transaction pruner idles between passes once it has nothing left to prune, in seconds.
+# How many epochs past the epoch its transaction committed in a transaction receipt is retained.
+# Unset (the default) or "forever" retains receipts indefinitely. A pruned receipt no longer answers a
+# result lookup or appears in the receipt listing. Must be at least transaction_retention_epochs, since
+# a stored transaction reports its outcome from its receipt. The economic totals on /network/economics,
+# including the receipt count, keep counting pruned receipts.
+#transaction_receipt_retention_epochs = 1000
+
+# How many epochs past the epoch its transaction committed in an event is retained. Unset (the default)
+# or "forever" retains events indefinitely. A pruned event no longer answers event queries or the event
+# stream's catch-up.
+#event_retention_epochs = 1000
+
+# How long each pruner idles between passes once it has nothing left to prune, in seconds.
 # While a backlog remains it drains in back-to-back batches rather than waiting out this interval.
-# Only used when transaction_retention_epochs is set.
-#transaction_prune_interval = 3600
+# Only used when a retention window is set. Also accepted as transaction_prune_interval.
+#prune_interval = 3600
 
 # Compiled-template caches. The in-memory one holds modules for the life of the process; the on-disk
 # one holds their serialized form under <data_dir>/wasm_cache and is shared by the template manager

@@ -658,21 +658,6 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         deserialize_json(&receipt_entry)
     }
 
-    fn count_transaction_receipts(&mut self) -> Result<u64, StorageError> {
-        const OPERATION: &str = "count_transaction_receipts";
-        use crate::storage_sqlite::schema::transaction_receipts;
-
-        let count = transaction_receipts::table
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("{OPERATION}: {}", e),
-            })?;
-        u64::try_from(count).map_err(|_| StorageError::DataInconsistency {
-            details: format!("{OPERATION}: negative receipt count {count}"),
-        })
-    }
-
     fn sum_validator_fee_pool_balances(&mut self) -> Result<Amount, StorageError> {
         const OPERATION: &str = "sum_validator_fee_pool_balances";
         use crate::storage_sqlite::schema::substates;

@@ -43,13 +43,13 @@ mod metrics;
 mod network_client;
 mod network_state_sync;
 mod notify;
+mod retention_pruner;
 mod storage_sqlite;
 mod store;
 mod substate_cache;
 mod substate_manager;
 mod transaction_gossip;
 mod transaction_manager;
-mod transaction_pruner;
 
 use std::fs;
 

@@ -58,9 +58,18 @@
 # transaction lookup.
 #transaction_retention_epochs = 100
 
-# How long, in seconds, the transaction pruner idles between passes once it has nothing left to prune.
-# Only used when transaction_retention_epochs is set. (default = 3600)
-#transaction_prune_interval = 3600
+# How many epochs past the epoch its transaction committed in a transaction receipt is retained.
+# Unset (the default) or "forever" retains receipts indefinitely. Must be at least
+# transaction_retention_epochs, since a stored transaction reports its outcome from its receipt.
+#transaction_receipt_retention_epochs = 1000
+
+# How many epochs past the epoch its transaction committed in an event is retained. Unset (the default)
+# or "forever" retains events indefinitely. A pruned event no longer answers event queries.
+#event_retention_epochs = 1000
+
+# How long, in seconds, each pruner idles between passes once it has nothing left to prune.
+# Only used when a retention window is set. (default = 3600)
+#prune_interval = 3600
 
 [indexer.p2p]
 #enable_mdns = true

@@ -839,10 +839,17 @@ pub struct GetIndexerInfoResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub current_epoch: Epoch,
     /// How many epochs past its terminal epoch this indexer retains a transaction before pruning the
-    /// record. `None` means transactions are retained indefinitely. Transaction receipts are retained
-    /// regardless of this setting. A client paginating transaction history hits this floor rather
-    /// than the start of the chain.
+    /// record. `None` means transactions are retained indefinitely. A client paginating transaction
+    /// history hits this floor rather than the start of the chain.
     pub transaction_retention_epochs: Option<u64>,
+    /// How many epochs past the epoch its transaction committed in this indexer retains a transaction
+    /// receipt before pruning it. `None` means receipts are retained indefinitely. Never shorter than
+    /// `transaction_retention_epochs`, so a retained transaction always has its receipt.
+    pub transaction_receipt_retention_epochs: Option<u64>,
+    /// How many epochs past the epoch its transaction committed in this indexer retains an event
+    /// before pruning it. `None` means events are retained indefinitely. Event queries and the event
+    /// stream's catch-up answer no further back than this.
+    pub event_retention_epochs: Option<u64>,
     /// Whether this indexer stores transactions observed on the network gossip topic in addition to
     /// those submitted directly to it. When false, a transaction submitted elsewhere is unknown to
     /// this indexer until its receipt is synced.
@@ -850,9 +857,9 @@ pub struct GetIndexerInfoResponse {
     /// Even when true the stored set of transactions is best effort: an indexer misses whatever was
     /// gossiped while it was offline or while its inbound queue was full, and there is no backfill.
     /// Transaction receipts carry no such caveat — they are synced from network state and are
-    /// complete from genesis — so a committed transaction always has a receipt even when its body is
-    /// missing here. Transactions that never committed get no receipt, so gossip is the only source
-    /// for them.
+    /// complete back to `transaction_receipt_retention_epochs` — so a committed transaction always
+    /// has a receipt even when its body is missing here. Transactions that never committed get no receipt, so gossip
+    /// is the only source for them.
     pub index_gossiped_transactions: bool,
     /// Whether substates served by this indexer are verified against a shard group committee proof
     /// before being returned. When false, values are served as fetched from a single validator and

@@ -220,17 +220,34 @@ pub struct IndexerConfig {
     ///
     /// Applies to every stored transaction, whether submitted here or observed on the gossip topic.
     /// Only the transaction body and its locally recorded rejection reason are pruned; transaction
-    /// receipts synced from the network are retained regardless, so a pruned transaction still
-    /// resolves to its receipt-backed outcome. Set this well above the longest a client may take to
-    /// poll for a result: once pruned, a transaction no longer appears in the recent-transactions
-    /// listing or single transaction lookup, and a mempool rejection reason recorded for it is lost.
-    /// Transactions stored before this indexer recorded a terminal epoch carry epoch 0, so the first
+    /// receipts synced from the network follow `transaction_receipt_retention_epochs`, which may not
+    /// be shorter, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above the
+    /// longest a client may take to poll for a result: once pruned, a transaction no longer appears in the
+    /// recent-transactions listing or single transaction lookup, and a mempool rejection reason recorded for it is
+    /// lost. Transactions stored before this indexer recorded a terminal epoch carry epoch 0, so the first
     /// pass on an indexer upgraded from a build that retained everything prunes that entire backlog.
     ///
     /// Pruning bounds database growth but does not return disk to the filesystem: SQLite reuses the
     /// freed pages rather than shrinking the file.
     #[serde(default = "default_transaction_retention_epochs", with = "retention_epochs")]
     pub transaction_retention_epochs: Option<u64>,
+    /// How many epochs past the epoch its transaction committed in a transaction receipt is retained
+    /// before it is pruned. Write `"forever"` (the default) to retain receipts indefinitely.
+    ///
+    /// A pruned receipt no longer answers a result lookup or appears in the receipt listing, so set
+    /// this well above the longest a client may take to fetch a result. It may not be shorter than
+    /// `transaction_retention_epochs`: a retained transaction reports its outcome from its receipt.
+    /// The network economic totals, including the receipt count, are accumulated as receipts are
+    /// indexed and keep counting pruned ones.
+    #[serde(default, with = "retention_epochs")]
+    pub transaction_receipt_retention_epochs: Option<u64>,
+    /// How many epochs past the epoch its transaction committed in an event is retained before it is
+    /// pruned. Write `"forever"` (the default) to retain events indefinitely.
+    ///
+    /// A pruned event no longer answers event queries or the event stream's catch-up, so a client
+    /// resuming from an older cursor misses it.
+    #[serde(default, with = "retention_epochs")]
+    pub event_retention_epochs: Option<u64>,
     /// Store transactions observed on the network-wide transaction gossip topic, not only those
     /// submitted directly to this indexer. When enabled the indexer joins the transaction mesh as a
     /// full participant: it validates what it receives and propagates it onward. Disabling it leaves
@@ -252,11 +269,15 @@ pub struct IndexerConfig {
     /// messages.
     #[serde(default = "default_max_transaction_gossip_queue_bytes")]
     pub max_transaction_gossip_queue_bytes: usize,
-    /// How long the transaction pruner idles between passes once it has nothing left to prune. While
-    /// a backlog remains it drains in back-to-back batches rather than waiting out this interval.
-    /// Only used when `transaction_retention_epochs` is set.
-    #[serde(default = "default_transaction_prune_interval", with = "serializers::seconds")]
-    pub transaction_prune_interval: Duration,
+    /// How long each pruner idles between passes once it has nothing left to prune. While a backlog
+    /// remains it drains in back-to-back batches rather than waiting out this interval. Only used
+    /// when a retention window is set.
+    #[serde(
+        default = "default_prune_interval",
+        alias = "transaction_prune_interval",
+        with = "serializers::seconds"
+    )]
+    pub prune_interval: Duration,
     /// The event filtering configuration
     pub event_filters: Vec<EventFilter>,
     /// Bounds on the compiled-template caches: the in-memory one, and the on-disk artifact cache
@@ -309,10 +330,31 @@ fn default_substate_cache_negative_ttl() -> Duration {
 /// The subset of an indexer's configuration that is published over its API, as it affects what
 /// clients see. Built once at startup: the API must expose exactly these values and nothing else
 /// from `IndexerConfig`, which also holds local paths and listen addresses.
+impl IndexerConfig {
+    /// Rejects a receipt retention window shorter than the transaction one: a stored transaction
+    /// reports its outcome from its receipt, so the receipt must outlive it.
+    pub fn check_retention(&self) -> Result<(), String> {
+        let Some(receipts) = self.transaction_receipt_retention_epochs else {
+            return Ok(());
+        };
+        match self.transaction_retention_epochs {
+            Some(transactions) if transactions <= receipts => Ok(()),
+            transactions => Err(format!(
+                "transaction_receipt_retention_epochs ({receipts}) is shorter than transaction_retention_epochs ({}). \
+                 Raise it to at least transaction_retention_epochs, because a stored transaction reports its outcome \
+                 from its receipt.",
+                transactions.map_or_else(|| "forever".to_string(), |epochs| epochs.to_string()),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PublishedIndexerConfig {
     pub sidechain_id: Option<RistrettoPublicKeyBytes>,
     pub transaction_retention_epochs: Option<u64>,
+    pub transaction_receipt_retention_epochs: Option<u64>,
+    pub event_retention_epochs: Option<u64>,
     pub index_gossiped_transactions: bool,
     pub verify_substate_proofs: bool,
     pub substate_cache_max_serve_lag: Duration,
@@ -324,6 +366,8 @@ impl From<&IndexerConfig> for PublishedIndexerConfig {
         Self {
             sidechain_id: config.sidechain_id.as_ref().map(|pk| pk.to_byte_type()),
             transaction_retention_epochs: config.transaction_retention_epochs,
+            transaction_receipt_retention_epochs: config.transaction_receipt_retention_epochs,
+            event_retention_epochs: config.event_retention_epochs,
             index_gossiped_transactions: config.index_gossiped_transactions,
             verify_substate_proofs: config.verify_substate_proofs,
             substate_cache_max_serve_lag: config.substate_cache_max_serve_lag,
@@ -338,7 +382,7 @@ fn default_transaction_retention_epochs() -> Option<u64> {
 }
 
 mod retention_epochs {
-    //! `transaction_retention_epochs` accepts a number of epochs or the string `"forever"`. An
+    //! A retention window accepts a number of epochs or the string `"forever"`. An
     //! omitted key takes the default and TOML has no null literal, so without an explicit spelling
     //! for it, retaining indefinitely would be unreachable from a config file.
 
@@ -381,7 +425,7 @@ mod retention_epochs {
         fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
             u64::try_from(v)
                 .map(Some)
-                .map_err(|_| E::custom(format!("transaction_retention_epochs cannot be negative (got {v})")))
+                .map_err(|_| E::custom(format!("a retention window cannot be negative (got {v})")))
         }
 
         // The config layer hands every value through as a string, so a numeric literal in the file
@@ -392,7 +436,7 @@ mod retention_epochs {
             }
             v.parse::<u64>().map(Some).map_err(|_| {
                 E::custom(format!(
-                    "expected a number of epochs or \"{FOREVER}\" for transaction_retention_epochs, got '{v}'"
+                    "expected a number of epochs or \"{FOREVER}\" for a retention window, got '{v}'"
                 ))
             })
         }
@@ -419,7 +463,7 @@ fn default_max_transaction_gossip_queue_bytes() -> usize {
     128 * 1024 * 1024
 }
 
-fn default_transaction_prune_interval() -> Duration {
+fn default_prune_interval() -> Duration {
     Duration::from_secs(60 * 60)
 }
 
@@ -453,9 +497,11 @@ impl Default for IndexerConfig {
             substate_cache_max_entries: default_substate_cache_max_entries(),
             substate_cache_negative_ttl: default_substate_cache_negative_ttl(),
             transaction_retention_epochs: default_transaction_retention_epochs(),
+            transaction_receipt_retention_epochs: None,
+            event_retention_epochs: None,
             index_gossiped_transactions: default_index_gossiped_transactions(),
             max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),
-            transaction_prune_interval: default_transaction_prune_interval(),
+            prune_interval: default_prune_interval(),
             event_filters: vec![],
             templates: TemplateConfig::default(),
             watched_templates: default_watched_templates(),
@@ -551,6 +597,25 @@ mod tests {
         assert_eq!(parse("").unwrap(), default_transaction_retention_epochs());
         assert!(parse("transaction_retention_epochs = -1").is_err());
         assert!(parse(r#"transaction_retention_epochs = "never""#).is_err());
+    }
+
+    #[test]
+    fn receipts_must_outlive_the_transactions_they_report_on() {
+        let check = |transactions, receipts| {
+            IndexerConfig {
+                transaction_retention_epochs: transactions,
+                transaction_receipt_retention_epochs: receipts,
+                ..Default::default()
+            }
+            .check_retention()
+        };
+
+        assert!(check(Some(50), None).is_ok());
+        assert!(check(None, None).is_ok());
+        assert!(check(Some(50), Some(50)).is_ok());
+        assert!(check(Some(50), Some(100)).is_ok());
+        assert!(check(Some(50), Some(49)).is_err());
+        assert!(check(None, Some(100)).is_err());
     }
 
     #[test]

@@ -13,9 +13,9 @@ use tokio::{task, time};
 
 use crate::store::{IndexerStore, IndexerStoreWriteTransaction};
 
-const LOG_TARGET: &str = "tari::indexer::transaction_pruner";
+const LOG_TARGET: &str = "tari::indexer::retention_pruner";
 
-/// Transactions removed per write transaction. Bounds how long a single statement holds SQLite's
+/// Rows removed per write transaction. Bounds how long a single statement holds SQLite's
 /// database-wide write lock, so a large backlog is cleared over several passes rather than one stall.
 const BATCH_SIZE: usize = 500;
 
@@ -23,26 +23,49 @@ const BATCH_SIZE: usize = 500;
 /// configured interval is raised to this floor.
 const MIN_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Periodically deletes transactions submitted through this indexer once their retention epoch falls
-/// more than `retention_epochs` behind the current epoch. Transaction receipts synced from the
-/// network are keyed independently and are untouched.
-pub struct TransactionPruner<TStore> {
+/// The rows a [`RetentionPruner`] deletes, each aged by its own epoch column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneTarget {
+    /// Stored transaction bodies, aged by their retention epoch.
+    Transactions,
+    /// Transaction receipts, aged by the epoch the transaction committed in.
+    TransactionReceipts,
+    /// Events, aged by the epoch the transaction that emitted them committed in.
+    Events,
+}
+
+impl PruneTarget {
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Transactions => "transaction(s)",
+            Self::TransactionReceipts => "transaction receipt(s)",
+            Self::Events => "event(s)",
+        }
+    }
+}
+
+/// Periodically deletes one [`PruneTarget`]'s rows once their epoch falls more than
+/// `retention_epochs` behind the current epoch.
+pub struct RetentionPruner<TStore> {
     store: TStore,
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    target: PruneTarget,
     retention_epochs: u64,
     interval: Duration,
 }
 
-impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
+impl<TStore: IndexerStore + Clone> RetentionPruner<TStore> {
     pub fn new(
         store: TStore,
         epoch_manager: EpochManagerHandle<PeerAddress>,
+        target: PruneTarget,
         retention_epochs: u64,
         interval: Duration,
     ) -> Self {
         Self {
             store,
             epoch_manager,
+            target,
             retention_epochs,
             interval: interval.max(MIN_INTERVAL),
         }
@@ -57,7 +80,7 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
             loop {
                 tokio::select! {
                     _ = shutdown.wait() => {
-                        info!(target: LOG_TARGET, "🧹 Transaction pruner was shutdown.");
+                        info!(target: LOG_TARGET, "🧹 Retention pruner for {:?} was shutdown.", self.target);
                         break;
                     },
                     // The first tick resolves immediately, clearing whatever aged out while the
@@ -77,17 +100,18 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
                                     if num_pruned > 0 {
                                         info!(
                                             target: LOG_TARGET,
-                                            "🧹 Pruned {num_pruned} transaction(s) more than {} epoch(s) behind",
+                                            "🧹 Pruned {num_pruned} {} more than {} epoch(s) behind",
+                                            self.target.noun(),
                                             self.retention_epochs,
                                         );
                                     } else {
-                                        debug!(target: LOG_TARGET, "🧹 No transactions to prune.");
+                                        debug!(target: LOG_TARGET, "🧹 No {} to prune.", self.target.noun());
                                     }
                                     num_pruned = 0;
                                 }
                             },
                             Err(err) => {
-                                error!(target: LOG_TARGET, "⚠️ Transaction pruning failed: {err}");
+                                error!(target: LOG_TARGET, "⚠️ Pruning {} failed: {err}", self.target.noun());
                                 num_pruned = 0;
                             },
                         }
@@ -100,21 +124,26 @@ impl<TStore: IndexerStore + Clone> TransactionPruner<TStore> {
     async fn prune_batch(&self) -> Result<usize, StorageError> {
         let current_epoch = self.epoch_manager.get_current_epoch();
         // The epoch manager reports zero until its initial scan completes. Pruning against it would
-        // measure every transaction against an epoch the network has long passed.
+        // measure every row against an epoch the network has long passed.
         if current_epoch.is_zero() {
             return Ok(0);
         }
 
         let cutoff = cutoff_from(current_epoch, self.retention_epochs);
+        let target = self.target;
         self.store
-            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(cutoff, BATCH_SIZE))
+            .with_write_tx(move |tx| match target {
+                PruneTarget::Transactions => tx.prune_transactions_before_epoch(cutoff, BATCH_SIZE),
+                PruneTarget::TransactionReceipts => tx.prune_transaction_receipts_before_epoch(cutoff, BATCH_SIZE),
+                PruneTarget::Events => tx.prune_events_before_epoch(cutoff, BATCH_SIZE),
+            })
             .await
     }
 }
 
-/// A transaction is retained while its retention epoch is within `retention_epochs` of the current
-/// epoch, so the cutoff — the first epoch still retained — is `current - retention_epochs`. With a
-/// window of zero that is the current epoch itself, which prunes everything that can no longer
+/// A row is retained while its epoch is within `retention_epochs` of the current epoch, so the
+/// cutoff — the first epoch still retained — is `current - retention_epochs`. With a window of zero
+/// that is the current epoch itself, which for transactions prunes everything that can no longer
 /// commit.
 fn cutoff_from(current_epoch: Epoch, retention_epochs: u64) -> Epoch {
     current_epoch.saturating_sub(Epoch(retention_epochs))

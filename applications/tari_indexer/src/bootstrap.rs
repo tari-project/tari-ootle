@@ -94,13 +94,13 @@ use crate::{
     network_state_sync,
     network_state_sync::{ConsensusEpoch, NetworkWideStateSyncConfig, ValidatorStatusMonitor},
     notify::Notify,
+    retention_pruner::{PruneTarget, RetentionPruner},
     storage_sqlite::{SqliteIndexerStore, models::Key},
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
     substate_cache::SqliteSubstateCache,
     substate_manager::SubstateManager,
     transaction_gossip::TransactionGossipService,
     transaction_manager::TransactionManager,
-    transaction_pruner::TransactionPruner,
 };
 
 const LOG_TARGET: &str = "tari::indexer::bootstrap";
@@ -134,6 +134,7 @@ pub async fn spawn_services(
     consensus_constants: ConsensusConstants,
     #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> Result<Services, anyhow::Error> {
+    config.indexer.check_retention().map_err(|e| anyhow!(e))?;
     ensure_directories_exist(config)?;
 
     // Initialize networking
@@ -217,6 +218,13 @@ pub async fn spawn_services(
 
     // Connect to substate db
     let store = SqliteIndexerStore::try_create(config.state_db_path())?;
+    #[cfg(feature = "metrics")]
+    let store = {
+        let storage_metrics = crate::storage_sqlite::metrics::StorageMetrics::register(metrics_registry);
+        let store = store.with_metrics(storage_metrics.clone());
+        crate::storage_sqlite::metrics::spawn_file_stats_sampler(store.clone(), storage_metrics, shutdown.clone());
+        store
+    };
     check_store(config, &store).await?;
 
     seed_builtin_template_catalogue(&store).await?;
@@ -305,7 +313,6 @@ pub async fn spawn_services(
     let substate_manager = substate_manager.with_metrics(metrics_registry);
 
     network_state_sync::NetworkWideStateSync::new(
-        config.network,
         epoch_manager.clone(),
         networking.clone(),
         store.clone(),
@@ -327,6 +334,8 @@ pub async fn spawn_services(
         substate_cache_metrics,
         #[cfg(feature = "metrics")]
         substate_manager.clone(),
+        #[cfg(feature = "metrics")]
+        config.network,
     )
     .spawn(shutdown.clone());
 
@@ -375,31 +384,42 @@ pub async fn spawn_services(
         config.indexer.dry_run_max_concurrent_executions,
     )?;
 
-    // Both of these have defaults that decide how much disk this node uses and what it deletes, so
-    // they are logged unconditionally: an operator who upgraded without touching their config should
-    // be able to see what changed underneath them in their own logs.
+    let display_retention =
+        |epochs: Option<u64>| epochs.map_or_else(|| "forever".to_string(), |epochs| format!("{epochs} epoch(s)"));
+    // These have defaults that decide how much disk this node uses and what it deletes, so they are
+    // logged unconditionally: an operator who upgraded without touching their config should be able
+    // to see what changed underneath them in their own logs.
     info!(
         target: LOG_TARGET,
-        "⚙️ Transaction storage: gossip indexing {}, retention {}",
+        "⚙️ Storage: gossip indexing {}, retention: transactions {}, receipts {}, events {}",
         if config.indexer.index_gossiped_transactions { "ON" } else { "OFF" },
-        config
-            .indexer
-            .transaction_retention_epochs
-            .map_or_else(|| "forever".to_string(), |epochs| format!("{epochs} epoch(s)")),
+        display_retention(config.indexer.transaction_retention_epochs),
+        display_retention(config.indexer.transaction_receipt_retention_epochs),
+        display_retention(config.indexer.event_retention_epochs),
     );
 
-    if let Some(retention_epochs) = config.indexer.transaction_retention_epochs {
+    for (target, retention_epochs) in [
+        (PruneTarget::Transactions, config.indexer.transaction_retention_epochs),
+        (
+            PruneTarget::TransactionReceipts,
+            config.indexer.transaction_receipt_retention_epochs,
+        ),
+        (PruneTarget::Events, config.indexer.event_retention_epochs),
+    ] {
+        let Some(retention_epochs) = retention_epochs else {
+            continue;
+        };
         info!(
             target: LOG_TARGET,
-            "🧹 Pruning transactions more than {} epoch(s) behind, checked every {:.0?}",
-            retention_epochs,
-            config.indexer.transaction_prune_interval,
+            "🧹 Pruning {target:?} more than {retention_epochs} epoch(s) behind, checked every {:.0?}",
+            config.indexer.prune_interval,
         );
-        TransactionPruner::new(
+        RetentionPruner::new(
             store.clone(),
             epoch_manager.clone(),
+            target,
             retention_epochs,
-            config.indexer.transaction_prune_interval,
+            config.indexer.prune_interval,
         )
         .spawn(shutdown.clone());
     }

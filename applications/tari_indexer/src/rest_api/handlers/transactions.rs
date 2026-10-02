@@ -202,7 +202,8 @@ pub async fn submit_transaction_dry_run(
         full, or if the transaction has since aged past its retention window (see `transaction_retention_epochs` on \
         /info).\n\n\
         Transaction receipts are different: they are synced from network state rather than gossip, are complete from \
-        genesis, and are recovered after downtime. A committed transaction whose gossip this indexer missed therefore \
+        genesis back to the indexer's receipt retention window (see `transaction_receipt_retention_epochs` on /info), \
+        and are recovered after downtime. A committed transaction whose gossip this indexer missed therefore \
         has a receipt but no entry here — list it from /transaction-receipts instead. Transactions that never \
         committed (mempool-rejected, aborted or expired) never get a receipt, so gossip is the only source for them \
         and coverage is best effort with no fallback.",
@@ -244,8 +245,9 @@ pub async fn list_recent_transactions(
         Two endpoints answer authoritatively where this one cannot. \
         /transactions/{transaction_id}/result queries the transaction's committee, so it resolves the outcome of any \
         transaction regardless of where it was submitted. /transaction-receipts is synced from network state rather \
-        than gossip and is complete from genesis, so a committed transaction always has a receipt there even when its \
-        body is missing here.",
+        than gossip and is complete back to its retention window (see `transaction_receipt_retention_epochs` on \
+        /info), which is never shorter than the transaction one, so a committed transaction always has a receipt \
+        there even when its body is missing here.",
     responses(
         (status = 200, description = "Transaction found", body = GetTransactionResponse),
         (status = 404, description = "Transaction not known to this indexer", body = ErrorResponse),

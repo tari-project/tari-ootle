@@ -11,6 +11,7 @@ use std::{
 
 use futures::{StreamExt, future::Either, stream::FuturesUnordered};
 use log::*;
+#[cfg(feature = "metrics")]
 use ootle_network::Network;
 use tari_engine_types::{
     published_template::PublishedTemplateMetadata,
@@ -88,7 +89,6 @@ const CONSENSUS_EPOCH_PROBE_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct NetworkWideStateSync {
-    network: Network,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     networking: NetworkingHandle<TariMessagingSpec>,
     store: SqliteIndexerStore,
@@ -105,11 +105,12 @@ pub struct NetworkWideStateSync {
     substate_cache_metrics: SubstateCacheMetrics,
     #[cfg(feature = "metrics")]
     substate_manager: SubstateManager,
+    #[cfg(feature = "metrics")]
+    network: Network,
 }
 
 impl NetworkWideStateSync {
     pub fn new(
-        network: Network,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
@@ -122,9 +123,9 @@ impl NetworkWideStateSync {
         #[cfg(feature = "metrics")] metrics: NetworkStateMetrics,
         #[cfg(feature = "metrics")] substate_cache_metrics: SubstateCacheMetrics,
         #[cfg(feature = "metrics")] substate_manager: SubstateManager,
+        #[cfg(feature = "metrics")] network: Network,
     ) -> Self {
         Self {
-            network,
             epoch_manager,
             networking,
             store: storage,
@@ -141,6 +142,8 @@ impl NetworkWideStateSync {
             substate_cache_metrics,
             #[cfg(feature = "metrics")]
             substate_manager,
+            #[cfg(feature = "metrics")]
+            network,
         }
     }
 
@@ -832,7 +835,7 @@ impl NetworkWideStateSync {
 
         // Buffers accumulate a single (shard, state version) at a time: the responder splits an
         // oversized version into chunks flagged `has_more`, and the last chunk flushes them.
-        let mut update_buf = Vec::new();
+        let mut num_updates = 0usize;
         let mut invalidations_buf = Vec::new();
         let mut utxos_buf = Vec::new();
         let mut transactions_buf = Vec::new();
@@ -938,6 +941,7 @@ impl NetworkWideStateSync {
                     details: "Received state update without epoch".to_string(),
                 })?;
 
+            num_updates += batch.updates.len();
             for update in batch.updates {
                 let update =
                     SubstateUpdateProof::try_from(update).map_err(|e| NetworkStateSyncError::InvalidStateUpdate {
@@ -949,9 +953,7 @@ impl NetworkWideStateSync {
                     shard,
                     state_version,
                     update,
-                    msg_epoch,
                     value_filters,
-                    &mut update_buf,
                     &mut invalidations_buf,
                     &mut utxos_buf,
                     &mut transactions_buf,
@@ -967,18 +969,15 @@ impl NetworkWideStateSync {
                 continue;
             }
 
-            debug!(target: LOG_TARGET, "🌍️ Received {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", update_buf.len());
+            debug!(target: LOG_TARGET, "🌍️ Received {num_updates} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})");
 
-            self.stats.increase_state_updates(update_buf.len());
-
-            let updates = std::mem::take(&mut update_buf);
+            self.stats.increase_state_updates(std::mem::take(&mut num_updates));
             let invalidations = std::mem::take(&mut invalidations_buf);
             let utxos = std::mem::take(&mut utxos_buf);
             let transactions = std::mem::take(&mut transactions_buf);
             let validator_fee_pools = std::mem::take(&mut validator_fee_pools_buf);
             let template_catalogue = std::mem::take(&mut template_catalogue_buf);
 
-            let updates_len = updates.len();
             let utxos_len = utxos.len();
             let transactions_len = transactions.len();
             let template_catalogue_len = template_catalogue.len();
@@ -989,7 +988,6 @@ impl NetworkWideStateSync {
             progress.record_state_version(shard, state_version, msg_epoch);
             let sync_progress_snapshot = progress.clone();
 
-            let network = self.network;
             let event_filters = self.config.event_filters.clone();
             let watched_templates = self.config.watched_templates.clone();
             let xtr_claimed_snapshot = xtr_claimed;
@@ -1000,9 +998,6 @@ impl NetworkWideStateSync {
                 .store
                 .clone()
                 .with_write_tx(move |tx| -> Result<(Vec<InsertedEvent>, usize), StorageError> {
-                    debug!(target: LOG_TARGET, "✅ Committing {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", updates_len);
-                    // TODO: this is not currently used. Consider removing.
-                    tx.batch_insert_substate_transitions(network, shard, state_version, updates)?;
                     // Must commit with the watermark below: the substate cache serves an entry on the
                     // argument that it holds every transition up to that watermark, which a reader
                     // seeing one of the two without the other would break.
@@ -1257,9 +1252,7 @@ fn extend_bufs_from_substate_update(
     shard: Shard,
     state_version: StateVersion,
     update: SubstateUpdateProof,
-    msg_epoch: Epoch,
     value_filters: SubstateValueFilterFlags,
-    update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
     invalidations_buf: &mut Vec<SubstateCacheInvalidation>,
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
     transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
@@ -1291,7 +1284,6 @@ fn extend_bufs_from_substate_update(
                 {
                     template_catalogue_buf.push((template_addr.as_template_address(), metadata.clone()));
                 }
-                update_buf.push((msg_epoch, update));
                 return Ok(());
             }
             match create.substate.value().value() {
@@ -1372,7 +1364,6 @@ fn extend_bufs_from_substate_update(
         },
     }
 
-    update_buf.push((msg_epoch, update));
     Ok(())
 }
 

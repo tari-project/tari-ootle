@@ -35,6 +35,7 @@ diesel::table! {
         substate_id -> Nullable<Text>,
         resource_address -> Nullable<Text>,
         created_at -> Timestamp,
+        epoch -> BigInt,
     }
 }
 
@@ -45,21 +46,6 @@ diesel::table! {
         value -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,
-    }
-}
-
-diesel::table! {
-    substate_transitions (id) {
-        id -> Integer,
-        shard -> Integer,
-        state_version -> BigInt,
-        epoch -> BigInt,
-        substate_id -> Text,
-        version -> BigInt,
-        substate_type -> Text,
-        is_up -> Bool,
-        value_hash -> Nullable<Text>,
-        created_at -> Timestamp,
     }
 }
 
@@ -84,6 +70,7 @@ diesel::table! {
         created_at -> Timestamp,
         outcome -> Text,
         total_fees_paid -> BigInt,
+        epoch -> BigInt,
     }
 }
 
@@ -177,7 +164,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     substate_cache,
     substate_cache_invalidations,
     substate_cache_proofs,
-    substate_transitions,
     substates,
     template_catalogue,
     transaction_receipts,

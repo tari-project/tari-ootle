@@ -13,6 +13,8 @@ use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use tari_ootle_storage::StorageError;
 use tari_ootle_storage_sqlite::{SqliteTransaction, error::SqliteStorageError};
 
+#[cfg(feature = "metrics")]
+use crate::storage_sqlite::metrics::{StorageFileStats, StorageMetrics};
 use crate::{
     storage_sqlite::{reader::SqliteStoreReadTransaction, writer::SqliteStoreWriteTransaction},
     store::{IndexerStore, IndexerStoreReader, IndexerStoreWriteTransaction},
@@ -21,10 +23,14 @@ use crate::{
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite";
 const POOL_MAX_SIZE: usize = 16;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/storage_sqlite/migrations");
 
 #[derive(Clone)]
 pub struct SqliteIndexerStore {
     pool: Pool,
+    path: PathBuf,
+    #[cfg(feature = "metrics")]
+    metrics: Option<StorageMetrics>,
 }
 
 impl SqliteIndexerStore {
@@ -32,6 +38,7 @@ impl SqliteIndexerStore {
         create_dir_all(path.parent().unwrap()).map_err(|_| StorageError::FileSystemPathDoesNotExist)?;
 
         let database_url = path.to_str().expect("database_url utf-8 error").to_string();
+        let db_path = path.clone();
 
         // Run migrations on a one-shot connection before opening the pool, so pooled connections
         // never observe a partially-migrated schema.
@@ -40,7 +47,6 @@ impl SqliteIndexerStore {
             source,
             operation: "set pragma",
         })?;
-        pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/storage_sqlite/migrations");
         if let Err(err) = migration_conn.run_pending_migrations(MIGRATIONS) {
             log::error!(target: LOG_TARGET, "Error running migrations: {}", err);
         }
@@ -63,19 +69,92 @@ impl SqliteIndexerStore {
                 details: format!("Failed to build sqlite connection pool: {}", e),
             })?;
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            path: db_path,
+            #[cfg(feature = "metrics")]
+            metrics: None,
+        })
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn with_metrics(mut self, metrics: StorageMetrics) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     async fn acquire(&self) -> Result<deadpool_diesel::sqlite::Connection, StorageError> {
-        self.pool.get().await.map_err(|e| StorageError::General {
+        #[cfg(feature = "metrics")]
+        let started = std::time::Instant::now();
+        let conn = self.pool.get().await.map_err(|e| StorageError::General {
             details: format!("Failed to acquire sqlite connection from pool: {}", e),
+        })?;
+        #[cfg(feature = "metrics")]
+        if let Some(metrics) = &self.metrics {
+            metrics.observe_connection_wait(started.elapsed());
+        }
+        Ok(conn)
+    }
+
+    /// Sizes of the database and its WAL, after a passive checkpoint has copied back every WAL frame
+    /// that no open read transaction still needs. The checkpoint is the one SQLite runs on its own
+    /// once the WAL passes its autocheckpoint size; running it here makes the frames it leaves behind
+    /// a measure of how far open reads are holding the WAL back.
+    #[cfg(feature = "metrics")]
+    pub(super) async fn file_stats(&self) -> Result<StorageFileStats, StorageError> {
+        use diesel::{QueryableByName, sql_types::BigInt};
+
+        #[derive(QueryableByName)]
+        struct WalCheckpoint {
+            #[diesel(sql_type = BigInt)]
+            log: i64,
+            #[diesel(sql_type = BigInt)]
+            checkpointed: i64,
+        }
+        #[derive(QueryableByName)]
+        struct PageSize {
+            #[diesel(sql_type = BigInt)]
+            page_size: i64,
+        }
+        #[derive(QueryableByName)]
+        struct FreelistCount {
+            #[diesel(sql_type = BigInt)]
+            freelist_count: i64,
+        }
+
+        let conn = self.acquire().await?;
+        let (checkpoint, page_size, freelist) = conn
+            .interact(|c| -> Result<_, diesel::result::Error> {
+                let checkpoint = sql_query("PRAGMA wal_checkpoint(PASSIVE);").get_result::<WalCheckpoint>(c)?;
+                let page_size = sql_query("PRAGMA page_size;").get_result::<PageSize>(c)?;
+                let freelist = sql_query("PRAGMA freelist_count;").get_result::<FreelistCount>(c)?;
+                Ok((checkpoint, page_size, freelist))
+            })
+            .await
+            .map_err(|e| StorageError::General {
+                details: format!("Pool interact panicked: {}", e),
+            })?
+            .map_err(|e| StorageError::general("file_stats", e))?;
+
+        let mut wal_path = self.path.clone().into_os_string();
+        wal_path.push("-wal");
+        let file_len = |path: &std::path::Path| std::fs::metadata(path).map_or(0, |m| m.len());
+        let non_negative = |n: i64| u64::try_from(n).unwrap_or(0);
+
+        Ok(StorageFileStats {
+            db_bytes: file_len(&self.path),
+            wal_bytes: file_len(PathBuf::from(wal_path).as_path()),
+            wal_uncheckpointed_frames: non_negative(checkpoint.log - checkpoint.checkpointed),
+            freelist_bytes: non_negative(freelist.freelist_count).saturating_mul(non_negative(page_size.page_size)),
         })
     }
 }
 
 impl Debug for SqliteIndexerStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SqliteIndexerStore {{ pool: ... }}")
+        f.debug_struct("SqliteIndexerStore")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
     }
 }
 
@@ -117,24 +196,47 @@ impl IndexerStore for SqliteIndexerStore {
         E: From<StorageError> + Send + 'static,
     {
         let conn = self.acquire().await?;
+        #[cfg(feature = "metrics")]
+        let metrics = self.metrics.clone();
         let result: Result<R, E> = conn
             .interact(move |c| -> Result<R, E> {
-                let inner = SqliteTransaction::begin_immediate(c)
-                    .map_err(StorageError::from)
-                    .map_err(E::from)?;
-                let mut tx = SqliteStoreWriteTransaction::new(inner);
-                match f(&mut tx) {
-                    Ok(r) => {
-                        tx.commit().map_err(E::from)?;
-                        Ok(r)
+                #[cfg(feature = "metrics")]
+                let lock_requested = std::time::Instant::now();
+                let inner = match SqliteTransaction::begin_immediate(c) {
+                    Ok(inner) => inner,
+                    Err(err) => {
+                        #[cfg(feature = "metrics")]
+                        if let Some(metrics) = &metrics &&
+                            is_busy(&err)
+                        {
+                            metrics.inc_write_lock_busy();
+                        }
+                        return Err(E::from(StorageError::from(err)));
                     },
+                };
+                #[cfg(feature = "metrics")]
+                let lock_acquired = std::time::Instant::now();
+                #[cfg(feature = "metrics")]
+                if let Some(metrics) = &metrics {
+                    metrics.observe_write_lock_wait(lock_acquired - lock_requested);
+                }
+
+                let mut tx = SqliteStoreWriteTransaction::new(inner);
+                let result = match f(&mut tx) {
+                    Ok(r) => tx.commit().map(|_| r).map_err(E::from),
                     Err(e) => {
                         if let Err(err) = tx.rollback() {
                             log::error!(target: LOG_TARGET, "Failed to rollback transaction: {}", err);
                         }
                         Err(e)
                     },
+                };
+
+                #[cfg(feature = "metrics")]
+                if let Some(metrics) = &metrics {
+                    metrics.observe_write_lock_hold(lock_acquired.elapsed());
                 }
+                result
             })
             .await
             .map_err(|e| StorageError::General {
@@ -142,6 +244,18 @@ impl IndexerStore for SqliteIndexerStore {
             })?;
         result
     }
+}
+
+/// True if `err` is SQLite giving up on a lock after the busy timeout (`SQLITE_BUSY`).
+#[cfg(feature = "metrics")]
+fn is_busy(err: &SqliteStorageError) -> bool {
+    matches!(
+        err,
+        SqliteStorageError::DieselError {
+            source: diesel::result::Error::DatabaseError(_, info),
+            ..
+        } if info.message().contains("database is locked")
+    )
 }
 
 fn apply_pragmas(conn: &mut SqliteConnection) -> Result<(), diesel::result::Error> {
@@ -172,6 +286,7 @@ pub(crate) fn insert_test_events(db_path: &std::path::Path, topics: &[&str]) {
                 payload: payload.clone(),
                 substate_id: None,
                 resource_address: None,
+                epoch: 0,
             })
             .execute(&mut conn)
             .unwrap();
@@ -1105,6 +1220,255 @@ mod tests {
             epoch,
             intent_commitment: Default::default(),
         }
+    }
+
+    fn receipt_with_events_at(epoch: Epoch, num_events: usize) -> TransactionReceipt {
+        let events = (0..num_events)
+            .map(|i| {
+                tari_engine_types::events::Event::new(
+                    None,
+                    Default::default(),
+                    format!("test.topic.{i}"),
+                    tari_template_lib_types::Metadata::new(),
+                )
+            })
+            .collect::<Vec<_>>();
+        TransactionReceipt {
+            events: events.into(),
+            ..receipt_at(epoch)
+        }
+    }
+
+    fn receipt_address(n: u8) -> tari_template_lib_types::TransactionReceiptAddress {
+        TransactionId::new([n; 32]).into_receipt_address()
+    }
+
+    async fn insert_receipts(store: &SqliteIndexerStore, receipts: Vec<(u8, TransactionReceipt)>) {
+        store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_transaction_receipts(
+                    receipts.into_iter().map(|(n, receipt)| (receipt_address(n), receipt)),
+                    &[],
+                )
+            })
+            .await
+            .unwrap();
+    }
+
+    #[derive(diesel::QueryableByName)]
+    struct EpochRow {
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        epoch: i64,
+    }
+
+    async fn event_epochs(store: &SqliteIndexerStore) -> Vec<i64> {
+        store
+            .with_read_tx(|tx| {
+                sql_query("select epoch from events order by id")
+                    .load::<EpochRow>(tx.connection())
+                    .map_err(|e| StorageError::general("event_epochs", e))
+            })
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.epoch)
+            .collect()
+    }
+
+    async fn query_plan(store: &SqliteIndexerStore, query: &'static str) -> String {
+        #[derive(diesel::QueryableByName)]
+        struct QueryPlanRow {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            detail: String,
+        }
+
+        store
+            .with_read_tx(move |tx| {
+                sql_query(format!("explain query plan {query}"))
+                    .load::<QueryPlanRow>(tx.connection())
+                    .map_err(|e| StorageError::general("explain query plan", e))
+            })
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.detail)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[tokio::test]
+    async fn prune_receipts_removes_only_those_committed_before_the_cutoff() {
+        let (_dir, store) = temp_store().await;
+        insert_receipts(&store, vec![
+            (1, receipt_at(Epoch(5))),
+            (2, receipt_at(Epoch(9))),
+            (3, receipt_at(Epoch(10))),
+        ])
+        .await;
+
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_transaction_receipts_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 2);
+
+        let remaining = store
+            .with_read_tx(|tx| tx.list_transaction_receipts(None, 10, tari_ootle_storage::Ordering::Ascending))
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].0, receipt_address(3));
+    }
+
+    /// The receipt count is network history, reported next to the other accumulated totals. Pruning
+    /// local storage must not rewind it.
+    #[tokio::test]
+    async fn the_receipt_count_includes_pruned_receipts() {
+        use crate::store::ReadOnlyStore;
+
+        let (_dir, store) = temp_store().await;
+        insert_receipts(&store, vec![(1, receipt_at(Epoch(5))), (2, receipt_at(Epoch(6)))]).await;
+        insert_receipts(&store, vec![(3, receipt_at(Epoch(20)))]).await;
+
+        store
+            .with_write_tx(move |tx| tx.prune_transaction_receipts_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+
+        let econ = ReadOnlyStore::new(store.clone()).get_tari_economics().await.unwrap();
+        assert_eq!(econ.transaction_receipt_count, 3);
+    }
+
+    #[tokio::test]
+    async fn prune_events_removes_only_those_committed_before_the_cutoff() {
+        let (_dir, store) = temp_store().await;
+        insert_receipts(&store, vec![
+            (1, receipt_with_events_at(Epoch(5), 2)),
+            (2, receipt_with_events_at(Epoch(10), 1)),
+        ])
+        .await;
+        assert_eq!(event_epochs(&store).await, vec![5, 5, 10]);
+
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_events_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 2);
+        assert_eq!(event_epochs(&store).await, vec![10]);
+
+        // Events and receipts age out independently.
+        store
+            .with_read_tx(move |tx| tx.get_transaction_receipt(&receipt_address(1)))
+            .await
+            .unwrap();
+    }
+
+    /// As with transactions, the prune selects run under the write lock on every pass, so they must be
+    /// served from the epoch indexes rather than a table scan.
+    #[tokio::test]
+    async fn receipt_and_event_prune_selects_are_served_by_the_epoch_indexes() {
+        let (_dir, store) = temp_store().await;
+
+        let plan = query_plan(
+            &store,
+            "select id from transaction_receipts where epoch < 100 order by epoch asc limit 500",
+        )
+        .await;
+        assert!(plan.contains("transaction_receipts_epoch_idx"), "{plan}");
+        assert!(!plan.contains("SCAN transaction_receipts"), "{plan}");
+
+        let plan = query_plan(
+            &store,
+            "select id from events where epoch < 100 order by epoch asc limit 500",
+        )
+        .await;
+        assert!(plan.contains("events_epoch_idx"), "{plan}");
+        assert!(!plan.contains("SCAN events"), "{plan}");
+    }
+
+    /// Indexers upgrading in place carry receipts and events stored before either recorded an epoch.
+    /// The migration must date them from the receipt, or enabling retention would prune the whole
+    /// backlog as epoch 0 on its first pass.
+    #[tokio::test]
+    async fn the_retention_migration_dates_existing_receipts_and_events() {
+        use diesel_migrations::MigrationHarness;
+
+        use crate::{
+            storage_sqlite::serialization::{serialize_hex, serialize_json},
+            store::ReadOnlyStore,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("indexer.db");
+        {
+            let mut conn = SqliteConnection::establish(path.to_str().unwrap()).unwrap();
+            // Only the initial migration: the schema an indexer upgrading in place already has.
+            conn.run_next_migration(MIGRATIONS).unwrap();
+
+            let dated = serialize_hex(receipt_address(1).as_object_key());
+            let orphan = serialize_hex(receipt_address(2).as_object_key());
+            sql_query("insert into transaction_receipts (address, data) values (?, ?)")
+                .bind::<diesel::sql_types::Text, _>(&dated)
+                .bind::<diesel::sql_types::Text, _>(serialize_json(&receipt_at(Epoch(7))).unwrap())
+                .execute(&mut conn)
+                .unwrap();
+            for tx_hash in [&dated, &orphan] {
+                sql_query(
+                    "insert into events (template_address, tx_hash, topic, payload) values ('00', ?, 'test', '{}')",
+                )
+                .bind::<diesel::sql_types::Text, _>(tx_hash)
+                .execute(&mut conn)
+                .unwrap();
+            }
+        }
+
+        let store = SqliteIndexerStore::try_create(path).unwrap();
+
+        let receipt_epochs = store
+            .with_read_tx(|tx| {
+                sql_query("select epoch from transaction_receipts")
+                    .load::<EpochRow>(tx.connection())
+                    .map_err(|e| StorageError::general("receipt_epochs", e))
+            })
+            .await
+            .unwrap();
+        assert_eq!(receipt_epochs.iter().map(|r| r.epoch).collect::<Vec<_>>(), vec![7]);
+        // An event whose receipt this indexer never stored has nothing to date it by.
+        assert_eq!(event_epochs(&store).await, vec![7, 0]);
+
+        let econ = ReadOnlyStore::new(store.clone()).get_tari_economics().await.unwrap();
+        assert_eq!(econ.transaction_receipt_count, 1);
+    }
+
+    #[cfg(feature = "metrics")]
+    #[tokio::test]
+    async fn file_stats_report_the_database_and_its_wal() {
+        let (_dir, store) = temp_store().await;
+        insert_receipts(&store, vec![(1, receipt_with_events_at(Epoch(1), 3))]).await;
+
+        let stats = store.file_stats().await.unwrap();
+        assert!(stats.db_bytes > 0);
+        assert!(stats.wal_bytes > 0);
+        // No read transaction is open, so the checkpoint copies every frame back.
+        assert_eq!(stats.wal_uncheckpointed_frames, 0);
+    }
+
+    #[cfg(feature = "metrics")]
+    #[tokio::test]
+    async fn a_writer_that_cannot_take_the_lock_is_recognised_as_busy() {
+        let (dir, _store) = temp_store().await;
+        let url = dir.path().join("indexer.db");
+        let url = url.to_str().unwrap();
+
+        let mut holder = SqliteConnection::establish(url).unwrap();
+        let _held = SqliteTransaction::begin_immediate(&mut holder).unwrap();
+
+        // A fresh connection has no busy timeout, so it gives up at once instead of after five seconds.
+        let mut waiter = SqliteConnection::establish(url).unwrap();
+        let err = SqliteTransaction::begin_immediate(&mut waiter)
+            .err()
+            .expect("lock is held");
+        assert!(is_busy(&err), "{err}");
     }
 
     // -------------------------------- Substate Cache -------------------------------- //

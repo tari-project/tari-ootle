@@ -41,6 +41,7 @@ pub struct EventRecord {
     pub substate_id: Option<String>,
     pub resource_address: Option<String>,
     pub created_at: PrimitiveDateTime,
+    pub epoch: i64,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -53,6 +54,7 @@ pub struct NewEvent<'a> {
     pub payload: String,
     pub substate_id: Option<String>,
     pub resource_address: Option<String>,
+    pub epoch: i64,
 }
 
 #[derive(Clone, Debug, QueryableByName, Deserialize, Serialize)]

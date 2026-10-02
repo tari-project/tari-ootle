@@ -220,7 +220,7 @@ pub struct IndexerConfig {
     ///
     /// Applies to every stored transaction, whether submitted here or observed on the gossip topic.
     /// Only the transaction body and its locally recorded rejection reason are pruned; transaction
-    /// receipts synced from the network follow `transaction_receipt_retention_epochs`, which must be
+    /// receipts synced from the network follow `transaction_receipt_retention_epochs`, which is kept
     /// longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above the
     /// longest a client may take to poll for a result: once pruned, a transaction no longer appears in the
     /// recent-transactions listing or single transaction lookup, and a mempool rejection reason recorded for it is
@@ -235,9 +235,9 @@ pub struct IndexerConfig {
     /// before it is pruned. Write `"forever"` (the default) to retain receipts indefinitely.
     ///
     /// A pruned receipt no longer answers a result lookup or appears in the receipt listing, so set
-    /// this well above the longest a client may take to fetch a result. It must be longer than
-    /// `transaction_retention_epochs`: a retained transaction reports its outcome from its receipt, and
-    /// the two pruners run independently, so equal windows would race at each epoch boundary.
+    /// this well above the longest a client may take to fetch a result. A window not longer than
+    /// `transaction_retention_epochs` is raised to one epoch longer, and receipts are retained
+    /// indefinitely while transactions are; see [`IndexerConfig::effective_receipt_retention_epochs`].
     /// The network economic totals, including the receipt count, are accumulated as receipts are
     /// indexed and keep counting pruned ones.
     #[serde(default, with = "retention_epochs")]
@@ -332,21 +332,14 @@ fn default_substate_cache_negative_ttl() -> Duration {
 /// clients see. Built once at startup: the API must expose exactly these values and nothing else
 /// from `IndexerConfig`, which also holds local paths and listen addresses.
 impl IndexerConfig {
-    /// Requires the receipt retention window to be longer than the transaction one: a stored
-    /// transaction reports its outcome from its receipt, so the receipt must outlive it. The two
-    /// pruners run independently, so equal windows would race at each epoch boundary.
-    pub fn check_retention(&self) -> Result<(), String> {
-        let Some(receipts) = self.transaction_receipt_retention_epochs else {
-            return Ok(());
-        };
-        match self.transaction_retention_epochs {
-            Some(transactions) if transactions < receipts => Ok(()),
-            transactions => Err(format!(
-                "transaction_receipt_retention_epochs ({receipts}) must be longer than transaction_retention_epochs \
-                 ({}), because a stored transaction reports its outcome from its receipt.",
-                transactions.map_or_else(|| "forever".to_string(), |epochs| epochs.to_string()),
-            )),
-        }
+    /// The receipt retention window in force: the configured one, raised to at least one epoch longer
+    /// than `transaction_retention_epochs`. A stored transaction reports its outcome from its receipt,
+    /// so the receipt must outlive it, and the two pruners run independently, so equal windows would
+    /// race at each epoch boundary. `None` retains receipts indefinitely.
+    pub fn effective_receipt_retention_epochs(&self) -> Option<u64> {
+        let receipts = self.transaction_receipt_retention_epochs?;
+        let transactions = self.transaction_retention_epochs?;
+        Some(receipts.max(transactions.saturating_add(1)))
     }
 }
 
@@ -367,7 +360,7 @@ impl From<&IndexerConfig> for PublishedIndexerConfig {
         Self {
             sidechain_id: config.sidechain_id.as_ref().map(|pk| pk.to_byte_type()),
             transaction_retention_epochs: config.transaction_retention_epochs,
-            transaction_receipt_retention_epochs: config.transaction_receipt_retention_epochs,
+            transaction_receipt_retention_epochs: config.effective_receipt_retention_epochs(),
             event_retention_epochs: config.event_retention_epochs,
             index_gossiped_transactions: config.index_gossiped_transactions,
             verify_substate_proofs: config.verify_substate_proofs,
@@ -601,22 +594,23 @@ mod tests {
     }
 
     #[test]
-    fn receipts_must_outlive_the_transactions_they_report_on() {
-        let check = |transactions, receipts| {
+    fn receipts_outlive_the_transactions_they_report_on() {
+        let effective = |transactions, receipts| {
             IndexerConfig {
                 transaction_retention_epochs: transactions,
                 transaction_receipt_retention_epochs: receipts,
                 ..Default::default()
             }
-            .check_retention()
+            .effective_receipt_retention_epochs()
         };
 
-        assert!(check(Some(50), None).is_ok());
-        assert!(check(None, None).is_ok());
-        assert!(check(Some(50), Some(50)).is_err());
-        assert!(check(Some(50), Some(100)).is_ok());
-        assert!(check(Some(50), Some(49)).is_err());
-        assert!(check(None, Some(100)).is_err());
+        assert_eq!(effective(Some(50), None), None);
+        assert_eq!(effective(None, None), None);
+        assert_eq!(effective(Some(50), Some(100)), Some(100));
+        assert_eq!(effective(Some(50), Some(50)), Some(51));
+        assert_eq!(effective(Some(50), Some(10)), Some(51));
+        assert_eq!(effective(None, Some(100)), None);
+        assert_eq!(effective(Some(u64::MAX), Some(1)), Some(u64::MAX));
     }
 
     #[test]

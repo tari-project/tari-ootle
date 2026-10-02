@@ -86,7 +86,7 @@ Main indexer application settings.
 # (default: 50).
 # Only the submitted transaction body and its locally recorded mempool rejection reason are pruned;
 # transaction receipts synced from the network follow transaction_receipt_retention_epochs, which
-# must be longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this
+# is kept longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this
 # well above the longest a client may take to poll for a result: once pruned, a transaction no
 # longer appears in the recent-transactions listing or single transaction lookup. Transactions
 # stored before this indexer recorded a terminal epoch carry epoch 0, so the first pass after
@@ -96,9 +96,10 @@ Main indexer application settings.
 
 # How many epochs past the epoch its transaction committed in a transaction receipt is retained.
 # Unset (the default) or "forever" retains receipts indefinitely. A pruned receipt no longer answers
-# a result lookup or appears in the receipt listing. Must be longer than
-# transaction_retention_epochs, since a stored transaction reports its outcome from its receipt. The
-# economic totals on /network/economics, including the receipt count, keep counting pruned receipts.
+# a result lookup or appears in the receipt listing. A stored transaction reports its outcome from
+# its receipt, so a window not longer than transaction_retention_epochs is raised to one epoch
+# longer, and receipts are retained forever while transactions are. The economic totals on
+# /network/economics, including the receipt count, keep counting pruned receipts.
 #transaction_receipt_retention_epochs = 1000
 
 # How many epochs past the epoch its transaction committed in an event is retained. Unset (the

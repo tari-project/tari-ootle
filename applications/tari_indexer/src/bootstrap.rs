@@ -31,7 +31,7 @@ use std::{
 
 use anyhow::{Context, anyhow};
 use libp2p::identity;
-use log::info;
+use log::{info, warn};
 use ootle_byte_type::ToByteType;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{ApplicationType, grpc_default_port};
@@ -134,7 +134,6 @@ pub async fn spawn_services(
     consensus_constants: ConsensusConstants,
     #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> Result<Services, anyhow::Error> {
-    config.indexer.check_retention().map_err(|e| anyhow!(e))?;
     ensure_directories_exist(config)?;
 
     // Initialize networking
@@ -386,6 +385,17 @@ pub async fn spawn_services(
 
     let display_retention =
         |epochs: Option<u64>| epochs.map_or_else(|| "forever".to_string(), |epochs| format!("{epochs} epoch(s)"));
+    let receipt_retention_epochs = config.indexer.effective_receipt_retention_epochs();
+    if receipt_retention_epochs != config.indexer.transaction_receipt_retention_epochs {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ transaction_receipt_retention_epochs ({}) raised to {}: receipts must outlive transaction_retention_epochs \
+             ({}), because a stored transaction reports its outcome from its receipt",
+            display_retention(config.indexer.transaction_receipt_retention_epochs),
+            display_retention(receipt_retention_epochs),
+            display_retention(config.indexer.transaction_retention_epochs),
+        );
+    }
     // These have defaults that decide how much disk this node uses and what it deletes, so they are
     // logged unconditionally: an operator who upgraded without touching their config should be able
     // to see what changed underneath them in their own logs.
@@ -394,16 +404,13 @@ pub async fn spawn_services(
         "⚙️ Storage: gossip indexing {}, retention: transactions {}, receipts {}, events {}",
         if config.indexer.index_gossiped_transactions { "ON" } else { "OFF" },
         display_retention(config.indexer.transaction_retention_epochs),
-        display_retention(config.indexer.transaction_receipt_retention_epochs),
+        display_retention(receipt_retention_epochs),
         display_retention(config.indexer.event_retention_epochs),
     );
 
     for (target, retention_epochs) in [
         (PruneTarget::Transactions, config.indexer.transaction_retention_epochs),
-        (
-            PruneTarget::TransactionReceipts,
-            config.indexer.transaction_receipt_retention_epochs,
-        ),
+        (PruneTarget::TransactionReceipts, receipt_retention_epochs),
         (PruneTarget::Events, config.indexer.event_retention_epochs),
     ] {
         let Some(retention_epochs) = retention_epochs else {

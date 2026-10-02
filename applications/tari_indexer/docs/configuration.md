@@ -81,8 +81,9 @@ Main indexer application settings.
 # How many epochs past its terminal epoch a transaction submitted through this indexer is retained.
 # A transaction's terminal epoch is the epoch it committed in once its receipt has been indexed, and
 # its max_epoch (the last epoch it could still be sequenced in) until then, so a transaction that is
-# never sequenced ages out on the same schedule as one that commits. Unset (the default) retains
-# transactions forever; 0 keeps only those that can still commit or committed in the current epoch.
+# never sequenced ages out on the same schedule as one that commits. "forever" retains transactions
+# indefinitely; 0 keeps only those that can still commit or committed in the current epoch
+# (default: 50).
 # Only the submitted transaction body and its locally recorded mempool rejection reason are pruned;
 # transaction receipts synced from the network follow transaction_receipt_retention_epochs, which
 # must be longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this
@@ -91,7 +92,7 @@ Main indexer application settings.
 # stored before this indexer recorded a terminal epoch carry epoch 0, so the first pass after
 # enabling this prunes that entire backlog. Pruning bounds database growth but does not return disk
 # to the filesystem: SQLite reuses the freed pages rather than shrinking the file.
-#transaction_retention_epochs = 100
+#transaction_retention_epochs = 50
 
 # How many epochs past the epoch its transaction committed in a transaction receipt is retained.
 # Unset (the default) or "forever" retains receipts indefinitely. A pruned receipt no longer answers

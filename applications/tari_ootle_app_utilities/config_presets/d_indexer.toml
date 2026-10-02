@@ -50,13 +50,13 @@
 # How many epochs past its terminal epoch a transaction submitted through this indexer is retained
 # before it is pruned. A transaction's terminal epoch is the epoch it committed in once its receipt has
 # been indexed, and its max_epoch (the last epoch it could still be sequenced in).
-# Unset (the default) retains transactions forever; 0 keeps only those that can still commit or committed
-# in the current epoch (not recommended).
+# "forever" retains transactions indefinitely; 0 keeps only those that can still commit or committed
+# in the current epoch (not recommended). (default = 50)
 #
 # Set this well above the longest a client may take to poll for a result — once pruned,
 # a transaction no longer appears in the recent-transactions listing or single
 # transaction lookup.
-#transaction_retention_epochs = 100
+#transaction_retention_epochs = 50
 
 # How many epochs past the epoch its transaction committed in a transaction receipt is retained.
 # Unset (the default) or "forever" retains receipts indefinitely. Must be longer than

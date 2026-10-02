@@ -497,8 +497,9 @@ pub struct IndexerRateLimitsConfig {
     pub transactions_rate: RefillRate,
     /// Maximum concurrent SSE connections per IP (default: 10)
     pub sse_max_connections_per_ip: usize,
-    /// Trust X-Forwarded-For / X-Real-IP proxy headers (default: false).
-    /// Only enable when the indexer is behind a trusted reverse proxy.
+    /// Trust CF-Connecting-IP / X-Forwarded-For / X-Real-IP proxy headers (default: false).
+    /// Only enable when the indexer is behind a trusted reverse proxy. The client IP is
+    /// CF-Connecting-IP, else the last X-Forwarded-For entry, else X-Real-IP.
     pub trust_proxy_headers: bool,
 }
 

@@ -371,32 +371,37 @@ impl Drop for SseOpenConnection {
 
 /// Extract the client IP, optionally trusting proxy headers.
 ///
-/// When `trust_proxy_headers` is `true`, `X-Forwarded-For` and `X-Real-IP` are
-/// consulted first. This should only be enabled when the indexer sits behind a
-/// trusted reverse proxy that overwrites these headers. When the indexer is
-/// exposed directly to the internet, set this to `false` so that clients cannot
-/// spoof their IP to bypass rate limits.
+/// When `trust_proxy_headers` is `true`, the client IP is taken from, in order:
+/// `CF-Connecting-IP`, the last `X-Forwarded-For` entry, then `X-Real-IP`. Every
+/// `X-Forwarded-For` entry before the last was written by the client or an earlier
+/// hop and can be spoofed; the last is the address the nearest proxy saw. Cloudflare
+/// overwrites `CF-Connecting-IP`, so a proxy other than Cloudflare must strip or
+/// overwrite it. Only enable this when the indexer sits behind such a trusted
+/// reverse proxy. When the indexer is exposed directly to the internet, set this
+/// to `false` so that clients cannot spoof their IP to bypass rate limits.
 pub fn extract_ip(
     headers: &HeaderMap,
     connect_info: Option<&ConnectInfo<SocketAddr>>,
     trust_proxy_headers: bool,
 ) -> IpAddr {
     if trust_proxy_headers {
+        if let Some(ip) = header_ip(headers, "cf-connecting-ip") {
+            return ip;
+        }
+
         if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) &&
-            let Some(first) = xff.split(',').next() &&
-            let Ok(ip) = first.trim().parse::<IpAddr>()
+            let Some(last) = xff.rsplit(',').next() &&
+            let Ok(ip) = last.trim().parse::<IpAddr>()
         {
             return ip;
         }
 
-        if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) &&
-            let Ok(ip) = xri.trim().parse::<IpAddr>()
-        {
+        if let Some(ip) = header_ip(headers, "x-real-ip") {
             return ip;
         }
     }
 
-    if !trust_proxy_headers && (headers.contains_key("x-forwarded-for") || headers.contains_key("x-real-ip")) {
+    if !trust_proxy_headers && PROXY_HEADERS.iter().any(|h| headers.contains_key(*h)) {
         warn_proxy_headers_untrusted();
     }
 
@@ -407,6 +412,12 @@ pub fn extract_ip(
     IpAddr::from([127, 0, 0, 1])
 }
 
+const PROXY_HEADERS: [&str; 3] = ["cf-connecting-ip", "x-forwarded-for", "x-real-ip"];
+
+fn header_ip(headers: &HeaderMap, name: &str) -> Option<IpAddr> {
+    headers.get(name)?.to_str().ok()?.trim().parse().ok()
+}
+
 /// Warns once that requests carry proxy headers while they are untrusted. Behind a reverse proxy
 /// every client then shares the proxy's address, and so one rate-limit bucket.
 fn warn_proxy_headers_untrusted() {
@@ -414,7 +425,7 @@ fn warn_proxy_headers_untrusted() {
     if !WARNED.swap(true, Ordering::Relaxed) {
         log::warn!(
             target: LOG_TARGET,
-            "Requests carry X-Forwarded-For/X-Real-IP but indexer.rate_limits.trust_proxy_headers is false, so rate \
+            "Requests carry CF-Connecting-IP/X-Forwarded-For/X-Real-IP but indexer.rate_limits.trust_proxy_headers is false, so rate \
              limits key on the connecting address. Behind a trusted reverse proxy, set it to true so each client \
              gets its own limit."
         );
@@ -435,8 +446,8 @@ pub struct RequestCost(pub f64);
 pub struct RateLimitConfig {
     pub enabled: bool,
     pub limiter: IpRateLimiter,
-    /// Whether to trust `X-Forwarded-For` / `X-Real-IP` headers for IP
-    /// extraction. Only enable this when running behind a trusted reverse proxy.
+    /// Whether to trust `CF-Connecting-IP` / `X-Forwarded-For` / `X-Real-IP` headers for IP
+    /// extraction (see [`extract_ip`]). Only enable this when running behind a trusted reverse proxy.
     pub trust_proxy_headers: bool,
     /// Tokens charged, beyond the one the request took, when a request is dropped before its
     /// handler responds. A route whose handler reports a [`RequestCost`] sets this to the most
@@ -473,8 +484,8 @@ impl Drop for PendingCharge {
 pub struct SseLimitConfig {
     pub enabled: bool,
     pub limiter: SseConnectionLimiter,
-    /// Whether to trust `X-Forwarded-For` / `X-Real-IP` headers for IP
-    /// extraction. Only enable this when running behind a trusted reverse proxy.
+    /// Whether to trust `CF-Connecting-IP` / `X-Forwarded-For` / `X-Real-IP` headers for IP
+    /// extraction (see [`extract_ip`]). Only enable this when running behind a trusted reverse proxy.
     pub trust_proxy_headers: bool,
     /// Gauge handle for the route this config is attached to.
     pub active_connections: SseEndpointConnections,
@@ -901,11 +912,28 @@ mod tests {
     }
 
     #[test]
-    fn extract_ip_takes_xff_first_entry_when_trusted() {
+    fn extract_ip_takes_xff_last_entry_when_trusted() {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4, 5.6.7.8"));
         let conn = ci("203.0.113.7:55512");
-        assert_eq!(extract_ip(&headers, Some(&conn), true), IpAddr::from([1, 2, 3, 4]));
+        assert_eq!(extract_ip(&headers, Some(&conn), true), IpAddr::from([5, 6, 7, 8]));
+    }
+
+    #[test]
+    fn extract_ip_prefers_cf_connecting_ip_when_trusted() {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("4.4.4.4"));
+        headers.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4, 4.4.4.4"));
+        headers.insert("x-real-ip", HeaderValue::from_static("9.9.9.9"));
+        assert_eq!(extract_ip(&headers, None, true), IpAddr::from([4, 4, 4, 4]));
+    }
+
+    #[test]
+    fn extract_ip_ignores_cf_connecting_ip_when_untrusted() {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("4.4.4.4"));
+        let conn = ci("203.0.113.7:55512");
+        assert_eq!(extract_ip(&headers, Some(&conn), false), IpAddr::from([203, 0, 113, 7]));
     }
 
     #[test]
@@ -918,7 +946,8 @@ mod tests {
     #[test]
     fn extract_ip_falls_through_invalid_proxy_headers_to_connect_info() {
         let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", HeaderValue::from_static("not-an-ip"));
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("garbage"));
+        headers.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4, not-an-ip"));
         headers.insert("x-real-ip", HeaderValue::from_static("also-garbage"));
         let conn = ci("203.0.113.7:55512");
         assert_eq!(extract_ip(&headers, Some(&conn), true), IpAddr::from([203, 0, 113, 7]));

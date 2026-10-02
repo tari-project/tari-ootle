@@ -246,7 +246,7 @@ pub async fn list_recent_transactions(
         /transactions/{transaction_id}/result queries the transaction's committee, so it resolves the outcome of any \
         transaction regardless of where it was submitted. /transaction-receipts is synced from network state rather \
         than gossip and is complete back to its retention window (see `transaction_receipt_retention_epochs` on \
-        /info), which is never shorter than the transaction one, so a committed transaction always has a receipt \
+        /info), which is longer than the transaction one, so a committed transaction always has a receipt \
         there even when its body is missing here.",
     responses(
         (status = 200, description = "Transaction found", body = GetTransactionResponse),

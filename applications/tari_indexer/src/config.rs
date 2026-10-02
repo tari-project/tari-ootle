@@ -220,8 +220,8 @@ pub struct IndexerConfig {
     ///
     /// Applies to every stored transaction, whether submitted here or observed on the gossip topic.
     /// Only the transaction body and its locally recorded rejection reason are pruned; transaction
-    /// receipts synced from the network follow `transaction_receipt_retention_epochs`, which may not
-    /// be shorter, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above the
+    /// receipts synced from the network follow `transaction_receipt_retention_epochs`, which must be
+    /// longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above the
     /// longest a client may take to poll for a result: once pruned, a transaction no longer appears in the
     /// recent-transactions listing or single transaction lookup, and a mempool rejection reason recorded for it is
     /// lost. Transactions stored before this indexer recorded a terminal epoch carry epoch 0, so the first
@@ -235,8 +235,9 @@ pub struct IndexerConfig {
     /// before it is pruned. Write `"forever"` (the default) to retain receipts indefinitely.
     ///
     /// A pruned receipt no longer answers a result lookup or appears in the receipt listing, so set
-    /// this well above the longest a client may take to fetch a result. It may not be shorter than
-    /// `transaction_retention_epochs`: a retained transaction reports its outcome from its receipt.
+    /// this well above the longest a client may take to fetch a result. It must be longer than
+    /// `transaction_retention_epochs`: a retained transaction reports its outcome from its receipt, and
+    /// the two pruners run independently, so equal windows would race at each epoch boundary.
     /// The network economic totals, including the receipt count, are accumulated as receipts are
     /// indexed and keep counting pruned ones.
     #[serde(default, with = "retention_epochs")]
@@ -331,18 +332,18 @@ fn default_substate_cache_negative_ttl() -> Duration {
 /// clients see. Built once at startup: the API must expose exactly these values and nothing else
 /// from `IndexerConfig`, which also holds local paths and listen addresses.
 impl IndexerConfig {
-    /// Rejects a receipt retention window shorter than the transaction one: a stored transaction
-    /// reports its outcome from its receipt, so the receipt must outlive it.
+    /// Requires the receipt retention window to be longer than the transaction one: a stored
+    /// transaction reports its outcome from its receipt, so the receipt must outlive it. The two
+    /// pruners run independently, so equal windows would race at each epoch boundary.
     pub fn check_retention(&self) -> Result<(), String> {
         let Some(receipts) = self.transaction_receipt_retention_epochs else {
             return Ok(());
         };
         match self.transaction_retention_epochs {
-            Some(transactions) if transactions <= receipts => Ok(()),
+            Some(transactions) if transactions < receipts => Ok(()),
             transactions => Err(format!(
-                "transaction_receipt_retention_epochs ({receipts}) is shorter than transaction_retention_epochs ({}). \
-                 Raise it to at least transaction_retention_epochs, because a stored transaction reports its outcome \
-                 from its receipt.",
+                "transaction_receipt_retention_epochs ({receipts}) must be longer than transaction_retention_epochs \
+                 ({}), because a stored transaction reports its outcome from its receipt.",
                 transactions.map_or_else(|| "forever".to_string(), |epochs| epochs.to_string()),
             )),
         }
@@ -612,7 +613,7 @@ mod tests {
 
         assert!(check(Some(50), None).is_ok());
         assert!(check(None, None).is_ok());
-        assert!(check(Some(50), Some(50)).is_ok());
+        assert!(check(Some(50), Some(50)).is_err());
         assert!(check(Some(50), Some(100)).is_ok());
         assert!(check(Some(50), Some(49)).is_err());
         assert!(check(None, Some(100)).is_err());

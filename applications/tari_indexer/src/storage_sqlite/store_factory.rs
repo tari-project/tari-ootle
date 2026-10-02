@@ -1320,6 +1320,51 @@ mod tests {
         assert_eq!(remaining[0].0, receipt_address(3));
     }
 
+    #[tokio::test]
+    async fn receipt_listing_resumes_after_the_cursor() {
+        let (_dir, store) = temp_store().await;
+        insert_receipts(&store, vec![
+            (1, receipt_at(Epoch(5))),
+            (2, receipt_at(Epoch(6))),
+            (3, receipt_at(Epoch(7))),
+        ])
+        .await;
+
+        let page = store
+            .with_read_tx(|tx| {
+                tx.list_transaction_receipts(Some(receipt_address(1)), 10, tari_ootle_storage::Ordering::Ascending)
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.iter().map(|(addr, _)| *addr).collect::<Vec<_>>(), vec![
+            receipt_address(2),
+            receipt_address(3)
+        ]);
+    }
+
+    /// Retention deletes the oldest receipts first, which is where an ascending reader's cursor sits. An
+    /// empty page there would read as caught up on every call, so a missing cursor must be reported.
+    #[tokio::test]
+    async fn a_pruned_receipt_cursor_is_not_found() {
+        let (_dir, store) = temp_store().await;
+        insert_receipts(&store, vec![(1, receipt_at(Epoch(5))), (2, receipt_at(Epoch(20)))]).await;
+        store
+            .with_write_tx(move |tx| tx.prune_transaction_receipts_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+
+        for ordering in [
+            tari_ootle_storage::Ordering::Ascending,
+            tari_ootle_storage::Ordering::Descending,
+        ] {
+            let err = store
+                .with_read_tx(move |tx| tx.list_transaction_receipts(Some(receipt_address(1)), 10, ordering))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, StorageError::NotFound { .. }), "{err}");
+        }
+    }
+
     /// The receipt count is network history, reported next to the other accumulated totals. Pruning
     /// local storage must not rewind it.
     #[tokio::test]

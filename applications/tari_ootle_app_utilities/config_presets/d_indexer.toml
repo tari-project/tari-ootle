@@ -59,7 +59,7 @@
 #transaction_retention_epochs = 100
 
 # How many epochs past the epoch its transaction committed in a transaction receipt is retained.
-# Unset (the default) or "forever" retains receipts indefinitely. Must be at least
+# Unset (the default) or "forever" retains receipts indefinitely. Must be longer than
 # transaction_retention_epochs, since a stored transaction reports its outcome from its receipt.
 #transaction_receipt_retention_epochs = 1000
 

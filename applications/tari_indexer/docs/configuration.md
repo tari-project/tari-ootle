@@ -84,9 +84,9 @@ Main indexer application settings.
 # never sequenced ages out on the same schedule as one that commits. Unset (the default) retains
 # transactions forever; 0 keeps only those that can still commit or committed in the current epoch.
 # Only the submitted transaction body and its locally recorded mempool rejection reason are pruned;
-# transaction receipts synced from the network follow transaction_receipt_retention_epochs, which may
-# not be shorter, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above the longest a client may take to poll
-# for a result: once pruned, a transaction no longer appears in the recent-transactions listing or
+# transaction receipts synced from the network follow transaction_receipt_retention_epochs, which must
+# be longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above
+# the longest a client may take to poll for a result: once pruned, a transaction no longer appears in the recent-transactions listing or
 # single transaction lookup. Transactions stored before this indexer recorded a terminal epoch carry
 # epoch 0, so the first pass after enabling this prunes that entire backlog.
 # Pruning bounds database growth but does not return disk to the filesystem: SQLite reuses the freed
@@ -95,8 +95,8 @@ Main indexer application settings.
 
 # How many epochs past the epoch its transaction committed in a transaction receipt is retained.
 # Unset (the default) or "forever" retains receipts indefinitely. A pruned receipt no longer answers a
-# result lookup or appears in the receipt listing. Must be at least transaction_retention_epochs, since
-# a stored transaction reports its outcome from its receipt. The economic totals on /network/economics,
+# result lookup or appears in the receipt listing. Must be longer than transaction_retention_epochs,
+# since a stored transaction reports its outcome from its receipt. The economic totals on /network/economics,
 # including the receipt count, keep counting pruned receipts.
 #transaction_receipt_retention_epochs = 1000
 

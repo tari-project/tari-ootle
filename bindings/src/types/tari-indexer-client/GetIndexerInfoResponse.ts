@@ -32,7 +32,7 @@ export type GetIndexerInfoResponse = {
   transaction_retention_epochs: bigint | null;
   /**
    * How many epochs past the epoch its transaction committed in this indexer retains a transaction
-   * receipt before pruning it. `None` means receipts are retained indefinitely. Never shorter than
+   * receipt before pruning it. `None` means receipts are retained indefinitely. Longer than
    * `transaction_retention_epochs`, so a retained transaction always has its receipt.
    */
   transaction_receipt_retention_epochs: bigint | null;

@@ -843,7 +843,7 @@ pub struct GetIndexerInfoResponse {
     /// history hits this floor rather than the start of the chain.
     pub transaction_retention_epochs: Option<u64>,
     /// How many epochs past the epoch its transaction committed in this indexer retains a transaction
-    /// receipt before pruning it. `None` means receipts are retained indefinitely. Never shorter than
+    /// receipt before pruning it. `None` means receipts are retained indefinitely. Longer than
     /// `transaction_retention_epochs`, so a retained transaction always has its receipt.
     pub transaction_receipt_retention_epochs: Option<u64>,
     /// How many epochs past the epoch its transaction committed in this indexer retains an event

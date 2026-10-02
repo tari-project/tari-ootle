@@ -30,6 +30,7 @@ use crate::{
             RateLimitConfig,
             SseConnectionLimiter,
             SseLimitConfig,
+            TrustedProxyHeaders,
             rate_limit_middleware,
             sse_limit_middleware,
         },
@@ -104,42 +105,44 @@ impl Server {
         let sse_metrics = crate::rest_api::rate_limit::SseConnectionMetrics::default();
 
         // Per-IP rate limiters for specific endpoint groups.
-        // `trust_proxy_headers` mirrors the value from config – enable only when
-        // the indexer is behind a trusted reverse proxy.
+        let trusted_headers = TrustedProxyHeaders {
+            forwarded_for: rate_limits.trust_proxy_headers,
+            cf_connecting_ip: rate_limits.trust_cf_connecting_ip,
+        };
         let tx_submit_limiter = RateLimitConfig {
             enabled: rate_limits.enabled,
             limiter: IpRateLimiter::new(rate_limits.transactions_submit_rate),
-            trust_proxy_headers: rate_limits.trust_proxy_headers,
+            trusted_headers,
             abandoned_request_cost: 0.0,
         };
         let tx_dry_run_limiter = RateLimitConfig {
             enabled: rate_limits.enabled,
             limiter: IpRateLimiter::new(rate_limits.transactions_dry_run_submit_rate),
-            trust_proxy_headers: rate_limits.trust_proxy_headers,
+            trusted_headers,
             abandoned_request_cost: handlers::transactions::DRY_RUN_MAX_COST,
         };
         let transactions_fetch_limiter = RateLimitConfig {
             enabled: rate_limits.enabled,
             limiter: IpRateLimiter::new(rate_limits.transactions_rate),
-            trust_proxy_headers: rate_limits.trust_proxy_headers,
+            trusted_headers,
             abandoned_request_cost: 0.0,
         };
         let substates_fetch_limiter = RateLimitConfig {
             enabled: rate_limits.enabled,
             limiter: IpRateLimiter::new(rate_limits.substates_rate),
-            trust_proxy_headers: rate_limits.trust_proxy_headers,
+            trusted_headers,
             abandoned_request_cost: 0.0,
         };
         let utxos_fetch_limiter = RateLimitConfig {
             enabled: rate_limits.enabled,
             limiter: IpRateLimiter::new(rate_limits.utxos_fetch_rate),
-            trust_proxy_headers: rate_limits.trust_proxy_headers,
+            trusted_headers,
             abandoned_request_cost: 0.0,
         };
         let non_fungibles_limiter = RateLimitConfig {
             enabled: rate_limits.enabled,
             limiter: IpRateLimiter::new(rate_limits.non_fungibles_rate),
-            trust_proxy_headers: rate_limits.trust_proxy_headers,
+            trusted_headers,
             abandoned_request_cost: 0.0,
         };
         // The streaming routes share one per-IP limiter but are counted separately, so each
@@ -148,7 +151,7 @@ impl Server {
         let sse_limiter = |endpoint: &'static str| SseLimitConfig {
             enabled: rate_limits.enabled,
             limiter: sse_connections.clone(),
-            trust_proxy_headers: rate_limits.trust_proxy_headers,
+            trusted_headers,
             active_connections: sse_metrics.endpoint(endpoint),
         };
 

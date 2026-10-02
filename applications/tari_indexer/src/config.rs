@@ -497,10 +497,14 @@ pub struct IndexerRateLimitsConfig {
     pub transactions_rate: RefillRate,
     /// Maximum concurrent SSE connections per IP (default: 10)
     pub sse_max_connections_per_ip: usize,
-    /// Trust CF-Connecting-IP / X-Forwarded-For / X-Real-IP proxy headers (default: false).
-    /// Only enable when the indexer is behind a trusted reverse proxy. The client IP is
-    /// CF-Connecting-IP, else the last X-Forwarded-For entry, else X-Real-IP.
+    /// Key rate limits on the last X-Forwarded-For entry, else X-Real-IP (default: false).
+    /// Only enable when the indexer is behind a reverse proxy that appends to X-Forwarded-For.
     pub trust_proxy_headers: bool,
+    /// Key rate limits on CF-Connecting-IP, ahead of X-Forwarded-For (default: false).
+    /// Only enable when Cloudflare is in front of the indexer: any other proxy passes a
+    /// client-supplied CF-Connecting-IP through, and the client picks its own limit.
+    #[serde(default)]
+    pub trust_cf_connecting_ip: bool,
 }
 
 impl Default for IndexerRateLimitsConfig {
@@ -516,6 +520,7 @@ impl Default for IndexerRateLimitsConfig {
             transactions_rate: RefillRate::new(200.0, window).unwrap(),
             sse_max_connections_per_ip: 10,
             trust_proxy_headers: false,
+            trust_cf_connecting_ip: false,
         }
     }
 }

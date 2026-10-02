@@ -9,7 +9,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use ootle_network::Network;
 use serde::{Serialize, de::DeserializeOwned};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::{
@@ -39,7 +38,7 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     Ordering,
     StorageError,
-    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    consensus_models::{EpochCheckpoint, SubstateData},
     time::PrimitiveDateTime,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
@@ -170,8 +169,6 @@ pub trait IndexerStoreReadTransaction {
         address: &TransactionReceiptAddress,
     ) -> Result<TransactionReceipt, StorageError>;
 
-    fn count_transaction_receipts(&mut self) -> Result<u64, StorageError>;
-
     /// The sum of every validator fee pool balance: the leader fees validators have earned and not yet claimed.
     fn sum_validator_fee_pool_balances(&mut self) -> Result<Amount, StorageError>;
 
@@ -273,13 +270,6 @@ pub trait IndexerStoreWriteTransaction {
     fn commit(self) -> Result<(), StorageError>;
     fn rollback(self) -> Result<(), StorageError>;
     fn key_value_set<K: AsRef<str>, V: Serialize>(&mut self, key: K, value: V) -> Result<(), StorageError>;
-    fn batch_insert_substate_transitions<I: IntoIterator<Item = (Epoch, SubstateUpdateProof)>>(
-        &mut self,
-        network: Network,
-        shard: Shard,
-        state_version: StateVersion,
-        updates: I,
-    ) -> Result<(), StorageError>;
     fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdateRecord>>(
         &mut self,
         epoch: Epoch,
@@ -319,6 +309,13 @@ pub trait IndexerStoreWriteTransaction {
     /// deleted. Transaction receipts are keyed independently of this table and are never removed here,
     /// so a pruned transaction still resolves to its receipt-backed outcome.
     fn prune_transactions_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError>;
+    /// Deletes up to `limit` transaction receipts that committed before `cutoff`, oldest first,
+    /// returning the number deleted. The receipt-sourced totals are accumulated separately and keep
+    /// counting a pruned receipt.
+    fn prune_transaction_receipts_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError>;
+    /// Deletes up to `limit` events emitted by transactions that committed before `cutoff`, oldest
+    /// first, returning the number deleted.
+    fn prune_events_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
     fn upsert_template_catalogue(
         &mut self,
@@ -456,7 +453,7 @@ pub struct XtrEconomics {
     /// Total exhaust burned, summed from the same transaction receipts as `fee_volume` (so their ratio is
     /// the exact realized burn share).
     pub receipt_exhaust_burned: Amount,
-    /// Number of transaction receipts the indexer has stored.
+    /// Number of transaction receipts the indexer has indexed, including any it has since pruned.
     pub transaction_receipt_count: u64,
     /// Leader fees validators have earned and not yet claimed, summed over every validator fee pool.
     pub validator_claimable_fees: Amount,
@@ -542,7 +539,10 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
                     .key_value_get_value::<_, Amount>(Key::TariAccumulatedReceiptExhaustBurn)
                     .optional()?
                     .unwrap_or_default();
-                let transaction_receipt_count = tx.count_transaction_receipts()?;
+                let transaction_receipt_count = tx
+                    .key_value_get_value::<_, u64>(Key::TransactionReceiptCount)
+                    .optional()?
+                    .unwrap_or_default();
                 let validator_claimable_fees = tx.sum_validator_fee_pool_balances()?;
 
                 Ok(XtrEconomics {

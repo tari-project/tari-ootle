@@ -589,17 +589,24 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .select((transaction_receipts::address, transaction_receipts::data))
             .into_boxed();
         if let Some(last_id) = last_id {
-            let tr = alias!(transaction_receipts as tr);
-            let subquery = tr
-                .select(tr.field(transaction_receipts::id))
-                .filter(tr.field(transaction_receipts::address).eq(last_id.to_string()))
-                .limit(1)
-                .single_value()
-                .assume_not_null();
+            // A cursor this indexer does not store - pruned by retention, or never indexed - is
+            // `NotFound`, so the client restarts the listing: no later call can advance past it.
+            let cursor = transaction_receipts::table
+                .select(transaction_receipts::id)
+                .filter(transaction_receipts::address.eq(serialize_hex(last_id.as_object_key())))
+                .first::<i32>(self.connection())
+                .optional()
+                .map_err(|e| StorageError::QueryError {
+                    reason: format!("{OPERATION}: {}", e),
+                })?
+                .ok_or_else(|| StorageError::NotFound {
+                    item: "transaction_receipt",
+                    key: last_id.to_string(),
+                })?;
 
             query = match ordering {
-                Ordering::Ascending => query.filter(transaction_receipts::id.gt(subquery)),
-                Ordering::Descending => query.filter(transaction_receipts::id.lt(subquery)),
+                Ordering::Ascending => query.filter(transaction_receipts::id.gt(cursor)),
+                Ordering::Descending => query.filter(transaction_receipts::id.lt(cursor)),
             }
         }
 
@@ -655,21 +662,6 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             })?;
 
         deserialize_json(&receipt_entry)
-    }
-
-    fn count_transaction_receipts(&mut self) -> Result<u64, StorageError> {
-        const OPERATION: &str = "count_transaction_receipts";
-        use crate::storage_sqlite::schema::transaction_receipts;
-
-        let count = transaction_receipts::table
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("{OPERATION}: {}", e),
-            })?;
-        u64::try_from(count).map_err(|_| StorageError::DataInconsistency {
-            details: format!("{OPERATION}: negative receipt count {count}"),
-        })
     }
 
     fn sum_validator_fee_pool_balances(&mut self) -> Result<Amount, StorageError> {

@@ -23,6 +23,7 @@ use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::H
 responses(
     (status = 200, description = "List of transaction receipts", body = ListTransactionReceiptsResponse),
     (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
+    (status = 404, description = "The last_id receipt is not stored on this indexer", body = ErrorResponse),
     (status = INTERNAL_SERVER_ERROR, description = "Failed to list transaction receipts", body = ErrorResponse),
 ))]
 pub async fn list_transaction_receipts(
@@ -45,7 +46,14 @@ pub async fn list_transaction_receipts(
         .read_only_store()
         .list_transaction_receipts(req.last_id, u64::from(limit), ordering)
         .await
-        .map_err(ErrorResponse::anyhow)?;
+        .optional()
+        .map_err(ErrorResponse::anyhow)?
+        .ok_or_else(|| {
+            ErrorResponse::not_found(
+                "The last_id receipt is not stored on this indexer: it may have aged past the receipt retention \
+                 window (see transaction_receipt_retention_epochs on /info). Restart the listing without last_id.",
+            )
+        })?;
 
     Ok(context.apply_cache_control(Json(ListTransactionReceiptsResponse { receipts }), 10))
 }

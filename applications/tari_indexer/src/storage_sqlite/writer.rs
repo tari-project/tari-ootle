@@ -9,7 +9,6 @@ use std::{
 
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
-use ootle_network::Network;
 use serde::Serialize;
 use tari_engine_types::{
     published_template::PublishedTemplateMetadata,
@@ -18,16 +17,10 @@ use tari_engine_types::{
 };
 use tari_indexer_client::types::TransactionSource;
 use tari_indexer_lib::substate_cache::{FetchWatermark, SubstateCacheEntryRef, caches_nonexistence};
-use tari_ootle_common_types::{
-    Epoch,
-    StateVersion,
-    displayable::Displayable,
-    shard::Shard,
-    substate_type::SubstateType,
-};
+use tari_ootle_common_types::{Epoch, StateVersion, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::{
     StorageError,
-    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    consensus_models::{EpochCheckpoint, SubstateData},
     time::PrimitiveDateTime,
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
@@ -40,6 +33,7 @@ use crate::{
     network_state_sync::EventFilter,
     storage_sqlite::{
         models::{
+            Key,
             NewEvent,
             NewSubstate,
             NewTemplateCatalogueRow,
@@ -57,7 +51,7 @@ use crate::{
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_cbor, serialize_hex, serialize_json},
     },
-    store::{IndexerStoreWriteTransaction, InsertedEvent},
+    store::{IndexerStoreReadTransaction, IndexerStoreWriteTransaction, InsertedEvent},
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::writer";
@@ -106,42 +100,6 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .on_conflict(key_values::key)
             .do_update()
             .set(key_values::value.eq(&json))
-            .execute(self.connection())
-            .map_err(|e| StorageError::general(OPERATION, e))?;
-
-        Ok(())
-    }
-
-    fn batch_insert_substate_transitions<I: IntoIterator<Item = (Epoch, SubstateUpdateProof)>>(
-        &mut self,
-        network: Network,
-        shard: Shard,
-        state_version: StateVersion,
-        updates: I,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "batch_insert_substate_transitions";
-        use crate::storage_sqlite::schema::substate_transitions;
-
-        diesel::insert_into(substate_transitions::table)
-            .values(
-                updates
-                    .into_iter()
-                    .map(|(epoch, proof)| {
-                        (
-                            substate_transitions::shard.eq(shard.as_u32() as i32),
-                            substate_transitions::state_version.eq(state_version.as_u64() as i64),
-                            substate_transitions::epoch.eq(epoch.as_u64() as i64),
-                            substate_transitions::substate_id.eq(proof.substate_id().to_string()),
-                            substate_transitions::substate_type.eq(SubstateType::from(proof.substate_id()).to_string()),
-                            substate_transitions::version.eq(proof.version().as_u64() as i64),
-                            substate_transitions::is_up.eq(proof.is_create()),
-                            substate_transitions::value_hash.eq(proof.as_create().map(|v| {
-                                serialize_hex(v.substate.value.to_value_hash(network, proof.version(), epoch))
-                            })),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            )
             .execute(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
 
@@ -279,8 +237,10 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         use crate::storage_sqlite::schema::{events, transaction_receipts, transactions};
 
         let mut inserted_events = Vec::new();
+        let mut num_receipts = 0u64;
 
         for (receipt_addr, receipt) in receipts {
+            num_receipts += 1;
             let receipt_addr_hex = serialize_hex(receipt_addr.as_object_key());
             let transaction_id = TransactionId::from_receipt_address(receipt_addr);
 
@@ -290,6 +250,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     transaction_receipts::data.eq(serialize_json(&receipt)?),
                     transaction_receipts::outcome.eq(receipt.outcome.to_string()),
                     transaction_receipts::total_fees_paid.eq(receipt.fee_receipt.total_fees_paid() as i64),
+                    transaction_receipts::epoch.eq(encode_retention_epoch(receipt.epoch)),
                 ))
                 .execute(self.connection())
                 .map_err(|e| StorageError::general(OPERATION, e))?;
@@ -318,6 +279,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     payload: serialize_json(event.payload())?,
                     substate_id: event.substate_id().map(|s| s.to_string()),
                     resource_address: EventFilter::event_resource_address(&event).map(|r| r.to_string()),
+                    epoch: encode_retention_epoch(receipt.epoch),
                 };
 
                 let id: i64 = diesel::insert_into(events::table)
@@ -334,6 +296,12 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     event: Arc::new(event),
                 });
             }
+        }
+
+        if num_receipts > 0 {
+            let count =
+                Optional::optional(self.key_value_get_value::<_, u64>(Key::TransactionReceiptCount))?.unwrap_or(0);
+            self.key_value_set(Key::TransactionReceiptCount, count + num_receipts)?;
         }
 
         Ok(inserted_events)
@@ -451,6 +419,52 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .map_err(|e| StorageError::general(OPERATION, e))?;
 
         Ok(num_deleted)
+    }
+
+    fn prune_transaction_receipts_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError> {
+        const OPERATION: &str = "prune_transaction_receipts_before_epoch";
+        use crate::storage_sqlite::schema::transaction_receipts;
+
+        // Bounded select-then-delete, ordered by the filtered column so the select is served from
+        // `transaction_receipts_epoch_idx`. See `prune_transactions_before_epoch`.
+        let ids = transaction_receipts::table
+            .select(transaction_receipts::id)
+            .filter(transaction_receipts::epoch.lt(encode_retention_epoch(cutoff)))
+            .order_by(transaction_receipts::epoch.asc())
+            .limit(limit as i64)
+            .load::<i32>(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        diesel::delete(transaction_receipts::table.filter(transaction_receipts::id.eq_any(ids)))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))
+    }
+
+    fn prune_events_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError> {
+        const OPERATION: &str = "prune_events_before_epoch";
+        use crate::storage_sqlite::schema::events;
+
+        // Bounded select-then-delete, ordered by the filtered column so the select is served from
+        // `events_epoch_idx`. See `prune_transactions_before_epoch`.
+        let ids = events::table
+            .select(events::id)
+            .filter(events::epoch.lt(encode_retention_epoch(cutoff)))
+            .order_by(events::epoch.asc())
+            .limit(limit as i64)
+            .load::<i64>(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        diesel::delete(events::table.filter(events::id.eq_any(ids)))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))
     }
 
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {

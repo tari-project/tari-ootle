@@ -58,6 +58,9 @@ pub enum Key {
     /// reveals receipts the indexer has not observed (pruned/lagging).
     /// type: Amount
     TariAccumulatedReceiptExhaustBurn,
+    /// The number of transaction receipts this indexer has indexed, including those it has since pruned.
+    /// type: u64
+    TransactionReceiptCount,
 }
 
 impl Key {
@@ -69,6 +72,7 @@ impl Key {
             Self::TariAccumulatedExhaustBurn => "tari_accumulated_exhaust_burn",
             Self::TariAccumulatedFees => "tari_accumulated_fees",
             Self::TariAccumulatedReceiptExhaustBurn => "tari_accumulated_receipt_exhaust_burn",
+            Self::TransactionReceiptCount => "transaction_receipt_count",
         }
     }
 }

@@ -50,17 +50,27 @@
 # How many epochs past its terminal epoch a transaction submitted through this indexer is retained
 # before it is pruned. A transaction's terminal epoch is the epoch it committed in once its receipt has
 # been indexed, and its max_epoch (the last epoch it could still be sequenced in).
-# Unset (the default) retains transactions forever; 0 keeps only those that can still commit or committed
-# in the current epoch (not recommended).
+# "forever" retains transactions indefinitely; 0 keeps only those that can still commit or committed
+# in the current epoch (not recommended). (default = 50)
 #
 # Set this well above the longest a client may take to poll for a result — once pruned,
 # a transaction no longer appears in the recent-transactions listing or single
 # transaction lookup.
-#transaction_retention_epochs = 100
+#transaction_retention_epochs = 50
 
-# How long, in seconds, the transaction pruner idles between passes once it has nothing left to prune.
-# Only used when transaction_retention_epochs is set. (default = 3600)
-#transaction_prune_interval = 3600
+# How many epochs past the epoch its transaction committed in a transaction receipt is retained.
+# Unset (the default) or "forever" retains receipts indefinitely. A stored transaction reports its
+# outcome from its receipt, so a window not longer than transaction_retention_epochs is raised to one
+# epoch longer, and receipts are retained forever while transactions are.
+#transaction_receipt_retention_epochs = 1000
+
+# How many epochs past the epoch its transaction committed in an event is retained. Unset (the default)
+# or "forever" retains events indefinitely. A pruned event no longer answers event queries.
+#event_retention_epochs = 1000
+
+# How long, in seconds, each pruner idles between passes once it has nothing left to prune.
+# Only used when a retention window is set. (default = 3600)
+#prune_interval = 3600
 
 [indexer.p2p]
 #enable_mdns = true

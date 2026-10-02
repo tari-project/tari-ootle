@@ -328,9 +328,6 @@ fn default_substate_cache_negative_ttl() -> Duration {
     DEFAULT_NEGATIVE_CACHE_TTL
 }
 
-/// The subset of an indexer's configuration that is published over its API, as it affects what
-/// clients see. Built once at startup: the API must expose exactly these values and nothing else
-/// from `IndexerConfig`, which also holds local paths and listen addresses.
 impl IndexerConfig {
     /// The receipt retention window in force: the configured one, raised to at least one epoch longer
     /// than `transaction_retention_epochs`. A stored transaction reports its outcome from its receipt,
@@ -343,6 +340,9 @@ impl IndexerConfig {
     }
 }
 
+/// The subset of an indexer's configuration that is published over its API, as it affects what
+/// clients see. Built once at startup: the API must expose exactly these values and nothing else
+/// from `IndexerConfig`, which also holds local paths and listen addresses.
 #[derive(Debug, Clone)]
 pub struct PublishedIndexerConfig {
     pub sidechain_id: Option<RistrettoPublicKeyBytes>,

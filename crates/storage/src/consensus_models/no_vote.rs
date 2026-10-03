@@ -62,8 +62,6 @@ pub enum NoVoteReason {
     LocalOnlyProposedForMultiShard,
     #[error("Multi shard proposed for local only")]
     MultiShardProposedForLocalOnly,
-    #[error("Not all shard groups are prepared")]
-    NotAllShardGroupsPrepared,
     #[error("Foreign proposal command in block missing")]
     ForeignProposalCommandInBlockMissing,
     #[error("Foreign proposal already proposed")]
@@ -94,8 +92,15 @@ pub enum NoVoteReason {
     CommandMerkleRootMismatch,
     #[error("Not all foreign input pledges are present")]
     NotAllForeignInputPledges,
-    #[error("Not all inputs and outputs are accepted")]
-    NotAllInputsOutputsAccepted,
+    #[error(
+        "{command} proposed for transaction {transaction_id} at stage {stage} before the shard groups involved in it \
+         were ready"
+    )]
+    ProposedBeforeShardGroupsReady {
+        transaction_id: TransactionId,
+        stage: TransactionPoolStage,
+        command: &'static str,
+    },
     #[error("Invalid evidence")]
     InvalidEvidence { reason: InvalidEvidenceReason },
     #[error("Block transaction execution weight {total_weight} exceeds the maximum {max_weight}")]
@@ -141,7 +146,6 @@ impl NoVoteReason {
             Self::NoLeaderFee => "NoLeaderFee",
             Self::LocalOnlyProposedForMultiShard => "LocalOnlyProposedForMultiShard",
             Self::MultiShardProposedForLocalOnly => "MultiShardProposedForLocalOnly",
-            Self::NotAllShardGroupsPrepared => "NotAllShardGroupsPrepared",
             Self::ForeignProposalCommandInBlockMissing => "ForeignProposalCommandInBlockMissing",
             Self::ForeignProposalAlreadyProposed => "ForeignProposalAlreadyProposed",
             Self::ForeignProposalNotReceived => "ForeignProposalNotReceived",
@@ -157,7 +161,7 @@ impl NoVoteReason {
             Self::StateMerkleRootMismatch => "StateMerkleRootMismatch",
             Self::CommandMerkleRootMismatch => "CommandMerkleRootMismatch",
             Self::NotAllForeignInputPledges => "NotAllForeignInputPledges",
-            Self::NotAllInputsOutputsAccepted => "NotAllInputsOutputsAccepted",
+            Self::ProposedBeforeShardGroupsReady { .. } => "ProposedBeforeShardGroupsReady",
             Self::InvalidEvidence { .. } => "InvalidEvidence",
             Self::BlockWeightExceeded { .. } => "BlockWeightExceeded",
             Self::BlockExecutionPointsExceeded { .. } => "BlockExecutionPointsExceeded",

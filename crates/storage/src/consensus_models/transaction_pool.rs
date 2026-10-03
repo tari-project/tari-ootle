@@ -759,6 +759,18 @@ impl TransactionPoolRecord {
         next_stage: TransactionPoolStage,
         local_shard_group: ShardGroup,
     ) -> Result<(), TransactionPoolError> {
+        // A transaction is only finalised once the shard groups involved in it have reached the agreement the
+        // finalising command records: every one accepted for AllAccepted, at least one prepared for SomeAccepted.
+        if self.current_stage().is_local_accepted() &&
+            next_stage.is_finalising() &&
+            !self.is_ready_for_pending_stage(local_shard_group)
+        {
+            return Err(TransactionPoolError::NotReadyToLeaveStage {
+                transaction_id: self.transaction_id,
+                from: self.current_stage(),
+                to: next_stage,
+            });
+        }
         let is_ready = self.can_continue_to(next_stage, local_shard_group);
         self.check_pending_status_update(next_stage, is_ready)?;
         info!(
@@ -998,6 +1010,14 @@ pub enum TransactionPoolError {
         to: TransactionPoolStage,
         is_ready: bool,
     },
+    #[error(
+        "Transaction {transaction_id} cannot move from {from} to {to} before the shard groups involved in it are ready"
+    )]
+    NotReadyToLeaveStage {
+        transaction_id: TransactionId,
+        from: TransactionPoolStage,
+        to: TransactionPoolStage,
+    },
     #[error("Transaction already executed: {transaction_id} in block {block_id}")]
     TransactionAlreadyExecuted {
         transaction_id: TransactionId,
@@ -1094,6 +1114,103 @@ mod tests {
             // is the only thing bounding it, never an unbounded fill.
             let rec = record_with_weight_and_stage(0, TransactionPoolStage::New);
             assert_eq!(rec.proposal_weight(), 1);
+        }
+    }
+
+    mod leaving_local_accepted {
+        use tari_consensus_types::PcId;
+        use tari_engine_types::commit_result::AbortReason;
+        use tari_template_lib_types::ComponentAddress;
+
+        use super::*;
+
+        fn input_group() -> ShardGroup {
+            ShardGroup::new(0, 127)
+        }
+
+        fn local_group() -> ShardGroup {
+            ShardGroup::new(128, 255)
+        }
+
+        /// A record at LocalAccepted with an input and an output shard group, neither of which is justified.
+        fn local_accepted_record() -> TransactionPoolRecord {
+            let mut evidence = Evidence::empty();
+            evidence
+                .add_shard_group(input_group())
+                .insert_unpledged_input(ComponentAddress::from_array([1; 32]).into());
+            evidence
+                .add_shard_group(local_group())
+                .insert_output(ComponentAddress::from_array([2; 32]).into(), SubstateVersion::ZERO);
+
+            TransactionPoolRecord {
+                transaction_id: TransactionId::new([0; 32]),
+                original_decision: Decision::Commit,
+                evidence,
+                transaction_fee: 0,
+                leader_fee: None,
+                stage: TransactionPoolStage::LocalAccepted,
+                is_global: false,
+                pending_stage: None,
+                local_decision: None,
+                remote_decision: None,
+                is_ready: false,
+                max_epoch: Epoch(1),
+                locked_epoch: None,
+                last_updated: time::OffsetDateTime::now_utc(),
+                last_updated_in_block: None,
+                transaction_weight: 0,
+                exhaust_burn: 0,
+            }
+        }
+
+        #[test]
+        fn all_accepted_requires_every_shard_group_to_have_accepted() {
+            let mut rec = local_accepted_record();
+            rec.evidence_mut()
+                .get_mut(&input_group())
+                .unwrap()
+                .set_prepare_qc(PcId::zero());
+            rec.evidence_mut()
+                .get_mut(&local_group())
+                .unwrap()
+                .set_accept_qc(PcId::zero());
+            let err = rec
+                .set_next_stage_and_readiness(TransactionPoolStage::AllAccepted, local_group())
+                .unwrap_err();
+            assert!(
+                matches!(err, TransactionPoolError::NotReadyToLeaveStage { .. }),
+                "unexpected error: {err}"
+            );
+            assert_eq!(rec.current_stage(), TransactionPoolStage::LocalAccepted);
+
+            rec.evidence_mut()
+                .get_mut(&input_group())
+                .unwrap()
+                .set_accept_qc(PcId::zero());
+            rec.set_next_stage_and_readiness(TransactionPoolStage::AllAccepted, local_group())
+                .unwrap();
+            assert_eq!(rec.current_stage(), TransactionPoolStage::AllAccepted);
+        }
+
+        #[test]
+        fn some_accepted_requires_a_shard_group_to_have_prepared() {
+            let mut rec = local_accepted_record();
+            rec.set_local_decision(Decision::Abort(AbortReason::ExecutionFailure));
+            let err = rec
+                .set_next_stage_and_readiness(TransactionPoolStage::SomeAccepted, local_group())
+                .unwrap_err();
+            assert!(
+                matches!(err, TransactionPoolError::NotReadyToLeaveStage { .. }),
+                "unexpected error: {err}"
+            );
+
+            rec.evidence_mut()
+                .get_mut(&local_group())
+                .unwrap()
+                .set_accept_qc(PcId::zero());
+            rec.set_next_stage_and_readiness(TransactionPoolStage::SomeAccepted, local_group())
+                .unwrap();
+            assert_eq!(rec.current_stage(), TransactionPoolStage::SomeAccepted);
         }
     }
 

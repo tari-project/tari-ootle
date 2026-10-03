@@ -1052,6 +1052,13 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::TransactionNotInPool));
         };
 
+        // Readiness is evaluated before execution, which may change the decision and with it the readiness condition
+        if !tx_rec.current_stage().is_new() &&
+            let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "LocalAccept")
+        {
+            return Ok(Some(reason));
+        }
+
         if tx_rec.current_stage().is_new() {
             // CASE: This was sequenced immediately as LocalAccept, which can only mean either we are aborting or we are
             // an output-only Shard Group
@@ -1382,16 +1389,9 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::LeaderFeeDisagreement));
         }
 
-        // TODO: investigate, this fails sometimes
-        // if !tx_rec.evidence().all_objects_accepted() {
-        //     warn!(
-        //         target: LOG_TARGET,
-        //         "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed that all shard
-        // groups have accepted the atom but locally this is not the case",         tx_rec.transaction_id(),
-        //         block,
-        //     );
-        //     return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
-        // }
+        if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "AllAccept") {
+            return Ok(Some(reason));
+        }
 
         if !tx_rec.has_all_required_foreign_pledges(tx, local_committee_info)? {
             warn!(
@@ -1402,17 +1402,6 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(Some(NoVoteReason::NotAllForeignInputPledges));
         }
-
-        // TODO: on_propose does not process foreign proposals so we cannot rely on this check
-        // if !atom.evidence.all_shard_groups_accepted() {
-        //     warn!(
-        //         target: LOG_TARGET,
-        //         "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed an atom which did
-        // not indicate that all shard groups have accepted the transaction",         tx_rec.transaction_id(),
-        //         block,
-        //     );
-        //     return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
-        // }
 
         if *tx_rec.evidence() != atom.evidence {
             warn!(
@@ -1552,6 +1541,10 @@ where TConsensusSpec: ConsensusSpec
                 local: Decision::Commit,
                 remote: atom.decision,
             }));
+        }
+
+        if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "SomeAccept") {
+            return Ok(Some(reason));
         }
 
         if tx_rec.transaction_fee() != atom.transaction_fee {
@@ -1831,6 +1824,34 @@ fn exceeds_block_validation_weight(
     num_transaction_commands > 1 && block_execution_weight > max_validation_weight
 }
 
+/// Consensus rule: a leader may only move a transaction out of its current stage once the shard groups involved in it
+/// are ready for that, which is the same condition under which an honest leader proposes `command`. Evidence equality
+/// with the atom cannot stand in for this, because every replica derives the same incomplete evidence.
+fn check_ready_to_leave_stage(
+    tx_rec: &TransactionPoolRecord,
+    block: &Block,
+    command: &'static str,
+) -> Option<NoVoteReason> {
+    if tx_rec.is_ready_for_pending_stage(block.shard_group()) {
+        return None;
+    }
+
+    warn!(
+        target: LOG_TARGET,
+        "❌ NO VOTE: Leader proposed {} for transaction {} in block {} before the shard groups involved in it were ready to leave stage {} ({})",
+        command,
+        tx_rec.id(),
+        block,
+        tx_rec.current_stage(),
+        tx_rec.evidence(),
+    );
+    Some(NoVoteReason::ProposedBeforeShardGroupsReady {
+        transaction_id: *tx_rec.id(),
+        stage: tx_rec.current_stage(),
+        command,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1856,6 +1877,95 @@ mod tests {
             // A single transaction heavier than the whole cap must stay committable (liveness).
             assert!(!exceeds_block_validation_weight(1_000_000, 1, 15_000));
             assert!(!exceeds_block_validation_weight(0, 0, 15_000));
+        }
+    }
+
+    mod check_ready_to_leave_stage {
+        use tari_engine_types::{SubstateVersion, fees::ExhaustBurnRate};
+        use tari_ootle_common_types::ProtocolVersion;
+        use tari_ootle_storage::consensus_models::Evidence;
+        use tari_ootle_transaction::{Network, TransactionId};
+        use tari_template_lib_types::ComponentAddress;
+
+        use super::*;
+
+        fn input_group() -> ShardGroup {
+            ShardGroup::new(0, 127)
+        }
+
+        fn local_group() -> ShardGroup {
+            ShardGroup::new(128, 255)
+        }
+
+        fn local_block() -> Block {
+            Block::genesis(
+                Network::LocalNet,
+                ProtocolVersion::V0,
+                Epoch(1),
+                FixedHash::zero(),
+                local_group(),
+                FixedHash::zero(),
+                None,
+                ExhaustBurnRate::new(0),
+            )
+        }
+
+        /// A committed record at LocalAccepted for a transaction whose input shard group has prepared and whose local
+        /// output shard group has accepted.
+        fn local_accepted_record(input_group_accepted: bool) -> TransactionPoolRecord {
+            let mut evidence = Evidence::empty();
+            let input = evidence
+                .add_shard_group(input_group())
+                .insert_unpledged_input(ComponentAddress::from_array([1; 32]).into())
+                .set_prepare_qc(PcId::zero());
+            if input_group_accepted {
+                input.set_accept_qc(PcId::zero());
+            }
+            evidence
+                .add_shard_group(local_group())
+                .insert_output(ComponentAddress::from_array([2; 32]).into(), SubstateVersion::ZERO)
+                .set_accept_qc(PcId::zero());
+
+            TransactionPoolRecord::load(
+                TransactionId::new([1; 32]),
+                evidence,
+                false,
+                0,
+                None,
+                TransactionPoolStage::LocalAccepted,
+                None,
+                Decision::Commit,
+                None,
+                None,
+                input_group_accepted,
+                Epoch(1),
+                None,
+                time::OffsetDateTime::now_utc(),
+                None,
+                0,
+                0,
+            )
+        }
+
+        #[test]
+        fn all_accept_before_the_input_shard_group_accepted_is_not_voted_for() {
+            let reason = check_ready_to_leave_stage(&local_accepted_record(false), &local_block(), "AllAccept");
+            assert!(
+                matches!(
+                    reason,
+                    Some(NoVoteReason::ProposedBeforeShardGroupsReady {
+                        stage: TransactionPoolStage::LocalAccepted,
+                        ..
+                    })
+                ),
+                "unexpected reason: {reason:?}"
+            );
+        }
+
+        #[test]
+        fn all_accept_after_every_shard_group_accepted_is_voted_for() {
+            let reason = check_ready_to_leave_stage(&local_accepted_record(true), &local_block(), "AllAccept");
+            assert!(reason.is_none(), "unexpected reason: {reason:?}");
         }
     }
 }

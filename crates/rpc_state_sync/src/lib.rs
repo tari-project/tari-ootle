@@ -4,6 +4,7 @@
 //! # P2P RPC State Sync Protocol
 
 mod error;
+mod shard_sync;
 mod state_sync;
 mod stats;
 // mod manager_old;

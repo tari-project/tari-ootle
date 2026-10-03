@@ -3,6 +3,7 @@
 
 mod epoch_cleanup;
 mod pending_chain;
+mod rewind;
 mod shard_scoped_state_tree;
 mod substate_value_proof;
 use std::{collections::HashMap, ops::Deref};
@@ -10,6 +11,7 @@ use std::{collections::HashMap, ops::Deref};
 pub use epoch_cleanup::*;
 use indexmap::IndexMap;
 pub use pending_chain::*;
+pub use rewind::*;
 use serde::{Deserialize, Serialize};
 pub use shard_scoped_state_tree::*;
 pub use substate_value_proof::*;
@@ -439,6 +441,11 @@ pub trait StateStoreReadTransaction: Sized {
         shard_group: ShardGroup,
     ) -> Result<ShardStateVersions, StorageError>;
 
+    // -------------------------------- State sync -------------------------------- //
+    /// The version `shard` must be rewound to because state sync committed versions above it that it has not yet
+    /// verified, or `None` if every committed version of `shard` is verified.
+    fn state_sync_rewind_point_get(&self, shard: Shard) -> Result<Option<Version>, StorageError>;
+
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_get_all_from_epoch(
         &self,
@@ -667,6 +674,21 @@ pub trait StateStoreWriteTransaction {
     /// Clears the values of substates downed in or before `epoch`, stopping at the first index entry that takes the
     /// count to `limit` or more. Returns the number of values cleared; a result below `limit` means none remain.
     fn substates_prune_downed_values(&mut self, epoch: Epoch, limit: usize) -> Result<usize, StorageError>;
+    /// Rewinds substate state for `shard` back to `target_state_version` by inverting every state transition
+    /// recorded for versions > `target_state_version`, in reverse order.
+    ///
+    /// Inverse operations:
+    /// - An `Up` transition → delete the `SubstateRecord` it created.
+    /// - A `Down` transition → clear the `destroyed` field on the affected `SubstateRecord`.
+    ///
+    /// After the inverses are applied, the head index is rebuilt for every touched `SubstateId` from the
+    /// highest-version `SubstateRecord` that survives in storage. The inverses are exact only if every `Up` created
+    /// a record that did not exist and every `Down` destroyed a record that was up.
+    fn substates_rewind_to_state_version(
+        &mut self,
+        shard: Shard,
+        target_state_version: Version,
+    ) -> Result<SubstateRewindStats, StorageError>;
 
     // -------------------------------- Foreign pledges -------------------------------- //
 
@@ -718,6 +740,28 @@ pub trait StateStoreWriteTransaction {
         max_deletes: usize,
     ) -> Result<usize, StorageError>;
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
+    /// Truncates the state tree for `shard` back to `target_version`.
+    ///
+    /// After this call:
+    /// - `state_tree_versions_get_latest(shard)` returns the highest committed version at or below `target_version` (or
+    ///   `None` if the shard has no state at or below `target_version`). Version 0 counts as committed state:
+    ///   bootstrapped genesis substates are written to the tree at version 0.
+    /// - All nodes at versions > `target_version` are deleted from the tree store.
+    /// - All stale-node records at versions > `target_version` are deleted.
+    ///
+    /// The versions above `target_version` mark nodes at or below it as stale, so the tree at `target_version` is
+    /// restored exactly only while the stale-node GC has not deleted those nodes.
+    fn state_tree_truncate_to_version(
+        &mut self,
+        shard: Shard,
+        target_version: Version,
+    ) -> Result<StateTreeTruncateStats, StorageError>;
+
+    // -------------------------------- State sync -------------------------------- //
+    /// Records that state sync is committing versions of `shard` above `version` that it has not yet verified, so
+    /// that they can be rewound if the sync never verifies them, even across a restart.
+    fn state_sync_rewind_point_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
+    fn state_sync_rewind_point_remove(&mut self, shard: Shard) -> Result<(), StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;

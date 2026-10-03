@@ -26,3 +26,9 @@ futures = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tari_engine_types = { workspace = true }
+tari_state_store_rocksdb = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, default-features = false, features = ["macros", "rt"] }

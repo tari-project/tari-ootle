@@ -3,8 +3,8 @@
 
 //! Write-side rollback primitives that operate against the rocksdb state store directly.
 //!
-//! These were previously methods on `StateStoreWriteTransaction`. Consensus never calls
-//! them, so they live with the rollback tool and take a `&mut RocksDbStateStoreWriteTransaction`.
+//! Consensus never calls these, so they live with the rollback tool and take a
+//! `&mut RocksDbStateStoreWriteTransaction`.
 //!
 //! `rollback_delete_after_epoch` reaches into per-block trait helpers (block diffs,
 //! block transaction executions, pending state-tree diffs, substate locks, lock
@@ -12,13 +12,10 @@
 //! `StateStoreWriteTransaction` because consensus uses them as well, so we just call
 //! through the trait via `&mut tx`.
 
-use std::collections::HashSet;
-
 use log::*;
 use serde::{Serialize, de::DeserializeOwned};
 use tari_consensus_types::{BlockId, PcId, TcId};
-use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, ShardGroup, optional::Optional, shard::Shard};
+use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, ShardGroup};
 use tari_ootle_storage::{Ordering, StateStoreWriteTransaction, StorageError, consensus_models::RollbackHistoryEntry};
 use tari_state_store_rocksdb::{
     codecs::ByteColumn,
@@ -44,18 +41,13 @@ use tari_state_store_rocksdb::{
         finalized_transaction::FinalizedTransactionLinkCf,
         foreign_proposal::{self, EpochIndex as ForeignProposalEpochIndex, ForeignProposalCf},
         rollback_history::RollbackHistoryCf,
-        state_transition::{ByShardAndStateVersionQuery, StateTransitionCf, StateTransitionType},
-        state_tree::{ByShardStateVersionQuery, ByStateTreeStaleShardVersionQuery, StateTreeCf, StateTreeStaleNodesCf},
-        state_tree_shard_versions::StateTreeShardVersionCf,
-        substate::{HeadIndex as SubstateHeadIndex, SubstateCf, SubstateHeadData, UnprunedDownedValuesIndex},
         validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
     },
     writer::RocksDbStateStoreWriteTransaction,
 };
-use tari_state_tree::Version;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use super::types::{RollbackDeleteStats, StateTreeTruncateStats, SubstateRewindStats};
+use super::types::RollbackDeleteStats;
 
 const LOG_TARGET: &str = "tari::ootle::validator_rollback::storage::write";
 
@@ -73,208 +65,6 @@ where
         .cf(RollbackHistoryCf)?
         .put(&(entry.applied_at_unix_secs, entry.target_epoch), entry, OPERATION)?;
     Ok(())
-}
-
-/// Truncate the state tree for `shard` back to `target_version`.
-///
-/// After this call:
-/// - `state_tree_versions_get_latest(shard)` returns the highest committed version at or below `target_version` (or
-///   `None` if the shard has no state at or below `target_version`). Version 0 counts as committed state: bootstrapped
-///   genesis substates are written to the tree at version 0.
-/// - All nodes at versions > `target_version` are deleted from the tree store.
-/// - All stale-node records at versions > `target_version` are deleted.
-pub fn state_tree_truncate_to_version<'a, TAddr>(
-    tx: &mut RocksDbStateStoreWriteTransaction<'a, TAddr>,
-    shard: Shard,
-    target_version: Version,
-) -> Result<StateTreeTruncateStats, StorageError>
-where
-    TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a,
-{
-    const OPERATION: &str = "state_tree_truncate_to_version";
-
-    let db = tx.db();
-    let tree_cf = db.cf(StateTreeCf)?;
-    let version_query = db.cf(ByShardStateVersionQuery)?;
-    let stale_query = db.cf(ByStateTreeStaleShardVersionQuery)?;
-    let stale_cf = db.cf(StateTreeStaleNodesCf)?;
-    let versions_cf = db.cf(StateTreeShardVersionCf)?;
-
-    // Versions are u64; saturate on the unlikely MAX case so we don't overflow.
-    let start_version = target_version.saturating_add(1);
-
-    // 1. Delete tree nodes at versions > target for this shard.
-    let mut keys_to_delete = Vec::new();
-    for result in version_query.query_range_iterator(Ordering::Ascending, (shard, start_version)..(shard, Version::MAX))
-    {
-        let ((key_shard, node_key), _node) = result?;
-        debug_assert_eq!(key_shard, shard, "range iterator leaked across shard boundary");
-        keys_to_delete.push((key_shard, node_key));
-    }
-    let nodes_deleted = keys_to_delete.len();
-    for key in &keys_to_delete {
-        tree_cf.delete(key, OPERATION)?;
-    }
-
-    // 2. Delete stale-node records at versions > target for this shard.
-    let mut stale_keys_to_delete = Vec::new();
-    for result in stale_query.query_range_iterator(Ordering::Ascending, (shard, start_version)..(shard, Version::MAX)) {
-        let ((stale_shard, version), _nodes) = result?;
-        debug_assert_eq!(stale_shard, shard);
-        stale_keys_to_delete.push((stale_shard, version));
-    }
-    let stale_records_deleted = stale_keys_to_delete.len();
-    for key in &stale_keys_to_delete {
-        stale_cf.delete(key, OPERATION)?;
-    }
-
-    // 3. Reset the latest-version pointer to the highest version with surviving tree nodes. The pointer must reference
-    //    a version at which a JMT root node exists — downstream readers (JMT root lookup, state-sync's
-    //    `calculate_state_root_for_shard`) load the root at Some(v) and treat a missing entry as the empty tree
-    //    (placeholder hash). Version 0 is a valid committed version: genesis substates are bootstrapped into the tree
-    //    at version 0, so a shard whose only state is genesis must keep a pointer at 0 or it reads as empty and no
-    //    longer matches the checkpoint being rolled back to.
-    let latest_surviving_version = version_query
-        .query_range_key_iterator(
-            Ordering::Descending,
-            (shard, 0)..(shard, target_version.saturating_add(1)),
-        )
-        .next()
-        .transpose()?
-        .map(|(_, node_key)| node_key.version());
-    match latest_surviving_version {
-        Some(version) => versions_cf.put(&shard, &version, OPERATION)?,
-        None => versions_cf.delete(&shard, OPERATION)?,
-    }
-
-    debug!(
-        target: LOG_TARGET,
-        "Truncated state tree for shard {shard} to version {target_version}: \
-         deleted {nodes_deleted} node(s), {stale_records_deleted} stale record(s)"
-    );
-
-    Ok(StateTreeTruncateStats {
-        nodes_deleted,
-        stale_records_deleted,
-    })
-}
-
-/// Rewind substate state for `shard` back to `target_state_version` by inverting every
-/// state transition recorded for versions > `target_state_version`.
-///
-/// Inverse operations:
-/// - An `Up` transition → delete the `SubstateRecord` it created.
-/// - A `Down` transition → clear the `destroyed` field on the affected `SubstateRecord`.
-///
-/// After the inverses are applied, the `HeadIndex` is rebuilt for every touched
-/// `SubstateId` from the highest-version `SubstateRecord` that survives in storage.
-pub fn substates_rewind_to_state_version<'a, TAddr>(
-    tx: &mut RocksDbStateStoreWriteTransaction<'a, TAddr>,
-    shard: Shard,
-    target_state_version: Version,
-) -> Result<SubstateRewindStats, StorageError>
-where
-    TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a,
-{
-    const OPERATION: &str = "substates_rewind_to_state_version";
-    use tari_state_store_rocksdb::codecs::KeyPrefix;
-
-    let db = tx.db();
-    let transitions_cf = db.cf(StateTransitionCf)?;
-    let transitions_query = db.cf(ByShardAndStateVersionQuery)?;
-    let substates_cf = db.cf(SubstateCf)?;
-    let head_cf = db.cf(SubstateHeadIndex)?;
-    let unpruned_cf = db.cf(UnprunedDownedValuesIndex)?;
-
-    let start_version = target_state_version.saturating_add(1);
-    let mut touched: HashSet<SubstateId> = HashSet::new();
-    let mut stats = SubstateRewindStats::default();
-
-    // Collect only the versions we need to process — then load each record one at a time
-    // inside the loop. This caps memory at ~O(n_versions) rather than O(n_versions *
-    // avg_record_size), which matters for large rollbacks spanning many epochs.
-    let versions: Vec<Version> = transitions_query
-        .query_range_key_iterator(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))
-        .map(|res| {
-            let (key_shard, version) = res?;
-            debug_assert_eq!(key_shard, shard);
-            Ok::<_, StorageError>(version)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // Iterator was Descending, so `versions` is already in reverse state_version order.
-    for state_version in versions {
-        let record = transitions_cf.get(&(shard, state_version), OPERATION)?;
-        // Within a record, invert transitions in reverse index order so that the inverse
-        // sequence is the exact time-reversed mirror of forward application.
-        for transition in record.transitions.iter().rev() {
-            let address = &transition.substate_address;
-            match transition.transition {
-                StateTransitionType::Up => {
-                    let substate = substates_cf.get(address, OPERATION)?;
-                    touched.insert(substate.substate_id.clone());
-                    substates_cf.delete(address, OPERATION)?;
-                    stats.substates_created_deleted += 1;
-                },
-                StateTransitionType::Down => {
-                    let mut substate = substates_cf.get(address, OPERATION)?;
-                    touched.insert(substate.substate_id.clone());
-                    substate.destroyed = None;
-                    substates_cf.put(address, &substate, OPERATION)?;
-                    stats.substates_destroyed_restored += 1;
-                },
-            }
-        }
-
-        // Remove the transition record and any unpruned-down index entry for this (epoch, shard, version).
-        transitions_cf.delete(&(shard, state_version), OPERATION)?;
-        unpruned_cf
-            .delete(&(record.epoch, shard, state_version), OPERATION)
-            .optional()?;
-        stats.transitions_processed += 1;
-    }
-
-    // Rebuild the HeadIndex for every touched SubstateId by finding the highest surviving
-    // version via a reverse prefix scan on SubstateCf. SubstateAddress = object_key ||
-    // version_be, so all versions for a given substate_id are lexically adjacent.
-    for substate_id in touched {
-        let object_key = substate_id.to_object_key();
-        let object_key_bytes: &[u8] = object_key.as_ref();
-        let mut raw_prefix = Vec::with_capacity(1 + object_key_bytes.len());
-        raw_prefix.push(KeyPrefix::Substates.as_u8());
-        raw_prefix.extend_from_slice(object_key_bytes);
-
-        let mut iter = substates_cf.prefix_range_iterator_raw_key(Ordering::Descending, raw_prefix);
-        match iter.next() {
-            Some(result) => {
-                let (_address, record) = result?;
-                head_cf.put(
-                    &substate_id,
-                    &SubstateHeadData {
-                        version: record.version,
-                        is_up: record.is_up(),
-                    },
-                    OPERATION,
-                )?;
-            },
-            None => {
-                head_cf.delete(&substate_id, OPERATION).optional()?;
-            },
-        }
-        stats.heads_updated += 1;
-    }
-
-    debug!(
-        target: LOG_TARGET,
-        "🔄 Rewound substates for shard {shard} to state_version {target_state_version}: \
-         {} transitions, {} created-deleted, {} destroyed-restored, {} heads updated",
-        stats.transitions_processed,
-        stats.substates_created_deleted,
-        stats.substates_destroyed_restored,
-        stats.heads_updated,
-    );
-
-    Ok(stats)
 }
 
 /// Delete every epoch-indexed record with `epoch > target_epoch`, and clear the singleton

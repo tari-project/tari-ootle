@@ -12850,15 +12850,19 @@ dependencies = [
  "rand 0.10.1",
  "tari_consensus",
  "tari_consensus_types",
+ "tari_engine_types",
  "tari_epoch_manager",
  "tari_ootle_common_types",
  "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_rpc_framework",
+ "tari_state_store_rocksdb",
  "tari_state_tree",
  "tari_template_lib_types",
  "tari_validator_node_rpc",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

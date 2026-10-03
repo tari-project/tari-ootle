@@ -14,6 +14,7 @@ use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
+    StateStoreWriteTransaction,
     consensus_models::{EpochCheckpoint, RollbackHistoryEntry},
 };
 use tari_state_store_rocksdb::{
@@ -31,8 +32,6 @@ use crate::{
         rollback_history_insert,
         rollback_plan_collect_blocks,
         rollback_plan_collect_substates,
-        state_tree_truncate_to_version,
-        substates_rewind_to_state_version,
     },
 };
 
@@ -240,9 +239,9 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         .to_string();
     store.with_write_tx(|tx| -> anyhow::Result<()> {
         for (shard, version) in &state_versions {
-            state_tree_truncate_to_version(tx, *shard, *version)
+            tx.state_tree_truncate_to_version(*shard, *version)
                 .with_context(|| format!("state_tree_truncate_to_version(shard={shard}, version={version})"))?;
-            substates_rewind_to_state_version(tx, *shard, *version)
+            tx.substates_rewind_to_state_version(*shard, *version)
                 .with_context(|| format!("substates_rewind_to_state_version(shard={shard}, version={version})"))?;
         }
         rollback_delete_after_epoch(tx, target_epoch).context("rollback_delete_after_epoch")?;

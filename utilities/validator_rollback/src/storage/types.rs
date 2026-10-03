@@ -62,19 +62,3 @@ pub struct RollbackDeleteStats {
     pub validator_stats_deleted: usize,
     pub bookkeeping_cleared: bool,
 }
-
-/// Outcome of [`super::write::state_tree_truncate_to_version`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct StateTreeTruncateStats {
-    pub nodes_deleted: usize,
-    pub stale_records_deleted: usize,
-}
-
-/// Outcome of [`super::write::substates_rewind_to_state_version`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SubstateRewindStats {
-    pub transitions_processed: usize,
-    pub substates_created_deleted: usize,
-    pub substates_destroyed_restored: usize,
-    pub heads_updated: usize,
-}

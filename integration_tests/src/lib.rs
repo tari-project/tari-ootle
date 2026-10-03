@@ -265,31 +265,31 @@ impl TariWorld {
     }
 
     pub fn after(&mut self, _scenario: &Scenario) {
-        for (name, mut p) in self.indexers.drain(..) {
+        for (name, p) in self.indexers.drain(..) {
             cucumber_log!("Shutting down indexer {}", name);
             p.shutdown.trigger();
         }
 
-        for (name, mut p) in self.validator_nodes.drain(..) {
+        for (name, p) in self.validator_nodes.drain(..) {
             cucumber_log!("Shutting down validator node {}", name);
             p.shutdown.trigger();
         }
 
-        for (name, mut p) in self.vn_seeds.drain(..) {
+        for (name, p) in self.vn_seeds.drain(..) {
             cucumber_log!("Shutting down validator node seed {}", name);
             p.shutdown.trigger();
         }
 
-        for (name, mut p) in self.wallets.drain(..) {
+        for (name, p) in self.wallets.drain(..) {
             cucumber_log!("Shutting down wallet {}", name);
             p.shutdown.trigger();
         }
-        for (name, mut p) in self.base_nodes.drain(..) {
+        for (name, p) in self.base_nodes.drain(..) {
             cucumber_log!("Shutting down base node {}", name);
             // You have explicitly trigger the shutdown now because of the change to use Arc/Mutex in tari_shutdown
             p.shutdown.trigger();
         }
-        for (name, mut p) in self.wallet_daemons.drain(..) {
+        for (name, p) in self.wallet_daemons.drain(..) {
             cucumber_log!("Shutting down wallet daemon {}", name);
             // You have explicitly trigger the shutdown now because of the change to use Arc/Mutex in tari_shutdown
             p.shutdown.trigger();

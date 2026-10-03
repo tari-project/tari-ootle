@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_consensus_types::{BlockId, PcId};
+use tari_consensus_types::BlockId;
 use tari_ootle_common_types::{SubstateVersion, VersionedSubstateId};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 
@@ -121,7 +121,8 @@ fn a_chain_read_before_a_commit_is_stale() {
     commit_chain(&mut tx, &chain);
 
     let stale = tx.pending_chain_get(chain[10].id()).unwrap();
-    tx.blocks_set_qcs(chain[8].id(), Some(&PcId::zero()), None).unwrap();
+    tx.blocks_set_qcs(chain[8].id(), Some(&tari_consensus_types::PcId::zero()), None)
+        .unwrap();
 
     tx.substate_locks_get_latest_for_substate_in_chain(&stale, &create_random_substate_id())
         .unwrap_err();

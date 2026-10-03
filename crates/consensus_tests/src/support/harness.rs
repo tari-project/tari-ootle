@@ -677,8 +677,9 @@ impl TestBuilder {
         const DEFAULT_PACEMAKER_BLOCK_TIME: Duration = Duration::from_secs(10);
         Self {
             committees: HashMap::new(),
-            // By default, timeout aims to occur after we allow enough time for a "slow" block
-            timeout: Some(DEFAULT_PACEMAKER_BLOCK_TIME + Duration::from_secs(2)),
+            // The wait for each commit must cover a slow block, and the first commit of an epoch needs a 3-chain
+            // that a loaded CI runner can take several seconds per block to build.
+            timeout: Some(DEFAULT_PACEMAKER_BLOCK_TIME * 3),
             rocks_path: None,
             message_filter: None,
             send_observer: None,

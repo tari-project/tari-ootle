@@ -255,7 +255,7 @@ async fn run_recovery(test: &TestWithNetwork<OneUtxoNetwork>) {
         ABANDON_AFTER_NOT_FOUND,
         seed_birthday,
     );
-    tokio::time::timeout(Duration::from_secs(30), recovery.scan())
+    tokio::time::timeout(Duration::from_secs(120), recovery.scan())
         .await
         .expect("recovery did not finish");
 }

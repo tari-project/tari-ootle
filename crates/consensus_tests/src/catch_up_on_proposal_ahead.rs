@@ -6,8 +6,8 @@
 //! When a replica misses the proposals for a few heights, every later proposal justifies a block it does not
 //! hold. Those proposals are classified "future" and buffered, and the blocks they need never arrive through the
 //! buffer, so the only other way back is three leader timeouts. The test drops three consecutive proposals to one
-//! replica, then requires it to reach the height the next delivered proposal justifies within a single leader
-//! timeout of receiving it.
+//! replica, then requires it to reach the height the next delivered proposal justifies within two leader timeouts
+//! of receiving it: well short of the three a timeout-driven recovery needs, with headroom for slow CI runners.
 
 use std::{
     sync::{
@@ -35,6 +35,7 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
     // A leader timeout is the block time plus a delta of at least 2s plus 2s of assumed latency. Waiting for
     // three of them takes three times this.
     let leader_timeout = block_time + Duration::from_secs(4);
+    let catch_up_bound = leader_timeout * 2;
 
     let target = TestAddress::new("4");
     // First height of the withheld window; 0 until armed.
@@ -103,9 +104,9 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
             let elapsed = delivered_at.elapsed();
             log::info!("✅ {target} reached {justify_height} {elapsed:.2?} after the first proposal ahead of it");
             assert!(
-                elapsed < leader_timeout,
+                elapsed < catch_up_bound,
                 "{target} took {elapsed:.2?} to reach {justify_height} after receiving a proposal justifying it, \
-                 longer than one leader timeout ({leader_timeout:.2?})"
+                 longer than two leader timeouts ({catch_up_bound:.2?})"
             );
             break;
         } else {

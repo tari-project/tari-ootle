@@ -4,6 +4,7 @@
 use std::{
     fmt::{Debug, Display, Formatter},
     io,
+    time::Duration,
 };
 
 use futures_bounded::Timeout;
@@ -13,6 +14,8 @@ pub enum Error {
     CodecError(io::Error),
     ConnectionClosed,
     Timeout(Timeout),
+    ReceiveTimeout(Duration),
+    SendTimeout(Duration),
     DialFailure,
     DialUpgradeError,
     ProtocolNotSupported,
@@ -25,6 +28,8 @@ impl Display for Error {
             Self::CodecError(err) => write!(f, "Codec error: {}", err),
             Self::ConnectionClosed => write!(f, "Connection closed"),
             Self::Timeout(err) => write!(f, "Timeout: {}", err),
+            Self::ReceiveTimeout(timeout) => write!(f, "Peer did not finish sending a message within {timeout:?}"),
+            Self::SendTimeout(timeout) => write!(f, "Peer did not accept a message within {timeout:?}"),
             Self::DialFailure => write!(f, "Dial failure"),
             Self::DialUpgradeError => write!(f, "Dial upgrade error"),
             Self::ProtocolNotSupported => write!(f, "Protocol not supported"),

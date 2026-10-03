@@ -41,6 +41,11 @@ impl<TMsg> MessageStream<TMsg> {
     pub async fn recv(&mut self) -> Option<TMsg> {
         self.receiver.next().await
     }
+
+    /// Stops accepting new messages. Messages already queued can still be received.
+    pub fn close(&mut self) {
+        self.receiver.close();
+    }
 }
 
 #[derive(Debug)]

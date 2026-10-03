@@ -14,8 +14,12 @@ async-trait = { workspace = true }
 prost = { workspace = true, optional = true }
 smallvec = { workspace = true }
 futures-bounded = { workspace = true }
+futures-timer = { workspace = true }
 tracing = { workspace = true }
 prometheus-client = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures = { workspace = true }
 
 [features]
 default = []

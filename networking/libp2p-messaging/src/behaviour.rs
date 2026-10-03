@@ -86,7 +86,7 @@ where TCodec: Codec + Send + Clone + 'static
     pub fn obtain_message_channel(&mut self, peer_id: PeerId) -> MessageSink<TCodec::Message> {
         let stream_id = self.next_outbound_stream_id;
 
-        self.clear_closed_connections();
+        self.clear_closed_streams();
         match self.get_connections(&peer_id) {
             Some(connections) => {
                 // Return a currently active stream
@@ -147,9 +147,9 @@ where TCodec: Codec + Send + Clone + 'static
         }
     }
 
-    fn clear_closed_connections(&mut self) {
+    fn clear_closed_streams(&mut self) {
         for connections in self.connected.values_mut() {
-            connections.clear_closed_connections();
+            connections.clear_closed_streams();
         }
         self.connected.retain(|_, connections| !connections.is_empty());
 
@@ -429,11 +429,18 @@ impl<TMsg> Connections<TMsg> {
         Some(sink)
     }
 
-    pub(self) fn clear_closed_connections(&mut self) {
-        self.connections.retain(|c| {
-            c.message_sink.as_ref().is_none_or(|s| !s.is_closed()) &&
-                c.pending_sink.as_ref().is_none_or(|s| !s.is_closed())
-        });
+    /// Forgets streams whose handler task has ended so that the next message opens a new stream on the connection.
+    /// The connection itself is only removed when the swarm reports it closed.
+    pub(self) fn clear_closed_streams(&mut self) {
+        for c in &mut self.connections {
+            let is_closed = c.message_sink.as_ref().is_some_and(|s| s.is_closed()) ||
+                c.pending_sink.as_ref().is_some_and(|s| s.is_closed());
+            if is_closed {
+                c.stream_id = None;
+                c.pending_sink = None;
+                c.message_sink = None;
+            }
+        }
     }
 }
 
@@ -475,7 +482,50 @@ where F: FnMut(usize) -> Option<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::task::Waker;
+
     use super::*;
+    use crate::handler::tests::TestCodec;
+
+    fn poll_event(behaviour: &mut Behaviour<TestCodec>) -> ToSwarm<Event<Vec<u8>>, MessageStream<Vec<u8>>> {
+        match behaviour.poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(event) => event,
+            Poll::Pending => panic!("expected a behaviour event"),
+        }
+    }
+
+    #[test]
+    fn a_new_stream_is_opened_after_the_previous_one_ends() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+        let connection_id = ConnectionId::new_unchecked(1);
+        let addr: Multiaddr = "/memory/1".parse().unwrap();
+        behaviour
+            .handle_established_outbound_connection(connection_id, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+
+        let _sink = behaviour.obtain_message_channel(peer_id);
+        let ToSwarm::NotifyHandler { event: stream, .. } = poll_event(&mut behaviour) else {
+            panic!("expected the first message to open a stream");
+        };
+        behaviour.on_connection_handler_event(peer_id, connection_id, Event::OutboundStreamOpened {
+            peer_id,
+            stream_id: stream.stream_id(),
+        });
+        let _opened = poll_event(&mut behaviour);
+
+        // The handler task ends and drops its end of the channel before the behaviour hears about it.
+        drop(stream);
+
+        let _sink = behaviour.obtain_message_channel(peer_id);
+        assert!(
+            matches!(
+                poll_event(&mut behaviour),
+                ToSwarm::NotifyHandler { handler: NotifyHandler::One(id), .. } if id == connection_id
+            ),
+            "expected the next message to open a new stream on the existing connection"
+        );
+    }
 
     #[test]
     fn cycle_once_works() {

@@ -220,6 +220,7 @@ fern = "0.7.1"
 futures = "0.3.30"
 futures-util = "0.3"
 futures-bounded = "0.2.3"
+futures-timer = "3.0.3"
 gix-hash = { version = "0.15", features = ["serde"] }
 jsonwebtoken = { version = "10.3.0", default-features = false }
 hashbrown = { version = "0.13.2" }

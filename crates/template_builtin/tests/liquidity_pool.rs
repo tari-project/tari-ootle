@@ -10,7 +10,10 @@ use tari_template_lib::{
     types::{AccessRule, OwnerRule, constants::TARI_TOKEN, metadata},
 };
 use tari_template_lib_types::{Amount, ComponentAddress, ResourceAddress, access_rules::ResourceAuthAction};
-use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_access_denied_for_action};
+use tari_template_test_tooling::{
+    TemplateTest,
+    support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
+};
 
 const TEMPLATE_NAME: &str = "TwoResourceLiquidityPool";
 const TEMPLATE_PATHS: &[&str] = &["tests/faucet", "tests/resource_minter"];
@@ -334,10 +337,9 @@ fn second_contribution_and_partial_redeem() {
 }
 
 #[test]
-fn bootstrap_contribution_after_seeding_reserve() {
-    // Regression test for the `(false, _, _)` branch: the owner seeds one reserve via the owner-only
-    // `protected_add_liquidity` (which mints no LP), then bootstraps the pool with a full `contribute`. With no LP
-    // outstanding the first contribution must succeed and set the price over the combined reserves, not be rejected.
+fn owner_adds_liquidity_only_after_bootstrap() {
+    // Liquidity added through the owner-only `protected_add_liquidity` mints no LP, so it accrues to the existing LP
+    // holders. A pool with no LP outstanding is funded only through `contribute`.
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template_address = test.get_template_address(TEMPLATE_NAME);
 
@@ -368,8 +370,8 @@ fn bootstrap_contribution_after_seeding_reserve() {
         .pop()
         .unwrap();
 
-    // ACT 2: owner seeds 1000 TARI into reserve A via protected_add_liquidity (no LP minted).
-    test.execute_expect_success(
+    // ACT 2: the owner cannot seed a reserve while there is no LP supply.
+    let reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
             .call_method(user1, "withdraw", args![TARI_TOKEN, 1000])
             .put_last_instruction_output_on_workspace("seed_a")
@@ -377,9 +379,10 @@ fn bootstrap_contribution_after_seeding_reserve() {
             .build_and_seal(&user1_secret),
         vec![user1_proof.clone()],
     );
+    assert_reject_reason(&reason, "Cannot add liquidity to a pool with no LP supply");
 
-    // ACT 3: bootstrap with a full contribution of 500 TARI + 2000 stablecoin. Total reserves become
-    // (1000 + 500, 0 + 2000) = (1500, 2000) and LP minted = floor(sqrt(1500 * 2000)) = 1732.
+    // ACT 3: bootstrap with 500 TARI + 2000 stablecoin (LP minted = floor(sqrt(500 * 2000)) = 1000), then top up
+    // reserve A with 1000 TARI, which accrues to the LP holders. Reserves become (1500, 2000).
     test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
             .call_method(faucet_component, "take_free_coins_custom", args![2000])
@@ -394,6 +397,9 @@ fn bootstrap_contribution_after_seeding_reserve() {
             .call_method(user1, "deposit", args![Workspace("contribution.0")])
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 1000])
+            .put_last_instruction_output_on_workspace("top_up_a")
+            .call_method(pool_addr, "protected_add_liquidity", args![Workspace("top_up_a")])
             .build_and_seal(&user1_secret),
         vec![user1_proof.clone()],
     );
@@ -414,7 +420,106 @@ fn bootstrap_contribution_after_seeding_reserve() {
     let user_account = store.get_account(user1).unwrap();
     let lp_vault = user_account.get_vault_by_resource(&lp_resx).unwrap();
     let lp_balance = store.get_vault(&lp_vault.vault_id()).unwrap().balance();
-    assert_eq!(lp_balance, 1732);
+    assert_eq!(lp_balance, 1000);
+}
+
+#[test]
+fn swap_is_rejected_while_a_reserve_is_empty() {
+    // A pool with an empty reserve has no price, so a swap in either direction must be refused.
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_address = test.get_template_address(TEMPLATE_NAME);
+
+    let (faucet_component, faucet_resource) = create_test_faucet_component(&mut test, 1_000_000_000_000u64);
+    let (owner, owner_proof, owner_secret) = test.create_funded_account();
+    let (trader, _trader_proof, trader_secret) = test.create_funded_account();
+
+    const RESERVE_A: u64 = 1_000_000;
+    const RESERVE_B: u64 = 1_000;
+
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .allocate_component_address("pool")
+            .call_function(template_address, "create", args![
+                OwnerRule::OwnedBySigner,
+                AccessRule::AllowAll,
+                TARI_TOKEN,
+                faucet_resource,
+                metadata!["name" => "TARI-Stablecoin Liquidity Pool"],
+                Workspace("pool"),
+            ])
+            .build_and_seal(&owner_secret),
+        vec![owner_proof.clone()],
+    );
+
+    let store = test.read_only_state_store();
+    let (pool_addr, _) = store
+        .get_components_by_template_address(template_address)
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    // The owner bootstraps the pool, then withdraws all of reserve B.
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(faucet_component, "take_free_coins_custom", args![RESERVE_B])
+            .put_last_instruction_output_on_workspace("faucet_coins")
+            .call_method(owner, "withdraw", args![TARI_TOKEN, RESERVE_A])
+            .put_last_instruction_output_on_workspace("xtr_coins")
+            .call_method(pool_addr, "contribute", args![
+                Workspace("xtr_coins"),
+                Workspace("faucet_coins")
+            ])
+            .put_last_instruction_output_on_workspace("contribution")
+            .call_method(owner, "deposit", args![Workspace("contribution.0")])
+            .call_method(owner, "deposit", args![Workspace("contribution.1")])
+            .call_method(owner, "deposit", args![Workspace("contribution.2")])
+            .call_method(pool_addr, "protected_remove_liquidity", args![
+                faucet_resource,
+                RESERVE_B
+            ])
+            .put_last_instruction_output_on_workspace("removed")
+            .call_method(owner, "deposit", args![Workspace("removed")])
+            .build_and_seal(&owner_secret),
+        vec![owner_proof],
+    );
+
+    // Swapping into the empty side.
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(faucet_component, "take_free_coins_custom", args![1])
+            .put_last_instruction_output_on_workspace("input")
+            .call_method(pool_addr, "swap", args![Workspace("input")])
+            .put_last_instruction_output_on_workspace("output")
+            .call_method(trader, "deposit", args![Workspace("output")])
+            .build_and_seal(&trader_secret),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Pool has no liquidity");
+
+    // Swapping out of the empty side.
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(trader, "withdraw", args![TARI_TOKEN, 1000])
+            .put_last_instruction_output_on_workspace("input")
+            .call_method(pool_addr, "swap", args![Workspace("input")])
+            .put_last_instruction_output_on_workspace("output")
+            .call_method(trader, "deposit", args![Workspace("output")])
+            .build_and_seal(&trader_secret),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Pool has no liquidity");
+
+    let store = test.read_only_state_store();
+    let pool_body = store.get_component(pool_addr).unwrap();
+    let indexed = pool_body.body.to_indexed_well_known_types().unwrap();
+    let vaults = indexed
+        .vault_ids()
+        .iter()
+        .map(|id| store.get_vault(id).unwrap())
+        .map(|v| (*v.resource_address(), v))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(vaults.get(&TARI_TOKEN).unwrap().balance(), RESERVE_A);
+    assert_eq!(vaults.get(&faucet_resource).unwrap().balance(), 0);
 }
 
 #[test]

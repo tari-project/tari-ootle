@@ -144,22 +144,22 @@ mod template {
                 reserve_a.is_positive(),
                 reserve_b.is_positive(),
             ) {
-                // No LP tokens exist yet: this is the initial liquidity provision. Reserves may already be non-zero
-                // if the owner pre-seeded a vault via `protected_add_liquidity` (e.g. to bootstrap a pool in stages),
-                // in which case we mint on top of them. With no LP outstanding there is no existing price to
-                // preserve, so the first provider sets it: take the full contribution and mint LP equal to the
-                // geometric mean of the resulting total reserves, `sqrt((reserve_a + a) * (reserve_b + b))`. This
-                // reduces to `sqrt(a * b)` for a fresh, empty pool.
-                (false, _, _) => {
-                    let total_a = reserve_a.checked_add(a_amount).expect(OVERFLOW_MSG);
-                    let total_b = reserve_b.checked_add(b_amount).expect(OVERFLOW_MSG);
+                // No LP tokens exist yet: this is the initial liquidity provision. With no LP outstanding there is
+                // no existing price to preserve, so the first provider sets it: take the full contribution and mint
+                // LP equal to the geometric mean `sqrt(a * b)`.
+                (false, false, false) => {
                     // TODO: possible loss of precision even with 192 bit integer
-                    let mint = total_a
-                        .checked_mul(total_b)
+                    let mint = a_amount
+                        .checked_mul(b_amount)
                         .and_then(|product| product.checked_sqrt())
                         .expect(OVERFLOW_MSG);
 
                     (mint, a_amount, b_amount)
+                },
+                (false, _, _) => {
+                    // The reserves belong to the LP holders, and `protected_add_liquidity` refuses to fund a pool
+                    // with no LP outstanding, so this is an inconsistent state.
+                    panic!("Inconsistent pool state: zero LP supply with non-zero reserve");
                 },
                 (true, true, true) => {
                     // Normal case: existing LP supply and non-zero reserves
@@ -279,6 +279,13 @@ mod template {
         }
 
         pub fn protected_add_liquidity(&mut self, bucket: Bucket) {
+            // Reserves added here mint no LP, so they accrue to the existing LP holders. A pool with no LP
+            // outstanding has no holders to credit and is funded only through `contribute`.
+            assert!(
+                self.lp_total_supply().is_positive(),
+                "Cannot add liquidity to a pool with no LP supply: bootstrap it with `contribute`"
+            );
+
             // check that the buckets are correct
             let resource = bucket.resource_address();
             emit_event("add_liquidity", metadata![
@@ -324,6 +331,12 @@ mod template {
 
             let input_reserve = self.get_pool_vault(input_pool).balance();
             let output_reserve = self.get_pool_vault(output_pool).balance();
+
+            // The price is the ratio of the reserves, which is undefined while either is empty.
+            assert!(
+                input_reserve.is_positive() && output_reserve.is_positive(),
+                "Pool has no liquidity for one of its resources"
+            );
 
             // Simple constant product formula without fees
             // Δy = y.Δx / (X + Δx)

@@ -26,3 +26,7 @@ futures = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tari_common_types = { workspace = true }
+tari_sidechain = { workspace = true }

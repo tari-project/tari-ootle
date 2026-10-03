@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "ootle_byte_type"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "tari_crypto",
  "tari_template_lib_types",
@@ -2666,8 +2666,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari-wasmer-middlewares"
+version = "7.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93b2f760872268158f76f16d8f36e8c2bccf78dcd9e2f4486091c18351f0c115"
+dependencies = [
+ "wasmer",
+ "wasmer-types",
+ "wasmer-vm",
+]
+
+[[package]]
 name = "tari_bor"
-version = "0.16.0"
+version = "0.16.2"
 dependencies = [
  "borsh",
  "indexmap",
@@ -2677,9 +2688,9 @@ dependencies = [
 
 [[package]]
 name = "tari_bulletproofs_plus"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44504f532474401c8f3af90f81a8f9cda415a6571df0936b3c505c770144d439"
+checksum = "66582d6709d2b7c49509a3c56a63fe1e893af16e86fb757ae60eac8d15a70903"
 dependencies = [
  "blake2",
  "byteorder",
@@ -2699,9 +2710,9 @@ dependencies = [
 
 [[package]]
 name = "tari_crypto"
-version = "0.23.2"
+version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd83075a6fc9f62ea6d71f6256bb6e980b0304173f66f8eb60d58790fde8e6e"
+checksum = "a6ef628e3b35f65425c44323d38106b51bf4312e8ddaacd0a0178c5dd588653e"
 dependencies = [
  "blake2",
  "borsh",
@@ -2721,11 +2732,12 @@ dependencies = [
 
 [[package]]
 name = "tari_engine"
-version = "0.41.0"
+version = "0.43.0"
 dependencies = [
  "blake2",
  "digest 0.10.7",
  "indexmap",
+ "libc",
  "log",
  "ootle-network",
  "ootle_byte_type",
@@ -2733,6 +2745,7 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "sha3",
+ "tari-wasmer-middlewares",
  "tari_bor",
  "tari_crypto",
  "tari_engine_types",
@@ -2745,12 +2758,11 @@ dependencies = [
  "tari_utilities",
  "thiserror",
  "wasmer",
- "wasmer-middlewares",
 ]
 
 [[package]]
 name = "tari_engine_types"
-version = "0.41.0"
+version = "0.43.0"
 dependencies = [
  "blake2",
  "borsh",
@@ -2780,9 +2792,9 @@ dependencies = [
 
 [[package]]
 name = "tari_hashing"
-version = "5.7.0-pre.5"
+version = "6.0.1-pre.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "834dd8c98cc56c540d3156fc857b63cfd16bfad573101b9ea4dda2d7f91e912e"
+checksum = "ab7d3bb6fe15e8817ccdeb823069ace98121d68a539bbd9bd0a42a9b4943013a"
 dependencies = [
  "blake2",
  "borsh",
@@ -2804,7 +2816,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_common_types"
-version = "0.41.0"
+version = "0.43.0"
 dependencies = [
  "blake2",
  "borsh",
@@ -2832,7 +2844,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_template_metadata"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "borsh",
  "cargo_toml",
@@ -2850,7 +2862,7 @@ dependencies = [
 
 [[package]]
 name = "tari_ootle_transaction"
-version = "0.41.0"
+version = "0.43.0"
 dependencies = [
  "borsh",
  "hex",
@@ -2874,7 +2886,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "minicbor",
  "serde",
@@ -2884,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_builtin"
-version = "0.41.0"
+version = "0.42.0"
 dependencies = [
  "anyhow",
  "tari_template_lib_types",
@@ -2892,7 +2904,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "borsh",
  "minicbor",
@@ -2905,7 +2917,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "bnum",
  "borsh",
@@ -2929,10 +2941,9 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_manifest"
-version = "0.41.0"
+version = "0.43.0"
 dependencies = [
  "proc-macro2",
- "serde_json",
  "syn 2.0.118",
  "tari_bor",
  "tari_engine_types",
@@ -3430,17 +3441,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasmer-middlewares"
-version = "7.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d02a64ce70385c9f6b9b51892844ecb4a843a97f8b4995ba3032bfcc8f4b195"
-dependencies = [
- "wasmer",
- "wasmer-types",
- "wasmer-vm",
-]
-
-[[package]]
 name = "wasmer-types"
 version = "7.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3690,9 +3690,9 @@ dependencies = [
 
 [[package]]
 name = "xxhash-rust"
-version = "0.8.15"
+version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
+checksum = "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7"
 
 [[package]]
 name = "yoke"

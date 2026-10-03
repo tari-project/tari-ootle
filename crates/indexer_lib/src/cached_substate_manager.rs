@@ -487,19 +487,26 @@ where
         let heads = self.fetch_and_cache_heads(&miss_ids).await?;
 
         for req in misses {
-            let from_batch = heads.get(req.substate_id()).and_then(|head| {
-                let entry = SubstateCacheEntry {
-                    version: head.result.version(),
-                    substate_result: head.result.clone(),
-                    cached_at: 0,
-                    verified: head.verified,
-                };
-                entry.answer_at(req.version()).map(|entry| SubstateLookupResult {
-                    result: entry.substate_result,
-                    verified: entry.verified,
-                    proof: None,
+            // An unproven head that is not up is confirmed with the committee before the lookup
+            // stops at it, as an omitted one is.
+            let from_batch = heads
+                .get(req.substate_id())
+                .filter(|head| {
+                    head.verified || !self.verify_substate_proofs || matches!(head.result, SubstateResult::Up { .. })
                 })
-            });
+                .and_then(|head| {
+                    let entry = SubstateCacheEntry {
+                        version: head.result.version(),
+                        substate_result: head.result.clone(),
+                        cached_at: 0,
+                        verified: head.verified,
+                    };
+                    entry.answer_at(req.version()).map(|entry| SubstateLookupResult {
+                        result: entry.substate_result,
+                        verified: entry.verified,
+                        proof: None,
+                    })
+                });
             let lookup = match from_batch {
                 Some(lookup) => lookup,
                 None => self.get_substate(req.substate_id(), req.version()).await?,
@@ -546,7 +553,7 @@ where
             .await?;
 
         let mut results = HashMap::with_capacity(substate_ids.len());
-        for (batch, verified) in batches {
+        for (batch, batch_verified) in batches {
             let commit_proof = batch.commit_proof;
             if !batch.missing.is_empty() {
                 debug!(
@@ -557,6 +564,9 @@ where
             }
 
             for substate in batch.substates {
+                // A batch answers with heads, and the proof of a down version cannot show that no
+                // later version is up, so only an up head is proven by its batch.
+                let verified = batch_verified && matches!(substate.result, SubstateResult::Up { .. });
                 // A proven batch carries an anchor and a value proof for every result in it.
                 let proof = commit_proof.clone().zip(substate.value_proof).filter(|_| verified).map(
                     |(commit_proof, substate_value_proof)| SubstateProofData {
@@ -667,7 +677,7 @@ where
             return Ok(BatchTrust::Unanchored);
         };
 
-        let root = self.trusted_root_from_commit_proof(commit_proof).await?;
+        let (shard_group, root) = self.trusted_root_from_commit_proof(commit_proof).await?;
         for substate in &batch.substates {
             let Some(value_proof) = &substate.value_proof else {
                 return Err(IndexerError::SubstateProofVerificationFailed {
@@ -695,7 +705,9 @@ where
                 version,
                 value,
                 self.network,
+                NumPreshards::current(),
                 Epoch(substate.proof_epoch),
+                shard_group,
                 root,
             )
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
@@ -737,7 +749,7 @@ where
             });
         };
 
-        let tally = CommitteeReadTally::new(committee.len(), self.verify_substate_proofs);
+        let tally = CommitteeReadTally::new(committee.len(), self.verify_substate_proofs, substate_req.version());
         race_committee(
             committee
                 .shuffled()
@@ -822,14 +834,16 @@ where
         value: Option<&SubstateValue>,
         proof: &SubstateProofData,
     ) -> Result<(), IndexerError> {
-        let root = self.trusted_root_from_commit_proof(&proof.commit_proof).await?;
+        let (shard_group, root) = self.trusted_root_from_commit_proof(&proof.commit_proof).await?;
         verify_substate_value_proof_against_root(
             &proof.substate_value_proof,
             substate_id,
             version,
             value,
             self.network,
+            NumPreshards::current(),
             Epoch(proof.proof_epoch),
+            shard_group,
             root,
         )
         .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
@@ -837,13 +851,16 @@ where
     }
 
     /// Establishes the shard-group state merkle root that value proofs anchored to `commit_proof`
-    /// must verify against.
+    /// must verify against, and the shard group whose committee committed it.
     ///
     /// The returned root is trusted because a quorum of the shard group signed the block header
     /// committing it, independently of any value proof that goes on to cite it. That is what makes it
     /// safe to establish once and reuse for a whole batch of value proofs, and to record for later
     /// reads.
-    async fn trusted_root_from_commit_proof(&self, commit_proof: &[u8]) -> Result<FixedHash, IndexerError> {
+    async fn trusted_root_from_commit_proof(
+        &self,
+        commit_proof: &[u8],
+    ) -> Result<(ShardGroup, FixedHash), IndexerError> {
         let commit_proof = CommittedBlockProof::from_bytes(commit_proof).map_err(|e| {
             IndexerError::SubstateProofVerificationFailed {
                 details: format!("undecodable commit proof: {e}"),
@@ -866,7 +883,7 @@ where
                 target: LOG_TARGET,
                 "trusted-root HIT at epoch {epoch} {shard_group}: skipped commit-proof validation"
             );
-            return Ok(root);
+            return Ok((shard_group, root));
         }
 
         // Slow path: validate the commit proof against the shard group committee.
@@ -894,7 +911,7 @@ where
             warn!(target: LOG_TARGET, "Failed to record verified root at epoch {epoch} {shard_group}: {e}");
         }
 
-        Ok(root)
+        Ok((shard_group, root))
     }
 }
 
@@ -923,11 +940,13 @@ mod tests {
 
     type Addr = String;
 
-    /// A single-member network holding `live` and answering batches for all of it except `omitted_from_batches`.
+    /// A single-member network holding `live` and answering batches for all of it except `omitted_from_batches`,
+    /// and with a down head for `down_in_batches`. Every answer is unproven.
     #[derive(Default)]
     struct FakeNetwork {
         live: HashMap<SubstateId, Substate>,
         omitted_from_batches: HashSet<SubstateId>,
+        down_in_batches: HashSet<SubstateId>,
         batch_requests: AtomicUsize,
         single_requests: AtomicUsize,
     }
@@ -970,9 +989,9 @@ mod tests {
 
         async fn get_substate_with_proof(
             &mut self,
-            _: SubstateRequirementRef<'_>,
+            substate_req: SubstateRequirementRef<'_>,
         ) -> Result<(SubstateResult, Option<SubstateProofData>), ValidatorNodeRpcClientError> {
-            unimplemented!()
+            Ok((self.get_substate(substate_req).await?, None))
         }
 
         async fn get_substates_batch(
@@ -988,6 +1007,16 @@ mod tests {
             };
             for &id in substate_ids {
                 match self.0.live.get(id) {
+                    Some(substate) if self.0.down_in_batches.contains(id) => {
+                        batch.substates.push(tari_validator_node_rpc::client::BatchedSubstate {
+                            substate_id: id.clone(),
+                            result: SubstateResult::Down {
+                                version: substate.version(),
+                            },
+                            value_proof: None,
+                            proof_epoch: 0,
+                        })
+                    },
                     Some(substate) if !self.0.omitted_from_batches.contains(id) => {
                         batch.substates.push(tari_validator_node_rpc::client::BatchedSubstate {
                             substate_id: id.clone(),
@@ -1254,6 +1283,27 @@ mod tests {
             omitted_from_batches: HashSet::from([ids[1].clone()]),
             ..Default::default()
         });
+
+        let lookup = manager.get_input_substates(&requirements(&ids)).await.unwrap();
+
+        let InputSubstatesLookup::AllUp(found) = lookup else {
+            panic!("expected every input to be up, got {lookup:?}");
+        };
+        assert_eq!(found.len(), ids.len());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+    }
+
+    /// A batch answers with heads, and a down head is not proven by its batch, so while verification is
+    /// on the committee is asked before the lookup stops at it.
+    #[tokio::test]
+    async fn it_confirms_an_input_a_batch_reported_down() {
+        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let (manager, network) = manager(FakeNetwork {
+            live: live(&ids),
+            down_in_batches: HashSet::from([ids[1].clone()]),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
 
         let lookup = manager.get_input_substates(&requirements(&ids)).await.unwrap();
 

@@ -5,8 +5,8 @@
 use std::collections::{BTreeSet, HashSet};
 
 use tari_jellyfish::{SPARSE_MERKLE_PLACEHOLDER_HASH, SparseMerkleProofExt, StaleTreeNode, TreeHash, Version};
-use tari_ootle_common_types::ToSubstateAddress;
-use tari_state_tree::{StateTreeError, memory_store::MemoryTreeStore};
+use tari_ootle_common_types::{NumPreshards, ToSubstateAddress, VersionedSubstateId, shard::Shard};
+use tari_state_tree::{ShardGroupRootTree, StateTreeError, compute_shard_group_root, memory_store::MemoryTreeStore};
 
 use crate::support::{HashTreeTester, change, hash_value_from_seed, make_value};
 mod support;
@@ -209,15 +209,99 @@ fn proofs() {
     proof.verify_inclusion(&root_hash, &key, &hash).unwrap_err();
 }
 
+const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+
+/// A shard that is neither global nor `shard`.
+fn sibling_of(shard: Shard) -> Shard {
+    if shard == Shard::first() {
+        Shard::from_u32(2)
+    } else {
+        Shard::first()
+    }
+}
+
 // Builds the shard-group root tree the same way a validator does for a block header: an ephemeral
-// tree over the ordered `[global, shard_0, shard_1, ...]` roots. The first shard hosts our substates.
-fn shard_group_root_and_proof(shard_root: TreeHash) -> (TreeHash, SparseMerkleProofExt) {
-    use tari_state_tree::{compute_merkle_root_for_hashes, compute_proof_for_hashes};
+// tree over the global shard's root and the shard group's roots, each keyed by its shard. `shard_root`
+// is the root of the shard that `substate` lives in.
+fn shard_group_root_and_proof(
+    substate: &VersionedSubstateId,
+    shard_root: TreeHash,
+) -> (TreeHash, SparseMerkleProofExt) {
+    let shard = substate.to_shard(NUM_PRESHARDS);
     // [global (empty), our shard, an unrelated sibling shard]
-    let ordered_roots = vec![SPARSE_MERKLE_PLACEHOLDER_HASH, shard_root, hash_value_from_seed(99)];
-    let group_root = compute_merkle_root_for_hashes(ordered_roots.clone()).unwrap();
-    let (_, shard_root_proof) = compute_proof_for_hashes(ordered_roots.into_iter(), shard_root).unwrap();
-    (group_root, shard_root_proof)
+    let tree = ShardGroupRootTree::build([
+        (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH),
+        (shard, shard_root),
+        (sibling_of(shard), hash_value_from_seed(99)),
+    ])
+    .unwrap();
+    let (_, shard_root_proof) = tree.get_proof(shard).unwrap();
+    (tree.root(), shard_root_proof)
+}
+
+#[test]
+fn shard_group_root_commits_to_the_shard_of_each_root() {
+    let a = hash_value_from_seed(1);
+    let b = hash_value_from_seed(2);
+    let root = compute_shard_group_root([(Shard::from_u32(1), a), (Shard::from_u32(2), b)]).unwrap();
+    let swapped = compute_shard_group_root([(Shard::from_u32(1), b), (Shard::from_u32(2), a)]).unwrap();
+    assert_ne!(root, swapped);
+}
+
+#[test]
+fn an_empty_shard_has_no_leaf_in_the_shard_group_root() {
+    let root = hash_value_from_seed(1);
+    assert_eq!(
+        compute_shard_group_root([
+            (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH),
+            (Shard::first(), root)
+        ])
+        .unwrap(),
+        compute_shard_group_root([(Shard::first(), root)]).unwrap()
+    );
+    assert_eq!(
+        compute_shard_group_root([(Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH)]).unwrap(),
+        SPARSE_MERKLE_PLACEHOLDER_HASH
+    );
+}
+
+/// An empty shard's root is proved by the absence of its leaf from the shard-group root, and that
+/// absence can only be claimed for a shard that is empty.
+#[test]
+fn a_substate_in_an_empty_shard_is_provably_absent() {
+    use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};
+
+    let substate = make_value(2);
+    let own_shard = substate.to_shard(NUM_PRESHARDS);
+    let sibling_shard = sibling_of(own_shard);
+
+    let mut empty = MemoryTreeStore::<StateTreePayload>::new();
+    SpreadPrefixStateTree::new(&mut empty)
+        .put_substate_changes(None, 1, vec![])
+        .unwrap();
+    let (_, _, empty_leaf_proof) = SpreadPrefixStateTree::new(&mut empty).get_proof(1, &substate).unwrap();
+
+    let empty_group = ShardGroupRootTree::build([
+        (own_shard, SPARSE_MERKLE_PLACEHOLDER_HASH),
+        (sibling_shard, hash_value_from_seed(99)),
+    ])
+    .unwrap();
+    let (value, absent_proof) = empty_group.get_proof(own_shard).unwrap();
+    assert!(value.is_none());
+    SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, absent_proof, empty_leaf_proof.clone())
+        .verify_exclusion(&empty_group.root(), NUM_PRESHARDS, &substate)
+        .unwrap();
+
+    // Once the shard holds state, its leaf is present and the empty root cannot be claimed for it.
+    let populated_group = ShardGroupRootTree::build([
+        (own_shard, hash_value_from_seed(1)),
+        (sibling_shard, hash_value_from_seed(99)),
+    ])
+    .unwrap();
+    let (_, present_proof) = populated_group.get_proof(own_shard).unwrap();
+    SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, present_proof, empty_leaf_proof)
+        .verify_exclusion(&populated_group.root(), NUM_PRESHARDS, &substate)
+        .unwrap_err();
 }
 
 #[test]
@@ -243,24 +327,26 @@ fn two_level_substate_inclusion_proof() {
     let value_hash = proof_value.unwrap().0;
 
     // Level 2: shard root within the shard-group root.
-    let (group_root, shard_root_proof) = shard_group_root_and_proof(shard_root);
+    let (group_root, shard_root_proof) = shard_group_root_and_proof(&make_value(2), shard_root);
 
     let proof = SubstateValueProof::new(shard_root, shard_root_proof, leaf_proof);
 
     // Verifies against the trusted group root.
     proof
-        .verify_inclusion(&group_root, &make_value(2), &value_hash)
+        .verify_inclusion(&group_root, NUM_PRESHARDS, &make_value(2), &value_hash)
         .unwrap();
     // A tampered value hash is rejected (binds the value to the committed leaf).
     proof
-        .verify_inclusion(&group_root, &make_value(2), &hash_value_from_seed(200))
+        .verify_inclusion(&group_root, NUM_PRESHARDS, &make_value(2), &hash_value_from_seed(200))
         .unwrap_err();
     // A wrong group root is rejected (level-2 failure).
     proof
-        .verify_inclusion(&hash_value_from_seed(7), &make_value(2), &value_hash)
+        .verify_inclusion(&hash_value_from_seed(7), NUM_PRESHARDS, &make_value(2), &value_hash)
         .unwrap_err();
     // An included substate cannot be proven absent.
-    proof.verify_exclusion(&group_root, &make_value(2)).unwrap_err();
+    proof
+        .verify_exclusion(&group_root, NUM_PRESHARDS, &make_value(2))
+        .unwrap_err();
 }
 
 #[test]
@@ -284,14 +370,76 @@ fn two_level_substate_exclusion_proof() {
         .unwrap();
     assert!(proof_value.is_none());
 
-    let (group_root, shard_root_proof) = shard_group_root_and_proof(shard_root);
+    let (group_root, shard_root_proof) = shard_group_root_and_proof(&make_value(4), shard_root);
     let proof = SubstateValueProof::new(shard_root, shard_root_proof, leaf_proof);
 
     // The absent substate is provably absent under the trusted group root...
-    proof.verify_exclusion(&group_root, &make_value(4)).unwrap();
+    proof
+        .verify_exclusion(&group_root, NUM_PRESHARDS, &make_value(4))
+        .unwrap();
     // ...but cannot be proven present.
     proof
-        .verify_inclusion(&group_root, &make_value(4), &hash_value_from_seed(50))
+        .verify_inclusion(&group_root, NUM_PRESHARDS, &make_value(4), &hash_value_from_seed(50))
+        .unwrap_err();
+}
+
+/// A substate is absent from every shard but its own, so only its own shard's root can prove it
+/// absent - however genuine the proofs that place another root in the group root.
+#[test]
+fn exclusion_proof_against_another_shards_root_is_rejected() {
+    use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};
+
+    let substate = make_value(2);
+    let own_shard = substate.to_shard(NUM_PRESHARDS);
+    let sibling_shard = sibling_of(own_shard);
+
+    let mut own = MemoryTreeStore::<StateTreePayload>::new();
+    let own_root = SpreadPrefixStateTree::new(&mut own)
+        .put_substate_changes(None, 1, vec![change(1, Some(30)), change(2, Some(40))])
+        .unwrap();
+    let mut sibling = MemoryTreeStore::<StateTreePayload>::new();
+    let sibling_root = SpreadPrefixStateTree::new(&mut sibling)
+        .put_substate_changes(None, 1, vec![change(77, Some(11))])
+        .unwrap();
+    let (_, proof_value, sibling_leaf_proof) = SpreadPrefixStateTree::new(&mut sibling)
+        .get_proof(1, &substate)
+        .unwrap();
+    assert!(proof_value.is_none());
+    let mut empty = MemoryTreeStore::<StateTreePayload>::new();
+    let empty_root = SpreadPrefixStateTree::new(&mut empty)
+        .put_substate_changes(None, 1, vec![])
+        .unwrap();
+    assert_eq!(empty_root, SPARSE_MERKLE_PLACEHOLDER_HASH);
+    let (_, _, empty_leaf_proof) = SpreadPrefixStateTree::new(&mut empty).get_proof(1, &substate).unwrap();
+
+    let tree = ShardGroupRootTree::build([
+        (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH),
+        (own_shard, own_root),
+        (sibling_shard, sibling_root),
+    ])
+    .unwrap();
+    let group_root = tree.root();
+    let (_, own_root_proof) = tree.get_proof(own_shard).unwrap();
+    let (_, sibling_root_proof) = tree.get_proof(sibling_shard).unwrap();
+    let (_, global_root_proof) = tree.get_proof(Shard::global()).unwrap();
+
+    // The substate is present in its own shard.
+    let (_, proof_value, own_leaf_proof) = SpreadPrefixStateTree::new(&mut own).get_proof(1, &substate).unwrap();
+    SubstateValueProof::new(own_root, own_root_proof.clone(), own_leaf_proof)
+        .verify_inclusion(&group_root, NUM_PRESHARDS, &substate, &proof_value.unwrap().0)
+        .unwrap();
+
+    // A sibling shard's root, with the proof of its own place in the group root.
+    SubstateValueProof::new(sibling_root, sibling_root_proof, sibling_leaf_proof.clone())
+        .verify_exclusion(&group_root, NUM_PRESHARDS, &substate)
+        .unwrap_err();
+    // A sibling shard's root, with the proof of the substate's shard's place in the group root.
+    SubstateValueProof::new(sibling_root, own_root_proof, sibling_leaf_proof)
+        .verify_exclusion(&group_root, NUM_PRESHARDS, &substate)
+        .unwrap_err();
+    // The global shard's empty root.
+    SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, global_root_proof, empty_leaf_proof)
+        .verify_exclusion(&group_root, NUM_PRESHARDS, &substate)
         .unwrap_err();
 }
 
@@ -316,16 +464,16 @@ fn two_level_substate_inclusion_proof_for_genesis_version_zero() {
     let value_hash = proof_value.unwrap().0;
 
     // Level 2: shard root within the shard-group root.
-    let (group_root, shard_root_proof) = shard_group_root_and_proof(shard_root);
+    let (group_root, shard_root_proof) = shard_group_root_and_proof(&make_value(1), shard_root);
     let proof = SubstateValueProof::new(shard_root, shard_root_proof, leaf_proof);
 
     // The genesis substate committed at version 0 is provably included under the trusted group root.
     proof
-        .verify_inclusion(&group_root, &make_value(1), &value_hash)
+        .verify_inclusion(&group_root, NUM_PRESHARDS, &make_value(1), &value_hash)
         .unwrap();
     // A tampered value hash is still rejected.
     proof
-        .verify_inclusion(&group_root, &make_value(1), &hash_value_from_seed(200))
+        .verify_inclusion(&group_root, NUM_PRESHARDS, &make_value(1), &hash_value_from_seed(200))
         .unwrap_err();
 }
 

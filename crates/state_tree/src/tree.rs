@@ -15,10 +15,11 @@ use tari_jellyfish::{
     TreeHash,
     TreeStore,
     TreeStoreReader,
+    TreeStoreWriter,
     TreeUpdateBatch,
     Version,
 };
-use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId};
+use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId, shard::Shard};
 use tari_template_lib_types::Hash32;
 
 use crate::{
@@ -26,7 +27,7 @@ use crate::{
     StateTreePayload,
     TreeStoreBatchWriter,
     error::StateTreeError,
-    key_mapper::{DbKeyMapper, HashIdentityKeyMapper, SpreadPrefixKeyMapper},
+    key_mapper::{DbKeyMapper, HashIdentityKeyMapper, ShardKeyMapper, SpreadPrefixKeyMapper},
     memory_store::MemoryTreeStore,
 };
 
@@ -328,6 +329,72 @@ impl RootProofTree {
         let proof_tuple = jmt.get_with_proof_ext(key.as_ref(), 1)?;
         Ok(proof_tuple)
     }
+}
+
+/// The shard-group state root tree: an ephemeral tree over the shard group's per-shard JMT roots,
+/// with each root stored at a leaf keyed by its shard. Its root is the `state_merkle_root` a block
+/// header commits.
+///
+/// Keying by shard is what lets a proof name the shard a root belongs to. A verifier proves a
+/// substate against the root at the leaf of the substate's own shard, so no other shard's root can
+/// stand in for it.
+///
+/// A shard whose JMT is empty has no leaf: the absence of its leaf commits to the empty-tree root
+/// [`SPARSE_MERKLE_PLACEHOLDER_HASH`]. This keeps the tree, and the cost of building it for every
+/// block, proportional to the shards that hold state.
+pub struct ShardGroupRootTree {
+    store: MemoryTreeStore<()>,
+    root: TreeHash,
+}
+
+impl ShardGroupRootTree {
+    /// Builds the tree over `(shard, root)` pairs. Each shard must appear at most once.
+    pub fn build<I: IntoIterator<Item = (Shard, TreeHash)>>(shard_roots: I) -> Result<Self, StateTreeError> {
+        let mut store = MemoryTreeStore::<()>::new();
+        let mut changes = shard_roots
+            .into_iter()
+            .filter(|(_, root)| *root != SPARSE_MERKLE_PLACEHOLDER_HASH)
+            .map(|(shard, root)| (ShardKeyMapper::map_to_leaf_key(&shard), Some((root, ()))))
+            .peekable();
+        if changes.peek().is_none() {
+            return Ok(Self {
+                store,
+                root: SPARSE_MERKLE_PLACEHOLDER_HASH,
+            });
+        }
+        let (root, update) = JellyfishMerkleTree::<_, ()>::new(&store).batch_put_value_set(
+            changes,
+            None,
+            None,
+            SHARD_GROUP_ROOT_VERSION,
+        )?;
+        for (key, node) in update.node_batch {
+            store.insert_node(key, node)?;
+        }
+        Ok(Self { store, root })
+    }
+
+    pub fn root(&self) -> TreeHash {
+        self.root
+    }
+
+    /// Proves the root stored for `shard`, or that the tree holds none for it - which is the proof
+    /// that the shard's root is the empty-tree root.
+    pub fn get_proof(&self, shard: Shard) -> Result<(Option<ProofValue<()>>, SparseMerkleProofExt), StateTreeError> {
+        let jmt = JellyfishMerkleTree::new(&self.store);
+        let key = ShardKeyMapper::map_to_leaf_key(&shard);
+        let proof_tuple = jmt.get_with_proof_ext(key.as_ref(), SHARD_GROUP_ROOT_VERSION)?;
+        Ok(proof_tuple)
+    }
+}
+
+const SHARD_GROUP_ROOT_VERSION: Version = 1;
+
+/// Computes the shard-group state root over `(shard, root)` pairs. See [`ShardGroupRootTree`].
+pub fn compute_shard_group_root<I: IntoIterator<Item = (Shard, TreeHash)>>(
+    shard_roots: I,
+) -> Result<TreeHash, StateTreeError> {
+    Ok(ShardGroupRootTree::build(shard_roots)?.root())
 }
 
 /// Computes a Merkle proof for the given hash is either included in the provided the hashes, or proof of absence.

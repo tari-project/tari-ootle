@@ -24,7 +24,7 @@ use tari_state_tree::{
     SubstateTreeChange,
     TreeHash,
     Version,
-    compute_merkle_root_for_hashes,
+    compute_shard_group_root,
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::sharded_state_tree";
@@ -135,24 +135,15 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         shard_group: ShardGroup,
         mut shard_state_roots: HashMap<Shard, TreeHash>,
     ) -> Result<TreeHash, StateTreeError> {
-        let mut hashes = Vec::with_capacity(shard_group.len() + 1);
-        match shard_state_roots.remove(&Shard::global()) {
-            Some(r) => hashes.push(r),
-            None => {
-                let hash = self.get_state_root_for_shard(Shard::global())?;
-                hashes.push(hash);
-            },
-        }
-        for shard in shard_group.shard_iter() {
-            match shard_state_roots.remove(&shard) {
-                Some(r) => hashes.push(r),
-                None => {
-                    let hash = self.get_state_root_for_shard(shard)?;
-                    hashes.push(hash);
-                },
+        let mut shard_roots = Vec::with_capacity(shard_group.len() + 1);
+        for shard in shard_group.shard_iter_with_global() {
+            let root = match shard_state_roots.remove(&shard) {
+                Some(r) => r,
+                None => self.get_state_root_for_shard(shard)?,
             };
+            shard_roots.push((shard, root));
         }
-        let hash = compute_merkle_root_for_hashes(hashes)?;
+        let hash = compute_shard_group_root(shard_roots)?;
         Ok(hash)
     }
 

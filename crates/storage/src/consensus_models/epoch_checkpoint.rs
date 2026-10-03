@@ -1,7 +1,7 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Display, iter};
+use std::fmt::Display;
 
 use anyhow::anyhow;
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -12,13 +12,7 @@ use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{Epoch, ShardGroup, VotePower, shard::Shard};
 use tari_sidechain::{CommandCommitProof, SidechainBlockHeader, SidechainProofValidationError, ToCommand};
-use tari_state_tree::{
-    SPARSE_MERKLE_PLACEHOLDER_HASH,
-    StateTreeError,
-    TreeHash,
-    Version,
-    compute_merkle_root_for_hashes,
-};
+use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, StateTreeError, TreeHash, Version, compute_shard_group_root};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
@@ -89,10 +83,10 @@ impl EpochCheckpoint {
 
     pub fn compute_state_merkle_root(&self) -> Result<TreeHash, EpochCheckpointValidationError> {
         let shard_group = self.checked_shard_group()?;
-        let hashes = iter::once(Shard::global())
-            .chain(shard_group.shard_iter())
-            .map(|shard| self.get_shard_root(shard));
-        let root = compute_merkle_root_for_hashes(hashes)?;
+        let shard_roots = shard_group
+            .shard_iter_with_global()
+            .map(|shard| (shard, self.get_shard_root(shard)));
+        let root = compute_shard_group_root(shard_roots)?;
         Ok(root)
     }
 

@@ -12,8 +12,8 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, VersionedSubstateId, shard::Shard};
 use tari_state_tree::{
-    RootProofTree,
     SPARSE_MERKLE_PLACEHOLDER_HASH,
+    ShardGroupRootTree,
     SparseMerkleProofExt,
     SpreadPrefixStateTree,
     SubstateValueProof,
@@ -27,8 +27,8 @@ use crate::{StateStoreReadTransaction, StorageError, state_store::ShardScopedTre
 /// Generates two-level [`SubstateValueProof`]s against one committed shard-group state.
 ///
 /// A proof has three parts, and only the last of them varies per substate:
-/// - the shard group's per-shard roots, in the canonical order the block header commits them,
-/// - level 2: the proof that a shard's root is committed in the shard-group root - one per shard,
+/// - the shard group's per-shard roots, global shard included,
+/// - level 2: the proof that a shard's root is committed at that shard's leaf of the shard-group root - one per shard,
 /// - level 1: the JMT leaf proof (inclusion or exclusion) for the substate within its shard.
 ///
 /// The first two are read and computed once and reused, so proving N substates costs N leaf
@@ -45,11 +45,10 @@ use crate::{StateStoreReadTransaction, StorageError, state_store::ShardScopedTre
 pub struct SubstateProofGenerator<'a, TTx> {
     tx: &'a TTx,
     num_preshards: NumPreshards,
-    /// The tree over the shard group's per-shard roots, in the canonical order the block header
-    /// commits them: [global, shard_0, ...]. Every level-2 proof is a leaf of this one tree, so it is
-    /// built once however many substates are proved - which is what keeps the cost of a batch
-    /// independent of the size of the shard group.
-    root_tree: RootProofTree,
+    /// The tree over the shard group's per-shard roots, global shard included. Every level-2 proof is
+    /// a leaf of this one tree, so it is built once however many substates are proved - which is what
+    /// keeps the cost of a batch independent of the size of the shard group.
+    root_tree: ShardGroupRootTree,
     /// The committed state of each shard in the root tree, keyed by shard.
     shards: HashMap<Shard, CommittedShardState>,
     /// Level-2 proofs, extracted from `root_tree` on first use of each shard.
@@ -67,18 +66,18 @@ struct CommittedShardState {
 impl<'a, TTx: StateStoreReadTransaction> SubstateProofGenerator<'a, TTx> {
     /// Reads the committed root of every shard in `shard_group`, plus the global shard.
     pub fn new(tx: &'a TTx, shard_group: ShardGroup, num_preshards: NumPreshards) -> Result<Self, StorageError> {
-        let mut ordered_roots = Vec::with_capacity(shard_group.len() + 1);
+        let mut shard_roots = Vec::with_capacity(shard_group.len() + 1);
         let mut shards = HashMap::with_capacity(shard_group.len() + 1);
         for shard in shard_group.shard_iter_with_global() {
             let state = committed_shard_state(tx, shard)?;
-            ordered_roots.push(state.root);
+            shard_roots.push((shard, state.root));
             shards.insert(shard, state);
         }
 
         Ok(Self {
             tx,
             num_preshards,
-            root_tree: RootProofTree::build(ordered_roots).map_err(|e| StorageError::QueryError {
+            root_tree: ShardGroupRootTree::build(shard_roots).map_err(|e| StorageError::QueryError {
                 reason: format!("SubstateProofGenerator shard group root tree: {e}"),
             })?,
             shards,
@@ -114,12 +113,9 @@ impl<'a, TTx: StateStoreReadTransaction> SubstateProofGenerator<'a, TTx> {
         let shard_root_proof = match self.shard_root_proofs.entry(shard) {
             Entry::Occupied(entry) => entry.get().clone(),
             Entry::Vacant(entry) => {
-                let (_, proof) = self
-                    .root_tree
-                    .get_proof(state.root)
-                    .map_err(|e| StorageError::QueryError {
-                        reason: format!("SubstateProofGenerator shard root proof: {e}"),
-                    })?;
+                let (_, proof) = self.root_tree.get_proof(shard).map_err(|e| StorageError::QueryError {
+                    reason: format!("SubstateProofGenerator shard root proof: {e}"),
+                })?;
                 entry.insert(proof).clone()
             },
         };
@@ -138,13 +134,20 @@ impl<'a, TTx: StateStoreReadTransaction> SubstateProofGenerator<'a, TTx> {
 /// one read transaction against the same committed block), so verifying against that root is the
 /// whole of the check. The trust decision must therefore be keyed on `trusted_root` itself: a node
 /// cannot forge a substate proof that verifies against a root a quorum already signed.
+///
+/// `trusted_shard_group` is the shard group whose committee committed `trusted_root`. That root
+/// commits only to the group's own shards: a shard outside the group has no leaf in it, exactly as
+/// an empty shard has none, so its absence there says nothing about the substate. A substate whose
+/// shard lies outside the group is rejected.
 pub fn verify_substate_value_proof_against_root(
     value_proof_bytes: &[u8],
     substate_id: &SubstateId,
     version: SubstateVersion,
     value: Option<&SubstateValue>,
     network: Network,
+    num_preshards: NumPreshards,
     proof_epoch: Epoch,
+    trusted_shard_group: ShardGroup,
     trusted_root: FixedHash,
 ) -> Result<(), SubstateProofVerifyError> {
     let group_root = TreeHash::new(trusted_root.into_array());
@@ -154,15 +157,23 @@ pub fn verify_substate_value_proof_against_root(
             .map_err(|e| SubstateProofVerifyError::Decode(e.to_string()))?;
 
     let versioned_id = VersionedSubstateId::new(substate_id.clone(), version);
+    let shard = versioned_id.to_shard(num_preshards);
+    if !trusted_shard_group.contains_or_global(&shard) {
+        return Err(SubstateProofVerifyError::ShardOutsideAnchor {
+            substate: versioned_id,
+            shard,
+            shard_group: trusted_shard_group,
+        });
+    }
     match value {
         Some(value) => {
             // Bind the returned value to the committed leaf by re-deriving its value hash, so a
             // validator cannot swap the value while presenting a proof for the real committed leaf.
             let value_hash = TreeHash::new(hash_substate(network, value, version, proof_epoch).into_array());
-            value_proof.verify_inclusion(&group_root, &versioned_id, &value_hash)?;
+            value_proof.verify_inclusion(&group_root, num_preshards, &versioned_id, &value_hash)?;
         },
         None => {
-            value_proof.verify_exclusion(&group_root, &versioned_id)?;
+            value_proof.verify_exclusion(&group_root, num_preshards, &versioned_id)?;
         },
     }
 
@@ -175,6 +186,12 @@ pub enum SubstateProofVerifyError {
     Decode(String),
     #[error("substate value proof invalid: {0}")]
     ValueProof(#[from] SubstateValueProofError),
+    #[error("{substate} is in {shard}, outside {shard_group} whose committed root the proof was anchored to")]
+    ShardOutsideAnchor {
+        substate: VersionedSubstateId,
+        shard: Shard,
+        shard_group: ShardGroup,
+    },
 }
 
 /// The committed JMT root and state-tree version of `shard`. A shard with no committed state has the
@@ -198,4 +215,60 @@ fn committed_shard_state<TTx: StateStoreReadTransaction>(
         root,
         version: Some(version),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_state_tree::{StateTreePayload, memory_store::MemoryTreeStore};
+    use tari_template_lib_types::{ComponentAddress, ObjectKey};
+
+    use super::*;
+
+    const NUM_PRESHARDS: NumPreshards = NumPreshards::P4;
+
+    /// A shard group's root commits to the shards in the group and nothing else, so a substate in a
+    /// shard outside the group has no leaf there, the same as a substate in an empty shard. An
+    /// absence proved against another group's root must not count as the substate's absence.
+    #[test]
+    fn an_absence_proved_against_another_shard_groups_root_is_rejected() {
+        let substate_id = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([1; ObjectKey::LENGTH])));
+        let version = SubstateVersion::ZERO;
+        let versioned_id = VersionedSubstateId::new(substate_id.clone(), version);
+        let own_shard = versioned_id.to_shard(NUM_PRESHARDS);
+        let other_shard = Shard::from_u32(if own_shard.as_u32() == 1 { 2 } else { 1 });
+        let other_group = ShardGroup::new(other_shard, other_shard);
+
+        let group_tree = ShardGroupRootTree::build([
+            (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH),
+            (other_shard, TreeHash::new([7; 32])),
+        ])
+        .unwrap();
+        let (_, shard_root_proof) = group_tree.get_proof(own_shard).unwrap();
+        let mut empty = MemoryTreeStore::<StateTreePayload>::new();
+        SpreadPrefixStateTree::new(&mut empty)
+            .put_substate_changes(None, 1, vec![])
+            .unwrap();
+        let (_, _, leaf_proof) = SpreadPrefixStateTree::new(&mut empty)
+            .get_proof(1, &versioned_id)
+            .unwrap();
+        let proof = SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, shard_root_proof, leaf_proof);
+        let proof_bytes = tari_bor::serde_codec::to_vec(&proof).unwrap();
+        let other_group_root = FixedHash::new(group_tree.root().into_array());
+
+        let result = verify_substate_value_proof_against_root(
+            &proof_bytes,
+            &substate_id,
+            version,
+            None,
+            Network::LocalNet,
+            NUM_PRESHARDS,
+            Epoch(1),
+            other_group,
+            other_group_root,
+        );
+        assert!(
+            matches!(result, Err(SubstateProofVerifyError::ShardOutsideAnchor { .. })),
+            "{result:?}"
+        );
+    }
 }

@@ -455,6 +455,23 @@ async fn max_per_client_sessions() {
     other.say_hello(SayHelloRequest::default()).await.unwrap();
 }
 
+#[tokio::test]
+async fn failed_handshakes_do_not_count_against_the_per_client_limit() {
+    let server = TestRpcServer::spawn(
+        GreetingService::default(),
+        RpcServer::builder().with_maximum_sessions_per_client(2),
+    );
+    let peer_id = PeerId::random();
+
+    // Each substream closes before the client sends its handshake.
+    for _ in 0..3 {
+        drop(server.dial_peer(peer_id));
+    }
+
+    let mut client = connect(server.dial_peer(peer_id)).await.unwrap();
+    client.say_hello(SayHelloRequest::default()).await.unwrap();
+}
+
 /// Opens sessions until one is accepted. A slot is released when the server's task for that session
 /// finishes, which trails the client closing its end.
 async fn wait_for_session(server: &TestRpcServer) -> GreetingClient {

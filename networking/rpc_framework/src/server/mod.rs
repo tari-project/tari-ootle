@@ -462,7 +462,31 @@ where
             },
         }
 
-        let version = handshake.perform_server_handshake().await?;
+        // The session slot taken above is released when the spawned task completes, so a session
+        // that never starts must release it here.
+        match self.start_session(protocol, peer_id, service, framed).await {
+            Ok(handle) => {
+                self.tasks.push(handle);
+                Ok(())
+            },
+            Err(err) => {
+                self.on_session_complete(&peer_id);
+                Err(err)
+            },
+        }
+    }
+
+    async fn start_session(
+        &mut self,
+        protocol: StreamProtocol,
+        peer_id: PeerId,
+        service: TSvc::Service,
+        mut framed: CanonicalFraming<TSubstream>,
+    ) -> Result<JoinHandle<PeerId>, RpcServerError> {
+        let version = Handshake::new(&mut framed)
+            .with_timeout(self.config.handshake_timeout)
+            .perform_server_handshake()
+            .await?;
         debug!(
             target: LOG_TARGET,
             "Server negotiated RPC v{} with client node `{}`", version, peer_id
@@ -486,9 +510,7 @@ where
             })
             .map_err(|_| RpcServerError::MaximumSessionsReached)?;
 
-        self.tasks.push(handle);
-
-        Ok(())
+        Ok(handle)
     }
 }
 

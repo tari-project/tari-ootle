@@ -24,5 +24,6 @@ tari_validator_node_rpc = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
+prost = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }

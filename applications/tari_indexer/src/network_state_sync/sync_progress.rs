@@ -36,6 +36,20 @@ impl SyncProgress {
     pub fn record_state_version(&mut self, shard: Shard, state_version: StateVersion, epoch: Epoch) {
         self.last_state_versions.insert(shard, (state_version, epoch));
     }
+
+    pub fn forget_state_version(&mut self, shard: Shard) {
+        self.last_state_versions.shift_remove(&shard);
+    }
+
+    /// The shards whose recorded state version is above `max_version` or was recorded at an epoch
+    /// after `max_epoch`.
+    pub fn shards_recorded_beyond(&self, max_version: StateVersion, max_epoch: Epoch) -> Vec<Shard> {
+        self.last_state_versions
+            .iter()
+            .filter(|(_, (version, epoch))| *version > max_version || *epoch > max_epoch)
+            .map(|(shard, _)| *shard)
+            .collect()
+    }
 }
 
 /// The sync progress shared by every shard-group stream, each of which advances its own shards.

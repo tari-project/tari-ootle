@@ -52,6 +52,11 @@ impl ShardWatermarks {
         entry.confirmed_at = now;
     }
 
+    /// Withdraws `shard`'s watermark, closing the shard until a completion marker confirms it again.
+    pub fn forget(&self, shard: Shard) {
+        self.write().remove(&shard);
+    }
+
     /// Re-stamps `shard`'s watermark as confirmed now, at the version it already holds. A shard that
     /// was never confirmed stays unconfirmed: liveness alone says nothing about what it holds.
     pub fn refresh(&self, shard: Shard) {
@@ -134,6 +139,16 @@ mod tests {
         let (version, age) = watermarks.confirmed(SHARD).unwrap();
         assert_eq!(version, StateVersion::new(7));
         assert!(age < MAX_LAG);
+    }
+
+    #[test]
+    fn a_forgotten_shard_is_closed_until_confirmed_again() {
+        let watermarks = ShardWatermarks::new();
+        watermarks.confirm(SHARD, StateVersion::new(100));
+        watermarks.forget(SHARD);
+        assert_eq!(watermarks.get(SHARD, MAX_LAG), None);
+        watermarks.confirm(SHARD, StateVersion::new(7));
+        assert_eq!(watermarks.get(SHARD, MAX_LAG), Some(StateVersion::new(7)));
     }
 
     #[test]

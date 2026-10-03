@@ -85,6 +85,7 @@ use tari_ootle_transaction_validation::{
     EpochRangeValidator,
     InputLimitValidator,
     InputsAreNotVirtualValidator,
+    InstructionLimitValidator,
     PublishTemplateLimitValidator,
     SignatureLimitValidator,
     StealthTransactionLimitsValidator,
@@ -387,6 +388,7 @@ pub async fn spawn_services(
         rx_consensus_gossip_messages,
         loopback_receiver,
         message_logger.clone(),
+        epoch_manager.clone(),
     );
     let outbound_messaging = ConsensusOutboundMessaging::new(
         loopback_sender,
@@ -470,6 +472,7 @@ pub async fn spawn_services(
         state_store.clone(),
         mempool.clone(),
         consensus_handle.clone(),
+        consensus_constants.max_transaction_size_bytes,
     )
     .await?;
     handles.push(join_handle);
@@ -553,6 +556,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
+    max_transaction_size_bytes: usize,
 ) -> anyhow::Result<JoinHandle<Result<(), anyhow::Error>>> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -563,6 +567,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
             shard_store_store,
             mempool,
             consensus,
+            max_transaction_size_bytes,
         ));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
@@ -597,6 +602,7 @@ pub fn create_node_transaction_validator<TProvider: TemplateProvider>(
         // fail at execution, and unreferenced blobs would never fail at all.
         .and_then(BlobReferenceValidator::new())
         .and_then(InputLimitValidator::new())
+        .and_then(InstructionLimitValidator::new())
         // Cheap structural check — reject over-weight transactions before verifying signatures.
         .and_then(TransactionWeightValidator::new(constants.max_transaction_weight))
         // Reject transactions whose aggregate stealth-transfer work exceeds the per-transaction caps before

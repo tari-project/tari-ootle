@@ -124,7 +124,15 @@ pub fn hash_blob(blob: &Blob) -> Hash32 {
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct Blobs(#[n(0)] Vec<Blob>);
+pub struct Blobs(
+    #[n(0)]
+    #[cbor(decode_with = "decode_blobs")]
+    Vec<Blob>,
+);
+
+fn decode_blobs<'b, C>(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Vec<Blob>, minicbor::decode::Error> {
+    tari_bor::adapters::bounded_vec::decode(d, ctx, Blobs::MAX_BLOBS)
+}
 
 impl Blobs {
     /// Blobs a transaction may carry: every index must fit a [`BlobIndex`].
@@ -224,6 +232,16 @@ mod tests {
     use borsh::BorshSerialize;
 
     use super::*;
+
+    #[test]
+    fn decoding_refuses_more_blobs_than_an_index_can_address() {
+        let at_limit = Blobs::from_vec(vec![Blob::from(vec![]); Blobs::MAX_BLOBS]);
+        let decoded: Blobs = tari_bor::decode(&tari_bor::encode(&at_limit).unwrap()).unwrap();
+        assert_eq!(decoded.len(), Blobs::MAX_BLOBS);
+
+        let over_limit = Blobs::from_vec(vec![Blob::from(vec![]); Blobs::MAX_BLOBS + 1]);
+        assert!(tari_bor::decode::<Blobs>(&tari_bor::encode(&over_limit).unwrap()).is_err());
+    }
 
     #[test]
     fn hash_is_deterministic() {

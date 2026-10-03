@@ -74,6 +74,14 @@ pub const MAX_SIGNATURES_PER_TRANSACTION: usize = STEALTH_LIMITS.max_total_input
 /// leaves their count in the tens of thousands, so this bounds it directly.
 pub const MAX_TRANSACTION_INPUTS: usize = 1024;
 
+/// The most instructions a transaction may carry, fee instructions included.
+///
+/// An instruction decodes to a fixed-size value whatever its encoded size, and the smallest encode in a few
+/// bytes, so the byte cap alone lets a transaction decode to over a hundred times its size. Decoding refuses
+/// either instruction list beyond this, which bounds that cost before anything else about the transaction is
+/// known.
+pub const MAX_TRANSACTION_INSTRUCTIONS: usize = 4096;
+
 /// The TARI resource is immutable, so the fee payment every transaction makes against it is a read.
 static XTR_REQUIREMENT: InputDeclaration = InputDeclaration::new(SubstateId::Resource(TARI_TOKEN), None, false);
 

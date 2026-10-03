@@ -464,6 +464,13 @@ impl TryFrom<proto::consensus::MissingTransactionsResponse> for MissingTransacti
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::MissingTransactionsResponse) -> Result<Self, Self::Error> {
+        if value.transactions.len() > MAX_REQUESTED_TRANSACTIONS {
+            return Err(anyhow!(
+                "MissingTransactionsResponse carries {} transactions, but at most {} can be requested",
+                value.transactions.len(),
+                MAX_REQUESTED_TRANSACTIONS
+            ));
+        }
         Ok(MissingTransactionsResponse {
             request_id: value.request_id,
             epoch: Epoch(value.epoch),
@@ -1228,5 +1235,23 @@ mod tests {
     fn a_request_beyond_the_maximum_does_not_decode() {
         MissingTransactionsRequest::try_from(missing_transactions_request(MAX_REQUESTED_TRANSACTIONS + 1))
             .expect_err("A request beyond the maximum is rejected");
+    }
+
+    #[test]
+    fn a_response_with_more_transactions_than_can_be_requested_is_refused_before_decoding_them() {
+        // Bytes that are not a transaction: an error about the count shows none of them was decoded.
+        let response = proto::consensus::MissingTransactionsResponse {
+            request_id: 1,
+            epoch: 1,
+            block_id: vec![0u8; 32],
+            transactions: vec![
+                proto::transaction::Transaction {
+                    bor_encoded: vec![0xff]
+                };
+                MAX_REQUESTED_TRANSACTIONS + 1
+            ],
+        };
+        let err = MissingTransactionsResponse::try_from(response).unwrap_err();
+        assert!(err.to_string().contains("at most"), "{err}");
     }
 }

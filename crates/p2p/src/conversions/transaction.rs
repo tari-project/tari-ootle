@@ -62,6 +62,24 @@ impl TryFrom<proto::transaction::Transaction> for Transaction {
     }
 }
 
+/// Decodes a transaction a peer sent directly, refusing one whose encoding exceeds
+/// `max_transaction_size_bytes` before decoding any of it.
+///
+/// Gossip enforces the same bound in its frame limit. A direct request is framed far more generously, so the
+/// transaction byte cap has to be applied to it here, ahead of the decode.
+pub fn decode_transaction_with_max_size(
+    transaction: &proto::transaction::Transaction,
+    max_transaction_size_bytes: usize,
+) -> anyhow::Result<Transaction> {
+    let len = transaction.bor_encoded.len();
+    if len > max_transaction_size_bytes {
+        return Err(anyhow!(
+            "Transaction is {len} bytes, but the maximum allowed is {max_transaction_size_bytes}"
+        ));
+    }
+    decode_from_slice(&transaction.bor_encoded)
+}
+
 impl From<&Transaction> for proto::transaction::Transaction {
     fn from(transaction: &Transaction) -> Self {
         proto::transaction::Transaction {

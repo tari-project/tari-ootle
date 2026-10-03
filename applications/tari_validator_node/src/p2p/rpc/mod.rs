@@ -40,11 +40,13 @@ pub fn create_tari_validator_node_rpc_service<TStateStore: StateStore + Send + S
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
+    max_transaction_size_bytes: usize,
 ) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TStateStore>> {
     ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(
         epoch_manager,
         shard_store_store,
         mempool,
         consensus,
+        max_transaction_size_bytes,
     ))
 }

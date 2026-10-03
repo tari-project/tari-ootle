@@ -10,6 +10,7 @@ mod message_spec;
 mod peer_address;
 pub mod proto;
 
+pub use conversions::decode_transaction_with_max_size;
 pub use gossip::*;
 pub use message::*;
 pub use message_spec::*;

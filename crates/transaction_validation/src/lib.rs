@@ -23,6 +23,8 @@ mod epoch_range;
 pub use epoch_range::*;
 mod input_limits;
 pub use input_limits::*;
+mod instruction_limits;
+pub use instruction_limits::*;
 mod inputs_are_not_virtual;
 pub use inputs_are_not_virtual::*;
 mod network;

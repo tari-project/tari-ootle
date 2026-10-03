@@ -42,6 +42,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::{
     PeerAddress,
+    decode_transaction_with_max_size,
     proto,
     proto::rpc::{
         ConsensusState as ProtoConsensusState,
@@ -83,7 +84,7 @@ use tari_ootle_storage::{
         TransactionRecord,
     },
 };
-use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_validator_node_rpc::{STATE_SYNC_MAX_BATCH_SIZE, rpc_service::ValidatorNodeRpcService};
 use tokio::{sync::mpsc, task};
@@ -107,6 +108,7 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     state_store: TStateStore,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
+    max_transaction_size_bytes: usize,
 }
 
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
@@ -115,12 +117,14 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
         state_store: TStateStore,
         mempool: MempoolHandle,
         consensus: ConsensusHandle,
+        max_transaction_size_bytes: usize,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
             mempool,
             consensus,
+            max_transaction_size_bytes,
         }
     }
 
@@ -320,10 +324,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         request: Request<proto::rpc::SubmitTransactionRequest>,
     ) -> Result<Response<proto::rpc::SubmitTransactionResponse>, RpcStatus> {
         let request = request.into_message();
-        let transaction: Transaction = request
+        let transaction = request
             .transaction
-            .ok_or_else(|| RpcStatus::bad_request("Missing transaction"))?
-            .try_into()
+            .ok_or_else(|| RpcStatus::bad_request("Missing transaction"))?;
+        let transaction = decode_transaction_with_max_size(&transaction, self.max_transaction_size_bytes)
             .map_err(|e| RpcStatus::bad_request(format!("Malformed transaction: {}", e)))?;
 
         let transaction_id = transaction.calculate_id();

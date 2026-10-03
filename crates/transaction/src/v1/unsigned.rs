@@ -11,7 +11,22 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
 use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
 
-use crate::{Blobs, ComponentReference, Instruction, ResourceAddressRef, Signable, TransactionSignature};
+use crate::{
+    Blobs,
+    ComponentReference,
+    Instruction,
+    MAX_TRANSACTION_INSTRUCTIONS,
+    ResourceAddressRef,
+    Signable,
+    TransactionSignature,
+};
+
+pub(crate) fn decode_instructions<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<Vec<Instruction>, minicbor::decode::Error> {
+    tari_bor::adapters::bounded_vec::decode(d, ctx, MAX_TRANSACTION_INSTRUCTIONS)
+}
 
 #[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -20,8 +35,10 @@ pub struct UnsignedTransactionV1 {
     #[n(0)]
     pub network: u8,
     #[n(1)]
+    #[cbor(decode_with = "decode_instructions")]
     pub fee_instructions: Vec<Instruction>,
     #[n(2)]
+    #[cbor(decode_with = "decode_instructions")]
     pub instructions: Vec<Instruction>,
 
     /// Input objects that may be read/write

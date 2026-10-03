@@ -46,8 +46,10 @@ pub struct PrunedUnsignedTransactionV1 {
     #[n(0)]
     pub network: u8,
     #[n(1)]
+    #[cbor(decode_with = "crate::v1::unsigned::decode_instructions")]
     pub fee_instructions: Vec<Instruction>,
     #[n(2)]
+    #[cbor(decode_with = "crate::v1::unsigned::decode_instructions")]
     pub instructions: Vec<Instruction>,
     #[n(3)]
     #[cbor(with = "tari_bor::adapters::indexset_codec")]

@@ -111,11 +111,11 @@ impl ConsensusGossipService {
             .decode_from(&mut gossip.message.data.as_slice())
             .await
             .map_err(anyhow::Error::from)
-            .and_then(|(_, msg)| HotstuffMessage::try_from(msg));
+            .and_then(|(_, msg)| decode_gossiped_message(msg));
 
         // gossipsub withholds the message from the mesh until a verdict is reported. A message that
-        // does not convert to a HotstuffMessage is withheld and counted against the peer that sent it;
-        // anything well-formed is accepted so it continues to propagate.
+        // is not a well-formed broadcast is withheld and counted against the peer that sent it;
+        // anything else is accepted so it continues to propagate.
         let acceptance = if decoded.is_ok() {
             MessageAcceptance::Accept
         } else {
@@ -163,4 +163,63 @@ impl ConsensusGossipService {
 
 pub(super) fn topic() -> String {
     TOPIC_PREFIX.to_string()
+}
+
+/// Converts a message received on the consensus topic, refusing any kind consensus never broadcasts before
+/// its payload is decoded. Every other kind travels point to point, where the receiver can tell who sent it.
+fn decode_gossiped_message(msg: proto::consensus::HotStuffMessage) -> anyhow::Result<HotstuffMessage> {
+    match &msg.message {
+        Some(proto::consensus::hot_stuff_message::Message::ForeignProposalNotification(_)) => {
+            HotstuffMessage::try_from(msg)
+        },
+        Some(_) => Err(anyhow::anyhow!(
+            "Peer gossiped a consensus message that is only sent point to point"
+        )),
+        None => Err(anyhow::anyhow!("Peer gossiped an empty consensus message")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_p2p::proto::{
+        consensus::{
+            ForeignProposalNotification,
+            HotStuffMessage,
+            MissingTransactionsResponse,
+            hot_stuff_message::Message,
+        },
+        transaction::Transaction,
+    };
+
+    use super::*;
+
+    #[test]
+    fn a_foreign_proposal_notification_is_accepted() {
+        let msg = HotStuffMessage {
+            message: Some(Message::ForeignProposalNotification(ForeignProposalNotification {
+                block_id: vec![1; 32],
+                epoch: 1,
+                shard_groups: vec![],
+            })),
+        };
+        let decoded = decode_gossiped_message(msg).unwrap();
+        assert!(matches!(decoded, HotstuffMessage::ForeignProposalNotification(_)));
+    }
+
+    #[test]
+    fn a_point_to_point_message_is_refused_before_its_payload_is_decoded() {
+        // The transaction bytes do not decode, so an error about the message kind shows they were never tried.
+        let msg = HotStuffMessage {
+            message: Some(Message::RequestedTransaction(MissingTransactionsResponse {
+                request_id: 1,
+                epoch: 1,
+                block_id: vec![1; 32],
+                transactions: vec![Transaction {
+                    bor_encoded: vec![0xff; 16],
+                }],
+            })),
+        };
+        let err = decode_gossiped_message(msg).unwrap_err();
+        assert!(err.to_string().contains("point to point"), "{err}");
+    }
 }

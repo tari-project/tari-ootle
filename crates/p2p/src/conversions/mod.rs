@@ -25,3 +25,5 @@ mod consensus;
 mod network;
 mod rpc;
 mod transaction;
+
+pub use transaction::decode_transaction_with_max_size;

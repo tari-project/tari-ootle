@@ -141,6 +141,17 @@ impl HeldHistory {
     }
 }
 
+/// Rejects a bounded request for history through an epoch this node has not reached, which it cannot hold. A
+/// node lagging the caller's view of the base layer answers as unavailable so that the caller tries another.
+pub fn ensure_epoch_reached(until_epoch: Epoch, current_epoch: Epoch) -> Result<(), RpcStatus> {
+    if until_epoch > current_epoch {
+        return Err(RpcStatus::unavailable(format!(
+            "This node has not reached epoch {until_epoch} (current epoch is {current_epoch})"
+        )));
+    }
+    Ok(())
+}
+
 /// Rejects a shard that `committee_info` does not cover. Every committee holds the global shard, so it
 /// is always in range.
 fn ensure_shard_is_stored(shard: Shard, committee_info: &CommitteeInfo) -> Result<(), RpcStatus> {
@@ -563,6 +574,16 @@ mod tests {
             committed_as: committed_as.map(|(s, e)| ShardGroup::new(s, e)),
             synced_as: synced_as.map(|(s, e)| ShardGroup::new(s, e)),
         }
+    }
+
+    #[test]
+    fn it_rejects_history_through_an_epoch_not_yet_reached() {
+        assert!(ensure_epoch_reached(Epoch(4), Epoch(5)).is_ok());
+        assert!(ensure_epoch_reached(Epoch(5), Epoch(5)).is_ok());
+        let err = ensure_epoch_reached(Epoch(6), Epoch(5)).unwrap_err();
+        assert!(err.is_unavailable());
+        let err = ensure_epoch_reached(Epoch::max(), Epoch(5)).unwrap_err();
+        assert!(err.is_unavailable());
     }
 
     #[test]

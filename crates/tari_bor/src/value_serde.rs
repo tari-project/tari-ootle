@@ -19,7 +19,7 @@
 //! | `Float(f)` | number |
 //! | `Text(s)` | string |
 //! | `Array(a)` | array |
-//! | `Map(m)` where every key is `Text` | object |
+//! | `Map(m)` where every key is `Text` and none is reserved | object |
 //!
 //! Variants without a natural JSON shape are emitted using a sentinel object keyed on
 //! `"@cbor"`:
@@ -28,8 +28,11 @@
 //! |---------|------|
 //! | `Bytes(b)` | `{ "@cbor": "bytes", "hex": "ab12.." }` |
 //! | `Integer(i)` (outside i64/u64 range) | `{ "@cbor": "int", "value": "12345" }` |
-//! | `Map(m)` with non-text keys | `{ "@cbor": "map", "entries": [[k, v], ...] }` |
+//! | `Map(m)` with a non-text or reserved key | `{ "@cbor": "map", "entries": [[k, v], ...] }` |
 //! | `Tag(t, v)` | `{ "@cbor": "tag", "tag": N, "value": v }` |
+//!
+//! The reserved keys are `"@cbor"` and `"$serde_json::private::Number"`, the two first keys the
+//! decoder reads as a special form.
 //!
 //! Deserialisation accepts either the natural form (where unambiguous) or the sentinel
 //! form. Hex strings without the sentinel envelope are NOT decoded as bytes — only the
@@ -92,7 +95,7 @@ impl Serialize for Value {
                 seq.end()
             },
             Value::Map(m) => {
-                if m.iter().all(|(k, _)| matches!(k, Value::Text(_))) {
+                if m.iter().all(|(k, _)| is_native_object_key(k)) {
                     let mut map = s.serialize_map(Some(m.len()))?;
                     for (k, v) in m {
                         if let Value::Text(k_str) = k {
@@ -116,6 +119,13 @@ impl Serialize for Value {
             },
         }
     }
+}
+
+/// The decoder reads an object whose first key is reserved as a special form, and any key may come
+/// first once the JSON passes through a key-sorting map such as `serde_json::Value`. A map holding a
+/// reserved key anywhere therefore goes through the `@cbor:map` envelope.
+fn is_native_object_key(key: &Value) -> bool {
+    matches!(key, Value::Text(k) if k != SENTINEL_KEY && k != JSON_NUMBER_SENTINEL)
 }
 
 impl<'de> Deserialize<'de> for Value {
@@ -415,6 +425,57 @@ mod tests {
         let json = serde_json::to_string(&v).unwrap();
         assert!(!json.contains("@cbor"));
         assert_eq!(json_roundtrip(&v), v);
+    }
+
+    fn text_map(entries: &[(&str, Value)]) -> Value {
+        Value::Map(
+            entries
+                .iter()
+                .map(|(k, v)| (Value::Text((*k).into()), v.clone()))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn text_keyed_maps_holding_a_reserved_key_round_trip() {
+        let maps = [
+            text_map(&[
+                (SENTINEL_KEY, Value::Text("hello".into())),
+                ("symbol", Value::Text("X".into())),
+            ]),
+            text_map(&[
+                (SENTINEL_KEY, Value::Text(SENTINEL_BYTES.into())),
+                ("hex", Value::Text("c0ffee".into())),
+                ("symbol", Value::Text("X".into())),
+            ]),
+            text_map(&[
+                (SENTINEL_KEY, Value::Text(SENTINEL_MAP.into())),
+                ("entries", Value::Array(vec![])),
+            ]),
+            text_map(&[(JSON_NUMBER_SENTINEL, Value::Text("42".into()))]),
+            text_map(&[("a", Value::Integer(1)), (SENTINEL_KEY, Value::Text("hello".into()))]),
+            text_map(&[(
+                "outer",
+                text_map(&[
+                    (SENTINEL_KEY, Value::Text(SENTINEL_TAG.into())),
+                    ("tag", Value::Integer(1)),
+                ]),
+            )]),
+        ];
+        for v in maps {
+            let json = serde_json::to_string(&v).unwrap();
+            assert!(json.contains(r#""@cbor":"map""#), "{json}");
+            assert_eq!(json_roundtrip(&v), v, "{json}");
+        }
+    }
+
+    // `serde_json::Value` sorts object keys, so a reserved key that is not first in the CBOR map
+    // becomes the first key once the JSON passes through it.
+    #[test]
+    fn a_reserved_key_survives_an_intermediate_json_value() {
+        let v = text_map(&[("a", Value::Integer(1)), (SENTINEL_KEY, Value::Text("hello".into()))]);
+        let json: serde_json::Value = serde_json::to_value(&v).unwrap();
+        assert_eq!(serde_json::from_value::<Value>(json).unwrap(), v);
     }
 
     #[test]

@@ -208,6 +208,10 @@ mod tests {
             // The variants `value_serde` routes through its `@cbor` sentinel rather than a natural
             // JSON shape, where a round trip has the furthest to fall.
             Value::Map(vec![(Value::Integer(1), Value::Text("non-text key".to_string()))]),
+            Value::Map(vec![
+                (Value::Text("@cbor".to_string()), Value::Text("hello".to_string())),
+                (Value::Text("symbol".to_string()), Value::Text("X".to_string())),
+            ]),
             Value::Tag(42, Box::new(Value::Integer(7))),
             Value::Tag(42, Box::new(Value::Bytes(vec![1, 2, 3]))),
         ] {

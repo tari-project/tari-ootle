@@ -188,6 +188,7 @@ fn miscellaneous_rocksdb() {
             proposed_by: Default::default(),
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
+            transaction_merkle_root: None,
             signature: Default::default(),
             accumulated_data: Default::default(),
             metadata_hash: Default::default(),

@@ -78,6 +78,7 @@ impl LayerOneTransactionSubmitter {
                             signature: exit.signature.signature().as_bytes().to_vec(),
                         }),
                         max_epoch: exit.max_epoch.as_u64(),
+                        activation_epoch: exit.activation_epoch.as_u64(),
                         fee_per_gram: 10,
                         message: format!("Validator: Automatically submitted {proof_type} transaction").into_bytes(),
                         sidechain_deployment_key: exit

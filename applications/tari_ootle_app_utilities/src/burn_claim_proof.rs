@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn rejects_an_output_ootle_cannot_claim() {
-        let exit = ValidatorNodeExit::signed(&PrivateKey::random(&mut rand::rng()), None, VnEpoch(1));
+        let exit = ValidatorNodeExit::signed(&PrivateKey::random(&mut rand::rng()), 0, None, VnEpoch(0), VnEpoch(1));
         for (features, reason) in [
             (
                 OutputFeatures {

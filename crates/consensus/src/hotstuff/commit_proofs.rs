@@ -187,6 +187,7 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
         })?,
         state_merkle_root: *header.state_merkle_root(),
         command_merkle_root: *header.command_merkle_root(),
+        transaction_merkle_root: None,
         metadata_hash: header.calculate_metadata_hash(),
         signature,
         accumulated_data: (*header.accumulated_data()).into(),
@@ -552,6 +553,7 @@ mod tests {
             proposed_by: Default::default(),
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
+            transaction_merkle_root: None,
             signature: ValidatorBlockSignature::new(
                 CompressedPublicKey::from_canonical_bytes(block.signature().unwrap().public_nonce().as_bytes())
                     .unwrap(),

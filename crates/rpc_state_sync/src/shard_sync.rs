@@ -1171,6 +1171,7 @@ mod tests {
             proposed_by: Default::default(),
             state_merkle_root: FixedHash::from(state_merkle_root.into_array()),
             command_merkle_root: FixedHash::zero(),
+            transaction_merkle_root: None,
             signature: Default::default(),
             accumulated_data: Default::default(),
             metadata_hash: FixedHash::zero(),

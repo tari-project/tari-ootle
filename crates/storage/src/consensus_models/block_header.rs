@@ -421,6 +421,7 @@ impl BlockHeader {
                 state_merkle_root: &self.state_merkle_root,
                 command_merkle_root: &self.command_merkle_root,
                 accumulated_data: &accumulated_data,
+                transaction_merkle_root: None,
                 metadata_hash: &metadata_hash,
             }),
         };

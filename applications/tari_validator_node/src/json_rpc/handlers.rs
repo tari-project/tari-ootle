@@ -897,6 +897,7 @@ impl JsonRpcHandlers {
 
                 let signature = ValidatorNodeSignature::sign_for_registration(
                     self.keypair.secret_key(),
+                    self.config.network.as_byte(),
                     sidechain_id.as_ref(),
                     &CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes()).expect(
                         "INVARIANT VIOLATION: \
@@ -948,11 +949,18 @@ impl JsonRpcHandlers {
                     ));
                 }
 
+                let registration = self
+                    .epoch_manager
+                    .get_our_validator_node(current_epoch)
+                    .await
+                    .map_err(internal_error(answer_id.clone()))?;
                 let max_epoch = current_epoch + Epoch(3);
                 let signature = ValidatorNodeSignature::sign_for_exit(
                     self.keypair.secret_key(),
+                    self.config.network.as_byte(),
                     // TODO: sidechain support
                     None,
+                    registration.start_epoch.as_u64().into(),
                     max_epoch.as_u64().into(),
                 );
                 let l1_tx = LayerOneTransactionDef {
@@ -967,6 +975,7 @@ impl JsonRpcHandlers {
                             Scalar32Bytes::from_bytes(signature.signature().get_signature().as_bytes())
                                 .expect("INVARIANT VIOLATION: signature scalar length mismatch"),
                         ),
+                        activation_epoch: registration.start_epoch,
                         max_epoch,
                         sidechain_public_key: self.sidechain_id().map(|pk| pk.to_byte_type()),
                     },

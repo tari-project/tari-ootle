@@ -1133,7 +1133,7 @@ mod burn_output_proof_tests {
     #[test]
     fn rejects_a_burn_with_another_sidechain_feature() {
         let chain = Chain::new(None);
-        let exit = ValidatorNodeExit::signed(&PrivateKey::random(&mut rand::rng()), None, VnEpoch(1));
+        let exit = ValidatorNodeExit::signed(&PrivateKey::random(&mut rand::rng()), 0, None, VnEpoch(0), VnEpoch(1));
         let burn = l1_output(
             OutputType::Burn,
             Some(SideChainFeature {

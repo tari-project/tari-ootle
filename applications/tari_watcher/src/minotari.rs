@@ -207,6 +207,7 @@ impl MinotariNodes {
                         validator_node_public_key: exit.public_key.as_bytes().to_vec(),
                         validator_node_signature: None,
                         max_epoch: exit.max_epoch.as_u64(),
+                        activation_epoch: exit.activation_epoch.as_u64(),
                         fee_per_gram: 10,
                         message: format!("Validator: Automatically submitted {proof_type} transaction").into_bytes(),
                         // TODO: This will not work as the deployment key is a secret key.

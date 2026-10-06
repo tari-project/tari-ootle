@@ -1562,6 +1562,7 @@ mod tests {
                     proposed_by: Default::default(),
                     state_merkle_root: FixedHash::zero(),
                     command_merkle_root: FixedHash::zero(),
+                    transaction_merkle_root: None,
                     signature: Default::default(),
                     accumulated_data: tari_sidechain::ShardGroupAccumulatedData { total_exhaust_burn },
                     metadata_hash: FixedHash::zero(),

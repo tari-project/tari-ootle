@@ -65,5 +65,7 @@ pub struct ValidatorExitParams {
     pub sidechain_public_key: Option<RistrettoPublicKeyBytes>,
     pub public_key: RistrettoPublicKeyBytes,
     pub signature: SchnorrSignatureBytes,
+    /// Activation epoch of the registration being exited. The exit signature commits to it.
+    pub activation_epoch: Epoch,
     pub max_epoch: Epoch,
 }

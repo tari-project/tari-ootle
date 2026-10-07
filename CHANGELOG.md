@@ -3,6 +3,38 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.46.0](https://github.com/tari-project/tari-ootle/compare/v0.45.0...v0.46.0) (2026-10-07)
+
+Introduces protocol version V2, whose block headers commit to a transaction merkle root. Also fixes
+burn claims, bounds per-transaction and per-block state writes, and hardens networking, the indexer
+and the wallet against misbehaving peers.
+
+### ⚠️ Upgrade notes
+
+- **Protocol V2 from genesis on every network except esmeralda**, which stays on V1. Validators and
+  indexers upgrade together. (#2804)
+- **A claimed burn UTXO is minted to the claim key, not the sealer.** (#2800)
+- **Transactions may persist at most 4 MiB of state**; larger ones fail. (#2821)
+
+### Features
+
+- **Transaction merkle root in block headers** (V2), proving whether a block finalized a
+  transaction. (#2804)
+
+### Bug fixes
+
+- **consensus:** blocks bound the bytes they write per shard, so state sync can always progress. (#2821)
+- **consensus:** the leader-skip walk saturates at the top of the height range. (#2825)
+- **engine:** nested template calls share one WASM compute budget. (#2817)
+- **epoch_manager:** committees are reassigned when the current epoch's hash is corrected. (#2810)
+- **networking:** idle RPC sessions close and inbound connections are capped. (#2816)
+- **validator:** state sync batches split by encoded size; the metrics server is split from JSON-RPC. (#2812, #2815)
+- **indexer:** remaining public read routes are rate limited and checkpoint pages capped at 20. (#2823)
+- **wallet:** indexer requests are bounded so an unresponsive indexer fails over, and substates
+  whose value does not match their id are refused. (#2802, #2813)
+- **walletd:** a burn claim's revealed fee is capped at its local price, and a transfer proof's
+  change nets out the revealed amount. (#2803, #2824)
+
 ## [0.45.0](https://github.com/tari-project/tari-ootle/compare/v0.44.0...v0.45.0) (2026-10-06)
 
 Updates the minotari dependencies to 6.1.0-pre.0 and tari_crypto to 0.24.

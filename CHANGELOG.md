@@ -11,8 +11,8 @@ and the wallet against misbehaving peers.
 
 ### ⚠️ Upgrade notes
 
-- **Protocol V2 from genesis on every network except esmeralda**, which stays on V1. Validators and
-  indexers upgrade together. (#2804)
+- **Protocol V2 from genesis on every network except esmeralda**, which stays on V1 until its V2
+  activation epoch is set (TBD). Validators and indexers upgrade together. (#2804)
 - **A claimed burn UTXO is minted to the claim key, not the sealer.** (#2800)
 - **Transactions may persist at most 4 MiB of state**; larger ones fail. (#2821)
 

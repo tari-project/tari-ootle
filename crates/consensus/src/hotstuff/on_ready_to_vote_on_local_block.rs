@@ -109,7 +109,7 @@ where TConsensusSpec: ConsensusSpec
         valid_block: &ValidBlock,
         local_committee_info: &CommitteeInfo,
         proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
-        mut can_propose_epoch_end: bool,
+        can_propose_epoch_end: bool,
         // The local oracle's view of the next epoch's boundary hash, if it has observed it. Used to
         // ratify the hash carried in an EndEpoch command before voting. `None` means our oracle has
         // not yet crossed the boundary, so we cannot ratify and must abstain.
@@ -161,9 +161,6 @@ where TConsensusSpec: ConsensusSpec
             block.add_justify_qc(tx, &block_qc_id)?;
         }
         justified_block.add_justify_qc(tx, &block_qc_id)?;
-        // Even if we do not yet see the next epoch (e.g. race condition), if a majority have, we allow the
-        // epoch end to be proposed.
-        can_propose_epoch_end |= justified_block.is_epoch_end();
 
         if self.should_vote(&**tx, valid_block.block())? {
             let parent = valid_block.block().get_parent(&**tx)?;
@@ -2029,6 +2026,7 @@ mod tests {
         struct Chain {
             store: RocksDbStateStore<String>,
             tip: Block,
+            epoch: Epoch,
             _tmp: TempDir,
         }
 
@@ -2045,9 +2043,16 @@ mod tests {
                     .unwrap();
                 Self {
                     store,
+                    epoch: zero.epoch(),
                     tip: zero,
                     _tmp: tmp,
                 }
+            }
+
+            /// Blocks pushed from here on are in the next epoch.
+            fn next_epoch(&mut self) -> &mut Self {
+                self.epoch += Epoch(1);
+                self
             }
 
             fn child(&self, commands: BTreeSet<Command>) -> Block {
@@ -2068,7 +2073,7 @@ mod tests {
                     justify.calculate_id(),
                     None,
                     parent.height() + NodeHeight(1),
-                    parent.epoch(),
+                    self.epoch,
                     ShardGroup::all_shards(NUM_PRESHARDS),
                     RistrettoPublicKeyBytes::default(),
                     FixedHash::zero(),
@@ -2202,6 +2207,21 @@ mod tests {
                 .push(none(), true)
                 .push(none(), false)
                 .push(foreign_proposal(), false);
+            let reason = chain.decide(foreign_proposal());
+            assert!(reason.is_none(), "unexpected reason: {reason:?}");
+        }
+
+        #[test]
+        fn commands_after_the_previous_epochs_end_are_voted_for() {
+            let mut chain = Chain::new();
+            chain
+                .push(foreign_proposal(), true)
+                .push(end_epoch(), true)
+                .push(none(), true)
+                .push(none(), true)
+                .next_epoch()
+                .push(none(), true)
+                .push(none(), false);
             let reason = chain.decide(foreign_proposal());
             assert!(reason.is_none(), "unexpected reason: {reason:?}");
         }

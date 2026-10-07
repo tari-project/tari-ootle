@@ -162,6 +162,8 @@ pub trait StateStoreReadTransaction: Sized {
     /// Returns the stored leaf block regardless of epoch, or `NotFound` if none persisted.
     /// Used by recovery paths that don't know the consensus epoch a priori.
     fn leaf_block_get_any(&self) -> Result<LeafBlock, StorageError>;
+    /// Returns the most recently committed end-of-epoch block, or `NotFound` if none has committed.
+    fn last_committed_epoch_end_get(&self) -> Result<LeafBlock, StorageError>;
     fn highest_seen_block_get(&self, epoch: Epoch) -> Result<HighestSeenBlock, StorageError>;
     fn last_sent_new_view_get(&self, epoch: Epoch) -> Result<LastSentNewView, StorageError>;
     fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError>;

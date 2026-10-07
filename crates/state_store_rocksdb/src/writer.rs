@@ -114,6 +114,7 @@ use crate::{
             HighPcCf,
             HighTcCf,
             HighestSeenBlockCf,
+            LastCommittedEpochEndCf,
             LastExecutedCf,
             LastProposedCf,
             LastSentNewViewCf,
@@ -379,6 +380,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 },
                 OPERATION,
             )?;
+            if block.is_epoch_end() {
+                self.db()
+                    .cf(LastCommittedEpochEndCf)?
+                    .put(&ByteColumn, &block.as_leaf(), OPERATION)?;
+            }
         }
         if let Some(value) = justify_qc_id {
             block.set_justify_qc(*value);

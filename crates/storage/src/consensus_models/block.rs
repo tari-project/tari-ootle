@@ -1018,30 +1018,30 @@ impl Block {
     /// Returns true if this block, or an ancestor of it in the same epoch, is the end-of-epoch block, committed or
     /// not.
     ///
-    /// The walk ends at the first ancestor that carries commands. A block that extends the end-of-epoch block may not
-    /// carry any, so an ancestor with commands that is not the end-of-epoch block has none below it.
+    /// Only the uncommitted ancestors are walked. Every block of the epoch that is still open to a vote or a proposal
+    /// extends the committed chain, so a committed end-of-epoch block is read from the record kept at commit.
     pub fn is_epoch_end_proposed_in_chain<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
     ) -> Result<bool, StorageError> {
-        if self.is_epoch_end() {
-            return Ok(true);
-        }
         let mut ancestor = None::<Block>;
         loop {
             let block = ancestor.as_ref().unwrap_or(self);
-            if !block.commands().is_empty() || block.is_genesis() || block.parent().is_zero() {
-                return Ok(false);
+            if block.is_epoch_end() {
+                return Ok(true);
+            }
+            if block.is_committed() || block.is_genesis() || block.parent().is_zero() {
+                break;
             }
             let parent = block.get_parent(tx)?;
             if parent.epoch() != self.epoch() {
-                return Ok(false);
-            }
-            if parent.is_epoch_end() {
-                return Ok(true);
+                break;
             }
             ancestor = Some(parent);
         }
+
+        let last_committed = tx.last_committed_epoch_end_get().optional()?;
+        Ok(last_committed.is_some_and(|eoe| eoe.epoch() == self.epoch()))
     }
 
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(

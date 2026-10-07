@@ -49,6 +49,8 @@ enum BookKeepingKey {
     HighestSeenBlock,
     /// The last sent new view message
     LastSentNewView,
+    /// The last committed end-of-epoch block
+    LastCommittedEpochEnd,
 }
 
 impl BookKeepingKey {
@@ -66,6 +68,7 @@ impl BookKeepingKey {
             Self::HighTc => 9,
             Self::HighestSeenBlock => 10,
             Self::LastSentNewView => 11,
+            Self::LastCommittedEpochEnd => 12,
         }
     }
 }
@@ -178,6 +181,20 @@ pub struct LeafBlockCf;
 
 impl Cf for LeafBlockCf {
     type Key = ByteColumn<{ BookKeepingKey::LeafBlock.as_byte() }>;
+    type KeyCodec = ColumnCodec;
+    type Prefix = ();
+    type Value = LeafBlock;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        cf_names::BOOKKEEPING
+    }
+}
+
+pub struct LastCommittedEpochEndCf;
+
+impl Cf for LastCommittedEpochEndCf {
+    type Key = ByteColumn<{ BookKeepingKey::LastCommittedEpochEnd.as_byte() }>;
     type KeyCodec = ColumnCodec;
     type Prefix = ();
     type Value = LeafBlock;

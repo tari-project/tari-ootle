@@ -115,6 +115,7 @@ use crate::{
             HighPcCf,
             HighTcCf,
             HighestSeenBlockCf,
+            LastCommittedEpochEndCf,
             LastExecutedCf,
             LastProposedCf,
             LastSentNewViewCf,
@@ -589,6 +590,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
     fn leaf_block_get_any(&self) -> Result<LeafBlock, StorageError> {
         Ok(self.db().cf(LeafBlockCf)?.get_by_default_key("leaf_block_get_any")?)
+    }
+
+    fn last_committed_epoch_end_get(&self) -> Result<LeafBlock, StorageError> {
+        Ok(self
+            .db()
+            .cf(LastCommittedEpochEndCf)?
+            .get_by_default_key("last_committed_epoch_end_get")?)
     }
 
     fn highest_seen_block_get(&self, epoch: Epoch) -> Result<HighestSeenBlock, StorageError> {

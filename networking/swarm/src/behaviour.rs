@@ -34,6 +34,7 @@ use libp2p_substream as substream;
 use crate::{
     config::{Config, RelayCircuitLimits, RelayReservationLimits},
     error::TariSwarmError,
+    ip_limits,
 };
 
 pub type PeerData = ();
@@ -45,6 +46,7 @@ where TCodec: messaging::Codec + Send + Clone + 'static
     pub ping: ping::Behaviour,
     pub dcutr: dcutr::Behaviour,
     pub connection_limits: connection_limits::Behaviour,
+    pub ip_limits: Toggle<ip_limits::Behaviour>,
 
     pub relay: Toggle<relay::Behaviour>,
     pub relay_client: relay::client::Behaviour,
@@ -155,8 +157,11 @@ where
 
             // Connection limits
             let connection_limits = connection_limits::Behaviour::new(
-                ConnectionLimits::default().with_max_established_per_peer(config.max_connections_per_peer),
+                ConnectionLimits::default()
+                    .with_max_established_per_peer(config.max_connections_per_peer)
+                    .with_max_established_incoming(config.max_established_incoming),
             );
+            let ip_limits = config.max_incoming_connections_per_ip.map(ip_limits::Behaviour::new);
 
             // mDNS
             let maybe_mdns = if config.enable_mdns {
@@ -192,6 +197,7 @@ where
                 substream,
                 messaging: Toggle::from(messaging),
                 connection_limits,
+                ip_limits: Toggle::from(ip_limits),
                 mdns: Toggle::from(maybe_mdns),
                 peer_store,
                 rendezvous_server: Toggle::from(rendezvous_server),

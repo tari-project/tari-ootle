@@ -15,6 +15,12 @@ pub struct Config {
     pub messaging_protocol: String,
     pub ping: ping::Config,
     pub max_connections_per_peer: Option<u32>,
+    /// Established inbound connections accepted in total. A PeerId is free to generate, so this bounds
+    /// the inbound connections remotes can make the node hold however many identities they use.
+    pub max_established_incoming: Option<u32>,
+    /// Established inbound connections accepted from one IP address. Loopback and relayed
+    /// connections are exempt.
+    pub max_incoming_connections_per_ip: Option<u32>,
     pub enable_mdns: bool,
     pub enable_relay: bool,
     pub enable_messaging: bool,
@@ -74,6 +80,8 @@ impl Default for Config {
             messaging_protocol: "/tari/messaging/0.0.1".to_string(),
             ping: ping::Config::default(),
             max_connections_per_peer: Some(3),
+            max_established_incoming: Some(256),
+            max_incoming_connections_per_ip: Some(16),
             enable_mdns: false,
             enable_relay: false,
             enable_messaging: true,

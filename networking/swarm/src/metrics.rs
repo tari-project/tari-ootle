@@ -38,6 +38,7 @@ impl<TCodec: libp2p_messaging::Codec + Send + Clone + 'static> Recorder<TariNode
             TariNodeBehaviourEvent::Messaging(messaging_event) => self.extended_metrics.record(messaging_event),
             TariNodeBehaviourEvent::Substream(substream_event) => self.extended_metrics.record(substream_event),
             TariNodeBehaviourEvent::ConnectionLimits(_) => {}, // No events for connection limits
+            TariNodeBehaviourEvent::IpLimits(_) => {},         // No events for IP limits
             TariNodeBehaviourEvent::Mdns(_) => {},             // No metrics for mDNS events
             TariNodeBehaviourEvent::Autonat(_) => {},          // No metrics for Autonat events
         }

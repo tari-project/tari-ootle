@@ -433,6 +433,33 @@ async fn max_global_sessions() {
 }
 
 #[tokio::test]
+async fn an_idle_session_is_closed_and_its_slot_released() {
+    let idle_timeout = Duration::from_secs(2);
+    let server = TestRpcServer::spawn(
+        GreetingService::default(),
+        RpcServer::builder()
+            .with_maximum_simultaneous_sessions(2)
+            .with_idle_session_timeout(idle_timeout),
+    );
+
+    // Completed handshakes that then send nothing, holding every slot.
+    let mut idle = Vec::new();
+    for _ in 0..2 {
+        let mut client = connect(server.dial()).await.unwrap();
+        client.say_hello(SayHelloRequest::default()).await.unwrap();
+        idle.push(client);
+    }
+
+    assert_eq!(
+        refusal_reason(server.dial()).await,
+        HandshakeRejectReason::NoSessionsAvailable.to_string()
+    );
+
+    time::sleep(idle_timeout).await;
+    wait_for_session(&server).await;
+}
+
+#[tokio::test]
 async fn max_per_client_sessions() {
     let server = TestRpcServer::spawn(
         GreetingService::default(),

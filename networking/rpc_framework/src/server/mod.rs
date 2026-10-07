@@ -159,8 +159,10 @@ pub struct RpcServerBuilder {
     maximum_simultaneous_sessions: Option<usize>,
     maximum_sessions_per_client: Option<usize>,
     minimum_client_deadline: Duration,
+    maximum_client_deadline: Duration,
     minimum_keepalive_interval: Duration,
     handshake_timeout: Duration,
+    idle_session_timeout: Duration,
 }
 
 impl RpcServerBuilder {
@@ -190,6 +192,21 @@ impl RpcServerBuilder {
 
     pub fn with_minimum_client_deadline(mut self, deadline: Duration) -> Self {
         self.minimum_client_deadline = deadline;
+        self
+    }
+
+    /// Sets the longest deadline the server honours. A client asking for a longer one is served this
+    /// one, so that a single request cannot hold its session for an unbounded span.
+    pub fn with_maximum_client_deadline(mut self, deadline: Duration) -> Self {
+        self.maximum_client_deadline = deadline;
+        self
+    }
+
+    /// Sets how long a session may wait for its next request before the server closes it and
+    /// releases its slot. Only the gap between requests counts: a request being served is bounded by
+    /// its deadline instead.
+    pub fn with_idle_session_timeout(mut self, timeout: Duration) -> Self {
+        self.idle_session_timeout = timeout;
         self
     }
 
@@ -224,8 +241,10 @@ impl Default for RpcServerBuilder {
             maximum_simultaneous_sessions: None,
             maximum_sessions_per_client: None,
             minimum_client_deadline: Duration::from_secs(1),
+            maximum_client_deadline: Duration::from_secs(10 * 60),
             minimum_keepalive_interval: crate::DEFAULT_MINIMUM_KEEPALIVE_INTERVAL,
             handshake_timeout: Duration::from_secs(15),
+            idle_session_timeout: Duration::from_secs(2 * 60),
         }
     }
 }
@@ -570,7 +589,19 @@ where
     }
 
     async fn run(&mut self) -> Result<(), RpcServerError> {
-        while let Some(result) = self.framed.next().await {
+        loop {
+            let Ok(next) = time::timeout(self.config.idle_session_timeout, self.framed.next()).await else {
+                debug!(
+                    target: LOG_TARGET,
+                    "({}) Closing session after {:.0?} without a request",
+                    self.logging_context_string,
+                    self.config.idle_session_timeout
+                );
+                break;
+            };
+            let Some(result) = next else {
+                break;
+            };
             match result {
                 Ok(frame) => {
                     #[cfg(feature = "metrics")]
@@ -633,7 +664,10 @@ where
 
         let request_id = decoded_msg.request_id;
         let method = RpcMethod::from(decoded_msg.method);
-        let deadline = Duration::from_secs(decoded_msg.deadline);
+        let deadline = cmp::min(
+            Duration::from_secs(decoded_msg.deadline),
+            self.config.maximum_client_deadline,
+        );
 
         // The client side deadline MUST be greater or equal to the minimum_client_deadline
         if deadline < self.config.minimum_client_deadline {

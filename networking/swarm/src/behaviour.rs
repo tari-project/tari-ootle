@@ -159,7 +159,8 @@ where
             let connection_limits = connection_limits::Behaviour::new(
                 ConnectionLimits::default()
                     .with_max_established_per_peer(config.max_connections_per_peer)
-                    .with_max_established_incoming(config.max_established_incoming),
+                    .with_max_established_incoming(config.max_established_incoming)
+                    .with_max_pending_incoming(config.max_pending_incoming),
             );
             let ip_limits = config.max_incoming_connections_per_ip.map(ip_limits::Behaviour::new);
 

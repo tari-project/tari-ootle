@@ -18,7 +18,10 @@ pub struct Config {
     /// Established inbound connections accepted in total. A PeerId is free to generate, so this bounds
     /// the inbound connections remotes can make the node hold however many identities they use.
     pub max_established_incoming: Option<u32>,
-    /// Established inbound connections accepted from one IP address. Loopback and relayed
+    /// Inbound connections still completing their handshake. Bounds the work a burst of dials can
+    /// make the node do before any of them is established.
+    pub max_pending_incoming: Option<u32>,
+    /// Inbound connections, pending or established, accepted from one IP address. Loopback and relayed
     /// connections are exempt.
     pub max_incoming_connections_per_ip: Option<u32>,
     pub enable_mdns: bool,
@@ -81,6 +84,7 @@ impl Default for Config {
             ping: ping::Config::default(),
             max_connections_per_peer: Some(3),
             max_established_incoming: Some(256),
+            max_pending_incoming: Some(64),
             max_incoming_connections_per_ip: Some(16),
             enable_mdns: false,
             enable_relay: false,

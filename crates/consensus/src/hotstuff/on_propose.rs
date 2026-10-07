@@ -380,13 +380,7 @@ where TConsensusSpec: ConsensusSpec
         // EndEpoch there binds nothing.
         let is_end_of_epoch_in_chain = justify_block.is_epoch_end_proposed_in_chain(tx)?;
 
-        let should_not_propose_commands = is_end_of_epoch_in_chain || end_epoch_hash.is_some() || {
-            // TODO: prevent proposers from proposing transactions after an epoch end command is in the justified
-            // pending chain, regardless of whether we see the end of epoch or not (race condition).
-            // If the last justified/parent block is an epoch end block, we dont propose commands since the block will
-            // be rejected
-            justify_block.is_epoch_end()
-        };
+        let should_not_propose_commands = is_end_of_epoch_in_chain || end_epoch_hash.is_some();
 
         let mut total_leader_fee = 0u64;
         // The block the candidate extends from, and the point at which every speculative state and pool read for

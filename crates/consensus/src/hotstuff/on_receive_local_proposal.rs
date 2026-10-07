@@ -86,7 +86,6 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
 struct PendingEndOfEpoch {
     eoe_block: Block,
     commit_qc: ProposalCertificate,
-    next_genesis_state_merkle_root: FixedHash,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec> {
@@ -476,12 +475,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // THere should only be one committed block with end of epoch
         if let Some(eoe_block) = block_decision.take_end_of_epoch_block() {
             // The QC of the block we're processing is the QC that committed the EOE via the
-            // 3-chain rule. Use it as the commit proof and the tip's state merkle root as the
-            // genesis state.
+            // 3-chain rule. Use it as the commit proof.
             let commit_qc = valid_block.justify().clone();
-            let next_genesis_state_merkle_root = *valid_block.block().state_merkle_root();
-            self.process_end_of_epoch(eoe_block, commit_qc, next_genesis_state_merkle_root)
-                .await?;
+            self.process_end_of_epoch(eoe_block, commit_qc).await?;
         }
 
         self.propose_foreign_proposals(local_committee_info, block_decision.commit_blocks);
@@ -499,7 +495,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         &mut self,
         eoe_block: Block,
         commit_qc: ProposalCertificate,
-        next_genesis_state_merkle_root: FixedHash,
     ) -> Result<(), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "process-end-of-epoch");
         let prev_epoch = eoe_block.epoch();
@@ -548,11 +543,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                  Deferring next-epoch genesis until oracle catches up.",
                 eoe_block.id()
             );
-            self.pending_end_of_epoch = Some(PendingEndOfEpoch {
-                eoe_block,
-                commit_qc,
-                next_genesis_state_merkle_root,
-            });
+            self.pending_end_of_epoch = Some(PendingEndOfEpoch { eoe_block, commit_qc });
             return Ok(());
         }
 
@@ -599,10 +590,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
                 if let Some(next_shard_group) = next_shard_group.filter(|_| !shard_group_changed) {
                     let next_protocol_version = ProtocolVersion::at(network, next_epoch);
-                    // The genesis root is formed under the next epoch's protocol version, which differs from the
+                    // The next epoch opens on the end-of-epoch block's state, which is the state the checkpoint
+                    // holds. Its root is formed under the next epoch's protocol version, which differs from the
                     // end-of-epoch block's at an activation.
                     let genesis_state_merkle_root = if next_protocol_version == eoe_block.header().protocol_version() {
-                        next_genesis_state_merkle_root
+                        *eoe_block.state_merkle_root()
                     } else {
                         let root = checkpoint
                             .compute_state_merkle_root_as(next_protocol_version)
@@ -668,20 +660,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     /// Seed pending state from disk so a worker that restarts after a deferred EOE can resume
     /// once the local oracle catches up. `commit_qc` must be the QC that committed `eoe_block`
-    /// (typically `eoe_block.get_commit_qc(tx)`); `next_genesis_state_merkle_root` is the state
-    /// root to stamp into the next epoch's genesis (the EOE's own root suffices when no state
-    /// changes follow it).
-    pub fn set_pending_end_of_epoch(
-        &mut self,
-        eoe_block: Block,
-        commit_qc: ProposalCertificate,
-        next_genesis_state_merkle_root: FixedHash,
-    ) {
-        self.pending_end_of_epoch = Some(PendingEndOfEpoch {
-            eoe_block,
-            commit_qc,
-            next_genesis_state_merkle_root,
-        });
+    /// (typically `eoe_block.get_commit_qc(tx)`).
+    pub fn set_pending_end_of_epoch(&mut self, eoe_block: Block, commit_qc: ProposalCertificate) {
+        self.pending_end_of_epoch = Some(PendingEndOfEpoch { eoe_block, commit_qc });
     }
 
     pub fn has_pending_end_of_epoch(&self) -> bool {
@@ -702,12 +683,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             "▶️ Attempting deferred end-of-epoch processing for EOE block {}",
             pending.eoe_block.id()
         );
-        self.process_end_of_epoch(
-            pending.eoe_block,
-            pending.commit_qc,
-            pending.next_genesis_state_merkle_root,
-        )
-        .await?;
+        self.process_end_of_epoch(pending.eoe_block, pending.commit_qc).await?;
         Ok(true)
     }
 

@@ -76,6 +76,8 @@ pub enum NoVoteReason {
     NotEndOfEpoch,
     #[error("The node is not at the end of the epoch and other commands are present")]
     EndOfEpochWithOtherCommands,
+    #[error("The proposer included commands in a block that extends the end-of-epoch block")]
+    CommandsAfterEndOfEpoch,
     #[error("End-of-epoch next-epoch hash mismatch. Local oracle: {local}, proposed: {proposed}")]
     EndOfEpochHashMismatch { local: FixedHash, proposed: FixedHash },
     #[error(
@@ -153,6 +155,7 @@ impl NoVoteReason {
             Self::ForeignProposalProcessingFailed => "ForeignProposalProcessingFailed",
             Self::NotEndOfEpoch => "NotEndOfEpoch",
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
+            Self::CommandsAfterEndOfEpoch => "CommandsAfterEndOfEpoch",
             Self::EndOfEpochHashMismatch { .. } => "EndOfEpochHashMismatch",
             Self::EndOfEpochHashNotObserved => "EndOfEpochHashNotObserved",
             Self::EndOfEpochBurnRateMissing => "EndOfEpochBurnRateMissing",

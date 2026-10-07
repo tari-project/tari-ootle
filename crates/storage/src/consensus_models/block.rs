@@ -1015,11 +1015,33 @@ impl Block {
         Ok(false)
     }
 
+    /// Returns true if this block, or an ancestor of it in the same epoch, is the end-of-epoch block, committed or
+    /// not.
+    ///
+    /// The walk ends at the first ancestor that carries commands. A block that extends the end-of-epoch block may not
+    /// carry any, so an ancestor with commands that is not the end-of-epoch block has none below it.
     pub fn is_epoch_end_proposed_in_chain<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
     ) -> Result<bool, StorageError> {
-        tx.is_block_in_end_of_epoch_chain(self.id())
+        if self.is_epoch_end() {
+            return Ok(true);
+        }
+        let mut ancestor = None::<Block>;
+        loop {
+            let block = ancestor.as_ref().unwrap_or(self);
+            if !block.commands().is_empty() || block.is_genesis() || block.parent().is_zero() {
+                return Ok(false);
+            }
+            let parent = block.get_parent(tx)?;
+            if parent.epoch() != self.epoch() {
+                return Ok(false);
+            }
+            if parent.is_epoch_end() {
+                return Ok(true);
+            }
+            ancestor = Some(parent);
+        }
     }
 
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(

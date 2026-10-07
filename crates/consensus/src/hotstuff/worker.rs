@@ -769,8 +769,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             loop {
                 if block.is_epoch_end() && block.is_committed() {
                     let commit_qc = block.get_commit_qc(tx)?;
-                    let state_root = *block.state_merkle_root();
-                    return Ok(Some((block, commit_qc, state_root)));
+                    return Ok(Some((block, commit_qc)));
                 }
                 if block.height().is_zero() || block.parent().is_zero() {
                     return Ok(None);
@@ -779,14 +778,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             }
         })?;
 
-        if let Some((eoe_block, commit_qc, state_root)) = pending {
+        if let Some((eoe_block, commit_qc)) = pending {
             info!(
                 target: LOG_TARGET,
                 "🔄 Detected unprocessed EOE block {} on startup. Seeding deferred end-of-epoch state.",
                 eoe_block.id()
             );
             self.on_receive_local_proposal
-                .set_pending_end_of_epoch(eoe_block, commit_qc, state_root);
+                .set_pending_end_of_epoch(eoe_block, commit_qc);
             // Attempt to complete immediately. If the oracle is still behind, this will re-defer
             // and a later EpochChanged event will retry.
             let _ = self.on_receive_local_proposal.try_resume_pending_end_of_epoch().await?;

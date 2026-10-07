@@ -647,19 +647,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(high_tc)
     }
 
-    fn is_block_in_end_of_epoch_chain(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        const OPERATION: &str = "is_block_in_end_of_epoch_chain";
-        let block_cf = self.db().cf(BlockCf)?;
-        let chain = self.get_pending_chain_ordered(block_id)?;
-        for block in chain {
-            let block = block_cf.get(&block, OPERATION)?;
-            if block.is_epoch_end() {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,

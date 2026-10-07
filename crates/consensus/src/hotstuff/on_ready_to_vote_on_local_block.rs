@@ -13,6 +13,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
         Block,
         BlockDiff,
@@ -247,6 +248,12 @@ where TConsensusSpec: ConsensusSpec
         expected_next_epoch_hash: Option<FixedHash>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
+        if let Some(reason) = check_no_commands_after_epoch_end(tx, parent, block)? {
+            warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (block {block})");
+            proposed_block_change_set.set_no_vote(reason);
+            return Ok(());
+        }
+
         // Reject (no-vote) a block whose total transaction execution weight exceeds the network cap,
         // before executing any of its commands. This bounds how long a replica can be made to spend
         // executing a single block, so a misbehaving leader cannot push replicas past the block time by
@@ -1843,6 +1850,21 @@ fn exceeds_block_validation_weight(
     num_transaction_commands > 1 && block_execution_weight > max_validation_weight
 }
 
+/// Consensus rule: the end-of-epoch block is the last block of its epoch to carry commands. The epoch checkpoint and
+/// the next epoch's genesis are both built from its state, so the blocks that extend it, up to and including the one
+/// that commits it, must leave that state as it is. This holds whether or not the end-of-epoch block has committed: a
+/// node whose next-epoch processing is deferred keeps voting in the epoch after the commit.
+fn check_no_commands_after_epoch_end<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    parent: &Block,
+    block: &Block,
+) -> Result<Option<NoVoteReason>, StorageError> {
+    if block.commands().is_empty() || !parent.is_epoch_end_proposed_in_chain(tx)? {
+        return Ok(None);
+    }
+    Ok(Some(NoVoteReason::CommandsAfterEndOfEpoch))
+}
+
 /// Consensus rule: a leader may only move a transaction out of its current stage once the shard groups involved in it
 /// are ready for that, which is the same condition under which an honest leader proposes `command`. Evidence equality
 /// with the atom cannot stand in for this, because every replica derives the same incomplete evidence.
@@ -1984,6 +2006,211 @@ mod tests {
         #[test]
         fn all_accept_after_every_shard_group_accepted_is_voted_for() {
             let reason = check_ready_to_leave_stage(&local_accepted_record(true), &local_block(), "AllAccept");
+            assert!(reason.is_none(), "unexpected reason: {reason:?}");
+        }
+    }
+
+    mod check_no_commands_after_epoch_end {
+        use std::collections::BTreeSet;
+
+        use tari_consensus_types::{BlockId, ProposalCertificate, ShardGroupAccumulatedData};
+        use tari_crypto::tari_utilities::epoch_time::EpochTime;
+        use tari_ootle_common_types::{ExtraData, NodeHeight, NumPreshards, ProtocolVersion};
+        use tari_ootle_storage::consensus_models::{BlockHeader, EndEpochAtom};
+        use tari_ootle_transaction::Network;
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+        use tempfile::TempDir;
+
+        use super::*;
+
+        const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+        const NETWORK: Network = Network::LocalNet;
+
+        struct Chain {
+            store: RocksDbStateStore<String>,
+            tip: Block,
+            _tmp: TempDir,
+        }
+
+        impl Chain {
+            fn new() -> Self {
+                let tmp = tempfile::tempdir().unwrap();
+                let store = RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap();
+                let zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+                store
+                    .with_write_tx(|tx| {
+                        zero.justify().save(tx)?;
+                        zero.insert(tx)
+                    })
+                    .unwrap();
+                Self {
+                    store,
+                    tip: zero,
+                    _tmp: tmp,
+                }
+            }
+
+            fn child(&self, commands: BTreeSet<Command>) -> Block {
+                let parent = &self.tip;
+                let justify = ProposalCertificate::new(
+                    *parent.id().hash(),
+                    *parent.id(),
+                    parent.height(),
+                    parent.epoch(),
+                    ShardGroup::all_shards(NUM_PRESHARDS),
+                    vec![],
+                    QuorumDecision::Accept,
+                );
+                let header = BlockHeader::create_unsigned(
+                    NETWORK,
+                    ProtocolVersion::V0,
+                    *parent.id(),
+                    justify.calculate_id(),
+                    None,
+                    parent.height() + NodeHeight(1),
+                    parent.epoch(),
+                    ShardGroup::all_shards(NUM_PRESHARDS),
+                    RistrettoPublicKeyBytes::default(),
+                    FixedHash::zero(),
+                    &commands,
+                    0,
+                    EpochTime::now().as_u64(),
+                    FixedHash::zero(),
+                    ShardGroupAccumulatedData::default(),
+                    ExtraData::new(),
+                )
+                .unwrap();
+                Block::new(header, justify, commands, None)
+            }
+
+            /// Appends a block carrying `commands` to the tip, committing it if `commit` is set.
+            fn push(&mut self, commands: BTreeSet<Command>, commit: bool) -> &mut Self {
+                let block = self.child(commands);
+                self.store
+                    .with_write_tx(|tx| {
+                        block.justify().save(tx)?;
+                        block.insert(tx)?;
+                        if commit {
+                            tx.blocks_set_qcs(block.id(), Some(&block.justify().calculate_id()), None)?;
+                        }
+                        Ok::<_, StorageError>(())
+                    })
+                    .unwrap();
+                self.tip = block;
+                self
+            }
+
+            /// The rule's decision on a candidate that extends the tip and carries `commands`.
+            fn decide(&self, commands: BTreeSet<Command>) -> Option<NoVoteReason> {
+                let candidate = self.child(commands);
+                self.store
+                    .with_read_tx(|tx| check_no_commands_after_epoch_end(tx, &self.tip, &candidate))
+                    .unwrap()
+            }
+        }
+
+        fn none() -> BTreeSet<Command> {
+            BTreeSet::new()
+        }
+
+        fn foreign_proposal() -> BTreeSet<Command> {
+            BTreeSet::from([Command::ForeignProposal(ForeignProposalAtom {
+                block_id: BlockId::new(FixedHash::new([7; 32])),
+                shard_group: ShardGroup::new(0, 127),
+            })])
+        }
+
+        fn end_epoch() -> BTreeSet<Command> {
+            BTreeSet::from([Command::EndEpoch(EndEpochAtom::new(FixedHash::new([9; 32])))])
+        }
+
+        fn assert_rejected(reason: Option<NoVoteReason>) {
+            assert!(
+                matches!(reason, Some(NoVoteReason::CommandsAfterEndOfEpoch)),
+                "unexpected reason: {reason:?}"
+            );
+        }
+
+        #[test]
+        fn commands_extending_the_epoch_end_are_not_voted_for() {
+            let mut chain = Chain::new();
+            chain.push(foreign_proposal(), true).push(end_epoch(), false);
+            assert_rejected(chain.decide(foreign_proposal()));
+        }
+
+        #[test]
+        fn commands_extending_a_pending_epoch_end_are_not_voted_for() {
+            let mut chain = Chain::new();
+            chain
+                .push(foreign_proposal(), true)
+                .push(end_epoch(), false)
+                .push(none(), false)
+                .push(none(), false);
+            assert_rejected(chain.decide(foreign_proposal()));
+        }
+
+        #[test]
+        fn commands_in_the_block_that_commits_the_epoch_end_are_not_voted_for() {
+            let mut chain = Chain::new();
+            chain
+                .push(foreign_proposal(), true)
+                .push(end_epoch(), true)
+                .push(none(), false)
+                .push(none(), false);
+            assert_rejected(chain.decide(foreign_proposal()));
+        }
+
+        #[test]
+        fn commands_after_the_epoch_end_and_its_successors_commit_are_not_voted_for() {
+            let mut chain = Chain::new();
+            chain
+                .push(foreign_proposal(), true)
+                .push(end_epoch(), true)
+                .push(none(), true)
+                .push(none(), true)
+                .push(none(), false)
+                .push(none(), false);
+            assert_rejected(chain.decide(foreign_proposal()));
+        }
+
+        #[test]
+        fn a_second_epoch_end_is_not_voted_for() {
+            let mut chain = Chain::new();
+            chain
+                .push(foreign_proposal(), true)
+                .push(end_epoch(), true)
+                .push(none(), false);
+            assert_rejected(chain.decide(end_epoch()));
+        }
+
+        #[test]
+        fn an_empty_block_extending_the_epoch_end_is_voted_for() {
+            let mut chain = Chain::new();
+            chain
+                .push(foreign_proposal(), true)
+                .push(end_epoch(), true)
+                .push(none(), false);
+            let reason = chain.decide(none());
+            assert!(reason.is_none(), "unexpected reason: {reason:?}");
+        }
+
+        #[test]
+        fn commands_without_an_epoch_end_are_voted_for() {
+            let mut chain = Chain::new();
+            chain
+                .push(foreign_proposal(), true)
+                .push(none(), true)
+                .push(none(), false)
+                .push(foreign_proposal(), false);
+            let reason = chain.decide(foreign_proposal());
+            assert!(reason.is_none(), "unexpected reason: {reason:?}");
+        }
+
+        #[test]
+        fn the_epoch_end_itself_is_voted_for() {
+            let mut chain = Chain::new();
+            chain.push(foreign_proposal(), true).push(none(), false);
+            let reason = chain.decide(end_epoch());
             assert!(reason.is_none(), "unexpected reason: {reason:?}");
         }
     }

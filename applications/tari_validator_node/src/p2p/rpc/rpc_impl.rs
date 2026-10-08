@@ -190,37 +190,48 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
         else {
             return Ok(());
         };
-
-        let shard_group = proof_shard_group(&commit_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-        // The anchor cannot speak for this substate - its shard is outside the group the anchor
-        // commits, or has nothing committed. Answer unproven rather than not at all.
-        let Some(value_proof) = SubstateProofGenerator::new(
-            tx,
-            shard_group,
-            num_preshards,
-            commit_proof
-                .protocol_version()
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
-        )
-        .and_then(|mut generator| generator.generate(&substate.to_versioned_substate_id()))
-        .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-        else {
-            return Ok(());
-        };
-
-        let down_proof = encode_down_proof(tx, num_preshards, substate, &value_proof)
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-        if substate.is_destroyed() && down_proof.is_none() {
-            return Ok(());
-        }
-
-        resp.commit_proof = commit_proof.to_bytes();
-        resp.substate_value_proof =
-            tari_bor::serde_codec::to_vec(&value_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-        resp.proof_epoch = substate.created().at_epoch.as_u64();
-        resp.substate_down_proof = down_proof.unwrap_or_default();
-        Ok(())
+        attach_substate_proof_at(tx, num_preshards, &commit_proof, substate, resp)
     }
+}
+
+/// Attaches the proof of `substate` anchored at `commit_proof` to `resp`, or leaves every proof field empty when the
+/// anchor cannot speak for the substate or the substate is down without a recorded down proof.
+fn attach_substate_proof_at<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    num_preshards: NumPreshards,
+    commit_proof: &CommittedBlockProof,
+    substate: &SubstateRecord,
+    resp: &mut GetSubstateResponse,
+) -> Result<(), RpcStatus> {
+    let shard_group = proof_shard_group(commit_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+    // The anchor cannot speak for this substate - its shard is outside the group the anchor
+    // commits, or has nothing committed. Answer unproven rather than not at all.
+    let Some(value_proof) = SubstateProofGenerator::new(
+        tx,
+        shard_group,
+        num_preshards,
+        commit_proof
+            .protocol_version()
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
+    )
+    .and_then(|mut generator| generator.generate(&substate.to_versioned_substate_id()))
+    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
+    else {
+        return Ok(());
+    };
+
+    let down_proof = encode_down_proof(tx, num_preshards, substate, &value_proof)
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+    if substate.is_destroyed() && down_proof.is_none() {
+        return Ok(());
+    }
+
+    resp.commit_proof = commit_proof.to_bytes();
+    resp.substate_value_proof =
+        tari_bor::serde_codec::to_vec(&value_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+    resp.proof_epoch = substate.created().at_epoch.as_u64();
+    resp.substate_down_proof = down_proof.unwrap_or_default();
+    Ok(())
 }
 
 /// The encoded down proof of `substate`, completed with `exclusion`, its exclusion proof under the root the response
@@ -1006,6 +1017,91 @@ mod tests {
 
     fn exclusion() -> SubstateValueProof {
         SubstateValueProof::new(TreeHash::new([5; 32]), 2, proof_ext(5), proof_ext(6))
+    }
+
+    /// An anchor for `shard`'s group of one. The responder serves its own state under the anchor it is given, so the
+    /// root the header names does not matter here.
+    fn anchor_of(shard: tari_ootle_common_types::shard::Shard) -> CommittedBlockProof {
+        let protocol_version = tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(1));
+        CommittedBlockProof::new(tari_sidechain::SidechainBlockCommitProof {
+            header: tari_sidechain::SidechainBlockHeader {
+                network: Network::LocalNet.as_byte(),
+                protocol_version: protocol_version.as_u32(),
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 4,
+                epoch: 1,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: shard.as_u32(),
+                    end_inclusive: shard.as_u32(),
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: None,
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: Default::default(),
+            },
+            proof_elements: vec![],
+        })
+    }
+
+    /// An exclusion proof alone does not show a version ever existed, so a down substate with no recorded down proof
+    /// is answered with no proof at all, while one with a record carries all three.
+    #[test]
+    fn a_down_substate_without_a_recorded_down_proof_is_served_unproven() {
+        use tari_ootle_storage::ShardScopedTreeStoreWriter;
+        use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let down = substate(true);
+        let id = down.to_versioned_substate_id();
+        let shard = id.to_shard(NUM_PRESHARDS);
+        store
+            .with_write_tx(|tx| {
+                let mut tree_store = ShardScopedTreeStoreWriter::new(tx, shard);
+                SpreadPrefixStateTree::new(&mut tree_store)
+                    .batch_put_substate_changes(None, 1, vec![SubstateTreeChange::Up {
+                        id: id.clone(),
+                        value_hash: *down.state_hash(),
+                    }])
+                    .unwrap();
+                SpreadPrefixStateTree::new(&mut tree_store)
+                    .batch_put_substate_changes(Some(1), 2, vec![SubstateTreeChange::Down { id: id.clone() }])
+                    .unwrap();
+                tx.state_tree_shard_versions_set(shard, 2)
+            })
+            .unwrap();
+
+        {
+            let tx = store.create_read_tx().unwrap();
+            let mut resp = GetSubstateResponse::default();
+            attach_substate_proof_at(&tx, NUM_PRESHARDS, &anchor_of(shard), &down, &mut resp).unwrap();
+            assert!(resp.commit_proof.is_empty());
+            assert!(resp.substate_value_proof.is_empty());
+            assert!(resp.substate_down_proof.is_empty());
+        }
+
+        let record = SubstateDownProofRecord {
+            state_version: 1,
+            value_hash: TreeHash::new([1; 32]),
+            leaf_proof: proof_ext(1),
+            shard_root: TreeHash::new([2; 32]),
+            shard_root_proof: proof_ext(2),
+            commit_proof: vec![9, 9, 9],
+        };
+        store
+            .with_write_tx(|tx| tx.substate_down_proofs_insert(shard, &id, &record))
+            .unwrap();
+        let tx = store.create_read_tx().unwrap();
+        let mut resp = GetSubstateResponse::default();
+        attach_substate_proof_at(&tx, NUM_PRESHARDS, &anchor_of(shard), &down, &mut resp).unwrap();
+        assert!(!resp.commit_proof.is_empty());
+        assert!(!resp.substate_value_proof.is_empty());
+        assert!(!resp.substate_down_proof.is_empty());
     }
 
     #[test]

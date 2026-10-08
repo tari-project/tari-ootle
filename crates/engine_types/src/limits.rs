@@ -109,7 +109,9 @@ pub const MIN_MAX_COMPUTE_TRANSACTIONS_PER_BLOCK: u64 = 18;
 /// [`template_compile_points`] for a binary at [`EngineLimits::max_template_binary_size_bytes`] comes to ~2.34e9,
 /// and that limit is chosen so the remainder still covers a fee intent (see
 /// `the_largest_publishable_binary_leaves_room_to_source_a_fee`). So a max-size publish *can* reach this cap, by
-/// construction — it is what makes the publish limit binding — whereas every other flow stays under it on the
+/// construction — it is what makes the publish limit binding. Template return values are the other flow this cap
+/// bounds: [`return_value_points`] is bounded per call, not per transaction, and about 18 maximal item-heavy
+/// returns reach the cap, failing the transaction out of compute. Every remaining flow stays under it on the
 /// structural caps alone.
 pub const MAX_NATIVE_POINTS_PER_TRANSACTION: u64 = 2_400_000_000;
 

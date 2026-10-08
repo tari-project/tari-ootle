@@ -15,6 +15,13 @@
 //! points-per-millisecond rate `native_points_calibrate` derives, and by the same method, so the
 //! figures are comparable.
 //!
+//! `validate_return_value` is left out: it needs a running transaction's working state, and its
+//! work is one map or store-cache lookup per bucket, proof and substate the value references, each
+//! looked up twice (once in `WasmProcess::invoke`, once in the `TransactionProcessor` call that ran
+//! it).
+//! Every such reference is a tag and its payload, at least two items, so the per-item price covers
+//! those lookups with the decode work they come with.
+//!
 //! Run with `--release`; a debug build measures nothing useful.
 
 use std::{hint::black_box, time::Instant};

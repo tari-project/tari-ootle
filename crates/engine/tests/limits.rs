@@ -330,10 +330,11 @@ fn a_nested_return_value_is_charged_per_item() {
     );
 }
 
-/// The charge is made before the value is decoded, so a transaction that cannot afford it is refused
-/// without the engine doing the work. Run in the fee intent, whose flat credit is the allowance.
+/// A return value priced above what the transaction can cover fails it out of compute, with the
+/// return-value charge as the points it required. Run in the fee intent, whose flat credit is the
+/// allowance.
 #[test]
-fn an_unaffordable_return_value_is_refused_before_it_is_decoded() {
+fn an_unaffordable_return_value_fails_out_of_compute() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template = test.get_template_address(TEMPLATE_NAME);
     let mut fee_table = FeeTable::zero_rated();

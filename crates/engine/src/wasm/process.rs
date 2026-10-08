@@ -310,7 +310,6 @@ impl WasmProcess {
     /// cost that follows its CBOR item count, so the charge is drawn from the transaction's compute
     /// allowance first: a transaction that cannot cover it fails having decoded nothing.
     fn decode_return_value(&self, store: &Store, raw: &[u8]) -> Result<IndexedValue, WasmExecutionError> {
-        let span = abi_metrics::Span::start();
         // An empty return decodes to the empty value without any per-item work.
         let items = if raw.is_empty() {
             0
@@ -321,6 +320,7 @@ impl WasmProcess {
             .state()?
             .interface()
             .charge_return_value(raw.len() as u64, items)?;
+        let span = abi_metrics::Span::start();
         let value = IndexedValue::from_raw(raw)?;
         abi_metrics::record_return_decode(raw.len(), span.finish());
         Ok(value)

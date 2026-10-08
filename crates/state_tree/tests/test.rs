@@ -658,9 +658,9 @@ fn v3_exclusion_proof_against_another_shards_root_is_rejected() {
     assert_exclusion_proof_against_another_shards_root_is_rejected(ProtocolVersion::V3);
 }
 
-/// Under V1 the shard-group root is a set of leaves that do not name their shard, so a sibling shard's genuine root
-/// proves the absence of a substate that is live in its own shard. Esmeralda verifies such roots until it activates
-/// V3; the indexer's two-root Down proof and its f+1 rule for unproven Downs are what stand in for the binding there.
+/// Roots committed before V3 do not bind a leaf to its shard, so a sibling shard's genuine root proves the absence of
+/// a substate that is live in its own shard. Such exclusion proofs verify, alone or as the exclusion half of a down
+/// proof, under every root committed before V3 activates.
 #[test]
 fn v1_exclusion_proof_against_another_shards_root_verifies() {
     use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};

@@ -373,9 +373,10 @@ impl RootProofTree {
 ///
 /// - [`ProtocolVersion::V0`] and [`ProtocolVersion::V1`]: the leaf is [`shard_state_leaf`], keyed by its own hash. The
 ///   tree is a set of leaves, so a proof against such a root shows only that a leaf is one of the group's.
-/// - [`ProtocolVersion::V2`]: the leaf is keyed by the shard, so a proof names the shard a leaf belongs to. A shard
-///   with no state - the empty-tree root at state version 0 - has no leaf, and the absence of its key proves its state.
-///   This keeps the tree, and the cost of building it for every block, proportional to the shards that hold state.
+/// - [`ProtocolVersion::V2`] and [`ProtocolVersion::V3`]: the leaf is keyed by the shard, so a proof names the shard a
+///   leaf belongs to. A shard with no state - the empty-tree root at state version 0 - has no leaf, and the absence of
+///   its key proves its state. This keeps the tree, and the cost of building it for every block, proportional to the
+///   shards that hold state. Under V3 the leaf value commits to the shard as well (see [`shard_state_leaf`]).
 #[derive(Debug, Clone)]
 pub struct ShardGroupLeaf {
     pub key: LeafKey,
@@ -384,7 +385,7 @@ pub struct ShardGroupLeaf {
 
 impl ShardGroupLeaf {
     pub fn new(protocol_version: ProtocolVersion, shard: Shard, shard_root: &TreeHash, state_version: Version) -> Self {
-        let value = shard_state_leaf(protocol_version, shard_root, state_version);
+        let value = shard_state_leaf(protocol_version, shard, shard_root, state_version);
         match protocol_version {
             ProtocolVersion::V0 | ProtocolVersion::V1 => Self {
                 key: HashIdentityKeyMapper::map_to_leaf_key(&value),

@@ -718,8 +718,10 @@ where
 
         let trusted_root = self.trusted_root_from_commit_proof(commit_proof).await?;
         // A down proof needs its anchor's height signed, which the trusted root above does not establish. It is
-        // validated at most once per batch, as is each earlier root the batch's down proofs cite.
-        let mut down_root = None;
+        // validated at most once per batch, as is each earlier root the batch's down proofs cite. An anchor that
+        // cannot be validated for want of its committee leaves the batch's down proofs unchecked, as they leave
+        // its Downs unproven either way.
+        let mut down_root: Option<Option<TrustedStateRoot>> = None;
         let mut up_roots = HashMap::new();
         for substate in &batch.substates {
             let Some(value_proof) = &substate.value_proof else {
@@ -758,10 +760,21 @@ where
             if let Some(down_proof) = &substate.substate_down_proof {
                 let down_root = match down_root {
                     Some(root) => root,
-                    None => *down_root.insert(self.validated_root_from_commit_proof(commit_proof).await?),
+                    None => *down_root.insert(
+                        self.establish_down_proof_root(commit_proof, &substate.substate_id)
+                            .await?,
+                    ),
                 };
-                self.verify_down_proof_against(&substate.substate_id, version, down_proof, &down_root, &mut up_roots)
+                if let Some(down_root) = down_root {
+                    self.verify_down_proof_against(
+                        &substate.substate_id,
+                        version,
+                        down_proof,
+                        &down_root,
+                        &mut up_roots,
+                    )
                     .await?;
+                }
             }
         }
 
@@ -919,9 +932,32 @@ where
         down_proof: &[u8],
         down_commit_proof: &[u8],
     ) -> Result<bool, IndexerError> {
-        let down_root = self.validated_root_from_commit_proof(down_commit_proof).await?;
+        let Some(down_root) = self.establish_down_proof_root(down_commit_proof, substate_id).await? else {
+            return Ok(false);
+        };
         self.verify_down_proof_against(substate_id, version, down_proof, &down_root, &mut HashMap::new())
             .await
+    }
+
+    /// Validates a root a down proof is anchored to. `None` when it cannot be established for want of its committee
+    /// (e.g. an epoch the indexer does not know yet, or no longer knows), which leaves the Down unproven; a commit
+    /// proof that its committee does not sign is an error, which disqualifies the member that served it.
+    async fn establish_down_proof_root(
+        &self,
+        commit_proof: &[u8],
+        substate_id: &SubstateId,
+    ) -> Result<Option<TrustedStateRoot>, IndexerError> {
+        match self.validated_root_from_commit_proof(commit_proof).await {
+            Ok(root) => Ok(Some(root)),
+            Err(e @ IndexerError::SubstateProofVerificationFailed { .. }) => Err(e),
+            Err(e) => {
+                debug!(
+                    target: LOG_TARGET,
+                    "Cannot establish a root of the down proof for {substate_id}: {e}. Leaving the Down unproven."
+                );
+                Ok(None)
+            },
+        }
     }
 
     /// [`Self::verify_down_proof`] against an already validated `down_root`. `up_roots` holds the earlier roots
@@ -942,17 +978,9 @@ where
         let up_root = match up_roots.get(&decoded.up_commit_proof) {
             Some(established) => *established,
             None => {
-                let established = match self.validated_root_from_commit_proof(&decoded.up_commit_proof).await {
-                    Ok(root) => Some(root),
-                    Err(e @ IndexerError::SubstateProofVerificationFailed { .. }) => return Err(e),
-                    Err(e) => {
-                        debug!(
-                            target: LOG_TARGET,
-                            "Cannot establish the earlier root of the down proof for {substate_id}v{version}: {e}"
-                        );
-                        None
-                    },
-                };
+                let established = self
+                    .establish_down_proof_root(&decoded.up_commit_proof, substate_id)
+                    .await?;
                 up_roots.insert(decoded.up_commit_proof, established);
                 established
             },
@@ -1221,7 +1249,8 @@ mod tests {
         }
     }
 
-    struct FakeEpochManager(Arc<Committee<Addr>>);
+    /// Serves one committee for every shard group, except at `.1`, an epoch whose committees it does not know.
+    struct FakeEpochManager(Arc<Committee<Addr>>, Option<Epoch>);
 
     impl EpochManagerReader for FakeEpochManager {
         type Addr = Addr;
@@ -1300,9 +1329,12 @@ mod tests {
 
         async fn get_committee_by_shard_group(
             &self,
-            _: Epoch,
+            epoch: Epoch,
             _: ShardGroup,
         ) -> Result<Arc<Committee<Addr>>, EpochManagerError> {
+            if self.1 == Some(epoch) {
+                return Err(EpochManagerError::NoEpochFound(epoch));
+            }
             Ok(self.0.clone())
         }
 
@@ -1401,7 +1433,7 @@ mod tests {
         let manager = CachedSubstateManager::new(
             Network::LocalNet,
             NumPreshards::P256,
-            FakeEpochManager(Arc::new(committee)),
+            FakeEpochManager(Arc::new(committee), None),
             FakeClient(network.clone()),
             FakeCache::default(),
         );
@@ -1698,6 +1730,98 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(proven, expected, "{up_group}");
+        }
+    }
+
+    /// The epoch every test commit proof is of.
+    const PROOF_EPOCH: Epoch = Epoch(1);
+
+    #[tokio::test]
+    async fn a_down_whose_earlier_root_has_no_known_committee_is_unproven() {
+        let (mut manager, _) = manager(FakeNetwork::default());
+        manager.committee_provider.1 = Some(PROOF_EPOCH);
+        let manager = manager.with_substate_proof_verification(true);
+        let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
+        let down_root = TrustedStateRoot {
+            epoch: PROOF_EPOCH,
+            shard_group: group(1, 2),
+            height: tari_ootle_common_types::NodeHeight(4),
+            root: FixedHash::new(r2_root.into_array()),
+        };
+        let proven = manager
+            .verify_down_proof_against(&id, SubstateVersion::ZERO, &proof, &down_root, &mut HashMap::new())
+            .await
+            .unwrap();
+        assert!(!proven);
+    }
+
+    #[tokio::test]
+    async fn a_down_whose_anchor_has_no_known_committee_is_unproven() {
+        let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
+        let (mut manager, _) = manager(FakeNetwork {
+            down_with_proof: [(
+                id.clone(),
+                (SubstateVersion::ZERO, SubstateProofData {
+                    substate_value_proof: vec![],
+                    commit_proof: unsigned_commit_proof(group(1, 2), 4, r2_root),
+                    proof_epoch: 0,
+                    substate_down_proof: Some(proof),
+                    destroyed_at_state_version: Some(2),
+                }),
+            )]
+            .into(),
+            ..Default::default()
+        });
+        manager.committee_provider.1 = Some(PROOF_EPOCH);
+        let manager = manager.with_substate_proof_verification(true);
+        let (result, proof) = manager
+            .get_substate_from_vn(
+                &"vn".to_string(),
+                SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(result, SubstateResult::Down { .. }));
+        assert!(proof.is_none());
+    }
+
+    /// A batch anchor whose committee is unknown leaves the batch's Downs unproven rather than failing the batch; one
+    /// its committee does not sign still fails it.
+    #[tokio::test]
+    async fn a_batch_whose_anchor_has_no_known_committee_is_not_failed() {
+        let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
+        let decoded = decode_substate_down_proof(&proof).unwrap();
+        let batch = SubstateBatch {
+            commit_proof: Some(unsigned_commit_proof(group(1, 2), 4, r2_root)),
+            substates: vec![tari_validator_node_rpc::client::BatchedSubstate {
+                substate_id: id,
+                result: SubstateResult::Down {
+                    version: SubstateVersion::ZERO,
+                },
+                value_proof: Some(tari_bor::serde_codec::to_vec(&decoded.down).unwrap()),
+                proof_epoch: 0,
+                substate_down_proof: Some(proof),
+            }],
+            missing: vec![],
+        };
+
+        for (committee_known, fails) in [(false, false), (true, true)] {
+            let (mut manager, _) = manager(FakeNetwork::default());
+            if !committee_known {
+                manager.committee_provider.1 = Some(PROOF_EPOCH);
+            }
+            let manager = manager
+                .with_substate_proof_verification(true)
+                .with_trusted_root_store(Arc::new(TrustEverything));
+            let result = manager.verify_substate_batch(&batch).await;
+            if fails {
+                assert!(
+                    matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+                    "{result:?}"
+                );
+            } else {
+                assert!(matches!(result, Ok(BatchTrust::Proven)), "{result:?}");
+            }
         }
     }
 

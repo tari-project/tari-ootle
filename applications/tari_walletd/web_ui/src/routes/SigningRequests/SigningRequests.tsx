@@ -3,7 +3,8 @@
 
 import {
   useApproveSigningRequest,
-  useListSigningRequests,
+  useListAllSigningRequests,
+  useListPendingSigningRequests,
   useRejectSigningRequest,
 } from "@api/hooks/useSigningRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
@@ -59,14 +60,21 @@ function statusColor(status: SigningRequestEffectiveStatus): "default" | "warnin
   }
 }
 
-function Countdown({ expiresAt }: { expiresAt: bigint }) {
+/// The current time in seconds, updated every second.
+function useNow(): number {
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(t);
   }, []);
+  return now;
+}
 
+function Countdown({ expiresAt, now }: { expiresAt: bigint; now: number }) {
   const remaining = Math.max(0, Math.floor(Number(expiresAt) - now));
+  if (remaining === 0) {
+    return <Chip label="expired" size="small" variant="outlined" />;
+  }
   const hours = Math.floor(remaining / 3600);
   const mins = Math.floor((remaining % 3600) / 60);
   const secs = remaining % 60;
@@ -106,8 +114,8 @@ function Summary({ request }: { request: SigningRequestInfo }) {
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             {d.headline}
           </Typography>
-          {d.details.map((line) => (
-            <Typography key={line} variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+          {d.details.map((line, j) => (
+            <Typography key={j} variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>
               {line}
             </Typography>
           ))}
@@ -126,8 +134,12 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
   const approve = useApproveSigningRequest();
   const reject = useRejectSigningRequest();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const now = useNow();
   const isActionable = request.status === "Pending";
-  const busy = approve.isPending || reject.isPending;
+  // The server refuses a decision once the window closes; the next poll then
+  // shows the request as expired.
+  const isExpired = Number(request.expires_at) <= now;
+  const busy = approve.isPending || reject.isPending || isExpired;
   const error = isActionable ? (approve.error ?? reject.error) : null;
   const params = { request_id: request.request_id };
 
@@ -157,7 +169,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
               variant={isMainnet ? "filled" : "outlined"}
             />
           )}
-          {isActionable && <Countdown expiresAt={request.expires_at} />}
+          {isActionable && <Countdown expiresAt={request.expires_at} now={now} />}
           <Chip label={request.status} size="small" color={statusColor(request.status)} />
         </Stack>
       </Stack>
@@ -267,11 +279,11 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
 }
 
 export default function SigningRequests() {
-  const { data, isFetching, isError, error } = useListSigningRequests();
+  const { data, isFetching, isError, error } = useListPendingSigningRequests();
+  const { data: all } = useListAllSigningRequests();
 
-  const requests = data?.requests ?? [];
-  const pending = requests.filter((r) => r.status === "Pending");
-  const rest = requests.filter((r) => r.status !== "Pending");
+  const pending = data?.requests ?? [];
+  const rest = (all?.requests ?? []).filter((r) => r.status !== "Pending");
 
   return (
     <Grid container spacing={5}>

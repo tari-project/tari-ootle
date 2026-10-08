@@ -94,7 +94,7 @@ function formatArg(arg: InstructionArg): string {
 }
 
 /// One-line call-style rendering of an instruction, e.g.
-/// `Call(component_21f1…, "pay_fee", Lit([956, 0]))`. The expandable JSON
+/// `Call(component_21f1…, "pay_fee", Lit(956))`. The expandable JSON
 /// below the row remains the full-fidelity view.
 function summarize(instruction: Instruction): string {
   if (typeof instruction === "string") {

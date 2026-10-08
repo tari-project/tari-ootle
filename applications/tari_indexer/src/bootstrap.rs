@@ -301,6 +301,7 @@ pub async fn spawn_services(
     substate_cache.spawn_pruner(SUBSTATE_CACHE_PRUNE_INTERVAL, shutdown.clone());
     let substate_manager = SubstateManager::new(
         config.network,
+        consensus_constants.num_preshards,
         store.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),

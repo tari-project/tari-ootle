@@ -574,6 +574,8 @@ where
                         substate_value_proof,
                         commit_proof,
                         proof_epoch: substate.proof_epoch,
+                        substate_down_proof: substate.substate_down_proof.clone(),
+                        destroyed_at_state_version: None,
                     },
                 );
                 if let Some(watermark) = watermarks.get(&substate.substate_id).copied() {
@@ -1022,6 +1024,7 @@ mod tests {
                             },
                             value_proof: None,
                             proof_epoch: 0,
+                            substate_down_proof: None,
                         })
                     },
                     Some(substate) if !self.0.omitted_from_batches.contains(id) => {
@@ -1032,6 +1035,7 @@ mod tests {
                             },
                             value_proof: None,
                             proof_epoch: 0,
+                            substate_down_proof: None,
                         })
                     },
                     _ => batch.missing.push(id.clone()),
@@ -1373,6 +1377,8 @@ mod tests {
             substate_value_proof: vec![1],
             commit_proof: vec![2],
             proof_epoch: 0,
+            substate_down_proof: None,
+            destroyed_at_state_version: None,
         };
         manager
             .substate_cache

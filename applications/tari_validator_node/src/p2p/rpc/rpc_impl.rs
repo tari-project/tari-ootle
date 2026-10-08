@@ -86,6 +86,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
+use tari_state_tree::SubstateValueProof;
 use tari_validator_node_rpc::{STATE_SYNC_MAX_BATCH_SIZE, rpc_service::ValidatorNodeRpcService};
 use tokio::{sync::mpsc, task};
 
@@ -173,6 +174,10 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
     /// substate lookup) so the value proof's group root matches the commit proof's block header. If
     /// nothing is committed beyond the epoch genesis yet, no proof is attached and the caller treats
     /// the result as unverified.
+    ///
+    /// A down substate is proven only together with a [`SubstateDownProof`](tari_state_tree::SubstateDownProof),
+    /// since its exclusion proof alone is also satisfied by a version that never existed. A down substate this node
+    /// recorded no such proof for is answered with no proof at all.
     fn attach_substate_proof<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
@@ -203,12 +208,41 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             return Ok(());
         };
 
+        let down_proof = encode_down_proof(tx, num_preshards, substate, &value_proof)
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        if substate.is_destroyed() && down_proof.is_none() {
+            return Ok(());
+        }
+
         resp.commit_proof = commit_proof.to_bytes();
         resp.substate_value_proof =
             tari_bor::serde_codec::to_vec(&value_proof).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
         resp.proof_epoch = substate.created().at_epoch.as_u64();
+        resp.substate_down_proof = down_proof.unwrap_or_default();
         Ok(())
     }
+}
+
+/// The encoded down proof of `substate`, completed with `exclusion`, its exclusion proof under the root the response
+/// is anchored to. `None` for a live substate, and for a down one this node recorded no proof of having been up.
+fn encode_down_proof<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    num_preshards: NumPreshards,
+    substate: &SubstateRecord,
+    exclusion: &SubstateValueProof,
+) -> Result<Option<Vec<u8>>, StorageError> {
+    if !substate.is_destroyed() {
+        return Ok(None);
+    }
+    let id = substate.to_versioned_substate_id();
+    let Some(record) = tx.substate_down_proofs_get(id.to_shard(num_preshards), &id)? else {
+        return Ok(None);
+    };
+    let proof = record.into_down_proof(exclusion.clone());
+    let bytes = tari_bor::serde_codec::to_vec(&proof).map_err(|e| StorageError::QueryError {
+        reason: format!("encode substate down proof: {e}"),
+    })?;
+    Ok(Some(bytes))
 }
 
 /// The shard group a commit proof's block header commits the state merkle root of.
@@ -267,6 +301,7 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
 
     for substate in substates {
         let mut value_proof = Vec::new();
+        let mut down_proof = Vec::new();
         if let Some(generator) = generator.as_mut() {
             let Some(proof) = generator.generate(&substate.to_versioned_substate_id())? else {
                 warn!(
@@ -280,11 +315,13 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
             value_proof = tari_bor::serde_codec::to_vec(&proof).map_err(|e| StorageError::QueryError {
                 reason: format!("encode substate value proof: {e}"),
             })?;
+            down_proof = encode_down_proof(tx, ctx.num_preshards, &substate, &proof)?.unwrap_or_default();
         }
 
         messages.push(batch_response::Response::Substate(proto::rpc::ProvenSubstate {
             proof_epoch: substate.created().at_epoch.as_u64(),
             substate_value_proof: value_proof,
+            substate_down_proof: down_proof,
             substate: Some(proto::consensus::Substate {
                 substate_id: substate.substate_id().to_bytes(),
                 version: substate.version().as_u64(),
@@ -917,5 +954,103 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         });
 
         Ok(Streaming::new(receiver))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::{
+        non_fungible::NonFungibleContainer,
+        substate::{SubstateId, SubstateValue, hash_substate},
+    };
+    use tari_ootle_common_types::{SubstateVersion, VersionedSubstateId};
+    use tari_ootle_storage::{
+        StateStoreWriteTransaction,
+        consensus_models::{SubstateCreated, SubstateDestroyed, SubstateDownProofRecord},
+    };
+    use tari_ootle_transaction::Network;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+    use tari_state_tree::{KeyedProofTree, LeafKey, SubstateDownProof, TreeHash};
+    use tari_template_lib_types::{ComponentAddress, ObjectKey};
+
+    use super::*;
+
+    const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+
+    fn proof_ext(seed: u8) -> tari_state_tree::SparseMerkleProofExt {
+        let key = LeafKey::new(TreeHash::new([seed; 32]));
+        let tree = KeyedProofTree::build([(key, TreeHash::new([seed; 32]))]).unwrap();
+        tree.get_proof(&key).unwrap().1
+    }
+
+    fn substate(destroyed: bool) -> SubstateRecord {
+        let substate_id = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([3; ObjectKey::LENGTH])));
+        let version = SubstateVersion::ZERO;
+        let value = SubstateValue::NonFungible(NonFungibleContainer::no_data());
+        SubstateRecord {
+            state_hash: hash_substate(Network::LocalNet, &value, version, Epoch(1)),
+            created: SubstateCreated {
+                at_epoch: Epoch(1),
+                in_shard: VersionedSubstateId::new(substate_id.clone(), version).to_shard(NUM_PRESHARDS),
+                at_state_version: 1,
+            },
+            destroyed: destroyed.then_some(SubstateDestroyed {
+                at_epoch: Epoch(1),
+                at_state_version: 2,
+            }),
+            substate_id,
+            version,
+            substate_value: Some(value),
+        }
+    }
+
+    fn exclusion() -> SubstateValueProof {
+        SubstateValueProof::new(TreeHash::new([5; 32]), 2, proof_ext(5), proof_ext(6))
+    }
+
+    #[test]
+    fn a_recorded_down_substate_is_served_with_its_down_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let down = substate(true);
+        let id = down.to_versioned_substate_id();
+        let record = SubstateDownProofRecord {
+            state_version: 1,
+            value_hash: TreeHash::new([1; 32]),
+            leaf_proof: proof_ext(1),
+            shard_root: TreeHash::new([2; 32]),
+            shard_root_proof: proof_ext(2),
+            commit_proof: vec![9, 9, 9],
+        };
+
+        {
+            let tx = store.create_read_tx().unwrap();
+            assert!(
+                encode_down_proof(&tx, NUM_PRESHARDS, &down, &exclusion())
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        store
+            .with_write_tx(|tx| tx.substate_down_proofs_insert(id.to_shard(NUM_PRESHARDS), &id, &record))
+            .unwrap();
+
+        let tx = store.create_read_tx().unwrap();
+        let bytes = encode_down_proof(&tx, NUM_PRESHARDS, &down, &exclusion())
+            .unwrap()
+            .unwrap();
+        let proof: SubstateDownProof = tari_bor::serde_codec::from_slice(&bytes).unwrap();
+        assert_eq!(proof.up_commit_proof, vec![9, 9, 9]);
+        assert_eq!(proof.up_value_hash, TreeHash::new([1; 32]));
+        assert_eq!(proof.up.shard_state_version, 1);
+        assert_eq!(proof.down.shard_root, TreeHash::new([5; 32]));
+        assert_eq!(proof.down.shard_state_version, 2);
+
+        // A live substate is never served with a down proof.
+        assert!(
+            encode_down_proof(&tx, NUM_PRESHARDS, &substate(false), &exclusion())
+                .unwrap()
+                .is_none()
+        );
     }
 }

@@ -218,6 +218,8 @@ mod tests {
             substate_value_proof: vec![],
             commit_proof: vec![],
             proof_epoch: 0,
+            substate_down_proof: None,
+            destroyed_at_state_version: None,
         })
     }
 

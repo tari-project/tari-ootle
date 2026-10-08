@@ -13370,6 +13370,7 @@ dependencies = [
  "tari_swarm",
  "tari_template_builtin",
  "tari_template_lib",
+ "tari_template_lib_types",
  "tari_transaction_components",
  "tari_validator_node_client",
  "tari_validator_node_rpc",
@@ -13425,6 +13426,7 @@ dependencies = [
  "tari_ootle_transaction",
  "tari_rpc_framework",
  "tari_rpc_macros",
+ "tari_template_lib_types",
  "thiserror 2.0.18",
  "tokio",
 ]

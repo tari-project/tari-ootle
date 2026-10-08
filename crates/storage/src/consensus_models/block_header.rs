@@ -422,7 +422,7 @@ impl BlockHeader {
                 accumulated_data: &accumulated_data,
                 metadata_hash: &metadata_hash,
             }),
-            protocol_version @ (ProtocolVersion::V1 | ProtocolVersion::V2) => {
+            protocol_version @ (ProtocolVersion::V1 | ProtocolVersion::V2 | ProtocolVersion::V3) => {
                 BlockHeaderHashFields::V2(BlockHeaderHashFieldsV2 {
                     network: self.network.as_byte(),
                     protocol_version: protocol_version.as_u32(),
@@ -628,7 +628,7 @@ impl BlockHeader {
     ) -> Result<Option<FixedHash>, BlockError> {
         match protocol_version {
             ProtocolVersion::V0 | ProtocolVersion::V1 => Ok(None),
-            ProtocolVersion::V2 => {
+            ProtocolVersion::V2 | ProtocolVersion::V3 => {
                 let root = build_finalized_transaction_tree(commands)?.root();
                 Ok(Some(FixedHash::from(root.into_array())))
             },

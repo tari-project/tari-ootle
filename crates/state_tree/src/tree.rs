@@ -390,7 +390,7 @@ impl ShardGroupLeaf {
                 key: HashIdentityKeyMapper::map_to_leaf_key(&value),
                 value: Some(value),
             },
-            ProtocolVersion::V2 => {
+            ProtocolVersion::V2 | ProtocolVersion::V3 => {
                 let has_state = *shard_root != SPARSE_MERKLE_PLACEHOLDER_HASH || state_version != 0;
                 Self {
                     key: ShardKeyMapper::map_to_leaf_key(&shard),

@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## Unreleased
+
+### ⚠️ Upgrade notes
+
+- **Protocol V3 binds every substate proof to its shard.** Every network except esmeralda starts at V3 from
+  genesis. **Release owner: set `ESMERALDA_V3_ACTIVATION_EPOCH` in
+  `crates/engine_types/src/protocol_version.rs` to the coordinated esmeralda activation epoch before this
+  release merges, and run the ignored test `esmeralda_v3_activation_epoch_is_set`.** Until it is set,
+  esmeralda stays on V1.
+
 ## [0.46.0](https://github.com/tari-project/tari-ootle/compare/v0.45.0...v0.46.0) (2026-10-07)
 
 Introduces protocol version V2, whose block headers commit to a transaction merkle root. Also fixes

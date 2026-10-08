@@ -302,7 +302,12 @@ fn v1_shard_group_root_is_the_set_of_shard_state_leaves() {
 
 #[test]
 fn a_shard_listed_twice_is_rejected() {
-    for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1, ProtocolVersion::V2] {
+    for protocol_version in [
+        ProtocolVersion::V0,
+        ProtocolVersion::V1,
+        ProtocolVersion::V2,
+        ProtocolVersion::V3,
+    ] {
         let result = compute_shard_group_root(protocol_version, [
             (Shard::from_u32(1), hash_value_from_seed(1), 1),
             (Shard::from_u32(1), hash_value_from_seed(2), 2),

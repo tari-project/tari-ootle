@@ -7,7 +7,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_ootle_common_types::hashing::finalized_transaction_hasher;
 use tari_ootle_transaction::TransactionId;
-use tari_state_tree::{JmtHashScheme, KeyedProofTree, LeafKey, TreeHash};
+use tari_state_tree::{KeyedProofTree, LeafKey, TreeHash};
 
 use super::{BlockError, Command};
 
@@ -58,7 +58,7 @@ mod tests {
     use tari_engine_types::commit_result::AbortReason;
     use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ProtocolVersion, ShardGroup};
     use tari_ootle_transaction::Network;
-    use tari_state_tree::TreeHash;
+    use tari_state_tree::{JmtHashScheme, TreeHash};
     use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
     use super::*;

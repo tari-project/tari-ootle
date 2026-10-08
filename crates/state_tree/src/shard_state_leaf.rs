@@ -15,7 +15,7 @@ use tari_jellyfish::{TreeHash, Version};
 pub fn shard_state_leaf(protocol_version: ProtocolVersion, shard_root: &TreeHash, state_version: Version) -> TreeHash {
     match protocol_version {
         ProtocolVersion::V0 => *shard_root,
-        ProtocolVersion::V1 | ProtocolVersion::V2 => {
+        ProtocolVersion::V1 | ProtocolVersion::V2 | ProtocolVersion::V3 => {
             let hash = hasher32(EngineHashDomainLabel::ShardStateLeaf)
                 .chain(&shard_root.into_array())
                 .chain(&state_version)

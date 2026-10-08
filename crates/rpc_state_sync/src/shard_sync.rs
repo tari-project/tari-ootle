@@ -1,13 +1,14 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Deref};
 
 use anyhow::anyhow;
 use futures::{Stream, StreamExt};
 use log::*;
 use ootle_network::Network;
 use prost::Message;
+use tari_consensus::hotstuff::commit_proofs::committed_block_commit_proof_bytes;
 use tari_engine_types::{ProtocolVersion, limits::MAX_CBOR_NESTING_DEPTH};
 use tari_ootle_common_types::{
     Epoch,
@@ -33,6 +34,7 @@ use tari_ootle_storage::{
         SubstateTransition,
         SubstateUpdateBatch,
         SubstateUpdateProof,
+        index_substate_down_proofs,
         verify_state_version_leaf,
     },
 };
@@ -602,14 +604,21 @@ pub(crate) fn calculate_state_root_for_shard<TTx: StateStoreReadTransaction>(
     Ok(root)
 }
 
-fn commit_updates<TTx: StateStoreWriteTransaction, I: IntoIterator<Item = SubstateUpdateProof>>(
+/// Commits one state version's updates and records a down proof for each substate it destroys, where this node holds
+/// a proof of a version the substate was up at.
+fn commit_updates<TTx, I>(
     network: Network,
     tx: &mut TTx,
     shard: Shard,
     epoch: Epoch,
     state_version: Version,
     updates: I,
-) -> Result<(), StorageError> {
+) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+    I: IntoIterator<Item = SubstateUpdateProof>,
+{
     let mut batch = SubstateUpdateBatch::new(network, epoch);
 
     batch
@@ -625,7 +634,9 @@ fn commit_updates<TTx: StateStoreWriteTransaction, I: IntoIterator<Item = Substa
             },
         }));
 
+    let downed = batch.downed();
     SubstateRecord::commit_batch(tx, batch)?;
+    index_substate_down_proofs(tx, &downed, committed_block_commit_proof_bytes)?;
 
     Ok(())
 }

@@ -54,6 +54,7 @@ use tari_ootle_common_types::{
     NumPreshards,
     ShardGroup,
     ToSubstateAddress,
+    VersionedSubstateId,
     optional::Optional,
     shard::Shard,
 };
@@ -81,6 +82,7 @@ use tari_ootle_storage::{
         SubstateChange,
         SubstateCreated,
         SubstateDestroyed,
+        SubstateDownProofRecord,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
@@ -156,6 +158,7 @@ use crate::{
         state_version_proof::{BlockCommitProofCf, StateVersionProofCf},
         substate,
         substate::{SubstateCf, SubstateHeadData},
+        substate_down_proof::SubstateDownProofCf,
         substate_locks::BlockLockSetCf,
         transaction::TransactionCf,
         transaction_pool::TransactionPoolCf,
@@ -1407,6 +1410,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let substates_cf = db.cf(SubstateCf)?;
         let head_cf = db.cf(substate::HeadIndex)?;
         let unpruned_cf = db.cf(substate::UnprunedDownedValuesIndex)?;
+        let down_proofs_cf = db.cf(SubstateDownProofCf)?;
 
         let start_version = target_state_version.saturating_add(1);
         let mut touched: HashSet<SubstateId> = HashSet::new();
@@ -1438,6 +1442,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                         touched.insert(substate.substate_id.clone());
                         substate.destroyed = None;
                         substates_cf.put(address, &substate, OPERATION)?;
+                        down_proofs_cf.delete(&(shard, *address), OPERATION).optional()?;
                         stats.substates_destroyed_restored += 1;
                     },
                 }
@@ -1816,6 +1821,19 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         self.db()
             .cf(BlockCommitProofCf)?
             .put_raw_value(block_id, commit_proof, OPERATION)?;
+        Ok(())
+    }
+
+    fn substate_down_proofs_insert(
+        &mut self,
+        shard: Shard,
+        id: &VersionedSubstateId,
+        record: &SubstateDownProofRecord,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "substate_down_proofs_insert";
+        self.db()
+            .cf(SubstateDownProofCf)?
+            .put(&(shard, id.to_substate_address()), record, OPERATION)?;
         Ok(())
     }
 

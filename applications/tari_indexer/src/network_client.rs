@@ -4,7 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::anyhow;
@@ -35,11 +35,18 @@ use tari_validator_node_rpc::{
 
 const LOG_TARGET: &str = "tari::indexer::network_client";
 
+/// How many committee-agreed transaction results are remembered, so that a later poll of the same
+/// transaction needs one member to repeat the answer instead of a fresh quorum.
+const AGREED_RESULTS_CAPACITY: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub struct TariNetworkClient<TEpochManager, TClientFactory> {
     epoch_manager: TEpochManager,
     client_provider: TClientFactory,
     num_preshards: NumPreshards,
+    /// Finalized answers a quorum has agreed on, most recent last, bounded at
+    /// [`AGREED_RESULTS_CAPACITY`].
+    agreed_results: Arc<Mutex<IndexMap<TransactionId, ResultAnswer>>>,
 }
 
 impl<TAddr, TEpochManager, TClientFactory> TariNetworkClient<TEpochManager, TClientFactory>
@@ -53,6 +60,7 @@ where
             epoch_manager,
             client_provider,
             num_preshards,
+            agreed_results: Arc::new(Mutex::new(IndexMap::with_capacity(AGREED_RESULTS_CAPACITY))),
         }
     }
 
@@ -119,10 +127,10 @@ where
     /// The status of a transaction as agreed by its receipt committee, or `None` if the committee
     /// agrees it does not know the transaction.
     ///
-    /// No member's answer is believed on its own: an answer settles the query only once members
-    /// holding more than the committee's tolerated faulty vote power give it. When the members that
-    /// answer never reach that agreement the transaction is reported as pending, which every caller
-    /// already treats as "ask again later".
+    /// An answer settles the query once members holding more than the committee's tolerated faulty
+    /// vote power give it. When the members that answer never reach that agreement the transaction
+    /// is reported as pending, which every caller already treats as "ask again later". The
+    /// exceptions are listed on [`TransactionResultTally::conclude`].
     pub async fn get_finalized_transaction_result(
         &self,
         transaction_id: TransactionId,
@@ -130,11 +138,17 @@ where
         let committee = self
             .committee_for_substate(transaction_id.to_substate_address())
             .await?;
-        let mut tally = TransactionResultTally::new(committee.max_failures());
+        let agreed = self.agreed_result(&transaction_id);
 
-        // Agreement needs at least f + 1 answers, so that many are asked at once; a member that fails
-        // or disagrees frees its slot for the next.
-        let width = committee.len().saturating_sub(1) / 3 + 1;
+        // Agreement needs at least f + 1 answers, so that many are asked at once. A finalized answer
+        // this indexer has already seen agreed cannot change, so one member repeating it is enough.
+        // A member that fails or disagrees frees its slot for the next.
+        let width = if agreed.is_some() {
+            1
+        } else {
+            committee.len().saturating_sub(1) / 3 + 1
+        };
+        let mut tally = TransactionResultTally::new(committee.max_failures(), agreed);
         let mut requests = committee.shuffled().map(|member| {
             let mut client = self.client_provider.create_client(&member.address);
             let vote_power = member.vote_power;
@@ -147,19 +161,39 @@ where
         in_flight.extend(requests.by_ref().take(width));
 
         while let Some((member, vote_power, response)) = in_flight.next().await {
+            let response = response.and_then(|status| Ok((ResultAnswer::of(status.as_ref())?, status)));
             if let Err(err) = &response {
                 warn!(
                     target: LOG_TARGET,
-                    "Transaction result request for {transaction_id} failed for validator '{member}': {err}"
+                    "Validator '{member}' gave no usable result for transaction {transaction_id}: {err}"
                 );
             }
-            if let Some(answer) = tally.observe(vote_power, response) {
-                return Ok(answer);
+            if let Some((answer, status)) = tally.observe(vote_power, response) {
+                if answer.is_finalized() {
+                    self.record_agreed_result(transaction_id, answer);
+                }
+                return Ok(status);
             }
             in_flight.extend(requests.next());
         }
 
         tally.conclude(transaction_id, committee.len())
+    }
+
+    fn agreed_result(&self, transaction_id: &TransactionId) -> Option<ResultAnswer> {
+        self.agreed_results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(transaction_id)
+            .cloned()
+    }
+
+    fn record_agreed_result(&self, transaction_id: TransactionId, answer: ResultAnswer) {
+        let mut agreed = self.agreed_results.lock().unwrap_or_else(|e| e.into_inner());
+        agreed.insert(transaction_id, answer);
+        if agreed.len() > AGREED_RESULTS_CAPACITY {
+            agreed.shift_remove_index(0);
+        }
     }
 
     async fn committee_for_substate(
@@ -279,12 +313,13 @@ where
 enum ResultAnswer {
     NotFound,
     Pending,
-    /// Aborts agree on the outcome alone: an abort commits nothing, and the reason recorded for it
-    /// is not what callers act on.
-    Aborted,
-    /// A commit is identified by a hash of its whole finalize result, which every honest member
-    /// derives from the same deterministic execution.
-    Committed(Hash32),
+    /// A finalized answer, identified by a hash of everything it reports except the answering
+    /// member's own execution and finalization timings. Every honest member derives the rest from
+    /// the same deterministic execution.
+    Finalized {
+        is_commit: bool,
+        hash: Hash32,
+    },
 }
 
 impl ResultAnswer {
@@ -298,32 +333,45 @@ impl ResultAnswer {
         // A member derives its decision from its execution result, so an answer where the two
         // disagree cannot have come from an honest member.
         let execute_result = finalized.execute_result.as_ref();
-        if finalized.final_decision.is_abort() {
-            if execute_result.is_some_and(|r| r.finalize.result.is_any_accept()) {
+        let is_commit = finalized.final_decision.is_commit();
+        match execute_result {
+            Some(r) if r.finalize.result.is_any_accept() != is_commit => {
                 return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                    "Node returned an abort decision with an accepted execution result"
+                    "Node returned a {} decision contradicting its execution result",
+                    if is_commit { "commit" } else { "abort" }
                 )));
-            }
-            return Ok(Self::Aborted);
+            },
+            None if is_commit => {
+                return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                    "Node returned a commit decision without an execution result"
+                )));
+            },
+            _ => {},
         }
-        let execute_result = execute_result
-            .filter(|r| r.finalize.result.is_any_accept())
-            .ok_or_else(|| {
-                ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                    "Node returned a commit decision without an accepted execution result"
-                ))
-            })?;
-        let encoded = tari_bor::encode(&execute_result.finalize)
-            .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
-        Ok(Self::Committed(
-            TariHasher32::new_with_label("IndexerFinalizedResult")
-                .chain(&encoded)
-                .result(),
-        ))
+
+        let mut hasher = TariHasher32::new_with_label("IndexerFinalizedResult");
+        hasher.update(&finalized.final_decision);
+        hasher.update(&finalized.abort_details);
+        if let Some(r) = execute_result {
+            let finalize =
+                tari_bor::encode(&r.finalize).map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
+            hasher.update(&finalize);
+            hasher.update(&r.execute_epoch.map(|epoch| epoch.as_u64()));
+            hasher.update(&r.wasm_execution_points);
+            hasher.update(&r.native_execution_points);
+        }
+        Ok(Self::Finalized {
+            is_commit,
+            hash: hasher.result(),
+        })
     }
 
     fn is_finalized(&self) -> bool {
-        matches!(self, Self::Aborted | Self::Committed(_))
+        matches!(self, Self::Finalized { .. })
+    }
+
+    fn is_abort(&self) -> bool {
+        matches!(self, Self::Finalized { is_commit: false, .. })
     }
 }
 
@@ -332,15 +380,21 @@ struct TransactionResultTally {
     /// Faulty vote power the committee tolerates. An answer is believed once members holding more
     /// than this give it, since at least one of them is then honest.
     max_failures: VotePower,
+    /// A finalized answer a quorum agreed on in an earlier query, settled by any one member that
+    /// repeats it.
+    agreed: Option<ResultAnswer>,
     /// Vote power behind each distinct answer, with the first response that gave it.
     answers: HashMap<ResultAnswer, (VotePower, Option<TransactionResultStatus>)>,
     last_error: Option<ValidatorNodeRpcClientError>,
 }
 
+type MemberAnswer = (ResultAnswer, Option<TransactionResultStatus>);
+
 impl TransactionResultTally {
-    fn new(max_failures: VotePower) -> Self {
+    fn new(max_failures: VotePower, agreed: Option<ResultAnswer>) -> Self {
         Self {
             max_failures,
+            agreed,
             answers: HashMap::new(),
             last_error: None,
         }
@@ -350,15 +404,18 @@ impl TransactionResultTally {
     fn observe(
         &mut self,
         vote_power: VotePower,
-        response: Result<Option<TransactionResultStatus>, ValidatorNodeRpcClientError>,
-    ) -> Option<Option<TransactionResultStatus>> {
-        let (answer, status) = match response.and_then(|status| Ok((ResultAnswer::of(status.as_ref())?, status))) {
+        response: Result<MemberAnswer, ValidatorNodeRpcClientError>,
+    ) -> Option<MemberAnswer> {
+        let (answer, status) = match response {
             Ok(answered) => answered,
             Err(err) => {
                 self.last_error = Some(err);
                 return None;
             },
         };
+        if self.agreed.as_ref() == Some(&answer) {
+            return Some((answer, status));
+        }
 
         let (power, _) = self
             .answers
@@ -366,17 +423,47 @@ impl TransactionResultTally {
             .or_insert_with(|| (VotePower::zero(), status));
         *power = power.saturating_add(vote_power);
         if *power > self.max_failures {
-            return self.answers.remove(&answer).map(|(_, status)| status);
+            return self.answers.remove(&answer).map(|(_, status)| (answer, status));
         }
         None
     }
 
-    /// The answer once every member has responded without settling the query.
+    /// The answer once every member has responded without settling the query:
+    /// - When members holding more than the faulty vote power report an abort but disagree on its details, the abort is
+    ///   returned without them: the outcome is agreed, the details are not.
+    /// - Otherwise any finalized or pending answer reports the transaction as pending.
+    /// - Otherwise, when some member does not know the transaction, it is reported as unknown.
+    /// - Otherwise every member failed.
     fn conclude(
-        self,
+        mut self,
         transaction_id: TransactionId,
         committee_size: usize,
     ) -> Result<Option<TransactionResultStatus>, NetworkClientError> {
+        let abort_power = self
+            .answers
+            .iter()
+            .filter(|(answer, _)| answer.is_abort())
+            .fold(VotePower::zero(), |acc, (_, (power, _))| acc.saturating_add(*power));
+        if abort_power > self.max_failures {
+            let best_attested = self
+                .answers
+                .iter()
+                .filter(|(answer, _)| answer.is_abort())
+                .max_by_key(|(_, (power, _))| *power)
+                .map(|(answer, _)| answer.clone());
+            if let Some((_, Some(TransactionResultStatus::Finalized(mut finalized)))) =
+                best_attested.and_then(|answer| self.answers.remove(&answer))
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "Committee agreed transaction {transaction_id} aborted but not on the details. Reporting the abort without them."
+                );
+                finalized.abort_details = None;
+                finalized.execute_result = None;
+                return Ok(Some(TransactionResultStatus::Finalized(finalized)));
+            }
+        }
+
         if self.answers.keys().any(ResultAnswer::is_finalized) {
             warn!(
                 target: LOG_TARGET,
@@ -435,6 +522,8 @@ impl NetworkClientError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use tari_common_types::types::FixedHash;
     use tari_engine_types::{
         commit_result::{ExecuteResult, RejectReason, TransactionResult},
@@ -461,9 +550,9 @@ mod tests {
         Unreachable,
     }
 
-    /// Answers for each committee member, by address.
+    /// Answers for each committee member, by address, and how many requests they have served.
     #[derive(Clone)]
-    struct FakeCommittee(Arc<HashMap<Addr, Answer>>);
+    struct FakeCommittee(Arc<HashMap<Addr, Answer>>, Arc<AtomicUsize>);
 
     struct FakeMember {
         committee: FakeCommittee,
@@ -490,6 +579,7 @@ mod tests {
             &mut self,
             _: TransactionId,
         ) -> Result<TransactionResultStatus, ValidatorNodeRpcClientError> {
+            self.committee.1.fetch_add(1, Ordering::SeqCst);
             match &self.committee.0[&self.address] {
                 Answer::Pending => Ok(TransactionResultStatus::Pending),
                 Answer::Finalized(result) => Ok(TransactionResultStatus::Finalized(result.clone())),
@@ -667,8 +757,32 @@ mod tests {
         finalized(TransactionResult::Reject(RejectReason::ForeignPledgeInputConflict), 0)
     }
 
-    /// Queries a committee of equally weighted members, member `n` answering with `answers[n]`.
+    fn aborted_with(details: &str) -> Answer {
+        let Answer::Finalized(mut result) = aborted() else {
+            unreachable!()
+        };
+        result.abort_details = Some(details.to_string());
+        Answer::Finalized(result)
+    }
+
+    fn abort_details(status: &TransactionResultStatus) -> Option<&str> {
+        let TransactionResultStatus::Finalized(result) = status else {
+            panic!("expected a finalized result, got {status:?}");
+        };
+        assert!(result.final_decision.is_abort());
+        result.abort_details.as_deref()
+    }
+
     async fn query(answers: Vec<Answer>) -> Result<Option<TransactionResultStatus>, NetworkClientError> {
+        network(answers)
+            .0
+            .get_finalized_transaction_result(transaction_id())
+            .await
+    }
+
+    /// A committee of equally weighted members, member `n` answering with `answers[n]`, and a count
+    /// of the requests it serves.
+    fn network(answers: Vec<Answer>) -> (TariNetworkClient<FakeEpochManager, FakeCommittee>, Arc<AtomicUsize>) {
         let members = (0..answers.len())
             .map(|n| CommitteeMember {
                 address: format!("vn{n}"),
@@ -681,12 +795,13 @@ mod tests {
             .enumerate()
             .map(|(n, answer)| (format!("vn{n}"), answer))
             .collect();
+        let requests = Arc::new(AtomicUsize::new(0));
         let client = TariNetworkClient::new(
             FakeEpochManager(Arc::new(Committee::new(members))),
-            FakeCommittee(Arc::new(answers)),
+            FakeCommittee(Arc::new(answers), requests.clone()),
             NumPreshards::P1,
         );
-        client.get_finalized_transaction_result(transaction_id()).await
+        (client, requests)
     }
 
     fn is_pending(status: &TransactionResultStatus) -> bool {
@@ -789,5 +904,62 @@ mod tests {
     async fn every_member_failing_is_an_error() {
         let result = query(vec![Answer::Unreachable, Answer::Unreachable]).await;
         assert!(matches!(result, Err(NetworkClientError::AllValidatorsFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn abort_details_given_by_one_member_are_not_returned() {
+        for _ in 0..ROUNDS {
+            let status = query(vec![
+                aborted_with("one member's account"),
+                aborted_with("another member's account"),
+                Answer::Unreachable,
+                Answer::Unreachable,
+            ])
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(abort_details(&status), None);
+            let TransactionResultStatus::Finalized(result) = status else {
+                unreachable!()
+            };
+            assert!(result.execute_result.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn agreed_abort_details_are_returned() {
+        for _ in 0..ROUNDS {
+            let status = query(vec![
+                aborted_with("agreed"),
+                aborted_with("agreed"),
+                aborted_with("one member's account"),
+                Answer::Pending,
+            ])
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(abort_details(&status), Some("agreed"));
+        }
+    }
+
+    #[tokio::test]
+    async fn an_agreed_result_is_confirmed_by_one_member_on_later_polls() {
+        // Seven members: f = 2, so the first poll needs three to agree.
+        let (client, requests) = network(vec![committed(2); 7]);
+        let status = client
+            .get_finalized_transaction_result(transaction_id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(commit_tag(&status), Some(2));
+        assert_eq!(requests.swap(0, Ordering::SeqCst), 3);
+
+        let status = client
+            .get_finalized_transaction_result(transaction_id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(commit_tag(&status), Some(2));
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
     }
 }

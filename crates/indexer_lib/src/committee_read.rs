@@ -30,8 +30,9 @@ pub type MemberResponse = Result<(SubstateResult, Option<SubstateProofData>), In
 /// proven `Down` of the version the read asked for (or any `Up`/`Down` while proofs are not
 /// required) answers on the spot. `DoesNotExist` answers only once more than `f` members agree, and
 /// so does a `Down` no member has proven, counted per version: a single member's word that a substate
-/// is down could otherwise make the indexer treat a live substate as spent. Any other `Up`/`Down` is
-/// held as a fallback in case nothing settles the read.
+/// is down could otherwise make the indexer treat a live substate as spent. The highest unproven `Up`
+/// is held as a fallback in case nothing settles the read; an unproven `Down` never is, and a read
+/// that ends with only too few of them fails rather than reporting the substate down or absent.
 ///
 /// A proof of a `Down` shows that the version it names was committed and is no longer up. That
 /// answers a read for that version, but says nothing about whether a later version is up, so it
@@ -48,9 +49,9 @@ pub struct CommitteeReadTally {
     /// How many members reported each version down without a proof that answers the read.
     unproven_downs: HashMap<SubstateVersion, usize>,
     last_error: Option<IndexerError>,
-    /// Highest-version `Up`/`Down` response that came back without a proof. Only served if no
-    /// member can prove one.
-    unproven_result: Option<SubstateResult>,
+    /// Highest-version `Up` that came back without a proof. Only served if nothing settles the read. A
+    /// `Down` is never kept here: one member's unproven `Down` would otherwise refuse a live input.
+    unproven_up: Option<SubstateResult>,
 }
 
 impl CommitteeReadTally {
@@ -66,7 +67,7 @@ impl CommitteeReadTally {
             num_nexist: 0,
             unproven_downs: HashMap::new(),
             last_error: None,
-            unproven_result: None,
+            unproven_up: None,
         }
     }
 
@@ -85,25 +86,22 @@ impl CommitteeReadTally {
                     if let SubstateResult::Down { version } = substate_result {
                         let count = self.unproven_downs.entry(version).or_default();
                         *count += 1;
-                        if *count > self.f {
-                            return Some(SubstateLookupResult {
-                                result: substate_result,
-                                verified: false,
-                                proof: None,
-                            });
-                        }
+                        return (*count > self.f).then_some(SubstateLookupResult {
+                            result: substate_result,
+                            verified: false,
+                            proof: None,
+                        });
                     }
-                    // The member could not prove an answer to this read (e.g. nothing committed
-                    // since the epoch started, or a down version other than the one asked for). Keep
-                    // the highest version as an unverified fallback (a member that is still syncing
-                    // may respond with a stale copy) and wait on the rest of the committee for a
-                    // proven copy.
+                    // The member could not prove an `Up` (e.g. nothing committed since the epoch
+                    // started). Keep the highest version as an unverified fallback (a member that is
+                    // still syncing may respond with a stale copy) and wait on the rest of the
+                    // committee for a proven copy.
                     if self
-                        .unproven_result
+                        .unproven_up
                         .as_ref()
                         .is_none_or(|r| r.version() < substate_result.version())
                     {
-                        self.unproven_result = Some(substate_result);
+                        self.unproven_up = Some(substate_result);
                     }
                     None
                 },
@@ -134,7 +132,7 @@ impl CommitteeReadTally {
 
     /// The answer once every member has responded without settling the read.
     pub fn conclude(self, describe: impl std::fmt::Display) -> Result<SubstateLookupResult, IndexerError> {
-        if let Some(result) = self.unproven_result {
+        if let Some(result) = self.unproven_up {
             log::warn!(
                 target: LOG_TARGET,
                 "No committee member could supply a proof for {describe}. Returning the substate unverified.",
@@ -144,6 +142,18 @@ impl CommitteeReadTally {
                 verified: false,
                 proof: None,
             });
+        }
+
+        // Members said the substate went down, but too few agreed to believe it. That is neither an
+        // answer nor evidence that the substate does not exist.
+        if !self.unproven_downs.is_empty() {
+            log::warn!(
+                target: LOG_TARGET,
+                "Too few committee members agree that {describe} is down (unproven Downs by version: {:?}, f = {})",
+                self.unproven_downs,
+                self.f,
+            );
+            return Err(IndexerError::InvalidSubstateState);
         }
 
         log::warn!(
@@ -387,17 +397,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_highest_unproven_version_is_served_when_nobody_can_prove() {
+    async fn the_highest_unproven_up_is_served_when_nobody_can_prove() {
         let result = race(4, 1, true, None, vec![
-            (0, Ok((down(2), None))),
-            (1, Ok((down(5), None))),
-            (2, Ok((down(3), None))),
+            (0, Ok((up(2), None))),
+            (1, Ok((up(5), None))),
+            (2, Ok((up(3), None))),
             (3, Err(error())),
         ])
         .await
         .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
         assert_eq!(result.result.version(), Some(SubstateVersion::new(5)));
         assert!(!result.verified);
+    }
+
+    #[tokio::test]
+    async fn one_unproven_down_does_not_outrank_unproven_ups() {
+        let result = race(4, 1, true, None, vec![
+            (0, Ok((down(5), None))),
+            (1, Ok((up(4), None))),
+            (2, Ok((up(4), None))),
+            (3, Ok((up(4), None))),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(4)));
+        assert!(!result.verified);
+    }
+
+    #[tokio::test]
+    async fn sub_threshold_unproven_downs_return_no_down() {
+        // f = 1: two members name different versions, so no version has f + 1 votes.
+        let result = race(4, 1, true, None, vec![
+            (0, Ok((down(5), None))),
+            (1, Ok((down(3), None))),
+            (2, Err(error())),
+            (3, Err(error())),
+        ])
+        .await;
+        assert!(matches!(result, Err(IndexerError::InvalidSubstateState)), "{result:?}");
     }
 
     #[tokio::test]

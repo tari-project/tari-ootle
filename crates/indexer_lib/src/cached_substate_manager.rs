@@ -48,6 +48,7 @@ use tari_ootle_common_types::{
     optional::Optional,
 };
 use tari_ootle_storage::{
+    SubstateProofVerifyError,
     TrustedStateRoot,
     consensus_models::{CommittedBlockProof, VerifiedBlockTip},
     decode_substate_down_proof,
@@ -688,6 +689,10 @@ where
         };
 
         let trusted_root = self.trusted_root_from_commit_proof(commit_proof).await?;
+        // A down proof needs its anchor's height signed, which the trusted root above does not establish. It is
+        // validated at most once per batch, as is each earlier root the batch's down proofs cite.
+        let mut down_root = None;
+        let mut up_roots = HashMap::new();
         for substate in &batch.substates {
             let Some(value_proof) = &substate.value_proof else {
                 return Err(IndexerError::SubstateProofVerificationFailed {
@@ -723,7 +728,11 @@ where
             // A batch answers with heads, which no down proof can settle (see `fetch_and_cache_heads`), but a member
             // that serves an invalid one is still disqualified.
             if let Some(down_proof) = &substate.substate_down_proof {
-                self.verify_down_proof(&substate.substate_id, version, down_proof, commit_proof)
+                let down_root = match down_root {
+                    Some(root) => root,
+                    None => *down_root.insert(self.validated_root_from_commit_proof(commit_proof).await?),
+                };
+                self.verify_down_proof_against(&substate.substate_id, version, down_proof, &down_root, &mut up_roots)
                     .await?;
             }
         }
@@ -882,32 +891,63 @@ where
         down_proof: &[u8],
         down_commit_proof: &[u8],
     ) -> Result<bool, IndexerError> {
+        let down_root = self.validated_root_from_commit_proof(down_commit_proof).await?;
+        self.verify_down_proof_against(substate_id, version, down_proof, &down_root, &mut HashMap::new())
+            .await
+    }
+
+    /// [`Self::verify_down_proof`] against an already validated `down_root`. `up_roots` holds the earlier roots
+    /// established so far, keyed by the encoded commit proof that names them; `None` records one that could not be.
+    ///
+    /// A global substate proved with roots of two shard groups is also unproven rather than refuted: each group commits
+    /// the global shard on its own chain, and an honest node that spans a reshard serves exactly such a proof.
+    async fn verify_down_proof_against(
+        &self,
+        substate_id: &SubstateId,
+        version: SubstateVersion,
+        down_proof: &[u8],
+        down_root: &TrustedStateRoot,
+        up_roots: &mut HashMap<Vec<u8>, Option<TrustedStateRoot>>,
+    ) -> Result<bool, IndexerError> {
         let decoded = decode_substate_down_proof(down_proof)
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
-        let down_root = self.validated_root_from_commit_proof(down_commit_proof).await?;
-        let up_root = match self.validated_root_from_commit_proof(&decoded.up_commit_proof).await {
-            Ok(root) => root,
-            Err(e @ IndexerError::SubstateProofVerificationFailed { .. }) => return Err(e),
-            Err(e) => {
-                debug!(
-                    target: LOG_TARGET,
-                    "Cannot establish the earlier root of the down proof for {substate_id}v{version}: {e}. Treating \
-                     the Down as unproven."
-                );
-                return Ok(false);
+        let up_root = match up_roots.get(&decoded.up_commit_proof) {
+            Some(established) => *established,
+            None => {
+                let established = match self.validated_root_from_commit_proof(&decoded.up_commit_proof).await {
+                    Ok(root) => Some(root),
+                    Err(e @ IndexerError::SubstateProofVerificationFailed { .. }) => return Err(e),
+                    Err(e) => {
+                        debug!(
+                            target: LOG_TARGET,
+                            "Cannot establish the earlier root of the down proof for {substate_id}v{version}: {e}"
+                        );
+                        None
+                    },
+                };
+                up_roots.insert(decoded.up_commit_proof, established);
+                established
             },
         };
-        verify_substate_down_proof_against_roots(
+        let Some(up_root) = up_root else {
+            return Ok(false);
+        };
+        match verify_substate_down_proof_against_roots(
             down_proof,
             substate_id,
             version,
             self.network,
             self.num_preshards,
             &up_root,
-            &down_root,
-        )
-        .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
-        Ok(true)
+            down_root,
+        ) {
+            Ok(()) => Ok(true),
+            Err(e @ SubstateProofVerifyError::DownProofGlobalAcrossShardGroups { .. }) => {
+                debug!(target: LOG_TARGET, "Down of {substate_id}v{version} is unproven: {e}");
+                Ok(false)
+            },
+            Err(e) => Err(IndexerError::SubstateProofVerificationFailed { details: e.to_string() }),
+        }
     }
 
     async fn verify_substate_proof(
@@ -1544,6 +1584,105 @@ mod tests {
             matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
             "{result:?}"
         );
+    }
+
+    /// A global substate up at `R1` and down at `R2`, with `R1`'s commit proof naming `up_group`.
+    fn global_down_proof(up_group: ShardGroup) -> (SubstateId, Vec<u8>, TrustedStateRoot, tari_state_tree::TreeHash) {
+        use tari_engine_types::published_template::PublishedTemplateAddress;
+        use tari_ootle_common_types::{VersionedSubstateId, shard::Shard};
+        use tari_state_tree::{
+            ShardGroupRootTree,
+            SpreadPrefixStateTree,
+            StateTreePayload,
+            SubstateDownProof,
+            SubstateTreeChange,
+            SubstateValueProof,
+            memory_store::MemoryTreeStore,
+        };
+
+        let protocol_version = tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(1));
+        let id = SubstateId::Template(PublishedTemplateAddress::from_hash(
+            tari_template_lib_types::Hash32::from_array([4; 32]),
+        ));
+        let target = VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO);
+        let mut store = MemoryTreeStore::<StateTreePayload>::new();
+        let r1_shard_root = SpreadPrefixStateTree::new(&mut store)
+            .put_substate_changes(None, 1, vec![SubstateTreeChange::Up {
+                id: target.clone(),
+                value_hash: tari_template_lib_types::Hash32::from_array([1; 32]),
+            }])
+            .unwrap();
+        let r2_shard_root = SpreadPrefixStateTree::new(&mut store)
+            .put_substate_changes(Some(1), 2, vec![SubstateTreeChange::Down { id: target.clone() }])
+            .unwrap();
+        let tree =
+            |root, version| ShardGroupRootTree::build(protocol_version, [(Shard::global(), root, version)]).unwrap();
+        let r1 = tree(r1_shard_root, 1);
+        let r2 = tree(r2_shard_root, 2);
+        let (_, value, up_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(1, &target).unwrap();
+        let (_, _, down_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(2, &target).unwrap();
+        let up_commit_proof = unsigned_commit_proof(up_group, 2, r1.root());
+        let up_root =
+            TrustedStateRoot::from_commit_proof(&CommittedBlockProof::from_bytes(&up_commit_proof).unwrap()).unwrap();
+        let proof = tari_bor::serde_codec::to_vec(&SubstateDownProof {
+            up: SubstateValueProof::new(r1_shard_root, 1, r1.get_proof(Shard::global()).unwrap().1, up_leaf),
+            up_value_hash: value.unwrap().0,
+            up_commit_proof,
+            down: SubstateValueProof::new(r2_shard_root, 2, r2.get_proof(Shard::global()).unwrap().1, down_leaf),
+        })
+        .unwrap();
+        (id, proof, up_root, r2.root())
+    }
+
+    fn group(start: u32, end: u32) -> ShardGroup {
+        ShardGroup::new(
+            tari_ootle_common_types::shard::Shard::from_u32(start),
+            tari_ootle_common_types::shard::Shard::from_u32(end),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_global_down_proved_across_shard_groups_is_unproven_not_invalid() {
+        let (manager, _) = manager(FakeNetwork::default());
+        let manager = manager.with_substate_proof_verification(true);
+        for (up_group, expected) in [(group(1, 2), true), (group(3, 4), false)] {
+            let (id, proof, up_root, r2_root) = global_down_proof(up_group);
+            let decoded = decode_substate_down_proof(&proof).unwrap();
+            let down_root = TrustedStateRoot {
+                epoch: Epoch(1),
+                shard_group: group(1, 2),
+                height: tari_ootle_common_types::NodeHeight(4),
+                root: FixedHash::new(r2_root.into_array()),
+            };
+            // The earlier root is taken as already established for the pass: its commit proof is unsigned, so
+            // validating it again would fail.
+            let mut up_roots = HashMap::from([(decoded.up_commit_proof, Some(up_root))]);
+            let proven = manager
+                .verify_down_proof_against(&id, SubstateVersion::ZERO, &proof, &down_root, &mut up_roots)
+                .await
+                .unwrap();
+            assert_eq!(proven, expected, "{up_group}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_earlier_root_that_could_not_be_established_is_not_retried() {
+        let (manager, _) = manager(FakeNetwork::default());
+        let manager = manager.with_substate_proof_verification(true);
+        let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
+        let decoded = decode_substate_down_proof(&proof).unwrap();
+        let down_root = TrustedStateRoot {
+            epoch: Epoch(1),
+            shard_group: group(1, 2),
+            height: tari_ootle_common_types::NodeHeight(4),
+            root: FixedHash::new(r2_root.into_array()),
+        };
+        let mut up_roots = HashMap::from([(decoded.up_commit_proof, None)]);
+        let proven = manager
+            .verify_down_proof_against(&id, SubstateVersion::ZERO, &proof, &down_root, &mut up_roots)
+            .await
+            .unwrap();
+        assert!(!proven);
     }
 
     #[tokio::test]

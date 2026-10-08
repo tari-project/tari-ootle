@@ -292,8 +292,18 @@ pub fn verify_substate_down_proof_against_roots(
     up_root.check_contains(&versioned_id, shard)?;
     down_root.check_contains(&versioned_id, shard)?;
 
+    // Every shard group commits the global shard on its own chain, so two groups' copies of the global tree are not
+    // known to agree: a global substate's inclusion under one group's root and exclusion under another's does not show
+    // it went down. An honest node can span a reshard this way, so this leaves the Down unproven rather than refuting
+    // it.
+    if shard.is_global() && up_root.shard_group != down_root.shard_group {
+        return Err(SubstateProofVerifyError::DownProofGlobalAcrossShardGroups {
+            up_shard_group: up_root.shard_group,
+            down_shard_group: down_root.shard_group,
+        });
+    }
     // Heights number the blocks of one shard group's chain, so two roots of one epoch are comparable only within a
-    // group. A global substate lies in every group, so its roots could otherwise come from two unrelated chains.
+    // group. Groups of one epoch do not overlap, so no honest pair of roots holding the same shard differs here.
     if up_root.epoch == down_root.epoch && up_root.shard_group != down_root.shard_group {
         return Err(SubstateProofVerifyError::DownProofShardGroupMismatch {
             epoch: up_root.epoch,
@@ -366,6 +376,14 @@ pub enum SubstateProofVerifyError {
     )]
     DownProofShardGroupMismatch {
         epoch: Epoch,
+        up_shard_group: ShardGroup,
+        down_shard_group: ShardGroup,
+    },
+    #[error(
+        "down proof's roots are of different shard groups ({up_shard_group} and {down_shard_group}), whose copies of \
+         the global shard are not known to agree"
+    )]
+    DownProofGlobalAcrossShardGroups {
         up_shard_group: ShardGroup,
         down_shard_group: ShardGroup,
     },
@@ -788,10 +806,10 @@ mod tests {
             scenario.verify(&proof, &target, scenario.r1(2)).unwrap();
         }
 
-        /// A global substate's shard is in every group. Two roots of one epoch from different groups sit on unrelated
-        /// chains, so their heights do not order them; roots of different epochs still do.
+        /// A global substate's shard is in every group, and each group commits it on its own chain. Roots of two
+        /// groups, in one epoch or in different ones, do not show it went down.
         #[test]
-        fn roots_of_different_groups_in_one_epoch_are_rejected_for_a_global_substate() {
+        fn roots_of_different_groups_do_not_prove_a_global_substate_down() {
             use tari_engine_types::published_template::PublishedTemplateAddress;
 
             let target = VersionedSubstateId::new(
@@ -855,7 +873,38 @@ mod tests {
                 )
             };
 
-            let result = verify(group_b, EPOCH);
+            for epoch in [EPOCH, Epoch(EPOCH.as_u64() + 1)] {
+                let result = verify(group_b, epoch);
+                assert!(
+                    matches!(
+                        result,
+                        Err(SubstateProofVerifyError::DownProofGlobalAcrossShardGroups { .. })
+                    ),
+                    "{epoch}: {result:?}"
+                );
+                verify(group_a, epoch).unwrap();
+            }
+        }
+
+        /// Groups of one epoch do not overlap, so no honest pair of roots of one epoch holds the substate's shard in
+        /// two different groups.
+        #[test]
+        fn roots_of_different_groups_in_one_epoch_are_rejected() {
+            let mut scenario = Scenario::new(false, destroyed_and_replaced);
+            let target = scenario.target.clone();
+            let proof = scenario.honest(&target);
+            let mut r2 = scenario.r2();
+            r2.shard_group = ShardGroup::new(Shard::from_u32(1), Shard::from_u32(NUM_PRESHARDS.as_u32()));
+            assert_ne!(r2.shard_group, scenario.group());
+            let result = verify_substate_down_proof_against_roots(
+                &tari_bor::serde_codec::to_vec(&proof).unwrap(),
+                target.substate_id(),
+                target.version(),
+                NETWORK,
+                NUM_PRESHARDS,
+                &scenario.r1(2),
+                &r2,
+            );
             assert!(
                 matches!(
                     result,
@@ -863,8 +912,6 @@ mod tests {
                 ),
                 "{result:?}"
             );
-            verify(group_a, EPOCH).unwrap();
-            verify(group_b, Epoch(EPOCH.as_u64() + 1)).unwrap();
         }
 
         #[test]

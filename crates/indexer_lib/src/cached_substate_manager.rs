@@ -445,31 +445,50 @@ where
     /// verified with, when one was.
     ///
     /// A batch is answered by one member, so an unproven head that is not up is confirmed through
-    /// [`Self::get_substate`]'s committee agreement before the substate is left out, as
-    /// [`Self::get_input_substates`] does.
+    /// [`Self::get_substate`]'s committee agreement before the substate is left out. A substate whose
+    /// confirmation fails is left out too: only what the committee holds up is returned.
     pub async fn fetch_and_cache_substates(
         &self,
         substate_ids: &[SubstateId],
     ) -> Result<HashMap<SubstateId, ProvenSubstate>, IndexerError> {
         let substate_ids = substate_ids.iter().collect::<Vec<_>>();
         let heads = self.fetch_and_cache_heads(&substate_ids).await?;
-        let mut live = HashMap::with_capacity(heads.len());
+        let mut lookups = Vec::with_capacity(heads.len());
+        let mut unsettled = Vec::new();
         for (id, head) in heads {
-            let settled =
-                head.verified || !self.verify_substate_proofs || matches!(head.result, SubstateResult::Up { .. });
-            let lookup = if settled {
-                head
+            if head.verified || !self.verify_substate_proofs || matches!(head.result, SubstateResult::Up { .. }) {
+                lookups.push((id, head));
             } else {
-                self.get_substate(&id, None).await?
-            };
-            // A batch answers with the head version; a caller asking for substates by id wants the
-            // live ones, and a down head is not one.
-            let proof = lookup.proof;
-            if let Some(substate) = lookup.result.into_up() {
-                live.insert(id, ProvenSubstate { substate, proof });
+                unsettled.push(id);
             }
         }
-        Ok(live)
+        let confirmed = stream::iter(unsettled)
+            .map(|id| async move {
+                let lookup = self.get_substate(&id, None).await;
+                (id, lookup)
+            })
+            .buffer_unordered(BATCH_FETCH_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        for (id, lookup) in confirmed {
+            match lookup {
+                Ok(lookup) => lookups.push((id, lookup)),
+                Err(e) => warn!(target: LOG_TARGET, "Could not confirm the state of {id}; leaving it out: {e}"),
+            }
+        }
+
+        // A batch answers with the head version; a caller asking for substates by id wants the live
+        // ones, and a down head is not one.
+        Ok(lookups
+            .into_iter()
+            .filter_map(|(id, lookup)| {
+                let proof = lookup.proof;
+                lookup
+                    .result
+                    .into_up()
+                    .map(|substate| (id, ProvenSubstate { substate, proof }))
+            })
+            .collect())
     }
 
     /// Looks up the substates a transaction declares as inputs, stopping at the first one that is not
@@ -1104,6 +1123,8 @@ mod tests {
         down_with_proof: HashMap<SubstateId, (SubstateVersion, SubstateProofData)>,
         batch_requests: AtomicUsize,
         single_requests: AtomicUsize,
+        /// Single reads of these fail.
+        failing_single_reads: HashSet<SubstateId>,
     }
 
     #[derive(Clone)]
@@ -1134,6 +1155,12 @@ mod tests {
             substate_req: SubstateRequirementRef<'_>,
         ) -> Result<SubstateResult, ValidatorNodeRpcClientError> {
             self.0.single_requests.fetch_add(1, Ordering::Relaxed);
+            if self.0.failing_single_reads.contains(substate_req.substate_id()) {
+                return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
+                    "no answer for {}",
+                    substate_req.substate_id()
+                )));
+            }
             Ok(match self.0.live.get(substate_req.substate_id()) {
                 Some(substate) => SubstateResult::Up {
                     substate: Box::new(substate.clone()),
@@ -1789,6 +1816,28 @@ mod tests {
         assert_eq!(found.len(), ids.len(), "{:?}", found.keys().collect::<Vec<_>>());
         assert!(found.contains_key(&ids[1]));
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+    }
+
+    /// A substate whose state the committee cannot confirm is left out without failing the rest.
+    #[tokio::test]
+    async fn a_batch_head_that_cannot_be_confirmed_is_left_out() {
+        let ids = (0..4).map(component_id).collect::<Vec<_>>();
+        let (manager, network) = manager(FakeNetwork {
+            live: live(&ids),
+            down_in_batches: HashSet::from([ids[1].clone(), ids[2].clone()]),
+            failing_single_reads: HashSet::from([ids[2].clone()]),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
+
+        let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
+
+        let mut returned = found.into_keys().collect::<Vec<_>>();
+        returned.sort();
+        let mut expected = vec![ids[0].clone(), ids[1].clone(), ids[3].clone()];
+        expected.sort();
+        assert_eq!(returned, expected);
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
     }
 
     /// A cached nonexistence ends the lookup before anything is asked of the network.

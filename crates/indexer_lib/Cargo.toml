@@ -25,6 +25,7 @@ thiserror = { workspace = true }
 prometheus-client = { workspace = true, optional = true }
 
 [dev-dependencies]
+anyhow = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
 tari_sidechain = { workspace = true }
 tari_state_tree = { workspace = true }

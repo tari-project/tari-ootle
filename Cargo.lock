@@ -12154,6 +12154,7 @@ dependencies = [
 name = "tari_indexer_lib"
 version = "0.46.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "futures 0.3.34",
  "log",

@@ -1233,6 +1233,48 @@ mod tests {
         .await
     }
 
+    fn down_proof_record<TStore: StateStore>(
+        store: &TStore,
+        seed: u8,
+    ) -> Option<tari_ootle_storage::consensus_models::SubstateDownProofRecord> {
+        let id = VersionedSubstateId::new(substate_id_in(shard(), seed), SubstateVersion::ZERO);
+        store
+            .with_read_tx(|tx| tx.substate_down_proofs_get(shard(), &id))
+            .unwrap()
+    }
+
+    /// A synced node that holds no proof of a version the substate was up at cannot prove it went down, so it records
+    /// nothing and serves the Down unproven.
+    #[tokio::test]
+    async fn a_destruction_synced_without_a_proof_point_records_no_down_proof() {
+        let (store, _tmp) = create_store();
+        let versions = vec![(1, vec![create(HONEST), create(2)]), (2, vec![destroy(HONEST)])];
+        sync_honestly(&store, &versions).await;
+
+        assert!(held_proofs(&store).is_empty());
+        assert!(substate(&store, HONEST).unwrap().is_destroyed());
+        assert!(down_proof_record(&store, HONEST).is_none());
+    }
+
+    /// With a proof of a version the substate was up at, the same destruction is recorded with it.
+    #[tokio::test]
+    async fn a_destruction_synced_after_a_proof_point_records_a_down_proof() {
+        let (store, _tmp) = create_store();
+        let v1 = vec![(1, vec![create(HONEST), create(2)])];
+        let versions = vec![v1[0].clone(), (2, vec![destroy(HONEST)])];
+        let responses = vec![
+            batch(1, v1[0].1.clone()),
+            version_proof(1, root_after(&v1)),
+            batch(2, vec![destroy(HONEST)]),
+            complete(2),
+        ];
+        sync_with_proofs(&store, &versions, responses).await.unwrap();
+
+        assert_eq!(held_proofs(&store), vec![1]);
+        let record = down_proof_record(&store, HONEST).unwrap();
+        assert_eq!(record.state_version, 1);
+    }
+
     fn held_proofs<TStore: StateStore>(store: &TStore) -> Vec<Version> {
         store
             .with_read_tx(|tx| tx.state_version_proofs_get_range(shard(), 0, Version::MAX - 1))

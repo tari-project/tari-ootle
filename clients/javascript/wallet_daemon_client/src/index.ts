@@ -106,6 +106,14 @@ import type {
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
+  SigningRequestCreateRequest,
+  SigningRequestCreateResponse,
+  SigningRequestDecisionRequest,
+  SigningRequestDecisionResponse,
+  SigningRequestGetRequest,
+  SigningRequestGetResponse,
+  SigningRequestListRequest,
+  SigningRequestListResponse,
   SignTemplateMetadataRequest,
   SignTemplateMetadataResponse,
   StealthTransferRequest,
@@ -324,6 +332,30 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public transactionRequestsSubmit(params: TransactionRequestSubmitRequest): Promise<TransactionRequestSubmitResponse> {
     return this.sendRequest("transaction_requests.submit", params);
+  }
+
+  public signingRequestsCreate(params: SigningRequestCreateRequest): Promise<SigningRequestCreateResponse> {
+    return this.sendRequest("signing_requests.create", params);
+  }
+
+  public signingRequestsGet(params: SigningRequestGetRequest): Promise<SigningRequestGetResponse> {
+    return this.sendRequest("signing_requests.get", params);
+  }
+
+  public signingRequestsList(
+    params: SigningRequestListRequest = { status: null },
+  ): Promise<SigningRequestListResponse> {
+    return this.sendRequest("signing_requests.list", params);
+  }
+
+  /** Requires an interactive wallet session; the daemon refuses an API key. */
+  public signingRequestsApprove(params: SigningRequestDecisionRequest): Promise<SigningRequestDecisionResponse> {
+    return this.sendRequest("signing_requests.approve", params);
+  }
+
+  /** Requires an interactive wallet session; the daemon refuses an API key. */
+  public signingRequestsReject(params: SigningRequestDecisionRequest): Promise<SigningRequestDecisionResponse> {
+    return this.sendRequest("signing_requests.reject", params);
   }
 
   public authCreateApiKey(params: AuthCreateApiKeyRequest): Promise<AuthCreateApiKeyResponse> {

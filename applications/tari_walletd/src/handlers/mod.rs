@@ -13,6 +13,7 @@ pub mod keys;
 pub mod nfts;
 pub mod resources;
 pub mod settings;
+pub mod signing_requests;
 pub mod stealth_utxos;
 pub mod substates;
 pub mod swap_pools;

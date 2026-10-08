@@ -36,6 +36,7 @@ use crate::handlers::{
     nfts,
     resources,
     settings,
+    signing_requests,
     swap_pools,
     transaction,
     transaction_requests,
@@ -178,6 +179,14 @@ async fn handler(
             "approve" => call_handler(context, value, token, transaction_requests::handle_approve).await,
             "reject" => call_handler(context, value, token, transaction_requests::handle_reject).await,
             "submit" => call_handler(context, value, token, transaction_requests::handle_submit).await,
+            _ => value.method_not_found(&value.method).into_response(),
+        },
+        Some(("signing_requests", method)) => match method {
+            "create" => call_handler(context, value, token, signing_requests::handle_create).await,
+            "get" => call_handler(context, value, token, signing_requests::handle_get).await,
+            "list" => call_handler(context, value, token, signing_requests::handle_list).await,
+            "approve" => call_handler(context, value, token, signing_requests::handle_approve).await,
+            "reject" => call_handler(context, value, token, signing_requests::handle_reject).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("accounts", method)) => match method {

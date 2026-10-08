@@ -21,6 +21,7 @@ export type Permission =
   | { Keys: Crud }
   | { Transactions: Crud }
   | { TransactionRequests: TxRequestAction }
+  | { SigningRequests: TxRequestAction }
   | { Transfer: [Crud, ComponentAddress | null] }
   | { Templates: Crud }
   | { Nfts: [Crud, ResourceAddress | null] }

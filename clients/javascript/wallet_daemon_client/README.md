@@ -40,6 +40,8 @@ A 401 from an API key is final — the key is revoked, expired, or lacks the per
 Keys are minted with `auth.create_api_key`, which requires an interactive Admin session; an API key cannot mint
 further keys. Scope each key to the narrowest permission set that works — a client that only proposes transactions
 for a human to approve needs `TransactionRequests(Create)` and not `Transfer` or `Transactions(Create)`.
+A client that asks the wallet to co-sign a transaction someone else seals needs `SigningRequests(Create)`;
+approving a signing request always takes an interactive session.
 
 The daemon only serves cross-origin callers when its CORS configuration permits the origin.
 

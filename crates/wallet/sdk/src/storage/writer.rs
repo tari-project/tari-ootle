@@ -36,8 +36,11 @@ use crate::{
         KeyId,
         KeyType,
         NewAccountData,
+        NewSigningRequest,
         NonFungibleToken,
         OutputStatus,
+        SigningRequestId,
+        SigningRequestModel,
         StealthOutputModel,
         SubstateModel,
         TransactionRequestId,
@@ -262,6 +265,30 @@ pub trait WalletStoreWriter: CommittableStore {
         id: TransactionRequestId,
         transaction_id: TransactionId,
     ) -> Result<TransactionRequestModel, WalletStorageError>;
+
+    // Signing requests
+    /// Persist a signing request. It is born `Pending` and expires `ttl` from
+    /// now.
+    fn signing_request_insert(
+        &mut self,
+        request: NewSigningRequest<'_>,
+    ) -> Result<SigningRequestModel, WalletStorageError>;
+
+    /// Move an unexpired `Pending` request to `Signed`, storing `signature`.
+    ///
+    /// The status and expiry checks and the write are one conditional UPDATE,
+    /// so of two concurrent approvals exactly one stores its signature. A
+    /// request that is not pending, or whose window has closed, is left
+    /// untouched and [`WalletStorageError::UnexpectedState`] is returned.
+    fn signing_request_mark_signed(
+        &mut self,
+        id: SigningRequestId,
+        signature: &TransactionSignature,
+    ) -> Result<SigningRequestModel, WalletStorageError>;
+
+    /// Move a `Pending` request to `Rejected`, guarded like
+    /// [`Self::signing_request_mark_signed`].
+    fn signing_request_reject(&mut self, id: SigningRequestId) -> Result<SigningRequestModel, WalletStorageError>;
 
     // Locks
     fn locks_create(&mut self, timeout: Option<Duration>) -> Result<WalletLockId, WalletStorageError>;

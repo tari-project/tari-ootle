@@ -58,6 +58,12 @@ impl UnsignedTransaction {
         }
     }
 
+    pub fn is_dry_run(&self) -> bool {
+        match self {
+            Self::V1(tx) => tx.dry_run,
+        }
+    }
+
     pub(crate) fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
         match self {
             Self::V1(tx) => tx.set_dry_run(dry_run),

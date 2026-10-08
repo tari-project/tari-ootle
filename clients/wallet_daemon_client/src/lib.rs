@@ -153,6 +153,14 @@ use crate::{
         SettingsSetResponse,
         SignTemplateMetadataRequest,
         SignTemplateMetadataResponse,
+        SigningRequestCreateRequest,
+        SigningRequestCreateResponse,
+        SigningRequestDecisionRequest,
+        SigningRequestDecisionResponse,
+        SigningRequestGetRequest,
+        SigningRequestGetResponse,
+        SigningRequestListRequest,
+        SigningRequestListResponse,
         StealthTransferRequest,
         StealthTransferResponse,
         StealthUtxosDecryptValueRequest,
@@ -400,6 +408,43 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<TransactionRequestSubmitResponse, WalletDaemonClientError> {
         self.send_request("transaction_requests.submit", request.borrow()).await
+    }
+
+    pub async fn create_signing_request<T: Borrow<SigningRequestCreateRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SigningRequestCreateResponse, WalletDaemonClientError> {
+        self.send_request("signing_requests.create", request.borrow()).await
+    }
+
+    pub async fn get_signing_request<T: Borrow<SigningRequestGetRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SigningRequestGetResponse, WalletDaemonClientError> {
+        self.send_request("signing_requests.get", request.borrow()).await
+    }
+
+    pub async fn list_signing_requests<T: Borrow<SigningRequestListRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SigningRequestListResponse, WalletDaemonClientError> {
+        self.send_request("signing_requests.list", request.borrow()).await
+    }
+
+    /// Approve a signing request. Requires an interactive wallet session: an
+    /// API key is refused.
+    pub async fn approve_signing_request<T: Borrow<SigningRequestDecisionRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SigningRequestDecisionResponse, WalletDaemonClientError> {
+        self.send_request("signing_requests.approve", request.borrow()).await
+    }
+
+    pub async fn reject_signing_request<T: Borrow<SigningRequestDecisionRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<SigningRequestDecisionResponse, WalletDaemonClientError> {
+        self.send_request("signing_requests.reject", request.borrow()).await
     }
 
     /// Submits a single instruction for execution as a transaction.

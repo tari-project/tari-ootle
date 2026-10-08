@@ -50,8 +50,12 @@ use tari_ootle_wallet_sdk::{
         KeyId,
         KeyType,
         NewAccountData,
+        NewSigningRequest,
         NonFungibleToken,
         OutputStatus,
+        SigningRequestId,
+        SigningRequestModel,
+        SigningRequestStatus,
         StealthOutputModel,
         SubstateModel,
         TransactionRequestId,
@@ -2298,6 +2302,76 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         transaction_request_from_row(OPERATION, row)
     }
 
+    fn signing_request_insert(
+        &mut self,
+        request: NewSigningRequest<'_>,
+    ) -> Result<SigningRequestModel, WalletStorageError> {
+        const OPERATION: &str = "signing_request_insert";
+        use crate::schema::signing_requests;
+
+        let now = OffsetDateTime::now_utc();
+        let expires_at = time::Duration::try_from(request.ttl)
+            .ok()
+            .and_then(|ttl| now.checked_add(ttl))
+            .ok_or_else(|| WalletStorageError::OperationError {
+                operation: OPERATION,
+                details: format!(
+                    "ttl of {} seconds overflows the expiry timestamp",
+                    request.ttl.as_secs()
+                ),
+            })?;
+
+        diesel::insert_into(signing_requests::table)
+            .values(models::NewSigningRequest {
+                unsigned_transaction: &serialize_json(request.unsigned_transaction)?,
+                seal_public_key: &serialize_hex(request.seal_public_key),
+                key_id: &serialize_json(&request.key_id)?,
+                signer_public_key: &serialize_hex(request.signer_public_key),
+                message_hash: &serialize_hex(request.message_hash),
+                memo: request.memo,
+                requested_by: request.requested_by,
+                status: SigningRequestStatus::Pending.as_key_str(),
+                expires_at: PrimitiveDateTime::new(expires_at.date(), expires_at.time()),
+            })
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        // SQLite has no RETURNING here; the row just inserted has the highest id.
+        let row = signing_requests::table
+            .order_by(signing_requests::id.desc())
+            .first::<models::SigningRequest>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        signing_request_from_row(OPERATION, row)
+    }
+
+    fn signing_request_mark_signed(
+        &mut self,
+        id: SigningRequestId,
+        signature: &TransactionSignature,
+    ) -> Result<SigningRequestModel, WalletStorageError> {
+        const OPERATION: &str = "signing_request_mark_signed";
+
+        let signature = serialize_json(signature)?;
+        decide_signing_request(
+            self.connection(),
+            OPERATION,
+            id,
+            SigningRequestStatus::Signed,
+            Some(signature.as_str()),
+        )
+    }
+
+    fn signing_request_reject(&mut self, id: SigningRequestId) -> Result<SigningRequestModel, WalletStorageError> {
+        decide_signing_request(
+            self.connection(),
+            "signing_request_reject",
+            id,
+            SigningRequestStatus::Rejected,
+            None,
+        )
+    }
+
     fn locks_set_timeout(
         &mut self,
         lock_id: WalletLockId,
@@ -2857,6 +2931,92 @@ pub(crate) fn transaction_request_from_row(
             .transpose()?,
         expires_at: row.expires_at,
         approved_at: row.approved_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    })
+}
+
+/// Moves an unexpired `Pending` signing request to `to` in one conditional
+/// UPDATE, so concurrent decisions resolve to a single winner.
+fn decide_signing_request(
+    conn: &mut SqliteConnection,
+    operation: &'static str,
+    id: SigningRequestId,
+    to: SigningRequestStatus,
+    signature: Option<&str>,
+) -> Result<SigningRequestModel, WalletStorageError> {
+    use crate::schema::signing_requests;
+
+    let now = OffsetDateTime::now_utc();
+    let now = PrimitiveDateTime::new(now.date(), now.time());
+
+    let updated = diesel::update(
+        signing_requests::table
+            .filter(signing_requests::id.eq(id))
+            .filter(signing_requests::status.eq(SigningRequestStatus::Pending.as_key_str()))
+            .filter(signing_requests::expires_at.ge(now)),
+    )
+    .set((
+        signing_requests::status.eq(to.as_key_str()),
+        signing_requests::signature.eq(signature),
+        signing_requests::decided_at.eq(now),
+        signing_requests::updated_at.eq(now),
+    ))
+    .execute(conn)
+    .map_err(|e| WalletStorageError::general(operation, e))?;
+
+    let row = signing_requests::table
+        .filter(signing_requests::id.eq(id))
+        .first::<models::SigningRequest>(conn)
+        .optional()
+        .map_err(|e| WalletStorageError::general(operation, e))?
+        .ok_or_else(|| WalletStorageError::NotFound {
+            operation,
+            entity: "signing_requests".to_string(),
+            key: id.to_string(),
+        })?;
+
+    if updated == 0 {
+        let actual = if row.status == SigningRequestStatus::Pending.as_key_str() {
+            format!("Pending, expired at {}", row.expires_at)
+        } else {
+            row.status
+        };
+        return Err(WalletStorageError::UnexpectedState {
+            operation,
+            entity: "signing_request",
+            key: id.to_string(),
+            expected: "unexpired Pending".to_string(),
+            actual,
+        });
+    }
+
+    signing_request_from_row(operation, row)
+}
+
+pub(crate) fn signing_request_from_row(
+    operation: &'static str,
+    row: models::SigningRequest,
+) -> Result<SigningRequestModel, WalletStorageError> {
+    let status = SigningRequestStatus::from_str(&row.status).map_err(|_| WalletStorageError::DecodingError {
+        operation,
+        item: "signing_requests.status",
+        details: format!("unknown status '{}'", row.status),
+    })?;
+
+    Ok(SigningRequestModel {
+        id: row.id,
+        unsigned_transaction: deserialize_json(&row.unsigned_transaction)?,
+        seal_public_key: deserialize_hex_try_from(&row.seal_public_key)?,
+        key_id: deserialize_json(&row.key_id)?,
+        signer_public_key: deserialize_hex_try_from(&row.signer_public_key)?,
+        message_hash: deserialize_hex_try_from(&row.message_hash)?,
+        memo: row.memo,
+        requested_by: row.requested_by,
+        status,
+        signature: row.signature.as_deref().map(deserialize_json).transpose()?,
+        expires_at: row.expires_at,
+        decided_at: row.decided_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })

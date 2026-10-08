@@ -31,6 +31,8 @@ use crate::{
         NonFungibleToken,
         OutputStatus,
         ResourceModel,
+        SigningRequestId,
+        SigningRequestModel,
         StealthBalance,
         StealthOutputInfo,
         StealthOutputModel,
@@ -225,6 +227,14 @@ pub trait WalletStoreReader {
     /// Every request, newest first. Expiry is derived on read, so it cannot be
     /// filtered here -- callers filter on the effective status.
     fn transaction_requests_list(&mut self) -> Result<Vec<TransactionRequestModel>, WalletStorageError>;
+
+    // Signing requests
+    /// Fetch a signing request by id. Returns `NotFound` when absent.
+    fn signing_request_get(&mut self, id: SigningRequestId) -> Result<SigningRequestModel, WalletStorageError>;
+
+    /// Every signing request, newest first. Expiry is derived on read, so
+    /// callers filter on the effective status.
+    fn signing_requests_list(&mut self) -> Result<Vec<SigningRequestModel>, WalletStorageError>;
 
     // Non fungible tokens
     fn non_fungible_token_get_by_nft_id(

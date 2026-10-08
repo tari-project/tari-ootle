@@ -26,6 +26,10 @@ pub enum Permission {
     Keys(Crud),
     Transactions(Crud),
     TransactionRequests(TxRequestAction),
+    /// Requests for the wallet to co-sign a transaction someone else seals.
+    /// Approving one releases a signature, so `Approve` is honoured only for
+    /// an interactive wallet session.
+    SigningRequests(TxRequestAction),
     Transfer(Crud, Option<ComponentAddress>),
     Templates(Crud),
     Nfts(Crud, Option<ResourceAddress>),
@@ -93,6 +97,7 @@ impl Permission {
             (Permission::TransactionRequests(ga), Permission::TransactionRequests(ra)) => {
                 tx_request_action_satisfies(*ga, *ra)
             },
+            (Permission::SigningRequests(ga), Permission::SigningRequests(ra)) => tx_request_action_satisfies(*ga, *ra),
             (Permission::Transfer(ga, gs), Permission::Transfer(ra, rs)) => {
                 crud_satisfies(*ga, *ra) && scope_satisfies(gs, rs)
             },
@@ -195,6 +200,7 @@ impl Display for Permission {
             Permission::Keys(a) => write!(f, "keys:{a}"),
             Permission::Transactions(a) => write!(f, "transactions:{a}"),
             Permission::TransactionRequests(a) => write!(f, "transaction_requests:{a}"),
+            Permission::SigningRequests(a) => write!(f, "signing_requests:{a}"),
             Permission::Transfer(a, s) => display_scoped(f, "transfer", *a, s),
             Permission::Templates(a) => write!(f, "templates:{a}"),
             Permission::Nfts(a, s) => display_scoped(f, "nfts", *a, s),
@@ -248,6 +254,7 @@ impl FromStr for Permission {
             "keys" => parse_unscoped(action_str, entity_str, Permission::Keys),
             "transactions" => parse_unscoped(action_str, entity_str, Permission::Transactions),
             "transaction_requests" => parse_unscoped(action_str, entity_str, Permission::TransactionRequests),
+            "signing_requests" => parse_unscoped(action_str, entity_str, Permission::SigningRequests),
             "transfer" => parse_scoped(action_str, entity_str, Permission::Transfer),
             "templates" => parse_unscoped(action_str, entity_str, Permission::Templates),
             "nfts" => parse_scoped(action_str, entity_str, Permission::Nfts),
@@ -656,6 +663,35 @@ mod tests {
         let approve = Permission::TransactionRequests(TxRequestAction::Approve);
         assert!(!approve.satisfies(&Permission::Transactions(Crud::Create)));
         assert!(!approve.satisfies(&Permission::Transactions(Crud::Read)));
+    }
+
+    #[test]
+    fn round_trip_signing_request_actions() {
+        for action in [TxRequestAction::Read, TxRequestAction::Create, TxRequestAction::Approve] {
+            round_trip(Permission::SigningRequests(action));
+        }
+        assert_eq!(
+            "signing_requests:approve".parse::<Permission>().unwrap(),
+            Permission::SigningRequests(TxRequestAction::Approve)
+        );
+        assert!("signing_requests:update".parse::<Permission>().is_err());
+        let json = serde_json::to_string(&Permission::SigningRequests(TxRequestAction::Create)).unwrap();
+        assert_eq!(json, r#"{"SigningRequests":"Create"}"#);
+    }
+
+    #[test]
+    fn signing_requests_are_separate_from_transaction_requests() {
+        // Approving a signing request releases a signature over an arbitrary
+        // transaction, so neither resource's grants may stand in for the
+        // other's.
+        let tx_approve = Permission::TransactionRequests(TxRequestAction::Approve);
+        assert!(!tx_approve.satisfies(&Permission::SigningRequests(TxRequestAction::Approve)));
+        assert!(!tx_approve.satisfies(&Permission::SigningRequests(TxRequestAction::Read)));
+
+        let sign_create = Permission::SigningRequests(TxRequestAction::Create);
+        assert!(!sign_create.satisfies(&Permission::SigningRequests(TxRequestAction::Approve)));
+        assert!(!sign_create.satisfies(&Permission::TransactionRequests(TxRequestAction::Create)));
+        assert!(sign_create.satisfies(&Permission::SigningRequests(TxRequestAction::Read)));
     }
 
     #[test]

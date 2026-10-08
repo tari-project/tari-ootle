@@ -172,6 +172,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    signing_requests (id) {
+        id -> Integer,
+        unsigned_transaction -> Text,
+        seal_public_key -> Text,
+        key_id -> Text,
+        signer_public_key -> Text,
+        message_hash -> Text,
+        memo -> Text,
+        requested_by -> Nullable<Text>,
+        status -> Text,
+        signature -> Nullable<Text>,
+        expires_at -> Timestamp,
+        decided_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     stealth_outputs (id) {
         id -> Integer,
         owner_account_id -> Integer,
@@ -366,6 +385,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     non_fungible_tokens,
     resources,
     shard_state_versions,
+    signing_requests,
     stealth_outputs,
     substates,
     transaction_accounts,

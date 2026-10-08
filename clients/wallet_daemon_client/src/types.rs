@@ -68,6 +68,8 @@ use tari_ootle_wallet_sdk::{
         KeyType,
         NonFungibleToken,
         OutputStatus,
+        SigningRequestEffectiveStatus,
+        SigningRequestId,
         StealthUtxoSpendKeyId,
         TransactionRequestId,
         TransactionStatus,
@@ -300,6 +302,117 @@ pub struct TransactionRequestSubmitRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionRequestSubmitResponse {
     pub transaction_id: TransactionId,
+}
+
+/// Ask this wallet to co-sign a transaction that someone else seals.
+///
+/// A person approves the request in the wallet UI; walletd then signs and
+/// stores the [`TransactionSignature`] for the requester to fetch with
+/// `signing_requests.get` and submit as part of the sealed transaction.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestCreateRequest {
+    /// The complete transaction body. Every field is covered by the signature,
+    /// so it must be final: inputs resolved, fee instructions and epochs set.
+    pub transaction: UnsignedTransaction,
+    /// Public key of the party that will seal the transaction. The signature
+    /// commits to it.
+    pub seal_public_key: RistrettoPublicKeyBytes,
+    /// The wallet key to sign with.
+    pub key_id: KeyId,
+    /// Free text shown to the approver, labelled as coming from the requester.
+    #[serde(default)]
+    pub memo: String,
+    /// How long a person has to approve, in seconds. Defaults to the daemon's
+    /// configured request window.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub ttl_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestCreateResponse {
+    pub request_id: SigningRequestId,
+    /// The authorization message the signature will sign, hex encoded. Its
+    /// leading bytes serve as a fingerprint the approver can compare out of
+    /// band.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
+    pub message_hash: [u8; 64],
+    /// Unix timestamp (seconds).
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestInfo {
+    pub request_id: SigningRequestId,
+    /// The transaction body the signature commits to.
+    pub transaction: UnsignedTransaction,
+    pub seal_public_key: RistrettoPublicKeyBytes,
+    pub key_id: KeyId,
+    /// Public key of `key_id`.
+    pub signer_public_key: RistrettoPublicKeyBytes,
+    /// The authorization message the signature signs, hex encoded.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
+    pub message_hash: [u8; 64],
+    /// Requester-supplied text. Display only; nothing verifies it.
+    pub memo: String,
+    /// Admin-assigned name of the API key that created this request, or `None`
+    /// for a wallet session. Display only.
+    pub requested_by: Option<String>,
+    pub status: SigningRequestEffectiveStatus,
+    /// Present once the request is `Signed`.
+    pub signature: Option<TransactionSignature>,
+    /// Unix timestamp (seconds).
+    pub expires_at: i64,
+    /// Unix timestamp (seconds) of approval or rejection.
+    pub decided_at: Option<i64>,
+    /// Unix timestamp (seconds).
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestGetRequest {
+    pub request_id: SigningRequestId,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestGetResponse {
+    pub request: SigningRequestInfo,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestListRequest {
+    /// Only return requests whose effective status matches.
+    #[serde(default)]
+    pub status: Option<SigningRequestEffectiveStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestListResponse {
+    pub requests: Vec<SigningRequestInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestDecisionRequest {
+    pub request_id: SigningRequestId,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct SigningRequestDecisionResponse {
+    pub request_id: SigningRequestId,
+    pub status: SigningRequestEffectiveStatus,
+    /// Present when the request was approved.
+    pub signature: Option<TransactionSignature>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

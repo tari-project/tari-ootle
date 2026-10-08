@@ -443,24 +443,33 @@ where
     /// Fetches the live version of each substate from the committee. A substate that is not up, or
     /// that no member answered for, is absent from the result. Each result carries the proof it was
     /// verified with, when one was.
+    ///
+    /// A batch is answered by one member, so an unproven head that is not up is confirmed through
+    /// [`Self::get_substate`]'s committee agreement before the substate is left out, as
+    /// [`Self::get_input_substates`] does.
     pub async fn fetch_and_cache_substates(
         &self,
         substate_ids: &[SubstateId],
     ) -> Result<HashMap<SubstateId, ProvenSubstate>, IndexerError> {
         let substate_ids = substate_ids.iter().collect::<Vec<_>>();
         let heads = self.fetch_and_cache_heads(&substate_ids).await?;
-        // A batch answers with the head version; a caller asking for substates by id wants the live
-        // ones, and a down head is not one.
-        Ok(heads
-            .into_iter()
-            .filter_map(|(id, lookup)| {
-                let proof = lookup.proof;
-                lookup
-                    .result
-                    .into_up()
-                    .map(|substate| (id, ProvenSubstate { substate, proof }))
-            })
-            .collect())
+        let mut live = HashMap::with_capacity(heads.len());
+        for (id, head) in heads {
+            let settled =
+                head.verified || !self.verify_substate_proofs || matches!(head.result, SubstateResult::Up { .. });
+            let lookup = if settled {
+                head
+            } else {
+                self.get_substate(&id, None).await?
+            };
+            // A batch answers with the head version; a caller asking for substates by id wants the
+            // live ones, and a down head is not one.
+            let proof = lookup.proof;
+            if let Some(substate) = lookup.result.into_up() {
+                live.insert(id, ProvenSubstate { substate, proof });
+            }
+        }
+        Ok(live)
     }
 
     /// Looks up the substates a transaction declares as inputs, stopping at the first one that is not
@@ -1761,6 +1770,24 @@ mod tests {
             panic!("expected every input to be up, got {lookup:?}");
         };
         assert_eq!(found.len(), ids.len());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+    }
+
+    /// One member answering a batch with an unproven Down cannot hide a substate the committee holds up.
+    #[tokio::test]
+    async fn a_batch_reporting_a_live_substate_down_does_not_drop_it() {
+        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let (manager, network) = manager(FakeNetwork {
+            live: live(&ids),
+            down_in_batches: HashSet::from([ids[1].clone()]),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
+
+        let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
+
+        assert_eq!(found.len(), ids.len(), "{:?}", found.keys().collect::<Vec<_>>());
+        assert!(found.contains_key(&ids[1]));
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
     }
 

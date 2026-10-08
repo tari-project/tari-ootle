@@ -39,7 +39,7 @@ import {
   IoTerminal,
   IoTerminalOutline,
 } from "react-icons/io5";
-import { LuBookOpen, LuCircleCheck, LuKeyRound, LuLayoutTemplate } from "react-icons/lu";
+import { LuBookOpen, LuCircleCheck, LuKeyRound, LuLayoutTemplate, LuSignature } from "react-icons/lu";
 import { NavLink } from "react-router-dom";
 
 function MainListItems() {
@@ -88,6 +88,12 @@ function MainListItems() {
       icon: <LuCircleCheck style={iconStyle} />,
       activeIcon: <LuCircleCheck style={activeIconStyle} />,
       link: "transaction-requests",
+    },
+    {
+      title: "Signing",
+      icon: <LuSignature style={iconStyle} />,
+      activeIcon: <LuSignature style={activeIconStyle} />,
+      link: "signing-requests",
     },
     {
       title: "API Keys",

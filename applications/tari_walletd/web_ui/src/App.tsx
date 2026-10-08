@@ -36,6 +36,7 @@ import Keys from "@routes/Keys/Keys";
 import Manifest from "@routes/Manifest/Manifest";
 import Onboarding from "@routes/Onboarding/Onboarding";
 import SettingsPage from "@routes/Settings/Settings";
+import SigningRequests from "@routes/SigningRequests/SigningRequests";
 import Templates from "@routes/Templates/Templates";
 import TransactionRequests from "@routes/TransactionRequests/TransactionRequests";
 import TransactionDetails from "@routes/Transactions/TransactionDetails";
@@ -98,6 +99,11 @@ export const breadcrumbRoutes = [
   {
     label: "Transaction Requests",
     path: "/transaction-requests",
+    dynamic: false,
+  },
+  {
+    label: "Signing Requests",
+    path: "/signing-requests",
     dynamic: false,
   },
   {
@@ -250,6 +256,10 @@ function App() {
           <Route
             path="transaction-requests"
             element={<GuardedRoute redirect="/transaction-requests" component={TransactionRequests} />}
+          />
+          <Route
+            path="signing-requests"
+            element={<GuardedRoute redirect="/signing-requests" component={SigningRequests} />}
           />
           <Route path="wallet" element={<GuardedRoute redirect="/wallet" component={Wallet} />} />
           <Route

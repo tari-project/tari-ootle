@@ -95,6 +95,10 @@ import type {
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
+  SigningRequestDecisionRequest,
+  SigningRequestDecisionResponse,
+  SigningRequestListRequest,
+  SigningRequestListResponse,
   StealthTransferRequest,
   StealthTransferResponse,
   StealthUtxosDecryptValueRequest,
@@ -230,6 +234,17 @@ export const transactionRequestsReject = (
 export const transactionRequestsSubmit = (
   request: TransactionRequestSubmitRequest,
 ): Promise<TransactionRequestSubmitResponse> => client().then((c) => c.transactionRequestsSubmit(request));
+
+// Signing requests. A tool holding `signing_requests:create` asks the wallet to
+// co-sign; approving or rejecting takes an interactive session, which this UI is.
+export const signingRequestsList = (request: SigningRequestListRequest): Promise<SigningRequestListResponse> =>
+  client().then((c) => c.signingRequestsList(request));
+export const signingRequestsApprove = (
+  request: SigningRequestDecisionRequest,
+): Promise<SigningRequestDecisionResponse> => client().then((c) => c.signingRequestsApprove(request));
+export const signingRequestsReject = (
+  request: SigningRequestDecisionRequest,
+): Promise<SigningRequestDecisionResponse> => client().then((c) => c.signingRequestsReject(request));
 
 // indexer
 export const indexerGetNetworkInfo = (indexerUrl: string) =>

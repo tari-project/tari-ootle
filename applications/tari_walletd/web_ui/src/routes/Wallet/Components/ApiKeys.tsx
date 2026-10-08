@@ -143,6 +143,16 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
     description: "Modify wallet daemon settings.",
   },
   {
+    value: "signing_requests:create",
+    label: "signing_requests:create",
+    description: "Ask this wallet to co-sign a transaction. Approving always takes an interactive session.",
+  },
+  {
+    value: "signing_requests:read",
+    label: "signing_requests:read",
+    description: "List and view signing requests and fetch approved signatures.",
+  },
+  {
     value: "stealth_utxos:read",
     label: "stealth_utxos:read",
     description: "List and decrypt stealth UTXOs.",

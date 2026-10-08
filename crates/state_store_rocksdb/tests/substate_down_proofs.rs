@@ -17,7 +17,14 @@ use helpers::{
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
 use tari_engine_types::ProtocolVersion;
-use tari_ootle_common_types::{Epoch, ShardGroup, SubstateVersion, ToSubstateAddress, shard::Shard};
+use tari_ootle_common_types::{
+    Epoch,
+    ShardGroup,
+    SubstateVersion,
+    ToSubstateAddress,
+    VersionedSubstateId,
+    shard::Shard,
+};
 use tari_ootle_storage::{
     ShardScopedTreeStoreReader,
     ShardScopedTreeStoreWriter,
@@ -25,6 +32,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     SubstateProofGenerator,
+    SubstateProofVerifyError,
     TrustedStateRoot,
     consensus_models::{
         CommittedBlockProof,
@@ -135,8 +143,66 @@ fn destroyed(record: &SubstateRecord, at_state_version: Version) -> SubstateReco
     record
 }
 
+/// Serves the recorded down proof of `target_id` against the store's latest state, as the RPC does, and verifies it
+/// with `r1` and a commit proof of the latest state at `height`.
+fn verify_down_at_latest<S: StateStore>(
+    db: &S,
+    shard_group: ShardGroup,
+    target_id: &VersionedSubstateId,
+    r1: &TrustedStateRoot,
+    height: u64,
+) -> Result<(), SubstateProofVerifyError> {
+    let tx = db.create_read_tx().unwrap();
+    let record = tx
+        .substate_down_proofs_get(target_id.to_shard(num_preshards()), target_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.state_version, 1);
+    let r2_commit_proof = commit_proof(shard_group, height, group_tree(&tx, shard_group).root());
+    let down = SubstateProofGenerator::new(&tx, shard_group, num_preshards(), protocol_version())
+        .unwrap()
+        .generate(target_id)
+        .unwrap()
+        .unwrap();
+    let proof = tari_bor::serde_codec::to_vec(record.into_down_proof(down)).unwrap();
+    verify_substate_down_proof_against_roots(
+        &proof,
+        target_id.substate_id(),
+        target_id.version(),
+        NETWORK,
+        num_preshards(),
+        r1,
+        &TrustedStateRoot::from_commit_proof(&r2_commit_proof).unwrap(),
+    )
+}
+
 fn no_committed_blocks<T: ?Sized>(_: &T, _: &BlockId) -> Option<Vec<u8>> {
     None
+}
+
+/// Commits `records` as the shard's first version and records a received proof of that version at height 2.
+fn commit_with_received_proof<S: StateStore>(
+    db: &S,
+    shard_group: ShardGroup,
+    shard: Shard,
+    records: &[&SubstateRecord],
+) -> CommittedBlockProof {
+    let mut tx = db.create_write_tx().unwrap();
+    let changes = records.iter().map(|record| up(record)).collect();
+    commit_version(&mut tx, shard, 1, changes, records, no_committed_blocks);
+    let tree = group_tree(&*tx, shard_group);
+    let commit_proof = commit_proof(shard_group, 2, tree.root());
+    tx.state_version_proofs_insert(&StateVersionProof {
+        shard,
+        state_version: 1,
+        source: StateVersionProofSource::Received {
+            commit_proof: commit_proof.to_bytes(),
+        },
+        shard_root_proof: tree.get_proof(shard).unwrap().1,
+    })
+    .unwrap();
+    tx.commit().unwrap();
+    commit_proof
 }
 
 #[test]
@@ -150,30 +216,7 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
     let neighbour = build_substate_record(&random_substate_id_for_shard(shard), SubstateVersion::ZERO, 1);
 
     // v1: the target is created; this node holds a proof of the shard at v1, as a synced node does at a proof point.
-    let r1_commit_proof = {
-        let mut tx = db.create_write_tx().unwrap();
-        commit_version(
-            &mut tx,
-            shard,
-            1,
-            vec![up(&target), up(&neighbour)],
-            &[&target, &neighbour],
-            no_committed_blocks,
-        );
-        let tree = group_tree(&*tx, shard_group);
-        let commit_proof = commit_proof(shard_group, 2, tree.root());
-        tx.state_version_proofs_insert(&StateVersionProof {
-            shard,
-            state_version: 1,
-            source: StateVersionProofSource::Received {
-                commit_proof: commit_proof.to_bytes(),
-            },
-            shard_root_proof: tree.get_proof(shard).unwrap().1,
-        })
-        .unwrap();
-        tx.commit().unwrap();
-        commit_proof
-    };
+    let r1_commit_proof = commit_with_received_proof(&db, shard_group, shard, &[&target, &neighbour]);
     let r1 = TrustedStateRoot::from_commit_proof(&r1_commit_proof).unwrap();
 
     // v2: the target is destroyed and its next version created.
@@ -191,28 +234,7 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
         tx.commit().unwrap();
     }
 
-    let verify_at_latest = |height: u64| {
-        let tx = db.create_read_tx().unwrap();
-        let record = tx.substate_down_proofs_get(shard, &target_id).unwrap().unwrap();
-        assert_eq!(record.state_version, 1);
-        let r2_commit_proof = commit_proof(shard_group, height, group_tree(&tx, shard_group).root());
-        let down = SubstateProofGenerator::new(&tx, shard_group, num_preshards(), protocol_version())
-            .unwrap()
-            .generate(&target_id)
-            .unwrap()
-            .unwrap();
-        let proof = tari_bor::serde_codec::to_vec(&record.into_down_proof(down)).unwrap();
-        verify_substate_down_proof_against_roots(
-            &proof,
-            target_id.substate_id(),
-            target_id.version(),
-            NETWORK,
-            num_preshards(),
-            &r1,
-            &TrustedStateRoot::from_commit_proof(&r2_commit_proof).unwrap(),
-        )
-    };
-    verify_at_latest(4).unwrap();
+    verify_down_at_latest(&db, shard_group, &target_id, &r1, 4).unwrap();
 
     // v3: the next version is destroyed. It was created at v2, a version this node holds no usable proof of: its
     // only candidate is a block this node can no longer build a commit proof for.
@@ -266,7 +288,7 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
         assert!(record.substate_value().is_none(), "the target's value was not pruned");
     }
 
-    verify_at_latest(6).unwrap();
+    verify_down_at_latest(&db, shard_group, &target_id, &r1, 6).unwrap();
 }
 
 #[test]

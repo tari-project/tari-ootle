@@ -417,6 +417,11 @@ impl FromIterator<Permission> for Permissions {
 pub struct Claims {
     pub permissions: Permissions,
     pub exp: u64,
+    /// Set on a token minted by `webrtc.start` for a connected peer. A
+    /// delegated token acts with its permissions on the peer's behalf but
+    /// never counts as the wallet's own interactive session.
+    #[serde(default)]
+    pub delegated: bool,
 }
 
 #[cfg(test)]

@@ -2372,6 +2372,21 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         )
     }
 
+    fn signing_requests_delete_expired(&mut self) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "signing_requests_delete_expired";
+        use crate::schema::signing_requests;
+
+        let now = OffsetDateTime::now_utc();
+        let now = PrimitiveDateTime::new(now.date(), now.time());
+        diesel::delete(
+            signing_requests::table
+                .filter(signing_requests::status.eq(SigningRequestStatus::Pending.as_key_str()))
+                .filter(signing_requests::expires_at.lt(now)),
+        )
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))
+    }
+
     fn locks_set_timeout(
         &mut self,
         lock_id: WalletLockId,

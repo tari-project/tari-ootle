@@ -324,7 +324,7 @@ pub struct SigningRequestCreateRequest {
     #[serde(default)]
     pub memo: String,
     /// How long a person has to approve, in seconds. Defaults to the daemon's
-    /// configured request window.
+    /// `signing_request_ttl` (one day unless configured).
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub ttl_secs: Option<u64>,

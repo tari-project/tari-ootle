@@ -290,6 +290,11 @@ pub trait WalletStoreWriter: CommittableStore {
     /// [`Self::signing_request_mark_signed`].
     fn signing_request_reject(&mut self, id: SigningRequestId) -> Result<SigningRequestModel, WalletStorageError>;
 
+    /// Delete every `Pending` request whose window has closed, returning how
+    /// many were deleted. Such a request can no longer be decided and carries
+    /// no signature.
+    fn signing_requests_delete_expired(&mut self) -> Result<usize, WalletStorageError>;
+
     // Locks
     fn locks_create(&mut self, timeout: Option<Duration>) -> Result<WalletLockId, WalletStorageError>;
 

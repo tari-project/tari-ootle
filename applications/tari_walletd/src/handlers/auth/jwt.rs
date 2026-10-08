@@ -33,6 +33,7 @@ impl<'a> JwtApi<'a> {
         Ok(Claims {
             permissions,
             exp: exp.as_secs(),
+            delegated: false,
         })
     }
 
@@ -61,6 +62,17 @@ impl<'a> JwtApi<'a> {
     pub fn check_auth(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {
         let token = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         let token_data = self.decode_jwt(token.token())?;
+        Ok(token_data.claims.permissions)
+    }
+
+    /// Like [`Self::check_auth`], but refuses a delegated token: only a token
+    /// issued to the wallet's own user session passes.
+    pub fn check_user_auth(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {
+        let token = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
+        let token_data = self.decode_jwt(token.token())?;
+        if token_data.claims.delegated {
+            return Err(AuthError::UserAuthOnly);
+        }
         Ok(token_data.claims.permissions)
     }
 }
@@ -95,7 +107,7 @@ pub enum AuthError {
     // keys are deliberately excluded so a leaked Admin key cannot mint or
     // revoke further keys, limiting blast radius of a compromise to the
     // lifetime of that single key.
-    #[error("Access denied. This endpoint requires an interactive user session, not an API key")]
+    #[error("Access denied. This endpoint requires an interactive user session, not an API key or a delegated token")]
     UserAuthOnly,
     #[error("Insufficient permissions. Required '{required:?}'")]
     InsufficientPermissions { required: Permission },

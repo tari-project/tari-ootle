@@ -13,6 +13,9 @@
 //! Approval and rejection require an interactive session: an API key is
 //! refused even when it holds `signing_requests:approve`. A credential handed
 //! to a tool can request signatures; only a person releases one.
+//!
+//! That guarantee rests on the daemon's authentication: with
+//! `authentication = None`, any caller can open an admin session.
 
 use std::time::Duration;
 
@@ -22,7 +25,14 @@ use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_transaction::TransactionSignature;
 use tari_ootle_wallet_sdk::{
-    models::{NewSigningRequest, SigningRequestEffectiveStatus, SigningRequestId, SigningRequestModel},
+    models::{
+        KeyBranch,
+        KeyId,
+        NewSigningRequest,
+        SigningRequestEffectiveStatus,
+        SigningRequestId,
+        SigningRequestModel,
+    },
     storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_walletd_client::{
@@ -54,6 +64,11 @@ const MAX_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// Upper bound on the requester's memo, in characters.
 const MAX_MEMO_CHARS: usize = 280;
 
+/// Upper bound on requests awaiting a decision. Expired requests are deleted
+/// when a new one is created, so this bounds the table along with the decided
+/// requests, which only a person creates.
+const MAX_PENDING: u64 = 256;
+
 pub async fn handle_create(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -61,8 +76,77 @@ pub async fn handle_create(
 ) -> Result<SigningRequestCreateResponse, anyhow::Error> {
     let auth = context.authorize_with_identity(token, &[Permission::SigningRequests(TxRequestAction::Create)])?;
     let sdk = context.wallet_sdk();
+
+    let ttl = validate_create_request(context, &req)?;
     let transaction = req.transaction;
 
+    let signer_public_key = match sdk.key_manager_api().get_public_key(req.key_id) {
+        Ok(key) => key.public_key.to_byte_type(),
+        Err(e) if e.is_not_found_error() => {
+            return Err(invalid_params(
+                "key_id",
+                Some(format!("this wallet has no key {}", req.key_id)),
+            ));
+        },
+        Err(e) => return Err(e.into()),
+    };
+
+    let current_epoch = context.current_epoch().await?;
+    if transaction.max_epoch() < current_epoch {
+        return Err(invalid_params(
+            "transaction.max_epoch",
+            Some(format!(
+                "the transaction expired at epoch {}; the current epoch is {current_epoch}",
+                transaction.max_epoch()
+            )),
+        ));
+    }
+
+    let message_hash = TransactionSignature::create_message(&req.seal_public_key, &transaction);
+
+    let model = sdk.store().with_write_tx(|tx| {
+        tx.signing_requests_delete_expired()?;
+        if tx.signing_requests_count_pending()? >= MAX_PENDING {
+            return Err(invalid_request(format!(
+                "{MAX_PENDING} signing requests are already awaiting a decision; approve or reject some first"
+            )));
+        }
+        let model = tx.signing_request_insert(NewSigningRequest {
+            unsigned_transaction: &transaction,
+            seal_public_key: &req.seal_public_key,
+            key_id: req.key_id,
+            signer_public_key: &signer_public_key,
+            message_hash: &message_hash,
+            memo: &req.memo,
+            requested_by: auth.api_key_name.as_deref(),
+            ttl,
+        })?;
+        Ok::<_, anyhow::Error>(model)
+    })?;
+
+    info!(
+        target: LOG_TARGET,
+        "Signing request {} created by {} for key {} (message {}, expires {})",
+        model.id,
+        auth.api_key_name.as_deref().unwrap_or("a wallet session"),
+        model.key_id,
+        fingerprint(&model.message_hash),
+        model.expires_at,
+    );
+
+    Ok(SigningRequestCreateResponse {
+        request_id: model.id,
+        message_hash: model.message_hash,
+        expires_at: model.expires_at.assume_utc().unix_timestamp(),
+    })
+}
+
+/// Checks a create request needs no I/O for, returning its approval window.
+fn validate_create_request(
+    context: &HandlerContext,
+    req: &SigningRequestCreateRequest,
+) -> Result<Duration, anyhow::Error> {
+    let transaction = &req.transaction;
     transaction
         .validate_blob_references()
         .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
@@ -96,7 +180,7 @@ pub async fn handle_create(
     let ttl = req
         .ttl_secs
         .map(Duration::from_secs)
-        .unwrap_or(context.config().transaction_request_ttl);
+        .unwrap_or(context.config().signing_request_ttl);
     if ttl > MAX_TTL {
         return Err(invalid_params(
             "ttl_secs",
@@ -104,58 +188,17 @@ pub async fn handle_create(
         ));
     }
 
-    let signer_public_key = match sdk.key_manager_api().get_public_key(req.key_id) {
-        Ok(key) => key.public_key.to_byte_type(),
-        Err(e) if e.is_not_found_error() => {
-            return Err(invalid_params(
-                "key_id",
-                Some(format!("this wallet has no key {}", req.key_id)),
-            ));
-        },
-        Err(e) => return Err(e.into()),
-    };
-
-    let current_epoch = context.current_epoch().await?;
-    if transaction.max_epoch() < current_epoch {
+    if !is_signing_key(&req.key_id) {
         return Err(invalid_params(
-            "transaction.max_epoch",
+            "key_id",
             Some(format!(
-                "the transaction expired at epoch {}; the current epoch is {current_epoch}",
-                transaction.max_epoch()
+                "{} is not a signing key: only account, transaction and imported keys sign transactions",
+                req.key_id
             )),
         ));
     }
 
-    let message_hash = TransactionSignature::create_message(&req.seal_public_key, &transaction);
-
-    let model = sdk.store().with_write_tx(|tx| {
-        tx.signing_request_insert(NewSigningRequest {
-            unsigned_transaction: &transaction,
-            seal_public_key: &req.seal_public_key,
-            key_id: req.key_id,
-            signer_public_key: &signer_public_key,
-            message_hash: &message_hash,
-            memo: &req.memo,
-            requested_by: auth.api_key_name.as_deref(),
-            ttl,
-        })
-    })?;
-
-    info!(
-        target: LOG_TARGET,
-        "Signing request {} created by {} for key {} (message {}, expires {})",
-        model.id,
-        auth.api_key_name.as_deref().unwrap_or("a wallet session"),
-        model.key_id,
-        fingerprint(&model.message_hash),
-        model.expires_at,
-    );
-
-    Ok(SigningRequestCreateResponse {
-        request_id: model.id,
-        message_hash: model.message_hash,
-        expires_at: model.expires_at.assume_utc().unix_timestamp(),
-    })
+    Ok(ttl)
 }
 
 pub async fn handle_get(
@@ -207,10 +250,26 @@ pub async fn handle_approve(
 
     let request = get_pending(context, req.request_id)?;
 
+    // The approver was shown `message_hash`; sign only if the stored request
+    // still produces exactly that message.
+    let message = TransactionSignature::create_message(&request.seal_public_key, &request.unsigned_transaction);
+    if message != request.message_hash {
+        return Err(invalid_request(format!(
+            "Signing request {} no longer produces the message it was created with; reject it and ask for a new one",
+            req.request_id
+        )));
+    }
+
     let signature = sdk
         .signer_api()
         .with_context(&request.seal_public_key)
         .generate_signature(request.key_id, &request.unsigned_transaction)?;
+    if *signature.public_key() != request.signer_public_key {
+        return Err(invalid_request(format!(
+            "Key {} now resolves to a different public key than signing request {} was created for",
+            request.key_id, req.request_id
+        )));
+    }
 
     let model = sdk
         .store()
@@ -270,6 +329,16 @@ fn get_pending(context: &HandlerContext, request_id: SigningRequestId) -> Result
         status => Err(invalid_request(format!(
             "Signing request {request_id} was already decided: {status:?}"
         ))),
+    }
+}
+
+/// Keys whose signatures may authorize a transaction. Mask, nonce and view
+/// branches derive secrets that protect outputs; a signature or public key
+/// under them must never leave the wallet.
+fn is_signing_key(key_id: &KeyId) -> bool {
+    match key_id {
+        KeyId::Imported { .. } => true,
+        KeyId::Derived { key_branch, .. } => matches!(key_branch, KeyBranch::Account | KeyBranch::Transaction),
     }
 }
 
@@ -528,6 +597,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_delegated_token_cannot_approve() {
+        // `webrtc.start` mints a delegated token carrying its caller's grants,
+        // which an API key holding `webrtc` can call.
+        let test = setup().await;
+        let request_id = insert_request(&test);
+
+        let mut claims = test
+            .context
+            .jwt_api()
+            .generate_auth_claims(Permissions::from_str("admin").unwrap())
+            .unwrap();
+        claims.delegated = true;
+        let delegated = Authorization::<Bearer>::bearer(&test.context.jwt_api().grant(&claims).unwrap())
+            .unwrap()
+            .0;
+
+        let err = handle_approve(&test.context, Some(&delegated), SigningRequestDecisionRequest {
+            request_id,
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("interactive user session"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(status_of(&test, request_id), SigningRequestStatus::Pending);
+    }
+
+    #[tokio::test]
     async fn a_decided_request_cannot_be_decided_again() {
         let test = setup().await;
         let signed = insert_request(&test);
@@ -574,6 +672,19 @@ mod tests {
         let unknown_key = KeyId::Imported { local_key_id: 999 };
         let err = create(create_request(transaction(), unknown_key)).await.unwrap_err();
         assert!(err.to_string().contains("key_id"), "{err}");
+
+        for key_branch in [
+            KeyBranch::ConfidentialMask,
+            KeyBranch::StealthMask,
+            KeyBranch::ElgamalEncryptionViewKey,
+            KeyBranch::Nonce,
+            KeyBranch::ViewOnlyKey,
+        ] {
+            let err = create(create_request(transaction(), KeyId::derived(key_branch, 0)))
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("not a signing key"), "{key_branch:?}: {err}");
+        }
 
         let mut long_memo = create_request(transaction(), signer_key());
         long_memo.memo = "x".repeat(MAX_MEMO_CHARS + 1);

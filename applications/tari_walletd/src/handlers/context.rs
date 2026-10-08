@@ -206,19 +206,19 @@ impl HandlerContext {
         Ok(identity)
     }
 
-    /// Like [`check_auth`], but rejects API-key bearers up front. Use for
-    /// endpoints that must NOT be reachable with a programmatically minted
-    /// credential — currently the API-key management endpoints themselves
-    /// (create / list / revoke). Restricting them to an interactive
-    /// WebAuthn session means a leaked Admin API key cannot mint further
-    /// keys to survive a revoke; the attacker's persistence is bounded by
-    /// the lifetime of the original compromised key.
+    /// Like [`check_auth`], but rejects API-key bearers and delegated tokens
+    /// (those `webrtc.start` mints for a peer). Use for endpoints that must
+    /// NOT be reachable with a programmatically minted credential — the
+    /// API-key management endpoints (create / list / revoke) and signing-request
+    /// decisions. Restricting them to an interactive session means a leaked
+    /// Admin API key cannot mint further keys to survive a revoke, and a tool
+    /// cannot release a signature it asked for.
     pub fn check_auth_user_only(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {
         let bearer = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
         if bearer.token().starts_with(api_keys::API_KEY_PREFIX) {
             return Err(AuthError::UserAuthOnly);
         }
-        self.jwt_api().check_auth(Some(bearer))
+        self.jwt_api().check_user_auth(Some(bearer))
     }
 
     /// Convenience: [`check_auth_user_only`] + [`enforce_scopes`].

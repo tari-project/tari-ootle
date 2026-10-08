@@ -42,6 +42,7 @@ use tari_ootle_wallet_sdk::{
         ResourceModel,
         SigningRequestId,
         SigningRequestModel,
+        SigningRequestStatus,
         StealthBalance,
         StealthOutputInfo,
         StealthOutputModel,
@@ -1494,6 +1495,22 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .into_iter()
             .map(|row| signing_request_from_row(OPERATION, row))
             .collect()
+    }
+
+    fn signing_requests_count_pending(&mut self) -> Result<u64, WalletStorageError> {
+        const OPERATION: &str = "signing_requests_count_pending";
+        use crate::schema::signing_requests;
+
+        let now = time::OffsetDateTime::now_utc();
+        let now = time::PrimitiveDateTime::new(now.date(), now.time());
+        let count = signing_requests::table
+            .filter(signing_requests::status.eq(SigningRequestStatus::Pending.as_key_str()))
+            .filter(signing_requests::expires_at.ge(now))
+            .count()
+            .get_result::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(count.try_into().unwrap_or(0))
     }
 
     fn locks_get_by_transaction_id(

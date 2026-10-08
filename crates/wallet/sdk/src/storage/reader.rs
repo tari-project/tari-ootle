@@ -236,6 +236,9 @@ pub trait WalletStoreReader {
     /// callers filter on the effective status.
     fn signing_requests_list(&mut self) -> Result<Vec<SigningRequestModel>, WalletStorageError>;
 
+    /// The number of `Pending` requests whose window is still open.
+    fn signing_requests_count_pending(&mut self) -> Result<u64, WalletStorageError>;
+
     // Non fungible tokens
     fn non_fungible_token_get_by_nft_id(
         &mut self,

@@ -83,6 +83,12 @@ pub struct WalletDaemonConfig {
     /// how long those funds stay unavailable if nobody ever answers.
     #[serde(default = "return_default_transaction_request_ttl")]
     pub transaction_request_ttl: Duration,
+    /// How long a person has to approve a signing request when the requester
+    /// does not set its own window. Co-signers of a council transaction are
+    /// often not at their wallet, so this is longer than the transaction-request
+    /// window.
+    #[serde(default = "return_default_signing_request_ttl")]
+    pub signing_request_ttl: Duration,
     /// If true, the wallet daemon will allow CORS requests from any origin. This is useful for development and
     /// testing, but should be disabled in production.
     pub enable_permissive_cors: bool,
@@ -201,6 +207,10 @@ fn return_default_transaction_request_ttl() -> Duration {
     Duration::from_secs(30 * 60)
 }
 
+fn return_default_signing_request_ttl() -> Duration {
+    Duration::from_secs(24 * 60 * 60)
+}
+
 fn return_default_jwt_expiry() -> Duration {
     // Suggested expiry for access tokens is between 5min and 1h
     Duration::from_secs(5 * 60)
@@ -244,6 +254,7 @@ impl Default for WalletDaemonConfig {
             ],
             jwt_expiry: return_default_jwt_expiry(),
             transaction_request_ttl: return_default_transaction_request_ttl(),
+            signing_request_ttl: return_default_signing_request_ttl(),
             enable_permissive_cors: false,
             value_lookup_table_file: None,
             recovery_abandon_count: 10,

@@ -133,6 +133,29 @@ fn an_expired_request_cannot_be_signed() {
 }
 
 #[test]
+fn deleting_expired_requests_keeps_open_and_decided_ones() {
+    let db = open_store();
+    let expired = insert_request(&db, Duration::ZERO);
+    let decided = insert_request(&db, Duration::from_secs(600));
+    let open = insert_request(&db, Duration::from_secs(600));
+    db.with_write_tx(|tx| tx.signing_request_mark_signed(decided, &signature()))
+        .unwrap();
+    thread::sleep(Duration::from_millis(5));
+
+    assert_eq!(db.with_read_tx(|tx| tx.signing_requests_count_pending()).unwrap(), 1);
+    assert_eq!(db.with_write_tx(|tx| tx.signing_requests_delete_expired()).unwrap(), 1);
+
+    let ids = db
+        .with_read_tx(|tx| tx.signing_requests_list())
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![open, decided]);
+    assert!(!ids.contains(&expired));
+}
+
+#[test]
 fn deciding_an_unknown_request_is_not_found() {
     let db = open_store();
     let err = db

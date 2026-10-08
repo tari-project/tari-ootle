@@ -31,7 +31,7 @@ export type SigningRequestCreateRequest = {
   memo: string;
   /**
    * How long a person has to approve, in seconds. Defaults to the daemon's
-   * configured request window.
+   * `signing_request_ttl` (one day unless configured).
    */
   ttl_secs: number | null;
 };

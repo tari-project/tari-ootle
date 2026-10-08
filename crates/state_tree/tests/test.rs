@@ -5,7 +5,14 @@
 use std::collections::{BTreeSet, HashSet};
 
 use tari_engine_types::ProtocolVersion;
-use tari_jellyfish::{SPARSE_MERKLE_PLACEHOLDER_HASH, SparseMerkleProofExt, StaleTreeNode, TreeHash, Version};
+use tari_jellyfish::{
+    JmtHashScheme,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
+    SparseMerkleProofExt,
+    StaleTreeNode,
+    TreeHash,
+    Version,
+};
 use tari_ootle_common_types::{NumPreshards, ToSubstateAddress, VersionedSubstateId, shard::Shard};
 use tari_state_tree::{
     ShardGroupRootTree,
@@ -178,43 +185,53 @@ fn proofs() {
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(1)).unwrap();
     let hash = hash_value_from_seed(30);
     assert_eq!(proof_value, Some((hash, make_value(1).to_substate_address(), 1)));
-    proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
+    proof
+        .verify_inclusion(JmtHashScheme::V1, &root_hash, &key, &hash)
+        .unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(2)).unwrap();
     let hash = hash_value_from_seed(40);
     assert_eq!(proof_value, Some((hash, make_value(2).to_substate_address(), 2)));
-    proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
+    proof
+        .verify_inclusion(JmtHashScheme::V1, &root_hash, &key, &hash)
+        .unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
     let hash = hash_value_from_seed(50);
     assert_eq!(proof_value, Some((hash, make_value(3).to_substate_address(), 3)));
-    proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
+    proof
+        .verify_inclusion(JmtHashScheme::V1, &root_hash, &key, &hash)
+        .unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
     proof
-        .verify_inclusion(&root_hash, &key, &proof_value.unwrap().0)
+        .verify_inclusion(JmtHashScheme::V1, &root_hash, &key, &proof_value.unwrap().0)
         .unwrap();
 
     // Fail cases:
     // Fail to proof exclusion for included value
     let (key, _, proof) = tree.get_proof(3, &make_value(3)).unwrap();
-    proof.verify_exclusion(&root_hash, &key).unwrap_err();
+    proof.verify_exclusion(JmtHashScheme::V1, &root_hash, &key).unwrap_err();
     // Fail to proof inclusion for excluded value
     let (key, _, proof) = tree.get_proof(3, &make_value(1)).unwrap();
     let hash = hash_value_from_seed(50);
-    proof.verify_inclusion(&root_hash, &key, &hash).unwrap_err();
+    proof
+        .verify_inclusion(JmtHashScheme::V1, &root_hash, &key, &hash)
+        .unwrap_err();
     // Fail to proof inclusion for old/incorrect merkle root
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
     proof
-        .verify_inclusion(&root_v1, &key, &proof_value.unwrap().0)
+        .verify_inclusion(JmtHashScheme::V1, &root_v1, &key, &proof_value.unwrap().0)
         .unwrap_err();
 
     // Exclusion proof
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(4)).unwrap();
     assert!(proof_value.is_none());
-    proof.verify_exclusion(&root_hash, &key).unwrap();
+    proof.verify_exclusion(JmtHashScheme::V1, &root_hash, &key).unwrap();
 
     // Fail to verify exclusion proof
     let (key, _, proof) = tree.get_proof(3, &make_value(4)).unwrap();
     let hash = hash_value_from_seed(50);
-    proof.verify_inclusion(&root_hash, &key, &hash).unwrap_err();
+    proof
+        .verify_inclusion(JmtHashScheme::V1, &root_hash, &key, &hash)
+        .unwrap_err();
 }
 
 const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
@@ -379,7 +396,13 @@ fn v2_substate_in_an_empty_shard_is_provably_absent() {
         absent_proof,
         empty_leaf_proof.clone(),
     )
-    .verify_exclusion(ProtocolVersion::V2, &empty_group.root(), NUM_PRESHARDS, &substate)
+    .verify_exclusion(
+        JmtHashScheme::V1,
+        ProtocolVersion::V2,
+        &empty_group.root(),
+        NUM_PRESHARDS,
+        &substate,
+    )
     .unwrap();
 
     // Once the shard holds state, its leaf is present and no state cannot be claimed for it - even
@@ -397,7 +420,13 @@ fn v2_substate_in_an_empty_shard_is_provably_absent() {
             present_proof,
             empty_leaf_proof.clone(),
         )
-        .verify_exclusion(ProtocolVersion::V2, &populated_group.root(), NUM_PRESHARDS, &substate)
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            ProtocolVersion::V2,
+            &populated_group.root(),
+            NUM_PRESHARDS,
+            &substate,
+        )
         .unwrap_err();
     }
 }
@@ -432,6 +461,7 @@ fn two_level_substate_inclusion_proof() {
     // Verifies against the trusted group root.
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V2,
             &group_root,
             NUM_PRESHARDS,
@@ -442,6 +472,7 @@ fn two_level_substate_inclusion_proof() {
     // A tampered value hash is rejected (binds the value to the committed leaf).
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V2,
             &group_root,
             NUM_PRESHARDS,
@@ -452,6 +483,7 @@ fn two_level_substate_inclusion_proof() {
     // A wrong group root is rejected (level-2 failure).
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V2,
             &hash_value_from_seed(7),
             NUM_PRESHARDS,
@@ -461,7 +493,13 @@ fn two_level_substate_inclusion_proof() {
         .unwrap_err();
     // An included substate cannot be proven absent.
     proof
-        .verify_exclusion(ProtocolVersion::V2, &group_root, NUM_PRESHARDS, &make_value(2))
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            ProtocolVersion::V2,
+            &group_root,
+            NUM_PRESHARDS,
+            &make_value(2),
+        )
         .unwrap_err();
 }
 
@@ -491,11 +529,18 @@ fn two_level_substate_exclusion_proof() {
 
     // The absent substate is provably absent under the trusted group root...
     proof
-        .verify_exclusion(ProtocolVersion::V2, &group_root, NUM_PRESHARDS, &make_value(4))
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            ProtocolVersion::V2,
+            &group_root,
+            NUM_PRESHARDS,
+            &make_value(4),
+        )
         .unwrap();
     // ...but cannot be proven present.
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V2,
             &group_root,
             NUM_PRESHARDS,
@@ -549,6 +594,7 @@ fn v2_exclusion_proof_against_another_shards_root_is_rejected() {
     let (_, proof_value, own_leaf_proof) = SpreadPrefixStateTree::new(&mut own).get_proof(1, &substate).unwrap();
     SubstateValueProof::new(own_root, 1, own_root_proof.clone(), own_leaf_proof)
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V2,
             &group_root,
             NUM_PRESHARDS,
@@ -559,15 +605,33 @@ fn v2_exclusion_proof_against_another_shards_root_is_rejected() {
 
     // A sibling shard's root, with the proof of its own place in the group root.
     SubstateValueProof::new(sibling_root, 1, sibling_root_proof, sibling_leaf_proof.clone())
-        .verify_exclusion(ProtocolVersion::V2, &group_root, NUM_PRESHARDS, &substate)
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            ProtocolVersion::V2,
+            &group_root,
+            NUM_PRESHARDS,
+            &substate,
+        )
         .unwrap_err();
     // A sibling shard's root, with the proof of the substate's shard's place in the group root.
     SubstateValueProof::new(sibling_root, 1, own_root_proof, sibling_leaf_proof)
-        .verify_exclusion(ProtocolVersion::V2, &group_root, NUM_PRESHARDS, &substate)
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            ProtocolVersion::V2,
+            &group_root,
+            NUM_PRESHARDS,
+            &substate,
+        )
         .unwrap_err();
     // The global shard's empty root.
     SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, 0, global_root_proof, empty_leaf_proof)
-        .verify_exclusion(ProtocolVersion::V2, &group_root, NUM_PRESHARDS, &substate)
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            ProtocolVersion::V2,
+            &group_root,
+            NUM_PRESHARDS,
+            &substate,
+        )
         .unwrap_err();
 }
 
@@ -598,6 +662,7 @@ fn two_level_substate_inclusion_proof_for_genesis_version_zero() {
     // The genesis substate committed at version 0 is provably included under the trusted group root.
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V2,
             &group_root,
             NUM_PRESHARDS,
@@ -608,6 +673,7 @@ fn two_level_substate_inclusion_proof_for_genesis_version_zero() {
     // A tampered value hash is still rejected.
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V2,
             &group_root,
             NUM_PRESHARDS,
@@ -667,6 +733,7 @@ fn v1_shard_leaf_proof_binds_the_shard_state_version() {
     let proof = SubstateValueProof::new(shard_root, 1, shard_root_proof.clone(), leaf_proof.clone());
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V1,
             &group_root,
             NUM_PRESHARDS,
@@ -677,6 +744,7 @@ fn v1_shard_leaf_proof_binds_the_shard_state_version() {
     // The same root claimed at another state version is not what the quorum signed.
     SubstateValueProof::new(shard_root, 2, shard_root_proof, leaf_proof.clone())
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V1,
             &group_root,
             NUM_PRESHARDS,
@@ -687,6 +755,7 @@ fn v1_shard_leaf_proof_binds_the_shard_state_version() {
     // A V1 root does not verify under V0 leaves, nor the reverse.
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V0,
             &group_root,
             NUM_PRESHARDS,
@@ -698,6 +767,7 @@ fn v1_shard_leaf_proof_binds_the_shard_state_version() {
     let proof = SubstateValueProof::new(shard_root, 1, v0_proof, leaf_proof);
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V0,
             &v0_root,
             NUM_PRESHARDS,
@@ -707,6 +777,7 @@ fn v1_shard_leaf_proof_binds_the_shard_state_version() {
         .unwrap();
     proof
         .verify_inclusion(
+            JmtHashScheme::V1,
             ProtocolVersion::V1,
             &v0_root,
             NUM_PRESHARDS,

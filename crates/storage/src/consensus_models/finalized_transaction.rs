@@ -7,7 +7,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_ootle_common_types::hashing::finalized_transaction_hasher;
 use tari_ootle_transaction::TransactionId;
-use tari_state_tree::{KeyedProofTree, LeafKey, TreeHash};
+use tari_state_tree::{JmtHashScheme, KeyedProofTree, LeafKey, TreeHash};
 
 use super::{BlockError, Command};
 
@@ -155,7 +155,9 @@ mod tests {
             let (leaf, proof) = block.compute_transaction_proof(&tx(seed)).unwrap();
             let leaf = leaf.expect("the block finalizes this transaction");
             assert_eq!(leaf.decision, decision);
-            proof.verify_inclusion(&root, &leaf.key(), &leaf.hash()).unwrap();
+            proof
+                .verify_inclusion(JmtHashScheme::V1, &root, &leaf.key(), &leaf.hash())
+                .unwrap();
 
             let other = FinalizedTransactionLeaf {
                 transaction_id: leaf.transaction_id,
@@ -165,7 +167,9 @@ mod tests {
                     Decision::Commit
                 },
             };
-            proof.verify_inclusion(&root, &other.key(), &other.hash()).unwrap_err();
+            proof
+                .verify_inclusion(JmtHashScheme::V1, &root, &other.key(), &other.hash())
+                .unwrap_err();
         }
     }
 
@@ -177,7 +181,9 @@ mod tests {
         for seed in [4, 5, 6] {
             let (leaf, proof) = block.compute_transaction_proof(&tx(seed)).unwrap();
             assert!(leaf.is_none());
-            proof.verify_exclusion(&root, &transaction_leaf_key(&tx(seed))).unwrap();
+            proof
+                .verify_exclusion(JmtHashScheme::V1, &root, &transaction_leaf_key(&tx(seed)))
+                .unwrap();
         }
     }
 

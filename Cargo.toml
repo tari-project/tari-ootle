@@ -162,7 +162,7 @@ minotari_wallet_grpc_client = "6.1.0-pre.0"
 tari_common = "6.1.0-pre.0"
 tari_common_sqlite = "6.1.0-pre.0"
 tari_common_types = "6.1.0-pre.0"
-tari_jellyfish = "6.1.0-pre.0"
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
 tari_metrics = "6.1.0-pre.0"
 tari_mmr = "6.1.0-pre.0"
 tari_node_components = "6.1.0-pre.0"
@@ -349,6 +349,46 @@ overflow-checks = true
 [profile.ci-build]
 inherits = "release"
 opt-level = 1
+
+# tari_jellyfish is pinned to an unreleased tari revision (SPEC-A/B/C). Every other tari crate is patched to the same
+# revision so that the graph holds one copy of each: tari_sidechain and tari_common_types types cross crate
+# boundaries, and two copies of them do not unify. Remove this section once a release containing the revision is
+# published to crates.io.
+[patch.crates-io]
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_ledger_wallet_common = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_ledger_wallet_comms = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_node_wallet_client = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_common = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_comms_rpc_macros = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_core = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_features = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_hashing = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_libtor = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_max_size = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_metrics = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_node_components = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_script = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_service_framework = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_storage = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_test_utils = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_transaction_components = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
+tari_transaction_key_manager = { git = "https://github.com/tari-project/tari.git", rev = "29c9caac9813a7c88cc267ba7d53268a6e8e0b03" }
 
 ## Make a copy of this code, uncomment and replace account and my-branch with the name of your fork and the branch you want to temporarily use
 #[patch."https://github.com/tari-project/tari.git"]

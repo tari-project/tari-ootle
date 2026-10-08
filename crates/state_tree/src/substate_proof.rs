@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::ProtocolVersion;
-use tari_jellyfish::{SparseMerkleProofExt, TreeHash, Version};
+use tari_jellyfish::{JmtHashScheme, SparseMerkleProofExt, TreeHash, Version};
 use tari_ootle_common_types::{NumPreshards, VersionedSubstateId};
 
 use crate::{
@@ -61,16 +61,17 @@ impl SubstateValueProof {
     /// shard-group `group_root`, committed under `protocol_version`.
     pub fn verify_inclusion(
         &self,
+        scheme: JmtHashScheme,
         protocol_version: ProtocolVersion,
         group_root: &TreeHash,
         num_preshards: NumPreshards,
         versioned_id: &VersionedSubstateId,
         value_hash: &TreeHash,
     ) -> Result<(), SubstateValueProofError> {
-        self.verify_shard_root(protocol_version, group_root, num_preshards, versioned_id)?;
+        self.verify_shard_root(scheme, protocol_version, group_root, num_preshards, versioned_id)?;
         let leaf_key = SpreadPrefixKeyMapper::map_to_leaf_key(versioned_id);
         self.leaf_proof
-            .verify_inclusion(&self.shard_root, &leaf_key, value_hash)
+            .verify_inclusion(scheme, &self.shard_root, &leaf_key, value_hash)
             .map_err(|e| SubstateValueProofError::LeafProof(e.to_string()))
     }
 
@@ -78,15 +79,18 @@ impl SubstateValueProof {
     /// shard-group `group_root`, committed under `protocol_version`.
     pub fn verify_exclusion(
         &self,
+        scheme: JmtHashScheme,
         protocol_version: ProtocolVersion,
         group_root: &TreeHash,
         num_preshards: NumPreshards,
         versioned_id: &VersionedSubstateId,
     ) -> Result<(), SubstateValueProofError> {
-        self.verify_shard_root(protocol_version, group_root, num_preshards, versioned_id)?;
+        self.verify_shard_root(scheme, protocol_version, group_root, num_preshards, versioned_id)?;
         let leaf_key = SpreadPrefixKeyMapper::map_to_leaf_key(versioned_id);
+        // `shard_root` is authenticated for this shard by the level-2 proof, so the empty-tree root here means the
+        // shard holds no substates at all (every one it held was destroyed, or none was ever created).
         self.leaf_proof
-            .verify_exclusion(&self.shard_root, &leaf_key)
+            .verify_exclusion_or_empty_tree(scheme, &self.shard_root, &leaf_key)
             .map_err(|e| SubstateValueProofError::LeafProof(e.to_string()))
     }
 
@@ -99,6 +103,7 @@ impl SubstateValueProof {
     /// the absence of its leaf.
     fn verify_shard_root(
         &self,
+        scheme: JmtHashScheme,
         protocol_version: ProtocolVersion,
         group_root: &TreeHash,
         num_preshards: NumPreshards,
@@ -107,8 +112,14 @@ impl SubstateValueProof {
         let shard = versioned_id.to_shard(num_preshards);
         let leaf = ShardGroupLeaf::new(protocol_version, shard, &self.shard_root, self.shard_state_version);
         let result = match leaf.value {
-            Some(value) => self.shard_root_proof.verify_inclusion(group_root, &leaf.key, &value),
-            None => self.shard_root_proof.verify_exclusion(group_root, &leaf.key),
+            Some(value) => self
+                .shard_root_proof
+                .verify_inclusion(scheme, group_root, &leaf.key, &value),
+            // `group_root` is trusted for this shard group, so the empty-tree root means no shard of the group holds
+            // state.
+            None => self
+                .shard_root_proof
+                .verify_exclusion_or_empty_tree(scheme, group_root, &leaf.key),
         };
         result.map_err(|e| SubstateValueProofError::ShardRootProof(e.to_string()))
     }

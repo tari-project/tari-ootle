@@ -21,6 +21,7 @@ use tari_state_tree::{
     SubstateValueProofError,
     TreeHash,
     Version,
+    jmt_hash_scheme,
 };
 
 use crate::{StateStoreReadTransaction, StorageError, state_store::ShardScopedTreeStoreReader};
@@ -196,6 +197,7 @@ pub fn verify_substate_value_proof_against_root(
             // validator cannot swap the value while presenting a proof for the real committed leaf.
             let value_hash = TreeHash::new(hash_substate(network, value, version, proof_epoch).into_array());
             value_proof.verify_inclusion(
+                jmt_hash_scheme(root_protocol_version),
                 root_protocol_version,
                 &group_root,
                 num_preshards,
@@ -204,7 +206,13 @@ pub fn verify_substate_value_proof_against_root(
             )?;
         },
         None => {
-            value_proof.verify_exclusion(root_protocol_version, &group_root, num_preshards, &versioned_id)?;
+            value_proof.verify_exclusion(
+                jmt_hash_scheme(root_protocol_version),
+                root_protocol_version,
+                &group_root,
+                num_preshards,
+                &versioned_id,
+            )?;
         },
     }
 
@@ -250,7 +258,7 @@ fn committed_shard_state<TTx: StateStoreReadTransaction>(
 
 #[cfg(test)]
 mod tests {
-    use tari_state_tree::{StateTreePayload, compute_shard_group_root, memory_store::MemoryTreeStore};
+    use tari_state_tree::{JmtHashScheme, StateTreePayload, compute_shard_group_root, memory_store::MemoryTreeStore};
     use tari_template_lib_types::{ComponentAddress, ObjectKey};
 
     use super::*;
@@ -294,7 +302,13 @@ mod tests {
             .unwrap();
         let proof = SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, 0, shard_root_proof, leaf_proof);
         proof
-            .verify_exclusion(ProtocolVersion::V2, &other_group_root, NUM_PRESHARDS, &versioned_id)
+            .verify_exclusion(
+                JmtHashScheme::V1,
+                ProtocolVersion::V2,
+                &other_group_root,
+                NUM_PRESHARDS,
+                &versioned_id,
+            )
             .unwrap();
         let proof_bytes = tari_bor::serde_codec::to_vec(&proof).unwrap();
 

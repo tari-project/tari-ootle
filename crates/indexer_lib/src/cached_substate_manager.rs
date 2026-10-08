@@ -50,6 +50,8 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     TrustedStateRoot,
     consensus_models::{CommittedBlockProof, VerifiedBlockTip},
+    decode_substate_down_proof,
+    verify_substate_down_proof_against_roots,
     verify_substate_value_proof_against_root,
 };
 use tari_validator_node_rpc::client::{
@@ -713,6 +715,12 @@ where
                 &trusted_root,
             )
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+            // A batch answers with heads, which no down proof can settle (see `fetch_and_cache_heads`), but a member
+            // that serves an invalid one is still disqualified.
+            if let Some(down_proof) = &substate.substate_down_proof {
+                self.verify_down_proof(&substate.substate_id, version, down_proof, &trusted_root)
+                    .await?;
+            }
         }
 
         Ok(BatchTrust::Proven)
@@ -818,15 +826,73 @@ where
         // Verify up/down results against the committee. An invalid proof disqualifies this
         // validator's response (fail-closed) so the caller tries another member. `DoesNotExist` is
         // not provable and is left to the existing f+1 agreement.
-        let (version, value) = match &result {
-            SubstateResult::Up { substate } => (substate.version(), Some(substate.substate_value())),
-            SubstateResult::Down { version } => (*version, None),
+        match &result {
+            SubstateResult::Up { substate } => {
+                self.verify_substate_proof(
+                    substate_requirement.substate_id(),
+                    substate.version(),
+                    Some(substate.substate_value()),
+                    &proof,
+                )
+                .await?;
+            },
+            SubstateResult::Down { version } => {
+                // Only a down proof shows the version was ever up; without one, the Down is left to f+1
+                // agreement.
+                let Some(down_proof) = proof.substate_down_proof.as_deref() else {
+                    return Ok((result, None));
+                };
+                let down_root = self.trusted_root_from_commit_proof(&proof.commit_proof).await?;
+                let proven = self
+                    .verify_down_proof(substate_requirement.substate_id(), *version, down_proof, &down_root)
+                    .await?;
+                if !proven {
+                    return Ok((result, None));
+                }
+            },
             SubstateResult::DoesNotExist => return Ok((result, None)),
-        };
-        self.verify_substate_proof(substate_requirement.substate_id(), version, value, &proof)
-            .await?;
+        }
 
         Ok((result, Some(proof)))
+    }
+
+    /// Verifies the down proof of `(substate_id, version)` whose exclusion half is anchored at `down_root`.
+    ///
+    /// Returns `Ok(false)` when the proof's earlier root cannot be established, e.g. because the committee of its
+    /// epoch is no longer known: the Down is then unproven rather than refuted. An invalid proof is an error, which
+    /// disqualifies the member that served it.
+    async fn verify_down_proof(
+        &self,
+        substate_id: &SubstateId,
+        version: SubstateVersion,
+        down_proof: &[u8],
+        down_root: &TrustedStateRoot,
+    ) -> Result<bool, IndexerError> {
+        let decoded = decode_substate_down_proof(down_proof)
+            .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+        let up_root = match self.trusted_root_from_commit_proof(&decoded.up_commit_proof).await {
+            Ok(root) => root,
+            Err(e @ IndexerError::SubstateProofVerificationFailed { .. }) => return Err(e),
+            Err(e) => {
+                debug!(
+                    target: LOG_TARGET,
+                    "Cannot establish the earlier root of the down proof for {substate_id}v{version}: {e}. Treating \
+                     the Down as unproven."
+                );
+                return Ok(false);
+            },
+        };
+        verify_substate_down_proof_against_roots(
+            down_proof,
+            substate_id,
+            version,
+            self.network,
+            NumPreshards::current(),
+            &up_root,
+            down_root,
+        )
+        .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+        Ok(true)
     }
 
     async fn verify_substate_proof(
@@ -956,6 +1022,8 @@ mod tests {
         live: HashMap<SubstateId, Substate>,
         omitted_from_batches: HashSet<SubstateId>,
         down_in_batches: HashSet<SubstateId>,
+        /// Answered on a proven read as down at the given version, with the given proof.
+        down_with_proof: HashMap<SubstateId, (SubstateVersion, SubstateProofData)>,
         batch_requests: AtomicUsize,
         single_requests: AtomicUsize,
     }
@@ -1000,6 +1068,9 @@ mod tests {
             &mut self,
             substate_req: SubstateRequirementRef<'_>,
         ) -> Result<(SubstateResult, Option<SubstateProofData>), ValidatorNodeRpcClientError> {
+            if let Some((version, proof)) = self.0.down_with_proof.get(substate_req.substate_id()) {
+                return Ok((SubstateResult::Down { version: *version }, Some(proof.clone())));
+            }
             Ok((self.get_substate(substate_req).await?, None))
         }
 
@@ -1244,6 +1315,55 @@ mod tests {
 
     fn requirements(ids: &[SubstateId]) -> Vec<SubstateRequirementRef<'_>> {
         ids.iter().map(|id| SubstateRequirementRef::new(id, None)).collect()
+    }
+
+    fn down_proof_data(substate_down_proof: Option<Vec<u8>>) -> SubstateProofData {
+        SubstateProofData {
+            substate_value_proof: vec![1],
+            commit_proof: vec![2],
+            proof_epoch: 0,
+            substate_down_proof,
+            destroyed_at_state_version: Some(4),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_down_without_a_down_proof_is_unproven() {
+        let id = component_id(1);
+        let (manager, _) = manager(FakeNetwork {
+            down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(None)))].into(),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
+        let (result, proof) = manager
+            .get_substate_from_vn(
+                &"vn".to_string(),
+                SubstateRequirementRef::new(&id, Some(SubstateVersion::new(3))),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(result, SubstateResult::Down { .. }));
+        assert!(proof.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_member_serving_an_invalid_down_proof_is_disqualified() {
+        let id = component_id(1);
+        let (manager, _) = manager(FakeNetwork {
+            down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(Some(vec![0xff]))))].into(),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
+        let result = manager
+            .get_substate_from_vn(
+                &"vn".to_string(),
+                SubstateRequirementRef::new(&id, Some(SubstateVersion::new(3))),
+            )
+            .await;
+        assert!(
+            matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+            "{result:?}"
+        );
     }
 
     #[tokio::test]

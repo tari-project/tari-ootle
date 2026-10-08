@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::future::Future;
+use std::{collections::HashMap, future::Future};
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use tari_ootle_common_types::SubstateVersion;
@@ -28,12 +28,14 @@ pub type MemberResponse = Result<(SubstateResult, Option<SubstateProofData>), In
 /// Responses arrive in whatever order the members answer, so the tally cannot assume anything about
 /// which member it hears from first. What settles a read is decided per response: a proven `Up`, a
 /// proven `Down` of the version the read asked for (or any `Up`/`Down` while proofs are not
-/// required) answers on the spot, `DoesNotExist` answers only once more than `f` members agree, and
-/// any other `Up`/`Down` is held as a fallback in case no member can prove one.
+/// required) answers on the spot. `DoesNotExist` answers only once more than `f` members agree, and
+/// so does a `Down` no member has proven, counted per version: a single member's word that a substate
+/// is down could otherwise make the indexer treat a live substate as spent. Any other `Up`/`Down` is
+/// held as a fallback in case nothing settles the read.
 ///
-/// A proof of a `Down` shows only that the version it names is not up. That answers a read for that
-/// version, but says nothing about whether a later version is up, so it cannot answer a read for the
-/// head.
+/// A proof of a `Down` shows that the version it names was committed and is no longer up. That
+/// answers a read for that version, but says nothing about whether a later version is up, so it
+/// cannot answer a read for the head; there it counts as one member's `Down`.
 #[derive(Debug)]
 pub struct CommitteeReadTally {
     /// Byzantine tolerance of the committee: `DoesNotExist` needs `f + 1` agreeing members before it
@@ -43,6 +45,8 @@ pub struct CommitteeReadTally {
     /// The version the read asked for, or `None` for the head.
     requested_version: Option<SubstateVersion>,
     num_nexist: usize,
+    /// How many members reported each version down without a proof that answers the read.
+    unproven_downs: HashMap<SubstateVersion, usize>,
     last_error: Option<IndexerError>,
     /// Highest-version `Up`/`Down` response that came back without a proof. Only served if no
     /// member can prove one.
@@ -60,6 +64,7 @@ impl CommitteeReadTally {
             verify_substate_proofs,
             requested_version,
             num_nexist: 0,
+            unproven_downs: HashMap::new(),
             last_error: None,
             unproven_result: None,
         }
@@ -76,6 +81,17 @@ impl CommitteeReadTally {
                             verified: proof.is_some(),
                             proof,
                         });
+                    }
+                    if let SubstateResult::Down { version } = substate_result {
+                        let count = self.unproven_downs.entry(version).or_default();
+                        *count += 1;
+                        if *count > self.f {
+                            return Some(SubstateLookupResult {
+                                result: substate_result,
+                                verified: false,
+                                proof: None,
+                            });
+                        }
                     }
                     // The member could not prove an answer to this read (e.g. nothing committed
                     // since the epoch started, or a down version other than the one asked for). Keep
@@ -315,7 +331,7 @@ mod tests {
     #[tokio::test]
     async fn an_unproven_answer_is_held_until_a_proof_arrives() {
         // Member 0 answers first and cannot prove; member 1 can.
-        let result = race(2, 1, true, Some(7), vec![
+        let result = race(4, 1, true, Some(7), vec![
             (0, Ok((down(7), None))),
             (1, Ok((down(7), proven()))),
         ])
@@ -328,7 +344,7 @@ mod tests {
     /// read for the head while another member can prove what the head is.
     #[tokio::test]
     async fn a_proven_down_does_not_answer_a_read_for_the_head() {
-        let result = race(2, 1, true, None, vec![
+        let result = race(4, 1, true, None, vec![
             (0, Ok((down(3), proven()))),
             (1, Ok((up(4), proven()))),
         ])
@@ -351,7 +367,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_proven_down_of_another_version_does_not_answer_a_versioned_read() {
-        let result = race(2, 1, true, Some(5), vec![
+        let result = race(4, 1, true, Some(5), vec![
             (0, Ok((down(6), proven()))),
             (1, Ok((down(5), proven()))),
         ])
@@ -372,15 +388,89 @@ mod tests {
 
     #[tokio::test]
     async fn the_highest_unproven_version_is_served_when_nobody_can_prove() {
-        let result = race(3, 1, true, None, vec![
+        let result = race(4, 1, true, None, vec![
             (0, Ok((down(2), None))),
             (1, Ok((down(5), None))),
             (2, Ok((down(3), None))),
+            (3, Err(error())),
         ])
         .await
         .unwrap();
         assert_eq!(result.result.version(), Some(SubstateVersion::new(5)));
         assert!(!result.verified);
+    }
+
+    #[tokio::test]
+    async fn one_unproven_down_does_not_settle_the_read() {
+        // Four members: f = 1. Member 0 claims the substate is down; member 1 proves it up.
+        let result = race(4, 1, true, None, vec![
+            (0, Ok((down(3), None))),
+            (1, Ok((up(3), proven()))),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert!(result.verified);
+    }
+
+    #[tokio::test]
+    async fn f_plus_one_unproven_downs_of_one_version_settle_unverified() {
+        let mut committee = Committee::new(vec![
+            (0, Ok((down(3), None))),
+            (1, Ok((down(3), None))),
+            (2, Ok((up(3), proven()))),
+        ]);
+        let started = committee.started.clone();
+        let fetch = committee.fetch();
+        let result = race_committee((0..4).map(fetch), 1, CommitteeReadTally::new(4, true, None), "test")
+            .await
+            .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(!result.verified);
+        assert!(result.proof.is_none());
+        assert_eq!(started.load(Ordering::SeqCst), 2, "the read settled on the second Down");
+    }
+
+    #[tokio::test]
+    async fn f_plus_one_unproven_downs_of_different_versions_do_not_settle() {
+        let mut committee = Committee::new(vec![
+            (0, Ok((down(3), None))),
+            (1, Ok((down(4), None))),
+            (2, Ok((up(5), proven()))),
+        ]);
+        let fetch = committee.fetch();
+        let result = race_committee((0..4).map(fetch), 1, CommitteeReadTally::new(4, true, None), "test")
+            .await
+            .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert!(result.verified);
+    }
+
+    #[tokio::test]
+    async fn one_proven_down_settles_a_read_for_its_version() {
+        let result = race(4, 1, true, Some(3), vec![(0, Ok((down(3), proven())))])
+            .await
+            .unwrap();
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(result.verified);
+    }
+
+    #[tokio::test]
+    async fn a_member_whose_proof_is_invalid_is_discarded() {
+        // An invalid proof reaches the tally as that member's error.
+        let result = race(4, 1, true, Some(3), vec![
+            (
+                0,
+                Err(IndexerError::SubstateProofVerificationFailed {
+                    details: "invalid down proof".into(),
+                }),
+            ),
+            (1, Ok((up(3), proven()))),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
     }
 
     #[tokio::test]

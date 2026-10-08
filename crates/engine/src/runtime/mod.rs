@@ -279,6 +279,12 @@ pub trait RuntimeInterface {
     /// the work.
     fn charge_template_instantiation(&self, shape: &ModuleShape) -> Result<(), RuntimeError>;
 
+    /// Charges the host-side handling of a value a template call returned, `bytes` long and holding
+    /// `items` CBOR data items, before it is decoded. Priced by
+    /// [`tari_engine_types::limits::return_value_points`] and charged against the same compute
+    /// allowance as native verification.
+    fn charge_return_value(&self, bytes: u64, items: u64) -> Result<(), RuntimeError>;
+
     /// The template instances this transaction has created. A borrow of it must not be held across a
     /// template call, which may reach it again through a nested call.
     fn wasm_instances(&self) -> &RefCell<WasmInstanceCache>;

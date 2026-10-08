@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use tari_bor::{ByteCounter, decode_exact_with_max_depth, encode_into_writer, encoded_len};
+use tari_bor::{BorError, ByteCounter, decode_exact_with_max_depth, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{
     CallInfo,
@@ -282,30 +282,48 @@ impl WasmProcess {
 
         // Read response from memory
         // SAFETY: WasmProcess is not used concurrently
-        let span = abi_metrics::Span::start();
-        let mut return_bytes = 0usize;
-        let value = unsafe {
+        let raw = unsafe {
             let mut fn_env = self.env_and_store(store);
             let (env, mut store) = fn_env.data_and_store_mut();
             env.with_memory_embedded_len(&mut store, return_ptr.offset(), |raw| {
-                return_bytes = raw.len();
                 // The returned value is bounded like the arguments passed the other way: it is
-                // decoded, validated and carried into the transaction result, all of it work the
-                // engine does outside the meter.
+                // decoded, validated and carried into the transaction result, host work that
+                // `decode_return_value` charges for by its CBOR item count.
                 if raw.len() > limits::ENGINE_LIMITS.max_call_size {
                     return Err(WasmExecutionError::CallSizeLimitExceeded {
                         limit: limits::ENGINE_LIMITS.max_call_size,
                     });
                 }
-                IndexedValue::from_raw(raw).map_err(WasmExecutionError::from)
+                Ok(raw.to_vec())
             })??
         };
-        abi_metrics::record_return_decode(return_bytes, span.finish());
 
         // Free allocated memory containing the result
         self.free_checked(store, return_ptr)?;
 
-        Ok(InvocationOutcome::Returned(value))
+        Ok(InvocationOutcome::Returned(raw))
+    }
+
+    /// Charges the host-side handling of a returned value, then decodes it.
+    ///
+    /// Decoding, indexing, validating and re-encoding the value all happen outside the meter, at a
+    /// cost that follows its CBOR item count, so the charge is drawn from the transaction's compute
+    /// allowance first: a transaction that cannot cover it fails having decoded nothing.
+    fn decode_return_value(&self, store: &Store, raw: &[u8]) -> Result<IndexedValue, WasmExecutionError> {
+        let span = abi_metrics::Span::start();
+        // An empty return decodes to the empty value without any per-item work.
+        let items = if raw.is_empty() {
+            0
+        } else {
+            tari_bor::count_data_items(raw).map_err(BorError::from)?
+        };
+        self.env(store)
+            .state()?
+            .interface()
+            .charge_return_value(raw.len() as u64, items)?;
+        let value = IndexedValue::from_raw(raw)?;
+        abi_metrics::record_return_decode(raw.len(), span.finish());
+        Ok(value)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -661,7 +679,8 @@ impl WasmProcess {
         };
 
         match outcome {
-            InvocationOutcome::Returned(value) => {
+            InvocationOutcome::Returned(raw) => {
+                let value = self.decode_return_value(store, &raw)?;
                 self.env(store).state()?.interface().validate_return_value(&value)?;
                 self.env(store)
                     .state()?
@@ -711,12 +730,9 @@ fn compute_exceeded_error(binding_allowance: Option<ComputeAllowance>, consumed_
 }
 
 /// How a metered invocation ended. Both arms are charged before either is turned into a result.
-///
-/// One of these exists per invocation and is consumed where it is returned, so the returned value
-/// travels in it directly rather than through a box.
-#[allow(clippy::large_enum_variant)]
 enum InvocationOutcome {
-    Returned(IndexedValue),
+    /// The encoded value the template function returned, decoded only once its handling is charged.
+    Returned(Vec<u8>),
     /// The template function trapped. The wasmer error is kept so a panic the template recorded can
     /// be reported with it.
     Trapped(wasmer::RuntimeError),

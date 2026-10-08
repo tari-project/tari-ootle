@@ -1,7 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! Codec-wide nesting bound applied to untrusted input before any typed decode runs.
+//! Structural scans of untrusted input that run before any typed decode: the codec-wide nesting
+//! bound, and the item count a decode's cost is priced by.
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -13,26 +14,38 @@ use minicbor::{Decoder, data::Type, decode};
 /// The walk is iterative and reads only item heads, so it costs a fraction of the decode it guards
 /// and is itself immune to the recursion it rejects.
 pub fn check_nesting_depth(input: &[u8], max_depth: usize) -> Result<(), decode::Error> {
-    if walk(&mut Decoder::new(input), max_depth).unwrap_or(true) {
+    // Malformed input passes: the decode that follows produces a parse error far more specific than
+    // anything this walk could say.
+    if !matches!(walk(&mut Decoder::new(input), max_depth), Ok(None)) {
         return Ok(());
     }
     Err(decode::Error::message("maximum CBOR nesting depth exceeded"))
 }
 
-/// Walks the heads of the first item in `d`, returning whether it stays within `max_depth`.
+/// Counts the data items making up the first item in `input`: that item and every item nested in
+/// it. Each chunk of an indefinite-length byte or text string counts as an item of its own.
 ///
-/// Malformed input is reported as `Err` and treated by the caller as within bound: the decode that
-/// follows produces a parse error far more specific than anything this walk could say.
-fn walk(d: &mut Decoder<'_>, max_depth: usize) -> Result<bool, decode::Error> {
+/// Decoding into a [`crate::Value`] does a roughly fixed amount of work per item on top of copying
+/// its bytes, so this count, rather than the input's length, is what prices that decode. Like
+/// [`check_nesting_depth`] it is iterative and reads only item heads.
+pub fn count_data_items(input: &[u8]) -> Result<u64, decode::Error> {
+    // A walk bounded at `usize::MAX` is never cut short for depth.
+    Ok(walk(&mut Decoder::new(input), usize::MAX)?.unwrap_or(u64::MAX))
+}
+
+/// Walks the heads of the first item in `d`, returning how many items it holds, or `None` once an
+/// item nests deeper than `max_depth`.
+fn walk(d: &mut Decoder<'_>, max_depth: usize) -> Result<Option<u64>, decode::Error> {
     // Items still to read per open container, innermost last: `Some(n)` for a definite-length
     // container, `None` for an indefinite-length one that ends at a break byte. The outermost frame
     // is the single top-level item, so an item's nesting depth is `stack.len() - 1`.
     let mut stack: Vec<Option<u64>> = Vec::with_capacity(16);
     stack.push(Some(1));
+    let mut items = 0u64;
 
     loop {
         let Some(frame) = stack.last().copied() else {
-            return Ok(true);
+            return Ok(Some(items));
         };
         match frame {
             Some(0) => {
@@ -53,12 +66,13 @@ fn walk(d: &mut Decoder<'_>, max_depth: usize) -> Result<bool, decode::Error> {
         // rather than where a container is opened, so an empty container at the bound is accepted
         // exactly as a scalar there is.
         if stack.len() - 1 > max_depth {
-            return Ok(false);
+            return Ok(None);
         }
 
         if let Some(Some(n)) = stack.last_mut() {
             *n -= 1;
         }
+        items = items.saturating_add(1);
 
         let remaining = match d.datatype()? {
             Type::Array | Type::ArrayIndef => d.array()?,
@@ -68,7 +82,21 @@ fn walk(d: &mut Decoder<'_>, max_depth: usize) -> Result<bool, decode::Error> {
                 d.tag()?;
                 Some(1)
             },
-            // Scalars, including indefinite-length byte and text strings, whose chunks do not nest.
+            // An indefinite-length string's chunks do not nest, but each is decoded separately.
+            Type::BytesIndef => {
+                for chunk in d.bytes_iter()? {
+                    chunk?;
+                    items = items.saturating_add(1);
+                }
+                continue;
+            },
+            Type::StringIndef => {
+                for chunk in d.str_iter()? {
+                    chunk?;
+                    items = items.saturating_add(1);
+                }
+                continue;
+            },
             _ => {
                 d.skip()?;
                 continue;
@@ -159,6 +187,40 @@ mod tests {
             &[0x1c][..], // a reserved additional-information value
         ] {
             assert!(check_nesting_depth(input, MAX).is_ok(), "claimed {input:x?} for itself");
+        }
+    }
+
+    #[test]
+    fn every_nested_item_is_counted() {
+        for (input, expected) in [
+            (&[0x00][..], 1),                               // 0
+            (&[0x80][..], 1),                               // []
+            (&[0x83, 0x01, 0x02, 0x03][..], 4),             // [1, 2, 3]
+            (&[0xa1, 0x01, 0x02][..], 3),                   // {1: 2}
+            (&[0x9f, 0x01, 0xff][..], 2),                   // [_ 1]
+            (&[0xbf, 0x01, 0x02, 0xff][..], 3),             // {_ 1: 2}
+            (&[0x43, 0x01, 0x02, 0x03][..], 1),             // h'010203'
+            (&[0x5f, 0x41, 0x01, 0x41, 0x02, 0xff][..], 3), // (_ h'01', h'02')
+            (&[0x7f, 0x61, 0x61, 0x60, 0xff][..], 3),       // (_ "a", "")
+            (&[0xc0, 0x01][..], 2),                         // 0(1)
+            (&[0x82, 0x81, 0x00, 0xa1, 0x00, 0x80][..], 6), // [[0], {0: []}]
+            (&[0x00, 0x83, 0x01, 0x02, 0x03][..], 1),       // 0, then trailing bytes
+        ] {
+            assert_eq!(count_data_items(input).unwrap(), expected, "counted {input:x?}");
+        }
+    }
+
+    #[test]
+    fn counting_is_not_bounded_by_nesting() {
+        let mut deep = vec![0x81u8; 10_000];
+        deep.push(0x00);
+        assert_eq!(count_data_items(&deep).unwrap(), 10_001);
+    }
+
+    #[test]
+    fn counting_malformed_input_fails() {
+        for input in [&[][..], &[0x81][..], &[0x1c][..]] {
+            assert!(count_data_items(input).is_err(), "counted {input:x?}");
         }
     }
 }

@@ -5,7 +5,7 @@ use std::{collections::BTreeSet, slice};
 
 use tari_bor::encoded_len;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine::{runtime::LimitError, state_store::StateWriter, wasm::WasmExecutionError};
+use tari_engine::{fees::FeeTable, runtime::LimitError, state_store::StateWriter, wasm::WasmExecutionError};
 use tari_engine_types::{
     events::Event,
     limits,
@@ -13,7 +13,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     vault::Vault,
 };
-use tari_ootle_transaction::{Epoch, Transaction, args};
+use tari_ootle_transaction::{Epoch, Transaction, args, builder::named_args::NamedArg};
 use tari_template_abi::CallInfo;
 use tari_template_lib::types::{
     ComponentAddress,
@@ -266,5 +266,103 @@ fn max_transaction_output_bytes_limit() {
             "exceeding the maximum of {} bytes per transaction",
             limits::ENGINE_LIMITS.max_transaction_output_bytes
         ),
+    );
+}
+
+/// The bytes `PushItToTheLimit::return_items` returns for `len`, and the CBOR items they hold.
+fn returned_items(len: u32) -> (u64, u64) {
+    let raw = tari_bor::encode(&vec![0u32; len as usize]).unwrap();
+    (raw.len() as u64, tari_bor::count_data_items(&raw).unwrap())
+}
+
+fn return_value_charge(len: u32) -> u64 {
+    let (bytes, items) = returned_items(len);
+    limits::return_value_points(bytes, items)
+}
+
+fn native_points_for(test: &mut TemplateTest, function: &str, args: Vec<NamedArg>) -> u64 {
+    let template = test.get_template_address(TEMPLATE_NAME);
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template, function, args)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    result.native_execution_points
+}
+
+/// Decoding and indexing a returned value runs on the host, outside the Wasmer meter, and costs a
+/// roughly fixed amount per CBOR item, so the engine charges native points for each item it is
+/// handed.
+#[test]
+fn a_return_value_is_charged_per_item() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (small, large) = (1, 30_000);
+
+    let small_points = native_points_for(&mut test, "return_items", args![small]);
+    let large_points = native_points_for(&mut test, "return_items", args![large]);
+
+    assert_eq!(
+        large_points - small_points,
+        return_value_charge(large) - return_value_charge(small),
+        "returning {large} items rather than {small} must cost exactly the difference in return-value charges"
+    );
+}
+
+/// A value a nested cross-template call returns is handled by the engine on its way back to the
+/// caller just as a top-level one is, and is charged the same.
+#[test]
+fn a_nested_return_value_is_charged_per_item() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template = test.get_template_address(TEMPLATE_NAME);
+    let (small, large) = (1, 30_000);
+
+    let small_points = native_points_for(&mut test, "return_items_nested", args![template, small]);
+    let large_points = native_points_for(&mut test, "return_items_nested", args![template, large]);
+
+    // The outer call returns the count, whose encoding widens with it.
+    let count_charge = |len: u32| limits::return_value_points(tari_bor::encode(&len).unwrap().len() as u64, 1);
+    assert_eq!(
+        large_points - small_points,
+        return_value_charge(large) + count_charge(large) - return_value_charge(small) - count_charge(small),
+        "a nested call returning {large} items rather than {small} must cost exactly the difference in return-value \
+         charges"
+    );
+}
+
+/// The charge is made before the value is decoded, so a transaction that cannot afford it is refused
+/// without the engine doing the work. Run in the fee intent, whose flat credit is the allowance.
+#[test]
+fn an_unaffordable_return_value_is_refused_before_it_is_decoded() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template = test.get_template_address(TEMPLATE_NAME);
+    let mut fee_table = FeeTable::zero_rated();
+    fee_table.per_wasm_point_cost = 1;
+    fee_table.wasm_points_cost_divisor = 1;
+    test.set_fee_table(fee_table);
+    test.enable_fees();
+
+    let mut len =
+        u32::try_from(limits::FREE_COMPUTE_GRACE_POINTS / limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM)
+            .unwrap();
+    while return_value_charge(len) <= limits::FREE_COMPUTE_GRACE_POINTS {
+        len += 1;
+    }
+    assert!(
+        returned_items(len).0 <= limits::ENGINE_LIMITS.max_call_size as u64,
+        "a return value priced above the fee intent's credit must fit within max_call_size for this test to reach the \
+         charge"
+    );
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .with_fee_instructions_builder(|builder| builder.call_function(template, "return_items", args![len]))
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(
+        reason,
+        format!("requiring {} points exceeds the fee intent's", return_value_charge(len)),
     );
 }

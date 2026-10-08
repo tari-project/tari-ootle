@@ -28,10 +28,10 @@ use indexmap::IndexSet;
 use log::*;
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_client::types::{IndexerTransactionFinalizedResult, TransactionEntry, TransactionSource};
-use tari_ootle_common_types::{Epoch, NodeAddressable, ToSubstateAddress, optional::Optional};
+use tari_ootle_common_types::{Epoch, NodeAddressable};
 use tari_ootle_transaction::{Network, Transaction, TransactionId};
 use tari_ootle_transaction_validation::{Validator, create_structural_transaction_validator};
-use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
+use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClientFactory};
 
 use crate::{
     network_client::TariNetworkClient,
@@ -176,12 +176,9 @@ where
         // commit no substate — and therefore no receipt for the indexer to sync — only a finalized
         // decision. Query it first so the full result (including abort decision and execution
         // details) is returned to callers.
-        let transaction_substate_address = transaction_id.to_substate_address();
         let network_result = self
             .network_client
-            .try_single_with_committee(transaction_substate_address, |mut client| async move {
-                client.get_finalized_transaction_result(transaction_id).await.optional()
-            })
+            .get_finalized_transaction_result(transaction_id)
             .await;
 
         match network_result {
@@ -234,7 +231,7 @@ where
                     abort_details: finalized.abort_details,
                 })
             },
-            // The committee has no finalized result: the transaction is genuinely pending, the
+            // The committee has no agreed finalized result: the transaction is genuinely pending, the
             // committee is unreachable, or it was rejected by mempool validation and never sequenced
             // (in which case the committee reports it as pending forever). Prefer a locally recorded
             // rejection over those outcomes.

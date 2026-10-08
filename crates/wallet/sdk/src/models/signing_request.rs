@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{str::FromStr, time::Duration};
+use std::{fmt, str::FromStr, time::Duration};
 
 use tari_ootle_transaction::{TransactionSignature, UnsignedTransaction};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
@@ -61,6 +61,29 @@ pub enum SigningRequestEffectiveStatus {
     Expired,
 }
 
+/// Who created a signing request, as the wallet authenticated it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum SigningRequester {
+    /// The wallet's own interactive session.
+    WalletSession,
+    /// An API key, by the name an Admin gave it when minting it.
+    ApiKey { name: String },
+    /// An app connected over WebRTC, holding a token delegated by the wallet.
+    /// The wallet knows nothing about which app it is.
+    ConnectedApp,
+}
+
+impl fmt::Display for SigningRequester {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WalletSession => write!(f, "a wallet session"),
+            Self::ApiKey { name } => write!(f, "API key \"{name}\""),
+            Self::ConnectedApp => write!(f, "a connected app"),
+        }
+    }
+}
+
 /// Insert shape for a signing request. A request is always born
 /// [`SigningRequestStatus::Pending`] and expires `ttl` from insertion.
 #[derive(Debug, Clone, Copy)]
@@ -71,7 +94,7 @@ pub struct NewSigningRequest<'a> {
     pub signer_public_key: &'a RistrettoPublicKeyBytes,
     pub message_hash: &'a [u8; 64],
     pub memo: &'a str,
-    pub requested_by: Option<&'a str>,
+    pub requester: &'a SigningRequester,
     pub ttl: Duration,
 }
 
@@ -92,9 +115,8 @@ pub struct SigningRequestModel {
     pub message_hash: [u8; 64],
     /// Free text from the requester. Display only; nothing verifies it.
     pub memo: String,
-    /// Admin-assigned name of the API key that created this request, or `None`
-    /// for a wallet session. Display and audit only.
-    pub requested_by: Option<String>,
+    /// Who created the request. Display and audit only.
+    pub requester: SigningRequester,
     pub status: SigningRequestStatus,
     /// Set exactly when `status` is `Signed`.
     pub signature: Option<TransactionSignature>,
@@ -149,7 +171,7 @@ mod tests {
             signer_public_key: RistrettoPublicKeyBytes::default(),
             message_hash: [0u8; 64],
             memo: String::new(),
-            requested_by: None,
+            requester: SigningRequester::WalletSession,
             status,
             signature: None,
             // The approval window closes on the 15th.

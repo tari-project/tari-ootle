@@ -70,6 +70,7 @@ use tari_ootle_wallet_sdk::{
         OutputStatus,
         SigningRequestEffectiveStatus,
         SigningRequestId,
+        SigningRequester,
         StealthUtxoSpendKeyId,
         TransactionRequestId,
         TransactionStatus,
@@ -360,9 +361,8 @@ pub struct SigningRequestInfo {
     pub message_hash: [u8; 64],
     /// Requester-supplied text. Display only; nothing verifies it.
     pub memo: String,
-    /// Admin-assigned name of the API key that created this request, or `None`
-    /// for a wallet session. Display only.
-    pub requested_by: Option<String>,
+    /// Who created the request. Display only.
+    pub requester: SigningRequester,
     pub status: SigningRequestEffectiveStatus,
     /// Present once the request is `Signed`.
     pub signature: Option<TransactionSignature>,

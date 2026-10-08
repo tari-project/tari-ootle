@@ -180,7 +180,7 @@ diesel::table! {
         signer_public_key -> Text,
         message_hash -> Text,
         memo -> Text,
-        requested_by -> Nullable<Text>,
+        requester -> Text,
         status -> Text,
         signature -> Nullable<Text>,
         expires_at -> Timestamp,

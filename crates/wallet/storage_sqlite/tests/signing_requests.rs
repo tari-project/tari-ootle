@@ -17,6 +17,7 @@ use tari_ootle_wallet_sdk::{
         SigningRequestEffectiveStatus,
         SigningRequestId,
         SigningRequestStatus,
+        SigningRequester,
     },
     storage::{CommittableStore, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
@@ -51,7 +52,9 @@ fn insert_request(db: &SqliteWalletStore, ttl: Duration) -> SigningRequestId {
             signer_public_key: &RistrettoPublicKeyBytes::default(),
             message_hash: &[0xab; 64],
             memo: "set burn rate to 7%",
-            requested_by: Some("governance-signer"),
+            requester: &SigningRequester::ApiKey {
+                name: "governance-signer".to_string(),
+            },
             ttl,
         })
         .unwrap();
@@ -69,7 +72,9 @@ fn insert_and_get_round_trips_as_pending() {
     assert_eq!(found.key_id, key_id());
     assert_eq!(found.message_hash, [0xab; 64]);
     assert_eq!(found.memo, "set burn rate to 7%");
-    assert_eq!(found.requested_by.as_deref(), Some("governance-signer"));
+    assert_eq!(found.requester, SigningRequester::ApiKey {
+        name: "governance-signer".to_string()
+    });
     assert_eq!(found.unsigned_transaction.max_epoch(), Epoch(50));
     assert!(found.signature.is_none());
     assert!(found.decided_at.is_none());

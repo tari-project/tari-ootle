@@ -65,6 +65,14 @@ impl<'a> JwtApi<'a> {
         Ok(token_data.claims.permissions)
     }
 
+    /// Validate the bearer JWT and return its permissions and whether it is a
+    /// delegated token.
+    pub fn check_auth_delegation(&self, token: Option<&Bearer>) -> Result<(Permissions, bool), AuthError> {
+        let token = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
+        let claims = self.decode_jwt(token.token())?.claims;
+        Ok((claims.permissions, claims.delegated))
+    }
+
     /// Like [`Self::check_auth`], but refuses a delegated token: only a token
     /// issued to the wallet's own user session passes.
     pub fn check_user_auth(&self, token: Option<&Bearer>) -> Result<Permissions, AuthError> {

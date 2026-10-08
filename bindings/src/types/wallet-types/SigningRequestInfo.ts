@@ -4,6 +4,7 @@ import type { TransactionSignature } from "../TransactionSignature";
 import type { UnsignedTransaction } from "../UnsignedTransaction";
 import type { KeyId } from "./KeyId";
 import type { SigningRequestEffectiveStatus } from "./SigningRequestEffectiveStatus";
+import type { SigningRequester } from "./SigningRequester";
 
 export type SigningRequestInfo = {
   request_id: number;
@@ -26,10 +27,9 @@ export type SigningRequestInfo = {
    */
   memo: string;
   /**
-   * Admin-assigned name of the API key that created this request, or `None`
-   * for a wallet session. Display only.
+   * Who created the request. Display only.
    */
-  requested_by: string | null;
+  requester: SigningRequester;
   status: SigningRequestEffectiveStatus;
   /**
    * Present once the request is `Signed`.

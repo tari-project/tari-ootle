@@ -139,6 +139,7 @@ export * from "./types/wallet-types/SigningRequestCreateResponse";
 export * from "./types/wallet-types/SigningRequestDecisionRequest";
 export * from "./types/wallet-types/SigningRequestDecisionResponse";
 export * from "./types/wallet-types/SigningRequestEffectiveStatus";
+export * from "./types/wallet-types/SigningRequester";
 export * from "./types/wallet-types/SigningRequestGetRequest";
 export * from "./types/wallet-types/SigningRequestGetResponse";
 export * from "./types/wallet-types/SigningRequestInfo";

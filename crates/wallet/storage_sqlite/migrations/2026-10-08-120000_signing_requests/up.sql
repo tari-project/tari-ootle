@@ -10,8 +10,9 @@
 --   * `signer_public_key` is the public key of `key_id`, resolved at creation.
 --   * `signature` is non-NULL exactly when `status` is 'Signed'.
 --   * `memo` is requester-supplied free text, shown to the approver as such.
---   * `requested_by` is the admin-assigned name of the API key that created
---     the request, or NULL for a wallet session. Display and audit only.
+--   * `requester` (JSON `SigningRequester`) is who created the request: the
+--     wallet session, an API key by its admin-assigned name, or an app
+--     connected over WebRTC. Display and audit only.
 --   * Expiry is derived on read: a row still 'Pending' past `expires_at` is
 --     expired.
 CREATE TABLE signing_requests (
@@ -22,7 +23,7 @@ CREATE TABLE signing_requests (
     signer_public_key    TEXT     NOT NULL,
     message_hash         TEXT     NOT NULL,
     memo                 TEXT     NOT NULL,
-    requested_by         TEXT     NULL,
+    requester            TEXT     NOT NULL,
     status               TEXT     NOT NULL,
     signature            TEXT     NULL,
     expires_at           DATETIME NOT NULL,

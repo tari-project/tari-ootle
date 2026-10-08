@@ -32,6 +32,7 @@ use tari_ootle_wallet_sdk::{
         SigningRequestEffectiveStatus,
         SigningRequestId,
         SigningRequestModel,
+        SigningRequester,
     },
     storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
@@ -50,7 +51,7 @@ use tari_ootle_walletd_client::{
     },
 };
 
-use super::context::HandlerContext;
+use super::context::{AuthIdentity, HandlerContext};
 use crate::handlers::helpers::{invalid_params, invalid_request};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::signing_requests";
@@ -103,6 +104,7 @@ pub async fn handle_create(
     }
 
     let message_hash = TransactionSignature::create_message(&req.seal_public_key, &transaction);
+    let requester = requester_of(auth);
 
     let model = sdk.store().with_write_tx(|tx| {
         tx.signing_requests_delete_expired()?;
@@ -118,7 +120,7 @@ pub async fn handle_create(
             signer_public_key: &signer_public_key,
             message_hash: &message_hash,
             memo: &req.memo,
-            requested_by: auth.api_key_name.as_deref(),
+            requester: &requester,
             ttl,
         })?;
         Ok::<_, anyhow::Error>(model)
@@ -128,7 +130,7 @@ pub async fn handle_create(
         target: LOG_TARGET,
         "Signing request {} created by {} for key {} (message {}, expires {})",
         model.id,
-        auth.api_key_name.as_deref().unwrap_or("a wallet session"),
+        model.requester,
         model.key_id,
         fingerprint(&model.message_hash),
         model.expires_at,
@@ -332,6 +334,14 @@ fn get_pending(context: &HandlerContext, request_id: SigningRequestId) -> Result
     }
 }
 
+fn requester_of(auth: AuthIdentity) -> SigningRequester {
+    match (auth.api_key_name, auth.delegated) {
+        (Some(name), _) => SigningRequester::ApiKey { name },
+        (None, true) => SigningRequester::ConnectedApp,
+        (None, false) => SigningRequester::WalletSession,
+    }
+}
+
 /// Keys whose signatures may authorize a transaction. Mask, nonce and view
 /// branches derive secrets that protect outputs; a signature or public key
 /// under them must never leave the wallet.
@@ -357,7 +367,7 @@ fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
         signer_public_key: model.signer_public_key,
         message_hash: model.message_hash,
         memo: model.memo,
-        requested_by: model.requested_by,
+        requester: model.requester,
         signature: model.signature,
         expires_at: model.expires_at.assume_utc().unix_timestamp(),
         decided_at: model.decided_at.map(|t| t.assume_utc().unix_timestamp()),
@@ -517,7 +527,9 @@ mod tests {
                     signer_public_key: &signer_public_key,
                     message_hash: &message_hash,
                     memo: "",
-                    requested_by: Some("governance-signer"),
+                    requester: &SigningRequester::ApiKey {
+                        name: "governance-signer".to_string(),
+                    },
                     ttl: Duration::from_secs(600),
                 })
             })
@@ -623,6 +635,30 @@ mod tests {
             "unexpected error: {err}"
         );
         assert_eq!(status_of(&test, request_id), SigningRequestStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn a_connected_app_is_recorded_as_one() {
+        let test = setup().await;
+        let required = [Permission::SigningRequests(TxRequestAction::Create)];
+        let requester =
+            |bearer: &Bearer| requester_of(test.context.authorize_with_identity(Some(bearer), &required).unwrap());
+
+        let mut claims = test
+            .context
+            .jwt_api()
+            .generate_auth_claims(Permissions::from_str("admin").unwrap())
+            .unwrap();
+        claims.delegated = true;
+        let delegated = Authorization::<Bearer>::bearer(&test.context.jwt_api().grant(&claims).unwrap())
+            .unwrap()
+            .0;
+
+        assert_eq!(requester(&delegated), SigningRequester::ConnectedApp);
+        assert_eq!(requester(&test.session), SigningRequester::WalletSession);
+        assert_eq!(requester(&test.api_key), SigningRequester::ApiKey {
+            name: "governance-signer".to_string()
+        });
     }
 
     #[tokio::test]

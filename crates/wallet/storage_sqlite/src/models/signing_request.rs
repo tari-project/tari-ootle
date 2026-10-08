@@ -19,7 +19,7 @@ pub struct SigningRequest {
     pub signer_public_key: String,
     pub message_hash: String,
     pub memo: String,
-    pub requested_by: Option<String>,
+    pub requester: String,
     pub status: String,
     pub signature: Option<String>,
     pub expires_at: PrimitiveDateTime,
@@ -37,7 +37,7 @@ pub struct NewSigningRequest<'a> {
     pub signer_public_key: &'a str,
     pub message_hash: &'a str,
     pub memo: &'a str,
-    pub requested_by: Option<&'a str>,
+    pub requester: &'a str,
     pub status: &'a str,
     pub expires_at: PrimitiveDateTime,
 }

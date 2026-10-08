@@ -36,12 +36,15 @@ use crate::{
     services::{RefreshTokenStore, WebauthnService},
 };
 
-/// An authenticated caller: what it may do, and (for an API key) what an Admin
-/// named it. The name never affects authorisation.
+/// An authenticated caller: what it may do, (for an API key) what an Admin
+/// named it, and whether it holds a delegated token. Neither the name nor the
+/// delegation affects scope checks here.
 #[derive(Debug, Clone)]
 pub struct AuthIdentity {
     pub permissions: Permissions,
     pub api_key_name: Option<String>,
+    /// The caller presented a token `webrtc.start` minted for a connected app.
+    pub delegated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -194,11 +197,14 @@ impl HandlerContext {
             AuthIdentity {
                 permissions: granted,
                 api_key_name: Some(row.name),
+                delegated: false,
             }
         } else {
+            let (permissions, delegated) = self.jwt_api().check_auth_delegation(Some(bearer))?;
             AuthIdentity {
-                permissions: self.jwt_api().check_auth(Some(bearer))?,
+                permissions,
                 api_key_name: None,
+                delegated,
             }
         };
 

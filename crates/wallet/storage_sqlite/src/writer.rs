@@ -2329,7 +2329,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 signer_public_key: &serialize_hex(request.signer_public_key),
                 message_hash: &serialize_hex(request.message_hash),
                 memo: request.memo,
-                requested_by: request.requested_by,
+                requester: &serialize_json(request.requester)?,
                 status: SigningRequestStatus::Pending.as_key_str(),
                 expires_at: PrimitiveDateTime::new(expires_at.date(), expires_at.time()),
             })
@@ -3027,7 +3027,7 @@ pub(crate) fn signing_request_from_row(
         signer_public_key: deserialize_hex_try_from(&row.signer_public_key)?,
         message_hash: deserialize_hex_try_from(&row.message_hash)?,
         memo: row.memo,
-        requested_by: row.requested_by,
+        requester: deserialize_json(&row.requester)?,
         status,
         signature: row.signature.as_deref().map(deserialize_json).transpose()?,
         expires_at: row.expires_at,

@@ -11,7 +11,6 @@ use helpers::{
     create_rocksdb_with_opts,
     create_substate_update_batch,
     num_preshards,
-    random_substate_id_for_shard,
     substate_id_seed,
 };
 use tari_common_types::types::FixedHash;
@@ -209,11 +208,12 @@ fn commit_with_received_proof<S: StateStore>(
 fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
     let (db, _dir) = create_rocksdb_with_opts(DatabaseOptions::default().with_state_history_length(1));
 
-    let target = build_substate_record(&substate_id_seed(1 << 24), SubstateVersion::ZERO, 1);
+    const SEED: u32 = 1;
+    let target = build_substate_record(&substate_id_seed(SEED << 24), SubstateVersion::ZERO, 1);
     let shard = target.created().in_shard;
     let shard_group = ShardGroup::new(shard, shard);
     let target_id = target.to_versioned_substate_id();
-    let neighbour = build_substate_record(&random_substate_id_for_shard(shard), SubstateVersion::ZERO, 1);
+    let neighbour = build_substate_record(&substate_id_seed((SEED << 24) | 1), SubstateVersion::ZERO, 1);
 
     // v1: the target is created; this node holds a proof of the shard at v1, as a synced node does at a proof point.
     let r1_commit_proof = commit_with_received_proof(&db, shard_group, shard, &[&target, &neighbour]);
@@ -295,11 +295,12 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
 fn a_substate_destroyed_with_a_committed_block_proof_is_recorded() {
     let (db, _dir) = create_rocksdb_with_opts(DatabaseOptions::default());
 
-    let target = build_substate_record(&substate_id_seed(2 << 24), SubstateVersion::ZERO, 1);
+    const SEED: u32 = 2;
+    let target = build_substate_record(&substate_id_seed(SEED << 24), SubstateVersion::ZERO, 1);
     let shard = target.created().in_shard;
     let shard_group = ShardGroup::new(shard, shard);
     let target_id = target.to_versioned_substate_id();
-    let neighbour = build_substate_record(&random_substate_id_for_shard(shard), SubstateVersion::ZERO, 1);
+    let neighbour = build_substate_record(&substate_id_seed((SEED << 24) | 1), SubstateVersion::ZERO, 1);
 
     let block_id = BlockId::from([7u8; 32]);
     let mut tx = db.create_write_tx().unwrap();
@@ -353,4 +354,75 @@ fn a_substate_destroyed_with_a_committed_block_proof_is_recorded() {
             &up.up_value_hash,
         )
         .unwrap();
+}
+
+#[test]
+fn substates_destroyed_together_share_one_commit_proof() {
+    let (db, _dir) = create_rocksdb_with_opts(DatabaseOptions::default());
+
+    const SEED: u32 = 3;
+    let targets = (0..3)
+        .map(|n| build_substate_record(&substate_id_seed((SEED << 24) | n), SubstateVersion::ZERO, 1))
+        .collect::<Vec<_>>();
+    let shard = targets[0].created().in_shard;
+    let shard_group = ShardGroup::new(shard, shard);
+    let neighbour = build_substate_record(&substate_id_seed((SEED << 24) | 100), SubstateVersion::ZERO, 1);
+
+    assert!(
+        targets
+            .iter()
+            .chain([&neighbour])
+            .all(|t| t.created().in_shard == shard)
+    );
+
+    let block_id = BlockId::from([9u8; 32]);
+    let mut tx = db.create_write_tx().unwrap();
+    let mut v1 = targets.iter().collect::<Vec<_>>();
+    v1.push(&neighbour);
+    commit_version(
+        &mut tx,
+        shard,
+        1,
+        v1.iter().map(|record| up(record)).collect(),
+        &v1,
+        no_committed_blocks,
+    );
+    let tree = group_tree(&*tx, shard_group);
+    let commit_proof_bytes = commit_proof(shard_group, 2, tree.root()).to_bytes();
+    tx.state_version_proofs_insert(&StateVersionProof {
+        shard,
+        state_version: 1,
+        source: StateVersionProofSource::Committed { block_id },
+        shard_root_proof: tree.get_proof(shard).unwrap().1,
+    })
+    .unwrap();
+
+    let destroyed_records = targets.iter().map(|t| destroyed(t, 2)).collect::<Vec<_>>();
+    let mut builds = 0;
+    commit_version(
+        &mut tx,
+        shard,
+        2,
+        targets
+            .iter()
+            .map(|t| SubstateTreeChange::Down {
+                id: t.to_versioned_substate_id(),
+            })
+            .collect(),
+        &destroyed_records.iter().collect::<Vec<_>>(),
+        |_, id| {
+            builds += 1;
+            (*id == block_id).then(|| commit_proof_bytes.clone())
+        },
+    );
+
+    assert_eq!(builds, 1);
+    for target in &targets {
+        let record = tx
+            .substate_down_proofs_get(shard, &target.to_versioned_substate_id())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.state_version, 1);
+        assert_eq!(record.commit_proof, commit_proof_bytes);
+    }
 }

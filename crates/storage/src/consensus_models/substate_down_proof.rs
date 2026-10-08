@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::Deref;
+use std::{collections::HashMap, ops::Deref};
 
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use crate::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
-    consensus_models::{DownedSubstate, StateVersionProofSource, SubstateRecord},
+    consensus_models::{DownedSubstate, StateVersionProof, StateVersionProofSource, SubstateRecord},
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::substate_down_proof";
@@ -84,15 +84,16 @@ impl SubstateDownProofRecord {
 pub fn index_substate_down_proofs<TTx, F>(
     tx: &mut TTx,
     downed: &[DownedSubstate],
-    mut commit_proof_for_block: F,
+    commit_proof_for_block: F,
 ) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
     F: FnMut(&TTx::Target, &BlockId) -> Option<Vec<u8>>,
 {
+    let mut sources = UpVersionSources::new(commit_proof_for_block);
     for downed in downed {
-        match build_down_proof_record(&**tx, downed, &mut commit_proof_for_block)? {
+        match sources.build_record(&**tx, downed)? {
             Some(record) => tx.substate_down_proofs_insert(downed.shard, &downed.id, &record)?,
             None => {
                 debug!(
@@ -108,54 +109,100 @@ where
     Ok(())
 }
 
-/// The record for the greatest version below the destroying one that this node can prove the substate up at.
-fn build_down_proof_record<TTx, F>(
-    tx: &TTx,
-    downed: &DownedSubstate,
-    commit_proof_for_block: &mut F,
-) -> Result<Option<SubstateDownProofRecord>, StorageError>
-where
-    TTx: StateStoreReadTransaction,
-    F: FnMut(&TTx, &BlockId) -> Option<Vec<u8>>,
-{
-    let Some(highest) = downed.state_version.checked_sub(1) else {
-        return Ok(None);
-    };
-    let Some(substate) = SubstateRecord::get(tx, &downed.id.to_substate_address()).optional()? else {
-        return Ok(None);
-    };
-    let lowest = substate
-        .created()
-        .at_state_version
-        .max(highest.saturating_sub(MAX_UP_VERSION_LOOKBACK));
-    if lowest > highest {
-        return Ok(None);
+/// The state version proofs and commit proofs an indexing pass draws on, each read or built at most once.
+///
+/// A block typically takes down many substates of one shard at one state version, and all of them are proved up at
+/// the same newest earlier version, so one lookup of that version and one commit proof serve every one of them.
+struct UpVersionSources<F> {
+    commit_proof_for_block: F,
+    /// `None` records a version this node holds no proof of.
+    version_proofs: HashMap<(Shard, Version), Option<StateVersionProof>>,
+    /// `None` records a block whose commit proof can no longer be built.
+    commit_proofs: HashMap<BlockId, Option<Vec<u8>>>,
+}
+
+impl<F> UpVersionSources<F> {
+    fn new(commit_proof_for_block: F) -> Self {
+        Self {
+            commit_proof_for_block,
+            version_proofs: HashMap::new(),
+            commit_proofs: HashMap::new(),
+        }
     }
 
-    let candidates = tx.state_version_proofs_get_range(downed.shard, lowest, highest)?;
-    for candidate in candidates.into_iter().rev() {
-        let commit_proof = match candidate.source {
-            StateVersionProofSource::Committed { block_id } => match commit_proof_for_block(tx, &block_id) {
-                Some(commit_proof) => commit_proof,
-                None => continue,
-            },
-            StateVersionProofSource::Received { commit_proof } => commit_proof,
+    /// The record for the greatest version below the destroying one that this node can prove the substate up at.
+    ///
+    /// Versions are tried newest first, one at a time, since the newest usually succeeds.
+    fn build_record<TTx>(
+        &mut self,
+        tx: &TTx,
+        downed: &DownedSubstate,
+    ) -> Result<Option<SubstateDownProofRecord>, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        F: FnMut(&TTx, &BlockId) -> Option<Vec<u8>>,
+    {
+        let Some(highest) = downed.state_version.checked_sub(1) else {
+            return Ok(None);
         };
-        let Some((leaf_proof, value_hash, shard_root)) =
-            up_leaf_proof(tx, downed.shard, candidate.state_version, &downed.id)
-        else {
-            continue;
+        let Some(substate) = SubstateRecord::get(tx, &downed.id.to_substate_address()).optional()? else {
+            return Ok(None);
         };
-        return Ok(Some(SubstateDownProofRecord {
-            state_version: candidate.state_version,
-            value_hash,
-            leaf_proof,
-            shard_root,
-            shard_root_proof: candidate.shard_root_proof,
-            commit_proof,
-        }));
+        let lowest = substate
+            .created()
+            .at_state_version
+            .max(highest.saturating_sub(MAX_UP_VERSION_LOOKBACK));
+
+        for state_version in (lowest..=highest).rev() {
+            let Some(candidate) = self.version_proof(tx, downed.shard, state_version)? else {
+                continue;
+            };
+            let commit_proof = match &candidate.source {
+                StateVersionProofSource::Committed { block_id } => match self.commit_proof(tx, block_id) {
+                    Some(commit_proof) => commit_proof,
+                    None => continue,
+                },
+                StateVersionProofSource::Received { commit_proof } => commit_proof.clone(),
+            };
+            let Some((leaf_proof, value_hash, shard_root)) = up_leaf_proof(tx, downed.shard, state_version, &downed.id)
+            else {
+                continue;
+            };
+            return Ok(Some(SubstateDownProofRecord {
+                state_version,
+                value_hash,
+                leaf_proof,
+                shard_root,
+                shard_root_proof: candidate.shard_root_proof,
+                commit_proof,
+            }));
+        }
+        Ok(None)
     }
-    Ok(None)
+
+    fn version_proof<TTx: StateStoreReadTransaction>(
+        &mut self,
+        tx: &TTx,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<Option<StateVersionProof>, StorageError> {
+        if let Some(cached) = self.version_proofs.get(&(shard, state_version)) {
+            return Ok(cached.clone());
+        }
+        let proof = tx
+            .state_version_proofs_get_range(shard, state_version, state_version)?
+            .pop();
+        self.version_proofs.insert((shard, state_version), proof.clone());
+        Ok(proof)
+    }
+
+    fn commit_proof<TTx>(&mut self, tx: &TTx, block_id: &BlockId) -> Option<Vec<u8>>
+    where F: FnMut(&TTx, &BlockId) -> Option<Vec<u8>> {
+        self.commit_proofs
+            .entry(*block_id)
+            .or_insert_with(|| (self.commit_proof_for_block)(tx, block_id))
+            .clone()
+    }
 }
 
 /// The inclusion proof of `id` in `shard`'s tree at `version`, its value hash and the shard root, or `None` if the

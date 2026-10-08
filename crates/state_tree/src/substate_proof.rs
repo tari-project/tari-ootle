@@ -125,6 +125,26 @@ impl SubstateValueProof {
     }
 }
 
+/// Proves a substate version was committed and is now absent: a two-root proof of destruction.
+///
+/// An exclusion proof alone shows only that `(id, version)` is absent at one root, which a version that was never
+/// created satisfies as well as one that was destroyed. Pairing it with an inclusion proof at an earlier trusted root
+/// shows the version existed first. The verifier obtains both roots from quorum-signed commit proofs and checks that
+/// the inclusion root is strictly earlier than the exclusion root.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubstateDownProof {
+    /// Level-1 inclusion of `(id, version)` at shard state version `u`, plus level-2 for the shard root at `u`, under
+    /// the root `up_commit_proof` commits.
+    pub up: SubstateValueProof,
+    /// The leaf value hash at `u`. The value itself may have been pruned since it went down.
+    pub up_value_hash: TreeHash,
+    /// CBOR-encoded `CommittedBlockProof` whose header commits the shard-group root `up` is proved against.
+    pub up_commit_proof: Vec<u8>,
+    /// Level-1 exclusion of `(id, version)` at the latest shard state version, plus level-2, under the root of the
+    /// commit proof the proof is served with.
+    pub down: SubstateValueProof,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SubstateValueProofError {
     #[error("shard-root-in-group-root proof is invalid: {0}")]

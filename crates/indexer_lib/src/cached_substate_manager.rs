@@ -863,6 +863,7 @@ where
             }
         })?;
         let epoch = commit_proof.epoch();
+        let height = commit_proof.height();
         let shard_group = commit_proof
             .shard_group()
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
@@ -882,6 +883,7 @@ where
             return Ok(TrustedStateRoot {
                 epoch,
                 shard_group,
+                height,
                 root,
             });
         }
@@ -914,6 +916,7 @@ where
         Ok(TrustedStateRoot {
             epoch,
             shard_group,
+            height,
             root,
         })
     }

@@ -292,6 +292,15 @@ pub fn verify_substate_down_proof_against_roots(
     up_root.check_contains(&versioned_id, shard)?;
     down_root.check_contains(&versioned_id, shard)?;
 
+    // Heights number the blocks of one shard group's chain, so two roots of one epoch are comparable only within a
+    // group. A global substate lies in every group, so its roots could otherwise come from two unrelated chains.
+    if up_root.epoch == down_root.epoch && up_root.shard_group != down_root.shard_group {
+        return Err(SubstateProofVerifyError::DownProofShardGroupMismatch {
+            epoch: up_root.epoch,
+            up_shard_group: up_root.shard_group,
+            down_shard_group: down_root.shard_group,
+        });
+    }
     if up_root.position() >= down_root.position() {
         return Err(SubstateProofVerifyError::DownProofNotOrdered {
             up_epoch: up_root.epoch,
@@ -350,6 +359,15 @@ pub enum SubstateProofVerifyError {
         up_height: NodeHeight,
         down_epoch: Epoch,
         down_height: NodeHeight,
+    },
+    #[error(
+        "down proof's roots are both of epoch {epoch} but of different shard groups ({up_shard_group} and \
+         {down_shard_group}), whose heights are not comparable"
+    )]
+    DownProofShardGroupMismatch {
+        epoch: Epoch,
+        up_shard_group: ShardGroup,
+        down_shard_group: ShardGroup,
     },
     #[error("down proof's inclusion root is not the root of the commit proof it carries")]
     DownProofAnchorMismatch,
@@ -768,6 +786,85 @@ mod tests {
             let target = scenario.target.clone();
             let proof = scenario.honest(&target);
             scenario.verify(&proof, &target, scenario.r1(2)).unwrap();
+        }
+
+        /// A global substate's shard is in every group. Two roots of one epoch from different groups sit on unrelated
+        /// chains, so their heights do not order them; roots of different epochs still do.
+        #[test]
+        fn roots_of_different_groups_in_one_epoch_are_rejected_for_a_global_substate() {
+            use tari_engine_types::published_template::PublishedTemplateAddress;
+
+            let target = VersionedSubstateId::new(
+                SubstateId::Template(PublishedTemplateAddress::from_hash(Hash32::from_array([4; 32]))),
+                SubstateVersion::ZERO,
+            );
+            assert_eq!(target.to_shard(NUM_PRESHARDS), Shard::global());
+
+            let mut global = MemoryTreeStore::<StateTreePayload>::new();
+            let r1_global_root = SpreadPrefixStateTree::new(&mut global)
+                .put_substate_changes(None, 1, vec![up(&target, 10)])
+                .unwrap();
+            let r2_global_root = SpreadPrefixStateTree::new(&mut global)
+                .put_substate_changes(Some(1), 2, vec![down(&target)])
+                .unwrap();
+            let (_, value, up_leaf) = SpreadPrefixStateTree::new(&mut global).get_proof(1, &target).unwrap();
+            let (_, _, down_leaf) = SpreadPrefixStateTree::new(&mut global).get_proof(2, &target).unwrap();
+
+            let group_a = ShardGroup::new(Shard::from_u32(1), Shard::from_u32(2));
+            let group_b = ShardGroup::new(Shard::from_u32(3), Shard::from_u32(4));
+            let tree = |shard_root, version| {
+                ShardGroupRootTree::build(ProtocolVersion::at(NETWORK, EPOCH), [(
+                    Shard::global(),
+                    shard_root,
+                    version,
+                )])
+                .unwrap()
+            };
+            let r1_tree = tree(r1_global_root, 1);
+            let r2_tree = tree(r2_global_root, 2);
+
+            let verify = |down_group: ShardGroup, down_epoch: Epoch| {
+                let up_commit_proof = commit_proof(group_a, EPOCH, 2, r1_tree.root());
+                let proof = SubstateDownProof {
+                    up: SubstateValueProof::new(
+                        r1_global_root,
+                        1,
+                        r1_tree.get_proof(Shard::global()).unwrap().1,
+                        up_leaf.clone(),
+                    ),
+                    up_value_hash: value.unwrap().0,
+                    up_commit_proof: up_commit_proof.to_bytes(),
+                    down: SubstateValueProof::new(
+                        r2_global_root,
+                        2,
+                        r2_tree.get_proof(Shard::global()).unwrap().1,
+                        down_leaf.clone(),
+                    ),
+                };
+                let down_root =
+                    TrustedStateRoot::from_commit_proof(&commit_proof(down_group, down_epoch, 4, r2_tree.root()))
+                        .unwrap();
+                verify_substate_down_proof_against_roots(
+                    &tari_bor::serde_codec::to_vec(&proof).unwrap(),
+                    target.substate_id(),
+                    target.version(),
+                    NETWORK,
+                    NUM_PRESHARDS,
+                    &TrustedStateRoot::from_commit_proof(&up_commit_proof).unwrap(),
+                    &down_root,
+                )
+            };
+
+            let result = verify(group_b, EPOCH);
+            assert!(
+                matches!(
+                    result,
+                    Err(SubstateProofVerifyError::DownProofShardGroupMismatch { .. })
+                ),
+                "{result:?}"
+            );
+            verify(group_a, EPOCH).unwrap();
+            verify(group_b, Epoch(EPOCH.as_u64() + 1)).unwrap();
         }
 
         #[test]

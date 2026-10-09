@@ -98,7 +98,7 @@ use tari_ootle_storage::{
     time,
 };
 use tari_ootle_transaction::TransactionId;
-use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
+use tari_state_tree::{Children, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
 
 use crate::{
     block_diff_table::BlockDiffEntry,
@@ -2050,7 +2050,7 @@ fn recurse_subtree_depth_first_post_order<'a>(
     cf: &'a CfContext<Transaction<TransactionDB>, StateTreeCf>,
     shard: Shard,
     parent_key: NodeKey,
-    children: IndexMap<Nibble, Child>,
+    children: Children,
 ) -> impl Iterator<Item = (Shard, NodeKey)> + 'a {
     const OPERATION: &str = "recurse_subtree";
     let parent_after_child = Some((shard, parent_key.clone()));
@@ -2058,7 +2058,13 @@ fn recurse_subtree_depth_first_post_order<'a>(
     children
         .into_iter()
         .flat_map(move |(nibble, child)| -> Box<dyn Iterator<Item = (Shard, NodeKey)>> {
-            let child_key = parent_key.gen_child_node_key(child.version, nibble);
+            let child_key = match parent_key.gen_child_node_key(child.version, nibble) {
+                Ok(child_key) => child_key,
+                Err(e) => {
+                    error!(target: LOG_TARGET, "Cannot derive the child of stale node ({shard}, {parent_key}) at {nibble:?}: {e}");
+                    return Box::new(iter::empty());
+                },
+            };
             match child.node_type{
                 NodeType::Leaf => {
                     Box::new(iter::once((shard, child_key)))

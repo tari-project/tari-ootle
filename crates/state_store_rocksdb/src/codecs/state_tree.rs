@@ -88,14 +88,15 @@ impl DbDecoder<NodeKey> for NodeKeyCodec {
                 source: anyhow!("Invalid nibble path bytes. Could not read {} bytes", num_path_bytes),
             });
         }
-        let nibble_path_bytes = bytes[path_start..path_end].to_vec();
+        let nibble_path_bytes = &bytes[path_start..path_end];
         let nibble_path = if is_even {
             NibblePath::new_even(nibble_path_bytes)
         } else {
-            NibblePath::new_odd(nibble_path_bytes).map_err(|e| RocksDbStorageError::DecodeError {
-                source: anyhow!("Invalid odd nibble path: {e}"),
-            })?
-        };
+            NibblePath::new_odd(nibble_path_bytes)
+        }
+        .map_err(|e| RocksDbStorageError::DecodeError {
+            source: anyhow!("Invalid nibble path: {e}"),
+        })?;
         Ok((NodeKey::new(version, nibble_path), path_end))
     }
 }
@@ -220,7 +221,7 @@ mod tests {
     #[test]
     fn encode_decode() {
         let version = 1;
-        let nibble_path = NibblePath::new_odd(vec![0x01, 0x02, 0x03, 0x04 << 4]).unwrap();
+        let nibble_path = NibblePath::new_odd(&[0x01, 0x02, 0x03, 0x04 << 4]).unwrap();
         let key = NodeKey::new(version, nibble_path);
         let codec = NodeKeyCodec;
         let encoded1 = codec.encode(&key).unwrap();
@@ -228,7 +229,7 @@ mod tests {
         assert_eq!(key, decoded);
 
         let version = 2;
-        let nibble_path = NibblePath::new_even(vec![0x01, 0x02, 0x03, 0x04]);
+        let nibble_path = NibblePath::new_even(&[0x01, 0x02, 0x03, 0x04]).unwrap();
         let key = NodeKey::new(version, nibble_path);
 
         let encoded = codec.encode(&key).unwrap();

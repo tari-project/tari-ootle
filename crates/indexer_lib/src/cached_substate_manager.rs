@@ -102,6 +102,10 @@ pub trait TrustedRootStore: std::fmt::Debug + Send + Sync + 'static {
     async fn record(&self, tip: VerifiedBlockTip) -> Result<(), IndexerError>;
 }
 
+/// How many validated commit-proof tips a manager remembers. Reads cite the latest few blocks of each shard group, so
+/// a small memo covers them; when it fills it starts over.
+const VALIDATED_TIP_MEMO_SIZE: usize = 1024;
+
 /// The most substates a validator will answer for in one batch request.
 const SUBSTATE_BATCH_SIZE: usize = 50;
 
@@ -194,6 +198,10 @@ pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     /// When set, lets a read skip re-validating a served commit proof whose root is already trusted,
     /// and is warmed with newly-validated roots. See [`TrustedRootStore`].
     trusted_root_store: Option<Arc<dyn TrustedRootStore>>,
+    /// Tips of commit proofs this manager validated, by the block they commit. A block id is the hash of the header
+    /// the committee signed, so a later commit proof of the same block yields the same tip. Bounded by
+    /// [`VALIDATED_TIP_MEMO_SIZE`].
+    validated_tips: Arc<std::sync::Mutex<HashMap<FixedHash, VerifiedBlockTip>>>,
     /// The network's preshard count, from its consensus constants: it maps a substate to its shard, both to route a
     /// read and to check that a proof is anchored to a root whose shard group holds the substate.
     num_preshards: NumPreshards,
@@ -224,6 +232,7 @@ where
             negative_cache_ttl: DEFAULT_NEGATIVE_CACHE_TTL,
             verify_substate_proofs: false,
             trusted_root_store: None,
+            validated_tips: Arc::default(),
             num_preshards,
             #[cfg(feature = "metrics")]
             metrics: None,
@@ -1073,6 +1082,10 @@ where
     /// included, is one the committee signed. Records the tip in the trusted-root store.
     async fn validated_tip_from_commit_proof(&self, commit_proof: &[u8]) -> Result<VerifiedBlockTip, IndexerError> {
         let commit_proof = decode_commit_proof(commit_proof)?;
+        let block_id = commit_proof.block_id();
+        if let Some(tip) = self.remembered_tip(&block_id) {
+            return Ok(tip);
+        }
         let epoch = commit_proof.epoch();
         let shard_group = commit_proof
             .shard_group()
@@ -1092,15 +1105,40 @@ where
             "trusted-root MISS at epoch {epoch} {shard_group}: validated commit proof"
         );
 
+        self.remember_tip(block_id, verified_tip);
+
         // Warm the store so subsequent reads at this tip hit the fast path. A write failure must not
         // fail an otherwise-verified read.
-        if let Some(store) = &self.trusted_root_store &&
-            let Err(e) = store.record(verified_tip).await
-        {
-            warn!(target: LOG_TARGET, "Failed to record verified root at epoch {epoch} {shard_group}: {e}");
+        if let Some(store) = &self.trusted_root_store {
+            let trusted = store
+                .is_trusted(epoch, shard_group, verified_tip.state_merkle_root)
+                .await
+                .unwrap_or(false);
+            if !trusted && let Err(e) = store.record(verified_tip).await {
+                warn!(target: LOG_TARGET, "Failed to record verified root at epoch {epoch} {shard_group}: {e}");
+            }
         }
 
         Ok(verified_tip)
+    }
+
+    fn remembered_tip(&self, block_id: &FixedHash) -> Option<VerifiedBlockTip> {
+        self.validated_tips
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(block_id)
+            .copied()
+    }
+
+    fn remember_tip(&self, block_id: FixedHash, tip: VerifiedBlockTip) {
+        let mut tips = self
+            .validated_tips
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if tips.len() >= VALIDATED_TIP_MEMO_SIZE {
+            tips.clear();
+        }
+        tips.insert(block_id, tip);
     }
 }
 
@@ -1865,14 +1903,20 @@ mod tests {
         assert!(!proven);
     }
 
-    /// One member's valid down proof, with both commit proofs signed by a quorum of the committee, settles a read for
-    /// the version it names, verified, while the rest of the committee never answers. It does not settle a head read.
-    #[tokio::test]
-    async fn one_members_valid_down_proof_settles_a_read_for_its_version() {
+    /// A committee of `keys` (`vn0`, `vn1`, ...) of which `vn0` serves an honest down proof of a global substate,
+    /// both of its commit proofs signed by all but the last member, and `silent` never answer. Verification is on.
+    fn signed_down_proof_setup(
+        keys: &[(
+            tari_crypto::ristretto::RistrettoSecretKey,
+            tari_crypto::ristretto::RistrettoPublicKey,
+        )],
+        silent: HashSet<Addr>,
+    ) -> (
+        SubstateId,
+        CachedSubstateManager<FakeEpochManager, FakeClient, FakeCache>,
+    ) {
         use tari_crypto::tari_utilities::ByteArray;
-        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 
-        let keys = (1..=4).map(create_key_pair_from_seed).collect::<Vec<_>>();
         let committee = Committee::new(
             keys.iter()
                 .enumerate()
@@ -1883,8 +1927,10 @@ mod tests {
                 })
                 .collect(),
         );
-        // Three of four is the quorum.
-        let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
+        let signers = keys[..keys.len() - 1]
+            .iter()
+            .map(|(secret, _)| secret.clone())
+            .collect::<Vec<_>>();
 
         let (id, proof, _, r2_root) = global_down_proof_signed_by(group(1, 2), &signers);
         let (mut manager, _) = manager(FakeNetwork {
@@ -1899,11 +1945,21 @@ mod tests {
                 }),
             )]
             .into(),
-            silent_members: ["vn1", "vn2", "vn3"].map(String::from).into(),
+            silent_members: silent,
             ..Default::default()
         });
         manager.committee_provider.0 = Arc::new(committee);
-        let manager = manager.with_substate_proof_verification(true);
+        (id, manager.with_substate_proof_verification(true))
+    }
+
+    /// One member's valid down proof, with both commit proofs signed by a quorum of the committee, settles a read for
+    /// the version it names, verified, while the rest of the committee never answers. It does not settle a head read.
+    #[tokio::test]
+    async fn one_members_valid_down_proof_settles_a_read_for_its_version() {
+        let keys = (1..=4)
+            .map(tari_ootle_common_types::crypto::create_key_pair_from_seed)
+            .collect::<Vec<_>>();
+        let (id, manager) = signed_down_proof_setup(&keys, ["vn1", "vn2", "vn3"].map(String::from).into());
         let answering = "vn0".to_string();
 
         let (result, proof) = manager
@@ -1931,6 +1987,29 @@ mod tests {
         .unwrap();
         assert!(matches!(lookup.result, SubstateResult::Down { .. }));
         assert!(lookup.verified);
+    }
+
+    /// A commit proof validated once is not validated again: repeated versioned reads of a destroyed version ask the
+    /// committee once per commit proof.
+    #[tokio::test]
+    async fn a_validated_commit_proof_is_not_validated_again() {
+        let keys = (1..=4)
+            .map(tari_ootle_common_types::crypto::create_key_pair_from_seed)
+            .collect::<Vec<_>>();
+        let (id, manager) = signed_down_proof_setup(&keys, HashSet::new());
+        let lookups = manager.committee_provider.2.clone();
+        for _ in 0..3 {
+            let (_, proof) = manager
+                .get_substate_from_vn(
+                    &"vn0".to_string(),
+                    SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+                )
+                .await
+                .unwrap();
+            assert!(proof.is_some());
+        }
+        // One lookup for each of the two commit proofs a down proof cites.
+        assert_eq!(lookups.load(Ordering::Relaxed), 2);
     }
 
     /// A down proof anchored before V2 cannot prove the Down, so it is left unproven before any committee is asked to

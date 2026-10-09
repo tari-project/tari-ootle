@@ -1083,7 +1083,6 @@ where
             "trusted-root MISS at epoch {epoch} {shard_group}: validated commit proof"
         );
 
-        let root = verified_tip.state_merkle_root;
         // Warm the store so subsequent reads at this tip hit the fast path. A write failure must not
         // fail an otherwise-verified read.
         if let Some(store) = &self.trusted_root_store &&
@@ -1092,12 +1091,7 @@ where
             warn!(target: LOG_TARGET, "Failed to record verified root at epoch {epoch} {shard_group}: {e}");
         }
 
-        Ok(TrustedStateRoot {
-            epoch: verified_tip.epoch,
-            shard_group: verified_tip.shard_group,
-            height: verified_tip.height,
-            root,
-        })
+        Ok(TrustedStateRoot::from(verified_tip))
     }
 }
 
@@ -1510,6 +1504,18 @@ mod tests {
         }
     }
 
+    /// The tip `commit_proof`'s header describes, taken at its word: these commit proofs are not signed.
+    fn unvalidated_tip(commit_proof: &CommittedBlockProof) -> VerifiedBlockTip {
+        VerifiedBlockTip {
+            epoch: commit_proof.epoch(),
+            shard_group: commit_proof.shard_group().unwrap(),
+            height: commit_proof.height(),
+            block_id: commit_proof.block_id(),
+            epoch_hash: commit_proof.epoch_hash(),
+            state_merkle_root: commit_proof.state_merkle_root(),
+        }
+    }
+
     /// An unsigned commit proof of `root` that claims `height`.
     fn unsigned_commit_proof(shard_group: ShardGroup, height: u64, root: tari_state_tree::TreeHash) -> Vec<u8> {
         let header = tari_sidechain::SidechainBlockHeader {
@@ -1602,9 +1608,8 @@ mod tests {
         .unwrap();
 
         // Taken at their word, the forged anchors make a valid proof.
-        let anchor = |bytes: &[u8]| {
-            TrustedStateRoot::from_commit_proof(&CommittedBlockProof::from_bytes(bytes).unwrap()).unwrap()
-        };
+        let anchor =
+            |bytes: &[u8]| TrustedStateRoot::from(unvalidated_tip(&CommittedBlockProof::from_bytes(bytes).unwrap()));
         let decoded = decode_substate_down_proof(&down_proof).unwrap();
         verify_substate_down_proof_against_roots(
             &down_proof,
@@ -1682,8 +1687,9 @@ mod tests {
         let (_, value, up_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(1, &target).unwrap();
         let (_, _, down_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(2, &target).unwrap();
         let up_commit_proof = unsigned_commit_proof(up_group, 2, r1.root());
-        let up_root =
-            TrustedStateRoot::from_commit_proof(&CommittedBlockProof::from_bytes(&up_commit_proof).unwrap()).unwrap();
+        let up_root = TrustedStateRoot::from(unvalidated_tip(
+            &CommittedBlockProof::from_bytes(&up_commit_proof).unwrap(),
+        ));
         let proof = tari_bor::serde_codec::to_vec(&SubstateDownProof {
             up: SubstateValueProof::new(r1_shard_root, 1, r1.get_proof(Shard::global()).unwrap().1, up_leaf),
             up_value_hash: value.unwrap().0,

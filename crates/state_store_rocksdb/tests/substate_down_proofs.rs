@@ -39,6 +39,7 @@ use tari_ootle_storage::{
         StateVersionProofSource,
         SubstateDestroyed,
         SubstateRecord,
+        VerifiedBlockTip,
         index_substate_down_proofs,
     },
     verify_substate_down_proof_against_roots,
@@ -55,6 +56,18 @@ use tari_state_tree::{
 };
 
 const EPOCH: Epoch = Epoch(1);
+
+/// The tip `commit_proof`'s header describes, taken at its word: these commit proofs are not signed.
+fn unvalidated_tip(commit_proof: &CommittedBlockProof) -> VerifiedBlockTip {
+    VerifiedBlockTip {
+        epoch: commit_proof.epoch(),
+        shard_group: commit_proof.shard_group().unwrap(),
+        height: commit_proof.height(),
+        block_id: commit_proof.block_id(),
+        epoch_hash: commit_proof.epoch_hash(),
+        state_merkle_root: commit_proof.state_merkle_root(),
+    }
+}
 
 fn protocol_version() -> ProtocolVersion {
     ProtocolVersion::at(NETWORK, EPOCH)
@@ -171,7 +184,7 @@ fn verify_down_at_latest<S: StateStore>(
         NETWORK,
         num_preshards(),
         r1,
-        &TrustedStateRoot::from_commit_proof(&r2_commit_proof).unwrap(),
+        &TrustedStateRoot::from(unvalidated_tip(&r2_commit_proof)),
     )
 }
 
@@ -217,7 +230,7 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
 
     // v1: the target is created; this node holds a proof of the shard at v1, as a synced node does at a proof point.
     let r1_commit_proof = commit_with_received_proof(&db, shard_group, shard, &[&target, &neighbour]);
-    let r1 = TrustedStateRoot::from_commit_proof(&r1_commit_proof).unwrap();
+    let r1 = TrustedStateRoot::from(unvalidated_tip(&r1_commit_proof));
 
     // v2: the target is destroyed and its next version created.
     let next = build_substate_record(target.substate_id(), SubstateVersion::new(1), 2);
@@ -336,7 +349,7 @@ fn a_substate_destroyed_with_a_committed_block_proof_is_recorded() {
     assert_eq!(record.state_version, 1);
     assert_eq!(record.commit_proof, r1_commit_proof.to_bytes());
     assert_eq!(record.value_hash, TreeHash::new(target.state_hash().into_array()));
-    let r1 = TrustedStateRoot::from_commit_proof(&r1_commit_proof).unwrap();
+    let r1 = TrustedStateRoot::from(unvalidated_tip(&r1_commit_proof));
     let up = record.into_down_proof(
         SubstateProofGenerator::new(&*tx, shard_group, num_preshards(), protocol_version())
             .unwrap()

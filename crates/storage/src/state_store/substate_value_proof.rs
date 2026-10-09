@@ -28,7 +28,7 @@ use tari_state_tree::{
 use crate::{
     StateStoreReadTransaction,
     StorageError,
-    consensus_models::CommittedBlockProof,
+    consensus_models::{CommittedBlockProof, VerifiedBlockTip},
     state_store::ShardScopedTreeStoreReader,
 };
 
@@ -168,20 +168,21 @@ pub struct TrustedStateRoot {
     pub root: FixedHash,
 }
 
-impl TrustedStateRoot {
-    /// The anchor `commit_proof`'s header describes. Trusting it is the caller's part: the commit proof must have been
-    /// validated against its shard group committee, now or when the root was recorded.
-    pub fn from_commit_proof(commit_proof: &CommittedBlockProof) -> Result<Self, SubstateProofVerifyError> {
-        Ok(Self {
-            epoch: commit_proof.epoch(),
-            shard_group: commit_proof
-                .shard_group()
-                .map_err(|e| SubstateProofVerifyError::Decode(e.to_string()))?,
-            height: commit_proof.height(),
-            root: commit_proof.state_merkle_root(),
-        })
+/// A root is trusted only as the state merkle root of a commit proof validated against its shard group committee, which
+/// signs every field, height included. Two roots are ordered by their heights, so an anchor must never be built from a
+/// header that has not been validated.
+impl From<VerifiedBlockTip> for TrustedStateRoot {
+    fn from(tip: VerifiedBlockTip) -> Self {
+        Self {
+            epoch: tip.epoch,
+            shard_group: tip.shard_group,
+            height: tip.height,
+            root: tip.state_merkle_root,
+        }
     }
+}
 
+impl TrustedStateRoot {
     fn position(&self) -> (Epoch, NodeHeight) {
         (self.epoch, self.height)
     }
@@ -522,6 +523,24 @@ mod tests {
         );
     }
 
+    /// An anchor is built only from a validated tip, and carries the height the committee signed.
+    #[test]
+    fn a_trusted_root_carries_its_validated_tip() {
+        let tip = VerifiedBlockTip {
+            epoch: Epoch(3),
+            shard_group: ShardGroup::new(Shard::from_u32(1), Shard::from_u32(2)),
+            height: NodeHeight(9),
+            block_id: FixedHash::from([1; 32]),
+            epoch_hash: FixedHash::from([2; 32]),
+            state_merkle_root: FixedHash::from([3; 32]),
+        };
+        let root = TrustedStateRoot::from(tip);
+        assert_eq!(root.epoch, tip.epoch);
+        assert_eq!(root.shard_group, tip.shard_group);
+        assert_eq!(root.height, tip.height);
+        assert_eq!(root.root, tip.state_merkle_root);
+    }
+
     mod down_proof {
         use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
         use tari_state_tree::{SubstateTreeChange, memory_store::MemoryTreeStore};
@@ -532,6 +551,18 @@ mod tests {
         /// V3 on every epoch.
         const NETWORK: Network = Network::LocalNet;
         const EPOCH: Epoch = Epoch(1);
+
+        /// The tip `commit_proof`'s header describes, taken at its word: these commit proofs are not signed.
+        fn unvalidated_tip(commit_proof: &CommittedBlockProof) -> VerifiedBlockTip {
+            VerifiedBlockTip {
+                epoch: commit_proof.epoch(),
+                shard_group: commit_proof.shard_group().unwrap(),
+                height: commit_proof.height(),
+                block_id: commit_proof.block_id(),
+                epoch_hash: commit_proof.epoch_hash(),
+                state_merkle_root: commit_proof.state_merkle_root(),
+            }
+        }
 
         fn id(seed: u8) -> SubstateId {
             SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([seed; ObjectKey::LENGTH])))
@@ -669,11 +700,16 @@ mod tests {
             }
 
             fn r1(&self, height: u64) -> TrustedStateRoot {
-                TrustedStateRoot::from_commit_proof(&self.r1_commit_proof(height)).unwrap()
+                TrustedStateRoot::from(unvalidated_tip(&self.r1_commit_proof(height)))
             }
 
             fn r2(&self) -> TrustedStateRoot {
-                TrustedStateRoot::from_commit_proof(&commit_proof(self.group(), EPOCH, 4, self.r2_tree.root())).unwrap()
+                TrustedStateRoot::from(unvalidated_tip(&commit_proof(
+                    self.group(),
+                    EPOCH,
+                    4,
+                    self.r2_tree.root(),
+                )))
             }
 
             /// `(proof, value hash)` of `id` in the substate's shard at version 1, under R1.
@@ -886,16 +922,19 @@ mod tests {
                         down_leaf.clone(),
                     ),
                 };
-                let down_root =
-                    TrustedStateRoot::from_commit_proof(&commit_proof(down_group, down_epoch, 4, r2_tree.root()))
-                        .unwrap();
+                let down_root = TrustedStateRoot::from(unvalidated_tip(&commit_proof(
+                    down_group,
+                    down_epoch,
+                    4,
+                    r2_tree.root(),
+                )));
                 verify_substate_down_proof_against_roots(
                     &tari_bor::serde_codec::to_vec(&proof).unwrap(),
                     target.substate_id(),
                     target.version(),
                     NETWORK,
                     NUM_PRESHARDS,
-                    &TrustedStateRoot::from_commit_proof(&up_commit_proof).unwrap(),
+                    &TrustedStateRoot::from(unvalidated_tip(&up_commit_proof)),
                     &down_root,
                 )
             };

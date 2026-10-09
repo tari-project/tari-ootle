@@ -169,7 +169,9 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
     /// bound-free inherent form of [`tari_ootle_storage::StateStore::create_read_tx`]; see CONTEXT.md
     /// (read view).
     pub fn read_view(&self) -> ReadView<'_, TAddr> {
-        let (snapshot, pending) = self.pending.pin_with(|| self.db.snapshot());
+        let (snapshot, pending) = self
+            .pending
+            .with_published(|published| (self.db.snapshot(), published.clone()));
         RocksDbStateStoreReadTransaction::new(&self.db, snapshot, PendingStateView::Pinned(pending))
     }
 }

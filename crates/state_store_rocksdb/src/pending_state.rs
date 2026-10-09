@@ -50,15 +50,13 @@ impl SharedPendingState {
 
     /// The latest published state.
     pub fn latest(&self) -> PendingState {
-        self.published().state.clone()
+        self.with_published(PendingState::clone)
     }
 
-    /// Runs `open_snapshot` and returns its result with the state published at the same point. Publishing waits for
-    /// the commit it mirrors, so the database snapshot and the state describe the same committed state.
-    pub fn pin_with<T, F: FnOnce() -> T>(&self, open_snapshot: F) -> (T, PendingState) {
-        let published = self.published();
-        let snapshot = open_snapshot();
-        (snapshot, published.state.clone())
+    /// Runs `f` on the published state, holding off publishing until it returns. Publishing waits for the commit it
+    /// mirrors, so a database snapshot taken inside `f` describes the same committed state as the state `f` is given.
+    pub fn with_published<R, F: FnOnce(&PendingState) -> R>(&self, f: F) -> R {
+        f(&self.published().state)
     }
 
     fn stage(&self) -> StagedPendingState {

@@ -137,12 +137,20 @@ impl CommitteeReadTally {
     /// The answer once every member has responded without settling the read.
     pub fn conclude(self, describe: impl std::fmt::Display) -> Result<SubstateLookupResult, IndexerError> {
         // Only with f = 0 can a version reach the threshold without having settled the read when it did.
+        // A Down of a version no later than an Up held unproven names a spent version, not the head,
+        // so the Up answers instead.
         if let Some(version) = self
             .unproven_downs
             .iter()
             .filter(|(_, count)| **count > self.f)
             .map(|(version, _)| *version)
             .max()
+            .filter(|version| {
+                self.unproven_up
+                    .as_ref()
+                    .and_then(|up| up.version())
+                    .is_none_or(|up_version| up_version < *version)
+            })
         {
             return Ok(SubstateLookupResult {
                 result: SubstateResult::Down { version },
@@ -477,6 +485,23 @@ mod tests {
     #[tokio::test]
     async fn with_f_zero_an_unproven_down_is_concluded_once_everyone_answers() {
         let result = race(2, 1, true, None, vec![(0, Ok((down(3), None))), (1, Err(error()))])
+            .await
+            .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(!result.verified);
+    }
+
+    #[tokio::test]
+    async fn with_f_zero_an_unproven_up_of_a_later_version_outranks_an_unproven_down() {
+        let result = race(2, 1, true, None, vec![(0, Ok((down(3), None))), (1, Ok((up(5), None)))])
+            .await
+            .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(5)));
+        assert!(!result.verified);
+
+        let result = race(2, 1, true, None, vec![(0, Ok((up(2), None))), (1, Ok((down(3), None)))])
             .await
             .unwrap();
         assert!(matches!(result.result, SubstateResult::Down { .. }));

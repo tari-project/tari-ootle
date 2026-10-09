@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -440,45 +440,49 @@ where
         Ok(map)
     }
 
-    /// Fetches the live version of each substate from the committee. A substate that is not up, or
-    /// that no member answered for, is absent from the result. Each result carries the proof it was
-    /// verified with, when one was.
+    /// Fetches the live version of each substate from the committee. A substate the committee holds down or
+    /// absent is left out of the result. Each result carries the proof it was verified with, when one was.
     ///
-    /// A batch is answered by one member, so an unproven head that is not up is confirmed through
-    /// [`Self::get_substate`]'s committee agreement before the substate is left out. A substate whose
-    /// confirmation fails is left out too: only what the committee holds up is returned.
+    /// A batch is answered by one member, which may leave an id out or report it down without being able to prove
+    /// either. Every requested id the batch does not settle is therefore confirmed through
+    /// [`Self::get_substate`]'s committee agreement, and a confirmation that fails fails the call: leaving the id out
+    /// would tell the caller it is not live.
     pub async fn fetch_and_cache_substates(
         &self,
         substate_ids: &[SubstateId],
     ) -> Result<HashMap<SubstateId, ProvenSubstate>, IndexerError> {
-        let substate_ids = substate_ids.iter().collect::<Vec<_>>();
-        let heads = self.fetch_and_cache_heads(&substate_ids).await?;
-        let mut lookups = Vec::with_capacity(heads.len());
+        let substate_ids = substate_ids
+            .iter()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut heads = self.fetch_and_cache_heads(&substate_ids).await?;
+        let mut lookups = Vec::with_capacity(substate_ids.len());
         let mut unsettled = Vec::new();
-        for (id, head) in heads {
-            if head.verified || !self.verify_substate_proofs || matches!(head.result, SubstateResult::Up { .. }) {
-                lookups.push((id, head));
-            } else {
-                unsettled.push(id);
+        for id in substate_ids {
+            match heads.remove(id) {
+                Some(head)
+                    if head.verified ||
+                        !self.verify_substate_proofs ||
+                        matches!(head.result, SubstateResult::Up { .. }) =>
+                {
+                    lookups.push((id.clone(), head));
+                },
+                _ => unsettled.push(id.clone()),
             }
         }
         let confirmed = stream::iter(unsettled)
             .map(|id| async move {
-                let lookup = self.get_substate(&id, None).await;
-                (id, lookup)
+                let lookup = self.get_substate(&id, None).await?;
+                Ok::<_, IndexerError>((id, lookup))
             })
             .buffer_unordered(BATCH_FETCH_CONCURRENCY)
-            .collect::<Vec<_>>()
-            .await;
-        for (id, lookup) in confirmed {
-            match lookup {
-                Ok(lookup) => lookups.push((id, lookup)),
-                Err(e) => warn!(target: LOG_TARGET, "Could not confirm the state of {id}; leaving it out: {e}"),
-            }
-        }
+            .try_collect::<Vec<_>>()
+            .await?;
+        lookups.extend(confirmed);
 
-        // A batch answers with the head version; a caller asking for substates by id wants the live
-        // ones, and a down head is not one.
+        // A batch answers with the head version; a caller asking for substates by id wants the live ones, and a
+        // down head is not one.
         Ok(lookups
             .into_iter()
             .filter_map(|(id, lookup)| {
@@ -1937,11 +1941,11 @@ mod tests {
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
     }
 
-    /// A substate whose state the committee cannot confirm is left out without failing the rest.
+    /// A substate whose state the committee cannot confirm fails the call, rather than reading as not live.
     #[tokio::test]
-    async fn a_batch_head_that_cannot_be_confirmed_is_left_out() {
+    async fn a_batch_head_that_cannot_be_confirmed_fails_the_call() {
         let ids = (0..4).map(component_id).collect::<Vec<_>>();
-        let (manager, network) = manager(FakeNetwork {
+        let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             down_in_batches: HashSet::from([ids[1].clone(), ids[2].clone()]),
             failing_single_reads: HashSet::from([ids[2].clone()]),
@@ -1949,14 +1953,45 @@ mod tests {
         });
         let manager = manager.with_substate_proof_verification(true);
 
+        let result = manager.fetch_and_cache_substates(&ids).await;
+
+        assert!(result.is_err(), "{result:?}");
+    }
+
+    /// A member that leaves an id out of its batch cannot hide a substate the committee holds up.
+    #[tokio::test]
+    async fn an_id_a_batch_leaves_out_is_confirmed_with_the_committee() {
+        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        for verify in [true, false] {
+            let (manager, network) = manager(FakeNetwork {
+                live: live(&ids),
+                omitted_from_batches: HashSet::from([ids[1].clone()]),
+                ..Default::default()
+            });
+            let manager = manager.with_substate_proof_verification(verify);
+
+            let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
+
+            assert_eq!(found.len(), ids.len(), "verify: {verify}");
+            assert!(found.contains_key(&ids[1]), "verify: {verify}");
+            assert_eq!(network.single_requests.load(Ordering::Relaxed), 1, "verify: {verify}");
+        }
+    }
+
+    /// An id the committee holds absent is left out.
+    #[tokio::test]
+    async fn an_id_the_committee_holds_absent_is_left_out() {
+        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let (manager, _) = manager(FakeNetwork {
+            live: live(&ids[..2]),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
+
         let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
 
-        let mut returned = found.into_keys().collect::<Vec<_>>();
-        returned.sort();
-        let mut expected = vec![ids[0].clone(), ids[1].clone(), ids[3].clone()];
-        expected.sort();
-        assert_eq!(returned, expected);
-        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
+        assert_eq!(found.len(), 2);
+        assert!(!found.contains_key(&ids[2]));
     }
 
     /// A cached nonexistence ends the lookup before anything is asked of the network.

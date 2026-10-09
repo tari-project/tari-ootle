@@ -50,12 +50,18 @@ pub async fn list(
             Box::new(cf.iterator(ordering, OPERATION))
         };
 
+    // Each record holds one block's changes, and the table pages over the changes.
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0).saturating_mul(page_size);
-    for result in iter.skip(skip).take(page_size) {
+    let mut total = 0usize;
+    for result in iter {
         let (block_id, changes) = result?;
         let encoded_key = hex::encode(cf.encode_key(&block_id));
         for change in changes {
+            total += 1;
+            if total <= skip || total > skip.saturating_add(page_size) {
+                continue;
+            }
             let versioned = change.versioned_substate_id();
             table.add_row(json!({
                 "id": encoded_key,
@@ -67,7 +73,6 @@ pub async fn list(
             }));
         }
     }
-    let total = cf.count(OPERATION)?;
     table.set_total_entries(total);
 
     Ok(Json(table))

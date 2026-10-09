@@ -658,9 +658,9 @@ fn v3_exclusion_proof_against_another_shards_root_is_rejected() {
     assert_exclusion_proof_against_another_shards_root_is_rejected(ProtocolVersion::V3);
 }
 
-/// Roots committed before V3 do not bind a leaf to its shard, so a sibling shard's genuine root proves the absence of
-/// a substate that is live in its own shard. Such exclusion proofs verify, alone or as the exclusion half of a down
-/// proof, under every root committed before V3 activates.
+/// Before V2 a shard-group leaf is keyed by its value, not its shard, so a sibling shard's genuine root proves the
+/// absence of a substate that is live in its own shard. Such exclusion proofs verify against any root committed
+/// before V2, which is why a down proof whose exclusion root precedes V2 is not taken as proof of a Down.
 #[test]
 fn v1_exclusion_proof_against_another_shards_root_verifies() {
     use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};

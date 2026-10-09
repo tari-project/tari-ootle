@@ -958,7 +958,7 @@ mod tests {
         fn an_exclusion_root_before_v2_does_not_prove_a_down() {
             let mut scenario = Scenario::new(false, destroyed_and_replaced);
             let target = scenario.target.clone();
-            let proof = tari_bor::serde_codec::to_vec(&scenario.honest(&target)).unwrap();
+            let proof = tari_bor::serde_codec::to_vec(scenario.honest(&target)).unwrap();
             for epoch in [Epoch(1), Epoch(11925), Epoch(20000)] {
                 let protocol_version = ProtocolVersion::at(Network::Esmeralda, epoch);
                 assert!(matches!(protocol_version, ProtocolVersion::V0 | ProtocolVersion::V1));

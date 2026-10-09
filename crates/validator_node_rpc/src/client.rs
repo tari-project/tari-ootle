@@ -103,9 +103,8 @@ pub struct BatchedSubstate {
     /// Epoch the substate value hash was computed at; needed to re-derive the leaf value hash when
     /// verifying an inclusion proof.
     pub proof_epoch: u64,
-    /// CBOR-encoded SubstateDownProof for a down substate, whose exclusion half verifies against
-    /// [`SubstateBatch::commit_proof`]'s root. `None` for an up substate, or when the responder holds no proof that
-    /// the substate was ever up.
+    /// CBOR-encoded SubstateDownProof, decoded for wire compatibility. Validators leave it empty: a batch answers
+    /// with heads, which a down proof cannot settle.
     pub substate_down_proof: Option<Vec<u8>>,
 }
 

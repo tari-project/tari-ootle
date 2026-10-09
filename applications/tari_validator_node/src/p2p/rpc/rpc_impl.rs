@@ -321,7 +321,6 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
 
     for substate in substates {
         let mut value_proof = Vec::new();
-        let mut down_proof = Vec::new();
         if let Some(generator) = generator.as_mut() {
             let Some(proof) = generator.generate(&substate.to_versioned_substate_id())? else {
                 warn!(
@@ -335,21 +334,12 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
             value_proof = tari_bor::serde_codec::to_vec(&proof).map_err(|e| StorageError::QueryError {
                 reason: format!("encode substate value proof: {e}"),
             })?;
-            down_proof = encode_down_proof(tx, ctx.num_preshards, &substate, &proof)?.unwrap_or_default();
         }
 
-        messages.push(batch_response::Response::Substate(proto::rpc::ProvenSubstate {
-            proof_epoch: substate.created().at_epoch.as_u64(),
-            substate_value_proof: value_proof,
-            substate_down_proof: down_proof,
-            substate: Some(proto::consensus::Substate {
-                substate_id: substate.substate_id().to_bytes(),
-                version: substate.version().as_u64(),
-                substate: substate.substate_value().map(|v| v.to_bytes()).unwrap_or_default(),
-                created: Some(substate.created().into()),
-                destroyed: substate.destroyed().map(Into::into),
-            }),
-        }));
+        messages.push(batch_response::Response::Substate(proven_substate(
+            &substate,
+            value_proof,
+        )));
     }
 
     if !missing.is_empty() {
@@ -360,6 +350,25 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
     }
 
     Ok(messages)
+}
+
+/// A batch entry for `substate` with its value proof.
+///
+/// A batch answers with each substate's head, which a down proof cannot settle (it says nothing of later versions),
+/// so a batch entry carries no down proof.
+fn proven_substate(substate: &SubstateRecord, value_proof: Vec<u8>) -> proto::rpc::ProvenSubstate {
+    proto::rpc::ProvenSubstate {
+        proof_epoch: substate.created().at_epoch.as_u64(),
+        substate_value_proof: value_proof,
+        substate_down_proof: Vec::new(),
+        substate: Some(proto::consensus::Substate {
+            substate_id: substate.substate_id().to_bytes(),
+            version: substate.version().as_u64(),
+            substate: substate.substate_value().map(|v| v.to_bytes()).unwrap_or_default(),
+            created: Some(substate.created().into()),
+            destroyed: substate.destroyed().map(Into::into),
+        }),
+    }
 }
 
 /// The commit proof for the latest committed block: the quorum-signed anchor for the shard-group
@@ -1114,6 +1123,15 @@ mod tests {
         assert!(!resp.commit_proof.is_empty());
         assert!(!resp.substate_value_proof.is_empty());
         assert!(!resp.substate_down_proof.is_empty());
+    }
+
+    /// A batch answers with heads, which a down proof cannot settle, so a down substate's batch entry carries none,
+    /// even where the single-substate path would serve one.
+    #[test]
+    fn a_batch_entry_carries_no_down_proof() {
+        let entry = proven_substate(&substate(true), vec![1]);
+        assert!(entry.substate_down_proof.is_empty());
+        assert!(entry.substate.unwrap().destroyed.is_some());
     }
 
     #[test]

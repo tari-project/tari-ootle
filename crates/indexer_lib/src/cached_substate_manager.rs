@@ -1148,16 +1148,19 @@ mod tests {
         single_requests: AtomicUsize,
         /// Single reads of these fail.
         failing_single_reads: HashSet<SubstateId>,
+        /// Members that never answer a proven read.
+        silent_members: HashSet<Addr>,
     }
 
     #[derive(Clone)]
-    struct FakeClient(Arc<FakeNetwork>);
+    /// A client of the fake network, acting for the member at `.1`.
+    struct FakeClient(Arc<FakeNetwork>, Option<Addr>);
 
     impl ValidatorNodeClientFactory<Addr> for FakeClient {
         type Client = Self;
 
-        fn create_client(&self, _address: &Addr) -> Self::Client {
-            self.clone()
+        fn create_client(&self, address: &Addr) -> Self::Client {
+            FakeClient(self.0.clone(), Some(address.clone()))
         }
     }
 
@@ -1196,6 +1199,13 @@ mod tests {
             &mut self,
             substate_req: SubstateRequirementRef<'_>,
         ) -> Result<(SubstateResult, Option<SubstateProofData>), ValidatorNodeRpcClientError> {
+            if self
+                .1
+                .as_ref()
+                .is_some_and(|address| self.0.silent_members.contains(address))
+            {
+                return std::future::pending().await;
+            }
             if let Some((version, proof)) = self.0.down_with_proof.get(substate_req.substate_id()) {
                 return Ok((SubstateResult::Down { version: *version }, Some(proof.clone())));
             }
@@ -1431,7 +1441,7 @@ mod tests {
             Network::LocalNet,
             NumPreshards::P256,
             FakeEpochManager(Arc::new(committee), None, Arc::default()),
-            FakeClient(network.clone()),
+            FakeClient(network.clone(), None),
             FakeCache::default(),
         );
         (manager, network)
@@ -1529,7 +1539,100 @@ mod tests {
 
     /// An unsigned commit proof of `root` that claims `height`.
     fn unsigned_commit_proof(shard_group: ShardGroup, height: u64, root: tari_state_tree::TreeHash) -> Vec<u8> {
-        let header = tari_sidechain::SidechainBlockHeader {
+        CommittedBlockProof::new(tari_sidechain::SidechainBlockCommitProof {
+            header: test_header(shard_group, height, root),
+            proof_elements: vec![],
+        })
+        .to_bytes()
+    }
+
+    /// A commit proof of `root` at `height`, its block committed by a 3-chain of certificates each signed by `signers`.
+    fn signed_commit_proof(
+        shard_group: ShardGroup,
+        height: u64,
+        root: tari_state_tree::TreeHash,
+        signers: &[tari_crypto::ristretto::RistrettoSecretKey],
+    ) -> Vec<u8> {
+        use tari_common_types::types::CompressedPublicKey;
+        use tari_consensus_types::ValidatorSchnorrSignature;
+        use tari_crypto::{
+            keys::{PublicKey as _, SecretKey as _},
+            ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+            tari_utilities::ByteArray,
+        };
+        use tari_sidechain::{
+            CommitProofElement,
+            ProposalVoteMessage,
+            QuorumCertificate,
+            QuorumDecision,
+            ValidatorBlockSignature,
+            ValidatorQcSignature,
+        };
+
+        let header = test_header(shard_group, height, root);
+        let sign = |secret: &RistrettoSecretKey, message: FixedHash| {
+            // A nonce unique to the signer and message.
+            let mut nonce = [0u8; 64];
+            nonce[..32].copy_from_slice(message.as_slice());
+            nonce[32..].copy_from_slice(secret.as_bytes());
+            let nonce = RistrettoSecretKey::from_uniform_bytes(&nonce).unwrap();
+            let signature =
+                ValidatorSchnorrSignature::sign_with_nonce_and_message(secret, nonce, message.as_slice()).unwrap();
+            ValidatorQcSignature {
+                public_key: CompressedPublicKey::from_canonical_bytes(
+                    RistrettoPublicKey::from_secret_key(secret).as_bytes(),
+                )
+                .unwrap(),
+                signature: ValidatorBlockSignature::new(
+                    CompressedPublicKey::from_canonical_bytes(signature.get_public_nonce().as_bytes()).unwrap(),
+                    signature.get_signature().clone(),
+                ),
+            }
+        };
+        let certify = |parent_id: FixedHash, header_hash: FixedHash, qc_height: u64| {
+            let mut qc = QuorumCertificate {
+                header_hash,
+                parent_id,
+                protocol_version: header.protocol_version,
+                epoch: header.epoch,
+                height: qc_height,
+                signatures: vec![],
+                decision: QuorumDecision::Accept,
+            };
+            let block_id = qc.calculate_justified_block();
+            let message = ProposalVoteMessage::new(
+                header.protocol_version,
+                &block_id,
+                QuorumDecision::Accept,
+                header.epoch,
+                qc_height,
+            )
+            .calculate_hash();
+            qc.signatures = signers.iter().map(|secret| sign(secret, message)).collect();
+            qc
+        };
+        // The proof walks the chain from its tip back to the committed block: each certificate justifies the parent
+        // of the one before it, and the last justifies the header's block.
+        let qc1 = certify(header.parent_id, header.calculate_hash(), height);
+        let qc2 = certify(qc1.calculate_justified_block(), FixedHash::from([0xb2; 32]), height + 1);
+        let qc3 = certify(qc2.calculate_justified_block(), FixedHash::from([0xb3; 32]), height + 2);
+        CommittedBlockProof::new(tari_sidechain::SidechainBlockCommitProof {
+            header,
+            proof_elements: vec![
+                CommitProofElement::QuorumCertificate(qc3),
+                CommitProofElement::QuorumCertificate(qc2),
+                CommitProofElement::QuorumCertificate(qc1),
+            ],
+        })
+        .to_bytes()
+    }
+
+    fn test_header(
+        shard_group: ShardGroup,
+        height: u64,
+        root: tari_state_tree::TreeHash,
+    ) -> tari_sidechain::SidechainBlockHeader {
+        tari_sidechain::SidechainBlockHeader {
             network: Network::LocalNet.as_byte(),
             protocol_version: tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(1)).as_u32(),
             parent_id: FixedHash::zero(),
@@ -1548,12 +1651,7 @@ mod tests {
             signature: Default::default(),
             accumulated_data: Default::default(),
             metadata_hash: FixedHash::zero(),
-        };
-        CommittedBlockProof::new(tari_sidechain::SidechainBlockCommitProof {
-            header,
-            proof_elements: vec![],
-        })
-        .to_bytes()
+        }
     }
 
     /// Two roots of one shard group in one epoch: `R_early`, before a substate was created, and `R_late`, while it is
@@ -1664,6 +1762,14 @@ mod tests {
 
     /// A global substate up at `R1` and down at `R2`, with `R1`'s commit proof naming `up_group`.
     fn global_down_proof(up_group: ShardGroup) -> (SubstateId, Vec<u8>, DownProofAnchor, tari_state_tree::TreeHash) {
+        global_down_proof_signed_by(up_group, &[])
+    }
+
+    /// [`global_down_proof`] with `R1`'s commit proof signed by `signers`, or unsigned if there are none.
+    fn global_down_proof_signed_by(
+        up_group: ShardGroup,
+        signers: &[tari_crypto::ristretto::RistrettoSecretKey],
+    ) -> (SubstateId, Vec<u8>, DownProofAnchor, tari_state_tree::TreeHash) {
         use tari_engine_types::published_template::PublishedTemplateAddress;
         use tari_ootle_common_types::{VersionedSubstateId, shard::Shard};
         use tari_state_tree::{
@@ -1697,7 +1803,11 @@ mod tests {
         let r2 = tree(r2_shard_root, 2);
         let (_, value, up_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(1, &target).unwrap();
         let (_, _, down_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(2, &target).unwrap();
-        let up_commit_proof = unsigned_commit_proof(up_group, 2, r1.root());
+        let up_commit_proof = if signers.is_empty() {
+            unsigned_commit_proof(up_group, 2, r1.root())
+        } else {
+            signed_commit_proof(up_group, 2, r1.root(), signers)
+        };
         let up_root = DownProofAnchor::from(unvalidated_tip(
             &CommittedBlockProof::from_bytes(&up_commit_proof).unwrap(),
         ));
@@ -1753,6 +1863,74 @@ mod tests {
             .check_down_proof(&id, SubstateVersion::ZERO, &proof, &up_root, &r2_anchor(r2_root))
             .unwrap();
         assert!(!proven);
+    }
+
+    /// One member's valid down proof, with both commit proofs signed by a quorum of the committee, settles a read for
+    /// the version it names, verified, while the rest of the committee never answers. It does not settle a head read.
+    #[tokio::test]
+    async fn one_members_valid_down_proof_settles_a_read_for_its_version() {
+        use tari_crypto::tari_utilities::ByteArray;
+        use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+
+        let keys = (1..=4).map(create_key_pair_from_seed).collect::<Vec<_>>();
+        let committee = Committee::new(
+            keys.iter()
+                .enumerate()
+                .map(|(i, (_, public))| CommitteeMember {
+                    address: format!("vn{i}"),
+                    public_key: RistrettoPublicKeyBytes::from_bytes(public.as_bytes()).unwrap(),
+                    vote_power: VotePower::of(1),
+                })
+                .collect(),
+        );
+        // Three of four is the quorum.
+        let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
+
+        let (id, proof, _, r2_root) = global_down_proof_signed_by(group(1, 2), &signers);
+        let (mut manager, _) = manager(FakeNetwork {
+            down_with_proof: [(
+                id.clone(),
+                (SubstateVersion::ZERO, SubstateProofData {
+                    substate_value_proof: vec![],
+                    commit_proof: signed_commit_proof(group(1, 2), 4, r2_root, &signers),
+                    proof_epoch: 0,
+                    substate_down_proof: Some(proof),
+                    destroyed_at_state_version: Some(2),
+                }),
+            )]
+            .into(),
+            silent_members: ["vn1", "vn2", "vn3"].map(String::from).into(),
+            ..Default::default()
+        });
+        manager.committee_provider.0 = Arc::new(committee);
+        let manager = manager.with_substate_proof_verification(true);
+        let answering = "vn0".to_string();
+
+        let (result, proof) = manager
+            .get_substate_from_vn(
+                &answering,
+                SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(result, SubstateResult::Down { .. }));
+        assert!(proof.is_some(), "a valid down proof answers a read for its version");
+
+        let (_, proof) = manager
+            .get_substate_from_vn(&answering, SubstateRequirementRef::new(&id, None))
+            .await
+            .unwrap();
+        assert!(proof.is_none(), "a down proof does not answer a head read");
+
+        let lookup = tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.get_substate(&id, Some(SubstateVersion::ZERO)),
+        )
+        .await
+        .expect("one member's proven Down settles the read")
+        .unwrap();
+        assert!(matches!(lookup.result, SubstateResult::Down { .. }));
+        assert!(lookup.verified);
     }
 
     /// A down proof anchored before V2 cannot prove the Down, so it is left unproven before any committee is asked to

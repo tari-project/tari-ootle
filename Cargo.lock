@@ -12162,6 +12162,8 @@ dependencies = [
  "prometheus-client",
  "tari_bor",
  "tari_common_types",
+ "tari_consensus_types",
+ "tari_crypto",
  "tari_engine_types",
  "tari_epoch_manager",
  "tari_ootle_common_types",

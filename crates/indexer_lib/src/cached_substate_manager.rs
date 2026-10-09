@@ -717,12 +717,8 @@ where
         };
 
         let trusted_root = self.trusted_root_from_commit_proof(commit_proof).await?;
-        // A down proof needs its anchor's height signed, which the trusted root above does not establish. It is
-        // validated at most once per batch, as is each earlier root the batch's down proofs cite. An anchor that
-        // cannot be validated for want of its committee leaves the batch's down proofs unchecked, as they leave
-        // its Downs unproven either way.
-        let mut down_root: Option<Option<TrustedStateRoot>> = None;
-        let mut up_roots = HashMap::new();
+        // A batch answers with heads, which a down proof cannot settle (it says nothing about later versions), so
+        // the down proofs a batch carries are not checked.
         for substate in &batch.substates {
             let Some(value_proof) = &substate.value_proof else {
                 return Err(IndexerError::SubstateProofVerificationFailed {
@@ -755,27 +751,6 @@ where
                 &trusted_root,
             )
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
-            // A batch answers with heads, which no down proof can settle (see `fetch_and_cache_heads`), but a member
-            // that serves an invalid one is still disqualified.
-            if let Some(down_proof) = &substate.substate_down_proof {
-                let down_root = match down_root {
-                    Some(root) => root,
-                    None => *down_root.insert(
-                        self.establish_down_proof_root(commit_proof, &substate.substate_id)
-                            .await?,
-                    ),
-                };
-                if let Some(down_root) = down_root {
-                    self.verify_down_proof_against(
-                        &substate.substate_id,
-                        version,
-                        down_proof,
-                        &down_root,
-                        &mut up_roots,
-                    )
-                    .await?;
-                }
-            }
         }
 
         Ok(BatchTrust::Proven)
@@ -893,10 +868,14 @@ where
             },
             SubstateResult::Down { version } => {
                 // Only a down proof shows the version was ever up; without one, the Down is left to f+1
-                // agreement.
+                // agreement. A down proof says nothing about later versions, so it answers only a read for the
+                // version it names, and is not checked for any other read.
                 let Some(down_proof) = proof.substate_down_proof.as_deref() else {
                     return Ok((result, None));
                 };
+                if substate_requirement.version() != Some(*version) {
+                    return Ok((result, None));
+                }
                 let proven = self
                     .verify_down_proof(
                         substate_requirement.substate_id(),
@@ -922,9 +901,9 @@ where
     /// authenticate: the trusted-root store vouches for a root, not for the height a header claims for it. Both commit
     /// proofs are therefore validated against their committees, never taken from the store.
     ///
-    /// Returns `Ok(false)` when the proof's earlier root cannot be established, e.g. because the committee of its
-    /// epoch is no longer known: the Down is then unproven rather than refuted. An invalid proof is an error, which
-    /// disqualifies the member that served it.
+    /// Returns `Ok(false)` when the Down is unproven but nothing shows the member dishonest: a root cannot be
+    /// established for want of its committee, or the proof is of a kind that does not prove a Down (see
+    /// [`Self::check_down_proof`]). An invalid proof is an error, which disqualifies the member that served it.
     async fn verify_down_proof(
         &self,
         substate_id: &SubstateId,
@@ -935,8 +914,63 @@ where
         let Some(down_root) = self.establish_down_proof_root(down_commit_proof, substate_id).await? else {
             return Ok(false);
         };
-        self.verify_down_proof_against(substate_id, version, down_proof, &down_root, &mut HashMap::new())
+        self.verify_down_proof_against(substate_id, version, down_proof, &down_root)
             .await
+    }
+
+    /// [`Self::verify_down_proof`] against an already validated `down_root`.
+    async fn verify_down_proof_against(
+        &self,
+        substate_id: &SubstateId,
+        version: SubstateVersion,
+        down_proof: &[u8],
+        down_root: &TrustedStateRoot,
+    ) -> Result<bool, IndexerError> {
+        let decoded = decode_substate_down_proof(down_proof)
+            .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
+        let Some(up_root) = self
+            .establish_down_proof_root(&decoded.up_commit_proof, substate_id)
+            .await?
+        else {
+            return Ok(false);
+        };
+        self.check_down_proof(substate_id, version, down_proof, &up_root, down_root)
+    }
+
+    /// Checks a down proof against its two established roots.
+    ///
+    /// Two kinds of proof verify yet leave the Down unproven rather than refuted, since an honest node serves them:
+    /// - a global substate proved with roots of two shard groups: each group commits the global shard on its own chain,
+    ///   and a node that spans a reshard serves exactly such a proof;
+    /// - an exclusion root committed before V2, whose leaves do not name their shard, so that any shard's root proves
+    ///   the substate absent.
+    fn check_down_proof(
+        &self,
+        substate_id: &SubstateId,
+        version: SubstateVersion,
+        down_proof: &[u8],
+        up_root: &TrustedStateRoot,
+        down_root: &TrustedStateRoot,
+    ) -> Result<bool, IndexerError> {
+        match verify_substate_down_proof_against_roots(
+            down_proof,
+            substate_id,
+            version,
+            self.network,
+            self.num_preshards,
+            up_root,
+            down_root,
+        ) {
+            Ok(()) => Ok(true),
+            Err(
+                e @ (SubstateProofVerifyError::DownProofGlobalAcrossShardGroups { .. } |
+                SubstateProofVerifyError::DownProofExclusionNotShardBound { .. }),
+            ) => {
+                debug!(target: LOG_TARGET, "Down of {substate_id}v{version} is unproven: {e}");
+                Ok(false)
+            },
+            Err(e) => Err(IndexerError::SubstateProofVerificationFailed { details: e.to_string() }),
+        }
     }
 
     /// Validates a root a down proof is anchored to. `None` when it cannot be established for want of its committee
@@ -957,52 +991,6 @@ where
                 );
                 Ok(None)
             },
-        }
-    }
-
-    /// [`Self::verify_down_proof`] against an already validated `down_root`. `up_roots` holds the earlier roots
-    /// established so far, keyed by the encoded commit proof that names them; `None` records one that could not be.
-    ///
-    /// A global substate proved with roots of two shard groups is also unproven rather than refuted: each group commits
-    /// the global shard on its own chain, and an honest node that spans a reshard serves exactly such a proof.
-    async fn verify_down_proof_against(
-        &self,
-        substate_id: &SubstateId,
-        version: SubstateVersion,
-        down_proof: &[u8],
-        down_root: &TrustedStateRoot,
-        up_roots: &mut HashMap<Vec<u8>, Option<TrustedStateRoot>>,
-    ) -> Result<bool, IndexerError> {
-        let decoded = decode_substate_down_proof(down_proof)
-            .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
-        let up_root = match up_roots.get(&decoded.up_commit_proof) {
-            Some(established) => *established,
-            None => {
-                let established = self
-                    .establish_down_proof_root(&decoded.up_commit_proof, substate_id)
-                    .await?;
-                up_roots.insert(decoded.up_commit_proof, established);
-                established
-            },
-        };
-        let Some(up_root) = up_root else {
-            return Ok(false);
-        };
-        match verify_substate_down_proof_against_roots(
-            down_proof,
-            substate_id,
-            version,
-            self.network,
-            self.num_preshards,
-            &up_root,
-            down_root,
-        ) {
-            Ok(()) => Ok(true),
-            Err(e @ SubstateProofVerifyError::DownProofGlobalAcrossShardGroups { .. }) => {
-                debug!(target: LOG_TARGET, "Down of {substate_id}v{version} is unproven: {e}");
-                Ok(false)
-            },
-            Err(e) => Err(IndexerError::SubstateProofVerificationFailed { details: e.to_string() }),
         }
     }
 
@@ -1715,22 +1703,68 @@ mod tests {
         let manager = manager.with_substate_proof_verification(true);
         for (up_group, expected) in [(group(1, 2), true), (group(3, 4), false)] {
             let (id, proof, up_root, r2_root) = global_down_proof(up_group);
-            let decoded = decode_substate_down_proof(&proof).unwrap();
-            let down_root = TrustedStateRoot {
-                epoch: Epoch(1),
-                shard_group: group(1, 2),
-                height: tari_ootle_common_types::NodeHeight(4),
-                root: FixedHash::new(r2_root.into_array()),
-            };
-            // The earlier root is taken as already established for the pass: its commit proof is unsigned, so
-            // validating it again would fail.
-            let mut up_roots = HashMap::from([(decoded.up_commit_proof, Some(up_root))]);
             let proven = manager
-                .verify_down_proof_against(&id, SubstateVersion::ZERO, &proof, &down_root, &mut up_roots)
-                .await
+                .check_down_proof(&id, SubstateVersion::ZERO, &proof, &up_root, &r2_anchor(r2_root))
                 .unwrap();
             assert_eq!(proven, expected, "{up_group}");
         }
+    }
+
+    /// The anchor `global_down_proof`'s exclusion half verifies against.
+    fn r2_anchor(r2_root: tari_state_tree::TreeHash) -> TrustedStateRoot {
+        TrustedStateRoot {
+            epoch: PROOF_EPOCH,
+            shard_group: group(1, 2),
+            height: tari_ootle_common_types::NodeHeight(4),
+            root: FixedHash::new(r2_root.into_array()),
+        }
+    }
+
+    /// Before V2 a shard-group leaf is keyed by its value, so another shard's root proves any substate absent. Such a
+    /// proof leaves the Down unproven without disqualifying the member.
+    #[tokio::test]
+    async fn a_down_proved_against_a_pre_v2_root_is_unproven_not_invalid() {
+        let (mut manager, _) = manager(FakeNetwork::default());
+        manager.network = Network::Esmeralda;
+        assert!(matches!(
+            tari_engine_types::ProtocolVersion::at(Network::Esmeralda, PROOF_EPOCH),
+            tari_engine_types::ProtocolVersion::V0 | tari_engine_types::ProtocolVersion::V1
+        ));
+        let manager = manager.with_substate_proof_verification(true);
+        let (id, proof, up_root, r2_root) = global_down_proof(group(1, 2));
+        let proven = manager
+            .check_down_proof(&id, SubstateVersion::ZERO, &proof, &up_root, &r2_anchor(r2_root))
+            .unwrap();
+        assert!(!proven);
+    }
+
+    /// A head read cannot be settled by a down proof, so its down proof is not checked: an invalid one is an unproven
+    /// Down, not grounds to disqualify the member. A read for the version it names checks it.
+    #[tokio::test]
+    async fn a_down_proof_is_checked_only_for_a_read_of_its_version() {
+        let id = component_id(1);
+        let (manager, _) = manager(FakeNetwork {
+            down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(Some(vec![0xff]))))].into(),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
+        let (result, proof) = manager
+            .get_substate_from_vn(&"vn".to_string(), SubstateRequirementRef::new(&id, None))
+            .await
+            .unwrap();
+        assert!(matches!(result, SubstateResult::Down { .. }));
+        assert!(proof.is_none());
+
+        let result = manager
+            .get_substate_from_vn(
+                &"vn".to_string(),
+                SubstateRequirementRef::new(&id, Some(SubstateVersion::new(3))),
+            )
+            .await;
+        assert!(
+            matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+            "{result:?}"
+        );
     }
 
     /// The epoch every test commit proof is of.
@@ -1742,14 +1776,8 @@ mod tests {
         manager.committee_provider.1 = Some(PROOF_EPOCH);
         let manager = manager.with_substate_proof_verification(true);
         let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
-        let down_root = TrustedStateRoot {
-            epoch: PROOF_EPOCH,
-            shard_group: group(1, 2),
-            height: tari_ootle_common_types::NodeHeight(4),
-            root: FixedHash::new(r2_root.into_array()),
-        };
         let proven = manager
-            .verify_down_proof_against(&id, SubstateVersion::ZERO, &proof, &down_root, &mut HashMap::new())
+            .verify_down_proof_against(&id, SubstateVersion::ZERO, &proof, &r2_anchor(r2_root))
             .await
             .unwrap();
         assert!(!proven);
@@ -1785,10 +1813,10 @@ mod tests {
         assert!(proof.is_none());
     }
 
-    /// A batch anchor whose committee is unknown leaves the batch's Downs unproven rather than failing the batch; one
-    /// its committee does not sign still fails it.
+    /// A batch answers with heads, which a down proof cannot settle, so a batch's down proofs are not checked: one
+    /// that would not verify, against an anchor its committee does not sign, does not fail the batch.
     #[tokio::test]
-    async fn a_batch_whose_anchor_has_no_known_committee_is_not_failed() {
+    async fn a_batch_does_not_check_its_down_proofs() {
         let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
         let decoded = decode_substate_down_proof(&proof).unwrap();
         let batch = SubstateBatch {
@@ -1800,49 +1828,16 @@ mod tests {
                 },
                 value_proof: Some(tari_bor::serde_codec::to_vec(&decoded.down).unwrap()),
                 proof_epoch: 0,
-                substate_down_proof: Some(proof),
+                substate_down_proof: Some(vec![0xff]),
             }],
             missing: vec![],
         };
-
-        for (committee_known, fails) in [(false, false), (true, true)] {
-            let (mut manager, _) = manager(FakeNetwork::default());
-            if !committee_known {
-                manager.committee_provider.1 = Some(PROOF_EPOCH);
-            }
-            let manager = manager
-                .with_substate_proof_verification(true)
-                .with_trusted_root_store(Arc::new(TrustEverything));
-            let result = manager.verify_substate_batch(&batch).await;
-            if fails {
-                assert!(
-                    matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
-                    "{result:?}"
-                );
-            } else {
-                assert!(matches!(result, Ok(BatchTrust::Proven)), "{result:?}");
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn an_earlier_root_that_could_not_be_established_is_not_retried() {
         let (manager, _) = manager(FakeNetwork::default());
-        let manager = manager.with_substate_proof_verification(true);
-        let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
-        let decoded = decode_substate_down_proof(&proof).unwrap();
-        let down_root = TrustedStateRoot {
-            epoch: Epoch(1),
-            shard_group: group(1, 2),
-            height: tari_ootle_common_types::NodeHeight(4),
-            root: FixedHash::new(r2_root.into_array()),
-        };
-        let mut up_roots = HashMap::from([(decoded.up_commit_proof, None)]);
-        let proven = manager
-            .verify_down_proof_against(&id, SubstateVersion::ZERO, &proof, &down_root, &mut up_roots)
-            .await
-            .unwrap();
-        assert!(!proven);
+        let manager = manager
+            .with_substate_proof_verification(true)
+            .with_trusted_root_store(Arc::new(TrustEverything));
+        let result = manager.verify_substate_batch(&batch).await;
+        assert!(matches!(result, Ok(BatchTrust::Proven)), "{result:?}");
     }
 
     #[tokio::test]

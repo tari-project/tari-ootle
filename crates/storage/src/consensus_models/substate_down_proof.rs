@@ -21,7 +21,13 @@ use crate::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
-    consensus_models::{DownedSubstate, StateVersionProof, StateVersionProofSource, SubstateRecord},
+    consensus_models::{
+        CommittedBlockProof,
+        DownedSubstate,
+        StateVersionProof,
+        StateVersionProofSource,
+        SubstateRecord,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::substate_down_proof";
@@ -36,10 +42,12 @@ const MAX_UP_VERSION_LOOKBACK: Version = 128;
 /// committed at shard state version `state_version`, with the commit proof of the block whose root holds that state.
 ///
 /// Written in the same write transaction that commits the substate's destruction, while the tree nodes at
-/// `state_version` and the block that committed it still exist. It is self-contained so that it stays servable after
-/// both are pruned. The other half, the exclusion proof, is generated when it is served, against the latest root.
+/// `state_version` and the block that committed it still exist. With the commit proof it names, stored once per block
+/// alongside it, it stays servable after both are pruned. The other half, the exclusion proof, is generated when it
+/// is served, against the latest root.
 ///
-/// A record is a few KB: a level-1 leaf proof, a level-2 shard-root proof and a commit proof of three certificates.
+/// A record holds a level-1 leaf proof and a level-2 shard-root proof; served, it carries a second level-1 and level-2
+/// proof (the exclusion) and the commit proof, whose size grows with the committee's signatures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubstateDownProofRecord {
     /// The shard state version `u` the substate is proved up at, lower than the version that destroyed it.
@@ -50,16 +58,17 @@ pub struct SubstateDownProofRecord {
     pub leaf_proof: SparseMerkleProofExt,
     /// The shard root at `u`.
     pub shard_root: TreeHash,
-    /// Level-2 proof of the shard's leaf in the state merkle root of `commit_proof`'s block.
+    /// Level-2 proof of the shard's leaf in the state merkle root of the block `commit_proof_block` names.
     pub shard_root_proof: SparseMerkleProofExt,
-    /// CBOR-encoded `CommittedBlockProof` of the block whose root commits the shard at `u`.
-    pub commit_proof: Vec<u8>,
+    /// The block whose root commits the shard at `u`. Its CBOR-encoded `CommittedBlockProof` is stored once, under
+    /// this id, for every record that cites it.
+    pub commit_proof_block: BlockId,
 }
 
 impl SubstateDownProofRecord {
-    /// Completes the proof with `down`, the exclusion proof of the substate under the root of the commit proof the
-    /// proof is served with.
-    pub fn into_down_proof(self, down: SubstateValueProof) -> SubstateDownProof {
+    /// Completes the proof with `commit_proof`, the stored commit proof of [`Self::commit_proof_block`], and `down`,
+    /// the exclusion proof of the substate under the root of the commit proof the proof is served with.
+    pub fn into_down_proof(self, commit_proof: Vec<u8>, down: SubstateValueProof) -> SubstateDownProof {
         SubstateDownProof {
             up: SubstateValueProof::new(
                 self.shard_root,
@@ -68,7 +77,7 @@ impl SubstateDownProofRecord {
                 self.leaf_proof,
             ),
             up_value_hash: self.value_hash,
-            up_commit_proof: self.commit_proof,
+            up_commit_proof: commit_proof,
             down,
         }
     }
@@ -94,7 +103,12 @@ where
     let mut sources = UpVersionSources::new(commit_proof_for_block);
     for downed in downed {
         match sources.build_record(&**tx, downed)? {
-            Some(record) => tx.substate_down_proofs_insert(downed.shard, &downed.id, &record)?,
+            Some(record) => {
+                if let Some(commit_proof) = sources.take_unstored(&record.commit_proof_block) {
+                    tx.substate_down_proof_commit_proofs_insert(&record.commit_proof_block, &commit_proof)?;
+                }
+                tx.substate_down_proofs_insert(downed.shard, &downed.id, &record)?;
+            },
             None => {
                 debug!(
                     target: LOG_TARGET,
@@ -117,8 +131,11 @@ struct UpVersionSources<F> {
     commit_proof_for_block: F,
     /// `None` records a version this node holds no proof of.
     version_proofs: HashMap<(Shard, Version), Option<StateVersionProof>>,
-    /// `None` records a block whose commit proof can no longer be built.
-    commit_proofs: HashMap<BlockId, Option<Vec<u8>>>,
+    /// Per version, the block whose commit proof the version's proof cites, or `None` if none is available.
+    anchors: HashMap<(Shard, Version), Option<BlockId>>,
+    /// Commit proofs this pass resolved that are not yet stored, to be written once with the first record citing
+    /// them.
+    unstored: HashMap<BlockId, Vec<u8>>,
 }
 
 impl<F> UpVersionSources<F> {
@@ -126,8 +143,14 @@ impl<F> UpVersionSources<F> {
         Self {
             commit_proof_for_block,
             version_proofs: HashMap::new(),
-            commit_proofs: HashMap::new(),
+            anchors: HashMap::new(),
+            unstored: HashMap::new(),
         }
+    }
+
+    /// The commit proof of `block_id` if this pass resolved it and it is not yet stored, once.
+    fn take_unstored(&mut self, block_id: &BlockId) -> Option<Vec<u8>> {
+        self.unstored.remove(block_id)
     }
 
     /// The record for the greatest version below the destroying one that this node can prove the substate up at.
@@ -157,12 +180,8 @@ impl<F> UpVersionSources<F> {
             let Some(candidate) = self.version_proof(tx, downed.shard, state_version)? else {
                 continue;
             };
-            let commit_proof = match &candidate.source {
-                StateVersionProofSource::Committed { block_id } => match self.commit_proof(tx, block_id) {
-                    Some(commit_proof) => commit_proof,
-                    None => continue,
-                },
-                StateVersionProofSource::Received { commit_proof } => commit_proof.clone(),
+            let Some(commit_proof_block) = self.anchor(tx, downed.shard, &candidate)? else {
+                continue;
             };
             let Some((leaf_proof, value_hash, shard_root)) = up_leaf_proof(tx, downed.shard, state_version, &downed.id)
             else {
@@ -174,7 +193,7 @@ impl<F> UpVersionSources<F> {
                 leaf_proof,
                 shard_root,
                 shard_root_proof: candidate.shard_root_proof,
-                commit_proof,
+                commit_proof_block,
             }));
         }
         Ok(None)
@@ -196,12 +215,51 @@ impl<F> UpVersionSources<F> {
         Ok(proof)
     }
 
-    fn commit_proof<TTx>(&mut self, tx: &TTx, block_id: &BlockId) -> Option<Vec<u8>>
-    where F: FnMut(&TTx, &BlockId) -> Option<Vec<u8>> {
-        self.commit_proofs
-            .entry(*block_id)
-            .or_insert_with(|| (self.commit_proof_for_block)(tx, block_id))
-            .clone()
+    /// The block whose commit proof `candidate` cites, provided that commit proof is stored or can be.
+    fn anchor<TTx>(
+        &mut self,
+        tx: &TTx,
+        shard: Shard,
+        candidate: &StateVersionProof,
+    ) -> Result<Option<BlockId>, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        F: FnMut(&TTx, &BlockId) -> Option<Vec<u8>>,
+    {
+        let key = (shard, candidate.state_version);
+        if let Some(anchor) = self.anchors.get(&key) {
+            return Ok(*anchor);
+        }
+        let anchor = match &candidate.source {
+            StateVersionProofSource::Committed { block_id } => {
+                if self.unstored.contains_key(block_id) || tx.substate_down_proof_commit_proofs_get(block_id)?.is_some()
+                {
+                    Some(*block_id)
+                } else {
+                    (self.commit_proof_for_block)(tx, block_id).map(|commit_proof| {
+                        self.unstored.insert(*block_id, commit_proof);
+                        *block_id
+                    })
+                }
+            },
+            StateVersionProofSource::Received { commit_proof } => match CommittedBlockProof::from_bytes(commit_proof) {
+                Ok(decoded) => {
+                    let block_id = BlockId::new(decoded.block_id());
+                    if !self.unstored.contains_key(&block_id) &&
+                        tx.substate_down_proof_commit_proofs_get(&block_id)?.is_none()
+                    {
+                        self.unstored.insert(block_id, commit_proof.clone());
+                    }
+                    Some(block_id)
+                },
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "Held an undecodable commit proof for {shard} v{}: {e}", candidate.state_version);
+                    None
+                },
+            },
+        };
+        self.anchors.insert(key, anchor);
+        Ok(anchor)
     }
 }
 

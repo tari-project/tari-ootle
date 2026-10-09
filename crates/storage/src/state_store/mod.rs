@@ -465,6 +465,8 @@ pub trait StateStoreReadTransaction: Sized {
         shard: Shard,
         id: &VersionedSubstateId,
     ) -> Result<Option<SubstateDownProofRecord>, StorageError>;
+    /// The encoded commit proof of `block_id` that down proof records cite, if stored.
+    fn substate_down_proof_commit_proofs_get(&self, block_id: &BlockId) -> Result<Option<Vec<u8>>, StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_get_all_from_epoch(
@@ -796,6 +798,11 @@ pub trait StateStoreWriteTransaction {
         shard: Shard,
         id: &VersionedSubstateId,
         record: &SubstateDownProofRecord,
+    ) -> Result<(), StorageError>;
+    fn substate_down_proof_commit_proofs_insert(
+        &mut self,
+        block_id: &BlockId,
+        commit_proof: &[u8],
     ) -> Result<(), StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //

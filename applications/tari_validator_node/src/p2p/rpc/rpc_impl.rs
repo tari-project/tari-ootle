@@ -235,7 +235,8 @@ fn attach_substate_proof_at<TTx: StateStoreReadTransaction>(
 }
 
 /// The encoded down proof of `substate`, completed with `exclusion`, its exclusion proof under the root the response
-/// is anchored to. `None` for a live substate, and for a down one this node recorded no proof of having been up.
+/// is anchored to. `None` for a live substate, and for a down one this node recorded no proof of having been up, or
+/// whose record's commit proof it does not hold.
 fn encode_down_proof<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     num_preshards: NumPreshards,
@@ -249,7 +250,15 @@ fn encode_down_proof<TTx: StateStoreReadTransaction>(
     let Some(record) = tx.substate_down_proofs_get(id.to_shard(num_preshards), &id)? else {
         return Ok(None);
     };
-    let proof = record.into_down_proof(exclusion.clone());
+    let Some(commit_proof) = tx.substate_down_proof_commit_proofs_get(&record.commit_proof_block)? else {
+        warn!(
+            target: LOG_TARGET,
+            "The down proof of {id} cites the commit proof of block {}, which is not stored",
+            record.commit_proof_block
+        );
+        return Ok(None);
+    };
+    let proof = record.into_down_proof(commit_proof, exclusion.clone());
     let bytes = tari_bor::serde_codec::to_vec(&proof).map_err(|e| StorageError::QueryError {
         reason: format!("encode substate down proof: {e}"),
     })?;
@@ -1091,10 +1100,13 @@ mod tests {
             leaf_proof: proof_ext(1),
             shard_root: TreeHash::new([2; 32]),
             shard_root_proof: proof_ext(2),
-            commit_proof: vec![9, 9, 9],
+            commit_proof_block: BlockId::new([9; 32]),
         };
         store
-            .with_write_tx(|tx| tx.substate_down_proofs_insert(shard, &id, &record))
+            .with_write_tx(|tx| {
+                tx.substate_down_proof_commit_proofs_insert(&record.commit_proof_block, &[9, 9, 9])?;
+                tx.substate_down_proofs_insert(shard, &id, &record)
+            })
             .unwrap();
         let tx = store.create_read_tx().unwrap();
         let mut resp = GetSubstateResponse::default();
@@ -1116,7 +1128,7 @@ mod tests {
             leaf_proof: proof_ext(1),
             shard_root: TreeHash::new([2; 32]),
             shard_root_proof: proof_ext(2),
-            commit_proof: vec![9, 9, 9],
+            commit_proof_block: BlockId::new([9; 32]),
         };
 
         {
@@ -1129,6 +1141,18 @@ mod tests {
         }
         store
             .with_write_tx(|tx| tx.substate_down_proofs_insert(id.to_shard(NUM_PRESHARDS), &id, &record))
+            .unwrap();
+        // A record whose commit proof is not stored cannot be served.
+        {
+            let tx = store.create_read_tx().unwrap();
+            assert!(
+                encode_down_proof(&tx, NUM_PRESHARDS, &down, &exclusion())
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        store
+            .with_write_tx(|tx| tx.substate_down_proof_commit_proofs_insert(&record.commit_proof_block, &[9, 9, 9]))
             .unwrap();
 
         let tx = store.create_read_tx().unwrap();

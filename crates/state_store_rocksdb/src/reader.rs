@@ -148,7 +148,7 @@ use crate::{
         state_version_proof::{BlockCommitProofCf, StateVersionProofCf},
         substate,
         substate::SubstateCf,
-        substate_down_proof::SubstateDownProofCf,
+        substate_down_proof::{DownProofCommitProofCf, SubstateDownProofCf},
         transaction::TransactionCf,
         transaction_pool::TransactionPoolCf,
         transaction_pool_state_update,
@@ -1983,6 +1983,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             .get(&(shard, id.to_substate_address()), OPERATION)
             .optional()?;
         Ok(record)
+    }
+
+    fn substate_down_proof_commit_proofs_get(&self, block_id: &BlockId) -> Result<Option<Vec<u8>>, StorageError> {
+        const OPERATION: &str = "substate_down_proof_commit_proofs_get";
+        let commit_proof = self
+            .db()
+            .cf(DownProofCommitProofCf)?
+            .get(block_id, OPERATION)
+            .optional()?;
+        Ok(commit_proof)
     }
 
     fn state_sync_rewind_points_get_all(&self) -> Result<Vec<(Shard, Version)>, StorageError> {

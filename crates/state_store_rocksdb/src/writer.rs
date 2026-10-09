@@ -158,7 +158,7 @@ use crate::{
         state_version_proof::{BlockCommitProofCf, StateVersionProofCf},
         substate,
         substate::{SubstateCf, SubstateHeadData},
-        substate_down_proof::SubstateDownProofCf,
+        substate_down_proof::{DownProofCommitProofCf, SubstateDownProofCf},
         substate_locks::BlockLockSetCf,
         transaction::TransactionCf,
         transaction_pool::TransactionPoolCf,
@@ -1834,6 +1834,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         self.db()
             .cf(SubstateDownProofCf)?
             .put(&(shard, id.to_substate_address()), record, OPERATION)?;
+        Ok(())
+    }
+
+    fn substate_down_proof_commit_proofs_insert(
+        &mut self,
+        block_id: &BlockId,
+        commit_proof: &[u8],
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "substate_down_proof_commit_proofs_insert";
+        self.db()
+            .cf(DownProofCommitProofCf)?
+            .put(block_id, &commit_proof.to_vec(), OPERATION)?;
         Ok(())
     }
 

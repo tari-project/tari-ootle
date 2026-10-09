@@ -25,6 +25,7 @@ use tari_ootle_common_types::{
     shard::Shard,
 };
 use tari_ootle_storage::{
+    DownProofAnchor,
     ShardScopedTreeStoreReader,
     ShardScopedTreeStoreWriter,
     StateStore,
@@ -32,7 +33,6 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     SubstateProofGenerator,
     SubstateProofVerifyError,
-    TrustedStateRoot,
     consensus_models::{
         CommittedBlockProof,
         StateVersionProof,
@@ -161,7 +161,7 @@ fn verify_down_at_latest<S: StateStore>(
     db: &S,
     shard_group: ShardGroup,
     target_id: &VersionedSubstateId,
-    r1: &TrustedStateRoot,
+    r1: &DownProofAnchor,
     height: u64,
 ) -> Result<(), SubstateProofVerifyError> {
     let tx = db.create_read_tx().unwrap();
@@ -188,7 +188,7 @@ fn verify_down_at_latest<S: StateStore>(
         NETWORK,
         num_preshards(),
         r1,
-        &TrustedStateRoot::from(unvalidated_tip(&r2_commit_proof)),
+        &DownProofAnchor::from(unvalidated_tip(&r2_commit_proof)),
     )
 }
 
@@ -234,7 +234,7 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
 
     // v1: the target is created; this node holds a proof of the shard at v1, as a synced node does at a proof point.
     let r1_commit_proof = commit_with_received_proof(&db, shard_group, shard, &[&target, &neighbour]);
-    let r1 = TrustedStateRoot::from(unvalidated_tip(&r1_commit_proof));
+    let r1 = DownProofAnchor::from(unvalidated_tip(&r1_commit_proof));
 
     // v2: the target is destroyed and its next version created.
     let next = build_substate_record(target.substate_id(), SubstateVersion::new(1), 2);
@@ -355,7 +355,7 @@ fn a_substate_destroyed_with_a_committed_block_proof_is_recorded() {
     let stored = tx.substate_down_proof_commit_proofs_get(&block_id).unwrap().unwrap();
     assert_eq!(stored, r1_commit_proof.to_bytes());
     assert_eq!(record.value_hash, TreeHash::new(target.state_hash().into_array()));
-    let r1 = TrustedStateRoot::from(unvalidated_tip(&r1_commit_proof));
+    let r1 = DownProofAnchor::from(unvalidated_tip(&r1_commit_proof));
     let up = record.into_down_proof(
         stored,
         SubstateProofGenerator::new(&*tx, shard_group, num_preshards(), protocol_version())
@@ -368,7 +368,7 @@ fn a_substate_destroyed_with_a_committed_block_proof_is_recorded() {
         .verify_inclusion(
             tari_state_tree::jmt_hash_scheme(protocol_version()),
             protocol_version(),
-            &TreeHash::new(r1.root.into_array()),
+            &TreeHash::new(r1.root().into_array()),
             num_preshards(),
             &target_id,
             &up.up_value_hash,

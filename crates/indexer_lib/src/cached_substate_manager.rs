@@ -31,7 +31,10 @@ use futures::{FutureExt, StreamExt, TryStreamExt, stream};
 use log::*;
 use ootle_network::Network;
 use tari_common_types::types::FixedHash;
-use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
+use tari_engine_types::{
+    ProtocolVersion,
+    substate::{Substate, SubstateId, SubstateValue},
+};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -48,10 +51,12 @@ use tari_ootle_common_types::{
     optional::Optional,
 };
 use tari_ootle_storage::{
+    DownProofAnchor,
     SubstateProofVerifyError,
     TrustedStateRoot,
     consensus_models::{CommittedBlockProof, VerifiedBlockTip},
     decode_substate_down_proof,
+    exclusion_is_shard_bound,
     verify_substate_down_proof_against_roots,
     verify_substate_value_proof_against_root,
 };
@@ -915,6 +920,13 @@ where
         down_proof: &[u8],
         down_commit_proof: &[u8],
     ) -> Result<bool, IndexerError> {
+        // An exclusion against a root committed before V2 cannot prove a Down, so such a proof is unproven whatever
+        // its commit proofs hold, and validating them would be wasted work. A member that names an earlier epoch than
+        // its anchor's only makes its own Down unproven; naming a later one fails validation below.
+        let down_epoch = decode_commit_proof(down_commit_proof)?.epoch();
+        if !exclusion_is_shard_bound(ProtocolVersion::at(self.network, down_epoch)) {
+            return Ok(false);
+        }
         let Some(down_root) = self.establish_down_proof_root(down_commit_proof, substate_id).await? else {
             return Ok(false);
         };
@@ -928,7 +940,7 @@ where
         substate_id: &SubstateId,
         version: SubstateVersion,
         down_proof: &[u8],
-        down_root: &TrustedStateRoot,
+        down_root: &DownProofAnchor,
     ) -> Result<bool, IndexerError> {
         let decoded = decode_substate_down_proof(down_proof)
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
@@ -953,8 +965,8 @@ where
         substate_id: &SubstateId,
         version: SubstateVersion,
         down_proof: &[u8],
-        up_root: &TrustedStateRoot,
-        down_root: &TrustedStateRoot,
+        up_root: &DownProofAnchor,
+        down_root: &DownProofAnchor,
     ) -> Result<bool, IndexerError> {
         match verify_substate_down_proof_against_roots(
             down_proof,
@@ -984,9 +996,9 @@ where
         &self,
         commit_proof: &[u8],
         substate_id: &SubstateId,
-    ) -> Result<Option<TrustedStateRoot>, IndexerError> {
-        match self.validated_root_from_commit_proof(commit_proof).await {
-            Ok(root) => Ok(Some(root)),
+    ) -> Result<Option<DownProofAnchor>, IndexerError> {
+        match self.validated_tip_from_commit_proof(commit_proof).await {
+            Ok(tip) => Ok(Some(tip.into())),
             Err(e @ IndexerError::SubstateProofVerificationFailed { .. }) => Err(e),
             Err(e) => {
                 debug!(
@@ -1031,7 +1043,6 @@ where
         let commit_proof_bytes = commit_proof;
         let commit_proof = decode_commit_proof(commit_proof_bytes)?;
         let epoch = commit_proof.epoch();
-        let height = commit_proof.height();
         let shard_group = commit_proof
             .shard_group()
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
@@ -1051,18 +1062,16 @@ where
             return Ok(TrustedStateRoot {
                 epoch,
                 shard_group,
-                height,
                 root,
             });
         }
 
-        self.validated_root_from_commit_proof(commit_proof_bytes).await
+        Ok(self.validated_tip_from_commit_proof(commit_proof_bytes).await?.into())
     }
 
-    /// Establishes the root of `commit_proof` by validating it against its shard group committee, so that every field
-    /// of the returned anchor, its height included, is one the committee signed. Records the root in the
-    /// trusted-root store.
-    async fn validated_root_from_commit_proof(&self, commit_proof: &[u8]) -> Result<TrustedStateRoot, IndexerError> {
+    /// Validates `commit_proof` against its shard group committee, so that every field of the returned tip, its height
+    /// included, is one the committee signed. Records the tip in the trusted-root store.
+    async fn validated_tip_from_commit_proof(&self, commit_proof: &[u8]) -> Result<VerifiedBlockTip, IndexerError> {
         let commit_proof = decode_commit_proof(commit_proof)?;
         let epoch = commit_proof.epoch();
         let shard_group = commit_proof
@@ -1091,7 +1100,7 @@ where
             warn!(target: LOG_TARGET, "Failed to record verified root at epoch {epoch} {shard_group}: {e}");
         }
 
-        Ok(TrustedStateRoot::from(verified_tip))
+        Ok(verified_tip)
     }
 }
 
@@ -1235,8 +1244,9 @@ mod tests {
         }
     }
 
-    /// Serves one committee for every shard group, except at `.1`, an epoch whose committees it does not know.
-    struct FakeEpochManager(Arc<Committee<Addr>>, Option<Epoch>);
+    /// Serves one committee for every shard group, except at `.1`, an epoch whose committees it does not know. `.2`
+    /// counts the committee lookups.
+    struct FakeEpochManager(Arc<Committee<Addr>>, Option<Epoch>, Arc<AtomicUsize>);
 
     impl EpochManagerReader for FakeEpochManager {
         type Addr = Addr;
@@ -1318,6 +1328,7 @@ mod tests {
             epoch: Epoch,
             _: ShardGroup,
         ) -> Result<Arc<Committee<Addr>>, EpochManagerError> {
+            self.2.fetch_add(1, Ordering::Relaxed);
             if self.1 == Some(epoch) {
                 return Err(EpochManagerError::NoEpochFound(epoch));
             }
@@ -1419,7 +1430,7 @@ mod tests {
         let manager = CachedSubstateManager::new(
             Network::LocalNet,
             NumPreshards::P256,
-            FakeEpochManager(Arc::new(committee), None),
+            FakeEpochManager(Arc::new(committee), None, Arc::default()),
             FakeClient(network.clone()),
             FakeCache::default(),
         );
@@ -1609,7 +1620,7 @@ mod tests {
 
         // Taken at their word, the forged anchors make a valid proof.
         let anchor =
-            |bytes: &[u8]| TrustedStateRoot::from(unvalidated_tip(&CommittedBlockProof::from_bytes(bytes).unwrap()));
+            |bytes: &[u8]| DownProofAnchor::from(unvalidated_tip(&CommittedBlockProof::from_bytes(bytes).unwrap()));
         let decoded = decode_substate_down_proof(&down_proof).unwrap();
         verify_substate_down_proof_against_roots(
             &down_proof,
@@ -1652,7 +1663,7 @@ mod tests {
     }
 
     /// A global substate up at `R1` and down at `R2`, with `R1`'s commit proof naming `up_group`.
-    fn global_down_proof(up_group: ShardGroup) -> (SubstateId, Vec<u8>, TrustedStateRoot, tari_state_tree::TreeHash) {
+    fn global_down_proof(up_group: ShardGroup) -> (SubstateId, Vec<u8>, DownProofAnchor, tari_state_tree::TreeHash) {
         use tari_engine_types::published_template::PublishedTemplateAddress;
         use tari_ootle_common_types::{VersionedSubstateId, shard::Shard};
         use tari_state_tree::{
@@ -1687,7 +1698,7 @@ mod tests {
         let (_, value, up_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(1, &target).unwrap();
         let (_, _, down_leaf) = SpreadPrefixStateTree::new(&mut store).get_proof(2, &target).unwrap();
         let up_commit_proof = unsigned_commit_proof(up_group, 2, r1.root());
-        let up_root = TrustedStateRoot::from(unvalidated_tip(
+        let up_root = DownProofAnchor::from(unvalidated_tip(
             &CommittedBlockProof::from_bytes(&up_commit_proof).unwrap(),
         ));
         let proof = tari_bor::serde_codec::to_vec(&SubstateDownProof {
@@ -1721,13 +1732,9 @@ mod tests {
     }
 
     /// The anchor `global_down_proof`'s exclusion half verifies against.
-    fn r2_anchor(r2_root: tari_state_tree::TreeHash) -> TrustedStateRoot {
-        TrustedStateRoot {
-            epoch: PROOF_EPOCH,
-            shard_group: group(1, 2),
-            height: tari_ootle_common_types::NodeHeight(4),
-            root: FixedHash::new(r2_root.into_array()),
-        }
+    fn r2_anchor(r2_root: tari_state_tree::TreeHash) -> DownProofAnchor {
+        unvalidated_tip(&CommittedBlockProof::from_bytes(&unsigned_commit_proof(group(1, 2), 4, r2_root)).unwrap())
+            .into()
     }
 
     /// Before V2 a shard-group leaf is keyed by its value, so another shard's root proves any substate absent. Such a
@@ -1746,6 +1753,51 @@ mod tests {
             .check_down_proof(&id, SubstateVersion::ZERO, &proof, &up_root, &r2_anchor(r2_root))
             .unwrap();
         assert!(!proven);
+    }
+
+    /// A down proof anchored before V2 cannot prove the Down, so it is left unproven before any committee is asked to
+    /// validate its commit proofs.
+    #[tokio::test]
+    async fn a_down_proof_anchored_before_v2_is_unproven_without_validation() {
+        let (id, proof, _, r2_root) = global_down_proof(group(1, 2));
+        for (network, consulted) in [(Network::Esmeralda, false), (Network::LocalNet, true)] {
+            let (mut manager, _) = manager(FakeNetwork {
+                down_with_proof: [(
+                    id.clone(),
+                    (SubstateVersion::ZERO, SubstateProofData {
+                        substate_value_proof: vec![],
+                        commit_proof: unsigned_commit_proof(group(1, 2), 4, r2_root),
+                        proof_epoch: 0,
+                        substate_down_proof: Some(proof.clone()),
+                        destroyed_at_state_version: Some(2),
+                    }),
+                )]
+                .into(),
+                ..Default::default()
+            });
+            manager.network = network;
+            let lookups = manager.committee_provider.2.clone();
+            let manager = manager.with_substate_proof_verification(true);
+            let result = manager
+                .get_substate_from_vn(
+                    &"vn".to_string(),
+                    SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+                )
+                .await;
+            if consulted {
+                // These commit proofs are unsigned, so validating them fails.
+                assert!(
+                    matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+                    "{network}: {result:?}"
+                );
+                assert!(lookups.load(Ordering::Relaxed) > 0, "{network}");
+            } else {
+                let (result, proof) = result.unwrap();
+                assert!(matches!(result, SubstateResult::Down { .. }));
+                assert!(proof.is_none());
+                assert_eq!(lookups.load(Ordering::Relaxed), 0, "{network}");
+            }
+        }
     }
 
     /// A head read cannot be settled by a down proof, so its down proof is not checked: an invalid one is an unproven

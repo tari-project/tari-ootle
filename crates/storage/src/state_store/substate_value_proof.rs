@@ -163,30 +163,20 @@ pub struct TrustedStateRoot {
     /// The shard group whose committee committed `root`. The root commits only to the group's own
     /// shards: a shard outside the group has no leaf in it, exactly as an empty shard has none.
     pub shard_group: ShardGroup,
-    /// The height of the block that committed `root` within its epoch, which orders two roots of one epoch.
-    pub height: NodeHeight,
     pub root: FixedHash,
 }
 
-/// A root is trusted only as the state merkle root of a commit proof validated against its shard group committee, which
-/// signs every field, height included. Two roots are ordered by their heights, so an anchor must never be built from a
-/// header that has not been validated.
 impl From<VerifiedBlockTip> for TrustedStateRoot {
     fn from(tip: VerifiedBlockTip) -> Self {
         Self {
             epoch: tip.epoch,
             shard_group: tip.shard_group,
-            height: tip.height,
             root: tip.state_merkle_root,
         }
     }
 }
 
 impl TrustedStateRoot {
-    fn position(&self) -> (Epoch, NodeHeight) {
-        (self.epoch, self.height)
-    }
-
     fn check_contains(&self, substate: &VersionedSubstateId, shard: Shard) -> Result<(), SubstateProofVerifyError> {
         if self.shard_group.contains_or_global(&shard) {
             return Ok(());
@@ -196,6 +186,48 @@ impl TrustedStateRoot {
             shard,
             shard_group: self.shard_group,
         })
+    }
+}
+
+/// One of the two roots a down proof is verified against, with the height of the block that committed it.
+///
+/// A down proof orders its roots by height, and a trusted root vouches for a root, not for the height a header claims
+/// for it. An anchor is therefore built only from a [`VerifiedBlockTip`], whose every field, height included, the shard
+/// group committee signed.
+#[derive(Debug, Clone, Copy)]
+pub struct DownProofAnchor {
+    root: TrustedStateRoot,
+    height: NodeHeight,
+}
+
+impl From<VerifiedBlockTip> for DownProofAnchor {
+    fn from(tip: VerifiedBlockTip) -> Self {
+        Self {
+            root: tip.into(),
+            height: tip.height,
+        }
+    }
+}
+
+impl DownProofAnchor {
+    pub fn epoch(&self) -> Epoch {
+        self.root.epoch
+    }
+
+    pub fn shard_group(&self) -> ShardGroup {
+        self.root.shard_group
+    }
+
+    pub fn height(&self) -> NodeHeight {
+        self.height
+    }
+
+    pub fn root(&self) -> FixedHash {
+        self.root.root
+    }
+
+    fn position(&self) -> (Epoch, NodeHeight) {
+        (self.epoch(), self.height)
     }
 }
 
@@ -274,11 +306,11 @@ pub fn verify_substate_down_proof_against_roots(
     version: SubstateVersion,
     network: Network,
     num_preshards: NumPreshards,
-    up_root: &TrustedStateRoot,
-    down_root: &TrustedStateRoot,
+    up_root: &DownProofAnchor,
+    down_root: &DownProofAnchor,
 ) -> Result<(), SubstateProofVerifyError> {
     // Whatever else the proof holds, an exclusion against such a root cannot show the substate went down.
-    let down_protocol_version = ProtocolVersion::at(network, down_root.epoch);
+    let down_protocol_version = ProtocolVersion::at(network, down_root.epoch());
     if !exclusion_is_shard_bound(down_protocol_version) {
         return Err(SubstateProofVerifyError::DownProofExclusionNotShardBound {
             protocol_version: down_protocol_version,
@@ -291,53 +323,53 @@ pub fn verify_substate_down_proof_against_roots(
     // block.
     let up_anchor = CommittedBlockProof::from_bytes(&proof.up_commit_proof)
         .map_err(|e| SubstateProofVerifyError::Decode(e.to_string()))?;
-    if up_anchor.state_merkle_root() != up_root.root ||
-        up_anchor.epoch() != up_root.epoch ||
-        up_anchor.height() != up_root.height
+    if up_anchor.state_merkle_root() != up_root.root() ||
+        up_anchor.epoch() != up_root.epoch() ||
+        up_anchor.height() != up_root.height()
     {
         return Err(SubstateProofVerifyError::DownProofAnchorMismatch);
     }
 
     let versioned_id = VersionedSubstateId::new(substate_id.clone(), version);
     let shard = versioned_id.to_shard(num_preshards);
-    up_root.check_contains(&versioned_id, shard)?;
-    down_root.check_contains(&versioned_id, shard)?;
+    up_root.root.check_contains(&versioned_id, shard)?;
+    down_root.root.check_contains(&versioned_id, shard)?;
 
     // Every shard group commits the global shard on its own chain, so two groups' copies of the global tree are not
     // known to agree: a global substate's inclusion under one group's root and exclusion under another's does not show
     // it went down. An honest node can span a reshard this way, so this leaves the Down unproven rather than refuting
     // it.
-    if shard.is_global() && up_root.shard_group != down_root.shard_group {
+    if shard.is_global() && up_root.shard_group() != down_root.shard_group() {
         return Err(SubstateProofVerifyError::DownProofGlobalAcrossShardGroups {
-            up_shard_group: up_root.shard_group,
-            down_shard_group: down_root.shard_group,
+            up_shard_group: up_root.shard_group(),
+            down_shard_group: down_root.shard_group(),
         });
     }
     // Heights number the blocks of one shard group's chain, so two roots of one epoch are comparable only within a
     // group. Groups of one epoch do not overlap, so no honest pair of roots holding the same shard differs here.
-    if up_root.epoch == down_root.epoch && up_root.shard_group != down_root.shard_group {
+    if up_root.epoch() == down_root.epoch() && up_root.shard_group() != down_root.shard_group() {
         return Err(SubstateProofVerifyError::DownProofShardGroupMismatch {
-            epoch: up_root.epoch,
-            up_shard_group: up_root.shard_group,
-            down_shard_group: down_root.shard_group,
+            epoch: up_root.epoch(),
+            up_shard_group: up_root.shard_group(),
+            down_shard_group: down_root.shard_group(),
         });
     }
     if up_root.position() >= down_root.position() {
         return Err(SubstateProofVerifyError::DownProofNotOrdered {
-            up_epoch: up_root.epoch,
-            up_height: up_root.height,
-            down_epoch: down_root.epoch,
-            down_height: down_root.height,
+            up_epoch: up_root.epoch(),
+            up_height: up_root.height(),
+            down_epoch: down_root.epoch(),
+            down_height: down_root.height(),
         });
     }
 
-    let up_protocol_version = ProtocolVersion::at(network, up_root.epoch);
+    let up_protocol_version = ProtocolVersion::at(network, up_root.epoch());
     proof
         .up
         .verify_inclusion(
             jmt_hash_scheme(up_protocol_version),
             up_protocol_version,
-            &TreeHash::new(up_root.root.into_array()),
+            &TreeHash::new(up_root.root().into_array()),
             num_preshards,
             &versioned_id,
             &proof.up_value_hash,
@@ -349,7 +381,7 @@ pub fn verify_substate_down_proof_against_roots(
         .verify_exclusion(
             jmt_hash_scheme(down_protocol_version),
             down_protocol_version,
-            &TreeHash::new(down_root.root.into_array()),
+            &TreeHash::new(down_root.root().into_array()),
             num_preshards,
             &versioned_id,
         )
@@ -364,7 +396,7 @@ pub fn verify_substate_down_proof_against_roots(
 /// From V2 the shard-group tree keys each leaf by its shard, so a proof's level-2 path pins the shard it speaks for.
 /// Before that a leaf is keyed by its value alone, and any shard's genuine root and state version prove the absence
 /// of a substate that is live in another shard. Inclusion is unaffected: a substate's leaf key is unique to its shard.
-fn exclusion_is_shard_bound(protocol_version: ProtocolVersion) -> bool {
+pub fn exclusion_is_shard_bound(protocol_version: ProtocolVersion) -> bool {
     match protocol_version {
         ProtocolVersion::V0 | ProtocolVersion::V1 => false,
         ProtocolVersion::V2 | ProtocolVersion::V3 => true,
@@ -513,7 +545,6 @@ mod tests {
             &TrustedStateRoot {
                 epoch: Epoch(1),
                 shard_group: other_group,
-                height: NodeHeight(1),
                 root: FixedHash::new(other_group_root.into_array()),
             },
         );
@@ -525,7 +556,7 @@ mod tests {
 
     /// An anchor is built only from a validated tip, and carries the height the committee signed.
     #[test]
-    fn a_trusted_root_carries_its_validated_tip() {
+    fn a_down_proof_anchor_carries_its_validated_tip() {
         let tip = VerifiedBlockTip {
             epoch: Epoch(3),
             shard_group: ShardGroup::new(Shard::from_u32(1), Shard::from_u32(2)),
@@ -534,11 +565,11 @@ mod tests {
             epoch_hash: FixedHash::from([2; 32]),
             state_merkle_root: FixedHash::from([3; 32]),
         };
-        let root = TrustedStateRoot::from(tip);
-        assert_eq!(root.epoch, tip.epoch);
-        assert_eq!(root.shard_group, tip.shard_group);
-        assert_eq!(root.height, tip.height);
-        assert_eq!(root.root, tip.state_merkle_root);
+        let anchor = DownProofAnchor::from(tip);
+        assert_eq!(anchor.epoch(), tip.epoch);
+        assert_eq!(anchor.shard_group(), tip.shard_group);
+        assert_eq!(anchor.height(), tip.height);
+        assert_eq!(anchor.root(), tip.state_merkle_root);
     }
 
     mod down_proof {
@@ -699,17 +730,20 @@ mod tests {
                 commit_proof(self.group(), EPOCH, height, self.r1_tree.root())
             }
 
-            fn r1(&self, height: u64) -> TrustedStateRoot {
-                TrustedStateRoot::from(unvalidated_tip(&self.r1_commit_proof(height)))
+            fn r1_tip(&self, height: u64) -> VerifiedBlockTip {
+                unvalidated_tip(&self.r1_commit_proof(height))
             }
 
-            fn r2(&self) -> TrustedStateRoot {
-                TrustedStateRoot::from(unvalidated_tip(&commit_proof(
-                    self.group(),
-                    EPOCH,
-                    4,
-                    self.r2_tree.root(),
-                )))
+            fn r1(&self, height: u64) -> DownProofAnchor {
+                self.r1_tip(height).into()
+            }
+
+            fn r2_tip(&self) -> VerifiedBlockTip {
+                unvalidated_tip(&commit_proof(self.group(), EPOCH, 4, self.r2_tree.root()))
+            }
+
+            fn r2(&self) -> DownProofAnchor {
+                self.r2_tip().into()
             }
 
             /// `(proof, value hash)` of `id` in the substate's shard at version 1, under R1.
@@ -743,7 +777,7 @@ mod tests {
                 &self,
                 proof: &SubstateDownProof,
                 id: &VersionedSubstateId,
-                r1: TrustedStateRoot,
+                r1: DownProofAnchor,
             ) -> Result<(), SubstateProofVerifyError> {
                 verify_substate_down_proof_against_roots(
                     &tari_bor::serde_codec::to_vec(proof).unwrap(),
@@ -922,7 +956,7 @@ mod tests {
                         down_leaf.clone(),
                     ),
                 };
-                let down_root = TrustedStateRoot::from(unvalidated_tip(&commit_proof(
+                let down_root = DownProofAnchor::from(unvalidated_tip(&commit_proof(
                     down_group,
                     down_epoch,
                     4,
@@ -934,7 +968,7 @@ mod tests {
                     target.version(),
                     NETWORK,
                     NUM_PRESHARDS,
-                    &TrustedStateRoot::from(unvalidated_tip(&up_commit_proof)),
+                    &DownProofAnchor::from(unvalidated_tip(&up_commit_proof)),
                     &down_root,
                 )
             };
@@ -962,10 +996,11 @@ mod tests {
             for epoch in [Epoch(1), Epoch(11925), Epoch(20000)] {
                 let protocol_version = ProtocolVersion::at(Network::Esmeralda, epoch);
                 assert!(matches!(protocol_version, ProtocolVersion::V0 | ProtocolVersion::V1));
-                let mut up_root = scenario.r1(2);
-                let mut down_root = scenario.r2();
-                up_root.epoch = epoch;
-                down_root.epoch = epoch;
+                let mut up_tip = scenario.r1_tip(2);
+                let mut down_tip = scenario.r2_tip();
+                up_tip.epoch = epoch;
+                down_tip.epoch = epoch;
+                let (up_root, down_root) = (DownProofAnchor::from(up_tip), DownProofAnchor::from(down_tip));
                 let result = verify_substate_down_proof_against_roots(
                     &proof,
                     target.substate_id(),
@@ -1000,9 +1035,10 @@ mod tests {
             let mut scenario = Scenario::new(false, destroyed_and_replaced);
             let target = scenario.target.clone();
             let proof = scenario.honest(&target);
-            let mut r2 = scenario.r2();
-            r2.shard_group = ShardGroup::new(Shard::from_u32(1), Shard::from_u32(NUM_PRESHARDS.as_u32()));
-            assert_ne!(r2.shard_group, scenario.group());
+            let mut r2_tip = scenario.r2_tip();
+            r2_tip.shard_group = ShardGroup::new(Shard::from_u32(1), Shard::from_u32(NUM_PRESHARDS.as_u32()));
+            assert_ne!(r2_tip.shard_group, scenario.group());
+            let r2 = DownProofAnchor::from(r2_tip);
             let result = verify_substate_down_proof_against_roots(
                 &tari_bor::serde_codec::to_vec(&proof).unwrap(),
                 target.substate_id(),
@@ -1027,8 +1063,9 @@ mod tests {
             let target = scenario.target.clone();
             let proof = scenario.honest(&target);
             let elsewhere = (1..=4).map(Shard::from_u32).find(|s| *s != scenario.shard).unwrap();
-            let mut r2 = scenario.r2();
-            r2.shard_group = ShardGroup::new(elsewhere, elsewhere);
+            let mut r2_tip = scenario.r2_tip();
+            r2_tip.shard_group = ShardGroup::new(elsewhere, elsewhere);
+            let r2 = DownProofAnchor::from(r2_tip);
             let result = verify_substate_down_proof_against_roots(
                 &tari_bor::serde_codec::to_vec(&proof).unwrap(),
                 target.substate_id(),

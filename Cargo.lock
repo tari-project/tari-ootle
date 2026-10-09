@@ -13052,7 +13052,6 @@ dependencies = [
 name = "tari_state_tree"
 version = "0.46.0"
 dependencies = [
- "indexmap 2.14.2",
  "log",
  "minicbor",
  "serde",

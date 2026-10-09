@@ -29,9 +29,6 @@ pub enum ProtocolVersion {
     V2 = 2,
 }
 
-/// The epoch at which esmeralda moves to [`ProtocolVersion::V2`].
-pub const ESMERALDA_V2_ACTIVATION_EPOCH: Epoch = Epoch(u64::MAX); // TODO(release owner): set before merge
-
 impl ProtocolVersion {
     /// The schema activation schedule for `network`, ordered by activation epoch ascending. Entry at
     /// index 0 is the genesis schema, which that network starts under.
@@ -54,11 +51,7 @@ impl ProtocolVersion {
             Network::StageNet => &[(Epoch(0), Self::V2)],
             Network::NextNet => &[(Epoch(0), Self::V2)],
             Network::Igor => &[(Epoch(0), Self::V2)],
-            Network::Esmeralda => &[
-                (Epoch(0), Self::V0),
-                (Epoch(11925), Self::V1),
-                (ESMERALDA_V2_ACTIVATION_EPOCH, Self::V2),
-            ],
+            Network::Esmeralda => &[(Epoch(0), Self::V0), (Epoch(11925), Self::V1)],
             Network::LocalNet => &[(Epoch(0), Self::V2)],
         }
     }
@@ -288,17 +281,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "fails until ESMERALDA_V2_ACTIVATION_EPOCH is set; run before merge"]
-    fn esmeralda_v2_activation_epoch_is_set() {
-        assert_ne!(
-            ESMERALDA_V2_ACTIVATION_EPOCH,
-            Epoch(u64::MAX),
-            "the release owner must set ESMERALDA_V2_ACTIVATION_EPOCH before this release merges"
-        );
-        assert!(ESMERALDA_V2_ACTIVATION_EPOCH > Epoch(11925));
-    }
-
-    #[test]
     fn every_network_but_esmeralda_starts_at_v2() {
         for network in all_networks() {
             let expected = if network == Network::Esmeralda {
@@ -308,18 +290,6 @@ mod tests {
             };
             assert_eq!(ProtocolVersion::genesis(network), expected, "{network}");
         }
-    }
-
-    #[test]
-    fn esmeralda_reaches_v2_at_its_activation_epoch() {
-        assert_eq!(
-            ProtocolVersion::newest_scheduled_activation(Network::Esmeralda),
-            Some((ESMERALDA_V2_ACTIVATION_EPOCH, ProtocolVersion::V2))
-        );
-        assert_eq!(
-            ProtocolVersion::at(Network::Esmeralda, ESMERALDA_V2_ACTIVATION_EPOCH),
-            ProtocolVersion::V2
-        );
     }
 
     #[test]

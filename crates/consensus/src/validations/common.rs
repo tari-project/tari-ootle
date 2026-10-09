@@ -509,7 +509,6 @@ mod tests {
     use std::collections::BTreeSet;
 
     use tari_consensus_types::{BlockId, ProposalCertificate, ShardGroupAccumulatedData};
-    use tari_engine_types::ESMERALDA_V2_ACTIVATION_EPOCH;
     use tari_ootle_common_types::ExtraData;
 
     use super::*;
@@ -545,14 +544,14 @@ mod tests {
     }
 
     #[test]
-    fn esmeralda_requires_v2_from_its_activation_epoch() {
-        let activation = ESMERALDA_V2_ACTIVATION_EPOCH;
-        let before = Epoch(activation.as_u64() - 1);
-        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V1, activation));
-        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V0, activation));
-        assert!(!is_rejected(Network::Esmeralda, ProtocolVersion::V2, activation));
-        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V2, before));
-        assert!(!is_rejected(Network::Esmeralda, ProtocolVersion::V1, before));
+    fn esmeralda_requires_the_version_its_schedule_names() {
+        let v1_activation = Epoch(11925);
+        let before = Epoch(v1_activation.as_u64() - 1);
+        assert!(!is_rejected(Network::Esmeralda, ProtocolVersion::V0, before));
+        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V1, before));
+        assert!(!is_rejected(Network::Esmeralda, ProtocolVersion::V1, v1_activation));
+        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V0, v1_activation));
+        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V2, v1_activation));
     }
 
     #[test]

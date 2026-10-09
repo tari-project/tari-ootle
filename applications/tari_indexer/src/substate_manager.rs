@@ -174,6 +174,12 @@ impl SubstateManager {
         self
     }
 
+    /// See [`CachedSubstateManager::with_cache_writes`].
+    pub fn with_cache_writes(mut self, enabled: bool) -> Self {
+        self.cache_manager = self.cache_manager.with_cache_writes(enabled);
+        self
+    }
+
     /// Whether substates served by this manager are verified against the shard group committee.
     pub fn verifies_substates(&self) -> bool {
         self.cache_manager.verifies_substates()

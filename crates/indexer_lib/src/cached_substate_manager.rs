@@ -198,6 +198,10 @@ pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     /// When set, lets a read skip re-validating a served commit proof whose root is already trusted,
     /// and is warmed with newly-validated roots. See [`TrustedRootStore`].
     trusted_root_store: Option<Arc<dyn TrustedRootStore>>,
+    /// Whether this manager writes what it fetches into the substate cache. A manager that does not verify proofs
+    /// must not write into a cache that a verifying manager shares, or its unverified results would be served as
+    /// that manager's.
+    cache_writes: bool,
     /// Tips of commit proofs this manager validated, by the block they commit. A block id is the hash of the header
     /// the committee signed, so a later commit proof of the same block yields the same tip. Bounded by
     /// [`VALIDATED_TIP_MEMO_SIZE`].
@@ -232,6 +236,7 @@ where
             negative_cache_ttl: DEFAULT_NEGATIVE_CACHE_TTL,
             verify_substate_proofs: false,
             trusted_root_store: None,
+            cache_writes: true,
             validated_tips: Arc::default(),
             num_preshards,
             #[cfg(feature = "metrics")]
@@ -251,6 +256,13 @@ where
 
     pub fn with_substate_proof_verification(mut self, enabled: bool) -> Self {
         self.verify_substate_proofs = enabled;
+        self
+    }
+
+    /// Whether what this manager fetches is written into its substate cache (on by default). It still reads the
+    /// cache either way.
+    pub fn with_cache_writes(mut self, enabled: bool) -> Self {
+        self.cache_writes = enabled;
         self
     }
 
@@ -346,7 +358,7 @@ where
             let admissible = lookup_result.verified ||
                 !self.verify_substate_proofs ||
                 matches!(lookup_result.result, SubstateResult::DoesNotExist);
-            if is_head && admissible {
+            if self.cache_writes && is_head && admissible {
                 let version = lookup_result.result.version();
                 debug!(target: LOG_TARGET, "Updating cached substate {} with version {}", substate_id, version.display());
                 let entry = SubstateCacheEntryRef {
@@ -642,7 +654,7 @@ where
                     };
                     // An unverified entry is not cached while verification is on, so the next read
                     // retries for a proven copy instead of pinning an unproven value.
-                    if verified || !self.verify_substate_proofs {
+                    if self.cache_writes && (verified || !self.verify_substate_proofs) {
                         self.substate_cache
                             .write(&substate.substate_id, entry, watermark)
                             .await?;
@@ -2236,6 +2248,34 @@ mod tests {
         };
         assert_eq!(found.len(), ids.len());
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+    }
+
+    /// A manager without cache writes, as the dry-run manager runs, leaves a cache it shares untouched however it
+    /// reads, while one with them writes what it fetched without verification as before.
+    #[tokio::test]
+    async fn a_manager_without_cache_writes_leaves_the_cache_untouched() {
+        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        for cache_writes in [false, true] {
+            let (manager, _) = manager(FakeNetwork {
+                live: live(&ids),
+                down_in_batches: HashSet::from([ids[1].clone()]),
+                ..Default::default()
+            });
+            let manager = manager
+                .with_substate_proof_verification(false)
+                .with_cache_writes(cache_writes);
+
+            manager.fetch_and_cache_substates(&ids).await.unwrap();
+            manager.get_substate(&ids[2], None).await.unwrap();
+            manager.get_input_substates(&requirements(&ids)).await.unwrap();
+
+            let cached = manager.substate_cache.0.lock().unwrap().len();
+            if cache_writes {
+                assert_eq!(cached, ids.len());
+            } else {
+                assert_eq!(cached, 0);
+            }
+        }
     }
 
     /// One member answering a batch with an unproven Down cannot hide a substate the committee holds up.

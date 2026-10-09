@@ -1198,8 +1198,8 @@ mod tests {
         single_requests: AtomicUsize,
         /// Single reads of these fail.
         failing_single_reads: HashSet<SubstateId>,
-        /// Members that never answer a proven read.
-        silent_members: HashSet<Addr>,
+        /// Members whose proven reads fail at once, so that a read can only settle on another member's answer.
+        failing_members: HashSet<Addr>,
     }
 
     #[derive(Clone)]
@@ -1252,9 +1252,12 @@ mod tests {
             if self
                 .1
                 .as_ref()
-                .is_some_and(|address| self.0.silent_members.contains(address))
+                .is_some_and(|address| self.0.failing_members.contains(address))
             {
-                return std::future::pending().await;
+                return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
+                    "{} does not answer",
+                    substate_req.substate_id()
+                )));
             }
             if let Some((version, proof)) = self.0.down_with_proof.get(substate_req.substate_id()) {
                 return Ok((SubstateResult::Down { version: *version }, Some(proof.clone())));
@@ -1916,13 +1919,14 @@ mod tests {
     }
 
     /// A committee of `keys` (`vn0`, `vn1`, ...) of which `vn0` serves an honest down proof of a global substate,
-    /// both of its commit proofs signed by all but the last member, and `silent` never answer. Verification is on.
+    /// both of its commit proofs signed by all but the last member, and `failing` fail every proven read. Verification
+    /// is on.
     fn signed_down_proof_setup(
         keys: &[(
             tari_crypto::ristretto::RistrettoSecretKey,
             tari_crypto::ristretto::RistrettoPublicKey,
         )],
-        silent: HashSet<Addr>,
+        failing: HashSet<Addr>,
     ) -> (
         SubstateId,
         CachedSubstateManager<FakeEpochManager, FakeClient, FakeCache>,
@@ -1957,7 +1961,7 @@ mod tests {
                 }),
             )]
             .into(),
-            silent_members: silent,
+            failing_members: failing,
             ..Default::default()
         });
         manager.committee_provider.0 = Arc::new(committee);
@@ -1965,7 +1969,7 @@ mod tests {
     }
 
     /// One member's valid down proof, with both commit proofs signed by a quorum of the committee, settles a read for
-    /// the version it names, verified, while the rest of the committee never answers. It does not settle a head read.
+    /// the version it names, verified, while every other member fails. It does not settle a head read.
     #[tokio::test]
     async fn one_members_valid_down_proof_settles_a_read_for_its_version() {
         let keys = (1..=4)

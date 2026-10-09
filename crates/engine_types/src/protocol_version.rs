@@ -24,16 +24,13 @@ pub enum ProtocolVersion {
     /// a quorum-signed header fixes the version every shard of the group is at. Block IDs commit to the version.
     V1 = 1,
     /// Each block header commits to a transaction merkle root over the decision it reached for every transaction it
-    /// finalizes.
+    /// finalizes, and each leaf of a block's state merkle root commits to its shard as well as its shard root and
+    /// state version, so a substate proof can only cite the state of the shard the substate lives in.
     V2 = 2,
-    /// Each leaf of a block's state merkle root commits to its shard as well as its shard root and state version, so a
-    /// substate proof can only cite the state of the shard the substate lives in.
-    V3 = 3,
 }
 
-/// The epoch at which esmeralda moves to [`ProtocolVersion::V3`].
-// TODO(release owner): set before merge. `u64::MAX` keeps esmeralda on V1 indefinitely.
-pub const ESMERALDA_V3_ACTIVATION_EPOCH: Epoch = Epoch(u64::MAX);
+/// The epoch at which esmeralda moves to [`ProtocolVersion::V2`].
+pub const ESMERALDA_V2_ACTIVATION_EPOCH: Epoch = Epoch(u64::MAX); // TODO(release owner): set before merge
 
 impl ProtocolVersion {
     /// The schema activation schedule for `network`, ordered by activation epoch ascending. Entry at
@@ -53,16 +50,16 @@ impl ProtocolVersion {
     /// one.
     const fn activations(network: Network) -> &'static [(Epoch, Self)] {
         match network {
-            Network::MainNet => &[(Epoch(0), Self::V3)],
-            Network::StageNet => &[(Epoch(0), Self::V3)],
-            Network::NextNet => &[(Epoch(0), Self::V3)],
-            Network::Igor => &[(Epoch(0), Self::V3)],
+            Network::MainNet => &[(Epoch(0), Self::V2)],
+            Network::StageNet => &[(Epoch(0), Self::V2)],
+            Network::NextNet => &[(Epoch(0), Self::V2)],
+            Network::Igor => &[(Epoch(0), Self::V2)],
             Network::Esmeralda => &[
                 (Epoch(0), Self::V0),
                 (Epoch(11925), Self::V1),
-                (ESMERALDA_V3_ACTIVATION_EPOCH, Self::V3),
+                (ESMERALDA_V2_ACTIVATION_EPOCH, Self::V2),
             ],
-            Network::LocalNet => &[(Epoch(0), Self::V3)],
+            Network::LocalNet => &[(Epoch(0), Self::V2)],
         }
     }
 
@@ -90,7 +87,6 @@ impl ProtocolVersion {
             0 => Some(Self::V0),
             1 => Some(Self::V1),
             2 => Some(Self::V2),
-            3 => Some(Self::V3),
             _ => None,
         }
     }
@@ -292,37 +288,37 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "fails until ESMERALDA_V3_ACTIVATION_EPOCH is set; run before merge"]
-    fn esmeralda_v3_activation_epoch_is_set() {
+    #[ignore = "fails until ESMERALDA_V2_ACTIVATION_EPOCH is set; run before merge"]
+    fn esmeralda_v2_activation_epoch_is_set() {
         assert_ne!(
-            ESMERALDA_V3_ACTIVATION_EPOCH,
+            ESMERALDA_V2_ACTIVATION_EPOCH,
             Epoch(u64::MAX),
-            "the release owner must set ESMERALDA_V3_ACTIVATION_EPOCH before this release merges"
+            "the release owner must set ESMERALDA_V2_ACTIVATION_EPOCH before this release merges"
         );
-        assert!(ESMERALDA_V3_ACTIVATION_EPOCH > Epoch(11925));
+        assert!(ESMERALDA_V2_ACTIVATION_EPOCH > Epoch(11925));
     }
 
     #[test]
-    fn every_network_but_esmeralda_starts_at_v3() {
+    fn every_network_but_esmeralda_starts_at_v2() {
         for network in all_networks() {
             let expected = if network == Network::Esmeralda {
                 ProtocolVersion::V0
             } else {
-                ProtocolVersion::V3
+                ProtocolVersion::V2
             };
             assert_eq!(ProtocolVersion::genesis(network), expected, "{network}");
         }
     }
 
     #[test]
-    fn esmeralda_reaches_v3_at_its_activation_epoch() {
+    fn esmeralda_reaches_v2_at_its_activation_epoch() {
         assert_eq!(
             ProtocolVersion::newest_scheduled_activation(Network::Esmeralda),
-            Some((ESMERALDA_V3_ACTIVATION_EPOCH, ProtocolVersion::V3))
+            Some((ESMERALDA_V2_ACTIVATION_EPOCH, ProtocolVersion::V2))
         );
         assert_eq!(
-            ProtocolVersion::at(Network::Esmeralda, ESMERALDA_V3_ACTIVATION_EPOCH),
-            ProtocolVersion::V3
+            ProtocolVersion::at(Network::Esmeralda, ESMERALDA_V2_ACTIVATION_EPOCH),
+            ProtocolVersion::V2
         );
     }
 

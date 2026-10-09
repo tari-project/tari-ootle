@@ -399,7 +399,7 @@ pub fn verify_substate_down_proof_against_roots(
 pub fn exclusion_is_shard_bound(protocol_version: ProtocolVersion) -> bool {
     match protocol_version {
         ProtocolVersion::V0 | ProtocolVersion::V1 => false,
-        ProtocolVersion::V2 | ProtocolVersion::V3 => true,
+        ProtocolVersion::V2 => true,
     }
 }
 
@@ -579,7 +579,7 @@ mod tests {
 
         use super::*;
 
-        /// V3 on every epoch.
+        /// V2 on every epoch.
         const NETWORK: Network = Network::LocalNet;
         const EPOCH: Epoch = Epoch(1);
 
@@ -810,7 +810,7 @@ mod tests {
         }
 
         /// A live substate is absent from every shard but its own, so a sibling shard's genuine tree "proves" its
-        /// absence. Under V3 that tree's leaf names the sibling, so the proof fails.
+        /// absence. Under V2 that tree's leaf names the sibling, so the proof fails.
         #[test]
         fn an_exclusion_lifted_from_another_shard_is_rejected() {
             let mut scenario = Scenario::new(false, |_| vec![]);
@@ -892,7 +892,7 @@ mod tests {
             );
         }
 
-        /// Destroying the only substate of a shard leaves the shard at the empty-tree root, which its V3 leaf binds to
+        /// Destroying the only substate of a shard leaves the shard at the empty-tree root, which its V2 leaf binds to
         /// the shard and its state version.
         #[test]
         fn a_shard_emptied_by_the_destruction_proves_it_down() {
@@ -1025,7 +1025,6 @@ mod tests {
             assert!(!exclusion_is_shard_bound(ProtocolVersion::V0));
             assert!(!exclusion_is_shard_bound(ProtocolVersion::V1));
             assert!(exclusion_is_shard_bound(ProtocolVersion::V2));
-            assert!(exclusion_is_shard_bound(ProtocolVersion::V3));
         }
 
         /// Groups of one epoch do not overlap, so no honest pair of roots of one epoch holds the substate's shard in

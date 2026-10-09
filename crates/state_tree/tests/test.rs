@@ -302,12 +302,7 @@ fn v1_shard_group_root_is_the_set_of_shard_state_leaves() {
 
 #[test]
 fn a_shard_listed_twice_is_rejected() {
-    for protocol_version in [
-        ProtocolVersion::V0,
-        ProtocolVersion::V1,
-        ProtocolVersion::V2,
-        ProtocolVersion::V3,
-    ] {
+    for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1, ProtocolVersion::V2] {
         let result = compute_shard_group_root(protocol_version, [
             (Shard::from_u32(1), hash_value_from_seed(1), 1),
             (Shard::from_u32(1), hash_value_from_seed(2), 2),
@@ -438,11 +433,6 @@ fn assert_substate_in_an_empty_shard_is_provably_absent(protocol_version: Protoc
 #[test]
 fn v2_substate_in_an_empty_shard_is_provably_absent() {
     assert_substate_in_an_empty_shard_is_provably_absent(ProtocolVersion::V2);
-}
-
-#[test]
-fn v3_substate_in_an_empty_shard_is_provably_absent() {
-    assert_substate_in_an_empty_shard_is_provably_absent(ProtocolVersion::V3);
 }
 
 #[test]
@@ -653,11 +643,6 @@ fn v2_exclusion_proof_against_another_shards_root_is_rejected() {
     assert_exclusion_proof_against_another_shards_root_is_rejected(ProtocolVersion::V2);
 }
 
-#[test]
-fn v3_exclusion_proof_against_another_shards_root_is_rejected() {
-    assert_exclusion_proof_against_another_shards_root_is_rejected(ProtocolVersion::V3);
-}
-
 /// Before V2 a shard-group leaf is keyed by its value, not its shard, so a sibling shard's genuine root proves the
 /// absence of a substate that is live in its own shard. Such exclusion proofs verify against any root committed
 /// before V2, which is why a down proof whose exclusion root precedes V2 is not taken as proof of a Down.
@@ -689,6 +674,43 @@ fn v1_exclusion_proof_against_another_shards_root_verifies() {
     .unwrap();
     let (_, sibling_root_proof) = tree.get_proof(sibling_shard).unwrap();
     SubstateValueProof::new(sibling_root, 1, sibling_root_proof, sibling_leaf_proof)
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            ProtocolVersion::V1,
+            &tree.root(),
+            NUM_PRESHARDS,
+            &substate,
+        )
+        .unwrap();
+}
+
+/// Before V2 two empty shards share a leaf, so the empty-tree proof of one shard's leaf proves the absence of a
+/// substate that is live in another shard of the group.
+#[test]
+fn v1_exclusion_proof_against_another_empty_shard_verifies() {
+    use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, SubstateValueProof, memory_store::MemoryTreeStore};
+
+    let substate = make_value(2);
+    let own_shard = substate.to_shard(NUM_PRESHARDS);
+    let sibling_shard = sibling_of(own_shard);
+
+    let mut own = MemoryTreeStore::<StateTreePayload>::new();
+    let own_root = SpreadPrefixStateTree::new(&mut own)
+        .put_substate_changes(None, 1, vec![change(1, Some(30)), change(2, Some(40))])
+        .unwrap();
+    let mut empty = MemoryTreeStore::<StateTreePayload>::new();
+    SpreadPrefixStateTree::new(&mut empty)
+        .put_substate_changes(None, 1, vec![])
+        .unwrap();
+    let (_, _, empty_leaf_proof) = SpreadPrefixStateTree::new(&mut empty).get_proof(1, &substate).unwrap();
+
+    let tree = ShardGroupRootTree::build(ProtocolVersion::V1, [
+        (own_shard, own_root, 1),
+        (sibling_shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0),
+    ])
+    .unwrap();
+    let (_, sibling_root_proof) = tree.get_proof(sibling_shard).unwrap();
+    SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, 0, sibling_root_proof, empty_leaf_proof)
         .verify_exclusion(
             JmtHashScheme::V1,
             ProtocolVersion::V1,

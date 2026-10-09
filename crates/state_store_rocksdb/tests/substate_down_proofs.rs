@@ -232,11 +232,12 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
     let target_id = target.to_versioned_substate_id();
     let neighbour = build_substate_record(&substate_id_seed((SEED << 24) | 1), SubstateVersion::ZERO, 1);
 
-    // v1: the target is created; this node holds a proof of the shard at v1, as a synced node does at a proof point.
+    // State version 1: the target is created; this node holds a proof of the shard at it, as a synced node does at
+    // a proof point.
     let r1_commit_proof = commit_with_received_proof(&db, shard_group, shard, &[&target, &neighbour]);
     let r1 = DownProofAnchor::from(unvalidated_tip(&r1_commit_proof));
 
-    // v2: the target is destroyed and its next version created.
+    // State version 2: the target is destroyed and its next version created.
     let next = build_substate_record(target.substate_id(), SubstateVersion::new(1), 2);
     {
         let mut tx = db.create_write_tx().unwrap();
@@ -253,8 +254,8 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
 
     verify_down_at_latest(&db, shard_group, &target_id, &r1, 4).unwrap();
 
-    // v3: the next version is destroyed. It was created at v2, a version this node holds no usable proof of: its
-    // only candidate is a block this node can no longer build a commit proof for.
+    // State version 3: the next version is destroyed. It was created at state version 2, a version this node holds
+    // no usable proof of: its only candidate is a block this node can no longer build a commit proof for.
     {
         let mut tx = db.create_write_tx().unwrap();
         tx.state_version_proofs_insert(&StateVersionProof {

@@ -509,7 +509,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use tari_consensus_types::{BlockId, ProposalCertificate, ShardGroupAccumulatedData};
-    use tari_engine_types::ESMERALDA_V3_ACTIVATION_EPOCH;
+    use tari_engine_types::ESMERALDA_V2_ACTIVATION_EPOCH;
     use tari_ootle_common_types::ExtraData;
 
     use super::*;
@@ -545,18 +545,18 @@ mod tests {
     }
 
     #[test]
-    fn esmeralda_requires_v3_from_its_activation_epoch() {
-        let activation = ESMERALDA_V3_ACTIVATION_EPOCH;
+    fn esmeralda_requires_v2_from_its_activation_epoch() {
+        let activation = ESMERALDA_V2_ACTIVATION_EPOCH;
         let before = Epoch(activation.as_u64() - 1);
-        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V2, activation));
         assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V1, activation));
-        assert!(!is_rejected(Network::Esmeralda, ProtocolVersion::V3, activation));
-        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V3, before));
+        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V0, activation));
+        assert!(!is_rejected(Network::Esmeralda, ProtocolVersion::V2, activation));
+        assert!(is_rejected(Network::Esmeralda, ProtocolVersion::V2, before));
         assert!(!is_rejected(Network::Esmeralda, ProtocolVersion::V1, before));
     }
 
     #[test]
-    fn other_networks_require_v3_from_genesis() {
+    fn other_networks_require_v2_from_genesis() {
         for network in [
             Network::MainNet,
             Network::StageNet,
@@ -564,13 +564,13 @@ mod tests {
             Network::Igor,
             Network::LocalNet,
         ] {
-            for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1, ProtocolVersion::V2] {
+            for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1] {
                 assert!(
                     is_rejected(network, protocol_version, Epoch(0)),
                     "{network} {protocol_version}"
                 );
             }
-            assert!(!is_rejected(network, ProtocolVersion::V3, Epoch(0)), "{network}");
+            assert!(!is_rejected(network, ProtocolVersion::V2, Epoch(0)), "{network}");
         }
     }
 }

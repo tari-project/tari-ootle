@@ -281,7 +281,7 @@ impl Command {
         let hasher = command_hasher().chain(self);
         match protocol_version {
             ProtocolVersion::V0 | ProtocolVersion::V1 => hasher.finalize().into(),
-            ProtocolVersion::V2 | ProtocolVersion::V3 => match self {
+            ProtocolVersion::V2 => match self {
                 Command::LocalPrepare(atom) |
                 Command::LocalAccept(atom) |
                 Command::AllAccept(atom) |
@@ -661,12 +661,7 @@ mod borsh_discriminant_tests {
     fn an_end_epoch_command_hashes_identically_on_both_sides() {
         let next_epoch_hash = FixedHash::zero();
 
-        for protocol_version in [
-            ProtocolVersion::V0,
-            ProtocolVersion::V1,
-            ProtocolVersion::V2,
-            ProtocolVersion::V3,
-        ] {
+        for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1, ProtocolVersion::V2] {
             assert_eq!(
                 Command::EndEpoch(EndEpochAtom::new(next_epoch_hash)).hash(protocol_version),
                 tari_sidechain::Command::EndEpoch(tari_sidechain::EndEpochAtom::new(next_epoch_hash)).hash(),

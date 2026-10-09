@@ -30,7 +30,9 @@ pub type MemberResponse = Result<(SubstateResult, Option<SubstateProofData>), In
 /// proven `Down` of the version the read asked for (or any `Up`/`Down` while proofs are not
 /// required) answers on the spot. `DoesNotExist` answers only once more than `f` members agree, and
 /// so does a `Down` no member has proven, counted per version: a single member's word that a substate
-/// is down could otherwise make the indexer treat a live substate as spent. The highest unproven `Up`
+/// is down could otherwise make the indexer treat a live substate as spent. When `f` is 0 that one
+/// member is the threshold, so its unproven `Down` answers only once every member has responded and
+/// none has proven anything. The highest unproven `Up`
 /// is held as a fallback in case nothing settles the read; an unproven `Down` never is, and a read
 /// that ends with only too few of them fails rather than reporting the substate down or absent.
 ///
@@ -86,7 +88,9 @@ impl CommitteeReadTally {
                     if let SubstateResult::Down { version } = substate_result {
                         let count = self.unproven_downs.entry(version).or_default();
                         *count += 1;
-                        return (*count > self.f).then_some(SubstateLookupResult {
+                        // With f = 0 the threshold is one member, whose word must not preempt a member still
+                        // proving an Up. Such a Down is answered only once every member has responded.
+                        return (self.f > 0 && *count > self.f).then_some(SubstateLookupResult {
                             result: substate_result,
                             verified: false,
                             proof: None,
@@ -132,6 +136,21 @@ impl CommitteeReadTally {
 
     /// The answer once every member has responded without settling the read.
     pub fn conclude(self, describe: impl std::fmt::Display) -> Result<SubstateLookupResult, IndexerError> {
+        // Only with f = 0 can a version reach the threshold without having settled the read when it did.
+        if let Some(version) = self
+            .unproven_downs
+            .iter()
+            .filter(|(_, count)| **count > self.f)
+            .map(|(version, _)| *version)
+            .max()
+        {
+            return Ok(SubstateLookupResult {
+                result: SubstateResult::Down { version },
+                verified: false,
+                proof: None,
+            });
+        }
+
         if let Some(result) = self.unproven_up {
             log::warn!(
                 target: LOG_TARGET,
@@ -437,6 +456,32 @@ mod tests {
         ])
         .await;
         assert!(matches!(result, Err(IndexerError::InvalidSubstateState)), "{result:?}");
+    }
+
+    /// With f = 0 one member is the threshold for an unproven Down, which must not preempt a member
+    /// proving an Up.
+    #[tokio::test]
+    async fn with_f_zero_an_unproven_down_does_not_preempt_a_proven_up() {
+        for size in [2, 3] {
+            let result = race(size, 1, true, None, vec![
+                (0, Ok((down(3), None))),
+                (1, Ok((up(3), proven()))),
+            ])
+            .await
+            .unwrap();
+            assert!(matches!(result.result, SubstateResult::Up { .. }), "{size}");
+            assert!(result.verified, "{size}");
+        }
+    }
+
+    #[tokio::test]
+    async fn with_f_zero_an_unproven_down_is_concluded_once_everyone_answers() {
+        let result = race(2, 1, true, None, vec![(0, Ok((down(3), None))), (1, Err(error()))])
+            .await
+            .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(!result.verified);
     }
 
     #[tokio::test]

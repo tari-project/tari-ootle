@@ -8,7 +8,7 @@ use futures::{Stream, StreamExt};
 use log::*;
 use ootle_network::Network;
 use prost::Message;
-use tari_consensus::hotstuff::commit_proofs::committed_block_commit_proof_bytes;
+use tari_consensus::hotstuff::commit_proofs::committed_block_commit_proof;
 use tari_engine_types::{ProtocolVersion, limits::MAX_CBOR_NESTING_DEPTH};
 use tari_ootle_common_types::{
     Epoch,
@@ -636,7 +636,7 @@ where
 
     let downed = batch.downed();
     SubstateRecord::commit_batch(tx, batch)?;
-    index_substate_down_proofs(tx, &downed, committed_block_commit_proof_bytes)?;
+    index_substate_down_proofs(tx, &downed, committed_block_commit_proof)?;
 
     Ok(())
 }

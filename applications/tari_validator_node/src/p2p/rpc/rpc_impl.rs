@@ -82,6 +82,7 @@ use tari_ootle_storage::{
         SubstateRecord,
         SubstateValueFilterFlags,
         TransactionRecord,
+        resolve_substate_down_proof,
     },
 };
 use tari_ootle_transaction::TransactionId;
@@ -236,7 +237,7 @@ fn attach_substate_proof_at<TTx: StateStoreReadTransaction>(
 
 /// The encoded down proof of `substate`, completed with `exclusion`, its exclusion proof under the root the response
 /// is anchored to. `None` for a live substate, and for a down one this node recorded no proof of having been up, or
-/// whose record's commit proof it does not hold.
+/// for which it no longer holds the commit proof of the version the record proves it up at.
 fn encode_down_proof<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     num_preshards: NumPreshards,
@@ -247,18 +248,18 @@ fn encode_down_proof<TTx: StateStoreReadTransaction>(
         return Ok(None);
     }
     let id = substate.to_versioned_substate_id();
-    let Some(record) = tx.substate_down_proofs_get(id.to_shard(num_preshards), &id)? else {
+    let shard = id.to_shard(num_preshards);
+    let Some(record) = tx.substate_down_proofs_get(shard, &id)? else {
         return Ok(None);
     };
-    let Some(commit_proof) = tx.substate_down_proof_commit_proofs_get(&record.commit_proof_block)? else {
+    let state_version = record.state_version;
+    let Some(proof) = resolve_substate_down_proof(tx, shard, record, exclusion.clone())? else {
         warn!(
             target: LOG_TARGET,
-            "The down proof of {id} cites the commit proof of block {}, which is not stored",
-            record.commit_proof_block
+            "The down proof of {id} relies on the commit proof of {shard} v{state_version}, which is not held",
         );
         return Ok(None);
     };
-    let proof = record.into_down_proof(commit_proof, exclusion.clone());
     let bytes = tari_bor::serde_codec::to_vec(&proof).map_err(|e| StorageError::QueryError {
         reason: format!("encode substate down proof: {e}"),
     })?;
@@ -1033,6 +1034,25 @@ mod tests {
         }
     }
 
+    /// The block that committed the state version a test record proves its substate up at.
+    const COMMITTING_BLOCK: BlockId = BlockId::zero();
+
+    /// A proof that `shard` was at `state_version` in [`COMMITTING_BLOCK`].
+    fn committed_version_proof<TTx: StateStoreWriteTransaction>(
+        tx: &mut TTx,
+        shard: tari_ootle_common_types::shard::Shard,
+        state_version: u64,
+    ) -> Result<(), StorageError> {
+        tx.state_version_proofs_insert(&tari_ootle_storage::consensus_models::StateVersionProof {
+            shard,
+            state_version,
+            source: tari_ootle_storage::consensus_models::StateVersionProofSource::Committed {
+                block_id: COMMITTING_BLOCK,
+            },
+            shard_root_proof: proof_ext(3),
+        })
+    }
+
     fn exclusion() -> SubstateValueProof {
         SubstateValueProof::new(TreeHash::new([5; 32]), 2, proof_ext(5), proof_ext(6))
     }
@@ -1109,11 +1129,11 @@ mod tests {
             leaf_proof: proof_ext(1),
             shard_root: TreeHash::new([2; 32]),
             shard_root_proof: proof_ext(2),
-            commit_proof_block: BlockId::new([9; 32]),
         };
         store
             .with_write_tx(|tx| {
-                tx.substate_down_proof_commit_proofs_insert(&record.commit_proof_block, &[9, 9, 9])?;
+                committed_version_proof(tx, shard, 1)?;
+                tx.block_commit_proofs_insert(&COMMITTING_BLOCK, &[9, 9, 9])?;
                 tx.substate_down_proofs_insert(shard, &id, &record)
             })
             .unwrap();
@@ -1146,7 +1166,6 @@ mod tests {
             leaf_proof: proof_ext(1),
             shard_root: TreeHash::new([2; 32]),
             shard_root_proof: proof_ext(2),
-            commit_proof_block: BlockId::new([9; 32]),
         };
 
         {
@@ -1160,8 +1179,14 @@ mod tests {
         store
             .with_write_tx(|tx| tx.substate_down_proofs_insert(id.to_shard(NUM_PRESHARDS), &id, &record))
             .unwrap();
-        // A record whose commit proof is not stored cannot be served.
-        {
+        // A record whose version's commit proof is not held cannot be served: first no state version proof, then one
+        // citing a committed block whose commit proof is not stored.
+        for setup in [false, true] {
+            if setup {
+                store
+                    .with_write_tx(|tx| committed_version_proof(tx, id.to_shard(NUM_PRESHARDS), 1))
+                    .unwrap();
+            }
             let tx = store.create_read_tx().unwrap();
             assert!(
                 encode_down_proof(&tx, NUM_PRESHARDS, &down, &exclusion())
@@ -1170,7 +1195,7 @@ mod tests {
             );
         }
         store
-            .with_write_tx(|tx| tx.substate_down_proof_commit_proofs_insert(&record.commit_proof_block, &[9, 9, 9]))
+            .with_write_tx(|tx| tx.block_commit_proofs_insert(&COMMITTING_BLOCK, &[9, 9, 9]))
             .unwrap();
 
         let tx = store.create_read_tx().unwrap();

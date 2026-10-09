@@ -52,7 +52,7 @@ use crate::{
         apply_leader_fee_to_substate_store,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
         calculate_state_merkle_root,
-        commit_proofs::{committed_block_commit_proof_bytes, generate_block_commit_proof},
+        commit_proofs::{committed_block_commit_proof, generate_block_commit_proof},
         error::HotStuffError,
         event::HotstuffEvent,
         exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
@@ -1815,7 +1815,7 @@ where TConsensusSpec: ConsensusSpec
         {
             let _timer = TraceTimer::debug(LOG_TARGET, "commit_block");
             let downed = block.commit_block(tx, commit_qc_id, &version_updates)?;
-            index_substate_down_proofs(tx, &downed, committed_block_commit_proof_bytes)?;
+            index_substate_down_proofs(tx, &downed, committed_block_commit_proof)?;
         }
 
         let finalized_transactions = {

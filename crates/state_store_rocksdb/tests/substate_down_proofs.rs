@@ -22,6 +22,7 @@ use tari_ootle_common_types::{
     SubstateVersion,
     ToSubstateAddress,
     VersionedSubstateId,
+    optional::Optional,
     shard::Shard,
 };
 use tari_ootle_storage::{
@@ -41,6 +42,7 @@ use tari_ootle_storage::{
         SubstateRecord,
         VerifiedBlockTip,
         index_substate_down_proofs,
+        resolve_substate_down_proof,
     },
     verify_substate_down_proof_against_roots,
 };
@@ -176,11 +178,10 @@ fn verify_down_at_latest<S: StateStore>(
         .generate(target_id)
         .unwrap()
         .unwrap();
-    let up_commit_proof = tx
-        .substate_down_proof_commit_proofs_get(&record.commit_proof_block)
+    let proof = resolve_substate_down_proof(&tx, target_id.to_shard(num_preshards()), record, down)
         .unwrap()
-        .unwrap();
-    let proof = tari_bor::serde_codec::to_vec(record.into_down_proof(up_commit_proof, down)).unwrap();
+        .expect("the record's state version proof and its commit proof are held");
+    let proof = tari_bor::serde_codec::to_vec(proof).unwrap();
     verify_substate_down_proof_against_roots(
         &proof,
         target_id.substate_id(),
@@ -352,19 +353,27 @@ fn a_substate_destroyed_with_a_committed_block_proof_is_recorded() {
 
     let record = tx.substate_down_proofs_get(shard, &target_id).unwrap().unwrap();
     assert_eq!(record.state_version, 1);
-    assert_eq!(record.commit_proof_block, block_id);
-    let stored = tx.substate_down_proof_commit_proofs_get(&block_id).unwrap().unwrap();
-    assert_eq!(stored, r1_commit_proof.to_bytes());
     assert_eq!(record.value_hash, TreeHash::new(target.state_hash().into_array()));
+    // No commit proof was stored for the block, so indexing built one and stored it per block, where the record's
+    // state version proof finds it once the block is pruned.
+    assert_eq!(
+        tx.block_commit_proofs_get(&block_id).unwrap(),
+        r1_commit_proof.to_bytes()
+    );
     let r1 = DownProofAnchor::from(unvalidated_tip(&r1_commit_proof));
-    let up = record.into_down_proof(
-        stored,
+    let up = resolve_substate_down_proof(
+        &*tx,
+        shard,
+        record,
         SubstateProofGenerator::new(&*tx, shard_group, num_preshards(), protocol_version())
             .unwrap()
             .generate(&target_id)
             .unwrap()
             .unwrap(),
-    );
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(up.up_commit_proof, r1_commit_proof.to_bytes());
     up.up
         .verify_inclusion(
             tari_state_tree::jmt_hash_scheme(protocol_version()),
@@ -377,84 +386,87 @@ fn a_substate_destroyed_with_a_committed_block_proof_is_recorded() {
         .unwrap();
 }
 
+/// Substates a block takes down together in one shard are proved up at one version, whose block's commit proof is
+/// built at most once and stored once, per block, beside the commit proofs consensus stores.
 #[test]
 fn substates_destroyed_together_share_one_commit_proof() {
-    let (db, _dir) = create_rocksdb_with_opts(DatabaseOptions::default());
+    for already_stored in [false, true] {
+        let (db, _dir) = create_rocksdb_with_opts(DatabaseOptions::default());
 
-    const SEED: u32 = 3;
-    let targets = (0..3)
-        .map(|n| build_substate_record(&substate_id_seed((SEED << 24) | n), SubstateVersion::ZERO, 1))
-        .collect::<Vec<_>>();
-    let shard = targets[0].created().in_shard;
-    let shard_group = ShardGroup::new(shard, shard);
-    let neighbour = build_substate_record(&substate_id_seed((SEED << 24) | 100), SubstateVersion::ZERO, 1);
+        const SEED: u32 = 3;
+        let targets = (0..3)
+            .map(|n| build_substate_record(&substate_id_seed((SEED << 24) | n), SubstateVersion::ZERO, 1))
+            .collect::<Vec<_>>();
+        let shard = targets[0].created().in_shard;
+        let shard_group = ShardGroup::new(shard, shard);
+        let neighbour = build_substate_record(&substate_id_seed((SEED << 24) | 100), SubstateVersion::ZERO, 1);
+        assert!(
+            targets
+                .iter()
+                .chain([&neighbour])
+                .all(|t| t.created().in_shard == shard)
+        );
 
-    assert!(
-        targets
-            .iter()
-            .chain([&neighbour])
-            .all(|t| t.created().in_shard == shard)
-    );
+        let block_id = BlockId::from([9u8; 32]);
+        let mut tx = db.create_write_tx().unwrap();
+        let mut v1 = targets.iter().collect::<Vec<_>>();
+        v1.push(&neighbour);
+        commit_version(
+            &mut tx,
+            shard,
+            1,
+            v1.iter().map(|record| up(record)).collect(),
+            &v1,
+            no_committed_blocks,
+        );
+        let tree = group_tree(&*tx, shard_group);
+        let commit_proof_bytes = commit_proof(shard_group, 2, tree.root()).to_bytes();
+        tx.state_version_proofs_insert(&StateVersionProof {
+            shard,
+            state_version: 1,
+            source: StateVersionProofSource::Committed { block_id },
+            shard_root_proof: tree.get_proof(shard).unwrap().1,
+        })
+        .unwrap();
+        if already_stored {
+            // As consensus stores it when the block commits.
+            tx.block_commit_proofs_insert(&block_id, &commit_proof_bytes).unwrap();
+        }
 
-    let block_id = BlockId::from([9u8; 32]);
-    let mut tx = db.create_write_tx().unwrap();
-    let mut v1 = targets.iter().collect::<Vec<_>>();
-    v1.push(&neighbour);
-    commit_version(
-        &mut tx,
-        shard,
-        1,
-        v1.iter().map(|record| up(record)).collect(),
-        &v1,
-        no_committed_blocks,
-    );
-    let tree = group_tree(&*tx, shard_group);
-    let commit_proof_bytes = commit_proof(shard_group, 2, tree.root()).to_bytes();
-    tx.state_version_proofs_insert(&StateVersionProof {
-        shard,
-        state_version: 1,
-        source: StateVersionProofSource::Committed { block_id },
-        shard_root_proof: tree.get_proof(shard).unwrap().1,
-    })
-    .unwrap();
+        let destroyed_records = targets.iter().map(|t| destroyed(t, 2)).collect::<Vec<_>>();
+        let mut builds = 0;
+        commit_version(
+            &mut tx,
+            shard,
+            2,
+            targets
+                .iter()
+                .map(|t| SubstateTreeChange::Down {
+                    id: t.to_versioned_substate_id(),
+                })
+                .collect(),
+            &destroyed_records.iter().collect::<Vec<_>>(),
+            |_, id| {
+                builds += 1;
+                (*id == block_id).then(|| commit_proof_bytes.clone())
+            },
+        );
 
-    let destroyed_records = targets.iter().map(|t| destroyed(t, 2)).collect::<Vec<_>>();
-    let mut builds = 0;
-    commit_version(
-        &mut tx,
-        shard,
-        2,
-        targets
-            .iter()
-            .map(|t| SubstateTreeChange::Down {
-                id: t.to_versioned_substate_id(),
-            })
-            .collect(),
-        &destroyed_records.iter().collect::<Vec<_>>(),
-        |_, id| {
-            builds += 1;
-            (*id == block_id).then(|| commit_proof_bytes.clone())
-        },
-    );
-
-    assert_eq!(builds, 1);
-    for target in &targets {
-        let record = tx
-            .substate_down_proofs_get(shard, &target.to_versioned_substate_id())
-            .unwrap()
-            .unwrap();
-        assert_eq!(record.state_version, 1);
-        assert_eq!(record.commit_proof_block, block_id);
+        assert_eq!(builds, usize::from(!already_stored), "already stored: {already_stored}");
+        for target in &targets {
+            let record = tx
+                .substate_down_proofs_get(shard, &target.to_versioned_substate_id())
+                .unwrap()
+                .unwrap();
+            assert_eq!(record.state_version, 1);
+        }
+        assert_eq!(tx.block_commit_proofs_get(&block_id).unwrap(), commit_proof_bytes);
     }
-    assert_eq!(
-        tx.substate_down_proof_commit_proofs_get(&block_id).unwrap(),
-        Some(commit_proof_bytes)
-    );
 }
 
-/// A received commit proof is stored under the block its header names, once, however many records cite it.
+/// A received commit proof is served from the state version proof that carries it, so nothing is stored for it.
 #[test]
-fn a_received_commit_proof_is_stored_under_its_block() {
+fn a_received_commit_proof_is_served_from_its_state_version_proof() {
     let (db, _dir) = create_rocksdb_with_opts(DatabaseOptions::default());
 
     const SEED: u32 = 4;
@@ -484,16 +496,25 @@ fn a_received_commit_proof_is_stored_under_its_block() {
         no_committed_blocks,
     );
 
-    let block_id = BlockId::new(r1_commit_proof.block_id());
+    let exclusion = SubstateProofGenerator::new(&*tx, shard_group, num_preshards(), protocol_version())
+        .unwrap()
+        .generate(&targets[0].to_versioned_substate_id())
+        .unwrap()
+        .unwrap();
     for target in &targets {
         let record = tx
             .substate_down_proofs_get(shard, &target.to_versioned_substate_id())
             .unwrap()
             .unwrap();
-        assert_eq!(record.commit_proof_block, block_id);
+        let proof = resolve_substate_down_proof(&*tx, shard, record, exclusion.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.up_commit_proof, r1_commit_proof.to_bytes());
     }
-    assert_eq!(
-        tx.substate_down_proof_commit_proofs_get(&block_id).unwrap(),
-        Some(r1_commit_proof.to_bytes())
+    assert!(
+        tx.block_commit_proofs_get(&BlockId::new(r1_commit_proof.block_id()))
+            .optional()
+            .unwrap()
+            .is_none()
     );
 }

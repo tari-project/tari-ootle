@@ -8,12 +8,15 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
 ### ⚠️ Upgrade notes
 
 - **Protocol V2 now also binds every substate proof to its shard**: each leaf of a block's state merkle root
-  commits to its shard. V2 is not active on any live network yet; every network except esmeralda starts at V2
-  from genesis. **Release owner: set `ESMERALDA_V2_ACTIVATION_EPOCH` in
-  `crates/engine_types/src/protocol_version.rs` to the coordinated esmeralda activation epoch before this
-  release merges, and run the ignored test `esmeralda_v2_activation_epoch_is_set`.** Activating V2 on
-  esmeralda also activates V2's transaction merkle root in block headers. Until it is set, esmeralda stays on
-  V1.
+  commits to its shard. No persistent network depends on V2 state roots yet: esmeralda has not activated V2.
+- **V2 state merkle roots change, so every network started on V2 must be reset.** Any non-esmeralda network or
+  local database started on 0.46.0 (igor, nextnet, stagenet, mainnet, localnet) runs V2 from genesis; wipe its
+  data directory before upgrading. `check_activation_schedule` does not detect this, because the genesis
+  version is unchanged.
+- **Release owner: set `ESMERALDA_V2_ACTIVATION_EPOCH`** in `crates/engine_types/src/protocol_version.rs` to the
+  coordinated esmeralda activation epoch before this release merges, and run the ignored test
+  `esmeralda_v2_activation_epoch_is_set`. Activating V2 on esmeralda also activates V2's transaction merkle root
+  in block headers. Until it is set, esmeralda stays on V1.
 
 ## [0.46.0](https://github.com/tari-project/tari-ootle/compare/v0.45.0...v0.46.0) (2026-10-07)
 

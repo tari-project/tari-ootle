@@ -987,13 +987,18 @@ mod tests {
         }
 
         /// Before V2 another shard's genuine root proves any substate absent, so a down proof whose exclusion root
-        /// precedes V2 shows nothing. Esmeralda runs V0 then V1.
+        /// precedes V2 shows nothing. Esmeralda runs V0 then V1 until its V2 activation.
         #[test]
         fn an_exclusion_root_before_v2_does_not_prove_a_down() {
             let mut scenario = Scenario::new(false, destroyed_and_replaced);
             let target = scenario.target.clone();
             let proof = tari_bor::serde_codec::to_vec(scenario.honest(&target)).unwrap();
-            for epoch in [Epoch(1), Epoch(11925), Epoch(20000)] {
+            let last_before_v2 = Epoch(
+                tari_engine_types::ESMERALDA_V2_ACTIVATION_EPOCH
+                    .as_u64()
+                    .saturating_sub(1),
+            );
+            for epoch in [Epoch(1), Epoch(11925), last_before_v2] {
                 let protocol_version = ProtocolVersion::at(Network::Esmeralda, epoch);
                 assert!(matches!(protocol_version, ProtocolVersion::V0 | ProtocolVersion::V1));
                 let mut up_tip = scenario.r1_tip(2);

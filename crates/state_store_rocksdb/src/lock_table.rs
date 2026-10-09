@@ -3,19 +3,11 @@
 
 //! The substate locks held by blocks whose transactions have not yet released them.
 //!
-//! The table answers every lock read. Its persistent form is one [`BlockLockSet`] record per block, written in the
-//! same RocksDB transaction as the change that produced it, and the table is rebuilt from those records when the store
-//! opens. A record always holds exactly the block's unreleased locks: it is rewritten when some of them are released
-//! and deleted when the last one is.
-//!
-//! Each write transaction stages its lock changes on a private copy of the table and publishes them only once its
-//! RocksDB commit has succeeded, so the table never holds a lock the database does not.
+//! The table answers every lock read. Its persistent form is one [`BlockLockSet`] record per block, and a record always
+//! holds exactly the block's unreleased locks: it is rewritten when some of them are released and deleted when the last
+//! one is. See [`crate::pending_state`] for how changes are staged and published.
 
-use std::{
-    collections::HashMap,
-    ops::Deref,
-    sync::{Arc, Mutex, MutexGuard},
-};
+use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use tari_consensus_types::BlockId;
@@ -24,10 +16,7 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::consensus_models::SubstateLock;
 use tari_ootle_transaction::TransactionId;
 
-use crate::{
-    column_families::substate_locks::{BlockLockSet, SubstateLockGrants},
-    error::RocksDbStorageError,
-};
+use crate::column_families::substate_locks::{BlockLockSet, SubstateLockGrants};
 
 /// The locks one block granted that are still held.
 #[derive(Debug, Clone)]
@@ -201,169 +190,6 @@ where
         entries.retain(|v| !matches(v));
         if entries.is_empty() {
             index.remove(key);
-        }
-    }
-}
-
-/// The lock table every transaction of one store reads and publishes to.
-#[derive(Debug, Default)]
-pub(crate) struct SharedLockTable {
-    published: Mutex<Published>,
-}
-
-#[derive(Debug, Default)]
-struct Published {
-    /// Incremented by every publish, so a staged copy can tell whether it is still based on the latest table.
-    generation: u64,
-    table: Arc<LockTable>,
-}
-
-impl SharedLockTable {
-    pub fn new(table: LockTable) -> Self {
-        Self {
-            published: Mutex::new(Published {
-                generation: 0,
-                table: Arc::new(table),
-            }),
-        }
-    }
-
-    fn published(&self) -> MutexGuard<'_, Published> {
-        // The guarded state is replaced or mutated only after the RocksDB commit it mirrors has succeeded, so a panic
-        // while holding the lock cannot leave it describing an uncommitted change.
-        self.published.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// The latest published table.
-    pub fn latest(&self) -> Arc<LockTable> {
-        self.published().table.clone()
-    }
-
-    /// Runs `open_snapshot` and returns its result with the table published at the same point. Publishing waits for
-    /// the commit it mirrors, so the database snapshot and the table describe the same committed state.
-    pub fn pin_with<T, F: FnOnce() -> T>(&self, open_snapshot: F) -> (T, Arc<LockTable>) {
-        let published = self.published();
-        let snapshot = open_snapshot();
-        (snapshot, published.table.clone())
-    }
-
-    fn stage(&self) -> StagedLocks {
-        let published = self.published();
-        StagedLocks {
-            base_generation: published.generation,
-            table: (*published.table).clone(),
-        }
-    }
-
-    /// Commits the database transaction with `commit` and, if it succeeds, publishes `staged`.
-    ///
-    /// A staged copy describes the table it was copied from plus this transaction's changes, and the records the
-    /// transaction wrote were computed from it. If another transaction has published since, both are out of date, so
-    /// the database transaction is left uncommitted and an error is returned.
-    pub fn commit_and_publish<F: FnOnce() -> Result<(), RocksDbStorageError>>(
-        &self,
-        staged: StagedLocks,
-        commit: F,
-    ) -> Result<(), RocksDbStorageError> {
-        let mut published = self.published();
-        if published.generation != staged.base_generation {
-            return Err(RocksDbStorageError::GeneralError {
-                message: "Write transaction not committed: another write transaction changed substate locks after \
-                          this one read them"
-                    .to_string(),
-            });
-        }
-        commit()?;
-        published.table = Arc::new(staged.table);
-        published.generation += 1;
-        Ok(())
-    }
-}
-
-/// A write transaction's lock changes, applied to a private copy of the table it read from.
-#[derive(Debug)]
-pub(crate) struct StagedLocks {
-    base_generation: u64,
-    table: LockTable,
-}
-
-impl StagedLocks {
-    pub fn table(&self) -> &LockTable {
-        &self.table
-    }
-
-    pub fn insert_block(&mut self, block_id: BlockId, locks: BlockLocks) {
-        self.table.insert_block(block_id, locks);
-    }
-
-    pub fn remove_block(&mut self, block_id: &BlockId) -> bool {
-        self.table.remove_block(block_id)
-    }
-
-    pub fn release(&mut self, transaction_ids: &[TransactionId]) -> Vec<BlockId> {
-        self.table.release(transaction_ids)
-    }
-}
-
-/// The lock table a transaction reads from.
-pub(crate) enum LockTableView<'a> {
-    /// The table published when a read view's snapshot was taken.
-    Pinned(Arc<LockTable>),
-    /// A write transaction's table: the latest published one, until the transaction changes a lock, and from then on
-    /// its staged copy.
-    Writer {
-        shared: &'a SharedLockTable,
-        staged: Option<StagedLocks>,
-    },
-}
-
-impl<'a> LockTableView<'a> {
-    pub fn writer(shared: &'a SharedLockTable) -> Self {
-        Self::Writer { shared, staged: None }
-    }
-
-    pub fn table(&self) -> LockTableRef<'_> {
-        match self {
-            Self::Pinned(table) => LockTableRef::Shared(table.clone()),
-            Self::Writer {
-                staged: Some(staged), ..
-            } => LockTableRef::Borrowed(staged.table()),
-            Self::Writer { shared, staged: None } => LockTableRef::Shared(shared.latest()),
-        }
-    }
-
-    /// The staged copy changes are applied to, created from the latest published table on first use.
-    ///
-    /// # Panics
-    /// On a pinned view, which belongs to a read view and is never written.
-    pub fn staged_mut(&mut self) -> &mut StagedLocks {
-        match self {
-            Self::Pinned(_) => panic!("a read view's lock table is never written"),
-            Self::Writer { shared, staged } => staged.get_or_insert_with(|| shared.stage()),
-        }
-    }
-
-    /// The table to publish to and the changes to publish, if this transaction changed any lock.
-    pub fn into_staged(self) -> Option<(&'a SharedLockTable, StagedLocks)> {
-        match self {
-            Self::Pinned(_) => None,
-            Self::Writer { shared, staged } => staged.map(|staged| (shared, staged)),
-        }
-    }
-}
-
-pub(crate) enum LockTableRef<'a> {
-    Borrowed(&'a LockTable),
-    Shared(Arc<LockTable>),
-}
-
-impl Deref for LockTableRef<'_> {
-    type Target = LockTable;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Self::Borrowed(table) => table,
-            Self::Shared(table) => table,
         }
     }
 }

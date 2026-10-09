@@ -34,17 +34,17 @@ pub async fn list(
     ]);
     let tx = db.read_only_context();
 
-    let cf = tx.cf(cfs::block_diff::BlockDiffCf)?;
+    let cf = tx.cf(cfs::block_diff::BlockDiffRecordCf)?;
     let ordering = if req.desc {
         Ordering::Descending
     } else {
         Ordering::Ascending
     };
-    type Key = <cfs::block_diff::BlockDiffCf as Cf>::Key;
-    type Value = <cfs::block_diff::BlockDiffCf as Cf>::Value;
+    type Key = <cfs::block_diff::BlockDiffRecordCf as Cf>::Key;
+    type Value = <cfs::block_diff::BlockDiffRecordCf as Cf>::Value;
     let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
         if let Some(prefix_hex) = req.query.as_ref() {
-            let key_prefix = decode_hex_prefix::<cfs::block_diff::BlockDiffCf>(prefix_hex)?;
+            let key_prefix = decode_hex_prefix::<cfs::block_diff::BlockDiffRecordCf>(prefix_hex)?;
             Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
         } else {
             Box::new(cf.iterator(ordering, OPERATION))
@@ -53,16 +53,19 @@ pub async fn list(
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0).saturating_mul(page_size);
     for result in iter.skip(skip).take(page_size) {
-        let (id, data) = result?;
-        let encoded_key = cf.encode_key(&id);
-        table.add_row(json!({
-            "id": hex::encode(encoded_key),
-            "block_id": id.block_id,
-            "substate_id": id.substate_id,
-            "version": id.version,
-            "shard": data.shard(),
-            "substate": data.substate(),
-        }));
+        let (block_id, changes) = result?;
+        let encoded_key = hex::encode(cf.encode_key(&block_id));
+        for change in changes {
+            let versioned = change.versioned_substate_id();
+            table.add_row(json!({
+                "id": encoded_key,
+                "block_id": block_id,
+                "substate_id": versioned.substate_id(),
+                "version": versioned.version(),
+                "shard": change.shard(),
+                "substate": change.substate(),
+            }));
+        }
     }
     let total = cf.count(OPERATION)?;
     table.set_total_entries(total);

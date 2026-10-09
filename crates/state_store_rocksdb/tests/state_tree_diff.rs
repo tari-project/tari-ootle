@@ -3,7 +3,7 @@
 
 pub mod helpers;
 
-use helpers::{create_block, create_rocksdb};
+use helpers::{commit_chain, create_block, create_chain, create_rocksdb};
 use tari_consensus_types::PcId;
 use tari_ootle_storage::{
     StateStore,
@@ -11,6 +11,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     consensus_models::{BookkeepingModel, PendingShardStateTreeDiff},
 };
+use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_state_tree::StateHashTreeDiff;
 
 #[test]
@@ -42,10 +43,11 @@ fn pending_state_tree_diff_operations(db: impl StateStore) {
     let block_3 = create_block(Some(&block_2));
     block_3.insert(&mut tx).unwrap();
 
-    // pending_state_tree_diffs_insert
+    // pending_state_tree_diffs_insert_all
     let shard = block_2.shard_group().shard_iter().next().unwrap();
     let diff = PendingShardStateTreeDiff::new(0, StateHashTreeDiff::new());
-    tx.pending_state_tree_diffs_insert(*block_2.id(), shard, &diff).unwrap();
+    tx.pending_state_tree_diffs_insert_all(block_2.id(), [(&shard, &diff)])
+        .unwrap();
 
     // pending_state_tree_diffs_get_all_up_to_commit_block
     let res = tx
@@ -64,4 +66,43 @@ fn pending_state_tree_diff_operations(db: impl StateStore) {
     assert_eq!(res.len(), 0);
 
     tx.rollback().unwrap();
+}
+
+/// A block's pending state tree diffs, one per shard, survive reopening the store as one record.
+#[test]
+fn pending_state_tree_diffs_survive_reopening_the_store() {
+    let (db, tmp) = create_rocksdb();
+    let chain = create_chain(10);
+    let block8 = &chain[8];
+    let shards = block8.shard_group().shard_iter().take(3).collect::<Vec<_>>();
+    let diffs = shards
+        .iter()
+        .enumerate()
+        .map(|(i, shard)| {
+            (
+                *shard,
+                PendingShardStateTreeDiff::new(i as u64, StateHashTreeDiff::new()),
+            )
+        })
+        .collect::<Vec<_>>();
+    db.with_write_tx(|tx| {
+        commit_chain(tx, &chain);
+        tx.pending_state_tree_diffs_insert_all(block8.id(), diffs.iter().map(|(shard, diff)| (shard, diff)))
+    })
+    .unwrap();
+
+    drop(db);
+    let db = RocksDbStateStore::<String>::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap();
+    let res = db
+        .with_write_tx(|tx| tx.pending_state_tree_diffs_remove_and_return_by_block(block8.id()))
+        .unwrap();
+    assert_eq!(res.len(), 3);
+    for (i, shard) in shards.iter().enumerate() {
+        assert_eq!(res[shard].len(), 1);
+        assert_eq!(res[shard][0].version, i as u64);
+    }
+    let res = db
+        .with_write_tx(|tx| tx.pending_state_tree_diffs_remove_and_return_by_block(block8.id()))
+        .unwrap();
+    assert!(res.is_empty());
 }

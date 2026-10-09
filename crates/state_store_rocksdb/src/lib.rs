@@ -33,10 +33,12 @@ pub mod writer;
 
 pub use store::*;
 
+mod block_diff_table;
 mod dbs;
 mod info;
 mod lock_table;
 mod memory_budget;
+mod pending_state;
 pub use memory_budget::RocksDbMemoryBudget;
 pub mod read_only_ctx;
 

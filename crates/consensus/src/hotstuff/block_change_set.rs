@@ -441,9 +441,7 @@ impl ProposedBlockChangeSet {
         BlockDiff::insert(tx, &self.block.block_id, &self.local_substate_changes)?;
 
         // Store the tree diffs for each affected shard
-        for (shard, diff) in &self.state_tree_diffs {
-            PendingShardStateTreeDiff::create(tx, *self.block.block_id(), *shard, diff)?;
-        }
+        PendingShardStateTreeDiff::create_all(tx, self.block.block_id(), &self.state_tree_diffs)?;
 
         // Save locks
         SubstateRecord::lock_all(tx, &self.block, &self.substate_locks)?;

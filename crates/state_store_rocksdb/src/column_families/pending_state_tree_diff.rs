@@ -20,26 +20,47 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use minicbor::{CborLen, Decode, Encode};
+use serde::Serialize;
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::shard::Shard;
 use tari_ootle_storage::consensus_models::PendingShardStateTreeDiff;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, KeyPrefix, ShardCodec},
+    codecs::{BlockIdCodec, DefaultCodec, KeyPrefix},
     column_families::cf_names,
     prefixed,
-    traits::{Cf, QueryCf},
+    traits::Cf,
 };
 
-prefixed!(PendingStateTreeDiffPrefix, KeyPrefix::PendingStateTreeDiff);
+/// One shard's pending state tree diff.
+#[derive(Debug, Clone, Serialize, Encode, Decode, CborLen)]
+pub struct ShardStateTreeDiff {
+    #[n(0)]
+    pub shard: Shard,
+    #[n(1)]
+    pub diff: PendingShardStateTreeDiff,
+}
 
-pub struct PendingStateTreeDiffCf;
+/// [`ShardStateTreeDiff`] by reference, for writing a record without copying its diffs.
+#[derive(Debug, Clone, Copy, Encode, CborLen)]
+pub struct ShardStateTreeDiffRef<'a> {
+    #[n(0)]
+    pub shard: Shard,
+    #[n(1)]
+    pub diff: &'a PendingShardStateTreeDiff,
+}
 
-impl Cf for PendingStateTreeDiffCf {
-    type Key = (BlockId, Shard);
-    type KeyCodec = (BlockIdCodec, ShardCodec);
-    type Prefix = PendingStateTreeDiffPrefix;
-    type Value = PendingShardStateTreeDiff;
+prefixed!(PendingStateTreeDiffRecordPrefix, KeyPrefix::PendingStateTreeDiffRecords);
+
+/// A block's pending state tree diffs, one per shard it changes.
+pub struct PendingStateTreeDiffRecordCf;
+
+impl Cf for PendingStateTreeDiffRecordCf {
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+    type Prefix = PendingStateTreeDiffRecordPrefix;
+    type Value = Vec<ShardStateTreeDiff>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
@@ -47,10 +68,33 @@ impl Cf for PendingStateTreeDiffCf {
     }
 }
 
-pub struct ByBlockIdQuery;
+/// The per-shard table pending state tree diffs were stored in up to schema version 1. Only the migration to version
+/// 2 reads it, moving each block's diffs into [`PendingStateTreeDiffRecordCf`].
+pub mod legacy {
+    use tari_consensus_types::BlockId;
+    use tari_ootle_common_types::shard::Shard;
+    use tari_ootle_storage::consensus_models::PendingShardStateTreeDiff;
 
-impl QueryCf for ByBlockIdQuery {
-    type Cf = PendingStateTreeDiffCf;
-    type Key = BlockId;
-    type KeyCodec = BlockIdCodec;
+    use crate::{
+        codecs::{BlockIdCodec, DefaultCodec, KeyPrefix, ShardCodec},
+        column_families::cf_names,
+        prefixed,
+        traits::Cf,
+    };
+
+    prefixed!(PendingStateTreeDiffPrefix, KeyPrefix::PendingStateTreeDiff);
+
+    pub struct PendingStateTreeDiffCf;
+
+    impl Cf for PendingStateTreeDiffCf {
+        type Key = (BlockId, Shard);
+        type KeyCodec = (BlockIdCodec, ShardCodec);
+        type Prefix = PendingStateTreeDiffPrefix;
+        type Value = PendingShardStateTreeDiff;
+        type ValueCodec = DefaultCodec<Self::Value>;
+
+        fn name() -> &'static str {
+            cf_names::STATE_TREE
+        }
+    }
 }

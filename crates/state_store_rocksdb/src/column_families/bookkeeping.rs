@@ -79,7 +79,7 @@ impl BookKeepingKey {
 /// here because it describes the on-disk schema rather than any one binary. Tools that write to a database directly
 /// must check the stored [`DatabaseMigrationVersion`] against it first: writing through the current key encodings to a
 /// database still at an older version silently misses the rows that a pending migration has yet to rewrite.
-pub const CURRENT_SCHEMA_VERSION: u64 = 1;
+pub const CURRENT_SCHEMA_VERSION: u64 = 2;
 
 pub struct DatabaseMigrationVersion;
 

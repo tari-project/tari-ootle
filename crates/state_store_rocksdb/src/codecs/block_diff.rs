@@ -10,7 +10,7 @@ use tari_ootle_common_types::SubstateVersion;
 
 use crate::{
     codecs::{DbDecoder, DbEncoder, SubstateIdCodec},
-    column_families::block_diff::BlockDiffKey,
+    column_families::block_diff::legacy::BlockDiffKey,
     error::RocksDbStorageError,
     utils::take_fixed,
 };

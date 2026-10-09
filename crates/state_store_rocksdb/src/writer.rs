@@ -24,7 +24,7 @@
 // (query_prefix_range_keys and friends) are the way to read a range here.
 #![deny(clippy::disallowed_methods)]
 
-use std::{collections::HashSet, iter, ops::Deref};
+use std::{collections::HashSet, iter, ops::Deref, sync::Arc};
 
 use indexmap::IndexMap;
 use log::*;
@@ -99,13 +99,13 @@ use tari_ootle_transaction::TransactionId;
 use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
 
 use crate::{
+    block_diff_table::BlockDiffEntry,
     cf_api::{CfContext, DbContext},
     codecs::{ByteColumn, DbEncoder, DefaultCodec, KeyPrefix},
     column_families::{
         block,
         block::BlockCf,
-        block_diff,
-        block_diff::{BlockDiffCf, BlockDiffKey},
+        block_diff::BlockDiffRecordCf,
         block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionCf,
         bookkeeping::{
@@ -141,8 +141,7 @@ use crate::{
         missing_transactions,
         missing_transactions::MissingTransactionCf,
         parked_block::{ParkedBlockCf, ParkedBlockDataRef},
-        pending_state_tree_diff,
-        pending_state_tree_diff::PendingStateTreeDiffCf,
+        pending_state_tree_diff::{PendingStateTreeDiffRecordCf, ShardStateTreeDiff, ShardStateTreeDiffRef},
         state_sync_rewind_point::StateSyncRewindPointCf,
         state_transition,
         state_transition::{
@@ -167,8 +166,9 @@ use crate::{
         vote_equivocation,
     },
     error::RocksDbStorageError,
-    lock_table::{BlockLocks, LockTableView, SharedLockTable, StagedLocks},
+    lock_table::BlockLocks,
     options::DatabaseOptions,
+    pending_state::{PendingStateView, SharedPendingState, StagedPendingState},
     read_only::ReadOnly,
     reader::RocksDbStateStoreReadTransaction,
     utils::now,
@@ -189,7 +189,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
     pub(crate) fn new(
         db: &'a TransactionDB,
         tx: Transaction<'a, TransactionDB>,
-        locks: &'a SharedLockTable,
+        pending: &'a SharedPendingState,
         options: &'a DatabaseOptions,
     ) -> Self {
         Self {
@@ -198,7 +198,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             transaction: Some(RocksDbStateStoreReadTransaction::new(
                 db,
                 ReadOnly::new(tx),
-                LockTableView::writer(locks),
+                PendingStateView::writer(pending),
             )),
             options,
         }
@@ -215,11 +215,11 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             .rocksdb_transaction()
     }
 
-    fn staged_locks(&mut self) -> &mut StagedLocks {
+    fn staged(&mut self) -> &mut StagedPendingState {
         self.transaction
             .as_mut()
             .expect("DB transaction already taken")
-            .locks_mut()
+            .pending_mut()
             .staged_mut()
     }
 
@@ -227,8 +227,9 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
     /// once it holds none.
     fn write_block_lock_set(&mut self, block_id: &BlockId, operation: &'static str) -> Result<(), StorageError> {
         let record = self
-            .staged_locks()
-            .table()
+            .staged()
+            .state()
+            .locks
             .block(block_id)
             .map(|locks| locks.to_record());
         let cf = self.db().cf(BlockLockSetCf)?;
@@ -267,16 +268,16 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         self.db()
             .cf(BlockLockSetCf)?
             .put(block_id, &locks.to_record(), OPERATION)?;
-        self.staged_locks().insert_block(*block_id, locks);
+        self.staged().locks_mut().insert_block(*block_id, locks);
 
         Ok(())
     }
 
     fn remove_block_lock_set(&mut self, block_id: &BlockId, operation: &'static str) -> Result<(), StorageError> {
-        if self.lock_table().block(block_id).is_none() {
+        if self.pending_state().locks.block(block_id).is_none() {
             return Ok(());
         }
-        self.staged_locks().remove_block(block_id);
+        self.staged().locks_mut().remove_block(block_id);
         self.db().cf(BlockLockSetCf)?.delete(block_id, operation)?;
         Ok(())
     }
@@ -478,39 +479,28 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn block_diffs_insert(&mut self, block_id: &BlockId, changes: &[SubstateChange]) -> Result<(), StorageError> {
         const OPERATION: &str = "block_diffs_insert";
-        let cf = self.db().cf(BlockDiffCf)?;
-        let index_cf = self.db().cf(block_diff::SubstateIdIndex)?;
-
-        assert!(
-            changes.len() <= u32::MAX as usize,
-            "BlockDiffs cannot exceed u32::MAX (>4 billion) changes, got {}",
-            changes.len()
-        );
-        for (seq, change) in changes.iter().enumerate() {
-            let key = BlockDiffKey {
-                block_id: *block_id,
-                sequence: seq as u32,
-                substate_id: change.versioned_substate_id().substate_id().clone(),
-                version: change.versioned_substate_id().version(),
-                is_up: change.is_up(),
-            };
-            cf.put(&key, change, OPERATION)?;
-            // Note: the key is encoded with substate id first
-            index_cf.put(&key, &(), OPERATION)?;
+        if changes.is_empty() {
+            return self.block_diffs_remove(block_id);
         }
+
+        let encoded = tari_bor::encode(&changes).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
+        self.db()
+            .cf(BlockDiffRecordCf)?
+            .put_raw_value(block_id, &encoded, OPERATION)?;
+        self.staged()
+            .block_diffs_mut()
+            .insert(*block_id, Arc::new(BlockDiffEntry::new(changes.to_vec())));
 
         Ok(())
     }
 
     fn block_diffs_remove(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         const OPERATION: &str = "block_diffs_remove";
-        let cf = self.db().cf(BlockDiffCf)?;
-        let index_cf = self.db().cf(block_diff::SubstateIdIndex)?;
-        let query = self.db().cf(block_diff::ByBlockIdQuery)?;
-        for key in query.query_prefix_range_keys(Ordering::Ascending, block_id)? {
-            cf.delete(&key, OPERATION)?;
-            index_cf.delete(&key, OPERATION)?;
+        if self.pending_state().block_diffs.get(block_id).is_none() {
+            return Ok(());
         }
+        self.staged().block_diffs_mut().remove(block_id);
+        self.db().cf(BlockDiffRecordCf)?.delete(block_id, OPERATION)?;
 
         Ok(())
     }
@@ -1255,10 +1245,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "substate_locks_remove_many_for_transactions";
         let transaction_ids = {
-            let table = self.lock_table();
+            let pending = self.pending_state();
             transaction_ids
                 .into_iter()
-                .filter(|id| table.holds_locks(id))
+                .filter(|id| pending.locks.holds_locks(id))
                 .copied()
                 .collect::<Vec<_>>()
         };
@@ -1266,7 +1256,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             return Ok(());
         }
 
-        for block_id in self.staged_locks().release(&transaction_ids) {
+        for block_id in self.staged().locks_mut().release(&transaction_ids) {
             self.write_block_lock_set(&block_id, OPERATION)?;
         }
 
@@ -1542,34 +1532,37 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn pending_state_tree_diffs_insert(
+    fn pending_state_tree_diffs_insert_all<'a, I: IntoIterator<Item = (&'a Shard, &'a PendingShardStateTreeDiff)>>(
         &mut self,
-        block_id: BlockId,
-        shard: Shard,
-        diff: &PendingShardStateTreeDiff,
+        block_id: &BlockId,
+        diffs: I,
     ) -> Result<(), StorageError> {
-        const OPERATION: &str = "pending_state_tree_diffs_insert";
+        const OPERATION: &str = "pending_state_tree_diffs_insert_all";
+        let diffs = diffs
+            .into_iter()
+            .map(|(shard, diff)| ShardStateTreeDiffRef { shard: *shard, diff })
+            .collect::<Vec<_>>();
+        if diffs.is_empty() {
+            return self.pending_state_tree_diffs_remove_by_block(block_id);
+        }
         trace!(
             target: LOG_TARGET,
-            "{OPERATION}: shard {} block {} (v{}, new={}, stale={})", shard, block_id,
-            diff.version,diff.diff.new_nodes.len(),diff.diff.stale_tree_nodes.len()
+            "{OPERATION}: {} shard(s) in block {}", diffs.len(), block_id
         );
+
+        let encoded = tari_bor::encode(&diffs).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
         self.db()
-            .cf(PendingStateTreeDiffCf)?
-            .put(&(block_id, shard), diff, OPERATION)?;
+            .cf(PendingStateTreeDiffRecordCf)?
+            .put_raw_value(block_id, &encoded, OPERATION)?;
         Ok(())
     }
 
     fn pending_state_tree_diffs_remove_by_block(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         const OPERATION: &str = "pending_state_tree_diffs_remove_by_block";
-        let cf = self.db().cf(PendingStateTreeDiffCf)?;
-        let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
-        let keys = query.query_prefix_range_keys(Ordering::Ascending, block_id)?;
-
-        for key in keys {
-            cf.delete(&key, OPERATION)?;
+        let cf = self.db().cf(PendingStateTreeDiffRecordCf)?;
+        if cf.exists(block_id, OPERATION)? {
+            cf.delete(block_id, OPERATION)?;
         }
-
         Ok(())
     }
 
@@ -1578,17 +1571,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
     ) -> Result<IndexMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError> {
         const OPERATION: &str = "pending_state_tree_diffs_remove_and_return_by_block";
-        let cf = self.db().cf(PendingStateTreeDiffCf)?;
-        let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
-        let entries = query.query_prefix_range_entries(block_id, Ordering::Ascending)?;
+        let cf = self.db().cf(PendingStateTreeDiffRecordCf)?;
+        let Some(record) = cf.get(block_id, OPERATION).optional()? else {
+            return Ok(IndexMap::new());
+        };
+        cf.delete(block_id, OPERATION)?;
 
-        let mut diffs = IndexMap::new();
-        for (key, diff) in entries {
-            let (_, shard) = &key;
-            diffs.entry(*shard).or_insert_with(Vec::new).push(diff);
-            cf.delete(&key, OPERATION)?;
+        let mut diffs = IndexMap::<Shard, Vec<PendingShardStateTreeDiff>>::new();
+        for ShardStateTreeDiff { shard, diff } in record {
+            diffs.entry(shard).or_default().push(diff);
         }
-
         Ok(diffs)
     }
 

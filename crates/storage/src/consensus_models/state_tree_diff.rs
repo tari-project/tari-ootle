@@ -53,17 +53,14 @@ impl PendingShardStateTreeDiff {
         tx.pending_state_tree_diffs_remove_and_return_by_block(block_id)
     }
 
-    pub fn create<TTx>(
-        tx: &mut TTx,
-        block_id: BlockId,
-        shard: Shard,
-        diff: &PendingShardStateTreeDiff,
-    ) -> Result<(), StorageError>
+    /// Records the diffs `block_id` makes, one per shard.
+    pub fn create_all<'a, TTx, I>(tx: &mut TTx, block_id: &BlockId, diffs: I) -> Result<(), StorageError>
     where
         TTx: Deref + StateStoreWriteTransaction,
         TTx::Target: StateStoreReadTransaction,
+        I: IntoIterator<Item = (&'a Shard, &'a PendingShardStateTreeDiff)>,
     {
-        tx.pending_state_tree_diffs_insert(block_id, shard, diff)
+        tx.pending_state_tree_diffs_insert_all(block_id, diffs)
     }
 }
 

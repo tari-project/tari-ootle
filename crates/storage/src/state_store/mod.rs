@@ -548,6 +548,7 @@ pub trait StateStoreWriteTransaction {
     ) -> Result<(), StorageError>;
 
     // -------------------------------- BlockDiff -------------------------------- //
+    /// Records the changes `block_id` makes, in order, replacing any recorded for it before.
     fn block_diffs_insert(&mut self, block_id: &BlockId, changes: &[SubstateChange]) -> Result<(), StorageError>;
     fn block_diffs_remove(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
 
@@ -719,11 +720,11 @@ pub trait StateStoreWriteTransaction {
     ) -> Result<(), StorageError>;
 
     // -------------------------------- Pending State Tree Diffs -------------------------------- //
-    fn pending_state_tree_diffs_insert(
+    /// Records the pending state tree diffs `block_id` makes, one per shard, replacing any recorded for it before.
+    fn pending_state_tree_diffs_insert_all<'a, I: IntoIterator<Item = (&'a Shard, &'a PendingShardStateTreeDiff)>>(
         &mut self,
-        block_id: BlockId,
-        shard: Shard,
-        diff: &PendingShardStateTreeDiff,
+        block_id: &BlockId,
+        diffs: I,
     ) -> Result<(), StorageError>;
     fn pending_state_tree_diffs_remove_by_block(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
     fn pending_state_tree_diffs_remove_and_return_by_block(

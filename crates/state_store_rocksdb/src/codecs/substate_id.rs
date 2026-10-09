@@ -94,7 +94,7 @@ mod tests {
     use super::*;
     use crate::{
         codecs::{BlockDiffKeyCodec, SubstateIdBlockIdVersionSeq},
-        column_families::block_diff::BlockDiffKey,
+        column_families::block_diff::legacy::BlockDiffKey,
     };
 
     fn new_substate_id(seed: u8) -> SubstateId {

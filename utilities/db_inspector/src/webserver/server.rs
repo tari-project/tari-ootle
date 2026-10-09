@@ -51,12 +51,8 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
             get(handlers::state_transitions::list),
         )
         .route(
-            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::block_diff::BlockDiffCf)),
+            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::block_diff::BlockDiffRecordCf)),
             get(handlers::block_diff::list),
-        )
-        .route(
-            &format!("/databases/{{db_name}}/column-families/{}", slugify_type_name(column_families::block_diff::SubstateIdIndex)),
-            get(handlers::block_diff_substate_id_index::list),
         )
         .route(
             "/databases/{db_name}/column-families/bookkeeping",
@@ -81,8 +77,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::foreign_proposal::EpochIndex,
         column_families::foreign_proposal::UnconfirmedIndex,
         column_families::block::EpochHeightIndex,
-        // column_families::block_diff::BlockDiffModel,
-        // column_families::block_diff::SubstateIdIndex,
         column_families::certificates::proposal::ProposalCertificateCf,
         column_families::certificates::timeout::TimeoutCertificateCf,
         column_families::block_transaction_execution::BlockTransactionExecutionCf,
@@ -103,7 +97,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::substate::UnprunedDownedValuesIndex,
         // column_families::state_transition::StateTransitionModel,
         // column_families::foreign_substate_pledge::ForeignSubstatePledgeModel,
-        column_families::pending_state_tree_diff::PendingStateTreeDiffCf,
+        column_families::pending_state_tree_diff::PendingStateTreeDiffRecordCf,
         // column_families::state_tree::StateTreeCf,
         column_families::state_tree::StateTreeStaleNodesCf,
         column_families::state_tree_shard_versions::StateTreeShardVersionCf,
@@ -173,8 +167,7 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
     context
         .register_cf(column_families::block::BlockCf)
         .register_cf(column_families::block::EpochHeightIndex)
-        .register_cf(column_families::block_diff::BlockDiffCf)
-        .register_cf(column_families::block_diff::SubstateIdIndex)
+        .register_cf(column_families::block_diff::BlockDiffRecordCf)
         .register_cf(column_families::block_transaction_execution::BlockIndex)
         .register_cf(column_families::block_transaction_execution::BlockTransactionExecutionCf)
         .register_cf(column_families::certificates::proposal::ProposalCertificateCf)
@@ -198,7 +191,7 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::lock_conflict::LockConflictCf)
         .register_cf(column_families::missing_transactions::MissingTransactionCf)
         .register_cf(column_families::parked_block::ParkedBlockCf)
-        .register_cf(column_families::pending_state_tree_diff::PendingStateTreeDiffCf)
+        .register_cf(column_families::pending_state_tree_diff::PendingStateTreeDiffRecordCf)
         .register_cf(column_families::state_transition::StateTransitionCf)
         .register_cf(column_families::state_tree::StateTreeCf)
         .register_cf(column_families::state_tree::StateTreeStaleNodesCf)

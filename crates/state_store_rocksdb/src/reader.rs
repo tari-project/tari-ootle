@@ -100,13 +100,12 @@ use tari_state_tree::{Node, NodeKey, StateTreePayload, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
+    block_diff_table::change_order,
     cf_api::DbContext,
     codecs::{DbEncoder, SubstateIdCodec},
     column_families::{
         block,
         block::BlockCf,
-        block_diff,
-        block_diff::{BlockDiffCf, BlockDiffKey},
         block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionCf,
         bookkeeping::{
@@ -136,7 +135,7 @@ use crate::{
         foreign_substate_pledge::ForeignSubstatePledgeCf,
         lock_conflict,
         parked_block,
-        pending_state_tree_diff,
+        pending_state_tree_diff::{PendingStateTreeDiffRecordCf, ShardStateTreeDiff},
         state_sync_rewind_point::StateSyncRewindPointCf,
         state_transition,
         state_transition::StateTransitionType,
@@ -155,7 +154,7 @@ use crate::{
         vote_equivocation,
     },
     error::RocksDbStorageError,
-    lock_table::{LockTableRef, LockTableView},
+    pending_state::{PendingState, PendingStateView},
     read_only::ReadOnly,
     state_tree_iterator::LatestSubstateStateTreeIterator,
     traits::{Cf, RocksReader},
@@ -168,7 +167,7 @@ pub(crate) type ReadOnlyTransaction<'a> = ReadOnly<Transaction<'a, TransactionDB
 pub struct RocksDbStateStoreReadTransaction<'a, TAddr, R = ReadOnlyTransaction<'a>> {
     tx: R,
     db: &'a TransactionDB,
-    locks: LockTableView<'a>,
+    pending: PendingStateView<'a>,
     _addr: PhantomData<TAddr>,
     // A read view must not be held open across an `.await` or *moved* to another thread: a live
     // snapshot pins SST files (space amplification), and reads are meant to be short and scoped.
@@ -188,11 +187,11 @@ pub struct RocksDbStateStoreReadTransaction<'a, TAddr, R = ReadOnlyTransaction<'
 unsafe impl<TAddr, R: Sync> Sync for RocksDbStateStoreReadTransaction<'_, TAddr, R> {}
 
 impl<'a, TAddr, R> RocksDbStateStoreReadTransaction<'a, TAddr, R> {
-    pub(crate) fn new(db: &'a TransactionDB, tx: R, locks: LockTableView<'a>) -> Self {
+    pub(crate) fn new(db: &'a TransactionDB, tx: R, pending: PendingStateView<'a>) -> Self {
         Self {
             tx,
             db,
-            locks,
+            pending,
             _addr: PhantomData,
             _not_send: PhantomData,
         }
@@ -202,12 +201,12 @@ impl<'a, TAddr, R> RocksDbStateStoreReadTransaction<'a, TAddr, R> {
         DbContext::new(self.db, &self.tx)
     }
 
-    pub(crate) fn lock_table(&self) -> LockTableRef<'_> {
-        self.locks.table()
+    pub(crate) fn pending_state(&self) -> PendingState {
+        self.pending.state()
     }
 
-    pub(crate) fn locks_mut(&mut self) -> &mut LockTableView<'a> {
-        &mut self.locks
+    pub(crate) fn pending_mut(&mut self) -> &mut PendingStateView<'a> {
+        &mut self.pending
     }
 }
 
@@ -218,8 +217,8 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr, ReadOnlyTransaction<
         &self.tx.inner
     }
 
-    pub(crate) fn into_parts(self) -> (Transaction<'a, TransactionDB>, LockTableView<'a>) {
-        (self.tx.inner, self.locks)
+    pub(crate) fn into_parts(self) -> (Transaction<'a, TransactionDB>, PendingStateView<'a>) {
+        (self.tx.inner, self.pending)
     }
 }
 
@@ -466,8 +465,8 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
         Ok(blocks)
     }
 
-    /// Returns the key of the last change to `substate_id` on the branch ending at the chain's leaf, or `None` if the
-    /// branch contains no change for it. If `version` is given, only changes to that version are considered.
+    /// The last change to `substate_id` on the branch ending at the chain's leaf, or `None` if the branch contains no
+    /// change for it. If `version` is given, only changes to that version are considered.
     ///
     /// Changes recorded by blocks that are not in the branch (forked-out siblings, other subtrees) are never
     /// considered. A substate version is only ever DOWNed after it is UPed, so a DOWN supersedes the UP of the same
@@ -477,29 +476,25 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
         chain: &PendingChain,
         substate_id: &SubstateId,
         version: Option<SubstateVersion>,
-    ) -> Result<Option<BlockDiffKey>, RocksDbStorageError> {
-        let query = self.db().cf(block_diff::BySubstateIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
-
-        let mut last_change = None::<BlockDiffKey>;
-        for result in iter {
-            let key = result?;
-            if version.is_some_and(|v| v != key.version) || !chain.contains_with_base(&key.block_id) {
+    ) -> Option<SubstateChange> {
+        let pending = self.pending_state();
+        let mut last_change = None::<&SubstateChange>;
+        for block_id in chain.ancestry() {
+            let Some(entry) = pending.block_diffs.get(block_id) else {
                 continue;
-            }
-            // A DOWN is the last change a version can have, so with the version fixed there is nothing left to find.
-            if version.is_some() && !key.is_up {
-                return Ok(Some(key));
-            }
-            if last_change
-                .as_ref()
-                .is_none_or(|c| block_diff_change_order(c) < block_diff_change_order(&key))
-            {
-                last_change = Some(key);
+            };
+            let change = match version {
+                Some(version) => entry.version_change(substate_id, version),
+                None => entry.last_change(substate_id),
+            };
+            let Some(change) = change else {
+                continue;
+            };
+            if last_change.is_none_or(|c| change_order(c) < change_order(change)) {
+                last_change = Some(change);
             }
         }
-
-        Ok(last_change)
+        last_change.cloned()
     }
 
     /// Fails with a query error if the chain's leaf block does not exist. A leaf in the pending-chain index always
@@ -1224,17 +1219,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
     }
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {
-        // const OPERATION: &str = "block_diffs_get";
-        let cf = self.db().cf(block_diff::ByBlockIdQuery)?;
-        let iter = cf.query_prefix_range_value_iterator(Ordering::default(), block_id);
-        let mut changes = Vec::new();
-        for result in iter {
-            let change = result?;
-            changes.push(change);
-        }
-
-        let diff = BlockDiff::new(*block_id, changes);
-        Ok(diff)
+        let changes = self
+            .pending_state()
+            .block_diffs
+            .get(block_id)
+            .map(|entry| entry.changes().to_vec())
+            .unwrap_or_default();
+        Ok(BlockDiff::new(*block_id, changes))
     }
 
     fn pending_chain_get(&self, leaf: &BlockId) -> Result<PendingChain, StorageError> {
@@ -1250,15 +1241,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         self.debug_assert_chain_is_current(chain)?;
         self.require_leaf_block_exists(chain, OPERATION)?;
 
-        let key = self
-            .block_diffs_select_last_change(chain, substate_id, None)?
+        self.block_diffs_select_last_change(chain, substate_id, None)
             .ok_or_else(|| StorageError::NotFound {
                 item: "SubstateChange",
                 key: format!("{substate_id} in {}", chain.leaf()),
-            })?;
-
-        let change = self.db().cf(BlockDiffCf)?.get(&key, OPERATION)?;
-        Ok(change)
+            })
     }
 
     fn block_diffs_get_change_for_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
@@ -1272,15 +1259,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
         let versioned = substate_id.into();
 
-        let key = self
-            .block_diffs_select_last_change(chain, versioned.substate_id(), Some(versioned.version()))?
+        self.block_diffs_select_last_change(chain, versioned.substate_id(), Some(versioned.version()))
             .ok_or_else(|| StorageError::NotFound {
                 item: "SubstateChange",
                 key: format!("{versioned} in {}", chain.leaf()),
-            })?;
-
-        let change = self.db().cf(BlockDiffCf)?.get(&key, OPERATION)?;
-        Ok(change)
+            })
     }
 
     fn block_diffs_contains_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
@@ -1294,17 +1277,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
         let versioned = substate_id.into();
 
-        let query = self.db().cf(block_diff::BySubstateIdQuery)?;
-        // Existence only: the first key for this version in the branch answers it, and the change value - which for
-        // an UP is the whole substate - is never read.
-        for result in query.query_prefix_range_key_iterator(Ordering::default(), versioned.substate_id()) {
-            let key = result?;
-            if key.version == versioned.version() && chain.contains_with_base(&key.block_id) {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
+        let pending = self.pending_state();
+        let found = chain.ancestry().iter().any(|block_id| {
+            pending.block_diffs.get(block_id).is_some_and(|entry| {
+                entry
+                    .version_change(versioned.substate_id(), versioned.version())
+                    .is_some()
+            })
+        });
+        Ok(found)
     }
 
     fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &PcId) -> Result<ProposalCertificate, StorageError> {
@@ -1662,7 +1643,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "substate_locks_get_locked_substates_for_transaction";
 
         let scope = self.chain_scope(leaf_block.block_id())?;
-        let table = self.lock_table();
+        let pending = self.pending_state();
+        let table = &pending.locks;
 
         // Ordered by encoded substate id, then by block and grant order, so callers see one order on every node.
         let mut held = Vec::new();
@@ -1718,7 +1700,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         }
 
         let scope = self.chain_scope(leaf_block.block_id())?;
-        let table = self.lock_table();
+        let pending = self.pending_state();
+        let table = &pending.locks;
 
         for substate_id in substate_ids {
             let mut conflicting = None::<TransactionId>;
@@ -1763,7 +1746,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         substate_id: &SubstateId,
     ) -> Result<SubstateLock, StorageError> {
         self.debug_assert_chain_is_current(scope)?;
-        let table = self.lock_table();
+        let pending = self.pending_state();
+        let table = &pending.locks;
 
         let mut candidates = table.blocks_locking_substate(substate_id).collect::<Vec<_>>();
         candidates.sort_by(|(a_id, a, _), (b_id, b, _)| (b.epoch, b.height, b_id).cmp(&(a.epoch, a.height, a_id)));
@@ -1800,26 +1784,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             return Ok(HashMap::new());
         }
 
-        let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
+        let cf = self.db().cf(PendingStateTreeDiffRecordCf)?;
 
         let mut diffs = HashMap::new();
         // Load diffs in from earliest to latest
         for block_id in block_ids.iter().rev() {
-            trace!(
-                target: LOG_TARGET,
-                "{OPERATION}: diffs for block {}",
-                block_id
-            );
-            let iter = query.query_prefix_range_iterator(Ordering::default(), block_id);
-            for result in iter {
-                let ((_, shard), diff) = result?;
+            let Some(record) = cf.get(block_id, OPERATION).optional()? else {
+                continue;
+            };
+            for ShardStateTreeDiff { shard, diff } in record {
                 trace!(
                     target: LOG_TARGET,
-                    "{OPERATION}: got diff for shard {} (v{}, new={}, stale={})",
-                    shard, diff.version, diff.diff.new_nodes.len(), diff.diff.stale_tree_nodes.len()
+                    "{OPERATION}: got diff for shard {} in block {} (v{}, new={}, stale={})",
+                    shard, block_id, diff.version, diff.diff.new_nodes.len(), diff.diff.stale_tree_nodes.len()
                 );
-                let diff_mut = diffs.entry(shard).or_insert_with(Vec::new);
-                diff_mut.push(diff);
+                diffs.entry(shard).or_insert_with(Vec::new).push(diff);
             }
         }
 
@@ -2226,10 +2205,4 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
 
         Ok(false)
     }
-}
-
-/// Orders two changes for the same substate within a branch. A substate version is only ever DOWNed after it is UPed,
-/// so a DOWN supersedes the UP of the same version.
-fn block_diff_change_order(key: &BlockDiffKey) -> (SubstateVersion, bool) {
-    (key.version, !key.is_up)
 }

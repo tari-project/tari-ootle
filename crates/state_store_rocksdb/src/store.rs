@@ -26,14 +26,16 @@ use tari_ootle_common_types::NodeAddressable;
 use tari_ootle_storage::{Ordering, StateStore, StorageError};
 
 use crate::{
+    block_diff_table::{BlockDiffEntry, BlockDiffTable},
     cf_api::DbContext,
-    column_families::{cf_names, substate_locks::BlockLockSetCf},
+    column_families::{block_diff::BlockDiffRecordCf, cf_names, substate_locks::BlockLockSetCf},
     dbs::read_only::ReadOnlyDb,
     error::RocksDbStorageError,
     info::ColumnFamilyInfo,
-    lock_table::{BlockLocks, LockTable, LockTableView, SharedLockTable},
+    lock_table::{BlockLocks, LockTable},
     memory_budget::RocksDbMemoryBudget,
     options::{DatabaseOptions, MAX_WRITE_BUFFER_NUMBER},
+    pending_state::{PendingState, PendingStateView, SharedPendingState},
     read_only_ctx::ReadOnlyContext,
     reader::RocksDbStateStoreReadTransaction,
     traits::{RocksDatabase, RocksReader},
@@ -114,7 +116,7 @@ pub(crate) fn build_default_store_opts(options: &DatabaseOptions) -> (rocksdb::O
 pub type RocksDbReadOnlyStateStore<TAddr> = RocksDbStateStore<TAddr, ReadOnlyDb>;
 pub struct RocksDbStateStore<TAddr, DB = TransactionDB> {
     db: Arc<DB>,
-    locks: Arc<SharedLockTable>,
+    pending: Arc<SharedPendingState>,
     options: DatabaseOptions,
     memory_budget: RocksDbMemoryBudget,
     _addr: PhantomData<TAddr>,
@@ -134,10 +136,10 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
             .map_err(|e| StorageError::ConnectionError {
                 reason: e.into_string(),
             })?;
-        let locks = load_lock_table(&db)?;
+        let pending = load_pending_state(&db)?;
         let db = Self {
             db: Arc::new(db),
-            locks: Arc::new(SharedLockTable::new(locks)),
+            pending: Arc::new(SharedPendingState::new(pending)),
             options,
             memory_budget,
             _addr: PhantomData,
@@ -167,8 +169,8 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
     /// bound-free inherent form of [`tari_ootle_storage::StateStore::create_read_tx`]; see CONTEXT.md
     /// (read view).
     pub fn read_view(&self) -> ReadView<'_, TAddr> {
-        let (snapshot, locks) = self.locks.pin_with(|| self.db.snapshot());
-        RocksDbStateStoreReadTransaction::new(&self.db, snapshot, LockTableView::Pinned(locks))
+        let (snapshot, pending) = self.pending.pin_with(|| self.db.snapshot());
+        RocksDbStateStoreReadTransaction::new(&self.db, snapshot, PendingStateView::Pinned(pending))
     }
 }
 
@@ -188,7 +190,7 @@ impl<TAddr> RocksDbStateStore<TAddr, ReadOnlyDb> {
 
         Ok(Self {
             db: Arc::new(ReadOnlyDb::new(db)),
-            locks: Arc::default(),
+            pending: Arc::default(),
             _addr: PhantomData,
             options: db_options,
             memory_budget,
@@ -244,18 +246,28 @@ impl<TAddr, DB: RocksDatabase + RocksReader> RocksDbStateStore<TAddr, DB> {
     }
 }
 
-/// Builds the lock table from the lock-set records the database holds.
-fn load_lock_table(db: &TransactionDB) -> Result<LockTable, StorageError> {
-    const OPERATION: &str = "load_lock_table";
+/// Builds the pending state from the per-block records the database holds.
+fn load_pending_state(db: &TransactionDB) -> Result<PendingState, StorageError> {
+    const OPERATION: &str = "load_pending_state";
     let snapshot = db.snapshot();
     let ctx = DbContext::new(db, &snapshot);
-    let cf = ctx.cf(BlockLockSetCf)?;
-    let mut table = LockTable::default();
-    for result in cf.iterator(Ordering::Ascending, OPERATION) {
+
+    let mut locks = LockTable::default();
+    for result in ctx.cf(BlockLockSetCf)?.iterator(Ordering::Ascending, OPERATION) {
         let (block_id, record) = result?;
-        table.insert_block(block_id, BlockLocks::from_record(record));
+        locks.insert_block(block_id, BlockLocks::from_record(record));
     }
-    Ok(table)
+
+    let mut block_diffs = BlockDiffTable::default();
+    for result in ctx.cf(BlockDiffRecordCf)?.iterator(Ordering::Ascending, OPERATION) {
+        let (block_id, changes) = result?;
+        block_diffs.insert(block_id, Arc::new(BlockDiffEntry::new(changes)));
+    }
+
+    Ok(PendingState {
+        locks: Arc::new(locks),
+        block_diffs: Arc::new(block_diffs),
+    })
 }
 
 // Manually implement the Debug implementation because `RocksDbStateStore` does not implement the Debug trait
@@ -276,7 +288,7 @@ impl<TAddr: NodeAddressable> RocksDbStateStore<TAddr, TransactionDB> {
         // closes it with `Busy` as soon as the cycle forms.
         tx_opts.set_deadlock_detect(true);
         let tx = self.db.transaction_opt(&write_opts, &tx_opts);
-        let tx = RocksDbStateStoreWriteTransaction::new(&self.db, tx, &self.locks, &self.options);
+        let tx = RocksDbStateStoreWriteTransaction::new(&self.db, tx, &self.pending, &self.options);
         let elapsed = timer.elapsed();
         let level = if elapsed > Duration::from_secs(1) {
             log::Level::Warn
@@ -322,7 +334,7 @@ impl<TAddr, DB> Clone for RocksDbStateStore<TAddr, DB> {
     fn clone(&self) -> Self {
         Self {
             db: self.db.clone(),
-            locks: self.locks.clone(),
+            pending: self.pending.clone(),
             _addr: PhantomData,
             options: self.options.clone(),
             memory_budget: self.memory_budget.clone(),

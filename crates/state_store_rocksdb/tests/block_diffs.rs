@@ -7,8 +7,10 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
-    consensus_models::SubstateChange,
+    StorageError,
+    consensus_models::{Block, SubstateChange},
 };
+use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 
 pub mod helpers;
 use helpers::{
@@ -193,4 +195,129 @@ fn block_diffs_last_change_prefers_the_down_of_a_version() {
     assert!(!change.is_up(), "Expected the DOWN of version 0 but got {change}");
 
     tx.rollback().unwrap();
+}
+
+fn up(substate_id: &tari_engine_types::substate::SubstateId, version: u64, block: &Block) -> SubstateChange {
+    SubstateChange::Up {
+        id: substate_id.clone(),
+        shard: block.shard_group().start(),
+        substate: Box::new(Substate::new(SubstateVersion::new(version), build_substate_value(None))),
+    }
+}
+
+fn down(substate_id: &tari_engine_types::substate::SubstateId, version: u64, block: &Block) -> SubstateChange {
+    SubstateChange::Down {
+        id: VersionedSubstateId::new(substate_id.clone(), SubstateVersion::new(version)),
+        shard: block.shard_group().start(),
+    }
+}
+
+/// What tells two changes apart: the substate version and whether it is UPed or DOWNed.
+fn identity(change: &SubstateChange) -> (tari_engine_types::substate::SubstateId, SubstateVersion, bool) {
+    let versioned = change.versioned_substate_id();
+    (versioned.substate_id().clone(), versioned.version(), change.is_up())
+}
+
+fn reopen(db: RocksDbStateStore<String>, tmp: &tempfile::TempDir) -> RocksDbStateStore<String> {
+    drop(db);
+    RocksDbStateStore::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap()
+}
+
+/// A block's changes survive reopening the store in the order the block made them, and removing them is persisted.
+#[test]
+fn block_diffs_survive_reopening_the_store() {
+    let (db, tmp) = create_rocksdb();
+    let chain = create_chain(10);
+    let block8 = &chain[8];
+    let substate_id = create_random_substate_id();
+    // A hot substate changes many times in one block. Its last change is the UP of its highest version.
+    let changes = (0..20)
+        .flat_map(|v| [up(&substate_id, v, block8), down(&substate_id, v, block8)])
+        .chain([up(&substate_id, 20, block8)])
+        .collect::<Vec<_>>();
+    db.with_write_tx(|tx| {
+        commit_chain(tx, &chain);
+        tx.block_diffs_insert(block8.id(), &changes)
+    })
+    .unwrap();
+
+    let db = reopen(db, &tmp);
+    {
+        let tx = db.create_read_tx().unwrap();
+        let diff = tx.block_diffs_get(block8.id()).unwrap();
+        assert_eq!(
+            diff.changes.iter().map(identity).collect::<Vec<_>>(),
+            changes.iter().map(identity).collect::<Vec<_>>(),
+            "the block's changes came back in a different order"
+        );
+        let last = tx
+            .block_diffs_get_last_change_for_substate(chain[9].id(), &substate_id)
+            .unwrap();
+        assert_eq!(identity(&last), identity(&up(&substate_id, 20, block8)));
+        let change = tx
+            .block_diffs_get_change_for_versioned_substate(
+                chain[9].id(),
+                &VersionedSubstateId::new(substate_id.clone(), SubstateVersion::new(7)),
+            )
+            .unwrap();
+        assert_eq!(identity(&change), identity(&down(&substate_id, 7, block8)));
+    }
+
+    db.with_write_tx(|tx| tx.block_diffs_remove(block8.id())).unwrap();
+    let db = reopen(db, &tmp);
+    let tx = db.create_read_tx().unwrap();
+    assert!(tx.block_diffs_get(block8.id()).unwrap().changes.is_empty());
+    assert!(
+        tx.block_diffs_get_last_change_for_substate(chain[9].id(), &substate_id)
+            .optional()
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// A rolled-back transaction's changes are never seen, and a read view sees the changes committed when it opened.
+#[test]
+fn block_diffs_follow_commits_and_snapshots() {
+    let (db, _tmp) = create_rocksdb();
+    let chain = create_chain(10);
+    let block8 = &chain[8];
+    let substate_id = create_random_substate_id();
+    db.with_write_tx(|tx| {
+        commit_chain(tx, &chain);
+        Ok::<_, StorageError>(())
+    })
+    .unwrap();
+
+    let mut tx = db.create_write_tx().unwrap();
+    tx.block_diffs_insert(block8.id(), &[up(&substate_id, 0, block8)])
+        .unwrap();
+    assert!(
+        tx.block_diffs_contains_versioned_substate(
+            chain[9].id(),
+            &VersionedSubstateId::new(substate_id.clone(), SubstateVersion::ZERO)
+        )
+        .unwrap(),
+        "a write transaction does not see its own changes"
+    );
+    tx.rollback().unwrap();
+
+    let before = db.create_read_tx().unwrap();
+    db.with_write_tx(|tx| tx.block_diffs_insert(block8.id(), &[up(&substate_id, 0, block8)]))
+        .unwrap();
+    let after = db.create_read_tx().unwrap();
+    db.with_write_tx(|tx| tx.block_diffs_remove(block8.id())).unwrap();
+
+    let versioned = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::ZERO);
+    assert!(
+        !before
+            .block_diffs_contains_versioned_substate(chain[9].id(), &versioned)
+            .unwrap(),
+        "a read view saw changes committed after it was opened, or a rolled-back transaction's changes"
+    );
+    assert!(
+        after
+            .block_diffs_contains_versioned_substate(chain[9].id(), &versioned)
+            .unwrap(),
+        "a read view lost changes removed after it was opened"
+    );
 }

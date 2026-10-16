@@ -5,6 +5,8 @@ mod catch_up_on_proposal_ahead;
 #[cfg(test)]
 mod catch_up_rewind;
 #[cfg(test)]
+mod command_trimming_censorship;
+#[cfg(test)]
 mod consensus;
 #[cfg(test)]
 mod deferred_lock_conflict;

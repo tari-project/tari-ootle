@@ -903,17 +903,20 @@ where
         let mut client = self.validator_node_client_factory.create_client(vn_addr);
 
         if !self.verify_substate_proofs {
-            return client
+            let result = client
                 .get_substate(substate_requirement)
                 .await
-                .map(|result| (result, None))
-                .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()));
+                .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()))?;
+            self.validate_substate_result_address(&result, substate_requirement, vn_addr)?;
+            return Ok((result, None));
         }
 
         let (result, proof) = client
             .get_substate_with_proof(substate_requirement)
             .await
             .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()))?;
+
+        self.validate_substate_result_address(&result, substate_requirement, vn_addr)?;
 
         // The validator has nothing committed to anchor a proof against yet (e.g. immediately after
         // an epoch change). Return the result unverified and let the caller decide.
@@ -964,6 +967,32 @@ where
         }
 
         Ok((result, Some(proof)))
+    }
+
+    fn validate_substate_result_address(
+        &self,
+        result: &SubstateResult,
+        substate_requirement: SubstateRequirementRef<'_>,
+        vn_addr: &TAddr,
+    ) -> Result<(), IndexerError> {
+        if let SubstateResult::Up { substate } = result {
+            if let Some(expected_addr) = substate_requirement.substate_id().as_template() {
+                if let Some(template) = substate.substate_value().published_template() {
+                    let derived = template.to_template_address();
+                    if derived != expected_addr {
+                        warn!(
+                            target: LOG_TARGET,
+                            "VN {} returned template with mismatched address {} (expected {})",
+                            vn_addr,
+                            derived,
+                            expected_addr
+                        );
+                        return Err(IndexerError::InvalidSubstateValue);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Verifies the down proof of `(substate_id, version)` whose exclusion half is anchored at the root of
@@ -1321,6 +1350,8 @@ mod tests {
         failing_members: HashSet<Addr>,
         /// Answered on a proven read as up, with the given proof.
         up_with_proof: HashMap<SubstateId, (Substate, SubstateProofData)>,
+        /// Member-specific responses: if (member, substate_id) matches, return this response.
+        member_responses: HashMap<(Addr, SubstateId), SubstateResult>,
     }
 
     #[derive(Clone)]
@@ -1352,6 +1383,11 @@ mod tests {
             substate_req: SubstateRequirementRef<'_>,
         ) -> Result<SubstateResult, ValidatorNodeRpcClientError> {
             self.0.single_requests.fetch_add(1, Ordering::Relaxed);
+            if let Some(addr) = &self.1 {
+                if let Some(res) = self.0.member_responses.get(&(addr.clone(), substate_req.substate_id().clone())) {
+                    return Ok(res.clone());
+                }
+            }
             if self.0.failing_single_reads.contains(substate_req.substate_id()) {
                 return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
                     "no answer for {}",
@@ -1634,6 +1670,34 @@ mod tests {
             public_key: Default::default(),
             vote_power: VotePower::of(1),
         }]);
+        let manager = CachedSubstateManager::new(
+            Network::LocalNet,
+            NumPreshards::P256,
+            FakeEpochManager(Arc::new(committee), None, Arc::default(), Epoch(1)),
+            FakeClient(network.clone(), None),
+            FakeCache::default(),
+        );
+        (manager, network)
+    }
+
+    fn manager_with_members(
+        network: FakeNetwork,
+        members: Vec<Addr>,
+    ) -> (
+        CachedSubstateManager<FakeEpochManager, FakeClient, FakeCache>,
+        Arc<FakeNetwork>,
+    ) {
+        let network = Arc::new(network);
+        let committee = Committee::new(
+            members
+                .into_iter()
+                .map(|address| CommitteeMember {
+                    address,
+                    public_key: Default::default(),
+                    vote_power: VotePower::of(1),
+                })
+                .collect(),
+        );
         let manager = CachedSubstateManager::new(
             Network::LocalNet,
             NumPreshards::P256,
@@ -2963,5 +3027,66 @@ mod tests {
 
         let (id, manager) = anchored_up_setup(next_epoch, 4, |_| vec![(next_epoch, group(1, 128), 2, NEWER_ROOT)]);
         assert!(!proves_read(&manager, &id).await);
+    }
+
+    /// A member serving a template whose derived address does not match the requested address is skipped,
+    /// and the read resolves from an honest member.
+    #[tokio::test]
+    async fn mismatched_template_address_is_skipped_and_read_resolves_from_honest_member() {
+        use tari_engine_types::published_template::PublishedTemplate;
+
+        let author = RistrettoPublicKeyBytes::from_bytes(&[0x42u8; 32]).unwrap();
+        let legit_binary = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00].try_into().unwrap();
+        let legit_template = PublishedTemplate {
+            template_name: "Legit".try_into().unwrap(),
+            author,
+            binary: legit_binary,
+            at_epoch: 0,
+            metadata_hash: None,
+        };
+        let legitimate_address = legit_template.to_template_address();
+        let template_id = SubstateId::Template(legitimate_address);
+
+        // Malicious template has a different binary, so its derived address != legitimate_address
+        let spoofed_binary = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x99].try_into().unwrap();
+        let spoofed_template = PublishedTemplate {
+            template_name: "Spoofed".try_into().unwrap(),
+            author,
+            binary: spoofed_binary,
+            at_epoch: 0,
+            metadata_hash: None,
+        };
+
+        let mut member_responses = HashMap::new();
+        member_responses.insert(
+            ("vn_malicious".to_string(), template_id.clone()),
+            SubstateResult::Up {
+                substate: Box::new(Substate::new(0, SubstateValue::Template(spoofed_template))),
+            },
+        );
+        member_responses.insert(
+            ("vn_honest".to_string(), template_id.clone()),
+            SubstateResult::Up {
+                substate: Box::new(Substate::new(0, SubstateValue::Template(legit_template))),
+            },
+        );
+
+        let (manager, _) = manager_with_members(
+            FakeNetwork {
+                member_responses,
+                ..Default::default()
+            },
+            vec!["vn_malicious".to_string(), "vn_honest".to_string()],
+        );
+        let manager = manager.with_substate_proof_verification(false);
+
+        // The read must skip vn_malicious and settle on vn_honest's legitimate template
+        let res = manager.get_substate(&template_id, None).await.unwrap();
+        let SubstateResult::Up { substate } = res.result else {
+            panic!("expected SubstateResult::Up, got {:?}", res.result);
+        };
+        let template = substate.substate_value().published_template().expect("published template value");
+        assert_eq!(template.to_template_address(), legitimate_address);
+        assert_eq!(template.template_name.as_ref(), "Legit");
     }
 }

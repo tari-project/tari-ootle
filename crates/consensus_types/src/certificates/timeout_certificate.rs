@@ -11,7 +11,7 @@ use tari_ootle_common_types::{Epoch, NodeHeight, hashing::timeout_certificate_id
 use crate::{HighTc, TcId, validator_signature::ValidatorSignatureBytes};
 
 /// A validator's signed timeout for a view, carrying the height of its high proposal certificate.
-#[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize, Encode, Decode, CborLen)]
+#[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize, Encode, Decode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SignedTimeout {
     #[n(0)]
@@ -20,7 +20,7 @@ pub struct SignedTimeout {
     pub signature: ValidatorSignatureBytes,
 }
 
-#[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize, Encode, Decode, CborLen)]
+#[derive(Debug, Clone, Hash, Deserialize, Serialize, BorshSerialize, Encode, Decode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TimeoutCertificate {
     #[n(0)]
@@ -34,7 +34,8 @@ pub struct TimeoutCertificate {
 }
 
 impl TimeoutCertificate {
-    pub fn new(epoch: Epoch, height: NodeHeight, timeouts: Vec<SignedTimeout>) -> Self {
+    pub fn new(epoch: Epoch, height: NodeHeight, mut timeouts: Vec<SignedTimeout>) -> Self {
+        timeouts.sort_by(|a, b| a.signature.public_key.cmp(&b.signature.public_key));
         Self {
             epoch,
             height,
@@ -92,5 +93,40 @@ impl Display for TimeoutCertificate {
             self.timeouts.len(),
             self.max_high_pc_height()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+
+    use super::*;
+
+    #[test]
+    fn canonical_timeout_ordering() {
+        let pk1 = RistrettoPublicKeyBytes::from_bytes(&[1u8; 32]).unwrap();
+        let pk2 = RistrettoPublicKeyBytes::from_bytes(&[2u8; 32]).unwrap();
+        let pk3 = RistrettoPublicKeyBytes::from_bytes(&[3u8; 32]).unwrap();
+
+        let sig1 = SignedTimeout {
+            high_pc_height: NodeHeight(1),
+            signature: ValidatorSignatureBytes::new(pk1, SchnorrSignatureBytes::zero()),
+        };
+        let sig2 = SignedTimeout {
+            high_pc_height: NodeHeight(2),
+            signature: ValidatorSignatureBytes::new(pk2, SchnorrSignatureBytes::zero()),
+        };
+        let sig3 = SignedTimeout {
+            high_pc_height: NodeHeight(3),
+            signature: ValidatorSignatureBytes::new(pk3, SchnorrSignatureBytes::zero()),
+        };
+
+        let tc1 = TimeoutCertificate::new(Epoch(1), NodeHeight(5), vec![sig3.clone(), sig1.clone(), sig2.clone()]);
+        let tc2 = TimeoutCertificate::new(Epoch(1), NodeHeight(5), vec![sig1.clone(), sig2.clone(), sig3.clone()]);
+        let tc3 = TimeoutCertificate::new(Epoch(1), NodeHeight(5), vec![sig2.clone(), sig3.clone(), sig1.clone()]);
+
+        assert_eq!(tc1.calculate_id(), tc2.calculate_id());
+        assert_eq!(tc2.calculate_id(), tc3.calculate_id());
+        assert_eq!(tc1.timeouts(), tc2.timeouts());
     }
 }

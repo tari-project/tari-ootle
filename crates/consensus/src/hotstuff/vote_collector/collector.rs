@@ -198,12 +198,12 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
         let epoch_height = (epoch, height);
         // Once a block is decided at this height, votes for any losing fork at the same height can be dropped too.
         let votes = self.store.remove(&epoch_height)?;
-        Some(
-            votes
-                .into_values()
-                .filter(|vote| vote.decision() == decision && vote.aggregation_key() == *agg_key)
-                .collect(),
-        )
+        let mut votes: Vec<V> = votes
+            .into_values()
+            .filter(|vote| vote.decision() == decision && vote.aggregation_key() == *agg_key)
+            .collect();
+        votes.sort_by(|a, b| a.public_key().cmp(b.public_key()));
+        Some(votes)
     }
 
     fn votes_for_key_iter(&self, epoch: Epoch, height: NodeHeight) -> Option<impl Iterator<Item = &V>> {
@@ -576,5 +576,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(collector.store.read().await.store.len(), 1);
+    }
+
+    #[test]
+    fn it_returns_votes_in_canonical_order() {
+        let mut store = VoteStoreInner::<TestVote>::new();
+        let epoch = Epoch(1);
+        let height = NodeHeight(1);
+        let block_id = FixedHash::zero();
+
+        for pk_byte in [3u8, 1u8, 4u8, 2u8] {
+            let pk = RistrettoPublicKeyBytes::from_bytes(&[pk_byte; 32]).unwrap();
+            let vote = TestVote {
+                epoch,
+                height,
+                block_id,
+                decision: QuorumDecision::Accept,
+                sig: ZERO_SIG,
+                public_key: pk,
+            };
+            store.save_vote(vote).unwrap();
+        }
+
+        let votes = store
+            .take_votes_with_decision(epoch, height, &block_id, QuorumDecision::Accept)
+            .unwrap();
+        let keys: Vec<u8> = votes.iter().map(|v| v.public_key.as_bytes()[0]).collect();
+        assert_eq!(keys, vec![1, 2, 3, 4]);
     }
 }

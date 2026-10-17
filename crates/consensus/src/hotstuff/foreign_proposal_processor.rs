@@ -815,7 +815,7 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
 }
 
 fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> PcId {
-    let signatures = qc
+    let mut signatures = qc
         .signatures
         .iter()
         .map(|s| ValidatorSignatureBytes {
@@ -828,6 +828,7 @@ fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> 
             ),
         })
         .collect::<Vec<_>>();
+    signatures.sort_by(|a, b| a.public_key().cmp(b.public_key()));
     ProposalCertificate::calculate_id_from_parts(
         &qc.header_hash,
         &qc.parent_id.into_array().into(),

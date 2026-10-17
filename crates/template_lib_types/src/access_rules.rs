@@ -12,7 +12,18 @@ use tari_template_abi::rust::{
 
 use crate::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
-/// Represents the types of possible access control rules over a component method or resource
+/// Represents the types of possible access control rules over a component method or resource.
+///
+/// # Owner Bypass Semantics
+/// Note that per-method component access rules and per-action resource access rules constrain **non-owners**.
+/// If a caller satisfies the component or resource owner rule ([`SubstateOwnerRule`]), the engine permits
+/// the call or action regardless of whether the specific access rule is [`AccessRule::DenyAll`].
+///
+/// The single carve-out is **recall** on resources ([`ResourceAuthAction::Recall`]), which always checks the
+/// explicit access rule and cannot be bypassed solely by ownership.
+///
+/// To make a resource or component truly immutable or trustless against its creator, set its owner rule to
+/// [`SubstateOwnerRule::None`].
 #[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
@@ -21,7 +32,11 @@ pub enum AccessRule {
     /// AccessRule always passes
     #[n(0)]
     AllowAll,
-    /// AccessRule always fails
+    /// AccessRule always fails for non-owners.
+    ///
+    /// NB: An owner-retained component or resource owner can still invoke methods or actions governed by `DenyAll`
+    /// (with the exception of `Recall`). To prevent even the owner from performing an action, configure the owner
+    /// rule to [`SubstateOwnerRule::None`].
     #[n(1)]
     DenyAll,
     /// AccessRule that requires a specific condition to be met
@@ -758,7 +773,12 @@ impl ResourceAccessRules {
         }
     }
 
-    /// Update the access rules so no one can perform any action on the resource after its creation
+    /// Update the access rules so non-owners cannot perform any action on the resource after its creation.
+    ///
+    /// NB: If an owner is retained via [`SubstateOwnerRule`], the owner can still perform actions (such as minting,
+    /// burning, or freezing) despite `DenyAll` rules, except for `Recall` which strictly checks its rule. To ensure
+    /// absolute immutability where even the issuer cannot perform actions, set the owner rule to
+    /// [`SubstateOwnerRule::None`].
     pub fn deny_all() -> Self {
         Self {
             mint: AccessRule::DenyAll,

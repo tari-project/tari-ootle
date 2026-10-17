@@ -98,6 +98,23 @@ async fn outbound_request_want_list_task_inner<TPeerStore: PeerStore>(
                     });
                 }
 
+                if !rec.is_valid() {
+                    return Err(Error::InvalidSignedPeer {
+                        peer_id: rec.to_peer_id(),
+                        details: format!("Peer {peer_id} returned an invalid signed peer record"),
+                    });
+                }
+
+                if !rec.is_valid_with_time(crate::MAX_ALLOWED_CLOCK_DRIFT) {
+                    return Err(Error::InvalidSignedPeer {
+                        peer_id: rec.to_peer_id(),
+                        details: format!(
+                            "Peer {peer_id} returned a peer record with timestamp in the far future: {:?}",
+                            rec.updated_at
+                        ),
+                    });
+                }
+
                 new_peers += 1;
 
                 store

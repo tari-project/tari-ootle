@@ -47,13 +47,31 @@ async fn inbound_sync_task_inner<TPeerStore: PeerStore>(
                     "Received local peer record from peer {peer_id} containing {} address(es)",
                     msg.addresses.len()
                 );
+                if msg.to_peer_id() != peer_id {
+                    return Err(Error::InvalidSignedPeer {
+                        peer_id,
+                        details: format!("peer {peer_id} sent local record for different peer {}", msg.to_peer_id()),
+                    });
+                }
                 if !msg.is_valid() {
                     return Err(Error::InvalidSignedPeer {
                         peer_id,
                         details: format!("peer {peer_id} sent an invalid local peer record"),
                     });
                 }
-                store.put(msg).await.map_err(|e| Error::StoreError(e.to_string()))?;
+                if !msg.is_valid_with_time(crate::MAX_ALLOWED_CLOCK_DRIFT) {
+                    return Err(Error::InvalidSignedPeer {
+                        peer_id,
+                        details: format!(
+                            "peer {peer_id} sent a local peer record with timestamp in the far future: {:?}",
+                            msg.updated_at
+                        ),
+                    });
+                }
+                store
+                    .put_if_newer(msg)
+                    .await
+                    .map_err(|e| Error::StoreError(e.to_string()))?;
                 received_remote_peer_record = true;
             },
             proto::mod_Message::OneOfpayload::WantPeers(msg) => {

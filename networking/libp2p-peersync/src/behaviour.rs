@@ -98,6 +98,12 @@ where TPeerStore: PeerStore
                 details: "Peer signature failed validation".to_string(),
             });
         }
+        if !peer.is_valid_with_time(crate::MAX_ALLOWED_CLOCK_DRIFT) {
+            return Err(Error::InvalidSignedPeer {
+                peer_id: peer.to_peer_id(),
+                details: format!("Peer record has timestamp in the far future: {:?}", peer.updated_at),
+            });
+        }
         self.store()
             .put_if_newer(peer)
             .await

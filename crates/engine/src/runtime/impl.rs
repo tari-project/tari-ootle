@@ -475,7 +475,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), RuntimeError> {
         let template_address = *state_mut.current_template()?;
         let event = Event::std(Some(substate_id.into()), template_address, object_name, action, payload);
-        debug!(target: LOG_TARGET, "Emitted event {}", event);
+        trace!(target: LOG_TARGET, "Emitted event {}", event);
         state_mut.push_event(event)?;
         Ok(())
     }
@@ -1409,7 +1409,7 @@ where
     ) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("component_invoke")?;
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "Component invoke: {} {:?}",
             component_ref,
@@ -2588,7 +2588,7 @@ where
     ) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("vault_invoke")?;
 
-        debug!(target: LOG_TARGET, "Vault invoke: {} {:?}", vault_ref, action,);
+        trace!(target: LOG_TARGET, "Vault invoke: {} {:?}", vault_ref, action,);
 
         // Check vault ownership if referencing an ID
         if action.requires_write_access() &&

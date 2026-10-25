@@ -207,7 +207,7 @@ where
         let mut read_declared_inputs = HashSet::new();
         let mut write_declared_inputs = HashSet::new();
         for input in executable.all_inputs_iter() {
-            debug!(
+            trace!(
                 target: LOG_TARGET,
                 "Adding substate to initial call scope: {}",
                 input
@@ -391,7 +391,7 @@ where
         instruction: Instruction,
         blobs: &tari_ootle_transaction::Blobs,
     ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
-        debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
+        trace!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
             Instruction::CreateAccount {
                 owner_public_key: public_key_address,

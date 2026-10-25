@@ -414,7 +414,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         }
 
         self.write_with(|state| {
-            debug!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
+            trace!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
             state.fee_state_mut().add_charge(source, amount);
         })
     }

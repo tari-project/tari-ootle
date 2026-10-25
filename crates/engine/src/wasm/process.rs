@@ -380,7 +380,7 @@ impl WasmProcess {
             }
         }
 
-        log::debug!(target: LOG_TARGET, "Engine call: {:?}", op);
+        log::trace!(target: LOG_TARGET, "Engine call: {:?}", op);
 
         let result = match op {
             EngineOp::EmitLog => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: EmitLogArg| {

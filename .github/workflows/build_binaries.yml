@@ -411,7 +411,7 @@ jobs:
 
       # The indexer web UI builds the workspace's ootle-wasm-bor crate to decode the values the indexer serves.
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.87.29
+        uses: taiki-e/install-action@v2.87.31
         with:
           tool: wasm-pack@0.15.0
 

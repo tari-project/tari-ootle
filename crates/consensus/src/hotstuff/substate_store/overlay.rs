@@ -4,10 +4,23 @@
 use std::collections::HashMap;
 
 use tari_engine_types::substate::{Substate, SubstateDiff, SubstateId};
-use tari_ootle_common_types::{SubstateRequirement, SubstateVersion, VersionedSubstateIdRef, optional::Optional};
+use tari_ootle_common_types::{
+    SubstateRequirement,
+    SubstateVersion,
+    ToSubstateAddress,
+    VersionedSubstateIdRef,
+    optional::Optional,
+};
 use tari_ootle_storage::{StateStoreReadTransaction, consensus_models::SubstateChange};
 
-use super::{LatestSubstateVersion, PendingSubstateStore, SubstateStoreError, change_log::ChangeLog};
+use super::{
+    BlockChanges,
+    LatestSubstateVersion,
+    PendingSubstateStore,
+    SubstateStoreError,
+    SubstateVersionReader,
+    change_log::ChangeLog,
+};
 use crate::traits::{ReadableSubstateStore, WriteableSubstateStore};
 
 /// Speculative changes over a [`PendingSubstateStore`], read as though they followed every change the store holds.
@@ -71,6 +84,25 @@ impl<TTx: StateStoreReadTransaction> ReadableSubstateStore for SubstateOverlay<'
 
     fn get(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, Self::Error> {
         self.log.get(self.base, id)
+    }
+}
+
+impl<TTx: StateStoreReadTransaction> SubstateVersionReader for SubstateOverlay<'_, '_, TTx> {
+    fn get_latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
+        SubstateOverlay::get_latest_version(self, id)
+    }
+
+    fn lock_assert_is_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<(), SubstateStoreError> {
+        SubstateOverlay::lock_assert_is_up(self, id)
+    }
+}
+
+/// The block an overlay builds is its store's block with the overlay's changes after it.
+impl<TTx: StateStoreReadTransaction> BlockChanges for SubstateOverlay<'_, '_, TTx> {
+    fn block_change(&self, id: VersionedSubstateIdRef<'_>) -> Option<&SubstateChange> {
+        self.log
+            .get_pending(&id.to_substate_address())
+            .or_else(|| self.base.block_change(id))
     }
 }
 

@@ -14,6 +14,7 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BlockTransactionExecution,
+        Command,
         InvalidEvidenceReason,
         LocalOnlyAtom,
         LockedEpoch,
@@ -44,7 +45,14 @@ use crate::{
         local_pledged_inputs,
         on_ready_to_vote_on_local_block::check_ready_to_leave_stage,
         substate_store::{LockStatus, PendingSubstateStore},
-        transaction_manager::{ConsensusTransactionManager, PledgedTransaction, PreparedTransaction},
+        transaction_manager::{
+            ConsensusTransactionManager,
+            ExecutionMemo,
+            PledgedTransaction,
+            PreparedTransaction,
+            SpeculationBudget,
+            SpeculationCandidate,
+        },
     },
     tracing::TraceTimer,
     traits::{BlockTransactionExecutor, WriteableSubstateStore},
@@ -57,6 +65,9 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_ready_to_vote_on_
 pub(super) struct LocalCommandValidator<'a, TExecutor, TStateStore> {
     transaction_manager: &'a ConsensusTransactionManager<TExecutor, TStateStore>,
     local_validator_pk: &'a RistrettoPublicKey,
+    /// The block's transaction records and the executions speculated for it, which a command takes when it resolves
+    /// to the same inputs.
+    memo: ExecutionMemo,
 }
 
 impl<'a, TExecutor, TStateStore> LocalCommandValidator<'a, TExecutor, TStateStore>
@@ -64,19 +75,74 @@ where
     TStateStore: StateStore,
     TExecutor: BlockTransactionExecutor<TStateStore>,
 {
+    /// A validator of the block `memo` was made for.
     pub fn new(
         transaction_manager: &'a ConsensusTransactionManager<TExecutor, TStateStore>,
         local_validator_pk: &'a RistrettoPublicKey,
+        memo: ExecutionMemo,
     ) -> Self {
         Self {
             transaction_manager,
             local_validator_pk,
+            memo,
         }
+    }
+
+    /// Speculates the executions of the LocalOnly and LocalPrepare commands among `commands`, those of `block`, against
+    /// `substate_store` as it stands, for the commands to take as they are evaluated. A replica speculates once
+    /// everything that precedes the block's transaction commands is applied.
+    pub fn speculate<'c, TTx: StateStoreReadTransaction>(
+        &mut self,
+        tx: &TTx,
+        block: &Block,
+        commands: impl IntoIterator<Item = &'c Command>,
+        local_committee_info: &CommitteeInfo,
+        substate_store: &PendingSubstateStore<TTx>,
+        proposed_block_change_set: &ProposedBlockChangeSet,
+        budget: SpeculationBudget,
+    ) where
+        TStateStore: Sync,
+        TExecutor: Sync,
+    {
+        let locked_epoch = block.to_locked_epoch();
+        let candidates = commands
+            .into_iter()
+            .filter_map(|cmd| match cmd {
+                Command::LocalOnly(atom) => Some(atom.id()),
+                Command::LocalPrepare(atom) => Some(atom.id()),
+                _ => None,
+            })
+            .filter_map(|id| {
+                let mut pool_tx = proposed_block_change_set
+                    .get_transaction_pool_record(tx, substate_store.parent_chain(), id)
+                    .ok()?;
+                if !pool_tx.current_stage().is_new() || pool_tx.current_decision().is_abort() {
+                    return None;
+                }
+                pool_tx.update_locked_epoch(locked_epoch.clone());
+                Some(SpeculationCandidate {
+                    transaction_id: *id,
+                    locked_epoch: pool_tx.locked_epoch()?.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        self.transaction_manager.speculate(
+            &mut self.memo,
+            substate_store,
+            local_committee_info,
+            block.epoch(),
+            &candidates,
+            budget,
+        );
+    }
+
+    pub fn memo(&self) -> &ExecutionMemo {
+        &self.memo
     }
 
     #[allow(clippy::too_many_lines)]
     pub fn evaluate_local_only_command<TTx: StateStoreReadTransaction>(
-        &self,
+        &mut self,
         tx: &TTx,
         block: &Block,
         atom: &LocalOnlyAtom,
@@ -124,6 +190,7 @@ where
                 &pool_tx,
                 block.as_leaf(),
                 proposed_block_change_set,
+                &mut self.memo,
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
@@ -227,7 +294,7 @@ where
 
     /// Evaluates a `proposed_kind` command proposed for a transaction at the New stage.
     fn evaluate_new_multishard_command<TTx: StateStoreReadTransaction>(
-        &self,
+        &mut self,
         mut tx_rec: TransactionPoolRecord,
         block: &Block,
         proposed_kind: MultiShardCommandKind,
@@ -267,6 +334,7 @@ where
                     &tx_rec,
                     block.as_leaf(),
                     proposed_block_change_set,
+                    &mut self.memo,
                 )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?
         };
@@ -325,7 +393,7 @@ where
     }
 
     pub fn evaluate_local_prepare_command<TTx: StateStoreReadTransaction>(
-        &self,
+        &mut self,
         tx: &TTx,
         block: &Block,
         atom: &MultiShardAtom,
@@ -374,7 +442,7 @@ where
 
     #[allow(clippy::too_many_lines)]
     pub fn evaluate_local_accept_command<TTx: StateStoreReadTransaction>(
-        &self,
+        &mut self,
         tx: &TTx,
         block: &Block,
         atom: &MultiShardAtom,
@@ -441,7 +509,7 @@ where
                 return Ok(Some(reason));
             }
 
-            let transaction = tx_rec.get_transaction(tx)?;
+            let transaction = self.memo.take_record(tx, tx_rec.id())?;
             if !transaction.has_all_required_input_pledges(tx, &block.as_leaf(), local_committee_info)? {
                 warn!(
                     target: LOG_TARGET,

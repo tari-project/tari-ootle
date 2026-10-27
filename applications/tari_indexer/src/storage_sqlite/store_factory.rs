@@ -463,7 +463,7 @@ pub(crate) mod tests {
 
         UtxoUpdateRecord::Spent(UtxoSpent {
             address: UtxoAddress::new(utxo_resource(), UtxoId::from_array([seq; 32])),
-            version: SubstateVersion::new(1),
+            version: SubstateVersion::ZERO,
             shard: tari_ootle_common_types::shard::Shard::from(1u32),
             state_version: StateVersion::new(state_version),
         })
@@ -640,6 +640,63 @@ pub(crate) mod tests {
         assert_eq!(cursor, 30);
     }
 
+    /// Freezing or unfreezing an output takes its version down and brings the next one up under the
+    /// same commitment. Each spend is reported at the state version and substate version it took down.
+    #[tokio::test]
+    async fn a_re_versioned_utxo_reports_each_version_spent_once() {
+        use tari_indexer_client::types::WalletUtxoUpdate;
+
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        fn at_version(record: UtxoUpdateRecord, version: u64) -> UtxoUpdateRecord {
+            match record {
+                UtxoUpdateRecord::Unspent(mut unspent) => {
+                    unspent.version = SubstateVersion::new(version);
+                    UtxoUpdateRecord::Unspent(unspent)
+                },
+                UtxoUpdateRecord::Spent(mut spent) => {
+                    spent.version = SubstateVersion::new(version);
+                    UtxoUpdateRecord::Spent(spent)
+                },
+            }
+        }
+
+        let (_dir, store) = store_with_utxos(&[(10, 1)]).await;
+        for (state_version, version) in [(20, 0), (30, 1)] {
+            store
+                .with_write_tx(move |tx| {
+                    tx.batch_insert_utxo_updates(Epoch(1), [
+                        at_version(spent_at(1, state_version), version),
+                        at_version(unspent_at(1, state_version), version + 1),
+                    ])
+                })
+                .await
+                .unwrap();
+        }
+
+        let spent_versions = |set: &tari_indexer_client::types::UtxoStateUpdateSet| {
+            set.updates
+                .iter()
+                .filter_map(|update| match update {
+                    WalletUtxoUpdate::Spent(spent) => Some(spent.version),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Each version's row is the record of its latest transition, so v1, spent at 30, no longer
+        // shows as unspent at 20.
+        let set = read_updates(&store, 10, 1).await;
+        assert_eq!(set.max_state_version, StateVersion::new(20));
+        assert_eq!(spent_versions(&set), [SubstateVersion::ZERO]);
+        assert_eq!(set.updates.len(), 1);
+
+        let set = read_updates(&store, 20, 10).await;
+        assert_eq!(set.max_state_version, StateVersion::new(30));
+        assert_eq!(spent_versions(&set), [SubstateVersion::new(1)]);
+        assert!(matches!(set.updates[1], WalletUtxoUpdate::Unspent(_)));
+    }
+
     #[tokio::test]
     async fn an_unspent_only_read_counts_spent_rows_against_its_limit() {
         let (_dir, store) = store_with_utxos(&[(10, 2)]).await;
@@ -784,6 +841,7 @@ pub(crate) mod tests {
         let mark_spent = diesel::update(utxos::table)
             .filter(utxos::resource_address.eq(resource.to_string()))
             .filter(utxos::commitment.eq(UtxoId::from_array([1; 32]).to_commitment_hex_string()))
+            .filter(utxos::version.eq(0))
             .set(utxos::is_spent.eq(true));
         assert_seeks(
             "mark spent",

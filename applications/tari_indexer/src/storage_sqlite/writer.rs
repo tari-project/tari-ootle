@@ -160,7 +160,6 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     let commitment = spent.address.id().to_commitment_hex_string();
                     let update = UtxoRecordUpdate {
                         epoch: Some(epoch.as_u64() as i64),
-                        version: Some(spent.version.as_u64() as i64),
                         // Prune the UTXO data for spent outputs
                         utxo: Some(None),
                         // Update to deleted state version
@@ -168,9 +167,12 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                         is_spent: Some(true),
                         ..Default::default()
                     };
+                    // A re-versioned output (freeze, unfreeze) keeps its commitment, so each version has its own
+                    // row and only the version this transition takes down is marked spent.
                     diesel::update(utxos::table)
                         .filter(utxos::resource_address.eq(resource_address))
                         .filter(utxos::commitment.eq(commitment))
+                        .filter(utxos::version.eq(spent.version.as_u64() as i64))
                         .set(update)
                         .execute(self.connection())
                         .map_err(|e| StorageError::general(OPERATION, format!("update error: {e}")))?;

@@ -20,7 +20,6 @@ use crate::storage_sqlite::{schema::utxos, serialization::deserialize_hex_try_fr
 #[diesel(table_name = utxos)]
 pub(crate) struct UtxoRecordUpdate {
     pub epoch: Option<i64>,
-    pub version: Option<i64>,
     pub utxo: Option<Option<Vec<u8>>>,
     pub state_version: Option<i64>,
     pub is_spent: Option<bool>,

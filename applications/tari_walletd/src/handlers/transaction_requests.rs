@@ -25,6 +25,7 @@ use tari_ootle_wallet_sdk::{
         EffectiveStatus,
         KeyId,
         LockOwner,
+        OutputStatus,
         TransactionRequestCreatedEvent,
         TransactionRequestId,
         TransactionRequestModel,
@@ -53,7 +54,7 @@ use tari_ootle_walletd_client::{
         TransactionSubmitRequest,
     },
 };
-use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes};
+use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, stealth::SpendAuthorization};
 
 use super::context::HandlerContext;
 use crate::handlers::{
@@ -411,7 +412,7 @@ fn transition(
 /// The wallet-computed view of a request, including what it moves.
 fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<TransactionRequestInfo, anyhow::Error> {
     let status = model.effective_status_now();
-    let value_summaries = value_summaries(context, &model.unsigned_transaction)?;
+    let value_summaries = value_summaries(context, &model.unsigned_transaction, status, &model.lock_ids)?;
 
     let main_signer = resolve_main_signer(context, &model.unsigned_transaction, &model.other_signers)?;
     let external_signers = model.signatures.iter().map(|sig| *sig.public_key()).collect();
@@ -463,6 +464,8 @@ fn resolve_main_signer(
 fn value_summaries(
     context: &HandlerContext,
     transaction: &UnsignedTransaction,
+    status: EffectiveStatus,
+    lock_ids: &[WalletLockId],
 ) -> Result<Vec<TransactionRequestValueSummary>, anyhow::Error> {
     // A workspace reference resolves only at execution, so its commitments
     // match a wallet output of any resource.
@@ -521,15 +524,26 @@ fn value_summaries(
         }
     }
 
+    let awaiting_submission = !matches!(status, EffectiveStatus::Submitted);
     let mut change = HashSet::new();
     for (resource, created) in created {
-        for output in wallet_outputs(resource, *created.commitment()) {
-            // Change is an output the wallet holds the spend key for, created
-            // with exactly the authorisation and encrypted opening the wallet
-            // recorded: a different `auth` hands the same commitment to
-            // whoever holds that key. An output the transaction also spends
-            // is not coming back.
-            let returns_to_wallet = output.owner_key_id.is_some() &&
+        // An output under a workspace reference resolves its resource at execution time,
+        // so change is attributed only when the statement names an explicit resource address.
+        let Some(resource) = resource else {
+            continue;
+        };
+        for output in wallet_outputs(Some(resource), *created.commitment()) {
+            // Change is a pending output recorded under one of the request's locks while the
+            // request awaits submission, spendable by the wallet's key alone, and created with
+            // exactly the authorisation and encrypted opening the wallet recorded. Once the
+            // request has been submitted, finalizing its lock promotes the change output to
+            // Unspent and clears lock_id, so the pending-lock check applies only beforehand.
+            let lock_and_status_match = !awaiting_submission ||
+                (matches!(output.status, OutputStatus::LockedUnconfirmed) &&
+                    output.lock_id.is_some_and(|id| lock_ids.contains(&id)));
+            let returns_to_wallet = lock_and_status_match &&
+                output.owner_key_id.is_some() &&
+                matches!(output.auth, SpendAuthorization::Key(_)) &&
                 output.auth == created.auth &&
                 output.encrypted_data == created.output.encrypted_data &&
                 output.sender_public_nonce == created.output.sender_public_nonce;
@@ -976,14 +990,14 @@ mod tests {
 
     mod value_summaries {
         use tari_ootle_transaction::{TransactionBuilder, args::WorkspaceOffsetId};
-        use tari_ootle_wallet_sdk::models::{OutputStatus, StealthOutputModel};
+        use tari_ootle_wallet_sdk::models::StealthOutputModel;
         use tari_template_lib_types::{
             Amount,
             ComponentAddress,
             EncryptedData,
+            Hash32,
             crypto::{RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
             stealth::{
-                SpendAuthorization,
                 StealthInput,
                 StealthInputsStatement,
                 StealthOutputsStatement,
@@ -1154,13 +1168,14 @@ mod tests {
                 &self,
                 inputs: &[PedersenCommitmentBytes],
                 outputs: Vec<StealthUnspentOutput>,
+                lock_ids: Vec<WalletLockId>,
             ) -> (u64, u64, u64) {
                 let tx = with_instructions(vec![stealth_transfer(
                     ResourceAddressRef::Address(resource()),
                     inputs,
                     outputs,
                 )]);
-                let info = self.info(tx, vec![]).await;
+                let info = self.info(tx, lock_ids).await;
                 let [summary] = info.value_summaries.as_slice() else {
                     panic!("expected one summary: {:?}", info.value_summaries);
                 };
@@ -1232,32 +1247,184 @@ mod tests {
         #[tokio::test]
         async fn change_is_an_output_created_exactly_as_the_wallet_recorded_it() {
             let wallet = Wallet::start().await;
-            let input = wallet_output(2, 1_000_000, OutputStatus::LockedForSpend);
-            let change = wallet_output(3, 400_000, OutputStatus::LockedUnconfirmed);
+            let lock_id = lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
+            let mut input = wallet_output(2, 1_000_000, OutputStatus::LockedForSpend);
+            input.lock_id = Some(lock_id);
+            let mut change = wallet_output(3, 400_000, OutputStatus::LockedUnconfirmed);
+            change.lock_id = Some(lock_id);
             wallet.add_output(&input);
             wallet.add_output(&change);
 
             let mut redirected = as_statement_output(&change);
             redirected.auth = SpendAuthorization::Key(RistrettoPublicKeyBytes::from_bytes(&[9; 32]).unwrap());
             let mut not_ours = wallet_output(4, 300_000, OutputStatus::LockedUnconfirmed);
+            not_ours.lock_id = Some(lock_id);
             not_ours.owner_key_id = None;
             wallet.add_output(&not_ours);
 
             let spend = &[input.commitment];
             assert_eq!(
-                wallet.totals(spend, vec![as_statement_output(&change)]).await,
+                wallet
+                    .totals(spend, vec![as_statement_output(&change)], vec![lock_id])
+                    .await,
                 (1_000_000, 400_000, 600_000)
             );
-            assert_eq!(wallet.totals(spend, vec![redirected]).await, (1_000_000, 0, 1_000_000));
             assert_eq!(
-                wallet.totals(spend, vec![as_statement_output(&not_ours)]).await,
+                wallet.totals(spend, vec![redirected], vec![lock_id]).await,
                 (1_000_000, 0, 1_000_000)
             );
             assert_eq!(
-                wallet.totals(spend, vec![as_statement_output(&input)]).await,
+                wallet
+                    .totals(spend, vec![as_statement_output(&not_ours)], vec![lock_id])
+                    .await,
+                (1_000_000, 0, 1_000_000)
+            );
+            assert_eq!(
+                wallet
+                    .totals(spend, vec![as_statement_output(&input)], vec![lock_id])
+                    .await,
                 (1_000_000, 0, 1_000_000),
                 "an output the transaction also spends was counted as change"
             );
+
+            for (n, status) in [
+                (5, OutputStatus::Unspent),
+                (6, OutputStatus::Spent),
+                (7, OutputStatus::LockedForSpend),
+            ] {
+                let mut existing = wallet_output(n, 1_000_000, status);
+                existing.lock_id = Some(lock_id);
+                wallet.add_output(&existing);
+                assert_eq!(
+                    wallet
+                        .totals(spend, vec![as_statement_output(&existing)], vec![lock_id])
+                        .await,
+                    (1_000_000, 0, 1_000_000),
+                    "a {status:?} wallet output was replayed as change"
+                );
+            }
+
+            for (n, auth) in [
+                (8, SpendAuthorization::Script(Hash32::zero())),
+                (
+                    9,
+                    SpendAuthorization::KeyAndScript(RistrettoPublicKeyBytes::default(), Hash32::zero()),
+                ),
+            ] {
+                let mut script_gated = wallet_output(n, 400_000, OutputStatus::LockedUnconfirmed);
+                script_gated.lock_id = Some(lock_id);
+                script_gated.auth = auth;
+                wallet.add_output(&script_gated);
+                assert_eq!(
+                    wallet
+                        .totals(spend, vec![as_statement_output(&script_gated)], vec![lock_id])
+                        .await,
+                    (1_000_000, 0, 1_000_000),
+                    "a condition-tree output was counted as change"
+                );
+            }
+
+            let mut foreign_locked = wallet_output(10, 400_000, OutputStatus::LockedUnconfirmed);
+            foreign_locked.lock_id = Some(lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool)));
+            wallet.add_output(&foreign_locked);
+            assert_eq!(
+                wallet
+                    .totals(spend, vec![as_statement_output(&foreign_locked)], vec![lock_id])
+                    .await,
+                (1_000_000, 0, 1_000_000),
+                "an unconfirmed output from an unheld lock was counted as change"
+            );
+
+            let unlocked_unconfirmed = wallet_output(11, 400_000, OutputStatus::LockedUnconfirmed);
+            wallet.add_output(&unlocked_unconfirmed);
+            assert_eq!(
+                wallet
+                    .totals(spend, vec![as_statement_output(&unlocked_unconfirmed)], vec![lock_id])
+                    .await,
+                (1_000_000, 0, 1_000_000),
+                "an unconfirmed output with no lock_id was counted as change"
+            );
+        }
+
+        #[tokio::test]
+        async fn submitted_request_retains_change_summary_after_outputs_finalize() {
+            let wallet = Wallet::start().await;
+            let input = wallet_output(2, 1_000_000, OutputStatus::Spent);
+            let change = wallet_output(3, 400_000, OutputStatus::Unspent);
+            wallet.add_output(&input);
+            wallet.add_output(&change);
+
+            let tx = with_instructions(vec![stealth_transfer(
+                ResourceAddressRef::Address(resource()),
+                &[input.commitment],
+                vec![as_statement_output(&change)],
+            )]);
+            let mut req = create_request(vec![], 60 * 60);
+            req.transaction = tx;
+            let created = handle_create(&wallet.daemon.context, Some(&wallet.tool), req)
+                .await
+                .unwrap();
+            wallet
+                .daemon
+                .context
+                .wallet_sdk()
+                .store()
+                .with_write_tx(|tx| {
+                    tx.transaction_request_transition(
+                        created.request_id,
+                        &[TransactionRequestStatus::Pending],
+                        TransactionRequestStatus::Submitted,
+                    )
+                })
+                .unwrap();
+
+            let info = handle_get(
+                &wallet.daemon.context,
+                Some(&wallet.daemon.session),
+                TransactionRequestGetRequest {
+                    request_id: created.request_id,
+                },
+            )
+            .await
+            .unwrap()
+            .request;
+            let [summary] = info.value_summaries.as_slice() else {
+                panic!("expected one summary: {:?}", info.value_summaries);
+            };
+            assert_eq!(
+                (summary.inputs_total, summary.change_total, summary.amount_leaving),
+                (1_000_000, 400_000, 600_000)
+            );
+        }
+
+        #[tokio::test]
+        async fn workspace_resource_outputs_do_not_offset_spent_inputs_as_change() {
+            let wallet = Wallet::start().await;
+            let lock_id = lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
+            let mut input = wallet_output(2, 1_000_000, OutputStatus::LockedForSpend);
+            input.lock_id = Some(lock_id);
+            let mut change = wallet_output(3, 1_000_000, OutputStatus::LockedUnconfirmed);
+            change.lock_id = Some(lock_id);
+            wallet.add_output(&input);
+            wallet.add_output(&change);
+
+            let tx = with_instructions(vec![
+                stealth_transfer(ResourceAddressRef::Address(resource()), &[input.commitment], vec![]),
+                stealth_transfer(
+                    ResourceAddressRef::Workspace(WorkspaceOffsetId::new(0)),
+                    &[],
+                    vec![as_statement_output(&change)],
+                ),
+            ]);
+            let info = wallet.info(tx, vec![lock_id]).await;
+
+            let [summary] = info.value_summaries.as_slice() else {
+                panic!("expected one summary: {:?}", info.value_summaries);
+            };
+            assert_eq!(summary.resource_address, resource());
+            assert_eq!(summary.inputs_total, 1_000_000);
+            assert_eq!(summary.change_total, 0);
+            assert_eq!(summary.amount_leaving, 1_000_000);
         }
 
         #[tokio::test]

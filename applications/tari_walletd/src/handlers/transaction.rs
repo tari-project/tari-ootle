@@ -441,7 +441,10 @@ async fn submit_dry_run_inner(
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
-        let substates = substates.into_iter().collect::<Vec<_>>();
+        let substates = substates
+            .into_iter()
+            .chain(req.transaction.inputs().iter().map(|r| r.substate_id().clone()))
+            .collect::<Vec<_>>();
         let dependencies = sdk
             .substate_api()
             .locate_dependent_substates(&substates, req.detect_inputs_use_unversioned)

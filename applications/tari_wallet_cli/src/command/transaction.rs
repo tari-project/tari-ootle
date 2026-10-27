@@ -328,7 +328,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             lock_ids: vec![],
         };
         let resp = client.submit_transaction(&request).await?;
-        wait_transaction_result(resp.transaction_id, client).await?;
+        wait_transaction_result(resp.transaction_id, common.wait_for_result_timeout_secs, client).await?;
     }
     Ok(())
 }
@@ -409,7 +409,7 @@ async fn handle_submit_manifest(
         };
 
         let resp = client.submit_transaction(&request).await?;
-        wait_transaction_result(resp.transaction_id, client).await?;
+        wait_transaction_result(resp.transaction_id, common.wait_for_result_timeout_secs, client).await?;
     }
 
     Ok(())
@@ -427,6 +427,11 @@ pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Res
     let destination_public_key =
         RistrettoPublicKeyBytes::from_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
 
+    if common.dry_run {
+        println!("NOTE: Dry run is enabled. This transaction will not be processed by the network.");
+        println!();
+    }
+    let timer = Instant::now();
     let fee = common.max_fee;
     let resp = client
         .accounts_transfer(AccountsTransferRequest {
@@ -436,9 +441,16 @@ pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Res
             destination_public_key,
             max_fee: fee,
             proof_from_badge_resource: None,
-            dry_run: false,
+            dry_run: common.dry_run,
         })
         .await?;
+    if common.dry_run {
+        let result = resp
+            .dry_run_result
+            .ok_or_else(|| anyhow!("Wallet daemon did not return a dry-run result"))?;
+        summarize(&result.finalize, timer.elapsed());
+        return Ok(());
+    }
     let resp = client
         .wait_transaction_result(TransactionWaitResultRequest {
             transaction_id: resp.transaction_id,
@@ -450,15 +462,19 @@ pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Res
         println!();
         return Ok(());
     }
+    let Some(ref result) = resp.result else {
+        println!("⚠️ Transaction not finalized");
+        return Ok(());
+    };
 
     println!("Transaction: {}", resp.transaction_id);
     println!(
         "Fee: {} ({} refunded)",
         resp.final_fee,
-        resp.result.as_ref().unwrap().fee_receipt.total_refunded()
+        result.fee_receipt.total_refunded()
     );
     println!();
-    summarize_finalize_result(resp.result.as_ref().unwrap());
+    summarize_finalize_result(result);
 
     Ok(())
 }
@@ -476,6 +492,11 @@ pub async fn handle_confidential_transfer(
         memo_message,
     } = args;
 
+    if common.dry_run {
+        println!("NOTE: Dry run is enabled. This transaction will not be processed by the network.");
+        println!();
+    }
+    let timer = Instant::now();
     // let AccountByNameResponse { account, .. } = client.accounts_get_by_name(&source_account_name).await?;
     let resp = client
         .accounts_confidential_transfer(ConfidentialTransferRequest {
@@ -490,9 +511,16 @@ pub async fn handle_confidential_transfer(
             output_memo: memo_message
                 .map(|s| Memo::new_message(s).ok_or_else(|| anyhow!("Invalid memo length")))
                 .transpose()?,
-            dry_run: false,
+            dry_run: common.dry_run,
         })
         .await?;
+    if common.dry_run {
+        let result = resp
+            .dry_run_result
+            .ok_or_else(|| anyhow!("Wallet daemon did not return a dry-run result"))?;
+        summarize(&result.finalize, timer.elapsed());
+        return Ok(());
+    }
     let resp = client
         .wait_transaction_result(TransactionWaitResultRequest {
             transaction_id: resp.transaction_id,
@@ -504,17 +532,22 @@ pub async fn handle_confidential_transfer(
         println!();
         return Ok(());
     }
+    let Some(ref result) = resp.result else {
+        println!("⚠️ Transaction not finalized");
+        return Ok(());
+    };
 
     println!("Transaction: {}", resp.transaction_id);
     println!("Fee: {}", resp.final_fee);
     println!();
-    summarize_finalize_result(&resp.result.unwrap());
+    summarize_finalize_result(result);
 
     Ok(())
 }
 
 pub async fn wait_transaction_result(
     transaction_id: TransactionId,
+    timeout_secs: Option<u64>,
     client: &mut WalletDaemonClient,
 ) -> Result<TransactionWaitResultResponse, anyhow::Error> {
     let timer = Instant::now();
@@ -529,8 +562,7 @@ pub async fn wait_transaction_result(
     let wait_resp = client
         .wait_transaction_result(TransactionWaitResultRequest {
             transaction_id,
-            // Never timeout, you can ctrl+c to exit
-            timeout_secs: None,
+            timeout_secs,
         })
         .await?;
     if wait_resp.timed_out {

@@ -152,7 +152,7 @@ pub struct SubmitManifestArgs {
     manifest: PathBuf,
     #[clap(long, short = 'g')]
     input_variables: Vec<String>,
-    /// Named blob files referenced by `blob!("<name>")` in the manifest (`<name>=<path>`). May be repeated.
+    /// Named blob files referenced by `blob!("<name>")` in the manifest (`<name>=<path>`, repeatable).
     #[clap(long = "blob", short = 'b', value_name = "NAME=PATH")]
     blobs: Vec<String>,
     #[clap(flatten)]

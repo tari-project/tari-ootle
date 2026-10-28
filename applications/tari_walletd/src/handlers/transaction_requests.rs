@@ -535,7 +535,7 @@ fn value_summaries(
         for output in wallet_outputs(Some(resource), *created.commitment()) {
             // Change is a pending output recorded under one of the request's locks while the
             // request awaits submission, spendable by the wallet's key alone, and created with
-            // exactly the authorisation and encrypted opening the wallet recorded. Once the
+            // exactly the authorisation and encrypted opening the wallet recorded. Once a
             // request has been submitted, finalizing its lock promotes the change output to
             // Unspent and clears lock_id, so the pending-lock check applies only beforehand.
             let lock_and_status_match = !awaiting_submission ||

@@ -911,13 +911,19 @@ pub struct GetUtxosRequest {
     #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Option<(u32, u64)>>))]
     pub unspent_at: Vec<Option<(Shard, StateVersion)>>,
+    /// Resumes after this UTXO: the last one a response with `has_more` returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub from_id: Option<UtxoId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetUtxosResponse {
-    /// The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`.
+    /// The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`, in the order this
+    /// indexer stored them. Any number of UTXOs may share a pair.
     #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, String)>))]
     pub utxos: Vec<(UtxoId, Encoded<Utxo>)>,
@@ -926,6 +932,10 @@ pub struct GetUtxosResponse {
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(u32, String)>))]
     pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+    /// More unspent UTXOs match than this response holds. The rest follow from a request with `from_id` set to the
+    /// last of `utxos`.
+    #[serde(default)]
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -650,34 +650,49 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         }
         // TODO: Given the potential size of substates protobuf, json + hex encoding may be too inefficient. Consider
         // supporting the application/x-protobuf content type in the indexer REST API.
-        self.observe_read(
-            &client,
-            client.get_utxos(GetUtxosRequest {
-                resource_address,
-                tag_and_nonce_pairs,
-                unspent_at,
-            }),
-            |resp| {
-                let unspent = resp
-                    .utxos
-                    .into_iter()
-                    .map(|(id, utxo)| {
-                        let utxo =
-                            utxo.decode()
-                                .map_err(|e| IndexerRestApiNetworkInterfaceError::UndecodableValue {
-                                    what: "UTXO",
-                                    details: e.to_string(),
+        let mut fetched = FetchedUtxos {
+            unspent: Vec::new(),
+            spent: Vec::new(),
+        };
+        let mut from_id = None;
+        loop {
+            let (unspent, spent, has_more) = self
+                .observe_read(
+                    &client,
+                    client.get_utxos(GetUtxosRequest {
+                        resource_address,
+                        tag_and_nonce_pairs: tag_and_nonce_pairs.clone(),
+                        unspent_at: unspent_at.clone(),
+                        from_id,
+                    }),
+                    |resp| {
+                        let unspent = resp
+                            .utxos
+                            .into_iter()
+                            .map(|(id, utxo)| {
+                                let utxo = utxo.decode().map_err(|e| {
+                                    IndexerRestApiNetworkInterfaceError::UndecodableValue {
+                                        what: "UTXO",
+                                        details: e.to_string(),
+                                    }
                                 })?;
-                        Ok((id, utxo))
-                    })
-                    .collect::<Result<_, IndexerRestApiNetworkInterfaceError>>()?;
-                Ok::<_, IndexerRestApiNetworkInterfaceError>(FetchedUtxos {
-                    unspent,
-                    spent: resp.spent,
-                })
-            },
-        )
-        .await
+                                Ok((id, utxo))
+                            })
+                            .collect::<Result<Vec<_>, IndexerRestApiNetworkInterfaceError>>()?;
+                        Ok::<_, IndexerRestApiNetworkInterfaceError>((unspent, resp.spent, resp.has_more))
+                    },
+                )
+                .await?;
+            // Every page reports the spent pairs of the whole request
+            if from_id.is_none() {
+                fetched.spent = spent;
+            }
+            from_id = unspent.last().map(|(id, _)| *id);
+            fetched.unspent.extend(unspent);
+            if !has_more || from_id.is_none() {
+                return Ok(fetched);
+            }
+        }
     }
 
     async fn list_watched_substates(

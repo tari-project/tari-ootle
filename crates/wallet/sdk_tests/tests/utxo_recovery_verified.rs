@@ -640,3 +640,53 @@ async fn an_unproven_output_is_asked_for_again_after_a_doubling_wait() {
     assert_eq!(process(240, 4).await, 0);
     assert_eq!(stored(&test, id).value, VALUE);
 }
+
+/// An output another sender made with the tag and nonce of `utxo`, which the wallet cannot spend.
+fn copy_of(test: &Test, account: &AccountWithAddress, utxo: &Utxo) -> (UtxoId, Utxo) {
+    let (id, _) = test.owned_utxo(account, 1);
+    let mut output = utxo.output().unwrap().clone();
+    output.auth = SpendAuthorization::Key(random_keypair().1.to_byte_type());
+    (id, Utxo::new(output))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_sharing_its_tag_and_nonce_with_another_is_recovered() {
+    let (_sets, network, test, account) = wallet(IndexerTrust::Trust).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    let (copy_id, copy) = copy_of(&test, &account, &utxo);
+    network.index_utxo(copy_id, copy);
+
+    assert_eq!(recover(&test, &network, &account, id, &utxo).await, 0);
+    assert_eq!(queued(&test), 0);
+    assert_eq!(stored(&test, id).value, VALUE);
+    assert!(!is_stored(&test, copy_id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unproven_output_sharing_its_tag_and_nonce_with_a_proven_one_stays_queued_until_it_is_proven() {
+    let (sets, network, test, account) = wallet(IndexerTrust::Verify).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    let (copy_id, copy) = copy_of(&test, &account, &utxo);
+    serve_proven(&sets, &network, copy_id, &copy);
+    network.index_utxo(copy_id, copy);
+    network.serve_substate(substate_id(id), VERSION, SubstateValue::Utxo(utxo.clone()), None);
+
+    assert_eq!(recover(&test, &network, &account, id, &utxo).await, 1);
+    assert_eq!(
+        queued(&test),
+        1,
+        "the pair stays queued while one of its outputs is unproven"
+    );
+    assert!(!is_stored(&test, id));
+    assert!(!is_stored(&test, copy_id));
+
+    serve_proven(&sets, &network, id, &utxo);
+    let num_unresolved = UtxoRecovery::new(test.sdk().clone())
+        .process_utxo_validation_queue()
+        .await
+        .unwrap();
+    assert_eq!(num_unresolved, 0);
+    assert_eq!(queued(&test), 0);
+    assert_eq!(stored(&test, id).value, VALUE);
+    assert!(!is_stored(&test, copy_id));
+}

@@ -131,9 +131,11 @@ create table utxos
 -- Every read of `utxos` by state version is for one shard. With `shard` ahead of `state_version`, such a read is a
 -- range within that shard's entries rather than over the whole resource's history.
 CREATE INDEX utxos_resource_shard_state_version_epoch_idx ON utxos (resource_address, shard, state_version, epoch);
-CREATE UNIQUE INDEX utxos_resource_public_nonce_utxo_tag_uniq_partial ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
--- Finds a UTXO by its commitment, as the list cursor and marking an output spent do.
-CREATE INDEX utxos_resource_commitment_idx ON utxos (resource_address, commitment);
+-- Finds a resource's unspent UTXOs by public nonce and tag, as fetching UTXOs by key does. A public nonce is unproven
+-- bytes a sender chooses, so any number of unspent UTXOs may share a nonce and tag.
+CREATE INDEX utxos_resource_public_nonce_utxo_tag_unspent_idx ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
+-- One row per version of a UTXO. Finds a UTXO by its commitment, as the list cursor and marking an output spent do.
+CREATE UNIQUE INDEX utxos_resource_commitment_version_uniq ON utxos (resource_address, commitment, version);
 -- A resource's unspent UTXOs in rowid order, so that listing them pages from a cursor without a sort. Queries
 -- must repeat this condition as SQL literals for SQLite to use the index.
 CREATE INDEX utxos_resource_unspent_idx ON utxos (resource_address) WHERE is_spent = false AND is_burnt = false;

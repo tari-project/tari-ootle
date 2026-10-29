@@ -4,7 +4,8 @@ import type { UtxoTag } from "../UtxoTag";
 
 export type GetUtxosResponse = {
   /**
-   * The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`.
+   * The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`, in the order this
+   * indexer stored them. Any number of UTXOs may share a pair.
    */
   utxos: Array<[string, string]>;
   /**
@@ -12,4 +13,9 @@ export type GetUtxosResponse = {
    * unknown to this indexer, which may not yet have indexed it, or may have pruned its tombstone.
    */
   spent: Array<[UtxoTag, RistrettoPublicKeyBytes]>;
+  /**
+   * More unspent UTXOs match than this response holds. The rest follow from a request with `from_id` set to the
+   * last of `utxos`.
+   */
+  has_more: boolean;
 };

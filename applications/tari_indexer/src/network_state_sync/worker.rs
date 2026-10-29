@@ -1289,7 +1289,7 @@ impl NetworkWideStateSync {
                 .add_invalidations(promoted.retired_cache_entries);
         }
         for (state_version, address) in &promoted.skipped_utxos {
-            warn!(target: LOG_TARGET, "⚠️ Unspent output {address} at v{state_version} of shard {shard} has the nonce and tag an indexed unspent output already holds. Kept the indexed output");
+            warn!(target: LOG_TARGET, "⚠️ Unspent output {address} at v{state_version} of shard {shard} is already indexed. Kept the indexed row");
         }
         for finalized in promoted.finalized {
             self.notify.notify(finalized);
@@ -2284,7 +2284,7 @@ struct CommittedVersion {
     /// One per receipt the commit inserted.
     finalized: Vec<TransactionFinalizedEvent>,
     inserted_events: Vec<InsertedEvent>,
-    /// Unspent outputs left out because an unspent output with their nonce and tag is indexed.
+    /// Unspent outputs left out because their version is indexed already.
     skipped_utxos: Vec<UtxoAddress>,
 }
 

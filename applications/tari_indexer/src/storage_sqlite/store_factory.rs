@@ -499,30 +499,36 @@ pub(crate) mod tests {
             .unwrap()
     }
 
-    /// An unspent output's `(resource, public nonce, tag)` is unique among unspent rows. A clash
-    /// means some sync peer was faulty, and must not fail the commit, which would stall the shard's
-    /// sync on every peer.
+    /// Unspent outputs may share a public nonce and tag, as a sender chooses the nonce. A version
+    /// already indexed is skipped and the commit goes on, as failing it would stall the shard's
+    /// sync.
     #[tokio::test]
-    async fn an_unspent_utxo_clashing_with_a_stored_one_is_skipped() {
+    async fn unspent_utxos_sharing_a_nonce_and_tag_are_all_indexed_and_a_version_once() {
         use tari_template_lib_types::{UtxoAddress, UtxoId};
 
         use crate::storage_sqlite::models::UtxoUpdateRecord;
 
         let (_dir, store) = store_with_utxos(&[(1, 1)]).await;
-        let UtxoUpdateRecord::Unspent(mut clashing) = unspent_at(1, 2) else {
+        let UtxoUpdateRecord::Unspent(mut sharing) = unspent_at(1, 2) else {
             unreachable!()
         };
-        let clashing_address = UtxoAddress::new(utxo_resource(), UtxoId::from_array([99; 32]));
-        clashing.address = clashing_address.clone();
+        sharing.address = UtxoAddress::new(utxo_resource(), UtxoId::from_array([99; 32]));
+        let UtxoUpdateRecord::Unspent(indexed) = unspent_at(1, 2) else {
+            unreachable!()
+        };
+        let indexed_address = indexed.address.clone();
 
         let skipped = store
             .with_write_tx(move |tx| {
-                tx.batch_insert_utxo_updates(Epoch(1), [UtxoUpdateRecord::Unspent(clashing), unspent_at(2, 2)])
+                tx.batch_insert_utxo_updates(Epoch(1), [
+                    UtxoUpdateRecord::Unspent(sharing),
+                    UtxoUpdateRecord::Unspent(indexed),
+                ])
             })
             .await
             .unwrap();
 
-        assert_eq!(skipped, [clashing_address]);
+        assert_eq!(skipped, [indexed_address]);
         let set = read_updates(&store, 0, 10).await;
         assert_eq!(set.updates.len(), 2);
     }
@@ -1119,6 +1125,7 @@ pub(crate) mod tests {
         use crate::storage_sqlite::{
             reader::{
                 spent_utxos_by_tag_and_nonce_query,
+                unspent_utxos_by_tag_and_nonce_page_query,
                 unspent_utxos_by_tag_and_nonce_query,
                 utxos_list_cursor_query,
                 utxos_list_query,
@@ -1162,7 +1169,20 @@ pub(crate) mod tests {
         assert_seeks(
             "fetch by tag and nonce",
             query_plan(&store, sql_of(&fetch)).await,
-            "resource_address=? AND public_nonce=?",
+            "utxos_resource_public_nonce_utxo_tag_unspent_idx (resource_address=? AND public_nonce=?",
+        );
+        // A page sorts only the rows matching its pairs, outside any index
+        let fetch_page =
+            unspent_utxos_by_tag_and_nonce_page_query(&resource, &[(UtxoTag::from(0u32), nonce)], Some(7), 1000);
+        let plan = query_plan(&store, sql_of(&fetch_page)).await;
+        assert!(
+            plan.lines()
+                .all(|step| !step.starts_with("SCAN ") || step.contains("CONSTANT ROW")),
+            "fetch a page by tag and nonce scans the table: {plan}"
+        );
+        assert!(
+            plan.contains("utxos_resource_public_nonce_utxo_tag_unspent_idx (resource_address=? AND public_nonce=?"),
+            "fetch a page by tag and nonce does not search on its pairs: {plan}"
         );
         let fetch_spent = spent_utxos_by_tag_and_nonce_query(&resource, &[(UtxoTag::from(0u32), nonce)]);
         assert_seeks(
@@ -1224,7 +1244,9 @@ pub(crate) mod tests {
                     RistrettoPublicKeyBytes::from_bytes(&[seq; 32]).unwrap(),
                 );
                 store
-                    .with_read_tx(move |tx| tx.utxos_get_unspent_by_public_nonce_and_tag(&utxo_resource(), &[pair]))
+                    .with_read_tx(move |tx| {
+                        tx.utxos_get_unspent_by_public_nonce_and_tag(&utxo_resource(), &[pair], None, 10)
+                    })
                     .await
                     .unwrap()
             }

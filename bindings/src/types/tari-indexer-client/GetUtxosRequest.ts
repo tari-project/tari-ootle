@@ -3,6 +3,7 @@ import type { ResourceAddress } from "../ResourceAddress";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { Shard } from "../Shard";
 import type { StateVersion } from "../StateVersion";
+import type { UtxoId } from "../UtxoId";
 import type { UtxoTag } from "../UtxoTag";
 
 export type GetUtxosRequest = {
@@ -14,4 +15,8 @@ export type GetUtxosRequest = {
    * indexer has indexed its shard through that state version, as this indexer keeps every unspent UTXO.
    */
   unspent_at?: Array<[Shard, StateVersion] | null>;
+  /**
+   * Resumes after this UTXO: the last one a response with `has_more` returned.
+   */
+  from_id?: UtxoId;
 };

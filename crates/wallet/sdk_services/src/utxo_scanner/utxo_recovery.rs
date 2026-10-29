@@ -272,12 +272,13 @@ where
                         })
                     })
                     .collect();
-                let utxos = if self.sdk.sdk_config().indexer_trust.is_verify() {
+                let (utxos, deferred) = if self.sdk.sdk_config().indexer_trust.is_verify() {
                     let (utxos, deferred) = self.settle_reported_utxos(*resource_addr, utxos).await?;
                     num_unresolved += deferred.len();
-                    for pair in deferred {
+                    let deferred = deferred.into_iter().collect::<HashSet<_>>();
+                    for pair in &deferred {
                         self.unsettled
-                            .entry((*resource_addr, pair))
+                            .entry((*resource_addr, *pair))
                             .or_insert(RetryBackoff {
                                 attempts: 0,
                                 retry_at: now,
@@ -285,13 +286,15 @@ where
                             .defer(now);
                     }
                     for found in &utxos {
-                        self.unsettled.remove(&(*resource_addr, found.tag_and_nonce()));
+                        if !deferred.contains(&found.tag_and_nonce()) {
+                            self.unsettled.remove(&(*resource_addr, found.tag_and_nonce()));
+                        }
                     }
-                    utxos
+                    (utxos, deferred)
                 } else {
-                    utxos
+                    (utxos, HashSet::new())
                 };
-                num_recovered += self.process_recovered_utxos(*resource_addr, utxos)?;
+                num_recovered += self.process_recovered_utxos(*resource_addr, utxos, &deferred)?;
             }
         }
     }
@@ -630,10 +633,13 @@ where
         }
     }
 
+    /// Stores each of `utxos_to_recover` the wallet may hold and dequeues its tag and nonce pair, unless the pair is in
+    /// `keep_queued`: another output with the pair is left for a later round.
     fn process_recovered_utxos(
         &self,
         resource_address: ResourceAddress,
         utxos_to_recover: Vec<FoundUtxo>,
+        keep_queued: &HashSet<TagAndPublicNoncePair>,
     ) -> Result<usize, StealthScannerApiError> {
         let num_attempted = utxos_to_recover.len();
         let mut num_recovered = 0;
@@ -644,7 +650,7 @@ where
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(entry) => entry.insert(self.load_account_keys(&utxo.account_addr)?),
             };
-            if self.check_unspent_utxo_and_store(self.sdk.network(), resource_address, keys, utxo)? {
+            if self.check_unspent_utxo_and_store(self.sdk.network(), resource_address, keys, utxo, keep_queued)? {
                 num_recovered += 1;
             }
         }
@@ -683,6 +689,7 @@ where
         resource_address: ResourceAddress,
         keys: &AccountAndViewKeys,
         found: FoundUtxo,
+        keep_queued: &HashSet<TagAndPublicNoncePair>,
     ) -> Result<bool, StealthScannerApiError> {
         let outputs_api = self.sdk.stealth_outputs_api();
 
@@ -695,9 +702,9 @@ where
                     address,
                 });
             }
-            self.sdk.store().with_write_tx(|tx| {
-                tx.utxo_process_queue_remove_item(resource_address, found.output.tag, found.output.output.public_nonce)
-            })?;
+            self.sdk
+                .store()
+                .with_write_tx(|tx| found.dequeue(tx, resource_address, keep_queued))?;
             return Ok(false);
         }
         let commitment = found.id.into_commitment_bytes();
@@ -722,11 +729,7 @@ where
                         tx.stealth_outputs_record_proven_up(&address, proven_up)?;
                     }
                     tx.stealth_outputs_update(&address, None, Some(OutputStatus::Unspent), Some(found.is_frozen))?;
-                    tx.utxo_process_queue_remove_item(
-                        resource_address,
-                        found.output.tag,
-                        found.output.output.public_nonce,
-                    )
+                    found.dequeue(tx, resource_address, keep_queued)
                 })?;
                 self.notify(UtxoRecoveredEvent {
                     address,
@@ -749,9 +752,9 @@ where
                     account_address: found.account_addr,
                 });
             }
-            self.sdk.store().with_write_tx(|tx| {
-                tx.utxo_process_queue_remove_item(resource_address, found.output.tag, found.output.output.public_nonce)
-            })?;
+            self.sdk
+                .store()
+                .with_write_tx(|tx| found.dequeue(tx, resource_address, keep_queued))?;
 
             return Ok(false);
         };
@@ -759,9 +762,9 @@ where
         output.proven_up = found.proven_up;
         let changed = outputs_api.upsert_utxo(&output)?;
 
-        self.sdk.store().with_write_tx(|tx| {
-            tx.utxo_process_queue_remove_item(resource_address, found.output.tag, found.output.output.public_nonce)
-        })?;
+        self.sdk
+            .store()
+            .with_write_tx(|tx| found.dequeue(tx, resource_address, keep_queued))?;
 
         if !changed {
             debug!(target: LOG_TARGET, "Stealth output {} is already recorded", address);
@@ -810,6 +813,22 @@ impl FoundUtxo {
 
     fn tag_and_nonce(&self) -> TagAndPublicNoncePair {
         (self.output.tag, self.output.output.public_nonce)
+    }
+
+    /// Removes the output's tag and nonce pair from the recovery queue, unless it is in `keep_queued`. Outputs of one
+    /// lookup may share a pair, so the pair may be gone already.
+    fn dequeue<TTx: WalletStoreWriter>(
+        &self,
+        tx: &mut TTx,
+        resource_address: ResourceAddress,
+        keep_queued: &HashSet<TagAndPublicNoncePair>,
+    ) -> Result<(), WalletStorageError> {
+        if keep_queued.contains(&self.tag_and_nonce()) {
+            return Ok(());
+        }
+        tx.utxo_process_queue_remove_item(resource_address, self.output.tag, self.output.output.public_nonce)
+            .optional()?;
+        Ok(())
     }
 }
 

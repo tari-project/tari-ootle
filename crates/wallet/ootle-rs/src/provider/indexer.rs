@@ -236,7 +236,8 @@ impl<Wallet> IndexerProvider<Wallet> {
     ///
     /// Only currently-unspent outputs are returned — the indexer prunes an output's ciphertext once
     /// it is spent, so a key whose output has since been spent is simply absent from the result.
-    /// Requests are automatically chunked to the indexer's per-request limit.
+    /// Requests are automatically chunked to the indexer's per-request limit, and every page of a chunk's outputs is
+    /// read. Any number of outputs may share a tag and nonce pair.
     ///
     /// The outputs are served unproven and are not verified under any [`IndexerTrust`]. Read an output with
     /// [`Self::get_substate`] to verify it.
@@ -251,19 +252,27 @@ impl<Wallet> IndexerProvider<Wallet> {
         }
         let mut utxos = Vec::with_capacity(tag_and_nonce_pairs.len());
         for chunk in tag_and_nonce_pairs.chunks(MAX_PAIRS_PER_REQUEST) {
-            let resp = self
-                .client
-                .get_utxos(GetUtxosRequest {
-                    resource_address,
-                    tag_and_nonce_pairs: chunk.to_vec(),
-                    unspent_at: Vec::new(),
-                })
-                .await?;
-            for (id, utxo) in resp.utxos {
-                let utxo = utxo.decode().map_err(|e| IndexerRestClientError::InvalidResponse {
-                    message: format!("The indexer served UTXO {id} that does not decode: {e}"),
-                })?;
-                utxos.push((id, utxo));
+            let mut from_id = None;
+            loop {
+                let resp = self
+                    .client
+                    .get_utxos(GetUtxosRequest {
+                        resource_address,
+                        tag_and_nonce_pairs: chunk.to_vec(),
+                        unspent_at: Vec::new(),
+                        from_id,
+                    })
+                    .await?;
+                from_id = resp.utxos.last().map(|(id, _)| *id);
+                for (id, utxo) in resp.utxos {
+                    let utxo = utxo.decode().map_err(|e| IndexerRestClientError::InvalidResponse {
+                        message: format!("The indexer served UTXO {id} that does not decode: {e}"),
+                    })?;
+                    utxos.push((id, utxo));
+                }
+                if !resp.has_more || from_id.is_none() {
+                    break;
+                }
             }
         }
         Ok(utxos)

@@ -198,10 +198,14 @@ pub trait IndexerStoreReadTransaction {
         limit: u32,
     ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError>;
 
+    /// Up to `limit` unspent UTXOs matching `public_nonce_and_tag` in the order they were indexed, after the UTXO
+    /// `from_id` when given. Any number of unspent UTXOs may share a nonce and tag.
     fn utxos_get_unspent_by_public_nonce_and_tag(
         &mut self,
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
+        from_id: Option<UtxoId>,
+        limit: u32,
     ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError>;
 
     /// The pairs of `public_nonce_and_tag` with an unspent UTXO.
@@ -318,8 +322,8 @@ pub trait IndexerStoreWriteTransaction {
     fn commit(self) -> Result<(), StorageError>;
     fn rollback(self) -> Result<(), StorageError>;
     fn key_value_set<K: AsRef<str>, V: Serialize>(&mut self, key: K, value: V) -> Result<(), StorageError>;
-    /// Applies each UTXO update, returning the addresses of unspent outputs skipped because an
-    /// unspent row already holds their `(resource, public nonce, tag)`. The stored row is kept.
+    /// Applies each UTXO update, returning the addresses of unspent outputs skipped because a row
+    /// already holds their version. The stored row is kept.
     fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdateRecord>>(
         &mut self,
         epoch: Epoch,

@@ -1399,6 +1399,16 @@
               }
             }
           },
+          "404": {
+            "description": "The from_id UTXO is not stored on this indexer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Failed to fetch UTXOs",
             "content": {
@@ -2013,11 +2023,11 @@
           },
           "state": {
             "$ref": "#/components/schemas/SubstateState",
-            "description": "What the shard group holds for `version`. Only a request with `include_proof` that names the version is\nanswered with [`SubstateState::Down`], and only when the indexer verified a down proof for it; any other down\nis a 404."
+            "description": "What the shard group holds for `version`. Only a request with `include_proof` that names the version is\nanswered with [`SubstateState::Down`], and only with a proof the indexer verified for it: a down proof, or an\nexclusion when more than `f` committee members agree the version is down. Any other down is a 404."
           },
           "verified": {
             "type": "boolean",
-            "description": "True when the indexer verified this answer against the shard group committee (via a merkle\nproof). False when proofs are disabled, or when no committee member could supply a proof yet\n(e.g. nothing committed since an epoch change) and the value was served unverified."
+            "description": "True when the indexer verified this answer against the shard group committee (via a merkle\nproof). False when proofs are disabled, or when no committee member could supply a proof yet\n(e.g. nothing committed since an epoch change) and the value was served unverified. A down answer\nis verified only with a down proof: an exclusion alone does not show the version was ever up."
           },
           "version": {
             "type": "integer",
@@ -2182,6 +2192,13 @@
           "resource_address"
         ],
         "properties": {
+          "from_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Resumes after this UTXO: the last one a response with `has_more` returned."
+          },
           "resource_address": {
             "type": "string"
           },
@@ -2233,6 +2250,10 @@
           "utxos"
         ],
         "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "More unspent UTXOs match than this response holds. The rest follow from a request with `from_id` set to the\nlast of `utxos`."
+          },
           "spent": {
             "type": "array",
             "items": {
@@ -2265,7 +2286,7 @@
                 }
               ]
             },
-            "description": "The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`."
+            "description": "The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`, in the order this\nindexer stored them. Any number of UTXOs may share a pair."
           }
         }
       },
@@ -2523,7 +2544,7 @@
               "null"
             ],
             "format": "byte",
-            "description": "CBOR-encoded `SubstateDownProof`, present when the substate version is down: an inclusion proof that the\nversion was committed, anchored at a block of its own, and an exclusion proof under `anchor.state_merkle_root`\nthat it is no longer in the state tree. `value_proof` is that exclusion proof."
+            "description": "CBOR-encoded `SubstateDownProof`, present when the substate version is down and the committee still holds it:\nan inclusion proof that the version was committed, anchored at a block of its own, and an exclusion proof\nunder `anchor.state_merkle_root` that it is no longer in the state tree. `value_proof` is that exclusion\nproof.\n\nA down version without one is served with `value_proof` alone. A version that never existed also satisfies\nit, as does one committed after the anchor, so it shows the version gone only to a reader that has proven the\nversion up at a block of an earlier epoch than the anchor's."
           },
           "value_hash_epoch": {
             "type": "integer",

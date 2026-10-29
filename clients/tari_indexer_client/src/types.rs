@@ -932,7 +932,8 @@ pub struct GetUtxosResponse {
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(u32, String)>))]
     pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
-    /// The `after_id` for the next page, or `None` once `utxos` holds the last matching UTXO.
+    /// The `after_id` for the next page, or `None` once `utxos` holds the last matching UTXO. A UTXO re-versioned
+    /// between pages is served again on a later page, at its new version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_after_id: Option<u64>,
 }

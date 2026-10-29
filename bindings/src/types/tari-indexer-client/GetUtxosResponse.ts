@@ -14,7 +14,8 @@ export type GetUtxosResponse = {
    */
   spent: Array<[UtxoTag, RistrettoPublicKeyBytes]>;
   /**
-   * The `after_id` for the next page, or `None` once `utxos` holds the last matching UTXO.
+   * The `after_id` for the next page, or `None` once `utxos` holds the last matching UTXO. A UTXO re-versioned
+   * between pages is served again on a later page, at its new version.
    */
   next_after_id?: bigint | null;
 };

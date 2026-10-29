@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::{HashMap, hash_map::Entry},
     ops::Deref,
     sync::{Arc, Mutex},
     time::Duration,
@@ -654,6 +655,8 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
             unspent: Vec::new(),
             spent: Vec::new(),
         };
+        // A UTXO re-versioned between pages is served again at its new version, which replaces the one served before
+        let mut positions = HashMap::new();
         let mut after_id = None;
         loop {
             let (unspent, spent, next_after_id) = self
@@ -687,7 +690,15 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
             if after_id.is_none() {
                 fetched.spent = spent;
             }
-            fetched.unspent.extend(unspent);
+            for (id, utxo) in unspent {
+                match positions.entry(id) {
+                    Entry::Occupied(entry) => fetched.unspent[*entry.get()] = (id, utxo),
+                    Entry::Vacant(entry) => {
+                        entry.insert(fetched.unspent.len());
+                        fetched.unspent.push((id, utxo));
+                    },
+                }
+            }
             if next_after_id.is_none() {
                 return Ok(fetched);
             }
@@ -956,8 +967,6 @@ fn now() -> PrimitiveDateTime {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use tari_consensus_types::Decision;
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_engine_types::{
@@ -1585,7 +1594,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetching_utxos_reads_every_page_and_the_spent_pairs_of_the_first() {
+    async fn fetching_utxos_reads_every_page_once_per_utxo_and_the_spent_pairs_of_the_first() {
         let pair = (UtxoTag::new(0), RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap());
         let utxos = (1..=5u8)
             .map(|seed| {
@@ -1603,8 +1612,12 @@ mod tests {
                 (UtxoId::from_array([seed; 32]), utxo)
             })
             .collect::<Vec<_>>();
+        // The second UTXO is frozen after the first page served it, so the last page serves it again
+        let mut frozen = utxos[1].clone();
+        frozen.1.freeze();
+        let served = utxos.iter().cloned().chain([frozen]).collect::<Vec<_>>();
         let cursors = Arc::new(Mutex::new(Vec::new()));
-        let url = spawn_utxo_pages_server(utxos.clone(), 2, pair, cursors.clone()).await;
+        let url = spawn_utxo_pages_server(served, 2, pair, cursors.clone()).await;
         let network = IndexerRestApiNetworkInterface::init(vec![url]).unwrap();
 
         let fetched = network.fetch_utxos(TARI_TOKEN, vec![(pair, None)]).await.unwrap();
@@ -1612,6 +1625,10 @@ mod tests {
         assert_eq!(
             fetched.unspent.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
             utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+        );
+        assert!(
+            fetched.unspent[1].1.is_frozen(),
+            "a UTXO served again is held at its later version"
         );
         assert_eq!(fetched.spent, [pair]);
         assert_eq!(*cursors.lock().unwrap(), [None, Some(2), Some(4)]);

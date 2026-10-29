@@ -3,7 +3,6 @@ import type { ResourceAddress } from "../ResourceAddress";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { Shard } from "../Shard";
 import type { StateVersion } from "../StateVersion";
-import type { UtxoId } from "../UtxoId";
 import type { UtxoTag } from "../UtxoTag";
 
 export type GetUtxosRequest = {
@@ -16,7 +15,8 @@ export type GetUtxosRequest = {
    */
   unspent_at?: Array<[Shard, StateVersion] | null>;
   /**
-   * Resumes after this UTXO: the last one a response with `has_more` returned.
+   * Return only UTXOs this indexer stored after this cursor. Pass the previous page's `next_after_id`, which only
+   * the indexer that returned it can resume from.
    */
-  from_id?: UtxoId;
+  after_id?: number | bigint | string | null;
 };

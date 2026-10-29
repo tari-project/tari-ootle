@@ -128,7 +128,6 @@ pub async fn stream_utxo_updates(
     responses(
         (status = 200, description = "UTXO details", body = GetUtxosResponse),
         (status = BAD_REQUEST, description = "Too many UTXOs requested or invalid parameters", body = ErrorResponse),
-        (status = NOT_FOUND, description = "The from_id UTXO is not stored on this indexer", body = ErrorResponse),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch UTXOs", body = ErrorResponse),
     )
 )]
@@ -150,23 +149,16 @@ pub async fn fetch_utxos(
             &req.resource_address,
             &req.tag_and_nonce_pairs,
             &req.unspent_at,
-            req.from_id,
+            req.after_id,
             MAX_FETCHED_UTXOS,
         )
         .await
-        .optional()
-        .map_err(ErrorResponse::anyhow)?
-        .ok_or_else(|| {
-            ErrorResponse::not_found(
-                "The from_id UTXO is not stored on this indexer: it may have been pruned once spent. Restart the \
-                 fetch without from_id.",
-            )
-        })?;
+        .map_err(ErrorResponse::anyhow)?;
 
     Ok(Json(GetUtxosResponse {
         utxos: fetched.utxos,
         spent: fetched.spent,
-        has_more: fetched.has_more,
+        next_after_id: fetched.next_after_id,
     }))
 }
 

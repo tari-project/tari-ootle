@@ -911,11 +911,11 @@ pub struct GetUtxosRequest {
     #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Option<(u32, u64)>>))]
     pub unspent_at: Vec<Option<(Shard, StateVersion)>>,
-    /// Resumes after this UTXO: the last one a response with `has_more` returned.
+    /// Return only UTXOs this indexer stored after this cursor. Pass the previous page's `next_after_id`, which only
+    /// the indexer that returned it can resume from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub from_id: Option<UtxoId>,
+    #[cfg_attr(feature = "ts", ts(type = "number | bigint | string | null"))]
+    pub after_id: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -932,10 +932,9 @@ pub struct GetUtxosResponse {
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(u32, String)>))]
     pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
-    /// More unspent UTXOs match than this response holds. The rest follow from a request with `from_id` set to the
-    /// last of `utxos`.
-    #[serde(default)]
-    pub has_more: bool,
+    /// The `after_id` for the next page, or `None` once `utxos` holds the last matching UTXO.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_after_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

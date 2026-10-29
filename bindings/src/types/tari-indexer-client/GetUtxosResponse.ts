@@ -14,8 +14,7 @@ export type GetUtxosResponse = {
    */
   spent: Array<[UtxoTag, RistrettoPublicKeyBytes]>;
   /**
-   * More unspent UTXOs match than this response holds. The rest follow from a request with `from_id` set to the
-   * last of `utxos`.
+   * The `after_id` for the next page, or `None` once `utxos` holds the last matching UTXO.
    */
-  has_more: boolean;
+  next_after_id?: bigint | null;
 };

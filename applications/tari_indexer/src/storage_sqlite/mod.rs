@@ -30,6 +30,6 @@ mod store_factory;
 mod writer;
 
 #[cfg(test)]
-pub(crate) use store_factory::tests::{epoch_checkpoint, temp_store, unspent_at, utxo_resource};
+pub(crate) use store_factory::tests::{epoch_checkpoint, spent_at, temp_store, unspent_at, utxo_resource};
 pub use store_factory::*;
 pub use writer::*;

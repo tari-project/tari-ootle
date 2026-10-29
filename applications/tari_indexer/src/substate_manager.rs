@@ -81,12 +81,12 @@ use crate::{
 pub struct FetchedUtxos {
     pub utxos: Vec<(UtxoId, Encoded<Utxo>)>,
     pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
-    /// More unspent UTXOs match after the last of `utxos`.
-    pub has_more: bool,
+    /// The row after which more unspent UTXOs match, or `None` once `utxos` holds the last of them.
+    pub next_after_id: Option<u64>,
 }
 
-/// Up to `limit` of the unspent UTXOs matching `public_nonce_and_tag`, after the UTXO `from_id` when given, and the
-/// pairs of `public_nonce_and_tag` that are spent or burnt.
+/// Up to `limit` of the unspent UTXOs matching `public_nonce_and_tag`, stored after the row `after_id` when given,
+/// and the pairs of `public_nonce_and_tag` that are spent or burnt.
 ///
 /// `unspent_at` is empty, or holds for each pair of `public_nonce_and_tag` the shard and state version its UTXO was
 /// unspent at, if known. A pair with no unspent UTXO is spent when its shard is promoted through that state version,
@@ -97,16 +97,27 @@ fn read_utxos<TTx: IndexerStoreReadTransaction>(
     resource_address: &ResourceAddress,
     public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
     unspent_at: &[Option<(Shard, StateVersion)>],
-    from_id: Option<UtxoId>,
+    after_id: Option<u64>,
     limit: u32,
 ) -> Result<FetchedUtxos, StorageError> {
-    let mut utxos =
-        tx.utxos_get_unspent_by_public_nonce_and_tag(resource_address, public_nonce_and_tag, from_id, limit + 1)?;
-    let has_more = utxos.len() > limit as usize;
-    utxos.truncate(limit as usize);
+    // Row ids are at most `i64::MAX`, so a larger cursor is after every row
+    let after_row_id = after_id.map(|after_id| i64::try_from(after_id).unwrap_or(i64::MAX));
+    let mut rows =
+        tx.utxos_get_unspent_by_public_nonce_and_tag(resource_address, public_nonce_and_tag, after_row_id, limit + 1)?;
+    let next_after_id = if rows.len() > limit as usize {
+        rows.truncate(limit as usize);
+        rows.last().map(|(row_id, _, _)| *row_id as u64)
+    } else {
+        None
+    };
+    let utxos = rows.into_iter().map(|(_, id, utxo)| (id, utxo)).collect();
     let mut spent = tx.utxos_get_spent_public_nonce_and_tag(resource_address, public_nonce_and_tag)?;
     if unspent_at.iter().all(Option::is_none) {
-        return Ok(FetchedUtxos { utxos, spent, has_more });
+        return Ok(FetchedUtxos {
+            utxos,
+            spent,
+            next_after_id,
+        });
     }
 
     let progress = tx
@@ -130,14 +141,22 @@ fn read_utxos<TTx: IndexerStoreReadTransaction>(
         .map(|(pair, _)| *pair)
         .collect::<Vec<_>>();
     if promoted.is_empty() {
-        return Ok(FetchedUtxos { utxos, spent, has_more });
+        return Ok(FetchedUtxos {
+            utxos,
+            spent,
+            next_after_id,
+        });
     }
     let held = tx
         .utxos_get_unspent_public_nonce_and_tag(resource_address, &promoted)?
         .into_iter()
         .collect::<HashSet<_>>();
     spent.extend(promoted.into_iter().filter(|pair| !held.contains(pair)));
-    Ok(FetchedUtxos { utxos, spent, has_more })
+    Ok(FetchedUtxos {
+        utxos,
+        spent,
+        next_after_id,
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -292,7 +311,7 @@ impl SubstateManager {
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
         unspent_at: &[Option<(Shard, StateVersion)>],
-        from_id: Option<UtxoId>,
+        after_id: Option<u64>,
         limit: u32,
     ) -> Result<FetchedUtxos, SubstateManagerError> {
         let resource_address = *resource_address;
@@ -306,7 +325,7 @@ impl SubstateManager {
                     &resource_address,
                     &public_nonce_and_tag,
                     &unspent_at,
-                    from_id,
+                    after_id,
                     limit,
                 )
             })
@@ -727,26 +746,51 @@ mod tests {
             .unwrap();
         assert!(skipped.is_empty(), "UTXOs sharing a nonce and tag are all indexed");
 
-        let page = |from_id: Option<UtxoId>| {
+        let page = |after_id: Option<u64>| {
             let store = store.clone();
             async move {
                 store
                     .with_read_tx(move |tx| {
-                        read_utxos(tx, &crate::storage_sqlite::utxo_resource(), &[pair(1)], &[], from_id, 2)
+                        read_utxos(
+                            tx,
+                            &crate::storage_sqlite::utxo_resource(),
+                            &[pair(1)],
+                            &[],
+                            after_id,
+                            2,
+                        )
                     })
                     .await
                     .unwrap()
             }
         };
         let first = page(None).await;
-        assert!(first.has_more);
+        assert!(first.next_after_id.is_some());
         let ids = first.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
         assert_eq!(ids, [UtxoId::from_array([1; 32]), UtxoId::from_array([2; 32])]);
 
-        let second = page(ids.last().copied()).await;
-        assert!(!second.has_more);
+        // A re-version of the last UTXO served brings up a later row, which the cursor does not skip to
+        store
+            .with_write_tx(move |tx| {
+                let UtxoUpdateRecord::Unspent(mut refrozen) = crate::storage_sqlite::unspent_at(2, 6) else {
+                    unreachable!()
+                };
+                refrozen.address =
+                    UtxoAddress::new(crate::storage_sqlite::utxo_resource(), UtxoId::from_array([2; 32]));
+                refrozen.version = SubstateVersion::new(1);
+                refrozen.utxo_output.output.public_nonce = pair(1).1;
+                tx.batch_insert_utxo_updates(Epoch(1), [
+                    crate::storage_sqlite::spent_at(2, 6),
+                    UtxoUpdateRecord::Unspent(refrozen),
+                ])
+            })
+            .await
+            .unwrap();
+
+        let second = page(first.next_after_id).await;
+        assert_eq!(second.next_after_id, None);
         let ids = second.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-        assert_eq!(ids, [UtxoId::from_array([3; 32])]);
+        assert_eq!(ids, [UtxoId::from_array([3; 32]), UtxoId::from_array([2; 32])]);
     }
 
     #[test]

@@ -456,7 +456,7 @@ pub(crate) mod tests {
         (dir, store)
     }
 
-    fn spent_at(seq: u8, state_version: u64) -> crate::storage_sqlite::models::UtxoUpdateRecord {
+    pub(crate) fn spent_at(seq: u8, state_version: u64) -> crate::storage_sqlite::models::UtxoUpdateRecord {
         use tari_template_lib_types::{UtxoAddress, UtxoId};
 
         use crate::storage_sqlite::models::{UtxoSpent, UtxoUpdateRecord};

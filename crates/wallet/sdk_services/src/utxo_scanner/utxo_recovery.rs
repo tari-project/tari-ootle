@@ -274,8 +274,8 @@ where
                     .collect();
                 let (utxos, deferred) = if self.sdk.sdk_config().indexer_trust.is_verify() {
                     let (utxos, deferred) = self.settle_reported_utxos(*resource_addr, utxos).await?;
-                    num_unresolved += deferred.len();
                     let deferred = deferred.into_iter().collect::<HashSet<_>>();
+                    num_unresolved += deferred.len();
                     for pair in &deferred {
                         self.unsettled
                             .entry((*resource_addr, *pair))

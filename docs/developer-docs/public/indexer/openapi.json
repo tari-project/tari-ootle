@@ -1399,16 +1399,6 @@
               }
             }
           },
-          "404": {
-            "description": "The from_id UTXO is not stored on this indexer",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "500": {
             "description": "Failed to fetch UTXOs",
             "content": {
@@ -2192,12 +2182,14 @@
           "resource_address"
         ],
         "properties": {
-          "from_id": {
+          "after_id": {
             "type": [
-              "string",
+              "integer",
               "null"
             ],
-            "description": "Resumes after this UTXO: the last one a response with `has_more` returned."
+            "format": "int64",
+            "description": "Return only UTXOs this indexer stored after this cursor. Pass the previous page's `next_after_id`, which only\nthe indexer that returned it can resume from.",
+            "minimum": 0
           },
           "resource_address": {
             "type": "string"
@@ -2250,9 +2242,14 @@
           "utxos"
         ],
         "properties": {
-          "has_more": {
-            "type": "boolean",
-            "description": "More unspent UTXOs match than this response holds. The rest follow from a request with `from_id` set to the\nlast of `utxos`."
+          "next_after_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `after_id` for the next page, or `None` once `utxos` holds the last matching UTXO.",
+            "minimum": 0
           },
           "spent": {
             "type": "array",

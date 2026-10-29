@@ -198,15 +198,15 @@ pub trait IndexerStoreReadTransaction {
         limit: u32,
     ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError>;
 
-    /// Up to `limit` unspent UTXOs matching `public_nonce_and_tag` in the order they were indexed, after the UTXO
-    /// `from_id` when given. Any number of unspent UTXOs may share a nonce and tag.
+    /// Up to `limit` unspent UTXOs matching `public_nonce_and_tag` in the order they were indexed, each with its row
+    /// id, after the row `after_row_id` when given. Any number of unspent UTXOs may share a nonce and tag.
     fn utxos_get_unspent_by_public_nonce_and_tag(
         &mut self,
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
-        from_id: Option<UtxoId>,
+        after_row_id: Option<i64>,
         limit: u32,
-    ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError>;
+    ) -> Result<Vec<(i64, UtxoId, Encoded<Utxo>)>, StorageError>;
 
     /// The pairs of `public_nonce_and_tag` with an unspent UTXO.
     fn utxos_get_unspent_public_nonce_and_tag(

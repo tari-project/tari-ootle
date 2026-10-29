@@ -37,6 +37,8 @@ use tari_indexer_client::{
         GetSubstatesResponse,
         GetTransactionResultQuery,
         GetTransactionResultResponse,
+        GetUtxosRequest,
+        GetUtxosResponse,
         IndexerTransactionFinalizedResult,
         ListEpochCheckpointsRequest,
         ListEpochCheckpointsResponse,
@@ -50,6 +52,7 @@ use tari_ootle_common_types::{
     Epoch,
     SubstateVersion,
     engine_types::{
+        Utxo,
         commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
         encoded::Encoded,
         fees::FeeReceipt,
@@ -67,7 +70,7 @@ use tari_ootle_light_client::test_fixtures::{
     substate_proof,
 };
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib_types::Hash32;
+use tari_template_lib_types::{Hash32, UtxoId};
 use tokio::net::TcpListener;
 
 use crate::{
@@ -103,6 +106,12 @@ struct TestIndexerState {
     unrequested_on_fetch: Option<SubstateId>,
     /// The number of substates each batch fetch requested.
     fetch_sizes: Vec<usize>,
+    /// The UTXOs every UTXO fetch matches, in the order they are paged.
+    utxos: Vec<(UtxoId, Utxo)>,
+    /// The most UTXOs one UTXO fetch answers with.
+    utxo_page_size: usize,
+    /// The `after_id` of each UTXO fetch so far.
+    utxo_fetch_cursors: Vec<Option<u64>>,
     results: HashMap<TransactionId, GetTransactionResultResponse>,
     /// The finalization events every event stream starts with.
     hints: Vec<TransactionFinalizedEvent>,
@@ -150,6 +159,9 @@ impl TestIndexer {
             substates: HashMap::new(),
             unrequested_on_fetch: None,
             fetch_sizes: Vec::new(),
+            utxos: Vec::new(),
+            utxo_page_size: usize::MAX,
+            utxo_fetch_cursors: Vec::new(),
             results: HashMap::new(),
             hints: Vec::new(),
             committee_requests: 0,
@@ -161,6 +173,7 @@ impl TestIndexer {
             .route("/committees", get(committee))
             .route("/epoch-manager/stats", get(epoch_manager_stats))
             .route("/substates/fetch", post(fetch_substates))
+            .route("/utxos/fetch", post(fetch_utxos))
             .route("/substates/{id}", get(substate))
             .route("/transactions/{id}/result", get(transaction_result))
             .route("/events", get(events))
@@ -239,6 +252,18 @@ impl TestIndexer {
     /// The number of substates each batch fetch so far requested.
     pub(crate) fn fetch_sizes(&self) -> Vec<usize> {
         self.state.lock().unwrap().fetch_sizes.clone()
+    }
+
+    /// Answers every UTXO fetch with `utxos`, at most `page_size` a response.
+    pub(crate) fn serve_utxos(&self, utxos: Vec<(UtxoId, Utxo)>, page_size: usize) {
+        let mut state = self.state.lock().unwrap();
+        state.utxos = utxos;
+        state.utxo_page_size = page_size;
+    }
+
+    /// The `after_id` of each UTXO fetch so far.
+    pub(crate) fn utxo_fetch_cursors(&self) -> Vec<Option<u64>> {
+        self.state.lock().unwrap().utxo_fetch_cursors.clone()
     }
 
     pub(crate) fn set_result(&self, transaction_id: TransactionId, result: GetTransactionResultResponse) {
@@ -368,6 +393,23 @@ async fn fetch_substates(State(state): Shared, Json(req): Json<GetSubstatesReque
         }
     }
     Json(GetSubstatesResponse::new(substates, proofs))
+}
+
+/// A page of the served UTXOs. Its cursor counts the UTXOs served before the next page.
+async fn fetch_utxos(State(state): Shared, Json(req): Json<GetUtxosRequest>) -> Json<GetUtxosResponse> {
+    let mut state = state.lock().unwrap();
+    state.utxo_fetch_cursors.push(req.after_id);
+    let start = req.after_id.map_or(0, |after_id| after_id as usize);
+    let end = start.saturating_add(state.utxo_page_size).min(state.utxos.len());
+    let utxos = state.utxos[start..end]
+        .iter()
+        .map(|(id, utxo)| (*id, Encoded::encode(utxo).unwrap()))
+        .collect();
+    Json(GetUtxosResponse {
+        utxos,
+        spent: Vec::new(),
+        next_after_id: (end < state.utxos.len()).then_some(end as u64),
+    })
 }
 
 async fn transaction_result(

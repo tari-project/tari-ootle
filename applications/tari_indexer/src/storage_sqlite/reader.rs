@@ -121,27 +121,6 @@ enum EventRange {
 }
 
 impl SqliteStoreReadTransaction<'_> {
-    /// The row a read of unspent UTXOs resumes after when its cursor is `from_id`. A cursor this indexer does not
-    /// store - pruned, or never indexed - is `NotFound`, so the client restarts the read: no later call can advance
-    /// past it.
-    fn utxo_cursor_row_id(
-        &mut self,
-        operation: &str,
-        resource_address: &ResourceAddress,
-        from_id: UtxoId,
-    ) -> Result<i64, StorageError> {
-        utxos_list_cursor_query(resource_address, from_id)
-            .first::<i64>(self.connection())
-            .optional()
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("{operation}: {}", e),
-            })?
-            .ok_or_else(|| StorageError::NotFound {
-                item: "utxo",
-                key: from_id.to_string(),
-            })
-    }
-
     /// The distinct tag and nonce pairs of the rows `query` matches.
     fn utxo_tag_and_nonce_pairs(
         &mut self,
@@ -960,8 +939,21 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError> {
         const OPERATION: &str = "utxos_list";
 
+        // A cursor this indexer does not store - pruned, or never indexed - is `NotFound`, so the client restarts the
+        // listing: no later call can advance past it.
         let after_row_id = from_id
-            .map(|from_id| self.utxo_cursor_row_id(OPERATION, resource_address, from_id))
+            .map(|from_id| {
+                utxos_list_cursor_query(resource_address, from_id)
+                    .first::<i64>(self.connection())
+                    .optional()
+                    .map_err(|e| StorageError::QueryError {
+                        reason: format!("{OPERATION}: {}", e),
+                    })?
+                    .ok_or_else(|| StorageError::NotFound {
+                        item: "utxo",
+                        key: from_id.to_string(),
+                    })
+            })
             .transpose()?;
 
         let rows = utxos_list_query(resource_address, after_row_id, limit)
@@ -986,14 +978,11 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         &mut self,
         resource_address: &ResourceAddress,
         tag_and_nonce_pairs: &[(UtxoTag, RistrettoPublicKeyBytes)],
-        from_id: Option<UtxoId>,
+        after_row_id: Option<i64>,
         limit: u32,
-    ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError> {
+    ) -> Result<Vec<(i64, UtxoId, Encoded<Utxo>)>, StorageError> {
         const OPERATION: &str = "utxos_get_unspent_by_public_nonce_and_tag";
 
-        let after_row_id = from_id
-            .map(|from_id| self.utxo_cursor_row_id(OPERATION, resource_address, from_id))
-            .transpose()?;
         let rows =
             unspent_utxos_by_tag_and_nonce_page_query(resource_address, tag_and_nonce_pairs, after_row_id, limit)
                 .load_iter::<models::UtxoRecord, _>(self.connection())
@@ -1006,8 +995,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 reason: format!("{OPERATION}: {}", e),
             })?;
 
+            let row_id = row.id;
             let (address, utxo) = row.try_convert_to_utxo()?;
-            utxos.push((*address.id(), utxo));
+            utxos.push((row_id, *address.id(), utxo));
         }
 
         Ok(utxos)

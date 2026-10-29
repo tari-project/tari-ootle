@@ -44,7 +44,7 @@ pub(crate) struct UtxoRecordInsert {
 #[derive(Queryable)]
 #[diesel(table_name = utxos)]
 pub(crate) struct UtxoRecord {
-    pub _id: i64,
+    pub id: i64,
     pub commitment: String,
     pub public_nonce: Option<String>,
     pub version: i64,

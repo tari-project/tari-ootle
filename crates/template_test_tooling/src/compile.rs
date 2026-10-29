@@ -132,9 +132,11 @@ fn wasm_name(pkg_dir: &Path) -> io::Result<String> {
 /// test crate's own `target`, so the dependencies they have in common compile once. Cargo names a template's wasm
 /// after its lib name alone, so two templates with the same name would overwrite each other's artifact there. The
 /// first template to claim a name in the shared directory owns it; any other template with that name compiles in a
-/// target directory of its own, inside its package.
+/// target directory of its own, inside its package. A claim lasts as long as the shared directory, so a template
+/// moved to a new path keeps its name's claim pointing at the old one and compiles in its own target directory until
+/// the test crate's `target` is cleaned.
 fn target_dir(pkg_dir: &Path, wasm_name: &str, key: &str) -> io::Result<PathBuf> {
-    let pkg_dir = fs::canonicalize(pkg_dir)?;
+    let pkg_dir = fs::canonicalize(pkg_dir).map_err(|e| path_error("resolve template package", pkg_dir, e))?;
     let own_target_dir = pkg_dir.join("target").join(key);
     let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR") else {
         return Ok(own_target_dir);
@@ -142,26 +144,31 @@ fn target_dir(pkg_dir: &Path, wasm_name: &str, key: &str) -> io::Result<PathBuf>
 
     let shared_target_dir = Path::new(&manifest_dir).join("target").join("templates").join(key);
     let claims_dir = shared_target_dir.join("claims");
-    fs::create_dir_all(&claims_dir)?;
+    fs::create_dir_all(&claims_dir).map_err(|e| path_error("create template claims directory", &claims_dir, e))?;
     let claim = claims_dir.join(wasm_name);
     let owner = pkg_dir.as_os_str().as_encoded_bytes();
     // The claim is written whole under a name of its own and then linked into place, so a reader never sees a
     // partial claim.
     let pending_claim = claims_dir.join(format!(".{wasm_name}.{}.{:?}", process::id(), thread::current().id()));
-    fs::write(&pending_claim, owner)?;
+    fs::write(&pending_claim, owner).map_err(|e| path_error("write template claim", &pending_claim, e))?;
     let linked = fs::hard_link(&pending_claim, &claim);
-    fs::remove_file(&pending_claim)?;
+    fs::remove_file(&pending_claim).map_err(|e| path_error("remove pending template claim", &pending_claim, e))?;
     match linked {
         Ok(()) => return Ok(shared_target_dir),
         Err(e) if e.kind() == ErrorKind::AlreadyExists => {},
-        Err(e) => return Err(e),
+        Err(e) => return Err(path_error("link template claim", &claim, e)),
     }
 
-    if fs::read(&claim)? == owner {
+    let claimed_by = fs::read(&claim).map_err(|e| path_error("read template claim", &claim, e))?;
+    if claimed_by == owner {
         Ok(shared_target_dir)
     } else {
         Ok(own_target_dir)
     }
+}
+
+fn path_error(action: &str, path: &Path, err: io::Error) -> io::Error {
+    io::Error::new(err.kind(), format!("Failed to {action} {}: {err}", path.display()))
 }
 
 /// Builds a stable, per-(features, envs) subdirectory name for a cargo target directory.
@@ -186,29 +193,104 @@ fn target_dir_key(features: &[&str], envs: &[(OsString, OsString)]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Barrier};
+
     use super::*;
+
+    /// A shared target directory under a key of its own, removed when the test ends, pass or fail.
+    struct SharedDir {
+        key: String,
+        path: PathBuf,
+    }
+
+    impl SharedDir {
+        fn new(packages: &Path) -> Self {
+            let key = packages.file_name().unwrap().to_str().unwrap().to_owned();
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target")
+                .join("templates")
+                .join(&key);
+            Self { key, path }
+        }
+    }
+
+    impl Drop for SharedDir {
+        fn drop(&mut self) {
+            let _ignore = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn package(packages: &Path, name: &str) -> PathBuf {
+        let dir = packages.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn a_second_template_with_a_claimed_name_compiles_in_its_own_target_dir() {
         let packages = tempfile::tempdir().unwrap();
-        let first = packages.path().join("first");
-        let second = packages.path().join("second");
-        fs::create_dir_all(&first).unwrap();
-        fs::create_dir_all(&second).unwrap();
-        let key = packages.path().file_name().unwrap().to_str().unwrap();
-        let shared = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("templates")
-            .join(key);
+        let shared = SharedDir::new(packages.path());
+        let first = package(packages.path(), "first");
+        let second = package(packages.path(), "second");
 
-        assert_eq!(target_dir(&first, "same_name", key).unwrap(), shared);
-        assert_eq!(target_dir(&first, "same_name", key).unwrap(), shared);
+        assert_eq!(target_dir(&first, "same_name", &shared.key).unwrap(), shared.path);
+        assert_eq!(target_dir(&first, "same_name", &shared.key).unwrap(), shared.path);
         assert_eq!(
-            target_dir(&second, "same_name", key).unwrap(),
-            fs::canonicalize(&second).unwrap().join("target").join(key)
+            target_dir(&second, "same_name", &shared.key).unwrap(),
+            fs::canonicalize(&second).unwrap().join("target").join(&shared.key)
         );
-        assert_eq!(target_dir(&second, "other_name", key).unwrap(), shared);
+        assert_eq!(target_dir(&second, "other_name", &shared.key).unwrap(), shared.path);
+    }
 
-        fs::remove_dir_all(shared).unwrap();
+    #[test]
+    fn concurrent_claims_give_the_shared_dir_to_every_caller_from_the_owning_package_only() {
+        const THREADS: usize = 16;
+        const ROUNDS: usize = 50;
+
+        let packages = tempfile::tempdir().unwrap();
+        let shared = SharedDir::new(packages.path());
+        let owner = package(packages.path(), "owner");
+        let others = (0..THREADS / 2)
+            .map(|i| package(packages.path(), &format!("other_{i}")))
+            .collect::<Vec<_>>();
+
+        for round in 0..ROUNDS {
+            let name = format!("name_{round}");
+            let barrier = Arc::new(Barrier::new(THREADS));
+            let handles = (0..THREADS)
+                .map(|i| {
+                    // Even threads compile the owning package, odd threads other packages with the same name.
+                    let pkg_dir = if i % 2 == 0 {
+                        owner.clone()
+                    } else {
+                        others[i / 2].clone()
+                    };
+                    let (barrier, name, key) = (barrier.clone(), name.clone(), shared.key.clone());
+                    thread::spawn(move || {
+                        barrier.wait();
+                        (pkg_dir.clone(), target_dir(&pkg_dir, &name, &key).unwrap())
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            let shared_by = handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .filter(|(_, dir)| *dir == shared.path)
+                .map(|(pkg_dir, _)| pkg_dir)
+                .collect::<Vec<_>>();
+            let first = &shared_by[0];
+            assert!(
+                shared_by.iter().all(|pkg_dir| pkg_dir == first),
+                "round {round}: more than one package got the shared dir for one name: {shared_by:?}"
+            );
+            if *first == owner {
+                assert_eq!(
+                    shared_by.len(),
+                    THREADS / 2,
+                    "round {round}: a caller from the owning package missed the shared dir"
+                );
+            }
+        }
     }
 }

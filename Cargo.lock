@@ -13226,6 +13226,7 @@ dependencies = [
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction_manifest",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

@@ -37,7 +37,7 @@ where they apply:
       stale key fails to load), changed limits, caches to wipe, data directories to delete.
 - [ ] What breaks for **template authors**: engine ops, ABI sections, auth rules, size caps.
 - [ ] What breaks for **app / wallet developers**: fee model and estimates, event payloads and
-      filters, reject/abort reasons, account methods (e.g. the `_with_auth` variants).
+      filters, reject/abort reasons, account methods (e.g. `withdraw_approved`).
 - [ ] What breaks **without a reset**, and is accepted as a testnet cost.
 
 ## 3. SDK surfaces

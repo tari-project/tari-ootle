@@ -34,8 +34,7 @@ mod template {
         current_id: u32,
         new_data: Option<MaxString<50>>,
         manager: ResourceManager,
-        supply_vault: Vault,
-        another_vault: Vault,
+        supply_vault: Option<Vault>,
     }
 
     impl TemplateV2 {
@@ -55,8 +54,7 @@ mod template {
                 new_data: None,
                 current_id,
                 manager: previous_state.manager,
-                another_vault: Vault::new_empty(previous_state.supply_vault.resource_address()),
-                supply_vault: previous_state.supply_vault,
+                supply_vault: Some(previous_state.supply_vault),
             }
         }
 
@@ -80,8 +78,7 @@ mod template {
                 new_data: Some(new_data),
                 current_id,
                 manager: previous_state.manager,
-                another_vault: Vault::new_empty(previous_state.supply_vault.resource_address()),
-                supply_vault: previous_state.supply_vault,
+                supply_vault: Some(previous_state.supply_vault),
             }
         }
 
@@ -93,9 +90,43 @@ mod template {
                 current_id,
                 manager: previous_state.manager,
                 new_data: None,
-                another_vault: Vault::new_empty(previous_state.supply_vault.resource_address()),
-                supply_vault: Vault::new_empty(previous_state.supply_vault.resource_address()),
+                supply_vault: None,
             }
+        }
+
+        /// A migration frame reformats its component's own state and nothing else: it cannot create a vault.
+        #[migration]
+        pub fn faulty_migrate_create_vault(previous_state: TemplateV1) -> Self {
+            let _vault = Vault::new_empty(previous_state.supply_vault.resource_address());
+            Self::migrate_v1_to_v2(previous_state)
+        }
+
+        #[migration]
+        pub fn faulty_migrate_withdraw(mut previous_state: TemplateV1) -> Self {
+            let bucket = previous_state.supply_vault.withdraw_all();
+            previous_state.supply_vault.deposit(bucket);
+            Self::migrate_v1_to_v2(previous_state)
+        }
+
+        #[migration]
+        pub fn faulty_migrate_create_proof(previous_state: TemplateV1) -> Self {
+            let proof = previous_state.supply_vault.create_proof();
+            proof.drop();
+            Self::migrate_v1_to_v2(previous_state)
+        }
+
+        #[migration]
+        pub fn faulty_migrate_allocate_address(previous_state: TemplateV1) -> Self {
+            let _allocation = CallerContext::allocate_component_address(None);
+            Self::migrate_v1_to_v2(previous_state)
+        }
+
+        /// Migrates only if the migration frame carries `badge`. The frame carries neither the signer badges nor
+        /// the proofs the transaction authorized, so this fails for both.
+        #[migration]
+        pub fn migrate_asserting_badge(previous_state: TemplateV1, badge: NonFungibleAddress) -> Self {
+            CallerContext::assert_badge_in_scope(&badge);
+            Self::migrate_v1_to_v2(previous_state)
         }
 
         #[migration]
@@ -104,18 +135,9 @@ mod template {
         }
 
         #[migration]
-        pub fn faulty_migrate_cross_template_call(mut previous_state: TemplateV1) -> Self {
-            let bucket = previous_state.supply_vault.withdraw_all();
-            TemplateManager::get(TemplateAddress::from_array([0; 32])).invoke("deposit", args![bucket]);
-            let current_id = previous_state.signers.len() as u32;
-            Self {
-                signers: Default::default(),
-                current_id,
-                manager: previous_state.manager,
-                new_data: None,
-                another_vault: Vault::new_empty(previous_state.supply_vault.resource_address()),
-                supply_vault: previous_state.supply_vault,
-            }
+        pub fn faulty_migrate_cross_template_call(previous_state: TemplateV1) -> Self {
+            TemplateManager::get(TemplateAddress::from_array([0; 32])).invoke("deposit", args![]);
+            Self::migrate_v1_to_v2(previous_state)
         }
 
         pub fn assert_correct(&self) {

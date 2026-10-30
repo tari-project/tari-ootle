@@ -232,12 +232,10 @@ pub trait RuntimeInterface {
 
     /// Checks whether the current execution context has access to the given component method.
     fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError>;
-    /// Checks whether the current execution context satisfies the current component's upgrade rule.
-    fn check_component_upgrade_rule(&self) -> Result<(), RuntimeError>;
-
-    /// Ends the current frame's call boundary by revoking the proofs that were in scope only for the boundary
-    /// check. Must run after the frame's access rule has been evaluated and before anything acts in the frame.
-    fn revoke_boundary_proofs(&self) -> Result<(), RuntimeError>;
+    /// Checks the upgrade rule of the component behind `component_lock` against the current frame's scope. Runs
+    /// before the migration frame is pushed: the migration frame carries no authority of its own, so whoever is
+    /// upgrading must satisfy the rule in the scope the instruction runs in.
+    fn check_component_upgrade_rule(&self, component_lock: &LockedSubstate) -> Result<(), RuntimeError>;
 
     /// Asserts that the signer badge for `public_key` is in the transaction's base auth scope, i.e. that the
     /// transaction is signed by that key.

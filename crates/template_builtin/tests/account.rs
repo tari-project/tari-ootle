@@ -405,13 +405,11 @@ fn a_stored_badge_approval_is_spent_with_a_proof_of_the_badge() {
         test.transaction()
             .call_method(spender, "create_proof_by_non_fungible", args![stored_badge.clone()])
             .put_last_instruction_output_on_workspace("badge")
-            .call_method(granter, "withdraw_approved_with_auth", args![
-                stored_badge,
-                TARI_TOKEN,
-                60,
-                Workspace("badge")
-            ])
-            .put_last_instruction_output_on_workspace("bucket")
+            .with_authorized_proof("badge", |builder| {
+                builder
+                    .call_method(granter, "withdraw_approved", args![stored_badge, TARI_TOKEN, 60])
+                    .put_last_instruction_output_on_workspace("bucket")
+            })
             .drop_all_proofs_in_workspace()
             .call_method(spender, "deposit", args![Workspace("bucket")])
             .finish()

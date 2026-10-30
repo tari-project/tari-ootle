@@ -27,8 +27,15 @@ pub struct AuthorizationScope {
     /// with.
     caller_badges: IndexSet<NonFungibleAddress>,
 
-    /// Resource-based proofs
+    /// The proofs this frame has opened an authorization window over. Only a proof the frame holds can be here, so
+    /// the frame may also pass, return or drop any of them.
     proofs: IndexSet<ProofId>,
+
+    /// The proofs lent to this frame by its caller: the caller's `proofs` as they stood when this frame was pushed.
+    /// They satisfy this frame's rules exactly as `proofs` do, but the frame does not hold them — it cannot open a
+    /// window over them, pass them on, return or drop them — so the loan ends with this frame and never reaches
+    /// its own callees.
+    granted: IndexSet<ProofId>,
 }
 
 impl AuthorizationScope {
@@ -37,15 +44,29 @@ impl AuthorizationScope {
             virtual_proofs,
             caller_badges: IndexSet::new(),
             proofs: IndexSet::new(),
+            granted: IndexSet::new(),
         }
     }
 
     pub fn empty() -> Self {
+        Self::new(IndexSet::new())
+    }
+
+    /// The scope a frame pushed by a top-level instruction starts with: the transaction's signer badges, and the
+    /// proofs the transaction has authorized at that point on loan.
+    pub(super) fn for_top_level_frame(&self) -> Self {
         Self {
-            virtual_proofs: IndexSet::new(),
+            virtual_proofs: self.virtual_proofs.clone(),
             caller_badges: IndexSet::new(),
             proofs: IndexSet::new(),
+            granted: self.proofs.clone(),
         }
+    }
+
+    /// Lends this frame's authorized proofs to the frame it is pushing. Signer badges are not carried: they stamp
+    /// the first frame only.
+    pub(super) fn lend_to_callee(&self, callee: &mut Self) {
+        callee.granted = self.proofs.clone();
     }
 
     /// Stamps the identity of the frame that is pushing the frame this scope belongs to. The component badge is
@@ -72,8 +93,19 @@ impl AuthorizationScope {
         self.badges().any(|badge| badge.resource_address() == resource_address)
     }
 
+    /// The scope a restricted top-level frame starts with: the signer badges and nothing on loan.
+    pub(super) fn badges_only(&self) -> Self {
+        Self::new(self.virtual_proofs.clone())
+    }
+
+    /// The proofs this frame has authorized itself.
     pub fn proofs(&self) -> &IndexSet<ProofId> {
         &self.proofs
+    }
+
+    /// Every proof that satisfies this frame's rules: its own windows and its caller's loan.
+    pub fn authorizing_proofs(&self) -> impl Iterator<Item = &ProofId> {
+        self.proofs.iter().chain(&self.granted)
     }
 
     pub fn add_proof(&mut self, proof_id: ProofId) {
@@ -97,6 +129,10 @@ impl Display for AuthorizationScope {
         }
         write!(f, "], Proofs: [")?;
         for proof in &self.proofs {
+            write!(f, "{}", proof)?;
+        }
+        write!(f, "], Granted: [")?;
+        for proof in &self.granted {
             write!(f, "{}", proof)?;
         }
         write!(f, "]")

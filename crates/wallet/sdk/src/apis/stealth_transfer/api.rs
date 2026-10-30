@@ -1439,9 +1439,8 @@ struct CheckedStatementSpec {
     resource_view_key: Option<RistrettoPublicKey>,
 }
 
-/// Withdraws `amount` of `resource` from the owner's account, handing the badge proof to the account's frame when
-/// one is in use. A frame authorizes with the badges it is stamped with and the proofs it is passed as arguments,
-/// so a badge reaches the account's withdraw rule as an argument.
+/// Withdraws `amount` of `resource` from the owner's account. When a badge is in use, the call runs inside an
+/// authorization window over the workspace proof `proof`, which lends the badge to the account's withdraw rule.
 fn withdraw_from_account<D>(
     builder: TransactionBuilder<D>,
     account: ComponentAddress,
@@ -1452,11 +1451,9 @@ fn withdraw_from_account<D>(
     if badge_usage.is_none() {
         builder.call_method(account, "withdraw", args![resource, amount])
     } else {
-        builder.call_method(account, "withdraw_with_auth", args![
-            resource,
-            amount,
-            Workspace("proof")
-        ])
+        builder.with_authorized_proof("proof", |builder| {
+            builder.call_method(account, "withdraw", args![resource, amount])
+        })
     }
 }
 

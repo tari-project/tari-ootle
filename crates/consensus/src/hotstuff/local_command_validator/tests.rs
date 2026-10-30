@@ -87,6 +87,7 @@ use super::LocalCommandValidator;
 use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
+        command_derivation::{derive_multi_shard_atom_with_leader_fee, lock_local_accept_execution},
         substate_store::PendingSubstateStore,
         transaction_manager::{
             ConsensusTransactionManager,
@@ -652,8 +653,14 @@ impl Replica {
                 };
                 let local = self.committee.shard_group();
                 match multishard.into_evidence_or_execution() {
-                    EvidenceOrExecution::Execution { execution, .. } => {
+                    EvidenceOrExecution::Execution {
+                        execution,
+                        fee_intent_only,
+                    } => {
                         rec.update_from_execution(NUM_PRESHARDS, self.committee.num_committees(), &execution);
+                        if fee_intent_only {
+                            rec.set_fee_intent_only(true);
+                        }
                         rec.evidence_mut().add_shard_group(local);
                         if execution.decision().is_commit() && !rec.evidence().has_inputs(local) {
                             let involved = NonZeroU64::new(rec.evidence().num_shard_groups() as u64).unwrap();
@@ -1562,6 +1569,68 @@ mod local_accept_from_new {
             evaluation.no_vote
         );
     }
+
+    #[test]
+    fn an_output_only_fee_intent_commit_retains_rejected_output_shard_groups_in_evidence() {
+        let (local, input_group, other_output_group) = local_and_two_foreign_thirds();
+        let replica = Replica::in_committee(local, 3);
+        let input = component_id_in(input_group);
+        let local_output = component_id_in(local);
+        let foreign_output = component_id_in(other_output_group);
+        // Existing substate at version 0 causes local output lock failure and triggers fee-intent fallback.
+        replica.add_substate(&local_output);
+        let id = replica.pool_transaction(1, &[&input], Script {
+            commit: true,
+            new_outputs: vec![local_output, foreign_output],
+            fee_intent: true,
+            ..Default::default()
+        });
+        replica.receive_input_pledges(&id, input_group, &[&input, &tari_token()]);
+
+        let command = replica.honest_new_multishard_command(&id);
+        let atom = multishard_atom(&command);
+        assert!(matches!(command, Command::LocalAccept(_)), "{command}");
+        assert_eq!(atom.decision, Decision::Commit);
+        assert!(atom.fee_intent_only);
+        assert_eq!(atom.evidence.num_shard_groups(), 3);
+        assert!(atom.evidence.has(&other_output_group));
+        assert_eq!(
+            atom.leader_fee,
+            Some(calculate_leader_fee(FEE, exhaust_burn(), NonZeroU64::new(3).unwrap()))
+        );
+
+        let evaluation = replica.evaluate(&[command]);
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+    }
+
+    #[test]
+    fn an_output_only_lock_failure_abort_retains_output_shard_groups_in_evidence() {
+        let (local, input_group, other_output_group) = local_and_two_foreign_thirds();
+        let replica = Replica::in_committee(local, 3);
+        let input = component_id_in(input_group);
+        let local_output = component_id_in(local);
+        let foreign_output = component_id_in(other_output_group);
+        replica.add_substate(&local_output);
+        let id = replica.pool_transaction(1, &[&input], Script {
+            commit: true,
+            new_outputs: vec![local_output, foreign_output],
+            fee_intent: false,
+            ..Default::default()
+        });
+        replica.receive_input_pledges(&id, input_group, &[&input, &tari_token()]);
+
+        let command = replica.honest_new_multishard_command(&id);
+        let atom = multishard_atom(&command);
+        assert!(matches!(command, Command::LocalAccept(_)), "{command}");
+        assert_eq!(atom.decision, Decision::Abort(AbortReason::LockInputsFailed));
+        assert_eq!(atom.evidence.num_shard_groups(), 3);
+        assert!(atom.evidence.has(&other_output_group));
+
+        let evaluation = replica.evaluate(&[command]);
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+    }
 }
 
 /// Rules a replica enforces by comparing a proposed command for a New cross-shard transaction with the one it derives.
@@ -1817,6 +1886,234 @@ mod local_accept_from_local_prepared {
         let evaluation = replica.evaluate_after(&[Command::LocalAccept(accept)], |change_set| {
             change_set.add_transaction_execution(id, execution).unwrap();
         });
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+    }
+
+    #[test]
+    fn an_abort_proposed_for_a_prepared_commit_is_refused() {
+        let (replica, id) = executing_cross_shard();
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        let involved = NonZeroU64::new(prepare.evidence.num_shard_groups() as u64).unwrap();
+        let forged_abort = MultiShardAtom {
+            decision: Decision::Abort(AbortReason::ExecutionFailure),
+            leader_fee: Some(calculate_leader_fee(FEE, exhaust_burn(), involved)),
+            ..prepare
+        };
+
+        let evaluation = replica.evaluate(&[Command::LocalAccept(forged_abort)]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Commit,
+                    remote: Decision::Abort(AbortReason::ExecutionFailure),
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_commit_proposed_for_an_aborted_prepared_transaction_is_refused() {
+        let (replica, id) = executing_cross_shard();
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        let mut rec = replica.pending_record(&id);
+        rec.set_remote_decision(Decision::Abort(AbortReason::ForeignPledgeInputConflict))
+            .no_leader_fee();
+        let forged_commit = MultiShardAtom {
+            decision: Decision::Commit,
+            ..rec.get_current_multi_shard_atom()
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::LocalAccept(forged_commit)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::ForeignPledgeInputConflict),
+                    remote: Decision::Commit,
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    /// A replica in `LocalPrepared` whose transaction executes at `LocalAccept` (after receiving foreign input
+    /// pledges) and collides on a local output.
+    fn prepared_colliding_on_local_output(fee_intent: bool) -> (Replica, TransactionId, ShardGroup) {
+        let (other_output_group, local, foreign_input_group) = local_and_two_foreign_thirds();
+        let replica = Replica::in_committee(local, 3);
+        let local_input = component_id_in(local);
+        let foreign_input = component_id_in(foreign_input_group);
+        let local_output = (0x20..=u8::MAX)
+            .map(component_id)
+            .filter(|id| {
+                let shard = VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(NUM_PRESHARDS);
+                local.contains(&shard)
+            })
+            .nth(1)
+            .expect("second seed in local shard group");
+        let foreign_output = component_id_in(other_output_group);
+        replica.add_substate(&local_input);
+        let id = replica.pool_transaction(1, &[&local_input, &foreign_input], Script {
+            commit: true,
+            new_outputs: vec![local_output.clone(), foreign_output],
+            fee_intent,
+            ..Default::default()
+        });
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        replica.receive_input_pledges(&id, foreign_input_group, &[&foreign_input]);
+        let parent = replica.parent.as_leaf();
+        let mut rec = replica.pending_record(&id);
+        rec.evidence_mut()
+            .add_shard_group(foreign_input_group)
+            .set_prepare_qc(PcId::zero());
+        rec.set_ready(true);
+        replica
+            .store
+            .with_write_tx(|tx| {
+                tx.transaction_pool_add_pending_update(&parent, &TransactionPoolStatusUpdate::new(rec, true))
+            })
+            .unwrap();
+        replica.add_substate(&local_output);
+        (replica, id, other_output_group)
+    }
+
+    /// Honest `LocalAccept` command produced for a `LocalPrepared` transaction that executes at `LocalAccept`.
+    fn honest_accept_from_local_prepared(replica: &Replica, id: &TransactionId) -> MultiShardAtom {
+        let block = &replica.candidate;
+        let validator = LocalCommandValidator::new(&replica.manager, &replica.public_key);
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(tx, block.as_leaf(), NUM_PRESHARDS)?;
+                let change_set = ProposedBlockChangeSet::new(block.as_leaf());
+                let mut rec = change_set
+                    .get_transaction_pool_record(tx, substate_store.parent_chain(), id)
+                    .unwrap();
+                let transaction = TransactionRecord::get(tx, id)?;
+                let locked_epoch = rec.locked_epoch().unwrap().clone();
+                let execution = validator
+                    .execute_transaction(
+                        &substate_store,
+                        &replica.committee,
+                        block.as_leaf(),
+                        locked_epoch,
+                        transaction,
+                        &change_set,
+                    )
+                    .unwrap()
+                    .into_transaction_execution();
+                lock_local_accept_execution(&mut substate_store, &replica.committee, &mut rec, execution).unwrap();
+                Ok::<_, StorageError>(derive_multi_shard_atom_with_leader_fee(&rec).unwrap())
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn an_honest_abort_when_locking_local_outputs_fails_retains_output_shard_groups_and_is_voted_for() {
+        let (replica, id, other_output_group) = prepared_colliding_on_local_output(false);
+        let honest = honest_accept_from_local_prepared(&replica, &id);
+        assert_eq!(honest.decision, Decision::Abort(AbortReason::LockOutputsFailed));
+        assert_eq!(honest.evidence.num_shard_groups(), 3);
+        assert!(honest.evidence.has(&other_output_group));
+
+        let evaluation = replica.evaluate(&[Command::LocalAccept(honest.clone())]);
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+
+        let wrong_reason = replica.evaluate(&[Command::LocalAccept(MultiShardAtom {
+            decision: Decision::Abort(AbortReason::ExecutionFailure),
+            ..honest.clone()
+        })]);
+        assert!(
+            matches!(
+                wrong_reason.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::LockOutputsFailed),
+                    remote: Decision::Abort(AbortReason::ExecutionFailure),
+                })
+            ),
+            "{:?}",
+            wrong_reason.no_vote
+        );
+
+        let non_zero_fee = replica.evaluate(&[Command::LocalAccept(MultiShardAtom {
+            transaction_fee: FEE,
+            ..honest.clone()
+        })]);
+        assert!(
+            matches!(non_zero_fee.no_vote, Some(NoVoteReason::FeeDisagreement)),
+            "{:?}",
+            non_zero_fee.no_vote
+        );
+
+        let with_leader_fee = replica.evaluate(&[Command::LocalAccept(MultiShardAtom {
+            leader_fee: Some(local_leader_fee()),
+            ..honest.clone()
+        })]);
+        assert!(
+            matches!(with_leader_fee.no_vote, Some(NoVoteReason::LeaderFeeDisagreement)),
+            "{:?}",
+            with_leader_fee.no_vote
+        );
+
+        let with_fee_intent_only = replica.evaluate(&[Command::LocalAccept(MultiShardAtom {
+            fee_intent_only: true,
+            ..honest.clone()
+        })]);
+        assert!(
+            matches!(
+                with_fee_intent_only.no_vote,
+                Some(NoVoteReason::FeeIntentOnlyDisagreement {
+                    local_fee_intent_only: false,
+                    proposed_fee_intent_only: true,
+                    ..
+                })
+            ),
+            "{:?}",
+            with_fee_intent_only.no_vote
+        );
+
+        let missing_output_evidence = replica.evaluate(&[Command::LocalAccept(MultiShardAtom {
+            evidence: replica.pending_record(&id).evidence().clone(),
+            ..honest
+        })]);
+        assert!(
+            matches!(
+                missing_output_evidence.no_vote,
+                Some(NoVoteReason::InvalidEvidence {
+                    reason: InvalidEvidenceReason::MismatchedEvidence
+                })
+            ),
+            "{:?}",
+            missing_output_evidence.no_vote
+        );
+    }
+
+    #[test]
+    fn a_fee_intent_commit_when_locking_local_outputs_fails_retains_rejected_output_shard_groups() {
+        let (replica, id, other_output_group) = prepared_colliding_on_local_output(true);
+        let honest = honest_accept_from_local_prepared(&replica, &id);
+        assert_eq!(honest.decision, Decision::Commit);
+        assert!(honest.fee_intent_only);
+        assert_eq!(honest.evidence.num_shard_groups(), 3);
+        assert!(honest.evidence.has(&other_output_group));
+        assert_eq!(
+            honest.leader_fee,
+            Some(calculate_leader_fee(FEE, exhaust_burn(), NonZeroU64::new(3).unwrap()))
+        );
+
+        let evaluation = replica.evaluate(&[Command::LocalAccept(honest)]);
 
         assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
     }

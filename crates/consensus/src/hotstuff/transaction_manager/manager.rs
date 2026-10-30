@@ -735,8 +735,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         if let Some(err) = locked.lock_status.hard_conflict() {
             // CASE: Multishard transaction, will abort due to hard lock conflict
             warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
-            let execution =
-                TransactionExecution::abort(&transaction_id, RejectReason::FailedToLockInputs(err.to_string()));
+            let execution = locked
+                .execution
+                .into_abort(&transaction_id, RejectReason::FailedToLockInputs(err.to_string()));
             Ok(PreparedTransaction::new_multishard_executed(
                 execution,
                 locked.lock_status,

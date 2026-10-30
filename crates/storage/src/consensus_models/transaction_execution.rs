@@ -39,9 +39,10 @@ pub struct TransactionExecution {
     #[serde(skip)]
     #[cfg_attr(feature = "ts", ts(skip))]
     pub is_fee_intent_commit: bool,
-    /// The outputs of the full execution that a fee-intent commit does not create. The transaction still involves
-    /// their shard groups, which every shard group must count alike, so they are part of a multishard transaction's
-    /// evidence but are never locked or written. Set by [`Self::take_fee_intent_commit`] and node-internal.
+    /// The outputs of the full execution that a fee-intent commit or a rejected execution does not create. The
+    /// transaction still involves their shard groups, which every shard group must count alike, so they are part of
+    /// a multishard transaction's evidence but are never locked or written. Set by [`Self::take_fee_intent_commit`]
+    /// and [`Self::into_abort`], and node-internal.
     #[n(5)]
     #[cbor(default)]
     #[serde(skip)]
@@ -119,6 +120,20 @@ impl TransactionExecution {
         }
     }
 
+    /// Rejects this execution for `reject_reason`, keeping the inputs and outputs it resolved so the aborting shard
+    /// group's evidence still names every shard group the execution involved.
+    pub fn into_abort(mut self, transaction_id: &TransactionId, reject_reason: RejectReason) -> Self {
+        self.rejected_outputs.append(&mut self.resulting_outputs);
+        Self {
+            result: ExecuteResult::new_rejected(transaction_id.as_hash(), reject_reason, None),
+            resolved_inputs: self.resolved_inputs,
+            resulting_outputs: Vec::new(),
+            fee_intent_fallback: None,
+            is_fee_intent_commit: false,
+            rejected_outputs: self.rejected_outputs,
+        }
+    }
+
     pub fn result(&self) -> &ExecuteResult {
         &self.result
     }
@@ -163,8 +178,8 @@ impl TransactionExecution {
         &self.rejected_outputs
     }
 
-    /// The outputs whose shard groups the transaction involves: those it creates, and those a fee-intent commit
-    /// rejects.
+    /// The outputs whose shard groups the transaction involves: those it creates, and those a fee-intent commit or a
+    /// rejected execution does not create.
     pub fn involved_outputs(&self) -> impl Iterator<Item = &VersionedSubstateIdLockIntent> {
         self.resulting_outputs.iter().chain(&self.rejected_outputs)
     }
@@ -337,5 +352,44 @@ impl Display for BlockTransactionExecution {
             self.decision(),
             self.execution_time()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::commit_result::RejectReason;
+
+    use super::*;
+
+    /// Encodes a pre-upgrade `TransactionExecution` record written without field `#[n(5)]`.
+    #[derive(Encode)]
+    struct LegacyTransactionExecution {
+        #[n(0)]
+        result: ExecuteResult,
+        #[n(1)]
+        resolved_inputs: Vec<VersionedSubstateIdLockIntent>,
+        #[n(2)]
+        resulting_outputs: Vec<VersionedSubstateIdLockIntent>,
+        #[n(3)]
+        fee_intent_fallback: Option<Box<FeeIntentFallback>>,
+        #[n(4)]
+        is_fee_intent_commit: bool,
+    }
+
+    #[test]
+    fn a_stored_execution_without_rejected_outputs_decodes_with_an_empty_vec() {
+        let id = TransactionId::default();
+        let legacy = LegacyTransactionExecution {
+            result: ExecuteResult::new_rejected(id.as_hash(), RejectReason::ForeignPledgeInputConflict, None),
+            resolved_inputs: Vec::new(),
+            resulting_outputs: Vec::new(),
+            fee_intent_fallback: None,
+            is_fee_intent_commit: false,
+        };
+        let bytes = minicbor::to_vec(&legacy).unwrap();
+
+        let decoded: TransactionExecution = minicbor::decode(&bytes).unwrap();
+
+        assert!(decoded.rejected_outputs.is_empty());
     }
 }

@@ -99,25 +99,22 @@ pub type ModulesCollection<TStore> = Arc<[Box<dyn RuntimeModule<TStore>>]>;
 
 /// The encoded bytes of the values of `inputs`, measured the way the fee module tallies storage.
 ///
-/// A global substate is held by every shard group and never pledged, so it is not counted. Every
-/// other declared input is resolved before execution — consensus aborts a transaction that names one
-/// it cannot find, and a dry run fails to fetch it — so one missing from `store` is an invariant
-/// violation.
+/// Every declared input counts, global ones included: every shard group resolves a global input
+/// locally and pledges it to the others. Every declared input is resolved before execution —
+/// consensus aborts a transaction that names one it cannot find, and a dry run fails to fetch it —
+/// so one missing from `store` is an invariant violation.
 fn declared_input_bytes<'a, TStore: StateReader, I: IntoIterator<Item = &'a SubstateId>>(
     store: &TStore,
     inputs: I,
 ) -> Result<u64, TransactionError> {
-    inputs
-        .into_iter()
-        .filter(|id| !id.is_global())
-        .try_fold(0u64, |total, id| {
-            let substate = store
-                .get_state(id)
-                .map_err(|err| TransactionErrorKind::InvariantError {
-                    details: format!("Declared input {id} was not resolved before execution: {err}"),
-                })?;
-            Ok(total.saturating_add(tari_bor::encoded_len(substate.substate_value()) as u64))
-        })
+    inputs.into_iter().try_fold(0u64, |total, id| {
+        let substate = store
+            .get_state(id)
+            .map_err(|err| TransactionErrorKind::InvariantError {
+                details: format!("Declared input {id} was not resolved before execution: {err}"),
+            })?;
+        Ok(total.saturating_add(tari_bor::encoded_len(substate.substate_value()) as u64))
+    })
 }
 
 pub struct TransactionProcessor<TStore, TTemplateProvider> {

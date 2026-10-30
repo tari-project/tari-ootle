@@ -148,13 +148,19 @@ The first charges land as soon as the runtime initialises, before any instructio
   network must gossip, store and validate regardless of what execution does.
 - **`InputLoad`** — the encoded bytes of every declared input × `per_byte_storage_cost` /
   `input_load_bytes_cost_divisor`. It prices reading each input from storage, whether or not
-  execution touches it. Global substates (templates, network governance) are not counted, since every
-  shard group already holds them.
+  execution touches it. Global substates (templates, network governance) are counted like any other
+  input.
 - **`InputFanout`** — the same bytes × the transaction's *input fanout* × `per_byte_storage_cost` /
   `input_fanout_bytes_cost_divisor`. The input fanout is the number of shard groups holding the
   transaction's declared inputs (and, for a burn claim, its claim tombstone), less one: the groups
   each input has to be pledged to beyond its own. Every transaction declares the TARI resource, so a
-  transaction whose other inputs sit in another group pays a fanout of at least one.
+  transaction whose other inputs sit in another group pays a fanout of at least one. A global
+  transaction — one that declares a global substate or publishes a template — executes in every
+  shard group, so its input fanout is the number of shard groups less one.
+
+Both input charges price one holder per input: one load, and one pledge to each further group. A
+global substate has a holder in every shard group, and each of them loads it and pledges it to the
+others, so with `n` groups the network does `n` times the work these charges price for it.
 
 Both input charges land before the fee intent runs, so they stand whatever the main intent does.
 

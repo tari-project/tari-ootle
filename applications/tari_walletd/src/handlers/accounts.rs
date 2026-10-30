@@ -1869,12 +1869,7 @@ impl DeclaredInputPricing {
     /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
     /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
     async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
-        let ids = ids
-            .into_iter()
-            .filter(|id| !id.is_global())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
         let started = tokio::time::Instant::now();
         let mut interval = Duration::from_millis(250);
         let substates = loop {

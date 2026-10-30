@@ -11,6 +11,8 @@ use tari_transaction_components::{tari_amount::MicroMinotari, transaction_compon
 pub struct BaseLayerMetadata {
     pub height_of_longest_chain: u64,
     pub tip_hash: FixedHash,
+    /// The lowest height the base node holds complete blocks for. Zero for an archival node.
+    pub pruned_height: u64,
 }
 
 #[derive(Debug, Clone)]

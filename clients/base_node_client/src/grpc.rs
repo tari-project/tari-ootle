@@ -121,6 +121,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             tip_hash: metadata.best_block_hash.try_into().map_err(|_| {
                 BaseNodeClientError::InvalidPeerMessage("best_block was not a valid fixed hash".to_string())
             })?,
+            pruned_height: metadata.pruned_height,
         })
     }
 

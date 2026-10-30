@@ -306,9 +306,10 @@ where
         proof: &BurnOutputInclusionProof,
         output_hash: &FixedHash,
     ) -> Result<(), ClaimProofError> {
-        // Only headers from epochs before the current one count: a node that has reached an epoch holds every header
-        // of the epochs before it from its configured scan `start_height` on, but each node scans the current
-        // epoch's headers at its own pace, so they would disagree on whether one is present.
+        // Only headers from epochs before the current one count: a node that has reached an epoch holds, from its
+        // configured scan `start_height` on, the header of every block in the epochs before it that has an output
+        // for this sidechain, which includes every block a valid claim can name. Each node scans the current epoch
+        // at its own pace, so they would disagree on whether one of its headers is present.
         let Some(max_header_epoch) = epoch.checked_sub(1) else {
             warn!(target: LOG_TARGET, "Claim burn failed - no base layer header is claimable in epoch 0");
             return Err(ClaimProofRejection::NotYetValid(

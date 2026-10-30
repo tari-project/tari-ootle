@@ -2910,6 +2910,82 @@ mod resource_access_rules {
     }
 }
 
+mod access_rule_metering {
+    use tari_engine_types::{
+        commit_result::ExecutionFailureCode,
+        limits::{MAX_NATIVE_POINTS_PER_TRANSACTION, NativeExecutionPoints},
+    };
+
+    use super::*;
+
+    /// Native points charged for creating `proofs` token proofs, each held while the next is authorized, under a
+    /// withdraw rule that tests `unmatched_requirements` badge requirements before the one that passes.
+    fn native_points_for_held_proofs(test: &mut TemplateTest, unmatched_requirements: u32, proofs: u32) -> u64 {
+        let component: ComponentAddress = test.call_function(
+            "AccessRulesTest",
+            "with_withdraw_rule_of_unmatched_requirements",
+            args![unmatched_requirements],
+            vec![],
+        );
+        test.call_method::<()>(component, "hold_token_proofs", args![proofs], vec![]);
+        test.last_execution_points().native
+    }
+
+    #[test]
+    fn it_charges_for_each_requirement_and_proof_examined() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let proofs = 20u64;
+
+        // Each unmatched requirement is a node visited, then a scan of every proof already held, on each of the
+        // `proofs` authorizations.
+        let one = native_points_for_held_proofs(&mut test, 1, proofs as u32);
+        let many = native_points_for_held_proofs(&mut test, 33, proofs as u32);
+        let per_requirement = proofs * NativeExecutionPoints::PER_ACCESS_RULE_NODE +
+            proofs * (proofs - 1) / 2 * NativeExecutionPoints::PER_ACCESS_RULE_PROOF;
+        assert_eq!(many - one, 32 * per_requirement);
+
+        // Every authorization in the second half of the proofs examines `proofs / 2` more proofs than its counterpart
+        // in the first half.
+        let half = native_points_for_held_proofs(&mut test, 1, (proofs / 2) as u32);
+        let none = native_points_for_held_proofs(&mut test, 1, 0);
+        let second_half = one - half;
+        let first_half = half - none;
+        assert!(
+            second_half >= first_half + (proofs / 2).pow(2) * NativeExecutionPoints::PER_ACCESS_RULE_PROOF,
+            "the proofs held while authorizing went uncharged: second half {second_half}, first half {first_half}"
+        );
+    }
+
+    #[test]
+    fn it_stops_evaluating_once_the_transaction_cannot_pay() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let component: ComponentAddress = test.call_function(
+            "AccessRulesTest",
+            "with_withdraw_rule_of_unmatched_requirements",
+            args![1022u32],
+            vec![],
+        );
+
+        // Authorizing all of these proofs would examine ~8e7 proofs, far beyond what any transaction may pay for.
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component, "hold_token_proofs", args![400u32])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert_eq!(
+            reason.execution_failure_code(),
+            Some(ExecutionFailureCode::LimitExceeded),
+            "unexpected rejection: {reason:?}"
+        );
+        assert!(
+            test.last_execution_points().native <= MAX_NATIVE_POINTS_PER_TRANSACTION,
+            "evaluation ran past the per-transaction maximum: {}",
+            test.last_execution_points().native
+        );
+    }
+}
+
 mod non_fungible_data {
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_engine_types::substate::SubstateId;

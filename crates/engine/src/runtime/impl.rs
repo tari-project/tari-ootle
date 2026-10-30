@@ -627,7 +627,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     where
         F: FnOnce(&Resource) -> Result<(), RuntimeError>,
     {
-        let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+        let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
             let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
             let resource = state_mut.get_resource(&resource_lock)?;
             validate(resource)?;
@@ -1115,7 +1115,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             AtomicCondition::AccessRule(access_rule) => {
                 let allowed = self
                     .tracker
-                    .read_with(|state| state.authorization().check_access_rule(access_rule))?;
+                    .write_with_authorization(|state| state.authorization().check_access_rule(access_rule))?;
                 if !allowed {
                     return Err(RuntimeError::AccessDenied {
                         action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
@@ -1632,7 +1632,7 @@ where
                 }
                 reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let component_lock = state
                         .current_call_scope()?
                         .get_current_component_lock()
@@ -1688,7 +1688,7 @@ where
                     reject_invalid_m_of_n("owner_rule", rule.find_invalid_m_of_n())?;
                 }
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let component_lock = state
                         .current_call_scope()?
                         .get_current_component_lock()
@@ -1944,7 +1944,7 @@ where
                 let mint_resource: MintResourceArg = args.assert_one_arg()?;
 
                 let (maybe_auth_hook, auth_caller, has_view_key, tracks_supply) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
@@ -2003,7 +2003,7 @@ where
                         })?;
                 let arg: RecallResourceArg = args.assert_one_arg()?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2100,7 +2100,7 @@ where
                 let arg: ResourceUpdateNonFungibleDataArg = args.assert_one_arg()?;
                 reject_transient_values_in("Non-fungible mutable data", &arg.data)?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2165,7 +2165,7 @@ where
                 let UpdateAccessRuleArg { action, new_rule } = args.assert_one_arg()?;
                 reject_invalid_m_of_n("new_rule", new_rule.find_invalid_m_of_n())?;
 
-                let resource_lock = self.tracker.write_with(|state_mut| {
+                let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2208,7 +2208,7 @@ where
                         })?;
                 let UpdateAuthHookArg { auth_hook } = args.assert_one_arg()?;
 
-                let resource_lock = self.tracker.write_with(|state_mut| {
+                let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2265,7 +2265,7 @@ where
                 Self::check_metadata_values("metadata", &new_metadata)?;
                 Self::check_token_symbol(&new_metadata)?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2331,7 +2331,7 @@ where
                     });
                 }
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2628,7 +2628,7 @@ where
                     })?;
                 args.assert_no_args("CreateVault")?;
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let resource_substate_id = SubstateId::Resource(*resource_address);
                     let resource_lock = state.read_lock_substate(resource_substate_id.clone())?;
                     let resource = state.get_resource(&resource_lock)?;
@@ -2682,7 +2682,7 @@ where
                 let bucket_id: BucketId = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -2743,7 +2743,7 @@ where
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -2957,7 +2957,7 @@ where
                     self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
                 }
 
-                self.tracker.write_with(|state_mut| {
+                self.tracker.write_with_authorization(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                     let vault = state_mut.get_vault(&vault_lock)?;
@@ -3030,7 +3030,7 @@ where
                 args.assert_no_args("CreateProofByResource")?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3084,7 +3084,7 @@ where
                 let arg: VaultCreateProofByFungibleAmountArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3138,7 +3138,7 @@ where
                 let arg: VaultCreateProofByNonFungiblesArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3381,7 +3381,7 @@ where
                 let arg: BurnBucketArg = args.assert_one_arg()?;
 
                 let (resource_address, maybe_auth_hook, auth_caller, tracks_supply) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let bucket = state_mut.get_bucket(bucket_id)?;
                         // Reject a burn that cannot succeed before the auth hook runs or anything is charged for it.
                         // This is re-checked after the hook, which may lock funds itself.
@@ -3457,7 +3457,7 @@ where
 
                 args.assert_no_args("Bucket::CreateProof")?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let bucket = state_mut.get_bucket(bucket_id)?;
 
                     let resource_lock =
@@ -3946,7 +3946,7 @@ where
         pool_address: ValidatorFeePoolAddress,
         max_amount: Option<Amount>,
     ) -> Result<BucketId, RuntimeError> {
-        self.tracker.write_with(|state| {
+        self.tracker.write_with_authorization(|state| {
             let resource = match max_amount {
                 Some(max_amount) => state.withdraw_fees_from_pool_up_to(pool_address, max_amount)?,
                 None => state.withdraw_all_fees_from_pool(pool_address)?,
@@ -4036,7 +4036,7 @@ where
                 let rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
                     RuleRequirement::NonFungibleAddress(badge.clone()),
                 )));
-                self.tracker.read_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     if !state.authorization().check_access_rule(&rule)? {
                         return Err(RuntimeError::BadgeNotInScope { badge });
                     }
@@ -4155,7 +4155,7 @@ where
 
     fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError> {
         self.tracker
-            .read_with(|state| state.authorization().check_current_component_access_rules(method))
+            .write_with_authorization(|state| state.authorization().check_current_component_access_rules(method))
     }
 
     fn check_signer_badge_in_scope(&self, public_key: RistrettoPublicKeyBytes) -> Result<(), RuntimeError> {
@@ -4173,7 +4173,7 @@ where
     }
 
     fn check_component_upgrade_rule(&self) -> Result<(), RuntimeError> {
-        self.tracker.read_with(|state| {
+        self.tracker.write_with_authorization(|state| {
             let locked = state
                 .current_call_scope()?
                 .get_current_component_lock()
@@ -4432,7 +4432,7 @@ where
         // wraparound forgery in the covenant check.
         self.verify_input_authorizations(resource_address.clone(), &statement)?;
 
-        self.tracker.write_with(|state_mut| {
+        self.tracker.write_with_authorization(|state_mut| {
             let Some(container) =
                 state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
             else {

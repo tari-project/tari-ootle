@@ -502,6 +502,26 @@ impl<TStore: StateReader> StateTracker<TStore> {
         }
     }
 
+    /// Runs `f` on the working state with access-rule evaluation metered, then charges what the evaluation used as
+    /// native execution. Every access rule is evaluated inside `f`, while the working state is borrowed and no charge
+    /// can be made, so the meter is opened with [`Self::native_execution_headroom`] read beforehand and evaluation
+    /// stops once it has used that. A transaction that cannot pay for the evaluation then fails out of compute here,
+    /// whatever `f` returned.
+    pub(super) fn write_with_authorization<R, E, F>(&self, f: F) -> Result<R, E>
+    where
+        F: FnOnce(&mut WorkingState<TStore>) -> Result<R, E>,
+        E: From<RuntimeError>,
+    {
+        let budget = self.native_execution_headroom();
+        let (result, used) = self.write_with(|state| {
+            state.authorization_meter().open(budget);
+            let result = f(state);
+            (result, state.authorization_meter().close())
+        });
+        self.charge_native_execution(used)?;
+        result
+    }
+
     /// Chooses the state that finalization will persist.
     ///
     /// A transaction that failed — either explicitly, or by not covering the fees charged against

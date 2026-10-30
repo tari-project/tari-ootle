@@ -86,6 +86,11 @@ pub struct MergedStealthTransferShape {
 }
 
 impl MergedStealthTransferShape {
+    /// Native points the transfer spends authorizing its withdraw of TARI, once for the resource action and once
+    /// for the transfer itself. TARI's owner rule and `AllowAll` withdraw rule are fixed at genesis, so each
+    /// authorization visits exactly those two rule nodes. `the_native_points_match_the_shape` in `tari_engine`'s
+    /// stealth fee estimate tests holds it to what the engine charges.
+    pub const AUTHORIZATION_POINTS: u64 = 2 * 2 * NativeExecutionPoints::PER_ACCESS_RULE_NODE;
     /// Engine host calls this shape's instruction sequence makes: the stealth transfer, the
     /// workspace put that carries its revealed bucket, and the fee payment. Fixed rather than
     /// supplied, because a sequence that makes any other call is not this shape — a badge proof or a
@@ -93,6 +98,13 @@ impl MergedStealthTransferShape {
     /// here. `the_runtime_call_count_matches_the_instruction_sequence` holds it to what the engine
     /// counts.
     pub const RUNTIME_CALLS: u64 = 3;
+
+    /// The native execution points the engine charges a transaction of this shape: the transfer's verification and
+    /// its withdraw authorization.
+    pub fn native_points(&self) -> u64 {
+        transfer_native_points_for_shape(self.num_inputs, self.num_outputs, self.has_view_key)
+            .saturating_add(Self::AUTHORIZATION_POINTS)
+    }
 
     /// An upper bound, in microtari, on what the engine charges a transaction of this shape.
     ///
@@ -104,11 +116,7 @@ impl MergedStealthTransferShape {
             .transaction_weight
             .saturating_mul(rates.per_transaction_weight_cost());
         let runtime_call_cost = Self::RUNTIME_CALLS.saturating_mul(rates.per_module_call_cost());
-        let native_cost = rates.execution_cost(transfer_native_points_for_shape(
-            self.num_inputs,
-            self.num_outputs,
-            self.has_view_key,
-        ));
+        let native_cost = rates.execution_cost(self.native_points());
         let storage_cost = rates.storage_cost(self.persisted_bytes_upper_bound() as u64);
         // The receipt occupies a created slot of its own, on top of one per stealth output. Spent
         // inputs already exist, so they allocate nothing.
@@ -187,17 +195,22 @@ impl ClaimBurnShape {
     /// `tari_engine`'s claim-burn tests holds it to what the engine counts.
     pub const RUNTIME_CALLS: u64 = MergedStealthTransferShape::RUNTIME_CALLS;
 
+    /// The native execution points the engine charges a transaction of this shape: the claim's proof verification,
+    /// then a transfer spending the claimed UTXO into one output, with its withdraw authorization. TARI carries no
+    /// view key.
+    pub fn native_points() -> u64 {
+        NativeExecutionPoints::PER_CLAIM_BURN
+            .saturating_add(transfer_native_points_for_shape(1, 1, false))
+            .saturating_add(MergedStealthTransferShape::AUTHORIZATION_POINTS)
+    }
+
     /// An upper bound, in microtari, on what the engine charges a transaction of this shape.
     pub fn estimate_fee(&self, rates: &FeeRates) -> u64 {
         let weight_cost = self
             .transaction_weight
             .saturating_mul(rates.per_transaction_weight_cost());
         let runtime_call_cost = Self::RUNTIME_CALLS.saturating_mul(rates.per_module_call_cost());
-        // The claim's proof verification, then a transfer spending the claimed UTXO into one output.
-        // TARI carries no view key.
-        let native_cost = rates.execution_cost(
-            NativeExecutionPoints::PER_CLAIM_BURN.saturating_add(transfer_native_points_for_shape(1, 1, false)),
-        );
+        let native_cost = rates.execution_cost(Self::native_points());
         let storage_cost = rates.storage_cost(self.persisted_bytes_upper_bound() as u64);
         // The tombstone, the output and the receipt each occupy a created slot.
         let create_cost = 3u64.saturating_mul(rates.per_substate_create_cost());

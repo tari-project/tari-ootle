@@ -81,7 +81,7 @@ use crate::{
         locking::LockedSubstate,
         scope::{CallFrame, CallScope, FrameWriteMode},
         state_store::WorkingStateStore,
-        tracker_auth::Authorization,
+        tracker_auth::{Authorization, AuthorizationMeter},
         validation::{
             ConfidentialTransactionTotals,
             StealthTransactionTotals,
@@ -193,6 +193,7 @@ pub(super) struct WorkingState<TStore> {
     /// any one transaction can incur (see `limits::STEALTH_LIMITS`).
     stealth_totals: StealthTransactionTotals,
     confidential_totals: ConfidentialTransactionTotals,
+    authorization_meter: AuthorizationMeter,
 }
 
 impl<TStore: StateReader> WorkingState<TStore> {
@@ -238,6 +239,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             object_ids: ObjectIds::new(limits::ENGINE_LIMITS.max_substate_outputs),
             stealth_totals: StealthTransactionTotals::default(),
             confidential_totals: ConfidentialTransactionTotals::default(),
+            authorization_meter: AuthorizationMeter::default(),
         }
     }
 
@@ -1452,8 +1454,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    pub fn authorization_meter(&self) -> &AuthorizationMeter {
+        &self.authorization_meter
+    }
+
     pub fn authorization(&self) -> Authorization<'_, TStore> {
-        Authorization::new(self)
+        Authorization::new(self, &self.authorization_meter)
     }
 
     pub fn take_mutated_substates(&mut self) -> IndexMap<SubstateId, SubstateValue> {

@@ -9,10 +9,7 @@ use std::{
 use axum_extra::headers::authorization::Bearer;
 use dashmap::DashMap;
 use tari_ootle_transaction::{Epoch, Transaction, TransactionBuilder, UnsignedTransaction};
-use tari_ootle_wallet_sdk::{
-    models::{LockOwner, SigningRequester, WalletEvent},
-    network::WalletNetworkInterface,
-};
+use tari_ootle_wallet_sdk::models::{LockOwner, SigningRequester, WalletEvent};
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitorHandle,
     notify::Notify,
@@ -420,7 +417,13 @@ impl HandlerContext {
         self.authenticator.webauthn()
     }
 
-    /// The current epoch, re-read from the network at most every [`EPOCH_CACHE_TTL`].
+    /// The current epoch, re-read at most every [`EPOCH_CACHE_TTL`].
+    ///
+    /// Under [`IndexerTrust::Verify`](tari_ootle_wallet_sdk::IndexerTrust::Verify) this is the epoch of the latest
+    /// validator set the wallet trusts after a
+    /// [`ValidatorSetApi::sync`](tari_ootle_wallet_sdk::apis::validator_set::ValidatorSetApi::sync),
+    /// which can trail the epoch manager's epoch until the walked shard group's checkpoint lands; under
+    /// [`IndexerTrust::Trust`](tari_ootle_wallet_sdk::IndexerTrust::Trust) it comes from the indexer's epoch manager.
     ///
     /// The cached value belongs to the indexer it was read from and is discarded once another indexer is in use,
     /// whether by `settings.set` or by failover: stamping a `max_epoch` derived from one indexer's view onto a
@@ -435,7 +438,7 @@ impl HandlerContext {
             return Ok(cached.epoch);
         }
 
-        let epoch = network.get_current_epoch().await?;
+        let epoch = self.wallet_sdk.current_epoch().await?;
         *self.cached_epoch.lock().unwrap() = Some(CachedEpoch {
             epoch,
             read_at: Instant::now(),
@@ -838,5 +841,132 @@ mod cookie_auth_tests {
             disabled_context.check_auth(Some(&daemon.cookie)),
             Err(AuthError::AccessDeniedInvalidBearerToken)
         ));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn current_epoch_and_transaction_max_epoch_ignore_epoch_manager_stats_under_verify() {
+        use std::str::FromStr;
+
+        use axum::{Json, Router, http::StatusCode, routing::get};
+        use tari_ootle_address::Network;
+        use tari_ootle_wallet_sdk::{
+            IndexerTrust,
+            WalletSdkConfig,
+            apis::config::ConfigKey,
+            cipher_seed::CipherSeedRestore,
+            models::EpochBirthday,
+            storage::{WalletStoreWriter, WriteableWalletStore},
+        };
+        use tari_ootle_wallet_sdk_services::{
+            account_monitor::AccountMonitor,
+            indexer_rest_api::IndexerRestApiNetworkInterface,
+            transaction_service::TransactionService,
+            utxo_scanner::StealthUtxoScannerWorker,
+        };
+        use tari_shutdown::Shutdown;
+
+        use crate::{config::WalletDaemonAuth, handlers::auth::create_authenticator};
+
+        let app = Router::new()
+            .route(
+                "/epoch-manager/stats",
+                get(|| async {
+                    Json(serde_json::json!({
+                        "current_epoch": 999,
+                        "current_block_height": 0,
+                        "is_valid": true,
+                        "is_initial_scanning_complete": true,
+                        "start_epoch": null,
+                        "committee_info": null,
+                        "consensus_epoch": 999,
+                    }))
+                }),
+            )
+            .route(
+                "/epoch-checkpoints/latest",
+                get(|| async {
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::json!({ "error": "NotFound", "details": "no checkpoint" })),
+                    )
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let temp = tempfile::tempdir().unwrap();
+        let store = SqliteWalletStore::try_open(temp.path().join("wallet.sqlite")).unwrap();
+        store.run_migrations().unwrap();
+        store
+            .with_write_tx(|tx| {
+                tx.config_set(
+                    ConfigKey::TrustedValidatorSet.as_key_str(),
+                    &serde_json::json!({
+                        "walk_shard": 1,
+                        "anchor_epoch": 7,
+                        "committee": {
+                            "network": "localnet",
+                            "epoch": 7,
+                            "num_preshards": "P256",
+                            "shard_group": { "start": 1, "end_inclusive": 128 },
+                            "validator_set_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "members": [],
+                        },
+                    }),
+                    false,
+                )
+            })
+            .unwrap();
+
+        let mut sdk = WalletSdk::initialize_with_local_key_store(
+            store.clone(),
+            IndexerRestApiNetworkInterface::new(format!("http://{addr}")),
+            WalletSdkConfig {
+                network: Network::LocalNet,
+                override_keyring_password: Some(SafePassword::from_str("test wallet password").unwrap()),
+                indexer_trust: IndexerTrust::Verify,
+            },
+            EpochBirthday::far_future(),
+        )
+        .unwrap();
+        sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
+            .unwrap();
+
+        let notify = Notify::new(10);
+        let shutdown = Shutdown::new();
+        let (transaction_service, transaction_service_handle) =
+            TransactionService::new(notify.clone(), sdk.clone(), shutdown.to_signal());
+        let (utxo_worker, utxo_scanner_handle) = StealthUtxoScannerWorker::new(sdk.clone(), notify.clone()).spawn();
+        let (account_monitor, account_monitor_handle) =
+            AccountMonitor::new(notify.clone(), sdk.clone(), utxo_scanner_handle, shutdown.to_signal());
+        let mut config = WalletDaemonConfig::default();
+        config.network = Network::LocalNet;
+        config.authentication = WalletDaemonAuth::None;
+        let context = HandlerContext::new(
+            sdk,
+            notify,
+            transaction_service_handle,
+            account_monitor_handle,
+            config.clone(),
+            create_authenticator(&config, store).unwrap(),
+            SafePassword::from_str("test jwt secret").unwrap(),
+            shutdown.to_signal(),
+        );
+        shutdown.trigger();
+        drop(account_monitor);
+        drop(transaction_service);
+        utxo_worker.abort();
+        drop(utxo_worker.await);
+
+        assert_eq!(context.current_epoch().await.unwrap(), Epoch(7));
+        assert_eq!(
+            context.transaction_max_epoch().await.unwrap(),
+            Epoch(7 + config.default_transaction_validity_epochs)
+        );
+        server.abort();
     }
 }

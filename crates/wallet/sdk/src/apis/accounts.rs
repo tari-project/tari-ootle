@@ -13,6 +13,7 @@ use tari_engine_types::{
     SubstateVersion,
     component::derive_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
+    substate::SubstateValue,
 };
 use tari_ootle_address::{Network, OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{
@@ -22,14 +23,17 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{
-    Amount,
-    ComponentAddress,
-    ResourceAddress,
-    ResourceType,
-    VaultId,
-    constants::TARI_TOKEN,
-    crypto::RistrettoPublicKeyBytes,
+use tari_template_lib::{
+    models::Account as BuiltinAccount,
+    types::{
+        Amount,
+        ComponentAddress,
+        ResourceAddress,
+        ResourceType,
+        VaultId,
+        constants::TARI_TOKEN,
+        crypto::RistrettoPublicKeyBytes,
+    },
 };
 
 use crate::{
@@ -78,6 +82,27 @@ pub struct AccountsApi<'a, TSpec: WalletSdkSpec> {
 
 pub fn derive_account_address_from_public_key(public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
     derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
+}
+
+/// The vault for `resource_address` held by the builtin `Account` component at `account_address`.
+pub fn account_vault_for_resource(
+    account_address: &ComponentAddress,
+    substate: &SubstateValue,
+    resource_address: &ResourceAddress,
+) -> Result<Option<VaultId>, AccountsApiError> {
+    let component = substate
+        .component()
+        .ok_or(AccountsApiError::AccountSubstateNotComponent {
+            account: *account_address,
+        })?;
+    let account =
+        BuiltinAccount::from_value(component.state()).map_err(|e| AccountsApiError::AccountStateUndecodable {
+            account: *account_address,
+            details: e.to_string(),
+        })?;
+    Ok(account
+        .get_vault_by_resource(resource_address)
+        .map(|vault| vault.vault_id()))
 }
 
 impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
@@ -827,6 +852,10 @@ pub enum AccountsApiError {
     ViewOnlyAccountCannotBeDefault,
     #[error("Config API error: {0}")]
     ConfigApiError(#[from] ConfigApiError),
+    #[error("The substate at account address {account} is not a component")]
+    AccountSubstateNotComponent { account: ComponentAddress },
+    #[error("Failed to decode account component {account}: {details}")]
+    AccountStateUndecodable { account: ComponentAddress, details: String },
 }
 
 impl AccountsApiError {
@@ -850,5 +879,66 @@ impl AccountsApiError {
 impl IsNotFoundError for AccountsApiError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::StoreError(e) if e.is_not_found_error() )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use tari_engine_types::component::{Component, ComponentBody, ComponentHeader};
+    use tari_template_lib::types::{SubstateOwnerRule, access_rules::ComponentAccessRules};
+
+    use super::*;
+
+    #[test]
+    fn account_vault_for_resource_decodes_builtin_account_and_rejects_malformed_state() {
+        let account = ComponentAddress::from_array([7; 32]);
+        let target_resource = ResourceAddress::new([1; 32].into());
+        let other_resource = ResourceAddress::new([2; 32].into());
+        let vault_id = VaultId::new([9; 32].into());
+
+        let make_component = |state| {
+            SubstateValue::Component(Component {
+                header: ComponentHeader {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: ComponentAccessRules::new(),
+                    entity_id: Default::default(),
+                    upgrade_rule: Default::default(),
+                },
+                body: ComponentBody::from_cbor_value(state),
+            })
+        };
+
+        let valid_state = tari_bor::to_value(&(BTreeMap::from([(target_resource, vault_id)]),)).unwrap();
+        let substate = make_component(valid_state);
+        assert_eq!(
+            account_vault_for_resource(&account, &substate, &target_resource).unwrap(),
+            Some(vault_id)
+        );
+        assert_eq!(
+            account_vault_for_resource(&account, &substate, &other_resource).unwrap(),
+            None
+        );
+
+        let malformed = make_component(tari_bor::Value::Integer(42.into()));
+        let err = account_vault_for_resource(&account, &malformed, &target_resource).unwrap_err();
+        assert!(
+            matches!(err, AccountsApiError::AccountStateUndecodable { account: err_account, .. } if err_account == account),
+            "expected AccountStateUndecodable for {account}, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains(&account.to_string()),
+            "expected error to name {account}, got: {err}"
+        );
+
+        let non_component =
+            SubstateValue::NonFungible(tari_engine_types::non_fungible::NonFungibleContainer::no_data());
+        let err = account_vault_for_resource(&account, &non_component, &target_resource).unwrap_err();
+        assert!(
+            matches!(err, AccountsApiError::AccountSubstateNotComponent { account: err_account } if err_account == account),
+            "expected AccountSubstateNotComponent for {account}, got: {err:?}"
+        );
     }
 }

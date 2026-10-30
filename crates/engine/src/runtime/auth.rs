@@ -19,6 +19,9 @@ pub struct AuthorizationScope {
     /// Virtual proofs are system-issued non-fungibles that exist for no longer than the execution e.g. derived from
     /// the transaction signer public key
     virtual_proofs: IndexSet<NonFungibleAddress>,
+    /// The resources of `virtual_proofs`, so a resource requirement is answered with one lookup however many
+    /// signers the transaction has.
+    virtual_proof_resources: IndexSet<ResourceAddress>,
 
     /// System-issued badges naming the frame's immediate caller: the caller's component (when it has one) and its
     /// template. Held per frame rather than in the transaction-wide `virtual_proofs` so that a callee only ever sees
@@ -40,8 +43,10 @@ pub struct AuthorizationScope {
 
 impl AuthorizationScope {
     pub fn new(virtual_proofs: IndexSet<NonFungibleAddress>) -> Self {
+        let virtual_proof_resources = virtual_proofs.iter().map(|badge| *badge.resource_address()).collect();
         Self {
             virtual_proofs,
+            virtual_proof_resources,
             caller_badges: IndexSet::new(),
             proofs: IndexSet::new(),
             granted: IndexSet::new(),
@@ -57,6 +62,7 @@ impl AuthorizationScope {
     pub(super) fn for_top_level_frame(&self) -> Self {
         Self {
             virtual_proofs: self.virtual_proofs.clone(),
+            virtual_proof_resources: self.virtual_proof_resources.clone(),
             caller_badges: IndexSet::new(),
             proofs: IndexSet::new(),
             granted: self.proofs.clone(),
@@ -89,8 +95,12 @@ impl AuthorizationScope {
         self.virtual_proofs.contains(nf_address) || self.caller_badges.contains(nf_address)
     }
 
+    /// One set lookup, then a scan of the caller badges, of which a frame holds at most two.
     pub fn contains_badge_of_resource(&self, resource_address: &ResourceAddress) -> bool {
-        self.badges().any(|badge| badge.resource_address() == resource_address)
+        self.virtual_proof_resources.contains(resource_address) ||
+            self.caller_badges
+                .iter()
+                .any(|badge| badge.resource_address() == resource_address)
     }
 
     /// The scope a restricted top-level frame starts with: the signer badges and nothing on loan.
@@ -136,5 +146,30 @@ impl Display for AuthorizationScope {
             write!(f, "{}", proof)?;
         }
         write!(f, "]")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::types::constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, TARI_TOKEN};
+
+    use super::*;
+
+    #[test]
+    fn it_finds_the_resources_of_signer_and_caller_badges() {
+        let signers = (0..=255u8)
+            .map(|b| NonFungibleAddress::from_public_key([b; 32].into()))
+            .collect();
+        let mut scope = AuthorizationScope::new(signers);
+        assert!(scope.contains_badge_of_resource(&PUBLIC_IDENTITY_RESOURCE_ADDRESS));
+        assert!(!scope.contains_badge_of_resource(&TARI_TOKEN));
+
+        let caller_template_badge =
+            NonFungibleAddress::direct_caller_template_badge(TemplateAddress::from_array([9; 32]));
+        assert!(!scope.contains_badge_of_resource(caller_template_badge.resource_address()));
+        scope.set_caller(None, TemplateAddress::from_array([9; 32]));
+        assert!(scope.contains_badge_of_resource(caller_template_badge.resource_address()));
+
+        assert!(!AuthorizationScope::empty().contains_badge_of_resource(&PUBLIC_IDENTITY_RESOURCE_ADDRESS));
     }
 }

@@ -25,13 +25,12 @@ use crate::{
 /// Meters the work of evaluating access rules: each rule node visited and each proof examined.
 ///
 /// Evaluation runs while the working state is borrowed, where the tracker cannot charge, and its cost follows the
-/// rule's size and the proofs in scope rather than anything the call that triggers it pays for. The tracker opens the
-/// meter with the most the transaction can still pay for before it borrows the working state, and charges what was
-/// used once the borrow ends. Evaluation stops as soon as it would use more than that budget, so no rule is evaluated
-/// further than the transaction can pay for.
+/// rule's size and the proofs in scope. The tracker opens the meter with the most the transaction can still pay for
+/// before it borrows the working state, and charges what was used once the borrow ends. Evaluation stops as soon as it
+/// would use more than that budget, so every rule is evaluated only as far as the transaction can pay for.
 #[derive(Debug, Clone, Default)]
 pub struct AuthorizationMeter {
-    /// `None` while closed. An access rule evaluated with the meter closed fails, so evaluation is never unmetered.
+    /// `None` while closed. Evaluating an access rule requires an open meter and fails with the meter closed.
     budget: Cell<Option<u64>>,
     used: Cell<u64>,
 }

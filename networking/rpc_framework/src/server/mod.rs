@@ -781,7 +781,7 @@ where
 
         let keepalive_interval = self.config.keepalive_interval_for(decoded_msg.keepalive_interval());
 
-        let req = Request::new(method, decoded_msg.payload.into());
+        let req = Request::with_peer_id(method, decoded_msg.payload.into(), self.peer_id);
 
         let service_call = log_timing(
             self.logging_context_string.clone(),

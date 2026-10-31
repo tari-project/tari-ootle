@@ -21,18 +21,20 @@
 // OTHERWISE) ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 // DAMAGE.
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     convert::{TryFrom, TryInto},
     num::NonZeroUsize,
     sync::{Arc, Mutex, PoisonError},
 };
 
+use libp2p::PeerId;
 use log::*;
 use tari_bor::encode;
 use tari_consensus::hotstuff::commit_proofs::generate_block_commit_proof;
 use tari_consensus_types::{HighPc, ProposalCertificate};
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
+use tari_ootle_app_utilities::p2p_config::DEFAULT_MAX_CONCURRENT_PUBLIC_READS;
 use tari_ootle_common_types::{
     Epoch,
     NumPreshards,
@@ -136,6 +138,12 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     max_transaction_size_bytes: usize,
     /// The epochs of history the state store keeps before epoch GC prunes it, destroyed substates' values included.
     epoch_history_length: u64,
+    /// Whether public read RPCs (`GetSubstate`, `GetSubstateBatch`, `GetTransactionResult`) are served.
+    serve_public_reads: bool,
+    /// Maximum concurrent in-flight public read RPCs per peer.
+    max_concurrent_public_reads: usize,
+    /// Per-peer permits bounding concurrent public read RPCs so one peer cannot exhaust permits for other peers.
+    public_reads_by_peer: Mutex<HashMap<Option<PeerId>, Arc<Semaphore>>>,
     /// Permits for the batch responses held in memory at once; see [`MAX_BUFFERED_BATCH_RESPONSES`].
     batch_responses: Arc<Semaphore>,
     state_sync_reads: Arc<Semaphore>,
@@ -158,10 +166,44 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             consensus,
             max_transaction_size_bytes,
             epoch_history_length,
+            serve_public_reads: true,
+            max_concurrent_public_reads: DEFAULT_MAX_CONCURRENT_PUBLIC_READS,
+            public_reads_by_peer: Mutex::default(),
             batch_responses: Arc::new(Semaphore::new(MAX_BUFFERED_BATCH_RESPONSES)),
             state_sync_reads: Arc::new(Semaphore::new(max_concurrent_state_sync_reads())),
             root_mismatch_log: Arc::default(),
         }
+    }
+
+    pub fn with_public_reads(mut self, serve_public_reads: bool, max_concurrent_public_reads: usize) -> Self {
+        self.serve_public_reads = serve_public_reads;
+        self.max_concurrent_public_reads = max_concurrent_public_reads;
+        self.public_reads_by_peer = Mutex::default();
+        self
+    }
+
+    fn acquire_public_read_permit(&self, peer_id: Option<PeerId>) -> Result<OwnedSemaphorePermit, RpcStatus> {
+        if !self.serve_public_reads {
+            return Err(RpcStatus::unavailable("Public read RPCs are disabled on this node"));
+        }
+        let semaphore = {
+            let mut by_peer = self.public_reads_by_peer.lock().unwrap_or_else(PoisonError::into_inner);
+            by_peer.retain(|existing_peer, sem| {
+                *existing_peer == peer_id ||
+                    Arc::strong_count(sem) > 1 ||
+                    sem.available_permits() < self.max_concurrent_public_reads
+            });
+            by_peer
+                .entry(peer_id)
+                .or_insert_with(|| Arc::new(Semaphore::new(self.max_concurrent_public_reads)))
+                .clone()
+        };
+        semaphore.try_acquire_owned().map_err(|_| {
+            RpcStatus::unavailable(
+                "This node is serving the maximum number of concurrent public reads for this peer; retry later or \
+                 query another peer",
+            )
+        })
     }
 
     /// Resolves which shards' committed history through `epoch` this node holds.
@@ -329,11 +371,11 @@ const MAX_BATCH_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// take, however many sessions peers open.
 const MAX_BUFFERED_BATCH_RESPONSES: usize = 32;
 
-/// Streams `responses` to the peer. The stream holds `permit` until the server has finished sending
+/// Streams `responses` to the peer. The stream holds `guard` until the server has finished sending
 /// the response and drops it.
-fn stream_batch_response(
+fn stream_batch_response<G: Send + Sync + 'static>(
     responses: Vec<batch_response::Response>,
-    permit: OwnedSemaphorePermit,
+    guard: G,
 ) -> Streaming<GetSubstatesBatchResponse> {
     let (sender, receiver) = mpsc::channel(responses.len().max(1));
     task::spawn(async move {
@@ -348,7 +390,7 @@ fn stream_batch_response(
             }
         }
     });
-    Streaming::new(receiver).with_guard(permit)
+    Streaming::new(receiver).with_guard(guard)
 }
 
 /// Reads the head version of each of `ids` and, when proofs were asked for, a single anchor followed
@@ -624,6 +666,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
     }
 
     async fn get_substate(&self, req: Request<GetSubstateRequest>) -> Result<Response<GetSubstateResponse>, RpcStatus> {
+        let _public_read_permit = self.acquire_public_read_permit(req.peer_id())?;
         let req = req.into_message();
 
         let substate_requirement = req
@@ -650,11 +693,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             if !substate_requirement.substate_id().is_global() &&
                 !info.includes_substate_id(substate_requirement.substate_id())
             {
-                return Err(RpcStatus::bad_request(format!(
-                    "This node in {} does not store {}",
+                return Err(tari_validator_node_rpc::does_not_store_substate_status(
                     info.shard_group(),
-                    substate_requirement
-                )));
+                    substate_requirement,
+                ));
             }
             Some(info)
         } else {
@@ -728,6 +770,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         &self,
         req: Request<GetTransactionResultRequest>,
     ) -> Result<Response<GetTransactionResultResponse>, RpcStatus> {
+        let _public_read_permit = self.acquire_public_read_permit(req.peer_id())?;
         let req = req.into_message();
         let tx = self
             .state_store
@@ -1128,6 +1171,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         // would therefore make a flood *more* expensive to serve, not less. `MAX_BATCH_RESPONSE_BYTES`
         // bounds the response's size.
         const MAX_REQUESTS: usize = 50;
+        let public_read_permit = self.acquire_public_read_permit(req.peer_id())?;
         let req = req.into_message();
 
         if req.substate_ids.len() > MAX_REQUESTS {
@@ -1163,11 +1207,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .await
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
         if let Some(id) = ids.iter().find(|id| !local_committee_info.includes_substate_id(id)) {
-            return Err(RpcStatus::bad_request(format!(
-                "This node in {} does not store {}",
+            return Err(tari_validator_node_rpc::does_not_store_substate_status(
                 local_committee_info.shard_group(),
-                id
-            )));
+                id,
+            ));
         }
 
         // A peer that does not read its response holds the permit, so a full node refuses rather than
@@ -1204,7 +1247,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        Ok(stream_batch_response(responses, permit))
+        Ok(stream_batch_response(responses, (permit, public_read_permit)))
     }
 }
 
@@ -1809,5 +1852,160 @@ mod tests {
             anchor_for(&store, 5, None).is_none(),
             "a node outside every shard group"
         );
+    }
+
+    fn rpc_service_for_test(
+        serve_public_reads: bool,
+        max_concurrent_public_reads: usize,
+    ) -> (
+        tempfile::TempDir,
+        ValidatorNodeRpcServiceImpl<RocksDbStateStore<String>>,
+    ) {
+        use std::sync::atomic::AtomicU64;
+
+        use tari_epoch_manager::service::{CommitteeCache, EpochManagerRequest};
+        use tari_ootle_common_types::{VotePower, committee::CommitteeInfo};
+        use tokio::sync::broadcast;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let (tx_epoch_req, mut rx_epoch_req) = mpsc::channel(8);
+        tokio::spawn(async move {
+            while let Some(req) = rx_epoch_req.recv().await {
+                if let EpochManagerRequest::GetLocalCommitteeInfo { reply, .. } = req {
+                    let _ = reply.send(Ok(CommitteeInfo::new(
+                        NUM_PRESHARDS,
+                        1,
+                        1,
+                        ShardGroup::new(1, NUM_PRESHARDS.as_u32()),
+                        Epoch(1),
+                        VotePower::of(1),
+                    )));
+                }
+            }
+        });
+        let (tx_events, _) = broadcast::channel(1);
+        let epoch_manager = EpochManagerHandle::new(
+            tx_epoch_req,
+            tx_events.downgrade(),
+            Arc::new(AtomicU64::new(1)),
+            CommitteeCache::new(),
+        );
+        let (tx_mempool, _rx_mempool) = mpsc::channel(1);
+        let mempool = MempoolHandle::new(tx_mempool);
+        let (consensus_events, _) = broadcast::channel(1);
+        let consensus = ConsensusHandle::for_test(&consensus_events);
+
+        let service = ValidatorNodeRpcServiceImpl::new(epoch_manager, store, mempool, consensus, 64 * 1024, 10)
+            .with_public_reads(serve_public_reads, max_concurrent_public_reads);
+        (dir, service)
+    }
+
+    #[tokio::test]
+    async fn public_read_rpcs_return_unavailable_when_disabled() {
+        let (_dir, service) = rpc_service_for_test(false, 8);
+        let id = template_record(1, 32).substate_id().clone();
+
+        let substate_err = service
+            .get_substate(Request::from_message(GetSubstateRequest {
+                substate_requirement: Some(SubstateRequirement::unversioned(id.clone()).into()),
+                include_proof: false,
+            }))
+            .await
+            .unwrap_err();
+        assert!(substate_err.is_unavailable(), "{substate_err}");
+
+        let batch_err = match service
+            .get_substate_batch(Request::from_message(GetSubstatesBatchRequest {
+                substate_ids: vec![id.to_bytes()],
+                include_proofs: false,
+            }))
+            .await
+        {
+            Ok(_) => panic!("expected get_substate_batch to be refused with Unavailable"),
+            Err(err) => err,
+        };
+        assert!(batch_err.is_unavailable(), "{batch_err}");
+
+        let tx_err = service
+            .get_transaction_result(Request::from_message(GetTransactionResultRequest {
+                transaction_id: vec![0u8; 32],
+            }))
+            .await
+            .unwrap_err();
+        assert!(tx_err.is_unavailable(), "{tx_err}");
+    }
+
+    #[tokio::test]
+    async fn public_read_limit_is_enforced_per_peer_without_shedding_other_peers() {
+        let (_dir, service) = rpc_service_for_test(true, 1);
+        let id = template_record(1, 32).substate_id().clone();
+        let peer_a = PeerId::random();
+        let peer_b = PeerId::random();
+
+        // Peer A opens a batch stream, which holds Peer A's single public-read permit until dropped.
+        let peer_a_stream = service
+            .get_substate_batch(Request::from_message_with_peer_id(peer_a, GetSubstatesBatchRequest {
+                substate_ids: vec![id.to_bytes()],
+                include_proofs: false,
+            }))
+            .await
+            .expect("first batch request for peer_a succeeds");
+
+        // While Peer A's permit is held, every additional public read from Peer A is shed with Unavailable.
+        let err = service
+            .get_substate(Request::from_message_with_peer_id(peer_a, GetSubstateRequest {
+                substate_requirement: Some(SubstateRequirement::unversioned(id.clone()).into()),
+                include_proof: false,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.is_unavailable(), "{err}");
+
+        let err = match service
+            .get_substate_batch(Request::from_message_with_peer_id(peer_a, GetSubstatesBatchRequest {
+                substate_ids: vec![id.to_bytes()],
+                include_proofs: false,
+            }))
+            .await
+        {
+            Ok(_) => panic!("expected second batch request from peer_a to be shed"),
+            Err(err) => err,
+        };
+        assert!(err.is_unavailable(), "{err}");
+
+        let err = service
+            .get_transaction_result(Request::from_message_with_peer_id(
+                peer_a,
+                GetTransactionResultRequest {
+                    transaction_id: vec![0u8; 32],
+                },
+            ))
+            .await
+            .unwrap_err();
+        assert!(err.is_unavailable(), "{err}");
+
+        // Peer B has its own permit budget and is not shed by Peer A's in-flight stream.
+        let peer_b_substate = service
+            .get_substate(Request::from_message_with_peer_id(peer_b, GetSubstateRequest {
+                substate_requirement: Some(SubstateRequirement::unversioned(id.clone()).into()),
+                include_proof: false,
+            }))
+            .await
+            .expect("peer_b get_substate is not shed by peer_a")
+            .into_message();
+        assert_eq!(peer_b_substate.status, SubstateStatus::DoesNotExist as i32);
+
+        // Once Peer A drops its stream, its permit is released and Peer A can read again.
+        drop(peer_a_stream);
+        let peer_a_substate = service
+            .get_substate(Request::from_message_with_peer_id(peer_a, GetSubstateRequest {
+                substate_requirement: Some(SubstateRequirement::unversioned(id).into()),
+                include_proof: false,
+            }))
+            .await
+            .expect("peer_a get_substate succeeds once stream permit is dropped")
+            .into_message();
+        assert_eq!(peer_a_substate.status, SubstateStatus::DoesNotExist as i32);
     }
 }

@@ -139,6 +139,20 @@ pub async fn spawn_services(
     // Initialize networking
     let identity = identity::Keypair::sr25519_from_bytes(keypair.secret_key().as_bytes().to_vec())
         .context("Failed to create libp2p identity from secret bytes")?;
+    let follower_seed_peers = config
+        .indexer
+        .follower_peers
+        .iter()
+        .map(|s| SeedPeer::from_str(s))
+        .collect::<anyhow::Result<Vec<SeedPeer>>>()?;
+    let follower_peer_addresses = follower_seed_peers
+        .iter()
+        .map(|p| {
+            p.to_peer_id()
+                .map(PeerAddress::from)
+                .ok_or_else(|| anyhow::anyhow!("follower_peers entry '{p}' must include a public key"))
+        })
+        .collect::<anyhow::Result<Vec<PeerAddress>>>()?;
     let seed_peers = config
         .peer_seeds
         .peer_seeds
@@ -147,6 +161,7 @@ pub async fn spawn_services(
         .collect::<anyhow::Result<Vec<SeedPeer>>>()?;
     let seed_peers = seed_peers
         .into_iter()
+        .chain(follower_seed_peers)
         .map(|p| {
             let peer_id = p.to_peer_id();
             (peer_id, p.into_address())
@@ -310,7 +325,8 @@ pub async fn spawn_services(
         substate_cache.clone(),
     )
     .with_substate_proof_verification(config.indexer.verify_substate_proofs)
-    .with_negative_cache_ttl(config.indexer.substate_cache_negative_ttl);
+    .with_negative_cache_ttl(config.indexer.substate_cache_negative_ttl)
+    .with_follower_peers(follower_peer_addresses);
     #[cfg(feature = "metrics")]
     let substate_manager = substate_manager.with_metrics(metrics_registry);
 

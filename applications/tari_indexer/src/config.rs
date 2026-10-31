@@ -29,7 +29,7 @@ use tari_common::{
     ConfigurationError,
     DefaultConfigLoader,
     SubConfigPath,
-    configuration::{CommonConfig, serializers},
+    configuration::{CommonConfig, StringList, serializers},
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_indexer_lib::cached_substate_manager::DEFAULT_NEGATIVE_CACHE_TTL;
@@ -301,6 +301,12 @@ pub struct IndexerConfig {
     /// (possibly byzantine or out-of-sync) validator.
     #[serde(default = "default_verify_substate_proofs")]
     pub verify_substate_proofs: bool,
+    /// Preferred validator peers (`<public_key_hex>::<multiaddr>`) tried first for proven substate reads
+    /// before racing the full shard group committee when `verify_substate_proofs` is enabled. A peer's answer is
+    /// accepted here only when its proof verifies against a committee-signed state root; unproven or missing answers
+    /// fall back to the committee.
+    #[serde(default)]
+    pub follower_peers: StringList,
     /// Rate-limiting configuration for the REST API endpoints
     pub rate_limits: IndexerRateLimitsConfig,
     /// Where log events go: the console and one file per named sink.
@@ -520,6 +526,7 @@ impl Default for IndexerConfig {
             templates: TemplateConfig::default(),
             watched_templates: default_watched_templates(),
             verify_substate_proofs: default_verify_substate_proofs(),
+            follower_peers: StringList::default(),
             rate_limits: IndexerRateLimitsConfig::default(),
             logging: crate::logging::default_logging_config(),
         }

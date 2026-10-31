@@ -102,7 +102,7 @@ use tari_ootle_transaction_validation::{
 };
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
-use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tari_validator_node_rpc::{client::TariValidatorNodeRpcClientFactory, rpc_service::ValidatorNodeRpcServer};
 use tokio::{
     sync::{broadcast, mpsc},
     task::JoinHandle,
@@ -137,7 +137,7 @@ use crate::{
     migrations,
     p2p::{
         NopLogger,
-        create_tari_validator_node_rpc_service,
+        rpc::ValidatorNodeRpcServiceImpl,
         services::{
             consensus_gossip::{self},
             mempool::{self, MempoolHandle},
@@ -583,18 +583,23 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     max_transaction_size_bytes: usize,
     epoch_history_length: u64,
 ) -> anyhow::Result<JoinHandle<Result<(), anyhow::Error>>> {
+    let rpc_service = ValidatorNodeRpcServiceImpl::new(
+        epoch_manager,
+        shard_store_store,
+        mempool,
+        consensus,
+        max_transaction_size_bytes,
+        epoch_history_length,
+    )
+    .with_public_reads(
+        config.validator_node.rpc.serve_public_reads,
+        config.validator_node.rpc.max_concurrent_public_reads,
+    );
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
         .with_maximum_sessions_per_client(config.validator_node.rpc.max_sessions_per_client)
         .finish()
-        .add_service(create_tari_validator_node_rpc_service(
-            epoch_manager,
-            shard_store_store,
-            mempool,
-            consensus,
-            max_transaction_size_bytes,
-            epoch_history_length,
-        ));
+        .add_service(ValidatorNodeRpcServer::new(rpc_service));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
     networking

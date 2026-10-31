@@ -5,6 +5,7 @@ use std::{convert::TryFrom, fmt, time::Duration};
 
 use bitflags::bitflags;
 use bytes::Bytes;
+use libp2p::PeerId;
 
 use crate::{
     RpcError,
@@ -19,6 +20,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Request<T> {
     inner: BaseRequest<T>,
+    peer_id: Option<PeerId>,
 }
 
 impl Request<Bytes> {
@@ -26,6 +28,7 @@ impl Request<Bytes> {
         let message = T::decode(&mut self.inner.message)?;
         Ok(Request {
             inner: BaseRequest::new(self.inner.method, message),
+            peer_id: self.peer_id,
         })
     }
 }
@@ -34,7 +37,27 @@ impl<T> Request<T> {
     pub(super) fn new(method: RpcMethod, message: T) -> Self {
         Self {
             inner: BaseRequest::new(method, message),
+            peer_id: None,
         }
+    }
+
+    pub(super) fn with_peer_id(method: RpcMethod, message: T, peer_id: PeerId) -> Self {
+        Self {
+            inner: BaseRequest::new(method, message),
+            peer_id: Some(peer_id),
+        }
+    }
+
+    pub fn from_message(message: T) -> Self {
+        Self::new(0.into(), message)
+    }
+
+    pub fn from_message_with_peer_id(peer_id: PeerId, message: T) -> Self {
+        Self::with_peer_id(0.into(), message, peer_id)
+    }
+
+    pub fn peer_id(&self) -> Option<PeerId> {
+        self.peer_id
     }
 
     pub fn method(&self) -> RpcMethod {

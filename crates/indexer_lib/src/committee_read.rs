@@ -266,6 +266,46 @@ where
     tally.conclude(describe)
 }
 
+/// Drives one request per follower peer, at most `width` at a time, until a response proves the
+/// answer.
+///
+/// Anyone can run a follower, so an unproven response (`DoesNotExist`, an unproven `Down`, an
+/// exclusion proof alone, or an unproven `Up`) says nothing and is never counted toward `f + 1`
+/// agreement. Only a response whose proof settles the read on its own (`proof_answers_read`) is
+/// returned; if no follower proves the read, `None` is returned so the caller asks the committee.
+pub async fn race_followers<I>(
+    requests: I,
+    width: usize,
+    requested_version: Option<SubstateVersion>,
+) -> Option<SubstateLookupResult>
+where
+    I: IntoIterator,
+    I::Item: Future<Output = MemberResponse>,
+{
+    let tally = CommitteeReadTally::new(0, true, requested_version);
+    let mut requests = requests.into_iter();
+    let mut in_flight = FuturesUnordered::new();
+    in_flight.extend(requests.by_ref().take(width.max(1)));
+
+    while let Some(response) = in_flight.next().await {
+        if let Ok((substate_result, Some(proof))) = response &&
+            requested_version.is_none_or(|requested| substate_result.version() == Some(requested)) &&
+            tally.proof_answers_read(&substate_result, &proof)
+        {
+            return Some(SubstateLookupResult {
+                result: substate_result,
+                verified: true,
+                proof: Some(proof),
+            });
+        }
+        if let Some(request) = requests.next() {
+            in_flight.push(request);
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -752,6 +792,47 @@ mod tests {
                     if requested == SubstateVersion::new(5) && answered == SubstateVersion::new(4)
             ),
             "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn follower_proven_up_and_proven_down_settle_immediately() {
+        let mut followers = Committee::new(vec![
+            (0, Ok((SubstateResult::DoesNotExist, None))),
+            (1, Ok((up(2), proven()))),
+        ]);
+        let fetch = followers.fetch();
+        let result = race_followers((0..2).map(fetch), 2, None)
+            .await
+            .expect("proven up from follower settles the read");
+        assert!(result.verified);
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(2)));
+
+        let mut followers = Committee::new(vec![(0, Ok((down(3), down_proven())))]);
+        let fetch = followers.fetch();
+        let result = race_followers((0..1).map(fetch), 1, Some(SubstateVersion::new(3)))
+            .await
+            .expect("proven down of requested version settles the read");
+        assert!(result.verified);
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+    }
+
+    #[tokio::test]
+    async fn followers_cannot_settle_unproven_or_does_not_exist_reads() {
+        let mut followers = Committee::new(vec![
+            (0, Ok((SubstateResult::DoesNotExist, None))),
+            (1, Ok((SubstateResult::DoesNotExist, None))),
+            (2, Ok((down(5), None))),
+            (3, Ok((down(5), excluded()))),
+            (4, Ok((up(5), None))),
+            (5, Ok((up(4), proven()))),
+            (6, Err(error())),
+        ]);
+        let fetch = followers.fetch();
+        let result = race_followers((0..7).map(fetch), 3, Some(SubstateVersion::new(5))).await;
+        assert!(
+            result.is_none(),
+            "unproven or wrong-version follower answers must fall back to the committee"
         );
     }
 }

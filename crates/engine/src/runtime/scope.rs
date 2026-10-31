@@ -162,6 +162,8 @@ impl CallScope {
 
     pub fn remove_proof_from_scope(&mut self, proof_id: &ProofId) {
         self.proof_scope.swap_remove(proof_id);
+        self.inherited_proofs.swap_remove(proof_id);
+        self.boundary_proofs.swap_remove(proof_id);
         self.auth_scope.remove_proof(proof_id);
     }
 

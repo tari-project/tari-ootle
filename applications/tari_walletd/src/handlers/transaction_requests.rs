@@ -19,7 +19,13 @@ use indexmap::IndexMap;
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::optional::Optional;
-use tari_ootle_transaction::{Instruction, MainSigner, ResourceAddressRef, UnsignedTransaction};
+use tari_ootle_transaction::{
+    Instruction,
+    MainSigner,
+    ResourceAddressRef,
+    UnsignedTransaction,
+    args::InstructionArg,
+};
 use tari_ootle_wallet_sdk::{
     models::{
         EffectiveStatus,
@@ -54,7 +60,12 @@ use tari_ootle_walletd_client::{
         TransactionSubmitRequest,
     },
 };
-use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, stealth::SpendAuthorization};
+use tari_template_lib_types::{
+    ResourceAddress,
+    constants::TARI_TOKEN,
+    crypto::PedersenCommitmentBytes,
+    stealth::{SpendAuthorization, StealthTransferStatement},
+};
 
 use super::context::HandlerContext;
 use crate::handlers::{
@@ -89,6 +100,25 @@ pub async fn handle_create(
     req.transaction
         .validate_blob_references()
         .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
+
+    let network = context.config().network;
+    if req.transaction.network() != network.as_byte() {
+        return Err(invalid_params(
+            "transaction.network",
+            Some(format!(
+                "the transaction is for network byte {:#04x}, but this wallet is on {network} ({:#04x})",
+                req.transaction.network(),
+                network.as_byte()
+            )),
+        ));
+    }
+    if req.transaction.is_dry_run() {
+        return Err(invalid_params(
+            "transaction.dry_run",
+            Some("a dry-run transaction cannot be committed, so it is never approved for submission"),
+        ));
+    }
+
     ensure_transaction_signers(sdk, &req.seal_signer, &req.other_signers)?;
     if let TransactionRequestMainSigner::External { public_key } =
         resolve_main_signer(context, &req.transaction, &req.other_signers)? &&
@@ -486,6 +516,40 @@ fn resolve_main_signer(
     Ok(TransactionRequestMainSigner::External { public_key })
 }
 
+/// Extracts every stealth transfer statement the transaction executes directly (`Instruction::StealthTransfer`
+/// and `Account::pay_fee_stealth` method calls), paired with its explicit resource address when known.
+pub(crate) fn extract_stealth_statements(
+    transaction: &UnsignedTransaction,
+) -> Vec<(Option<ResourceAddress>, StealthTransferStatement)> {
+    let mut statements = Vec::new();
+    for instruction in transaction.fee_instructions().iter().chain(transaction.instructions()) {
+        match instruction {
+            Instruction::StealthTransfer {
+                resource_address_ref,
+                statement,
+                ..
+            } => {
+                let resource = match resource_address_ref {
+                    ResourceAddressRef::Address(address) => Some(*address),
+                    ResourceAddressRef::Workspace(_) => None,
+                };
+                statements.push((resource, statement.clone()));
+            },
+            Instruction::CallMethod { method, args, .. } if &**method == "pay_fee_stealth" => {
+                if let Some(InstructionArg::Literal(bytes)) = args.first() &&
+                    let Ok(statement) =
+                        tari_engine_types::encoded::Encoded::<StealthTransferStatement>::from_bytes(bytes.to_vec())
+                            .decode()
+                {
+                    statements.push((Some(TARI_TOKEN), statement));
+                }
+            },
+            _ => {},
+        }
+    }
+    statements
+}
+
 /// What the transaction's stealth transfers move out of the wallet, one
 /// summary per resource.
 ///
@@ -501,29 +565,24 @@ fn value_summaries(
 ) -> Result<Vec<TransactionRequestValueSummary>, anyhow::Error> {
     // A workspace reference resolves only at execution, so its commitments
     // match a wallet output of any resource.
+    let statements = extract_stealth_statements(transaction);
     let mut spent = Vec::new();
     let mut created = Vec::new();
-    for instruction in transaction.fee_instructions().iter().chain(transaction.instructions()) {
-        let Instruction::StealthTransfer {
-            resource_address_ref,
-            statement,
-            ..
-        } = instruction
-        else {
-            continue;
-        };
-        let resource = match resource_address_ref {
-            ResourceAddressRef::Address(address) => Some(*address),
-            ResourceAddressRef::Workspace(_) => None,
-        };
+    for (resource, statement) in &statements {
         spent.extend(
             statement
                 .inputs_statement
                 .inputs
                 .iter()
-                .map(|i| (resource, i.commitment)),
+                .map(|i| (*resource, i.commitment)),
         );
-        created.extend(statement.outputs_statement.outputs.iter().map(|o| (resource, o)));
+        created.extend(
+            statement
+                .outputs_statement
+                .outputs
+                .iter()
+                .map(|o| (*resource, o)),
+        );
     }
     if spent.is_empty() {
         return Ok(Vec::new());
@@ -1607,6 +1666,65 @@ mod tests {
                 .map(|s| (s.resource_address, s.amount_leaving))
                 .collect::<Vec<_>>();
             assert_eq!(leaving, vec![(resource(), 1_000), (other, 7)]);
+        }
+
+        #[tokio::test]
+        async fn it_counts_stealth_inputs_spent_via_pay_fee_stealth() {
+            let wallet = Wallet::start().await;
+            let mut tari_input = wallet_output(2, 500_000, OutputStatus::Unspent);
+            tari_input.resource_address = TARI_TOKEN;
+            wallet.add_output(&tari_input);
+
+            let statement = StealthTransferStatement {
+                inputs_statement: StealthInputsStatement {
+                    inputs: vec![StealthInput::new(tari_input.commitment)],
+                    revealed_amount: Amount::ZERO,
+                },
+                outputs_statement: StealthOutputsStatement {
+                    outputs: vec![],
+                    revealed_output: None,
+                    agg_range_proof: RangeProofBytes::empty(),
+                },
+                balance_proof: None,
+                covenant_claims: vec![],
+            };
+            let tx = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+                .without_auto_fill_inputs()
+                .with_fee_instructions_builder(|b| {
+                    b.call_method(
+                        account(),
+                        "pay_fee_stealth",
+                        tari_ootle_transaction::args![statement],
+                    )
+                })
+                .build_unsigned();
+
+            let info = wallet.info(tx, vec![]).await;
+            let [summary] = info.value_summaries.as_slice() else {
+                panic!("expected one summary: {:?}", info.value_summaries);
+            };
+            assert_eq!(summary.resource_address, TARI_TOKEN);
+            assert_eq!(summary.inputs_total, 500_000);
+            assert_eq!(summary.amount_leaving, 500_000);
+        }
+
+        #[tokio::test]
+        async fn handle_create_rejects_wrong_network_and_dry_run_transactions() {
+            let wallet = Wallet::start().await;
+
+            let mut wrong_net = create_request(vec![], 60 * 60);
+            wrong_net.transaction = UnsignedTransaction::new(Network::MainNet.as_byte(), Epoch(100));
+            handle_create(&wallet.daemon.context, Some(&wallet.tool), wrong_net)
+                .await
+                .expect_err("wrong network transaction must be rejected");
+
+            let mut dry_run = create_request(vec![], 60 * 60);
+            dry_run.transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+                .with_dry_run(true)
+                .build_unsigned();
+            handle_create(&wallet.daemon.context, Some(&wallet.tool), dry_run)
+                .await
+                .expect_err("dry-run transaction must be rejected");
         }
     }
 }

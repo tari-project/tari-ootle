@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::cmp;
+use std::{cmp, time::Duration};
 
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
@@ -55,6 +55,7 @@ pub struct ConfidentialTransferApi<'a, TSpec: WalletSdkSpec> {
     locks_api: LocksApi<'a, TSpec::Store>,
     accounts_api: AccountsApi<'a, TSpec>,
     confidential_outputs_api: ConfidentialOutputsApi<'a, TSpec>,
+    #[allow(dead_code)]
     transaction_api: TransactionApi<'a, TSpec::Store, TSpec::NetworkInterface>,
     substate_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
     crypto_api: ConfidentialCryptoApi,
@@ -322,8 +323,10 @@ where TSpec: WalletSdkSpec
         let account_view_key = self.key_manager_api.get_key(from_account.account.view_only_key_id)?;
         let account_view_public_key = account_view_key.to_public_key();
 
-        // Reserve and lock input funds
-        let lock = self.locks_api.create_lock()?;
+        // Reserve and lock input funds with a timeout; the lock is only linked to a transaction
+        // when the transaction is persisted for submission, so a dry run or pre-submission failure
+        // never strands the locked outputs indefinitely.
+        let lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
             lock.id(),
             params.from_account,
@@ -476,10 +479,13 @@ where TSpec: WalletSdkSpec
             .with_inputs(inputs)
             .build_and_seal(&account_key.secret);
 
-        let tx_id = transaction.calculate_id();
-        self.transaction_api.locks_set_transaction_id(lock.id(), tx_id)?;
-
-        let lock_id = lock.keep_locked();
+        let lock_id = if params.is_dry_run {
+            let id = lock.id();
+            lock.release();
+            id
+        } else {
+            lock.keep_locked()
+        };
 
         Ok(TransferOutput {
             transaction,

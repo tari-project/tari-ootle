@@ -1441,11 +1441,11 @@ pub async fn handle_confidential_transfer(
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
-                None,
+                Some(transfer.transaction_proof_id),
             )
             .await;
         if let Err(err) = &submission &&
-            let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+            let Err(release_err) = sdk.locks_api().release_lock(transfer.transaction_proof_id)
         {
             warn!(
                 target: LOG_TARGET,

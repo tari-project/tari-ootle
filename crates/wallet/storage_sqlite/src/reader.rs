@@ -2514,4 +2514,53 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn webauthn_reg_clear_all_removes_all_passkeys_and_preserves_api_keys() {
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.webauthn_reg_insert(
+                "owner".to_string(),
+                "Primary".to_string(),
+                sample_passkey("AAECAwQFBgcICQoLDA0ODw"),
+            )
+            .unwrap();
+            tx.api_key_insert("automation", "deadbeef", "admin", None).unwrap();
+            tx.commit().unwrap();
+        }
+
+        {
+            let mut tx = store.create_read_tx().unwrap();
+            assert!(tx.webauthn_has_any_registration().unwrap());
+            assert_eq!(tx.webauthn_reg_fetch_all_passkeys().unwrap().len(), 1);
+            assert!(tx.api_key_find_active_by_hash("deadbeef").unwrap().is_some());
+        }
+
+        let deleted = store.with_write_tx(|tx| tx.webauthn_reg_clear_all()).unwrap();
+        assert_eq!(deleted, 1);
+
+        {
+            let mut tx = store.create_read_tx().unwrap();
+            assert!(!tx.webauthn_has_any_registration().unwrap());
+            assert!(tx.webauthn_reg_fetch_all_passkeys().unwrap().is_empty());
+            // API keys are preserved across passkey resets.
+            assert!(tx.api_key_find_active_by_hash("deadbeef").unwrap().is_some());
+        }
+
+        // After reset, a new initial registration under the same username succeeds.
+        store
+            .with_write_tx(|tx| {
+                tx.webauthn_reg_insert(
+                    "owner".to_string(),
+                    "Primary".to_string(),
+                    sample_passkey("AAECAwQFBgcICQoLDA0ODw"),
+                )
+            })
+            .unwrap();
+        let mut tx = store.create_read_tx().unwrap();
+        assert!(tx.webauthn_has_any_registration().unwrap());
+    }
 }

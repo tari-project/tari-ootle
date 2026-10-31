@@ -101,6 +101,16 @@ fn authorize_enrolled_passkey_addition(context: &HandlerContext, token: Option<&
     Ok(())
 }
 
+fn map_registration_error(err: WebauthnServiceError) -> anyhow::Error {
+    match err {
+        WebauthnServiceError::AlreadyEnrolled |
+        WebauthnServiceError::DuplicateCredential |
+        WebauthnServiceError::InvalidSetupToken |
+        WebauthnServiceError::SetupTokenExpired => invalid_request(err),
+        other => other.into(),
+    }
+}
+
 pub async fn handle_start_registration(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -114,6 +124,9 @@ pub async fn handle_start_registration(
         authorize_enrolled_passkey_addition(context, token)?;
         Some(existing_passkeys.into_iter().map(|pk| pk.cred_id().clone()).collect())
     } else {
+        webauthn_service
+            .verify_setup_token(request.setup_token.as_deref())
+            .map_err(map_registration_error)?;
         None
     };
 
@@ -147,15 +160,15 @@ pub async fn handle_finish_registration(
         authorize_enrolled_passkey_addition(context, token)?;
     } else {
         assert_not_enrolled(context)?;
+        webauthn_service
+            .verify_setup_token(request.setup_token.as_deref())
+            .map_err(map_registration_error)?;
     }
     let passkey = webauthn.finish_passkey_registration(&request.credential, session_data.passkey_reg())?;
     webauthn_service
-        .finish_registration(request.session_id, passkey)
+        .finish_registration(request.session_id, passkey, request.setup_token.as_deref())
         .await
-        .map_err(|e| match e {
-            WebauthnServiceError::AlreadyEnrolled | WebauthnServiceError::DuplicateCredential => invalid_request(e),
-            e => e.into(),
-        })?;
+        .map_err(map_registration_error)?;
 
     if session_data.allow_existing() {
         return Ok((
@@ -423,16 +436,22 @@ mod tests {
     }
 
     async fn enrol_initial_passkey(test: &HandlerTest) -> u32 {
+        let setup_token = test.context.webauthn_service().unwrap().issue_setup_token();
         let start = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
             username: "owner".to_string(),
             label: Some("Primary".to_string()),
+            setup_token: Some(setup_token.to_string()),
         })
         .await
         .unwrap();
         test.context
             .webauthn_service()
             .unwrap()
-            .finish_registration(start.session_id, dummy_passkey("AAECAwQFBgcICQoLDA0ODw"))
+            .finish_registration(
+                start.session_id,
+                dummy_passkey("AAECAwQFBgcICQoLDA0ODw"),
+                Some(setup_token.as_str()),
+            )
             .await
             .unwrap()
     }
@@ -446,6 +465,7 @@ mod tests {
         let err = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
             username: "attacker".to_string(),
             label: None,
+            setup_token: None,
         })
         .await
         .unwrap_err();
@@ -458,6 +478,7 @@ mod tests {
             WebauthnStartRegisterRequest {
                 username: "owner".to_string(),
                 label: None,
+                setup_token: None,
             },
         )
         .await
@@ -485,6 +506,7 @@ mod tests {
             let err = handle_start_registration(&test.context, Some(forbidden_bearer), WebauthnStartRegisterRequest {
                 username: "owner".to_string(),
                 label: Some("Backdoor".to_string()),
+                setup_token: None,
             })
             .await
             .unwrap_err();
@@ -526,6 +548,7 @@ mod tests {
         let start = handle_start_registration(&test.context, Some(&test.admin_bearer), WebauthnStartRegisterRequest {
             username: "owner".to_string(),
             label: Some("Second".to_string()),
+            setup_token: None,
         })
         .await
         .unwrap();
@@ -536,6 +559,7 @@ mod tests {
             (axum_jrpc::Id::Num(1), WebauthnFinishRegisterRequest {
                 session_id: start.session_id.clone(),
                 credential: dummy_register_credential(),
+                setup_token: None,
             }),
         )
         .await
@@ -549,6 +573,7 @@ mod tests {
                 (axum_jrpc::Id::Num(1), WebauthnFinishRegisterRequest {
                     session_id: start.session_id.clone(),
                     credential: dummy_register_credential(),
+                    setup_token: None,
                 }),
             )
             .await
@@ -573,11 +598,13 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_session_cannot_finish_after_another_enrolment_lands() {
         let test = setup().await;
+        let setup_token = test.context.webauthn_service().unwrap().issue_setup_token();
 
         // Start an unauthenticated bootstrap session before any passkey is enrolled (`allow_existing == false`)
         let stale_bootstrap = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
             username: "attacker".to_string(),
             label: None,
+            setup_token: Some(setup_token.to_string()),
         })
         .await
         .unwrap();
@@ -593,6 +620,7 @@ mod tests {
                 (axum_jrpc::Id::Num(1), WebauthnFinishRegisterRequest {
                     session_id: stale_bootstrap.session_id.clone(),
                     credential: dummy_register_credential(),
+                    setup_token: Some(setup_token.to_string()),
                 }),
             )
             .await

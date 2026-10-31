@@ -251,6 +251,12 @@ pub enum Subcommand {
         #[clap(long)]
         confirm: bool,
     },
+    #[clap(
+        name = "reset-passkeys",
+        about = "Remove all enrolled WebAuthn passkeys from the wallet database. Stop or restart the wallet daemon \
+                 afterwards to invalidate active sessions and issue a new setup token."
+    )]
+    ResetPasskeys,
 }
 
 #[cfg(test)]
@@ -350,5 +356,11 @@ mod tests {
         for (long, env) in expected {
             assert_eq!(env_of(long).as_deref(), Some(env), "--{long}");
         }
+    }
+
+    #[test]
+    fn reset_passkeys_subcommand_parses() {
+        let cli_sub = Cli::try_parse_from(["tari_ootle_walletd", "reset-passkeys"]).unwrap();
+        assert!(matches!(cli_sub.command, Some(Subcommand::ResetPasskeys)));
     }
 }

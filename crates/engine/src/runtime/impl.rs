@@ -312,6 +312,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             "proof_invoke",
             "bucket_invoke",
             "allocate_address_invoke",
+            "spend_context_invoke",
         ];
 
         match self.tracker.current_frame_write_mode() {
@@ -552,6 +553,11 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         if skip_hook {
             return Ok(());
         }
+
+        // A restricted frame (`OwnComponent` or `ReadOnly`) has cross-template calls disabled, so it may not
+        // indirectly invoke another component's auth hook by acting on a resource it does not own.
+        self.tracker
+            .read_with(|state| state.check_unrestricted_frame("invoke_resource_access_hook"))?;
 
         if let Some(component) = auth_caller.component().copied() {
             self.invoke_modules_on_runtime_call("load_component")?;
@@ -911,14 +917,19 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
         // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
         // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
+        // Bound args are untrusted spender data, so their CBOR item count and nesting depth are charged before
+        // decoding, and transient capability IDs are rejected so a spend script cannot claim capabilities from
+        // the spender's scope.
+        self.charge_call_args(&tf.args)?;
         for (i, arg) in tf.args.iter().enumerate() {
-            let _value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
+            let value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
                     "spend script '{}' bound argument {} is not well-formed CBOR: {}",
                     tf.function, i, e
                 ),
             })?;
+            reject_transient_values_in("Spend script bound argument", &value)?;
         }
 
         Ok(())
@@ -1216,9 +1227,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         // Make the introspection context reachable for the duration of the call, and restrict the predicate's frame
         // to a read-only, non-cross-template sandbox.
-        *self.spend_exec_context.borrow_mut() = Some(exec);
+        let prev_exec = self.spend_exec_context.borrow_mut().replace(exec);
         let result = self.invoke_template_function(&tf.template, &tf.function, args, Some(FrameWriteMode::ReadOnly));
-        *self.spend_exec_context.borrow_mut() = None;
+        *self.spend_exec_context.borrow_mut() = prev_exec;
 
         result
             .map(|_| ())
@@ -2939,23 +2950,27 @@ where
 
                 // Charge for the statement's verification cost, exactly like the
                 // `stealth_transfer` method does.
-                if let Some(ref statement) = arg.statement {
+                let statement_accounted = if let Some(statement) = arg.statement {
                     self.tracker.account_fee_intent_stealth_transfer()?;
                     let has_view_key = self.tracker.write_with(|state| {
+                        state.check_unrestricted_frame("pay_fee")?;
                         let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
                         let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
                         state.unlock_substate(resource_lock)?;
                         Ok::<_, RuntimeError>(has_view_key)
                     })?;
                     self.tracker
-                        .charge_native_execution(stealth::transfer_native_points(statement, has_view_key))?;
-                }
-
-                // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate as
-                // `stealth_transfer`, so a rejection leaves the inputs unspent. Fees are always paid in TARI.
-                if let Some(ref statement) = arg.statement {
-                    self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
-                }
+                        .charge_native_execution(stealth::transfer_native_points(&statement, has_view_key))?;
+                    let accounted = self
+                        .tracker
+                        .write_with(|state| state.account_stealth_transfer(&statement))?;
+                    // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate
+                    // as `stealth_transfer`, so a rejection leaves the inputs unspent. Fees are always paid in TARI.
+                    self.verify_input_authorizations(TARI_TOKEN.into(), &statement)?;
+                    Some((statement, accounted))
+                } else {
+                    None
+                };
 
                 self.tracker.write_with(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
@@ -2993,9 +3008,9 @@ where
                         let withdrawn = vault_mut.withdraw(arg.amount)?;
                         container.deposit(withdrawn)?;
                     }
-                    if let Some(statement) = arg.statement &&
+                    if let Some((statement, accounted)) = statement_accounted &&
                         let Some(revealed) =
-                            state_mut.execute_stealth_transfer(TARI_TOKEN.into(), statement, None)?
+                            state_mut.execute_stealth_transfer(TARI_TOKEN.into(), statement, None, accounted)?
                     {
                         container.deposit(revealed)?;
                     }
@@ -4408,6 +4423,7 @@ where
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (address, has_view_key) = self.tracker.write_with(|state| {
+            state.check_unrestricted_frame("stealth_transfer")?;
             let address = state.resolve_resource_address_ref(resource_address.clone())?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
@@ -4419,6 +4435,9 @@ where
                 &statement,
                 has_view_key,
             ))?;
+        let accounted = self
+            .tracker
+            .write_with(|state| state.account_stealth_transfer(&statement))?;
 
         self.authorize_resource_action(address, ResourceAuthAction::Withdraw, |_| Ok(()))?;
 
@@ -4434,7 +4453,7 @@ where
 
         self.tracker.write_with(|state_mut| {
             let Some(container) =
-                state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
+                state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id, accounted)?
             else {
                 return Ok(None);
             };

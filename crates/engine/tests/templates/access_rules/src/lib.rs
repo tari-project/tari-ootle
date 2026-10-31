@@ -19,7 +19,13 @@ pub fn create_badge_resource(recall_rule: AccessRule) -> Bucket {
 
 #[template]
 mod access_rules_template {
-    use tari_template_lib::types::{FunctionName, SubstateOwnerRule};
+    use tari_template_lib::types::{
+        FunctionName,
+        SubstateOwnerRule,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        crypto::{BalanceProofSignature, RangeProofBytes},
+        stealth::{StealthInputsStatement, StealthOutputsStatement, StealthTransferStatement},
+    };
 
     use super::*;
 
@@ -428,6 +434,66 @@ mod access_rules_template {
                 ResourceType::Fungible,
                 "hook read the wrong resource for action {action:?}"
             );
+        }
+
+        /// Updates metadata on `self.badges`' resource, whose authorization hook lives on another component.
+        pub fn hook_triggers_foreign_auth_hook(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {
+            let mut metadata = Metadata::new();
+            metadata.insert("triggered", "by_hook");
+            ResourceManager::get(self.badges.resource_address()).set_metadata(metadata);
+        }
+
+        /// Attempts a stealth transfer on `STEALTH_TARI_RESOURCE_ADDRESS` from inside a resource auth hook.
+        pub fn hook_attempts_stealth_transfer(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {
+            let statement = StealthTransferStatement {
+                inputs_statement: StealthInputsStatement::new_revealed_only(Amount::from(1u64)),
+                outputs_statement: StealthOutputsStatement {
+                    outputs: vec![],
+                    revealed_output: None,
+                    agg_range_proof: RangeProofBytes::empty(),
+                },
+                balance_proof: Some(BalanceProofSignature::zero()),
+                covenant_claims: vec![],
+            };
+            ResourceManager::get(STEALTH_TARI_RESOURCE_ADDRESS).stealth_transfer(statement);
+        }
+
+        /// Attempts a `SpendContext` engine invocation from inside a resource auth hook.
+        pub fn hook_attempts_spend_context_invoke(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {
+            let ctx = SpendContext::new(0);
+            let _ = ctx.data();
+        }
+
+        pub fn noop_auth_hook(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {}
+
+        /// As `with_auth_hook`, but `badges` also carries an authorization hook on `other_hook_component` and allows
+        /// anyone to update its metadata, so acting on `self.badges` from inside this component's hook attempts to
+        /// enter a foreign resource's auth hook.
+        pub fn with_chained_foreign_auth_hook(
+            hook: FunctionName,
+            other_hook_component: ComponentAddress,
+        ) -> Component<AccessRulesTest> {
+            let badges = ResourceBuilder::public_fungible()
+                .with_authorization_hook(other_hook_component, "noop_auth_hook")
+                .update_metadata(rule!(allow_all), LOCKED)
+                .initial_supply(1u32);
+
+            let address_alloc = CallerContext::allocate_component_address(None);
+
+            let tokens = ResourceBuilder::public_fungible()
+                .with_authorization_hook(address_alloc.get_address(), hook)
+                .initial_supply(1000u32);
+
+            Component::new(Self {
+                value: 0,
+                tokens: Vault::from_bucket(tokens),
+                badges: Vault::from_bucket(badges),
+                allowed: true,
+                attack_component: None,
+            })
+            .with_address_allocation(address_alloc)
+            .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
+            .create()
         }
 
         pub fn invalid_auth_hook2(&self, _action: String, _caller: AuthHookCaller) {}

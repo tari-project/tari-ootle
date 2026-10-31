@@ -151,6 +151,12 @@ impl<TStore: StateReader> ChargeableState<'_, TStore> {
     }
 }
 
+/// Proof token returned by [`WorkingState::account_stealth_transfer`] and required by
+/// [`WorkingState::execute_stealth_transfer`], enforcing at the type level that every stealth transfer has passed
+/// per-statement and per-transaction stealth limit accounting before execution.
+#[derive(Debug)]
+pub(super) struct StealthTransferAccounted(());
+
 #[derive(Debug, Clone)]
 pub(super) struct WorkingState<TStore> {
     /// Selects the substate schema version for the execution epoch, which is scheduled per network.
@@ -697,6 +703,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn get_bucket_mut(&mut self, bucket_id: BucketId) -> Result<&mut Bucket, RuntimeError> {
+        self.check_unrestricted_frame("get_bucket_mut")?;
         if !self.current_call_scope()?.is_bucket_in_scope(bucket_id) {
             return Err(RuntimeError::BucketNotFound { bucket_id });
         }
@@ -706,6 +713,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn take_bucket(&mut self, bucket_id: BucketId) -> Result<Bucket, RuntimeError> {
+        self.check_unrestricted_frame("take_bucket")?;
         if !self.current_call_scope()?.is_bucket_in_scope(bucket_id) {
             return Err(RuntimeError::BucketNotFound { bucket_id });
         }
@@ -806,6 +814,19 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    /// Enforces the stealth-transfer limits and accounts this transfer against the per-transaction totals. Must be
+    /// called before the transfer's input authorisation, substate-access, or proof crypto runs, so an over-limit
+    /// transaction is rejected before any of that work is done.
+    pub(super) fn account_stealth_transfer(
+        &mut self,
+        statement: &StealthTransferStatement,
+    ) -> Result<StealthTransferAccounted, RuntimeError> {
+        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, statement)?;
+        self.stealth_totals
+            .account_transfer(&limits::STEALTH_LIMITS, statement)?;
+        Ok(StealthTransferAccounted(()))
+    }
+
     /// Decreases the total supply of the locked resource, rejecting the transaction rather than wrapping if the
     /// decrease would underflow. Callers must only call this for a resource with supply tracking enabled.
     pub fn decrease_total_supply(
@@ -852,6 +873,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         resource_lock: &LockedSubstate,
         value_proofs: &BTreeMap<PedersenCommitmentBytes, CommitmentValueProof>,
     ) -> Result<(), RuntimeError> {
+        self.check_unrestricted_frame("burn_bucket")?;
         // Burning downs only the unlocked commitments, so a locked one would be left live with nothing referencing
         // it. Callers reject this earlier to avoid charging for a burn that cannot succeed; the check lives here so
         // that it holds for every caller.
@@ -923,6 +945,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn drop_proof(&mut self, proof_id: ProofId) -> Result<(), RuntimeError> {
+        self.check_unrestricted_frame("drop_proof")?;
         let call_frame_mut = self.current_call_scope_mut()?;
         if !call_frame_mut.is_proof_in_scope(&proof_id) {
             return Err(RuntimeError::ProofNotInScope { proof_id });
@@ -1237,9 +1260,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(resource_container)
     }
 
-    /// Buckets, proofs and address allocations are transaction-scoped engine state that no write lock guards. A
-    /// restricted frame can neither deposit, drop nor consume them, so it may not create them either.
-    fn check_create_allowed(&self, operation: &'static str) -> Result<(), RuntimeError> {
+    /// Verifies that the current frame is unrestricted ([`FrameWriteMode::Full`]).
+    ///
+    /// Restricted frames ([`FrameWriteMode::OwnComponent`] and [`FrameWriteMode::ReadOnly`]) may not create, mutate,
+    /// or consume transaction-scoped capabilities (buckets, proofs, and address allocations), invoke foreign resource
+    /// authorization hooks, or initiate stealth transfers.
+    pub(super) fn check_unrestricted_frame(&self, operation: &'static str) -> Result<(), RuntimeError> {
         match self.current_frame_write_mode() {
             FrameWriteMode::Full => Ok(()),
             FrameWriteMode::OwnComponent => Err(RuntimeError::ForbiddenInAuthHookContext { operation }),
@@ -1248,7 +1274,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn new_bucket(&mut self, bucket_id: BucketId, resource: ResourceContainer) -> Result<(), RuntimeError> {
-        self.check_create_allowed("new_bucket")?;
+        self.check_unrestricted_frame("new_bucket")?;
         debug!(
             target: LOG_TARGET,
             "New bucket {} for resource {} {:?}", bucket_id, resource.resource_address(), resource.resource_type()
@@ -1273,7 +1299,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn new_proof(&mut self, proof_id: ProofId, locked_funds: LockedResource) -> Result<(), RuntimeError> {
-        self.check_create_allowed("new_proof")?;
+        self.check_unrestricted_frame("new_proof")?;
         debug!(target: LOG_TARGET, "New proof {}", proof_id);
         if self.proofs.insert(proof_id, Proof::new(locked_funds)).is_some() {
             return Err(RuntimeError::DuplicateProof { proof_id });
@@ -1287,7 +1313,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &mut self,
         address: T,
     ) -> Result<AddressAllocationId, RuntimeError> {
-        self.check_create_allowed("new_address_allocation")?;
+        self.check_unrestricted_frame("new_address_allocation")?;
         let id = self.address_allocation_id;
         self.address_allocation_id = self
             .address_allocation_id
@@ -1326,6 +1352,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn use_allocated_address(&mut self, id: AddressAllocationId) -> Result<AllocatedAddress, RuntimeError> {
+        self.check_unrestricted_frame("use_allocated_address")?;
         if !self.current_call_scope()?.is_address_allocation_in_scope(id) {
             return Err(RuntimeError::AddressAllocationNotInScope { id });
         }
@@ -2249,17 +2276,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    pub fn execute_stealth_transfer(
+    pub(super) fn execute_stealth_transfer(
         &mut self,
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
+        _accounted: StealthTransferAccounted,
     ) -> Result<Option<ResourceContainer>, RuntimeError> {
-        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-        // Bound the aggregate stealth work across the whole transaction before doing this transfer's crypto, so a
-        // single transaction cannot stack enough native verification to stall the proposing leader.
-        self.stealth_totals
-            .account_transfer(&limits::STEALTH_LIMITS, &statement)?;
         let resource_address = self.resolve_resource_address_ref(resource_address)?;
 
         let resource_lock = self.read_lock_substate(SubstateId::Resource(resource_address))?;
@@ -2437,7 +2460,61 @@ fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib::types::{ComponentAddress, ObjectKey, ResourceAddress, TemplateAddress};
+
     use super::*;
+    use crate::state_store::memory::MemoryStateStore;
+
+    fn test_working_state() -> WorkingState<MemoryStateStore> {
+        WorkingState::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        )
+    }
+
+    fn push_test_frame(state: &mut WorkingState<MemoryStateStore>) {
+        let frame = CallFrame::for_static(TemplateAddress::default(), "Test".to_string(), EntityId::default());
+        state.push_frame(frame, 16).unwrap();
+    }
+
+    #[test]
+    fn restricted_frames_reject_capability_mutations() {
+        for (mode, is_auth_hook) in [(FrameWriteMode::OwnComponent, true), (FrameWriteMode::ReadOnly, false)] {
+            let mut state = test_working_state();
+            push_test_frame(&mut state);
+
+            let resx_addr = ResourceAddress::new(ObjectKey::from_array([0x33; ObjectKey::LENGTH]));
+            let bucket_id = state.new_bucket_id().unwrap();
+            state
+                .new_bucket(bucket_id, ResourceContainer::public_fungible(resx_addr, 10u64))
+                .unwrap();
+            let comp_addr = ComponentAddress::new(ObjectKey::from_array([0x44; ObjectKey::LENGTH]));
+            let alloc_id = state.new_address_allocation(comp_addr).unwrap();
+
+            state.restrict_current_frame(mode).unwrap();
+
+            let check_err = |err: RuntimeError| {
+                if is_auth_hook {
+                    assert!(matches!(err, RuntimeError::ForbiddenInAuthHookContext { .. }), "{err}");
+                } else {
+                    assert!(matches!(err, RuntimeError::ForbiddenInReadOnlyContext { .. }), "{err}");
+                }
+            };
+
+            check_err(state.get_bucket_mut(bucket_id).unwrap_err());
+            check_err(state.take_bucket(bucket_id).unwrap_err());
+            check_err(state.drop_proof(0u32.into()).unwrap_err());
+            check_err(state.use_allocated_address(alloc_id).unwrap_err());
+        }
+    }
 
     #[test]
     fn the_burn_is_a_floor_share_of_what_was_paid_and_the_leader_gets_the_rest() {

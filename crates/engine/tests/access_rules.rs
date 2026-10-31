@@ -2349,6 +2349,73 @@ mod resource_access_rules {
     }
 
     #[test]
+    fn it_disallows_hook_that_triggers_foreign_auth_hook_or_stealth_transfer_or_spend_context() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (_owner_account, owner_proof, owner_key) = test.create_empty_account();
+        let (user_account, user_proof, user_key) = test.create_empty_account();
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        // 1. Create a target hook component so a second component's resource can bind a foreign auth hook on it.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "with_auth_hook", args![true, "valid_auth_hook"])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+        let foreign_hook_component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "with_chained_foreign_auth_hook", args![
+                    "hook_triggers_foreign_auth_hook",
+                    foreign_hook_component
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+        let chained_component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(chained_component, "take_tokens", args![10])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(user_account, "deposit", args![Workspace("tokens")])
+                .build_and_seal(&user_key),
+            vec![user_proof.clone()],
+        );
+        assert_reject_reason(reason, RuntimeError::ForbiddenInAuthHookContext {
+            operation: "invoke_resource_access_hook",
+        });
+
+        // 2. A hook frame may not initiate a stealth transfer (`stealth_transfer`) or call `spend_context_invoke`.
+        for (hook_name, expected_op) in [
+            ("hook_attempts_stealth_transfer", "stealth_transfer"),
+            ("hook_attempts_spend_context_invoke", "spend_context_invoke"),
+        ] {
+            test.execute_expect_success(
+                Transaction::builder_localnet(Epoch(1))
+                    .call_function(access_rules_template, "with_auth_hook", args![true, hook_name])
+                    .build_and_seal(&owner_key),
+                vec![owner_proof.clone()],
+            );
+            let comp = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+            let reason = test.execute_expect_failure(
+                Transaction::builder_localnet(Epoch(1))
+                    .call_method(comp, "take_tokens", args![10])
+                    .put_last_instruction_output_on_workspace("tokens")
+                    .call_method(user_account, "deposit", args![Workspace("tokens")])
+                    .build_and_seal(&user_key),
+                vec![user_proof.clone()],
+            );
+            assert_reject_reason(reason, RuntimeError::ForbiddenInAuthHookContext {
+                operation: expected_op,
+            });
+        }
+    }
+
+    #[test]
     fn it_fails_if_auth_hook_is_invalid() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 

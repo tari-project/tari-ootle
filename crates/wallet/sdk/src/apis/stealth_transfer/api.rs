@@ -736,7 +736,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
 
         block_in_place(|| {
             // Create a lock with a timeout, the lock timeout will be removed if the lock is assigned a transaction
-            let lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
+            let mut lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
             // A transfer statement whose revealed remainder covers the fee replaces the separate fee
             // statement, doing in one statement what otherwise takes two. It requires the fee and the
@@ -771,7 +771,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 .map(|swap| swap.input_resource)
                 .unwrap_or(TARI_TOKEN);
 
-            let inputs_to_spend = self.lock_inputs_for_transfer(
+            let mut inputs_to_spend = self.lock_inputs_for_transfer(
                 lock.id(),
                 owner_account.account().component_address(),
                 params.resource_address,
@@ -797,8 +797,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         inputs_to_spend.inputs.len(),
                         num_outputs,
                     );
-                    // The transfer inputs already cover the fee, so this locks more of the account than is
-                    // strictly needed. The surplus comes back as transfer change.
+                    // Release the merged selection so the fee statement can lock first and expose its
+                    // change output to the transfer selection without double-locking `params.max_fee`
+                    // or leaving `inputs_to_spend.revealed` inflated by the fee.
+                    drop(lock);
+                    lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
+                    merged_fee_amount = Amount::zero();
                     fee_half = Some(self.build_fee_statement(
                         lock.id(),
                         &owner_account,
@@ -806,8 +810,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         &owner_address,
                         account_key_id,
                     )?);
-                    // The fee is now sourced separately, so the transfer statement must stop revealing it.
-                    merged_fee_amount = Amount::zero();
+                    inputs_to_spend = self.lock_inputs_for_transfer(
+                        lock.id(),
+                        owner_account.account().component_address(),
+                        params.resource_address,
+                        params.total_output_amount_with_fee(merged_fee_amount)?,
+                        params.input_selection,
+                    )?;
                 }
             }
 

@@ -208,12 +208,14 @@ where TSpec: WalletSdkSpec
 
                 let revealed_to_spend = spend_amount.saturating_sub(amount_locked);
 
-                if src_vault.revealed_balance < revealed_to_spend {
+                if available_revealed_funds < revealed_to_spend {
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
-                self.locks_api
-                    .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
+                if revealed_to_spend.is_positive() {
+                    self.locks_api
+                        .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
+                }
 
                 let commitments = commitments_of(&confidential_inputs);
                 let confidential_inputs = self

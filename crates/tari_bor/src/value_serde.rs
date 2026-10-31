@@ -200,7 +200,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
-        let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(64));
         while let Some(elem) = seq.next_element::<Value>()? {
             out.push(elem);
         }
@@ -225,7 +225,8 @@ impl<'de> Visitor<'de> for ValueVisitor {
         }
 
         let first_value: Value = map.next_value()?;
-        let mut entries: Vec<(Value, Value)> = Vec::with_capacity(map.size_hint().unwrap_or(0) + 1);
+        let mut entries: Vec<(Value, Value)> =
+            Vec::with_capacity(map.size_hint().unwrap_or(0).saturating_add(1).min(64));
         entries.push((Value::Text(first_key), first_value));
         while let Some((k, v)) = map.next_entry::<String, Value>()? {
             entries.push((Value::Text(k), v));
@@ -537,5 +538,18 @@ mod tests {
         });
         let bytes = crate::serde_codec::to_vec(&v).unwrap();
         assert_eq!(crate::serde_codec::from_slice::<Value>(&bytes).unwrap(), v);
+    }
+
+    #[test]
+    fn truncated_max_length_map_in_value_visitor_does_not_overflow_or_oom() {
+        // CBOR map claiming u64::MAX entries, followed by a single valid string key ("a")
+        // and integer value (1), then truncated. Previously `size_hint().unwrap_or(0) + 1`
+        // overflowed or attempted a multi-GB allocation on line 228.
+        let payload = [
+            0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // map(u64::MAX)
+            0x61, b'a', // key "a"
+            0x01, // value 1
+        ];
+        assert!(crate::serde_codec::from_slice::<Value>(&payload).is_err());
     }
 }

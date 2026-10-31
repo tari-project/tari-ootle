@@ -276,6 +276,19 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 }
             }
 
+            for fp_atom in valid_block.block().all_foreign_proposals() {
+                if !fp_atom.exists(&**tx)? {
+                    // The block id is left unmarked for another delivery of the block with its foreign proposals
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️❌ Rejecting delivery of block {}: foreign proposal {} has not been received",
+                        valid_block,
+                        fp_atom.block_id,
+                    );
+                    return Ok(false);
+                }
+            }
+
             self.save_block(tx, &valid_block)?;
             info!(target: LOG_TARGET, "✅ Block {} is valid and persisted.", valid_block);
             Ok::<_, HotStuffError>(true)
@@ -373,6 +386,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let is_epoch_end = valid_block.block().is_epoch_end();
+        let has_local_accept_abort = valid_block
+            .block()
+            .commands()
+            .iter()
+            .any(|cmd| cmd.local_accept().is_some_and(|atom| atom.decision.is_abort()));
 
         // Our own view of the next epoch, used by the voter to ratify what an EndEpoch block commits it to. The
         // boundary hash is `None` if we have not observed that boundary, and the validator set hash is `None` until
@@ -386,6 +404,12 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             let next_epoch = current_epoch + Epoch(1);
             LocalNextEpochView {
                 epoch_hash: self.epoch_manager.get_observed_epoch_hash(next_epoch).await?,
+                validator_set_hash: self.epoch_manager.get_validator_set_hash(next_epoch).await.optional()?,
+            }
+        } else if has_local_accept_abort && em_epoch <= current_epoch {
+            let next_epoch = current_epoch + Epoch(1);
+            LocalNextEpochView {
+                epoch_hash: None,
                 validator_set_hash: self.epoch_manager.get_validator_set_hash(next_epoch).await.optional()?,
             }
         } else {
@@ -402,11 +426,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // such an abort or ends the epoch. A node that knows the next epoch's validator set has assigned its
         // committees, so it can tell their number; that covers every node able to vote for an EndEpoch, including one
         // whose oracle has not yet advanced past `current_epoch`.
-        let has_local_accept_abort = valid_block
-            .block()
-            .commands()
-            .iter()
-            .any(|cmd| cmd.local_accept().is_some_and(|atom| atom.decision.is_abort()));
         let knows_next_epoch_committees = em_epoch > current_epoch || local_next_epoch.validator_set_hash.is_some();
         let next_epoch_changes_layout = (has_local_accept_abort || is_epoch_end) &&
             knows_next_epoch_committees &&

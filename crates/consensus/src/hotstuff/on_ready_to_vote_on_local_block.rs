@@ -174,31 +174,26 @@ where TConsensusSpec: ConsensusSpec
         // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
         let processed_blocks =
             process_newly_justified_block(&**tx, &justified_block, block_qc_id, local_committee_info, change_set)?;
-        for mut block in processed_blocks {
-            block.add_justify_qc(tx, &block_qc_id)?;
-        }
-        justified_block.add_justify_qc(tx, &block_qc_id)?;
 
-        if self.should_vote(&**tx, valid_block.block())? {
-            let parent = valid_block.block().get_parent(&**tx)?;
+        let parent = valid_block.block().get_parent(&**tx)?;
 
-            self.decide_what_to_vote(
-                &**tx,
-                &parent,
-                valid_block.block(),
-                local_committee_info,
-                proposer_claim_public_key_bytes,
-                can_propose_epoch_end,
-                local_next_epoch,
-                next_epoch_changes_layout,
-                change_set,
-            )?;
-        } else {
-            change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
-        }
+        self.decide_what_to_vote(
+            &**tx,
+            &parent,
+            valid_block.block(),
+            local_committee_info,
+            proposer_claim_public_key_bytes,
+            can_propose_epoch_end,
+            local_next_epoch,
+            next_epoch_changes_layout,
+            change_set,
+        )?;
 
-        let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
+            for mut block in processed_blocks {
+                block.add_justify_qc(tx, &block_qc_id)?;
+            }
+            justified_block.add_justify_qc(tx, &block_qc_id)?;
             info!(
                 target: LOG_TARGET,
                 "✅ Saving changeset: {}",
@@ -208,6 +203,10 @@ where TConsensusSpec: ConsensusSpec
             self.transaction_manager
                 .uncommitted_templates()
                 .record(change_set.block(), change_set.local_substate_changes());
+
+            if !self.should_vote(&**tx, valid_block.block())? {
+                change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
+            }
         } else {
             warn!(
                 target: LOG_TARGET,
@@ -216,6 +215,8 @@ where TConsensusSpec: ConsensusSpec
                 change_set,
             );
         }
+
+        let quorum_decision = change_set.quorum_decision();
 
         Ok(BlockDecision {
             local_decision: quorum_decision,
@@ -828,7 +829,7 @@ where TConsensusSpec: ConsensusSpec
 
         for atom in block.all_foreign_proposals() {
             // TODO: we need to keep these ATM to send them if a node needs to catch up
-            atom.set_status(tx, ForeignProposalStatus::Confirmed, None)?;
+            atom.set_status(tx, ForeignProposalStatus::Confirmed, Some(block.id()))?;
         }
 
         // NOTE: this must happen before we commit the substate diff because the state transitions use this version

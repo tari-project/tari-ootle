@@ -740,11 +740,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         if let Some(proposed_in_block) = set_proposed_in_block {
             let index_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
-            if let Some(prev_id) = fp.proposed_in_block() &&
-                prev_id != proposed_in_block
-            {
-                index_cf.delete(&(*prev_id, *fp.block_id()), OPERATION)?;
-            }
             index_cf.put(&(*proposed_in_block, *fp.block_id()), &(), OPERATION)?;
 
             // Update the epoch index
@@ -772,7 +767,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         for (proposed_in_block, fp_id) in proposed_keys {
             let mut fp = db.cf(ForeignProposalCf)?.get(&fp_id, OPERATION)?;
-            if fp.proposed_in_block() == Some(&proposed_in_block) {
+            if fp.status().is_proposed() && fp.proposed_in_block() == Some(&proposed_in_block) {
                 // Setting the status to New in this case
                 if !fp.status().is_unconfirmed() {
                     db.cf(foreign_proposal::UnconfirmedIndex)?

@@ -923,11 +923,14 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn drop_proof(&mut self, proof_id: ProofId) -> Result<(), RuntimeError> {
-        let call_frame_mut = self.current_call_scope_mut()?;
-        if !call_frame_mut.is_proof_in_scope(&proof_id) {
+        if !self.current_call_scope()?.is_proof_in_scope(&proof_id) {
             return Err(RuntimeError::ProofNotInScope { proof_id });
         }
-        call_frame_mut.remove_proof_from_scope(&proof_id);
+        self.initial_call_scope.remove_proof_from_scope(&proof_id);
+        for frame in &mut self.call_frames {
+            frame.scope_mut().remove_proof_from_scope(&proof_id);
+        }
+        self.workspace.remove_proof(&proof_id);
 
         // Fetch the proof
         let proof = self
@@ -2461,5 +2464,92 @@ mod tests {
         }
         assert_eq!(exhaust_burn_share(100, ExhaustBurnRate::new(500)), 5);
         assert_eq!(exhaust_burn_share(105, ExhaustBurnRate::new(500)), 5);
+    }
+
+    #[test]
+    fn dropping_a_proof_in_a_child_frame_removes_it_from_ancestor_scopes_and_workspace() {
+        use tari_template_lib::{
+            models::Proof,
+            types::{AccessRule, constants::TARI_TOKEN, rule},
+        };
+
+        use crate::{runtime::StateTracker, state_store::memory::MemoryStateStore};
+
+        let mut state = WorkingState::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::new(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::default(),
+            Hash32::default(),
+            ExhaustBurnRate::zero(),
+            FeeScale::IDENTITY,
+            Network::LocalNet,
+            false,
+        );
+
+        let proof_id = ProofId::from(1);
+        let locked = LockedResource::new(
+            ContainerRef::Runtime,
+            ResourceContainer::public_fungible(TARI_TOKEN, Amount::from(10u64)),
+        );
+        state.new_proof(proof_id, locked).unwrap();
+        let indexed_proof = IndexedValue::from_type(&Proof::from_id(proof_id)).unwrap();
+        state.workspace_mut().insert(0, indexed_proof.clone()).unwrap();
+
+        // Push a parent frame, then pass the proof into a child frame and drop it there.
+        let parent_frame = CallFrame::for_static(TemplateAddress::default(), "Parent".to_string(), EntityId::default());
+        state.push_frame(parent_frame, 10).unwrap();
+        state
+            .current_call_scope_mut()
+            .unwrap()
+            .include_refs_in_scope(indexed_proof.well_known_types());
+
+        let mut child_frame =
+            CallFrame::for_static(TemplateAddress::default(), "Child".to_string(), EntityId::default());
+        child_frame
+            .scope_mut()
+            .include_refs_in_scope(indexed_proof.well_known_types());
+        state.push_frame(child_frame, 10).unwrap();
+
+        state.drop_proof(proof_id).unwrap();
+        state.pop_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // The parent frame and initial call scope no longer retain the dropped proof id, and the workspace has no
+        // dangling proof entry left behind.
+        assert!(!state.current_call_scope().unwrap().is_proof_in_scope(&proof_id));
+        assert!(!state.base_call_scope().is_proof_in_scope(&proof_id));
+        assert!(state.workspace_mut().take_all_proofs().is_empty());
+        let err = state
+            .authorization()
+            .check_access_rules(NativeAction::CallFunction, &rule!(resource(TARI_TOKEN)))
+            .unwrap_err();
+        assert!(matches!(err, RuntimeError::AccessDenied { .. }), "{err:?}");
+
+        state.pop_frame(&IndexedWellKnownTypes::new()).unwrap();
+        state.validate_finalized().unwrap();
+
+        // `fee_checkpoint` drops workspace proofs before validating and snapshotting the checkpoint state.
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::new(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::default(),
+            Hash32::default(),
+            ExhaustBurnRate::zero(),
+            FeeScale::IDENTITY,
+            Network::LocalNet,
+            false,
+        );
+        tracker.write_with(|ws| {
+            let locked = LockedResource::new(
+                ContainerRef::Runtime,
+                ResourceContainer::public_fungible(TARI_TOKEN, Amount::from(5u64)),
+            );
+            ws.new_proof(proof_id, locked).unwrap();
+            ws.workspace_mut().insert(0, indexed_proof).unwrap();
+        });
+        tracker.fee_checkpoint().unwrap();
     }
 }

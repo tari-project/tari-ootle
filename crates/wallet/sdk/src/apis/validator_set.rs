@@ -65,6 +65,11 @@ const CHECKPOINTS_PER_REQUEST: u32 = 100;
 /// The most committees [`ValidatorSetShared`] keeps verified at once.
 const MAX_CACHED_COMMITTEES: usize = 256;
 
+/// How many epochs before the latest trusted validator set's epoch a shard group's latest checkpoint may end. The
+/// latest trusted validator set is named by the checkpoint ending the previous epoch, and another shard group may still
+/// be on the checkpoint ending the epoch before that.
+const MAX_CHECKPOINT_AGE_EPOCHS: u64 = 2;
+
 /// What every clone of the SDK shares about the validator sets it trusts.
 #[derive(Default)]
 pub struct ValidatorSetShared {
@@ -344,6 +349,15 @@ where
         let cached = self.shared.cached_shard_group_versions();
         let mut verified = HashMap::with_capacity(entries.len());
         for entry in &entries {
+            if let Some(cached) = cached.get(&entry.shard_group) &&
+                entry.epoch < cached.epoch
+            {
+                return Err(ValidatorSetApiError::CheckpointOlderThanVerified {
+                    shard_group: entry.shard_group,
+                    epoch: entry.epoch,
+                    verified_epoch: cached.epoch,
+                });
+            }
             let group_versions = match cached
                 .get(&entry.shard_group)
                 .filter(|cached| cached.epoch == entry.epoch)
@@ -352,6 +366,19 @@ where
                 None => self.verify_shard_group_versions(entry).await?,
             };
             verified.insert(entry.shard_group, group_versions);
+        }
+        let latest_trusted_epoch = self
+            .latest()?
+            .map(|latest| latest.epoch())
+            .unwrap_or_else(|| trusted.epoch());
+        if let Some((&shard_group, group)) = verified.iter().find(|(_, group)| {
+            group.epoch.as_u64().saturating_add(MAX_CHECKPOINT_AGE_EPOCHS) < latest_trusted_epoch.as_u64()
+        }) {
+            return Err(ValidatorSetApiError::CheckpointStale {
+                shard_group,
+                epoch: group.epoch,
+                latest_trusted_epoch,
+            });
         }
         let versions = verified
             .values()
@@ -662,6 +689,24 @@ pub enum ValidatorSetApiError {
          have"
     )]
     CheckpointOfShardsOutsideNetwork { shard_group: ShardGroup },
+    #[error(
+        "The indexer listed a checkpoint of shard group {shard_group} ending {epoch}, older than the checkpoint ending \
+         {verified_epoch} already verified for that shard group"
+    )]
+    CheckpointOlderThanVerified {
+        shard_group: ShardGroup,
+        epoch: Epoch,
+        verified_epoch: Epoch,
+    },
+    #[error(
+        "The indexer listed a checkpoint of shard group {shard_group} ending {epoch}, too long before \
+         {latest_trusted_epoch} to be its latest checkpoint"
+    )]
+    CheckpointStale {
+        shard_group: ShardGroup,
+        epoch: Epoch,
+        latest_trusted_epoch: Epoch,
+    },
 }
 
 impl ValidatorSetApiError {

@@ -6,7 +6,7 @@ use tari_consensus_types::{HighPc, ProposalCertificate, ProposalVote, ValidatorS
 use tari_ootle_common_types::{Epoch, NodeHeight, ProtocolVersion, committee::Committee, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
-    consensus_models::{Block, VoteEquivocation},
+    consensus_models::{Block, BookkeepingModel, VoteEquivocation},
 };
 use tari_ootle_transaction::Network;
 use tari_sidechain::{ProposalVoteMessage, QcSignatures, QuorumDecision, SignerBitmap};
@@ -135,6 +135,19 @@ where TConsensusSpec: ConsensusSpec
                 let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
                 let signatures = qc_signatures(epoch_state.local_committee(), signatures)?;
                 let new_qc = create_proposal_certificate(signatures, quorum_decision, block);
+                if new_qc.decision() != QuorumDecision::Accept {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❓️ Quorum reached with decision {:?} on {}, not advancing HighPc",
+                        new_qc.decision(),
+                        new_qc
+                    );
+                    let high_qc = self.store.with_write_tx(|tx| {
+                        new_qc.save(tx)?;
+                        HighPc::get(&**tx, current_epoch)
+                    })?;
+                    return Ok(Some((new_qc, high_qc)));
+                }
                 let high_qc = self.store.with_write_tx(|tx| new_qc.update_highest(tx))?;
                 if new_qc.calculate_id() == *high_qc.id() {
                     info!(target: LOG_TARGET, "🔥 New HIGH {}", new_qc);

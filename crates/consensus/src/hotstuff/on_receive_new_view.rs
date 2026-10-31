@@ -2,13 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate, Vote};
+use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate, SignedMessage, Vote};
 use tari_ootle_common_types::{NodeHeight, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreWriteTransaction,
     consensus_models::{Block, BookkeepingModel},
 };
+use tari_sidechain::QuorumDecision;
 
 use super::vote_collector::{ProposalVoteCollector, TimeoutVoteCollector};
 use crate::{
@@ -22,11 +23,12 @@ use crate::{
     },
     messages::NewViewMessage,
     tracing::TraceTimer,
-    traits::{CertificateStore, ConsensusSpec},
-    validations::check_quorum_certificate_signatures,
+    traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
+    validations::{check_quorum_certificate_signatures, signed_vote::SignedTimeoutVote},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_new_view";
+const MAX_NEWVIEW_LOOKAHEAD: NodeHeight = NodeHeight(20);
 
 pub struct OnReceiveNewViewHandler<TConsensusSpec: ConsensusSpec> {
     config: HotstuffConfig,
@@ -91,13 +93,56 @@ where TConsensusSpec: ConsensusSpec
             target: LOG_TARGET,
             "🌟 NEWVIEW from {from} with timeout height {timeout_height} with qc {high_pc}",
         );
-        if high_pc.epoch() != epoch_state.epoch() {
-            warn!(target: LOG_TARGET, "❌ NEWVIEW from {from} with epoch {} but current epoch is {}", high_pc.epoch(), epoch_state.epoch());
+        if high_pc.epoch() != epoch_state.epoch() || timeout.epoch() != epoch_state.epoch() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NEWVIEW from {from} with qc epoch {} / timeout epoch {} but current epoch is {}",
+                high_pc.epoch(),
+                timeout.epoch(),
+                epoch_state.epoch()
+            );
             return Ok(());
         }
 
         if timeout_height < current_height {
             warn!(target: LOG_TARGET, "❌ Ignoring NEWVIEW for {timeout_height} less than the current {current_height}.");
+            return Ok(());
+        }
+
+        if timeout_height > current_height.saturating_add(MAX_NEWVIEW_LOOKAHEAD) {
+            warn!(
+                target: LOG_TARGET,
+                "🗑️ Discarding NEWVIEW for {timeout_height} from {from}: it is too far ahead of our current view {}/{current_height}",
+                epoch_state.epoch()
+            );
+            return Ok(());
+        }
+
+        let is_eligible_sender = epoch_state
+            .local_committee()
+            .index_of_public_key(timeout.public_key())
+            .and_then(|index| epoch_state.local_committee().get(index))
+            .is_some_and(|member| member.address == from);
+        if !is_eligible_sender {
+            warn!(
+                target: LOG_TARGET,
+                "❌ Ignoring NEWVIEW from {from}: signer {} is not a matching member of the local committee",
+                timeout.public_key()
+            );
+            return Ok(());
+        }
+
+        // Verify the sender's timeout signature before loading skip sets, verifying 2f+1 QC signatures,
+        // triggering FallenBehind sync, or mutating HighPc.
+        let signed_timeout = SignedTimeoutVote {
+            message: timeout.to_message(self.proposal_vote_collector.network()),
+            signature: &timeout.signature,
+        };
+        if !self.proposal_vote_collector.signing_service().verify(&signed_timeout) {
+            warn!(
+                target: LOG_TARGET,
+                "❌ Ignoring NEWVIEW from {from}: invalid timeout vote signature"
+            );
             return Ok(());
         }
 
@@ -222,6 +267,25 @@ where TConsensusSpec: ConsensusSpec
                 qc_id: qc.calculate_id(),
                 qc_epoch: qc.epoch(),
                 current_epoch: epoch_state.epoch(),
+            });
+        }
+        let local_shard_group = epoch_state.local_committee_info().shard_group();
+        if qc.shard_group() != local_shard_group {
+            return Err(ProposalValidationError::InvalidShardGroup {
+                block_id: qc.calculate_block_id(),
+                shard_group: qc.shard_group(),
+                details: format!(
+                    "QC shard group {} does not match local shard group {}",
+                    qc.shard_group(),
+                    local_shard_group
+                ),
+            });
+        }
+        if qc.decision() != QuorumDecision::Accept {
+            return Err(ProposalValidationError::JustifyBlockInvalid {
+                proposed_by: String::new(),
+                block_id: qc.calculate_block_id(),
+                details: format!("QC has decision {:?}, expected Accept", qc.decision()),
             });
         }
         check_quorum_certificate_signatures::<TConsensusSpec>(

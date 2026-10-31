@@ -234,38 +234,41 @@ impl ChangeLog {
     }
 
     /// Puts every DOWN, then every UP, then every validator fee withdrawal in `diff`, calling `on_put` with each
-    /// DOWN and UP as it is recorded. A failure part way leaves the changes before it recorded.
+    /// DOWN and UP once all changes in `diff` succeed. A failure part way leaves `self` and `on_put` untouched.
     pub fn put_diff<B, F>(&mut self, base: &B, diff: &SubstateDiff, mut on_put: F) -> Result<(), SubstateStoreError>
     where
         B: SubstateLayer,
         F: FnMut(&SubstateChange),
     {
+        let mut staged = self.clone();
+        let start_index = staged.changes.len();
         let num_preshards = base.num_preshards();
         for (id, version) in diff.down_iter() {
             let id = VersionedSubstateId::new(id.clone(), *version);
             let shard = id.to_shard(num_preshards);
             debug!(target: LOG_TARGET, "🔽️ Down: {id} {shard}");
-            self.put_then(base, SubstateChange::Down { id, shard }, &mut on_put)?;
+            staged.put(base, SubstateChange::Down { id, shard })?;
         }
 
         for (id, substate) in diff.up_iter() {
             let vid = VersionedSubstateIdRef::new(id, substate.version());
             let shard = vid.to_shard(num_preshards);
             debug!(target: LOG_TARGET, "🔼️ Up: {} v{} {}", id, substate.version(), shard);
-            self.put_then(
+            staged.put(
                 base,
                 SubstateChange::Up {
                     id: id.clone(),
                     shard,
                     substate: Box::new(substate.clone()),
                 },
-                &mut on_put,
             )?;
         }
 
+        let after_up_index = staged.changes.len();
+
         for withdraw in diff.validator_fee_withdrawals() {
             let id = withdraw.address.into();
-            self.update_in_place(
+            staged.update_in_place(
                 base,
                 &id,
                 |value_mut| {
@@ -299,6 +302,11 @@ impl ChangeLog {
                 },
             )?;
         }
+
+        for change in &staged.changes[start_index..after_up_index] {
+            on_put(change);
+        }
+        *self = staged;
 
         Ok(())
     }

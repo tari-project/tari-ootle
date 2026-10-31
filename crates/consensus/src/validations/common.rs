@@ -25,7 +25,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::consensus_models::{Block, BlockHeader};
 use tari_ootle_transaction::Network;
-use tari_sidechain::{FixedHash, ProposalVoteMessage, QcSignatures, QcSignaturesError, SignerBitmap};
+use tari_sidechain::{FixedHash, ProposalVoteMessage, QcSignatures, QcSignaturesError, QuorumDecision, SignerBitmap};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
@@ -317,6 +317,24 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
             justify_block_height: qc.height(),
             candidate_block_height: candidate_block.height(),
+        });
+    }
+    if qc.shard_group() != candidate_block.shard_group() {
+        return Err(ProposalValidationError::InvalidShardGroup {
+            block_id: *candidate_block.id(),
+            shard_group: qc.shard_group(),
+            details: format!(
+                "Justify QC shard group {} does not match candidate block shard group {}",
+                qc.shard_group(),
+                candidate_block.shard_group()
+            ),
+        });
+    }
+    if qc.decision() != QuorumDecision::Accept {
+        return Err(ProposalValidationError::JustifyBlockInvalid {
+            proposed_by: candidate_block.proposed_by().to_string(),
+            block_id: *candidate_block.id(),
+            details: format!("Justify QC has decision {:?}, expected Accept", qc.decision()),
         });
     }
 

@@ -3964,6 +3964,7 @@ where
     }
 
     fn required_fee_payment(&self) -> u64 {
+        let _ = self.invoke_modules_on_before_finalize();
         self.tracker.required_fee_payment()
     }
 

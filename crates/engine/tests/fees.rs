@@ -1508,3 +1508,61 @@ fn a_dry_run_estimate_pays_for_the_submission_at_the_fee_scale() {
         );
     }
 }
+
+#[test]
+fn fee_intent_underpaying_its_own_execution_is_rejected_before_the_main_intent() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    let state_template = test.get_template_address("State");
+    test.enable_fees();
+
+    // Measure the fee intent's breakdown when it has no main intent.
+    test.set_dry_run(true);
+    let probe = test
+        .try_execute(
+            test.transaction()
+                .pay_fee_from_component(account, 100_000u64)
+                .build_and_seal(&key),
+            vec![owner_token.clone()],
+        )
+        .unwrap();
+    let breakdown = probe.finalize.fee_receipt.fee_breakdown();
+    let wasm_charge = breakdown.get(FeeSource::WasmExecution);
+    assert!(wasm_charge > 0);
+    let state_only_fee = breakdown.get_total() - wasm_charge;
+    // Pay enough to cover all non-execution charges of the fee intent, but 1 short of its execution charges.
+    let underfunded_fee = state_only_fee + wasm_charge - 1;
+    let probe_at_underfunded = test
+        .try_execute(
+            test.transaction()
+                .pay_fee_from_component(account, underfunded_fee)
+                .build_and_seal(&key),
+            vec![owner_token.clone()],
+        )
+        .unwrap();
+    let fee_intent_wasm_points = probe_at_underfunded.wasm_execution_points;
+
+    test.set_dry_run(false);
+    let result = test
+        .try_execute(
+            test.transaction()
+                .pay_fee_from_component(account, underfunded_fee)
+                .call_function(state_template, "new", args![])
+                .build_and_seal(&key),
+            vec![owner_token],
+        )
+        .unwrap();
+
+    assert!(
+        matches!(
+            result.finalize.result,
+            TransactionResult::Reject(RejectReason::InsufficientFeesPaid(_))
+        ),
+        "expected Reject(InsufficientFeesPaid), got {:?}",
+        result.finalize.result
+    );
+    assert_eq!(result.wasm_execution_points, fee_intent_wasm_points);
+    assert!(result.finalize.fee_receipt.fee_breakdown().get(FeeSource::WasmExecution) > 0);
+    assert!(result.finalize.fee_receipt.fee_breakdown().get(FeeSource::NativeExecution) > 0);
+}
+

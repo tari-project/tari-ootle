@@ -139,6 +139,15 @@ impl FeeState {
         self.fee_charges().get_total()
     }
 
+    /// Charges other than WASM and native execution metering, at the execution epoch's fee scale.
+    pub fn non_execution_charges(&self) -> u64 {
+        let charges = self.fee_charges();
+        charges
+            .get_total()
+            .saturating_sub(charges.get(FeeSource::WasmExecution))
+            .saturating_sub(charges.get(FeeSource::NativeExecution))
+    }
+
     pub fn total_payments(&self) -> u64 {
         self.running_payments_total
     }

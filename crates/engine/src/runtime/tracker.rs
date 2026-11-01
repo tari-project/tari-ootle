@@ -258,7 +258,9 @@ impl<TStore: StateReader> StateTracker<TStore> {
             if fee_state.is_dry_run() {
                 return None;
             }
-            let unspent = fee_state.total_payments().saturating_sub(fee_state.total_charges());
+            let unspent = fee_state
+                .total_payments()
+                .saturating_sub(fee_state.non_execution_charges());
             Some(ComputeAllowance {
                 // `prices_execution` above is the only case that yields no figure, so nothing here
                 // may widen the allowance by failing to produce one. The rate is the fee table's, so

@@ -327,6 +327,36 @@ where
     pub async fn verified_shard_state_versions(
         &self,
     ) -> Result<HashMap<Shard, CheckpointStateVersion>, ValidatorSetApiError> {
+        let verified = self.verified_shard_groups().await?;
+        let versions = verified
+            .values()
+            .flat_map(|group| {
+                group.versions.iter().map(|&(shard, state_version)| {
+                    (shard, CheckpointStateVersion {
+                        epoch: group.epoch,
+                        state_version,
+                    })
+                })
+            })
+            .collect();
+        Ok(versions)
+    }
+
+    /// The `(epoch, shard_group)` layout of the latest verified end-of-epoch checkpoints across all shard groups,
+    /// sorted in shard order.
+    pub async fn verified_checkpoint_layout(&self) -> Result<Vec<(Epoch, ShardGroup)>, ValidatorSetApiError> {
+        let verified = self.verified_shard_groups().await?;
+        let mut layout = verified
+            .into_iter()
+            .map(|(shard_group, group)| (group.epoch, shard_group))
+            .collect::<Vec<_>>();
+        layout.sort_by_key(|&(_, shard_group)| shard_group);
+        Ok(layout)
+    }
+
+    async fn verified_shard_groups(
+        &self,
+    ) -> Result<HashMap<ShardGroup, VerifiedShardGroupVersions>, ValidatorSetApiError> {
         let trusted = match self.latest()? {
             Some(trusted) => trusted,
             None => self.sync().await?,
@@ -353,19 +383,8 @@ where
             };
             verified.insert(entry.shard_group, group_versions);
         }
-        let versions = verified
-            .values()
-            .flat_map(|group| {
-                group.versions.iter().map(|&(shard, state_version)| {
-                    (shard, CheckpointStateVersion {
-                        epoch: group.epoch,
-                        state_version,
-                    })
-                })
-            })
-            .collect();
-        self.shared.cache_shard_group_versions(verified);
-        Ok(versions)
+        self.shared.cache_shard_group_versions(verified.clone());
+        Ok(verified)
     }
 
     /// The state versions that `entry`, the latest checkpoint the indexer lists for its shard group, commits, once it

@@ -42,6 +42,7 @@ impl IsNotFoundError for ValidatorNodeClientError {
     fn is_not_found_error(&self) -> bool {
         match self {
             Self::RequestFailedWithStatus { code, .. } => *code == 404,
+            Self::RequestFailed { source } => source.status() == Some(reqwest::StatusCode::NOT_FOUND),
             _ => false,
         }
     }

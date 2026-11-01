@@ -157,8 +157,42 @@ impl ValidatorNodeClient {
         self.send_request("prepare_layer_one_transaction", request).await
     }
 
+    pub async fn get_tx_pool(&mut self) -> Result<GetTxPoolResponse, ValidatorNodeClientError> {
+        self.send_request("get_tx_pool", json!({})).await
+    }
+
+    pub async fn get_filtered_blocks_count(
+        &mut self,
+        request: GetFilteredBlocksCountRequest,
+    ) -> Result<GetBlocksCountResponse, ValidatorNodeClientError> {
+        self.send_request("get_filtered_blocks_count", request).await
+    }
+
+    pub async fn get_mempool_stats(&mut self) -> Result<GetMempoolStatsResponse, ValidatorNodeClientError> {
+        self.send_request("get_mempool_stats", json!({})).await
+    }
+
+    pub async fn get_shard_key(
+        &mut self,
+        request: GetShardKeyRequest,
+    ) -> Result<GetShardKeyResponse, ValidatorNodeClientError> {
+        self.send_request("get_shard_key", request).await
+    }
+
+    pub async fn get_all_vns(&mut self, request: GetAllVnsRequest) -> Result<GetAllVnsResponse, ValidatorNodeClientError> {
+        self.send_request("get_all_vns", request).await
+    }
+
+    pub async fn get_comms_stats(&mut self) -> Result<GetCommsStatsResponse, ValidatorNodeClientError> {
+        self.send_request("get_comms_stats", json!({})).await
+    }
+
+    pub async fn get_connections(&mut self) -> Result<GetConnectionsResponse, ValidatorNodeClientError> {
+        self.send_request("get_connections", json!({})).await
+    }
+
     fn next_request_id(&mut self) -> i64 {
-        self.request_id += 1;
+        self.request_id = self.request_id.wrapping_add(1);
         self.request_id
     }
 
@@ -184,7 +218,8 @@ impl ValidatorNodeClient {
             .post(self.endpoint.clone())
             .body(request_json.to_string())
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
         let val = resp.json().await?;
         let resp = jsonrpc_result(val)?;
         // Response might not deserialize to R....
@@ -198,8 +233,8 @@ impl ValidatorNodeClient {
     }
 }
 
-fn jsonrpc_result(val: json::Value) -> Result<json::Value, ValidatorNodeClientError> {
-    if let Some(err) = val.get("error") {
+fn jsonrpc_result(mut val: json::Value) -> Result<json::Value, ValidatorNodeClientError> {
+    if let Some(err) = val.get("error").filter(|err| !err.is_null()) {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
         return Err(ValidatorNodeClientError::RequestFailedWithStatus {
@@ -209,9 +244,61 @@ fn jsonrpc_result(val: json::Value) -> Result<json::Value, ValidatorNodeClientEr
     }
 
     let result = val
-        .get("result")
+        .get_mut("result")
+        .map(json::Value::take)
         .ok_or_else(|| ValidatorNodeClientError::InvalidResponse {
             message: "Missing result field".to_string(),
         })?;
-    Ok(result.clone())
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::optional::IsNotFoundError;
+
+    use super::*;
+
+    #[test]
+    fn jsonrpc_result_accepts_null_error_field() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "size": 42 },
+            "error": null
+        });
+        let result = jsonrpc_result(payload).unwrap();
+        let stats: GetMempoolStatsResponse = serde_json::from_value(result).unwrap();
+        assert_eq!(stats.size, 42);
+    }
+
+    #[test]
+    fn jsonrpc_result_extracts_error_code_and_message() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": 404,
+                "message": "Substate not found"
+            }
+        });
+        let err = jsonrpc_result(payload).unwrap_err();
+        assert!(err.is_not_found_error());
+        assert!(matches!(
+            err,
+            ValidatorNodeClientError::RequestFailedWithStatus {
+                code: 404,
+                ref message
+            } if message == "Substate not found"
+        ));
+    }
+
+    #[test]
+    fn jsonrpc_result_rejects_missing_result_field() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1
+        });
+        let err = jsonrpc_result(payload).unwrap_err();
+        assert!(matches!(err, ValidatorNodeClientError::InvalidResponse { .. }));
+    }
 }

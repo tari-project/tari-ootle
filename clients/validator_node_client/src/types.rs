@@ -265,7 +265,7 @@ pub struct ListBlocksResponse {
     pub blocks: Vec<Block>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetTxPoolResponse {
     pub tx_pool: Vec<TransactionPoolRecord>,
@@ -469,7 +469,7 @@ pub struct AddPeerRequest {
 )]
 pub struct AddPeerResponse {}
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -517,7 +517,7 @@ pub struct GetFilteredBlocksCountRequest {
     pub filter: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -536,7 +536,7 @@ pub struct Connection {
     pub user_agent: Option<Arc<String>>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -547,7 +547,7 @@ pub enum ConnectionDirection {
     Outbound,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -557,7 +557,7 @@ pub struct GetConnectionsResponse {
     pub connections: Vec<Connection>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetMempoolStatsResponse {
     pub size: usize,

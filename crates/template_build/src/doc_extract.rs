@@ -42,10 +42,39 @@ fn has_template_attr(attrs: &[syn::Attribute]) -> bool {
         .any(|attr| attr.path().segments.last().is_some_and(|seg| seg.ident == "template"))
 }
 
+fn is_stateless_template(attrs: &[syn::Attribute]) -> bool {
+    let mut stateless = false;
+    for attr in attrs {
+        if !attr.path().segments.last().is_some_and(|seg| seg.ident == "template") {
+            continue;
+        }
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("stateless") {
+                stateless = true;
+            }
+            Ok(())
+        });
+    }
+    stateless
+}
+
 fn extract_from_mod(m: &syn::ItemMod) -> Vec<FunctionDoc> {
     let Some((_, items)) = &m.content else {
         return Vec::new();
     };
+
+    if is_stateless_template(&m.attrs) {
+        return items
+            .iter()
+            .filter_map(|item| match item {
+                syn::Item::Fn(f) if matches!(f.vis, syn::Visibility::Public(_)) => Some(FunctionDoc {
+                    name: f.sig.ident.to_string(),
+                    doc: extract_doc_lines(&f.attrs),
+                }),
+                _ => None,
+            })
+            .collect();
+    }
 
     // The template name is taken from the first public struct or enum (mirrors template_macros).
     let Some(template_name) = items.iter().find_map(|item| match item {
@@ -95,9 +124,12 @@ fn extract_doc_lines(attrs: &[syn::Attribute]) -> String {
             continue;
         };
         let raw = s.value();
-        // Rustdoc strips one leading space if present, matching `///  text` -> ` text`.
-        let trimmed = raw.strip_prefix(' ').unwrap_or(&raw);
-        lines.push(trimmed.to_string());
+        for line in raw.split('\n') {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            // Rustdoc strips one leading space if present, matching `///  text` -> ` text`.
+            let trimmed = line.strip_prefix(' ').unwrap_or(line);
+            lines.push(trimmed.to_string());
+        }
     }
     lines.join("\n")
 }
@@ -268,5 +300,45 @@ mod tests {
         let out = parse(src);
         let names: Vec<_> = out.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn extracts_stateless_template_functions() {
+        let src = r#"
+            #[template(stateless, skip_cbor_derives)]
+            mod stateless_tpl {
+                pub struct HelperData;
+                impl HelperData {
+                    /// helper method, not a template function
+                    pub fn helper() {}
+                }
+
+                /// Stateless entry point.
+                pub fn execute() {}
+
+                fn internal() {}
+            }
+        "#;
+        let out = parse(src);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "execute");
+        assert_eq!(out[0].doc, "Stateless entry point.");
+    }
+
+    #[test]
+    fn strips_leading_space_on_each_line_of_multiline_doc_attr() {
+        let src = r#"
+            #[template]
+            mod tpl {
+                pub struct Tpl;
+                impl Tpl {
+                    #[doc = " Line one.\n Line two."]
+                    pub fn block_doc() {}
+                }
+            }
+        "#;
+        let out = parse(src);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].doc, "Line one.\nLine two.");
     }
 }

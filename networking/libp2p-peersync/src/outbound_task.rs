@@ -67,10 +67,9 @@ where
             })
             .await
             .map_err(|e| Error::CodecError(e.into()))?;
-        return Ok(Event::InboundRequestCompleted {
-            peer_id,
-            peers_sent: 1,
-            requested: 0,
+        return Ok(Event::PeerBatchReceived {
+            from_peer: peer_id,
+            new_peers: 0,
         });
     }
 
@@ -85,6 +84,7 @@ where
         .map_err(|e| Error::CodecError(e.into()))?;
     tracing::debug!("Sent want list (size={}) to peer {}", want_list.len(), peer_id);
 
+    let mut remaining_want_list = (*want_list).clone();
     let mut new_peers = 0;
     let mut received_responses = 0;
     while let Some(msg) = framed.next().await {
@@ -98,7 +98,7 @@ where
 
         match msg {
             Ok(msg) => {
-                let Some(rec) = validate_want_peer_response(peer_id, msg, &want_list, config)? else {
+                let Some(rec) = validate_want_peer_response(peer_id, msg, &mut remaining_want_list, config)? else {
                     continue;
                 };
 
@@ -132,7 +132,7 @@ where
 fn validate_want_peer_response(
     peer_id: PeerId,
     msg: proto::WantPeerResponse,
-    want_list: &WantList,
+    remaining_want_list: &mut WantList,
     config: &Config,
 ) -> Result<Option<SignedPeerRecord>, Error> {
     let Some(peer) = msg.peer else {
@@ -153,7 +153,7 @@ fn validate_want_peer_response(
     };
 
     let subject_peer_id = rec.to_peer_id();
-    if !want_list.contains(&subject_peer_id) {
+    if !remaining_want_list.remove(&subject_peer_id) {
         return Err(Error::InvalidMessage {
             peer_id,
             details: format!("Peer {peer_id} sent us a peer we didnt request"),
@@ -388,6 +388,45 @@ mod tests {
                 other => panic!("expected InvalidMessage, got {other:?}"),
             }
             assert!(store.get(&skewed_peer).await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn outbound_rejects_duplicate_peer_record_in_batch() {
+        block_on(async {
+            let responder_peer = PeerId::random();
+
+            let kp1 = Arc::new(identity::Keypair::generate_ed25519());
+            let mut local1 = LocalPeerRecord::new(kp1);
+            local1.add_address("/ip4/127.0.0.1/tcp/9104".parse().unwrap());
+            let rec1 = SignedPeerRecord::from(local1);
+            let peer1 = rec1.to_peer_id();
+
+            let peer2 = PeerId::random();
+            let want_list = Arc::new([peer1, peer2].into_iter().collect::<WantList>());
+
+            let mut framed = make_outbound_framed(vec![
+                proto::WantPeerResponse {
+                    peer: Some(rec1.clone().into()),
+                },
+                proto::WantPeerResponse {
+                    peer: Some(rec1.into()),
+                },
+            ]);
+            let store = MemoryPeerStore::new();
+
+            let err = outbound_request_want_list_task_inner(
+                responder_peer,
+                &mut framed,
+                store,
+                want_list,
+                None,
+                &Config::default(),
+            )
+            .await
+            .unwrap_err();
+
+            assert!(matches!(err, Error::InvalidMessage { peer_id, .. } if peer_id == responder_peer));
         });
     }
 }

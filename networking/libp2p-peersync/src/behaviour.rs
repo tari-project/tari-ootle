@@ -176,8 +176,17 @@ where TPeerStore: PeerStore
         &self.peer_store
     }
 
-    fn on_connection_closed(&mut self, ConnectionClosed { peer_id, .. }: ConnectionClosed) {
-        self.active_outbound_connections.remove(&peer_id);
+    fn on_connection_closed(
+        &mut self,
+        ConnectionClosed {
+            peer_id,
+            connection_id,
+            ..
+        }: ConnectionClosed,
+    ) {
+        if self.active_outbound_connections.get(&peer_id) == Some(&connection_id) {
+            self.active_outbound_connections.remove(&peer_id);
+        }
         if let Some(pos) = self.pending_syncs.iter().position(|p| *p == peer_id) {
             self.pending_syncs.remove(pos);
             self.pending_events

@@ -110,6 +110,7 @@ where TStore: PeerStore
     fn on_dial_upgrade_error(&mut self, error: DialUpgradeError<(), Protocol<StreamProtocol>>) {
         match error.error {
             StreamUpgradeError::Timeout => {
+                self.aquired = None;
                 self.pending_events.push_back(Event::OutboundFailure {
                     peer_id: self.peer_id,
                     error: Error::DialUpgradeError,
@@ -121,6 +122,8 @@ where TStore: PeerStore
                 // successfully communicate with other protocols already.
                 // An event is reported to permit user code to react to the fact that
                 // the remote peer does not support the requested protocol(s).
+                self.aquired = None;
+                self.is_complete = true;
                 self.pending_events.push_back(Event::OutboundFailure {
                     peer_id: self.peer_id,
                     error: Error::ProtocolNotSupported,
@@ -137,6 +140,7 @@ where TStore: PeerStore
     fn on_fully_negotiated_outbound(&mut self, outbound: FullyNegotiatedOutbound<Protocol<StreamProtocol>, ()>) {
         if self.current_want_list.is_empty() && self.pending_local_peer_record.is_none() {
             tracing::trace!("No peers wanted or no local peer record update, ignoring outbound stream");
+            self.aquired = None;
             return;
         }
         tracing::debug!(
@@ -159,6 +163,7 @@ where TStore: PeerStore
         );
 
         if self.tasks.try_push(fut).is_err() {
+            self.aquired = None;
             tracing::warn!("Dropping outbound peer sync because we are at capacity")
         }
     }
@@ -228,6 +233,7 @@ where TStore: PeerStore
                 return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
             },
             Poll::Ready(Err(err)) => {
+                self.aquired = None;
                 return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Error(Error::Timeout(
                     err,
                 ))));
@@ -293,11 +299,15 @@ where TStore: PeerStore
         match action {
             HandlerAction::PushLocalRecord(local_record) => {
                 self.is_complete = false;
+                self.must_request_substream = true;
                 self.pending_local_peer_record = Some(local_record);
             },
             HandlerAction::WantPeers(want_list) => {
                 // Sync from existing connections if there are more want-peers
-                self.is_complete = !want_list.is_empty();
+                self.is_complete = want_list.is_empty() && self.pending_local_peer_record.is_none();
+                if !want_list.is_empty() {
+                    self.must_request_substream = true;
+                }
                 self.current_want_list = want_list;
             },
         }

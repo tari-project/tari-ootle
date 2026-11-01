@@ -544,6 +544,13 @@ where TConsensusSpec: ConsensusSpec
                 proposal.epoch(),
                 local_committee_info.epoch(),
             );
+            if proposal.epoch() > *epoch_range.end() {
+                return Err(ProposalValidationError::FutureEpoch {
+                    block_id: proposal.calculate_block_id(),
+                    current_epoch: epoch,
+                    block_epoch: proposal.epoch(),
+                });
+            }
             return Err(ProposalValidationError::ForeignProposalInvalid {
                 block_id: proposal.calculate_block_id(),
                 shard_group: proposal.shard_group_unchecked(),
@@ -1248,5 +1255,15 @@ mod tests {
         pending.remove(&shared);
         assert!(!pending.is_awaiting_reply(&shared, &foreign));
         assert!(!pending.unretried.by_notifier.contains_key(&second));
+    }
+
+    #[test]
+    fn future_epoch_error_rejects_message_without_poisoning_block_id() {
+        let err = ProposalValidationError::FutureEpoch {
+            block_id: block_id(1),
+            current_epoch: Epoch(1),
+            block_epoch: Epoch(10),
+        };
+        assert!(err.rejects_message_not_block());
     }
 }

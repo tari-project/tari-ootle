@@ -618,6 +618,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         transaction.id(),
                         RejectReason::FailedToLockInputs(err.to_string()),
                     );
+                    if local_committee_info.is_all_local(transaction.transaction().known_outputs_iter()) {
+                        return Ok(PreparedTransaction::new_local_accept(execution, lock_status));
+                    }
                     return Ok(PreparedTransaction::new_multishard_executed(execution, lock_status));
                 }
                 // We're committing, and one or more of the outputs are foreign
@@ -789,6 +792,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
         // Pledge the local inputs
         let lock_status = store.try_lock_all(transaction_id, &requested_locks, false)?;
+        if let Some(err) = lock_status.hard_conflict() {
+            warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
+            let execution =
+                TransactionExecution::abort(&transaction_id, RejectReason::FailedToLockInputs(err.to_string()));
+            return Ok(PreparedTransaction::new_multishard_executed(execution, lock_status));
+        }
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PREPARE: Multishard transaction {transaction_id} requires additional input pledges. Partial evidence: {evidence}",

@@ -1820,4 +1820,39 @@ mod local_accept_from_local_prepared {
 
         assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
     }
+
+    #[test]
+    fn a_commit_proposed_for_an_aborted_local_prepared_transaction_is_refused() {
+        let (replica, id) = executing_cross_shard();
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        let mut rec = replica.pending_record(&id);
+        rec.set_remote_decision(Decision::Abort(AbortReason::ForeignPledgeInputConflict))
+            .set_transaction_fee(0);
+        let mut aborted_evidence = prepare.evidence.clone();
+        aborted_evidence.abort();
+        let forged_commit = MultiShardAtom {
+            decision: Decision::Commit,
+            transaction_fee: 0,
+            leader_fee: None,
+            evidence: aborted_evidence,
+            ..prepare
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::LocalAccept(forged_commit)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::ForeignPledgeInputConflict),
+                    remote: Decision::Commit,
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
 }

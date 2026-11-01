@@ -61,8 +61,8 @@ use crate::{
 pub struct Handler<TCodec: Codec> {
     peer_id: PeerId,
     protocol: StreamProtocol,
-    requested_stream: Option<MessageStream<TCodec::Message>>,
-    pending_stream: Option<MessageStream<TCodec::Message>>,
+    requested_streams: VecDeque<MessageStream<TCodec::Message>>,
+    pending_streams: VecDeque<MessageStream<TCodec::Message>>,
     pending_events: VecDeque<Event<TCodec::Message>>,
     pending_events_sender: mpsc::Sender<Event<TCodec::Message>>,
     pending_events_receiver: mpsc::Receiver<Event<TCodec::Message>>,
@@ -87,8 +87,8 @@ impl<TCodec: Codec> Handler<TCodec> {
         Self {
             peer_id,
             protocol,
-            requested_stream: None,
-            pending_stream: None,
+            requested_streams: VecDeque::new(),
+            pending_streams: VecDeque::new(),
             pending_events: VecDeque::new(),
             codec: TCodec::default(),
             pending_events_sender,
@@ -114,10 +114,10 @@ where TCodec: Codec + Send + Clone + 'static
     }
 
     fn on_dial_upgrade_error(&mut self, error: DialUpgradeError<(), Protocol<StreamProtocol>>) {
-        let stream = self
-            .requested_stream
-            .take()
-            .expect("negotiated a stream without a requested stream");
+        let Some(stream) = self.requested_streams.pop_front() else {
+            tracing::warn!("negotiated a stream without a requested stream");
+            return;
+        };
 
         match error.error {
             StreamUpgradeError::Timeout => {
@@ -156,23 +156,28 @@ where TCodec: Codec + Send + Clone + 'static
         let codec = self.codec.clone();
         let (peer_stream, _protocol) = outbound.protocol;
 
-        let msg_stream = self
-            .requested_stream
-            .take()
-            .expect("negotiated outbound stream without a requested stream");
+        let Some(msg_stream) = self.requested_streams.pop_front() else {
+            tracing::warn!("negotiated outbound stream without a requested stream");
+            return;
+        };
 
+        let stream_id = msg_stream.stream_id();
         let events = self.pending_events_sender.clone();
-
-        self.pending_events.push_back(Event::OutboundStreamOpened {
-            peer_id: self.peer_id,
-            stream_id: msg_stream.stream_id(),
-        });
-
         let fut = outbound_loop(codec, peer_stream, msg_stream, events, self.timeouts).boxed();
 
         if self.outbound_tasks.try_push(fut).is_err() {
-            tracing::warn!("Dropping outbound stream because we are at capacity")
+            tracing::warn!("Dropping outbound stream because we are at capacity");
+            self.pending_events.push_back(Event::StreamClosed {
+                peer_id: self.peer_id,
+                stream_id,
+            });
+            return;
         }
+
+        self.pending_events.push_back(Event::OutboundStreamOpened {
+            peer_id: self.peer_id,
+            stream_id,
+        });
     }
 
     fn on_fully_negotiated_inbound(&mut self, inbound: FullyNegotiatedInbound<Protocol<StreamProtocol>, ()>) {
@@ -180,14 +185,14 @@ where TCodec: Codec + Send + Clone + 'static
         let peer_id = self.peer_id;
         let (stream, _protocol) = inbound.protocol;
         let events = self.pending_events_sender.clone();
-
-        self.pending_events.push_back(Event::InboundStreamOpened { peer_id });
-
         let fut = inbound_loop(codec, stream, peer_id, events, self.timeouts).boxed();
 
         if self.inbound_tasks.try_push(fut).is_err() {
-            tracing::warn!("Dropping inbound stream because we are at capacity")
+            tracing::warn!("Dropping inbound stream because we are at capacity");
+            return;
         }
+
+        self.pending_events.push_back(Event::InboundStreamOpened { peer_id });
     }
 }
 
@@ -378,8 +383,8 @@ where TCodec: Codec + Send + Clone + 'static
         }
 
         // Open outbound stream.
-        if let Some(stream) = self.pending_stream.take() {
-            self.requested_stream = Some(stream);
+        if let Some(stream) = self.pending_streams.pop_front() {
+            self.requested_streams.push_back(stream);
 
             return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
                 protocol: SubstreamProtocol::new(
@@ -395,7 +400,7 @@ where TCodec: Codec + Send + Clone + 'static
     }
 
     fn on_behaviour_event(&mut self, stream: Self::FromBehaviour) {
-        self.pending_stream = Some(stream);
+        self.pending_streams.push_back(stream);
     }
 
     fn on_connection_event(
@@ -788,5 +793,38 @@ pub(crate) mod tests {
         );
         assert!(sink.send(b"later".to_vec()).is_err());
         assert!(handler.poll(&mut cx).is_pending());
+    }
+
+    #[test]
+    fn multiple_pending_outbound_streams_are_queued_in_order() {
+        let peer_id = PeerId::random();
+        let mut handler = Handler::<TestCodec>::new(peer_id, StreamProtocol::new("/test/1"), &Config::default());
+        let (_sink1, stream1) = stream::channel(1, peer_id);
+        let (_sink2, stream2) = stream::channel(2, peer_id);
+        handler.on_behaviour_event(stream1);
+        handler.on_behaviour_event(stream2);
+
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        for _ in 0..2 {
+            assert!(matches!(
+                handler.poll(&mut cx),
+                Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest { .. })
+            ));
+        }
+
+        for expected_id in [1, 2] {
+            handler.on_dial_upgrade_error(DialUpgradeError {
+                info: (),
+                error: StreamUpgradeError::NegotiationFailed,
+            });
+            match handler.poll(&mut cx) {
+                Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::OutboundFailure {
+                    stream_id,
+                    error: Error::ProtocolNotSupported,
+                    ..
+                })) => assert_eq!(stream_id, expected_id),
+                other => panic!("expected an outbound failure, got {:?}", other.map(|_| ())),
+            }
+        }
     }
 }

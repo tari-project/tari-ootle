@@ -553,7 +553,7 @@ where
         }
         let confirmed = stream::iter(unsettled)
             .map(|id| async move {
-                let lookup = self.get_substate(&id, None).await?;
+                let lookup = self.fetch_and_cache_substate(&id, None).await?;
                 Ok::<_, IndexerError>((id, lookup))
             })
             .buffer_unordered(BATCH_FETCH_CONCURRENCY)
@@ -667,7 +667,12 @@ where
             return Ok(InputSubstatesLookup::AllUp(found));
         }
 
-        let miss_ids = misses.iter().map(|req| req.substate_id()).collect::<Vec<_>>();
+        let miss_ids = misses
+            .iter()
+            .map(|req| req.substate_id())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
         let heads = self.fetch_and_cache_heads(&miss_ids).await?;
 
         for req in misses {
@@ -693,7 +698,7 @@ where
                 });
             let lookup = match from_batch {
                 Some(lookup) => lookup,
-                None => self.get_substate(req.substate_id(), req.version()).await?,
+                None => self.fetch_and_cache_substate(req.substate_id(), req.version()).await?,
             };
             if let Some(not_up) = InputSubstatesLookup::not_up(req.substate_id(), &lookup.result) {
                 return Ok(not_up);
@@ -772,9 +777,23 @@ where
                     // An unverified entry is not cached while verification is on, so the next read
                     // retries for a proven copy instead of pinning an unproven value.
                     if self.cache_writes && (verified || !self.verify_substate_proofs) {
-                        self.substate_cache
-                            .write(&substate.substate_id, entry, watermark)
-                            .await?;
+                        match tokio::time::timeout(
+                            WARMING_WRITE_TIMEOUT,
+                            self.substate_cache.write(&substate.substate_id, entry, watermark),
+                        )
+                        .await
+                        {
+                            Ok(Ok(())) => {},
+                            Ok(Err(e)) => {
+                                warn!(target: LOG_TARGET, "Failed to cache substate {}: {e}", substate.substate_id)
+                            },
+                            Err(_) => warn!(
+                                target: LOG_TARGET,
+                                "Answered the batch lookup of {} without caching it: the cache write did not complete within {}ms",
+                                substate.substate_id,
+                                WARMING_WRITE_TIMEOUT.as_millis()
+                            ),
+                        }
                     }
                 }
 
@@ -3653,5 +3672,42 @@ mod tests {
             assert_eq!(template.to_template_address(), legitimate_address);
             assert_eq!(template.template_name.as_ref(), "Legit");
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_or_failed_batch_cache_writes_still_answer_the_lookup() {
+        let ids = vec![component_id(1)];
+        let (manager, _) = manager(FakeNetwork {
+            live: live(&ids),
+            ..Default::default()
+        });
+        *manager.substate_cache.2.lock().unwrap() = CacheWrites::Stall;
+
+        let started = tokio::time::Instant::now();
+        let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
+        assert!(found.contains_key(&ids[0]));
+        assert_eq!(started.elapsed(), WARMING_WRITE_TIMEOUT);
+
+        *manager.substate_cache.2.lock().unwrap() = CacheWrites::Fail;
+        let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
+        assert!(found.contains_key(&ids[0]));
+    }
+
+    #[tokio::test]
+    async fn unsettled_batch_item_with_expired_cached_proof_refetches_from_committee() {
+        let ids = vec![component_id(1)];
+        let (mut manager, network) = manager(FakeNetwork {
+            live: live(&ids),
+            omitted_from_batches: ids.iter().cloned().collect(),
+            ..Default::default()
+        });
+        manager.committee_provider.3 = Epoch(3);
+        let manager = manager.with_substate_proof_verification(true);
+        seed_cache(&manager, &ids, Some(cached_proof()));
+
+        let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
+        assert!(found.contains_key(&ids[0]));
+        assert_eq!(network.batch_requests.load(Ordering::Relaxed), 1);
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
     }
 }

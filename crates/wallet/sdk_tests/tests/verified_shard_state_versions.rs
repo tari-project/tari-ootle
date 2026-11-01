@@ -10,7 +10,7 @@ mod support;
 use std::collections::HashMap;
 
 use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, shard::Shard};
-use tari_ootle_light_client::test_fixtures::{CheckpointSpec, ValidatorSetFixture, checkpoint_entry, high};
+use tari_ootle_light_client::test_fixtures::{CheckpointSpec, ValidatorSetFixture, checkpoint_entry, high, low};
 use tari_ootle_wallet_sdk::{IndexerTrust, apis::validator_set::ValidatorSetApiError, models::CheckpointStateVersion};
 
 use crate::support::{ProvingNetwork, TestWithNetwork};
@@ -206,4 +206,28 @@ async fn an_empty_list_has_no_shard_state_versions() {
     let (network, test) = anchored_wallet(&sets).await;
     network.list_shard_group_checkpoints(vec![]);
     assert!(verified_versions(&test).await.is_empty());
+}
+
+#[tokio::test]
+async fn verified_checkpoint_layout_returns_sorted_verified_shard_groups_and_rejects_unverified_checkpoints() {
+    let sets = sets();
+    let (network, test) = anchored_wallet(&sets).await;
+
+    let layout = test
+        .sdk()
+        .validator_set_api()
+        .verified_checkpoint_layout()
+        .await
+        .unwrap();
+    assert_eq!(layout, vec![(Epoch(2), low()), (Epoch(2), high())]);
+
+    end_low_epoch(&network, &sets, 2, 20);
+    network.serve_latest_checkpoint(high_checkpoint(&sets, 2, &sets[0], 99));
+    let err = test
+        .sdk()
+        .validator_set_api()
+        .verified_checkpoint_layout()
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ValidatorSetApiError::Unverified(_)));
 }

@@ -435,7 +435,11 @@ impl HandlerContext {
             return Ok(cached.epoch);
         }
 
-        let epoch = network.get_current_epoch().await?;
+        let epoch = if self.wallet_sdk.sdk_config().indexer_trust.is_verify() {
+            self.wallet_sdk.validator_set_api().sync().await?.epoch()
+        } else {
+            network.get_current_epoch().await?
+        };
         *self.cached_epoch.lock().unwrap() = Some(CachedEpoch {
             epoch,
             read_at: Instant::now(),

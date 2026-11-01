@@ -253,6 +253,8 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         diesel::update(validator_nodes::table)
             .set(validator_nodes::end_epoch.eq(deactivation_epoch.as_u64() as i64))
             .filter(validator_nodes::public_key.eq(public_key.as_bytes()))
+            .filter(validator_nodes::start_epoch.le(deactivation_epoch.as_u64() as i64))
+            .filter(validator_nodes::end_epoch.is_null())
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

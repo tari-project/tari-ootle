@@ -64,13 +64,13 @@ impl EpochTicker for RealTimeEpochTicker {
         let calculated_epoch = self.calc_current_epoch();
 
         // Emit quickly to the initial epoch
-        if calculated_epoch < self.initial_epoch {
+        if self.epoch < self.initial_epoch {
             let epoch = self.increment_epoch();
             let epoch_hash = calc_static_epoch_hash(epoch);
             return Poll::Ready(Some(EpochTickerData {
                 epoch,
                 epoch_hash,
-                done_for_now: false,
+                done_for_now: calculated_epoch <= epoch && self.epoch >= self.initial_epoch,
             }));
         }
 
@@ -86,21 +86,20 @@ impl EpochTicker for RealTimeEpochTicker {
             }));
         }
 
-        if let Some(interval_mut) = self.interval.as_mut() {
-            loop {
-                // Every tick, check if we need to emit a new epoch
-                ready!(interval_mut.poll_tick(cx));
+        while let Some(interval_mut) = self.interval.as_mut() {
+            // Every tick, check if we need to emit a new epoch
+            ready!(interval_mut.poll_tick(cx));
 
-                if calculated_epoch >= self.epoch {
-                    let epoch = self.increment_epoch();
-                    let epoch_hash = calc_static_epoch_hash(epoch);
-                    return Poll::Ready(Some(EpochTickerData {
-                        epoch,
-                        epoch_hash,
-                        // Catching up if calculated_epoch > self.epoch
-                        done_for_now: calculated_epoch == epoch,
-                    }));
-                }
+            let calculated_epoch = self.calc_current_epoch();
+            if calculated_epoch >= self.epoch {
+                let epoch = self.increment_epoch();
+                let epoch_hash = calc_static_epoch_hash(epoch);
+                return Poll::Ready(Some(EpochTickerData {
+                    epoch,
+                    epoch_hash,
+                    // Catching up if calculated_epoch > self.epoch
+                    done_for_now: calculated_epoch == epoch,
+                }));
             }
         }
         // Ticks have been disabled, never return any new epochs

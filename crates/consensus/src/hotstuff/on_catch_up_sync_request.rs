@@ -148,7 +148,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
         };
 
         let mut start_height = msg.block_height.max(NodeHeight(1));
-        while start_height < leaf_block.height() {
+        while start_height <= leaf_block.height() {
             let result = store.with_read_tx(|tx| {
                 Block::get_all_blocks_between(tx, msg.epoch, start_height, leaf_block.height(), false, 100)
             });
@@ -174,7 +174,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
             start_height = blocks
                 .last()
                 .map(|b| b.height() + NodeHeight(1))
-                .unwrap_or(leaf_block.height());
+                .unwrap_or(leaf_block.height() + NodeHeight(1));
 
             info!(
                 target: LOG_TARGET,

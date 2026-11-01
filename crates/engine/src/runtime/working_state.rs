@@ -1304,10 +1304,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&self, address: T) -> Option<&AllocatedAddress> {
+        let scope = self.current_call_scope().ok()?;
         let substate_id = address.into();
         self.address_allocations
-            .values()
-            .find(|alloc| *alloc.substate_id() == substate_id)
+            .iter()
+            .find(|(id, alloc)| scope.is_address_allocation_in_scope(**id) && *alloc.substate_id() == substate_id)
+            .map(|(_, alloc)| alloc)
     }
 
     pub fn get_template_for_component(

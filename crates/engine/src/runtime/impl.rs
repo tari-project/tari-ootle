@@ -532,9 +532,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             // The hook component may still be an unused address allocation when the resource is acted upon in the
             // same call that creates it. For example, commonly a user creates a resource with initial supply and
             // deposits it into a vault before creating the component. In this case, we "skip" the hook.
-            if state
-                .get_allocated_address_by_address(auth_hook.component_address)
-                .is_some()
+            if let Some(alloc) = state.get_allocated_address_by_address(auth_hook.component_address) &&
+                alloc.template_address() == state.current_template().ok()
             {
                 return Ok(true);
             }
@@ -4079,6 +4078,10 @@ where
                         .as_ref()
                         .map(|public_key| id_provider.derive_new_component_address(&template, public_key))
                         .unwrap_or_else(|| id_provider.new_component_address())?;
+
+                    if state.substate_exists(&SubstateId::Component(address))? {
+                        return Err(RuntimeError::ComponentAlreadyExists { address });
+                    }
 
                     let id = state.new_address_allocation(address)?;
                     Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)

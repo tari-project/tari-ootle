@@ -251,3 +251,68 @@ fn it_scopes_address_allocations() {
         vec![],
     );
 }
+
+#[test]
+fn it_rejects_cross_template_component_allocation_hijack_and_unscoped_auth_hook_bypass() {
+    let mut test = TemplateTest::new(CRATE_PATH, [
+        "tests/templates/address_allocation",
+        "tests/templates/faucet",
+    ]);
+
+    let template_a = test.get_template_address("AddressAllocationTest");
+    let template_b = test.get_template_address("TestFaucet");
+    let pk = test.to_public_key_bytes();
+    let expected_addr = derive_component_address_from_public_key(&template_a, &pk);
+
+    // 1. A component address allocation created by `template_a` cannot be consumed by `template_b`
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_a, "allocate_and_pass_to_foreign_template", args![
+                pk,
+                template_b
+            ])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(
+        reason,
+        RuntimeError::AddressAllocationTemplateMismatch {
+            id: 0,
+            allocated_by: template_a,
+            used_by: template_b,
+        },
+    );
+
+    // 2. A child call frame that does not have the component address allocation in scope cannot skip
+    //    the resource auth hook for that allocated component address
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(
+                template_a,
+                "create_hooked_resource_and_call_unscoped_frame",
+                args![template_a],
+            )
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert!(
+        format!("{reason:?}").contains("has an auth hook on component"),
+        " unexpected reject reason: {reason:?}"
+    );
+
+    // 3. Allocating a public-key component address that already exists is rejected at allocation time
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_a, "create_for_pk", args![pk])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .add_input(expected_addr)
+            .call_function(template_a, "create_for_pk", args![pk])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(reason, RuntimeError::ComponentAlreadyExists { address: expected_addr });
+}

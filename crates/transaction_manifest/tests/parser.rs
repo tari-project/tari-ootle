@@ -1530,3 +1530,83 @@ fn doc_comments_and_attributes_are_ignored() {
     assert_eq!(instructions.len(), 1);
     assert_eq!(fee_instructions.len(), 1);
 }
+
+#[test]
+fn multi_segment_call_and_argument_paths_are_rejected() {
+    let cases = [
+        "fn main() { Foo::Bar::baz(); }",
+        "fn main() { let x = Foo::Bar::baz(); }",
+        "fn main() { ::Foo::bar(); }",
+        "fn main() { let x = ::Foo::bar(); }",
+        "fn main() { Foo::bar(Baz::Qux); }",
+    ];
+    for manifest in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("Expected syntax error for invalid path");
+        assert!(
+            err.to_string().contains("Invalid function call") || err.to_string().contains("Invalid path"),
+            "Unexpected error for `{manifest}`: {err}"
+        );
+    }
+}
+
+#[test]
+fn local_function_call_with_arguments_is_rejected() {
+    let manifest = r#"
+        fn helper() {
+            drop_all_proofs!();
+        }
+
+        fn main() {
+            helper(1);
+        }
+    "#;
+
+    let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("local function calls take no arguments");
+    assert!(err.to_string().contains("take no arguments"), "{err}");
+}
+
+#[test]
+fn duplicate_helper_function_and_tuple_bindings_are_rejected() {
+    let dup_fn = r#"
+        fn helper() {}
+        fn helper() {}
+        fn main() {}
+    "#;
+    let err = parse_manifest(dup_fn, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate helper function should fail");
+    assert!(err.to_string().contains("duplicate function `helper`"), "{err}");
+
+    let dup_tuple = r#"
+        fn main() {
+            let (a, a) = comp.redeem(100);
+        }
+    "#;
+    let err = parse_manifest(dup_tuple, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate identifier in tuple pattern should fail");
+    assert!(
+        err.to_string()
+            .contains("identifier `a` is bound more than once in the same pattern"),
+        "{err}"
+    );
+}
+
+#[test]
+fn zero_arg_macros_reject_arguments() {
+    let cases = [
+        "fn main() { let a = new_component_addr!(1); }",
+        "fn main() { let r = new_resource_addr!(1); }",
+        "fn main() { drop_all_proofs!(1); }",
+    ];
+    for manifest in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("zero-arg macro with arguments should fail");
+        assert!(err.to_string().contains("takes no arguments"), "{err}");
+    }
+}

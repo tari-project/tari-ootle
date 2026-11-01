@@ -273,7 +273,31 @@ impl Instruction {
     }
 
     pub fn is_pay_fee(&self) -> bool {
-        matches!(self, Self::PayFeeFromBucket { .. })
+        match self {
+            Self::PayFeeFromBucket { .. } => true,
+            Self::CallMethod { method, .. } => {
+                let method: &str = method;
+                method == "pay_fee" || method == "pay_fee_stealth"
+            },
+            _ => false,
+        }
+    }
+
+    /// Whether this instruction can record a fee payment in the engine (`PayFeeFromBucket`, `CallMethod`, or
+    /// `CallFunction`). A fee intent without at least one such instruction can never pay any fees.
+    pub fn may_pay_fee(&self) -> bool {
+        matches!(
+            self,
+            Self::PayFeeFromBucket { .. } | Self::CallMethod { .. } | Self::CallFunction { .. }
+        )
+    }
+
+    /// Whether this instruction is permitted inside a transaction's fee instructions.
+    pub fn is_allowed_in_fee_intent(&self) -> bool {
+        !matches!(
+            self,
+            Self::PublishTemplate { .. } | Self::UpdateComponentTemplate { .. }
+        )
     }
 
     /// Shift all workspace IDs in this instruction by the given offset.

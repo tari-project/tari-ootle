@@ -22,6 +22,10 @@ pub enum TransactionValidationError {
     TemplateNotFound { address: TemplateAddress },
     #[error("{transaction_id} has no fee instructions")]
     NoFeeInstructions { transaction_id: TransactionId },
+    #[error("Transaction {transaction_id} fee instructions contain no instruction capable of paying a fee")]
+    NoFeePaymentInFeeInstructions { transaction_id: TransactionId },
+    #[error("Transaction {transaction_id} contains an instruction that is not permitted in fee instructions")]
+    DisallowedFeeInstruction { transaction_id: TransactionId },
     #[error("Output substate exists in transaction {transaction_id}")]
     OutputSubstateExists { transaction_id: TransactionId },
     #[error("Validator fee claim instruction in transaction {transaction_id} contained invalid epoch {given_epoch}")]
@@ -199,6 +203,8 @@ impl TransactionValidationError {
 
             // Properties of the transaction itself, on which every node agrees.
             Self::NoFeeInstructions { .. } |
+            Self::NoFeePaymentInFeeInstructions { .. } |
+            Self::DisallowedFeeInstruction { .. } |
             Self::InvalidSignature |
             Self::MainSignerDidNotSign { .. } |
             Self::TransactionNotSigned { .. } |

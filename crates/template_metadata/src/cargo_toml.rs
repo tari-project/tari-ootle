@@ -33,83 +33,100 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         .get()
         .map_err(|_| CargoTomlError::InheritedField("version"))?
         .to_string();
-    let description = package
-        .description
-        .as_ref()
-        .and_then(|d| d.get().ok())
-        .cloned()
-        .unwrap_or_default();
-    let license = package.license.as_ref().and_then(|l| l.get().ok()).cloned();
-    let repository = package
-        .repository
-        .as_ref()
-        .and_then(|r| r.get().ok())
-        .map(|r| Url::parse(r))
-        .transpose()
-        .map_err(|e| CargoTomlError::InvalidUrl("repository", e))?;
+    let description = match package.description.as_ref() {
+        Some(d) => d.get().map_err(|_| CargoTomlError::InheritedField("description"))?.clone(),
+        None => String::new(),
+    };
+    let license = match package.license.as_ref() {
+        Some(l) => Some(l.get().map_err(|_| CargoTomlError::InheritedField("license"))?.clone()),
+        None => None,
+    };
+    let repository = match package.repository.as_ref() {
+        Some(r) => {
+            let repo = r.get().map_err(|_| CargoTomlError::InheritedField("repository"))?;
+            Some(Url::parse(repo).map_err(|e| CargoTomlError::InvalidUrl("repository", e))?)
+        },
+        None => None,
+    };
 
     // Read [package.metadata.tari-template]
-    let tari_template = package
-        .metadata
-        .as_ref()
-        .and_then(|m| m.get("tari-template"))
-        .and_then(|v| v.as_table());
+    let tari_template = match package.metadata.as_ref().and_then(|m| m.get("tari-template")) {
+        Some(v) => Some(
+            v.as_table()
+                .ok_or(CargoTomlError::InvalidFieldType("tari-template", "table"))?,
+        ),
+        None => None,
+    };
 
-    let tags = tari_template
-        .and_then(|t| t.get("tags"))
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        .unwrap_or_default();
+    let get_str = |field: &'static str| -> Result<Option<&str>, CargoTomlError> {
+        match tari_template.and_then(|t| t.get(field)) {
+            Some(v) => v
+                .as_str()
+                .map(Some)
+                .ok_or(CargoTomlError::InvalidFieldType(field, "string")),
+            None => Ok(None),
+        }
+    };
 
-    let category = tari_template
-        .and_then(|t| t.get("category"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let tags = match tari_template.and_then(|t| t.get("tags")) {
+        Some(v) => {
+            let arr = v
+                .as_array()
+                .ok_or(CargoTomlError::InvalidFieldType("tags", "array of strings"))?;
+            arr.iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(String::from)
+                        .ok_or(CargoTomlError::InvalidFieldType("tags", "array of strings"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        },
+        None => Vec::new(),
+    };
 
-    let commit_hash = tari_template
-        .and_then(|t| t.get("commit_hash"))
-        .and_then(|v| v.as_str())
+    let category = get_str("category")?.map(String::from);
+
+    let commit_hash = get_str("commit_hash")?
         .map(|s| gix_hash::ObjectId::from_hex(s.as_bytes()))
         .transpose()
         .map_err(CargoTomlError::InvalidCommitHash)?;
 
-    let documentation = tari_template
-        .and_then(|t| t.get("documentation"))
-        .and_then(|v| v.as_str())
+    let documentation = get_str("documentation")?
         .map(Url::parse)
         .transpose()
         .map_err(|e| CargoTomlError::InvalidUrl("documentation", e))?;
 
-    let homepage = tari_template
-        .and_then(|t| t.get("homepage"))
-        .and_then(|v| v.as_str())
+    let homepage = get_str("homepage")?
         .map(Url::parse)
         .transpose()
         .map_err(|e| CargoTomlError::InvalidUrl("homepage", e))?;
 
-    let logo_url = tari_template
-        .and_then(|t| t.get("logo_url"))
-        .and_then(|v| v.as_str())
+    let logo_url = get_str("logo_url")?
         .map(Url::parse)
         .transpose()
         .map_err(|e| CargoTomlError::InvalidUrl("logo_url", e))?;
 
-    let supersedes = tari_template
-        .and_then(|t| t.get("supersedes"))
-        .and_then(|v| v.as_str())
-        .map(TemplateAddress::from_hex)
+    let supersedes = get_str("supersedes")?
+        .map(|s| TemplateAddress::from_hex(s.strip_prefix("template_").unwrap_or(s)))
         .transpose()
         .map_err(|_| CargoTomlError::InvalidTemplateAddress("supersedes"))?;
 
-    let extra = tari_template
-        .and_then(|t| t.get("extra"))
-        .and_then(|v| v.as_table())
-        .map(|t| {
-            t.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect::<BTreeMap<String, String>>()
-        })
-        .unwrap_or_default();
+    let extra = match tari_template.and_then(|t| t.get("extra")) {
+        Some(v) => {
+            let table = v
+                .as_table()
+                .ok_or(CargoTomlError::InvalidFieldType("extra", "table of strings"))?;
+            table
+                .iter()
+                .map(|(k, val)| {
+                    val.as_str()
+                        .map(|s| (k.clone(), s.to_string()))
+                        .ok_or(CargoTomlError::InvalidFieldType("extra", "table of strings"))
+                })
+                .collect::<Result<BTreeMap<String, String>, _>>()?
+        },
+        None => BTreeMap::new(),
+    };
 
     Ok(TemplateMetadata {
         schema_version: SCHEMA_VERSION,
@@ -138,6 +155,8 @@ pub enum CargoTomlError {
     MissingPackageSection,
     #[error("Field '{0}' uses workspace inheritance which is not supported in this context")]
     InheritedField(&'static str),
+    #[error("Field '{0}' must be a {1}")]
+    InvalidFieldType(&'static str, &'static str),
     #[error("Invalid template address in field '{0}'")]
     InvalidTemplateAddress(&'static str),
     #[error("Invalid URL in field '{0}': {1}")]
@@ -222,5 +241,48 @@ edition = "2024"
 foo = "1.0"
 "#;
         assert!(from_cargo_toml_str(toml).is_err());
+    }
+
+    #[test]
+    fn accepts_prefixed_supersedes_and_rejects_invalid_field_types() {
+        let toml = r#"
+[package]
+name = "upgraded-template"
+version = "2.0.0"
+
+[package.metadata.tari-template]
+supersedes = "template_0000000000000000000000000000000000000000000000000000000000000001"
+"#;
+        let metadata = from_cargo_toml_str(toml).unwrap();
+        assert_eq!(
+            metadata.supersedes,
+            Some(
+                TemplateAddress::from_hex("0000000000000000000000000000000000000000000000000000000000000001").unwrap()
+            )
+        );
+
+        let bad_tags = r#"
+[package]
+name = "bad-tags"
+version = "1.0.0"
+
+[package.metadata.tari-template]
+tags = "not-an-array"
+"#;
+        assert!(matches!(
+            from_cargo_toml_str(bad_tags),
+            Err(CargoTomlError::InvalidFieldType("tags", _))
+        ));
+
+        let inherited_license = r#"
+[package]
+name = "inherited-license"
+version = "1.0.0"
+license.workspace = true
+"#;
+        assert!(matches!(
+            from_cargo_toml_str(inherited_license),
+            Err(CargoTomlError::InheritedField("license"))
+        ));
     }
 }

@@ -31,7 +31,15 @@ impl MetadataHash {
     /// Create a MetadataHash from a raw multihash byte slice.
     /// Returns `None` if the bytes are not a valid multihash or exceed the digest size limit.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        Multihash::from_bytes(bytes).ok().map(Self)
+        let mh = Multihash::<MAX_DIGEST_SIZE>::from_bytes(bytes).ok()?;
+        let digest_len = usize::from(mh.size());
+        if digest_len == 0 || (mh.code() == SHA2_256_CODE && digest_len != 32) {
+            return None;
+        }
+        if mh.to_bytes() != bytes {
+            return None;
+        }
+        Some(Self(mh))
     }
 
     /// Verify that this hash matches the given data by re-hashing with domain-separated SHA-256.
@@ -262,9 +270,16 @@ mod tests {
     #[test]
     fn from_bytes_rejects_invalid() {
         assert!(MetadataHash::from_bytes(&[0x12]).is_none());
+        // Empty digest
+        assert!(MetadataHash::from_bytes(&[0x12, 0x00]).is_none());
+        // Truncated SHA-256 digest (1 byte instead of 32)
+        assert!(MetadataHash::from_bytes(&[0x12, 0x01, 0xaa]).is_none());
         let hash = hash_data(b"test");
-        let bytes = hash.to_bytes();
+        let mut bytes = hash.to_bytes();
         assert!(MetadataHash::from_bytes(&bytes).is_some());
+        // Trailing bytes after a valid multihash must be rejected
+        bytes.push(0xff);
+        assert!(MetadataHash::from_bytes(&bytes).is_none());
     }
 
     #[test]

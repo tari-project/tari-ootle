@@ -104,9 +104,11 @@ impl BlockStore for Block {
             }
             let prepare_node = Block::get(&**tx, &commit_node)?;
             let last_executed = LastExecuted::get(&**tx, self.epoch())?;
-            let last_exec = prepare_node.as_last_executed();
-            on_commit_block_recurse(tx, &last_executed, prepare_node, &mut on_commit)?;
-            last_exec.set(tx)?;
+            if last_executed.height < prepare_node.height() {
+                let last_exec = prepare_node.as_last_executed();
+                on_commit_block_recurse(tx, &last_executed, prepare_node, &mut on_commit)?;
+                last_exec.set(tx)?;
+            }
         } else {
             debug!(
                 target: LOG_TARGET,

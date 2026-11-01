@@ -864,14 +864,20 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         //    orphan/abandoned branch (e.g. left over across a restart) and must NOT be reused - its execution is pinned
         //    to already-spent input versions.
         let pending_chain = self.get_pending_chain_until(from_block.block_id())?;
-        let pending_index = self.db().cf(chain::PendingChainIndex)?;
 
         // Heights restart at zero each epoch, so the most recent ancestor is the one with the highest (epoch, height).
         let mut best: Option<(TransactionId, BlockId, Epoch, NodeHeight)> = None;
         let candidates = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
         for res in candidates {
             let (tx_id, block_id, epoch, height) = res?;
-            let is_ancestor = pending_chain.contains(&block_id) || !pending_index.exists(&block_id, OPERATION)?;
+            if (epoch, height) > (from_block.epoch(), from_block.height()) {
+                continue;
+            }
+            let is_ancestor = if pending_chain.contains_pending(&block_id) {
+                true
+            } else {
+                self.is_in_chain_scope(&pending_chain, &block_id, epoch, height)? && self.blocks_exists(&block_id)?
+            };
             if is_ancestor && best.as_ref().is_none_or(|(_, _, e, h)| (*e, *h) < (epoch, height)) {
                 best = Some((tx_id, block_id, epoch, height));
             }

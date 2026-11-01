@@ -1000,12 +1000,16 @@ impl JsonRpcHandlers {
                     .get_our_validator_node(current_epoch)
                     .await
                     .map_err(internal_error(answer_id.clone()))?;
+                let sidechain_id = self.sidechain_id().map(|s| {
+                    CompressedPublicKey::from_canonical_bytes(s.as_bytes()).expect(
+                        "INVARIANT VIOLATION: CompressedPublicKey::from_canonical_bytes(sidechain_id.as_bytes())                          returned an error",
+                    )
+                });
                 let max_epoch = current_epoch + Epoch(3);
                 let signature = ValidatorNodeSignature::sign_for_exit(
                     self.keypair.secret_key(),
                     self.config.network.as_byte(),
-                    // TODO: sidechain support
-                    None,
+                    sidechain_id.as_ref(),
                     registration.start_epoch.as_u64().into(),
                     max_epoch.as_u64().into(),
                 );

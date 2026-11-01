@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use alloc::{borrow::Cow, format, string::String, vec::Vec};
+use alloc::{borrow::Cow, format, vec::Vec};
 use core::{any, fmt::Display};
 
 use serde::{Deserialize, Deserializer, Serializer};
@@ -63,23 +63,32 @@ where
 }
 
 pub mod option {
+    use serde::Serialize;
+
     use super::*;
 
-    pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &Option<T>, s: S) -> Result<S::Ok, S::Error> {
-        if s.is_human_readable() {
-            match v {
-                Some(v) => {
-                    let st = hex::encode(v.as_ref());
-                    s.serialize_some(&st)
-                },
-                None => s.serialize_none(),
-            }
-        } else {
-            match v {
-                Some(v) => s.serialize_some(v.as_ref()),
-                None => s.serialize_none(),
-            }
+    struct Encode<'a, T>(&'a T);
+
+    impl<T: AsRef<[u8]>> Serialize for Encode<'_, T> {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            super::serialize(self.0, s)
         }
+    }
+
+    struct Decode<T>(T);
+
+    impl<'de, T> Deserialize<'de> for Decode<T>
+    where
+        T: for<'a> TryFrom<&'a [u8]>,
+        for<'a> <T as TryFrom<&'a [u8]>>::Error: Display,
+    {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            super::deserialize(d).map(Decode)
+        }
+    }
+
+    pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &Option<T>, s: S) -> Result<S::Ok, S::Error> {
+        v.as_ref().map(Encode).serialize(s)
     }
 
     pub fn deserialize<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
@@ -88,24 +97,7 @@ pub mod option {
         T: for<'a> TryFrom<&'a [u8]>,
         for<'a> <T as TryFrom<&'a [u8]>>::Error: Display,
     {
-        let bytes = if d.is_human_readable() {
-            let hex = <Option<String> as Deserialize>::deserialize(d)?;
-            hex.as_ref()
-                .map(hex::decode)
-                .transpose()
-                .map_err(serde::de::Error::custom)?
-        } else {
-            <Option<Vec<u8>> as Deserialize>::deserialize(d)?
-        };
-
-        let value = bytes
-            .as_ref()
-            .map(|b| T::try_from(b.as_slice()))
-            .transpose()
-            .map_err(|e| {
-                serde::de::Error::custom(format!("Failed to convert hex bytes to {}: {e}", any::type_name::<T>()))
-            })?;
-        Ok(value)
+        Ok(Option::<Decode<T>>::deserialize(d)?.map(|Decode(v)| v))
     }
 }
 
@@ -116,7 +108,7 @@ mod tests {
     use super::*;
     use crate::test_fixtures::Bytes32;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
     struct TestCase {
         #[serde(with = "super")]
         fixed: [u8; 32],
@@ -124,20 +116,27 @@ mod tests {
         vec: Vec<u8>,
         #[serde(with = "super")]
         hash: Bytes32,
+        #[serde(with = "super::option")]
+        opt_hash: Option<Bytes32>,
     }
 
     // Test it
     #[test]
     fn test_serialize() {
-        let data = TestCase {
-            fixed: [1; 32],
-            vec: vec![5; 100],
-            hash: Bytes32::new([2; 32]),
-        };
-        let serialized = serde_json::to_vec(&data).unwrap();
-        let deserialized: TestCase = serde_json::from_slice(&serialized).unwrap();
-        assert_eq!(data.fixed, deserialized.fixed);
-        assert_eq!(data.vec, deserialized.vec);
-        assert_eq!(data.hash, deserialized.hash);
+        for opt_hash in [Some(Bytes32::new([3; 32])), None] {
+            let data = TestCase {
+                fixed: [1; 32],
+                vec: vec![5; 100],
+                hash: Bytes32::new([2; 32]),
+                opt_hash,
+            };
+            let serialized = serde_json::to_vec(&data).unwrap();
+            let deserialized: TestCase = serde_json::from_slice(&serialized).unwrap();
+            assert_eq!(data, deserialized);
+
+            let binary = tari_bor::serde_codec::to_vec(&data).unwrap();
+            let deserialized_bin: TestCase = tari_bor::serde_codec::from_slice(&binary).unwrap();
+            assert_eq!(data, deserialized_bin);
+        }
     }
 }

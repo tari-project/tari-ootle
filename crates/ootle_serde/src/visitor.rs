@@ -36,6 +36,15 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
     where E: de::Error {
         Ok(BytesCow::Owned(v.to_vec().into_boxed_slice()))
     }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: de::SeqAccess<'a> {
+        let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(1024));
+        while let Some(byte) = seq.next_element::<u8>()? {
+            bytes.push(byte);
+        }
+        Ok(BytesCow::Owned(bytes.into_boxed_slice()))
+    }
 }
 
 // Cow is not available in no_std, so we define our own

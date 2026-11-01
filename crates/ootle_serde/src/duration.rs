@@ -43,8 +43,45 @@ pub mod optional_seconds {
     pub fn serialize<S>(duration: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
         match duration {
-            Some(d) => s.serialize_u64(d.as_secs()),
+            Some(d) => s.serialize_some(&d.as_secs()),
             None => s.serialize_none(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::time::Duration;
+
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    struct Config {
+        #[serde(with = "super::seconds")]
+        timeout: Duration,
+        #[serde(with = "super::optional_seconds")]
+        optional_timeout: Option<Duration>,
+    }
+
+    #[test]
+    fn round_trips_duration_in_json_and_binary() {
+        for sample in [
+            Config {
+                timeout: Duration::from_secs(30),
+                optional_timeout: Some(Duration::from_secs(120)),
+            },
+            Config {
+                timeout: Duration::from_secs(0),
+                optional_timeout: None,
+            },
+        ] {
+            let json = serde_json::to_string(&sample).unwrap();
+            let decoded_json: Config = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded_json, sample);
+
+            let binary = tari_bor::serde_codec::to_vec(&sample).unwrap();
+            let decoded_bin: Config = tari_bor::serde_codec::from_slice(&binary).unwrap();
+            assert_eq!(decoded_bin, sample);
         }
     }
 }

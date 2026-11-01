@@ -328,15 +328,18 @@ where
                 explicit_topic_peers,
                 reply_tx,
             } => {
-                if !explicit_topic_peers.is_empty() {
-                    info!(target: LOG_TARGET, "📢 Adding {} explicit peers to topic {}", explicit_topic_peers.len(), topic);
-                    for peer in &explicit_topic_peers {
-                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(peer);
-                    }
-                    self.topic_peers.insert(topic.hash(), explicit_topic_peers);
-                }
                 match self.swarm.behaviour_mut().gossipsub.subscribe(&topic) {
                     Ok(_) => {
+                        if !explicit_topic_peers.is_empty() {
+                            info!(target: LOG_TARGET, "📢 Adding {} explicit peers to topic {}", explicit_topic_peers.len(), topic);
+                            let entry = self.topic_peers.entry(topic.hash()).or_default();
+                            for peer in explicit_topic_peers {
+                                self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                                if !entry.contains(&peer) {
+                                    entry.push(peer);
+                                }
+                            }
+                        }
                         debug!(target: LOG_TARGET, "📢 Subscribed to gossipsub topic: {}", topic);
                         let _ignore = reply_tx.send(Ok(()));
                     },
@@ -349,7 +352,9 @@ where
             NetworkingRequest::UnsubscribeTopic { topic, reply_tx } => {
                 if let Some(peers) = self.topic_peers.remove(&topic.hash()) {
                     for peer in peers {
-                        self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                        if !self.topic_peers.values().any(|remaining| remaining.contains(&peer)) {
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                        }
                     }
                 }
 
@@ -430,15 +435,14 @@ where
                     None => DialOpts::unknown_peer_id().address(addr).build(),
                 };
 
-                self.swarm.dial(opts).or_else(|err| {
-                    // Peer already has pending dial or established connection - OK
-                    if matches!(&err, DialError::DialPeerConditionFalse(_)) {
-                        Ok(())
-                    } else {
-                        Err(err)
-                    }
-                })?;
+                if let Err(err) = self.swarm.dial(opts) &&
+                    !matches!(&err, DialError::DialPeerConditionFalse(_))
+                {
+                    warn!(target: LOG_TARGET, "🚨 Failed to dial seed peer {peer:?}: {err}");
+                }
             }
+
+            self.is_initial_bootstrap_complete = true;
         }
 
         if self.active_connections.len() < self.relays.num_configured_relays() {
@@ -462,8 +466,6 @@ where
                     warn!(target: LOG_TARGET, "🚨 Failed to dial relay {peer}: {err}");
                 }
             }
-
-            self.is_initial_bootstrap_complete = true;
         }
 
         // A relay can be lost without a circuit ever closing (a failed dial or listen), so a node that needs a relay

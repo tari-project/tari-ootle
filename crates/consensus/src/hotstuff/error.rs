@@ -443,7 +443,9 @@ impl ProposalValidationError {
     pub fn rejects_message_not_block(&self) -> bool {
         matches!(
             self,
-            Self::ForeignPledgesNotCommitted { .. } | Self::ForeignProposalWithholdsCommand { .. }
+            Self::ForeignPledgesNotCommitted { .. } |
+                Self::ForeignProposalWithholdsCommand { .. } |
+                Self::FutureEpoch { .. }
         )
     }
 }

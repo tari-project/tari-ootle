@@ -239,7 +239,16 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let is_all_foreign_proposals_valid = self.store.with_write_tx(|tx| {
             for foreign_proposal in foreign_proposals {
                 let mut foreign_proposal = ForeignProposalRecord::new(foreign_proposal);
-                if foreign_proposal.exists(&**tx)? {
+                if let Some(existing) = ForeignProposalRecord::get(&**tx, foreign_proposal.block_id()).optional()? {
+                    if matches!(existing.status(), ForeignProposalStatus::Invalid) {
+                        warn!(
+                            target: LOG_TARGET,
+                            "⚠️❌ Rejecting block {}: foreign proposal {} was previously marked invalid",
+                            valid_block,
+                            foreign_proposal.block_id(),
+                        );
+                        return Ok(false);
+                    }
                     // This is expected behaviour, we may receive the same foreign proposal multiple times
                     debug!(
                         target: LOG_TARGET,

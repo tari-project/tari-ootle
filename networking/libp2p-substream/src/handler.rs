@@ -169,7 +169,7 @@ impl ConnectionHandler for Handler {
         }
 
         // Emit outbound streams.
-        if let Some(event) = self.pending_behaviour_events.pop_front() {
+        while let Some(event) = self.pending_behaviour_events.pop_front() {
             match event {
                 FromBehaviourEvent::OpenRpcSessionRequest(stream) => {
                     let protocol = stream.protocol().clone();
@@ -361,5 +361,19 @@ mod tests {
             .map(OpenStreamRequest::stream_id)
             .collect::<Vec<_>>();
         assert_eq!(remaining, [1]);
+    }
+
+    #[test]
+    fn multiple_behaviour_events_are_drained_in_poll() {
+        let peer_id = PeerId::random();
+        let p1 = StreamProtocol::new("/test/1");
+        let p2 = StreamProtocol::new("/test/2");
+        let mut handler = Handler::new(peer_id, smallvec::smallvec![]);
+        handler.on_behaviour_event(FromBehaviourEvent::AddSupportedProtocol(p1.clone()));
+        handler.on_behaviour_event(FromBehaviourEvent::AddSupportedProtocol(p2.clone()));
+
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(handler.poll(&mut cx).is_pending());
+        assert_eq!(handler.protocols.protocols.as_slice(), &[p1, p2]);
     }
 }

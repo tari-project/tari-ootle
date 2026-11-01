@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     task::{Context, Poll},
 };
 
@@ -60,8 +60,14 @@ pub struct Behaviour {
 
 impl Behaviour {
     pub fn new<I: IntoIterator<Item = StreamProtocol>>(protocols: I, _config: Config) -> Self {
+        let mut unique_protocols = SmallVec::new();
+        for protocol in protocols {
+            if !unique_protocols.contains(&protocol) {
+                unique_protocols.push(protocol);
+            }
+        }
         Self {
-            protocols: protocols.into_iter().collect(),
+            protocols: unique_protocols,
             pending_events: VecDeque::new(),
             pending_outbound_streams: HashMap::new(),
             connected: HashMap::new(),
@@ -70,6 +76,9 @@ impl Behaviour {
     }
 
     pub fn add_protocol(&mut self, protocol: StreamProtocol) {
+        if self.protocols.contains(&protocol) {
+            return;
+        }
         self.protocols.push(protocol.clone());
         // Notify all active connections
         for (peer_id, connections) in &self.connected {
@@ -89,13 +98,13 @@ impl Behaviour {
 
     pub fn open_substream(&mut self, peer_id: PeerId, protocol: StreamProtocol) -> StreamId {
         let stream_id = self.next_stream_id();
-        let request = OpenStreamRequest::new(stream_id, peer_id, protocol);
+        let request = OpenStreamRequest::new(stream_id, peer_id, protocol.clone());
 
         match self.get_connections(&peer_id) {
             Some(connections) => {
                 let ix = (stream_id as usize) % connections.len();
                 let conn = connections.get_mut(ix).expect("mod operator ensures index is in range");
-                conn.pending_streams.insert(stream_id);
+                conn.pending_streams.insert(stream_id, protocol);
                 let conn_id = conn.id;
                 self.pending_events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
@@ -104,9 +113,11 @@ impl Behaviour {
                 });
             },
             None => {
-                self.pending_events.push_back(ToSwarm::Dial {
-                    opts: DialOpts::peer_id(peer_id).build(),
-                });
+                if !self.pending_outbound_streams.contains_key(&peer_id) {
+                    self.pending_events.push_back(ToSwarm::Dial {
+                        opts: DialOpts::peer_id(peer_id).build(),
+                    });
+                }
                 self.pending_outbound_streams.entry(peer_id).or_default().push(request);
             },
         }
@@ -128,26 +139,36 @@ impl Behaviour {
             ..
         }: ConnectionClosed,
     ) {
-        let connections = self
-            .connected
-            .get_mut(&peer_id)
-            .expect("Expected some established connection to peer before closing.");
+        let Some(connections) = self.connected.get_mut(&peer_id) else {
+            tracing::warn!(
+                "Expected some established connection to peer before closing (peer_id={peer_id}, \
+                 connection_id={connection_id})"
+            );
+            return;
+        };
 
-        let connection = connections
+        let Some(connection) = connections
             .iter()
             .position(|c| c.id == connection_id)
             .map(|p: usize| connections.remove(p))
-            .expect("Expected connection to be established before closing.");
+        else {
+            tracing::warn!(
+                "Expected connection to be established before closing (peer_id={peer_id}, \
+                 connection_id={connection_id})"
+            );
+            return;
+        };
 
         debug_assert_eq!(connections.is_empty(), remaining_established == 0);
         if connections.is_empty() {
             self.connected.remove(&peer_id);
         }
 
-        for stream_id in connection.pending_streams {
+        for (stream_id, protocol) in connection.pending_streams {
             self.pending_events
-                .push_back(ToSwarm::GenerateEvent(Event::InboundFailure {
+                .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
                     peer_id,
+                    protocol,
                     stream_id,
                     error: Error::ConnectionClosed,
                 }));
@@ -215,7 +236,9 @@ impl Behaviour {
 
         if let Some(pending_streams) = self.pending_outbound_streams.remove(&peer_id) {
             for stream in pending_streams {
-                connection.pending_streams.insert(stream.stream_id());
+                connection
+                    .pending_streams
+                    .insert(stream.stream_id(), stream.protocol().clone());
                 handler.on_behaviour_event(stream.into());
             }
         }
@@ -306,7 +329,7 @@ impl NetworkBehaviour for Behaviour {
 struct Connection {
     id: ConnectionId,
     remote_address: Option<Multiaddr>,
-    pending_streams: HashSet<StreamId>,
+    pending_streams: HashMap<StreamId, StreamProtocol>,
 }
 
 impl Connection {
@@ -314,7 +337,7 @@ impl Connection {
         Self {
             id,
             remote_address,
-            pending_streams: HashSet::new(),
+            pending_streams: HashMap::new(),
         }
     }
 }

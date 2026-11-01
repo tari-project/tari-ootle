@@ -156,7 +156,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
             .with_read_tx(|tx| tx.key_manager_get_raw_imported_key(local_key_id))
             .optional()?
             .map(|(key_type, _)| key_type);
-        Ok(key_type != Some(KeyType::ViewOnly))
+        Ok(key_type.is_some_and(|kt| kt != KeyType::ViewOnly))
     }
 
     pub fn import_key(

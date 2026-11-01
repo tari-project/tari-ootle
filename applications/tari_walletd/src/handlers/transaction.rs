@@ -1559,4 +1559,71 @@ mod tests {
             signer.generate_signature(key, &unsigned).unwrap();
         }
     }
+
+    #[tokio::test]
+    async fn submit_and_dry_run_refuse_nonexistent_imported_keys() {
+        let daemon = TestDaemon::start().await;
+        let reader = daemon.api_key("reader", "transactions:read");
+        let account = KeyId::derived(KeyBranch::Account, 0);
+        let missing_imported = KeyId::imported(999_999);
+
+        let err = handle_submit(
+            &daemon.context,
+            Some(&daemon.session),
+            submit_request(missing_imported, vec![]),
+        )
+        .await
+        .unwrap_err();
+        assert_invalid_params(&err, "seal_signer");
+
+        let err = handle_submit(
+            &daemon.context,
+            Some(&daemon.session),
+            submit_request(account, vec![missing_imported]),
+        )
+        .await
+        .unwrap_err();
+        assert_invalid_params(&err, "other_signers");
+
+        let err = handle_submit_dry_run(&daemon.context, Some(&reader), submit_request(missing_imported, vec![]))
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "seal_signer");
+
+        let err = handle_submit_dry_run(
+            &daemon.context,
+            Some(&reader),
+            submit_request(account, vec![missing_imported]),
+        )
+        .await
+        .unwrap_err();
+        assert_invalid_params(&err, "other_signers");
+    }
+
+    #[tokio::test]
+    async fn submit_and_dry_run_enforce_lock_ownership_and_free_locks() {
+        let daemon = TestDaemon::start().await;
+        let reader = daemon.api_key("reader", "transactions:read");
+        let creator = daemon.api_key("creator", "transactions:create");
+        let account = KeyId::derived(KeyBranch::Account, 0);
+        let wallet_lock = daemon
+            .context
+            .wallet_sdk()
+            .locks_api()
+            .create_lock()
+            .unwrap()
+            .keep_locked();
+
+        let mut req = submit_request(account, vec![]);
+        req.lock_ids = vec![wallet_lock];
+        let err = handle_submit_dry_run(&daemon.context, Some(&reader), req.clone())
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+
+        let err = handle_submit(&daemon.context, Some(&creator), req)
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+    }
 }

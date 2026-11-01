@@ -21,6 +21,7 @@ use crate::{
     ResourceAddressRef,
     Signable,
     TransactionSignature,
+    args::InstructionArg,
 };
 
 pub(crate) fn decode_instructions<'b, C>(
@@ -222,6 +223,14 @@ impl UnsignedTransactionV1 {
             })
     }
 
+    fn resolve_arg_bytes<'a>(&'a self, arg: &'a InstructionArg) -> Option<&'a [u8]> {
+        match arg {
+            InstructionArg::Literal(bytes) => Some(bytes),
+            InstructionArg::Blob(idx) => self.blobs.get(*idx).map(|b| b.as_bytes()),
+            InstructionArg::Workspace(_) => None,
+        }
+    }
+
     /// Returns the substates this transaction references that it may declare as inputs (see
     /// [`SubstateId::is_declarable_input`]).
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
@@ -231,7 +240,7 @@ impl UnsignedTransactionV1 {
         for instruction in all_instructions {
             match instruction {
                 Instruction::CallFunction { args, .. } => {
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
+                    for arg in args.iter().filter_map(|a| self.resolve_arg_bytes(a)) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
@@ -240,7 +249,7 @@ impl UnsignedTransactionV1 {
                     if let Some(component_address) = call.address() {
                         substates.insert(SubstateId::Component(*component_address));
                     }
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
+                    for arg in args.iter().filter_map(|a| self.resolve_arg_bytes(a)) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
@@ -271,7 +280,7 @@ impl UnsignedTransactionV1 {
                         .as_ref()
                         .iter()
                         .flat_map(|m| &m.args)
-                        .filter_map(|a| a.as_literal_bytes())
+                        .filter_map(|a| self.resolve_arg_bytes(a))
                     {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));

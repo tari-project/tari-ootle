@@ -180,6 +180,7 @@ impl Instruction {
     pub fn referenced_template(&self) -> Option<&TemplateAddress> {
         match self {
             Self::CallFunction { address, .. } => Some(address),
+            Self::UpdateComponentTemplate { new_template, .. } => Some(new_template),
             _ => None,
         }
     }

@@ -380,13 +380,7 @@ impl Transaction {
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::CallFunction { address, .. } = instruction {
-                    Some(address)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|instruction| instruction.referenced_template())
     }
 
     /// Returns all substates addresses referenced by this transaction

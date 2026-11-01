@@ -612,22 +612,9 @@ fn msg_relative_view(
 
             if has_processed_first_block {
                 if pc_height > next_height {
-                    let msg_height = if msg.block.timeout_certificate().is_some() {
-                        let Some(height) = pc_height.checked_add(NodeHeight(1)) else {
-                            warn!(
-                                target: LOG_TARGET,
-                                "❗️ Proposal {} has an out-of-range justify height {}. Discarding.", msg.block, pc_height
-                            );
-                            return MessageRelativeView::Discard;
-                        };
-                        height
-                    } else {
-                        pc_height
-                    };
-
                     return MessageRelativeView::Future {
                         epoch,
-                        height: msg_height,
+                        height: pc_height,
                     };
                 }
             } else {

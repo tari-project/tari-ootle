@@ -994,6 +994,27 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
+        for arg in args {
+            let bytes = match arg {
+                InstructionArg::Literal(bytes) => Some(bytes.as_slice()),
+                InstructionArg::Blob(idx) => self.unsigned_transaction.blobs().get(*idx).map(|blob| blob.as_bytes()),
+                InstructionArg::Workspace(_) => None,
+            };
+            if let Some(bytes) = bytes &&
+                let Ok(indexed) = IndexedValue::from_raw(bytes)
+            {
+                declare_inputs(
+                    self.unsigned_transaction.inputs_mut(),
+                    indexed
+                        .referenced_substates()
+                        .filter(SubstateId::is_declarable_input)
+                        .map(InputDeclaration::write),
+                );
+            }
+        }
+    }
+
     fn add_inputs_for_instruction(&mut self, instruction: &Instruction) {
         if !self.fill_inputs {
             return;
@@ -1001,35 +1022,11 @@ impl<D> TransactionBuilder<D> {
 
         match instruction {
             Instruction::CallFunction { args, .. } => {
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed
-                                .referenced_substates()
-                                .filter(SubstateId::is_declarable_input)
-                                .map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::CallMethod { call, args, .. } => {
                 self.add_input_for_component_ref(call);
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed
-                                .referenced_substates()
-                                .filter(SubstateId::is_declarable_input)
-                                .map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::StealthTransfer {
                 resource_address_ref, ..
@@ -1054,8 +1051,11 @@ impl<D> TransactionBuilder<D> {
                         .insert((*resource_address).into());
                 }
             },
-            Instruction::UpdateComponentTemplate { component, .. } => {
+            Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                 self.add_input_for_component_ref(component);
+                if let Some(migrate) = migrate {
+                    self.add_inputs_for_args(&migrate.args);
+                }
             },
             Instruction::Assert {
                 assertion: Assertion::IsNotNull,

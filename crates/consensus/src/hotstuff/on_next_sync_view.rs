@@ -68,6 +68,11 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             {
                 timeout_height = last_sent_new_view + NodeHeight(1);
             }
+            if let Some(persisted) = LastSentNewView::get(tx, epoch).optional()? &&
+                persisted.height >= timeout_height
+            {
+                timeout_height = persisted.height + NodeHeight(1);
+            }
             let high_pc = HighPc::get(tx, epoch)?;
             let high_pc = ProposalCertificate::get(tx, epoch, high_pc.id())?;
             // Skipping the next height since the leader failed to propose. The certificate we report

@@ -10,7 +10,7 @@ use tari_engine_types::{
     ValidatorFeePool,
     commit_result::{AbortReason, RejectReason},
     fees::ExhaustBurnRate,
-    substate::SubstateDiff,
+    substate::{SubstateDiff, SubstateId},
 };
 use tari_ootle_common_types::{
     Epoch,
@@ -19,6 +19,8 @@ use tari_ootle_common_types::{
     NumPreshards,
     ProtocolVersion,
     ShardGroup,
+    SubstateLockType,
+    VersionedSubstateId,
     VersionedSubstateIdRef,
     committee::{Committee, CommitteeInfo},
     derive_fee_pool_address,
@@ -35,6 +37,7 @@ use tari_ootle_storage::{
         BlockHeader,
         BookkeepingModel,
         EpochCheckpoint,
+        LockConflict,
         PendingShardStateTreeDiff,
         SubstateChange,
         TransactionExecution,
@@ -55,7 +58,7 @@ use crate::{
         ProposalValidationError,
         block_change_set::ProposedBlockChangeSet,
         commit_proofs::generate_end_of_epoch_commit_proof,
-        substate_store::{PendingSubstateStore, ShardedStateTree},
+        substate_store::{LockFailedError, PendingSubstateStore, ShardedStateTree},
     },
     tracing::TraceTimer,
     traits::LeaderStrategy,
@@ -491,8 +494,29 @@ pub fn apply_leader_fee_to_substate_store<TTx: StateStoreReadTransaction>(
 
     let fee_substate_id = derive_fee_pool_address(claim_public_key_bytes, num_preshards, shard)
         .map_err(|err| HotStuffError::InvariantError(err.to_string()))?;
+    let substate_id = SubstateId::from(fee_substate_id);
+    if let Some(lock) = store.get_latest_lock_by_id(&substate_id)? &&
+        lock.is_write() &&
+        store
+            .get_latest_version(&substate_id)
+            .optional()?
+            .is_some_and(|latest| latest.is_up() && latest.version() == lock.version())
+    {
+        return Err(HotStuffError::SubstateStoreError(
+            LockFailedError::LockConflict {
+                substate_id: VersionedSubstateId::new(substate_id, lock.version()),
+                conflict: LockConflict {
+                    existing_lock: lock.lock_type(),
+                    requested_lock: SubstateLockType::Write,
+                    transaction_id: *lock.transaction_id(),
+                    is_local_only: lock.is_local_only(),
+                },
+            }
+            .into(),
+        ));
+    }
     store.update_in_place(
-        &fee_substate_id.into(),
+        &substate_id,
         |value_mut| {
             debug!(target: LOG_TARGET, "🪙 Deposit leader fee {total_leader_fee} into fee pool {fee_substate_id}");
             let substate_type = SubstateType::from(&*value_mut);

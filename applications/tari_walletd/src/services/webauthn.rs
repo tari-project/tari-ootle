@@ -1,12 +1,26 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::{Duration, Instant};
+use std::{
+    fs,
+    io::{ErrorKind, Write},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
+use anyhow::Context;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use rand::Rng;
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::{
     models::WebauthnRegistrationPasskeyModel,
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
+use tari_utilities::SafePassword;
+use tempfile::Builder as TempFileBuilder;
 use thiserror::Error;
 use webauthn_rs::{
     Webauthn,
@@ -20,6 +34,7 @@ use webauthn_rs::{
         WebauthnError,
     },
 };
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::services::{SessionData, SessionStore, SessionStoreError};
 
@@ -31,6 +46,166 @@ const MAX_PENDING_SESSIONS: usize = 8;
 
 const DEFAULT_PASSKEY_LABEL_PREFIX: &str = "Passkey";
 
+/// File name under `<base_path>` holding the one-time passkey enrollment token while the wallet has no credential.
+pub const SETUP_TOKEN_FILE_NAME: &str = "setup_token";
+
+/// Config key incremented whenever passkeys are reset so any in-process JWT secret can be rotated.
+pub const PASSKEY_RESET_SEQ_CONFIG_KEY: &str = "webauthn_reset_seq";
+
+/// Number of random bytes encoded in a one-time setup token.
+const SETUP_TOKEN_RAW_BYTES: usize = 32;
+
+pub fn setup_token_file_path(base_path: &Path) -> PathBuf {
+    base_path.join(SETUP_TOKEN_FILE_NAME)
+}
+
+/// Generates a fresh 256-bit URL-safe base64 one-time setup token.
+pub fn mint_setup_token() -> SafePassword {
+    let mut bytes = Zeroizing::new([0u8; SETUP_TOKEN_RAW_BYTES]);
+    rand::rng().fill_bytes(bytes.as_mut_slice());
+    let mut encoded = URL_SAFE_NO_PAD.encode(bytes.as_slice());
+    let token = SafePassword::from(encoded.as_str());
+    encoded.zeroize();
+    token
+}
+
+/// Compares `presented` against `expected` in constant time without leaking token contents or length.
+pub fn verify_setup_token_constant_time(expected: &SafePassword, presented: &str) -> bool {
+    let expected_bytes = expected.reveal().as_slice();
+    let presented_bytes = presented.as_bytes();
+
+    let expected_digest = Sha256::digest(expected_bytes);
+    let presented_digest = Sha256::digest(presented_bytes);
+
+    let digest_eq = expected_digest.as_slice().ct_eq(presented_digest.as_slice());
+    let len_eq = expected_bytes.len().ct_eq(&presented_bytes.len());
+    bool::from(digest_eq & len_eq)
+}
+
+/// RAII guard that writes `<base_path>/setup_token` atomically with mode `0600` on startup and removes it on drop.
+#[derive(Debug)]
+pub struct SetupTokenFileGuard {
+    path: PathBuf,
+}
+
+impl SetupTokenFileGuard {
+    pub fn write(base_path: &Path, token: &SafePassword) -> anyhow::Result<Self> {
+        fs::create_dir_all(base_path)
+            .with_context(|| format!("failed to create wallet daemon base directory {}", base_path.display()))?;
+
+        let target_path = setup_token_file_path(base_path);
+        let mut temp_file = TempFileBuilder::new()
+            .prefix(".setup_token.tmp.")
+            .tempfile_in(base_path)
+            .with_context(|| format!("failed to create temporary setup_token file in {}", base_path.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = fs::Permissions::from_mode(0o600);
+            temp_file
+                .as_file()
+                .set_permissions(perms)
+                .context("failed to set 0600 permissions on temporary setup_token file")?;
+        }
+
+        temp_file
+            .as_file_mut()
+            .write_all(token.reveal().as_slice())
+            .context("failed to write setup token to temporary file")?;
+        temp_file
+            .as_file()
+            .sync_all()
+            .context("failed to sync temporary setup_token file to disk")?;
+
+        temp_file
+            .persist(&target_path)
+            .map_err(|err| err.error)
+            .with_context(|| format!("failed to persist setup_token file to {}", target_path.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(&target_path, perms)
+                .with_context(|| format!("failed to enforce 0600 permissions on {}", target_path.display()))?;
+        }
+
+        Ok(Self { path: target_path })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn remove_stale(base_path: &Path) {
+        let path = setup_token_file_path(base_path);
+        match fs::remove_file(&path) {
+            Ok(()) => {},
+            Err(err) if err.kind() == ErrorKind::NotFound => {},
+            Err(err) => {
+                log::warn!(
+                    target: "tari::ootle::wallet_daemon::auth",
+                    "Failed to remove stale setup_token file {}: {}",
+                    path.display(),
+                    err
+                );
+            },
+        }
+    }
+}
+
+impl Drop for SetupTokenFileGuard {
+    fn drop(&mut self) {
+        match fs::remove_file(&self.path) {
+            Ok(()) => {},
+            Err(err) if err.kind() == ErrorKind::NotFound => {},
+            Err(err) => {
+                log::warn!(
+                    target: "tari::ootle::wallet_daemon::auth",
+                    "Failed to remove setup_token file {} on shutdown: {}",
+                    self.path.display(),
+                    err
+                );
+            },
+        }
+    }
+}
+
+/// Removes all stored WebAuthn passkeys and increments the persisted passkey-reset sequence counter so any live
+/// daemon instance invalidates outstanding JWTs and refresh tokens. API keys are preserved.
+pub fn reset_wallet_passkeys<TStore: WalletStore>(
+    wallet_store: &TStore,
+    base_path: Option<&Path>,
+) -> Result<usize, WalletStorageError> {
+    let removed = wallet_store.with_write_tx(|tx| {
+        let passkeys = tx.webauthn_reg_list_passkeys()?;
+        for entry in &passkeys {
+            tx.webauthn_reg_delete_passkey(entry.id)?;
+        }
+        let prev_seq = tx
+            .config_get::<u64>(PASSKEY_RESET_SEQ_CONFIG_KEY)
+            .optional()?
+            .map(|r| r.value)
+            .unwrap_or(0);
+        tx.config_set(PASSKEY_RESET_SEQ_CONFIG_KEY, &prev_seq.saturating_add(1), false)?;
+        Ok(passkeys.len())
+    })?;
+    if let Some(dir) = base_path {
+        SetupTokenFileGuard::remove_stale(dir);
+    }
+    Ok(removed)
+}
+
+pub fn current_passkey_reset_seq<TStore: WalletStore>(wallet_store: &TStore) -> Result<u64, WalletStorageError> {
+    let mut tx = wallet_store.create_read_tx()?;
+    Ok(tx
+        .config_get::<u64>(PASSKEY_RESET_SEQ_CONFIG_KEY)
+        .optional()?
+        .map(|r| r.value)
+        .unwrap_or(0))
+}
+
 #[derive(Debug, Error)]
 pub enum WebauthnServiceError {
     #[error("Session store error: {0}")]
@@ -39,6 +214,8 @@ pub enum WebauthnServiceError {
     WalletStorage(#[from] WalletStorageError),
     #[error("This wallet is already enrolled. A new credential must be added from an authenticated session")]
     AlreadyEnrolled,
+    #[error("Invalid or expired setup token")]
+    InvalidSetupToken,
     #[error("This credential is already registered in this wallet")]
     DuplicateCredential,
     #[error("Cannot remove the last passkey from the wallet")]
@@ -58,6 +235,46 @@ pub enum WebauthnServiceError {
     NotEnrolled,
     #[error("Webauthn error: {0}")]
     Webauthn(#[from] WebauthnError),
+}
+
+#[derive(Clone)]
+struct SetupTokenState {
+    token: SafePassword,
+    created_at: Instant,
+    ttl: Duration,
+    file_path: Option<PathBuf>,
+}
+
+impl SetupTokenState {
+    fn new(token: SafePassword, ttl: Duration, file_path: Option<PathBuf>) -> Self {
+        Self {
+            token,
+            created_at: Instant::now(),
+            ttl,
+            file_path,
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        self.created_at.elapsed() > self.ttl
+    }
+
+    fn remove_file(&self) {
+        if let Some(ref path) = self.file_path {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+impl std::fmt::Debug for SetupTokenState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetupTokenState")
+            .field("token", &"<redacted>")
+            .field("created_at", &self.created_at)
+            .field("ttl", &self.ttl)
+            .field("file_path", &self.file_path)
+            .finish()
+    }
 }
 
 /// Registration session data
@@ -130,16 +347,55 @@ pub struct WebauthnService<TStore> {
     wallet_store: TStore,
     registration_sessions: SessionStore<RegistrationSessionData>,
     auth_sessions: SessionStore<AuthSessionData>,
+    setup_token: Arc<Mutex<Option<SetupTokenState>>>,
+    last_seen_reset_seq: Arc<std::sync::atomic::AtomicU64>,
+    session_ttl: Duration,
 }
 
 impl<TStore> WebauthnService<TStore>
 where TStore: WalletStore
 {
     pub fn new(wallet_store: TStore, session_ttl: Duration) -> Self {
+        let enrolled = wallet_store
+            .create_read_tx()
+            .and_then(|mut tx| tx.webauthn_has_any_registration())
+            .unwrap_or(false);
+        let initial_seq = current_passkey_reset_seq(&wallet_store).unwrap_or(0);
+        let initial_token = if enrolled {
+            None
+        } else {
+            Some(SetupTokenState::new(mint_setup_token(), session_ttl, None))
+        };
         Self {
             wallet_store,
             registration_sessions: SessionStore::new(session_ttl, MAX_PENDING_SESSIONS),
             auth_sessions: SessionStore::new(session_ttl, MAX_PENDING_SESSIONS),
+            setup_token: Arc::new(Mutex::new(initial_token)),
+            last_seen_reset_seq: Arc::new(std::sync::atomic::AtomicU64::new(initial_seq)),
+            session_ttl,
+        }
+    }
+
+    fn sync_reset_state(&self) {
+        use std::sync::atomic::Ordering;
+        let Ok(current_seq) = current_passkey_reset_seq(&self.wallet_store) else {
+            return;
+        };
+        let prev = self.last_seen_reset_seq.load(Ordering::Acquire);
+        if current_seq > prev &&
+            self.last_seen_reset_seq
+                .compare_exchange(prev, current_seq, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+        {
+            let mut guard = self.setup_token.lock().expect("setup_token mutex poisoned");
+            let file_path = guard.take().and_then(|s| s.file_path);
+            let fresh_token = mint_setup_token();
+            if let Some(ref path) = file_path &&
+                let Some(parent) = path.parent()
+            {
+                let _ = SetupTokenFileGuard::write(parent, &fresh_token);
+            }
+            *guard = Some(SetupTokenState::new(fresh_token, self.session_ttl, file_path));
         }
     }
 
@@ -149,6 +405,53 @@ where TStore: WalletStore
     pub fn is_enrolled(&self) -> Result<bool, WebauthnServiceError> {
         let mut tx = self.wallet_store.create_read_tx()?;
         Ok(tx.webauthn_has_any_registration()?)
+    }
+
+    /// Returns the active one-time setup token when the wallet has no enrolled credential and the token has not
+    /// expired or been consumed.
+    pub fn setup_token(&self) -> Option<SafePassword> {
+        self.sync_reset_state();
+        if self.is_enrolled().unwrap_or(true) {
+            return None;
+        }
+        let mut guard = self.setup_token.lock().expect("setup_token mutex poisoned");
+        if guard.as_ref().is_some_and(SetupTokenState::is_expired) {
+            if let Some(expired) = guard.take() {
+                expired.remove_file();
+            }
+            return None;
+        }
+        guard.as_ref().map(|state| state.token.clone())
+    }
+
+    /// Associates a `<base_path>/setup_token` file path with the active setup token so consuming or expiring the token
+    /// removes the file from disk immediately.
+    pub fn attach_setup_token_file(&self, path: PathBuf) {
+        self.sync_reset_state();
+        let mut guard = self.setup_token.lock().expect("setup_token mutex poisoned");
+        if let Some(state) = guard.as_mut() {
+            state.file_path = Some(path);
+        }
+    }
+
+    /// Verifies `presented` against the active one-time setup token in constant time without consuming it.
+    pub fn verify_setup_token(&self, presented: Option<&str>) -> Result<(), WebauthnServiceError> {
+        self.sync_reset_state();
+        let presented = presented.ok_or(WebauthnServiceError::InvalidSetupToken)?;
+        let mut guard = self.setup_token.lock().expect("setup_token mutex poisoned");
+        let Some(state) = guard.as_ref() else {
+            return Err(WebauthnServiceError::InvalidSetupToken);
+        };
+        if state.is_expired() {
+            if let Some(expired) = guard.take() {
+                expired.remove_file();
+            }
+            return Err(WebauthnServiceError::InvalidSetupToken);
+        }
+        if !verify_setup_token_constant_time(&state.token, presented) {
+            return Err(WebauthnServiceError::InvalidSetupToken);
+        }
+        Ok(())
     }
 
     /// Start registration by creating a new session and saving the temporary [`PasskeyRegistration`],
@@ -185,8 +488,57 @@ where TStore: WalletStore
     /// the check that the wallet has no credential runs in the same write transaction as the insert. Any check
     /// made before this one is a courtesy rejection — two concurrent finishes both pass it and only this
     /// transaction separates them.
+    #[cfg(test)]
     pub async fn finish_registration(&self, session_id: String, passkey: Passkey) -> Result<u32, WebauthnServiceError> {
         let session = self.registration_sessions.remove(session_id.as_str()).await?;
+        self.insert_registered_passkey(session, passkey)
+    }
+
+    /// Finalizes registration while requiring and consuming the one-time setup token when the session is an
+    /// unauthenticated bootstrap registration (`allow_existing == false`).
+    pub async fn finish_registration_with_setup_token(
+        &self,
+        session_id: String,
+        passkey: Passkey,
+        setup_token: Option<&str>,
+    ) -> Result<u32, WebauthnServiceError> {
+        self.sync_reset_state();
+        let session = self.registration_sessions.remove(session_id.as_str()).await?;
+        if session.allow_existing {
+            return self.insert_registered_passkey(session, passkey);
+        }
+
+        let mut token_guard = self.setup_token.lock().expect("setup_token mutex poisoned");
+        let existing_passkeys = self.wallet_passkeys()?;
+        if !existing_passkeys.is_empty() {
+            return Err(WebauthnServiceError::AlreadyEnrolled);
+        }
+        let presented = setup_token.ok_or(WebauthnServiceError::InvalidSetupToken)?;
+        let Some(state) = token_guard.as_ref() else {
+            return Err(WebauthnServiceError::InvalidSetupToken);
+        };
+        if state.is_expired() {
+            if let Some(expired) = token_guard.take() {
+                expired.remove_file();
+            }
+            return Err(WebauthnServiceError::InvalidSetupToken);
+        }
+        if !verify_setup_token_constant_time(&state.token, presented) {
+            return Err(WebauthnServiceError::InvalidSetupToken);
+        }
+
+        let id = self.insert_registered_passkey(session, passkey)?;
+        if let Some(consumed) = token_guard.take() {
+            consumed.remove_file();
+        }
+        Ok(id)
+    }
+
+    fn insert_registered_passkey(
+        &self,
+        session: RegistrationSessionData,
+        passkey: Passkey,
+    ) -> Result<u32, WebauthnServiceError> {
         self.wallet_store.with_write_tx(|tx| {
             let existing = tx.webauthn_reg_list_passkeys()?;
             if !session.allow_existing && !existing.is_empty() {
@@ -697,5 +1049,56 @@ mod tests {
         let last_err = service.remove_passkey(second_id).unwrap_err();
         assert!(matches!(last_err, WebauthnServiceError::CannotRemoveLastPasskey));
         assert_eq!(service.list_passkeys().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn setup_token_file_is_written_and_removed_on_consumption_or_drop() {
+        let (service, temp) = service();
+        let token = service.setup_token().expect("unenrolled wallet has a setup token");
+        let token_str = std::str::from_utf8(token.reveal()).unwrap().to_string();
+
+        let guard = SetupTokenFileGuard::write(temp.path(), &token).unwrap();
+        let file_path = guard.path().to_path_buf();
+        assert_eq!(file_path, setup_token_file_path(temp.path()));
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), token_str);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&file_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "setup_token file must be mode 0600");
+        }
+
+        service.attach_setup_token_file(file_path.clone());
+        let session_id = service
+            .start_registration("owner".to_string(), None, passkey_reg("owner"), false)
+            .await
+            .unwrap();
+        service
+            .finish_registration_with_setup_token(session_id, passkey(), Some(token_str.as_str()))
+            .await
+            .unwrap();
+
+        assert!(
+            !file_path.exists(),
+            "setup_token file must be deleted when registration consumes the token"
+        );
+        assert!(service.setup_token().is_none());
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn setup_token_expires_after_ttl() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SqliteWalletStore::try_open(temp.path().join("wallet.sqlite")).unwrap();
+        store.run_migrations().unwrap();
+        let service = WebauthnService::new(store, Duration::from_millis(5));
+        let token = service.setup_token().unwrap();
+        let token_str = std::str::from_utf8(token.reveal()).unwrap().to_string();
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let err = service.verify_setup_token(Some(token_str.as_str())).unwrap_err();
+        assert!(matches!(err, WebauthnServiceError::InvalidSetupToken));
+        assert!(service.setup_token().is_none());
     }
 }

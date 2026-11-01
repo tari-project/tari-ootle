@@ -111,6 +111,10 @@ pub struct Cli {
     /// This is useful for development and testing, but should not be used in production.
     #[clap(long, alias = "vite-dev")]
     pub enable_vite_dev_port: Option<u16>,
+    /// Remove all enrolled WebAuthn passkeys and revoke outstanding JWT sessions, then exit. The next daemon start
+    /// issues a fresh one-time setup token. API keys are preserved.
+    #[clap(long = "reset-passkeys")]
+    pub reset_passkeys: bool,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -251,6 +255,12 @@ pub enum Subcommand {
         #[clap(long)]
         confirm: bool,
     },
+    #[clap(
+        name = "reset-passkeys",
+        about = "Remove all enrolled WebAuthn passkeys and revoke outstanding JWT sessions. The next daemon start \
+                 issues a fresh one-time setup token. API keys are preserved."
+    )]
+    ResetPasskeys,
 }
 
 #[cfg(test)]
@@ -350,5 +360,14 @@ mod tests {
         for (long, env) in expected {
             assert_eq!(env_of(long).as_deref(), Some(env), "--{long}");
         }
+    }
+
+    #[test]
+    fn reset_passkeys_flag_and_subcommand_parse() {
+        let from_flag = Cli::try_parse_from(["tari_ootle_walletd", "--reset-passkeys"]).unwrap();
+        assert!(from_flag.reset_passkeys);
+
+        let from_subcommand = Cli::try_parse_from(["tari_ootle_walletd", "reset-passkeys"]).unwrap();
+        assert!(matches!(from_subcommand.command, Some(Subcommand::ResetPasskeys)));
     }
 }

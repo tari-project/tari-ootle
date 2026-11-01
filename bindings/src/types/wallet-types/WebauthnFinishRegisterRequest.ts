@@ -9,4 +9,5 @@ export type WebauthnFinishRegisterRequest = {
    * [`RegisterPublicKeyCredential`]
    */
   credential: object;
+  setup_token?: string | null;
 };

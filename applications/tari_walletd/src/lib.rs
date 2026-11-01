@@ -27,6 +27,8 @@ mod server;
 mod services;
 mod webrtc;
 
+pub use crate::services::reset_wallet_passkeys;
+
 use std::{fs, panic, pin, process, time::Duration};
 
 use log::*;
@@ -196,7 +198,32 @@ pub async fn run_tari_ootle_walletd(
         shutdown_signal.clone(),
     )
     .with_cookie_token(cookie);
-    let (_jrpc_address, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
+    let webauthn_service = handlers.webauthn_service().cloned();
+    let (jrpc_address, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
+    let _setup_token_guard = if let Some(ref service) = webauthn_service &&
+        let Some(setup_token) = service.setup_token()
+    {
+        let guard = services::SetupTokenFileGuard::write(&config.common.base_path, &setup_token)?;
+        service.attach_setup_token_file(guard.path().to_path_buf());
+        let token_str = std::str::from_utf8(setup_token.reveal()).expect("ASCII setup token");
+        let ui_base = config
+            .ootle_wallet_daemon
+            .webauthn
+            .rp_origin
+            .as_ref()
+            .map(|origin| origin.as_str().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| format!("http://{jrpc_address}"));
+        let register_url = format!("{ui_base}/register?token={token_str}");
+        info!(
+            target: LOG_TARGET,
+            "🔑 No WebAuthn passkey enrolled. Register the first passkey at: {register_url} (setup token written to {})",
+            guard.path().display(),
+        );
+        Some(guard)
+    } else {
+        services::SetupTokenFileGuard::remove_stale(&config.common.base_path);
+        None
+    };
 
     #[cfg(not(feature = "web_ui"))]
     info!(

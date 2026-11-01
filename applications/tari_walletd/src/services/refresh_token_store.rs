@@ -97,6 +97,11 @@ impl RefreshTokenStore {
         clear_expired_tokens(&mut write);
     }
 
+    pub async fn clear_all(&self) {
+        let mut write = self.tokens.write().await;
+        write.clear();
+    }
+
     pub async fn to_vec(&self) -> Vec<(RefreshTokenHash, Claims)> {
         let read = self.tokens.read().await;
         read.iter().map(|(k, v)| (*k, v.claims.clone())).collect()

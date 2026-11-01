@@ -172,8 +172,10 @@ async fn handler(
         },
         Some(("webauthn", method)) => match method {
             "already_registered" => call_handler(context, value, token, webauthn::handle_already_registered).await,
-            "reg_start" => call_handler(context, value, token, webauthn::handle_start_registration).await,
-            "reg_finish" => {
+            "reg_start" | "start_register" => {
+                call_handler(context, value, token, webauthn::handle_start_registration).await
+            },
+            "reg_finish" | "finish_register" => {
                 call_handler_any_response(context, value, token, webauthn::handle_finish_registration).await
             },
             "auth_start" => call_handler(context, value, token, webauthn::handle_start_auth).await,

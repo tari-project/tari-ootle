@@ -56,6 +56,9 @@ pub async fn handle_token_refresh(
     cookies: Option<CookieJar>,
     _request: AuthRefreshRequest,
 ) -> Result<AuthLoginResponse, anyhow::Error> {
+    if context.take_pending_refresh_clear() {
+        context.refresh_token_store().clear_all().await;
+    }
     let refresh_token = cookies
         .as_ref()
         .ok_or_else(|| unauthorized("No cookies"))?
@@ -97,6 +100,9 @@ pub async fn handle_list_sessions(
     _request: AuthListSessionsRequest,
 ) -> Result<AuthListSessionsResponse, anyhow::Error> {
     context.authorize(token, &[Permission::Admin])?;
+    if context.take_pending_refresh_clear() {
+        context.refresh_token_store().clear_all().await;
+    }
     context.refresh_token_store().clear_expired().await;
     let sessions = context
         .refresh_token_store()

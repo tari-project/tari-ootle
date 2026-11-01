@@ -12,13 +12,13 @@ use tari_ootle_walletd_client::{
     types::EncodedJwtString,
 };
 
-pub struct JwtApi<'a> {
+pub struct JwtApi {
     default_expiry: Duration,
-    jwt_secret_key: &'a SafePassword,
+    jwt_secret_key: SafePassword,
 }
 
-impl<'a> JwtApi<'a> {
-    pub(crate) fn new(default_expiry: Duration, jwt_secret_key: &'a SafePassword) -> Self {
+impl JwtApi {
+    pub(crate) fn new(default_expiry: Duration, jwt_secret_key: SafePassword) -> Self {
         Self {
             default_expiry,
             jwt_secret_key,

@@ -71,8 +71,19 @@ async fn main() -> Result<(), anyhow::Error> {
         init_os_keyring_store();
     }
 
+    if cli.reset_passkeys || matches!(cli.command, Some(Subcommand::ResetPasskeys)) {
+        let wallet_store = init_wallet_store(&config)?;
+        let removed = tari_ootle_walletd::reset_wallet_passkeys(&wallet_store, Some(config.common.base_path()))?;
+        println!(
+            "Removed {removed} WebAuthn passkey(s) and revoked outstanding JWT sessions. API keys are preserved. \
+             Start the wallet daemon to issue a fresh setup token."
+        );
+        return Ok(());
+    }
+
     match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,
+        Some(Subcommand::ResetPasskeys) => unreachable!("handled above"),
         Some(Subcommand::CreateAccount {
             name,
             key_index,

@@ -69,12 +69,15 @@ const createCredential = async (
 
 export async function performPasskeyRegistration(options?: {
   label?: string;
+  setupToken?: string;
   updateClientToken?: boolean;
 }): Promise<string | null | undefined> {
   const trimmedLabel = options?.label?.trim() || undefined;
+  const trimmedSetupToken = options?.setupToken?.trim() || undefined;
   const startRegisterResponse = await webauthnStartRegistration({
     username: APP_NAME,
     label: trimmedLabel ?? null,
+    setup_token: trimmedSetupToken ?? null,
   });
 
   if (!startRegisterResponse) {
@@ -113,6 +116,7 @@ export async function performPasskeyRegistration(options?: {
   const { token } = await webauthnFinishRegistration({
     credential,
     session_id: regSessionId,
+    setup_token: trimmedSetupToken ?? null,
   });
 
   if (options?.updateClientToken !== false && token) {
@@ -128,6 +132,10 @@ function WebauthnRegistration(props: WebauthnProps) {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [setupToken, setSetupToken] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("token") ?? params.get("setup_token") ?? "";
+  });
   const [label, setLabel] = useState("");
   const [backupLabel, setBackupLabel] = useState("Backup Passkey");
   const [showBackupPrompt, setShowBackupPrompt] = useState(false);
@@ -140,8 +148,12 @@ function WebauthnRegistration(props: WebauthnProps) {
     try {
       await performPasskeyRegistration({
         label,
+        setupToken,
         updateClientToken: true,
       });
+      if (window.location.pathname === "/register" || window.location.search.includes("token")) {
+        window.history.replaceState({}, "", "/");
+      }
       setShowBackupPrompt(true);
     } catch (error) {
       console.error("Error registering WebAuthn key:", error);
@@ -224,6 +236,17 @@ function WebauthnRegistration(props: WebauthnProps) {
                     gap: theme.spacing(2),
                   }}
                 >
+                  <TextField
+                    label="Setup Token"
+                    placeholder="One-time setup token from walletd startup log or setup_token file"
+                    type="password"
+                    value={setupToken}
+                    onChange={(e) => setSetupToken(e.target.value)}
+                    disabled={loading}
+                    required
+                    size="small"
+                    fullWidth
+                  />
                   <TextField
                     label="Passkey Label (optional)"
                     placeholder="e.g. This Device"

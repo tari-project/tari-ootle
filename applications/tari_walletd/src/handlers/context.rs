@@ -107,7 +107,9 @@ pub struct HandlerContext {
     transaction_service: TransactionServiceHandle,
     account_monitor: AccountMonitorHandle,
     config: WalletDaemonConfig,
-    jwt_secret: SafePassword,
+    jwt_secret: Arc<std::sync::RwLock<SafePassword>>,
+    last_seen_reset_seq: Arc<std::sync::atomic::AtomicU64>,
+    pending_refresh_clear: Arc<std::sync::atomic::AtomicBool>,
     cookie: Option<(SafePassword, Permissions)>,
     authenticator: WalletAuthenticator,
     refresh_token_store: RefreshTokenStore,
@@ -141,6 +143,7 @@ impl HandlerContext {
         jwt_secret: SafePassword,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
+        let initial_reset_seq = crate::services::current_passkey_reset_seq(wallet_sdk.store()).unwrap_or(0);
         Self {
             wallet_sdk,
             notifier,
@@ -149,7 +152,9 @@ impl HandlerContext {
             config,
             authenticator,
             refresh_token_store: RefreshTokenStore::new(Duration::from_secs(60 * 60)),
-            jwt_secret,
+            jwt_secret: Arc::new(std::sync::RwLock::new(jwt_secret)),
+            last_seen_reset_seq: Arc::new(std::sync::atomic::AtomicU64::new(initial_reset_seq)),
+            pending_refresh_clear: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             cookie: None,
             shutdown_signal,
             api_key_last_used_bumps: Arc::new(DashMap::new()),
@@ -368,8 +373,34 @@ impl HandlerContext {
         });
     }
 
-    pub fn jwt_api(&self) -> JwtApi<'_> {
-        JwtApi::new(self.config().jwt_expiry, &self.jwt_secret)
+    pub fn jwt_api(&self) -> JwtApi {
+        self.sync_passkey_reset_state();
+        let secret = self.jwt_secret.read().expect("jwt_secret lock poisoned").clone();
+        JwtApi::new(self.config().jwt_expiry, secret)
+    }
+
+    pub(crate) fn sync_passkey_reset_state(&self) {
+        use std::sync::atomic::Ordering;
+        let Ok(current_seq) = crate::services::current_passkey_reset_seq(self.wallet_sdk.store()) else {
+            return;
+        };
+        let prev = self.last_seen_reset_seq.load(Ordering::Acquire);
+        if current_seq > prev &&
+            self.last_seen_reset_seq
+                .compare_exchange(prev, current_seq, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+        {
+            if let Ok(mut guard) = self.jwt_secret.write() {
+                *guard = crate::create_secret_password();
+            }
+            self.pending_refresh_clear.store(true, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn take_pending_refresh_clear(&self) -> bool {
+        self.sync_passkey_reset_state();
+        self.pending_refresh_clear
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
     }
 
     pub fn shutdown_signal(&self) -> &ShutdownSignal {

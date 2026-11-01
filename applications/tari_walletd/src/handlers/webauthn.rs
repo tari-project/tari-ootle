@@ -114,6 +114,12 @@ pub async fn handle_start_registration(
         authorize_enrolled_passkey_addition(context, token)?;
         Some(existing_passkeys.into_iter().map(|pk| pk.cred_id().clone()).collect())
     } else {
+        webauthn_service
+            .verify_setup_token(request.setup_token.as_deref())
+            .map_err(|e| match e {
+                WebauthnServiceError::InvalidSetupToken => invalid_request(e),
+                other => other.into(),
+            })?;
         None
     };
 
@@ -147,13 +153,21 @@ pub async fn handle_finish_registration(
         authorize_enrolled_passkey_addition(context, token)?;
     } else {
         assert_not_enrolled(context)?;
+        webauthn_service
+            .verify_setup_token(request.setup_token.as_deref())
+            .map_err(|e| match e {
+                WebauthnServiceError::InvalidSetupToken => invalid_request(e),
+                other => other.into(),
+            })?;
     }
     let passkey = webauthn.finish_passkey_registration(&request.credential, session_data.passkey_reg())?;
     webauthn_service
-        .finish_registration(request.session_id, passkey)
+        .finish_registration_with_setup_token(request.session_id, passkey, request.setup_token.as_deref())
         .await
         .map_err(|e| match e {
-            WebauthnServiceError::AlreadyEnrolled | WebauthnServiceError::DuplicateCredential => invalid_request(e),
+            WebauthnServiceError::AlreadyEnrolled
+            | WebauthnServiceError::DuplicateCredential
+            | WebauthnServiceError::InvalidSetupToken => invalid_request(e),
             e => e.into(),
         })?;
 
@@ -422,17 +436,33 @@ mod tests {
         }
     }
 
+    fn current_setup_token(test: &HandlerTest) -> String {
+        let token = test
+            .context
+            .webauthn_service()
+            .unwrap()
+            .setup_token()
+            .expect("unenrolled wallet has an active setup token");
+        std::str::from_utf8(token.reveal()).unwrap().to_string()
+    }
+
     async fn enrol_initial_passkey(test: &HandlerTest) -> u32 {
+        let setup_token = current_setup_token(test);
         let start = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
             username: "owner".to_string(),
             label: Some("Primary".to_string()),
+            setup_token: Some(setup_token.clone()),
         })
         .await
         .unwrap();
         test.context
             .webauthn_service()
             .unwrap()
-            .finish_registration(start.session_id, dummy_passkey("AAECAwQFBgcICQoLDA0ODw"))
+            .finish_registration_with_setup_token(
+                start.session_id,
+                dummy_passkey("AAECAwQFBgcICQoLDA0ODw"),
+                Some(setup_token.as_str()),
+            )
             .await
             .unwrap()
     }
@@ -446,6 +476,7 @@ mod tests {
         let err = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
             username: "attacker".to_string(),
             label: None,
+            setup_token: None,
         })
         .await
         .unwrap_err();
@@ -458,6 +489,7 @@ mod tests {
             WebauthnStartRegisterRequest {
                 username: "owner".to_string(),
                 label: None,
+                setup_token: None,
             },
         )
         .await
@@ -485,6 +517,7 @@ mod tests {
             let err = handle_start_registration(&test.context, Some(forbidden_bearer), WebauthnStartRegisterRequest {
                 username: "owner".to_string(),
                 label: Some("Backdoor".to_string()),
+                setup_token: None,
             })
             .await
             .unwrap_err();
@@ -526,6 +559,7 @@ mod tests {
         let start = handle_start_registration(&test.context, Some(&test.admin_bearer), WebauthnStartRegisterRequest {
             username: "owner".to_string(),
             label: Some("Second".to_string()),
+            setup_token: None,
         })
         .await
         .unwrap();
@@ -536,6 +570,7 @@ mod tests {
             (axum_jrpc::Id::Num(1), WebauthnFinishRegisterRequest {
                 session_id: start.session_id.clone(),
                 credential: dummy_register_credential(),
+                setup_token: None,
             }),
         )
         .await
@@ -549,6 +584,7 @@ mod tests {
                 (axum_jrpc::Id::Num(1), WebauthnFinishRegisterRequest {
                     session_id: start.session_id.clone(),
                     credential: dummy_register_credential(),
+                    setup_token: None,
                 }),
             )
             .await
@@ -573,11 +609,13 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_session_cannot_finish_after_another_enrolment_lands() {
         let test = setup().await;
+        let setup_token = current_setup_token(&test);
 
         // Start an unauthenticated bootstrap session before any passkey is enrolled (`allow_existing == false`)
         let stale_bootstrap = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
             username: "attacker".to_string(),
             label: None,
+            setup_token: Some(setup_token.clone()),
         })
         .await
         .unwrap();
@@ -593,6 +631,7 @@ mod tests {
                 (axum_jrpc::Id::Num(1), WebauthnFinishRegisterRequest {
                     session_id: stale_bootstrap.session_id.clone(),
                     credential: dummy_register_credential(),
+                    setup_token: Some(setup_token.clone()),
                 }),
             )
             .await
@@ -602,5 +641,151 @@ mod tests {
                 "bootstrap session must be refused once wallet is enrolled: {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn first_enrolment_requires_single_use_setup_token_and_never_echoes_it() {
+        let test = setup().await;
+        let expected_token = current_setup_token(&test);
+        let wrong_token = "wrong-setup-token-secret-value";
+
+        // 1. Missing setup token on reg_start is refused without echoing the expected token
+        let err = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
+            username: "owner".to_string(),
+            label: None,
+            setup_token: None,
+        })
+        .await
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid or expired setup token"), "{msg}");
+        assert!(
+            !msg.contains(&expected_token),
+            "error must not leak expected setup token"
+        );
+
+        // 2. Wrong setup token on reg_start is refused without echoing either token
+        let err = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
+            username: "owner".to_string(),
+            label: None,
+            setup_token: Some(wrong_token.to_string()),
+        })
+        .await
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid or expired setup token"), "{msg}");
+        assert!(
+            !msg.contains(&expected_token),
+            "error must not leak expected setup token"
+        );
+        assert!(!msg.contains(wrong_token), "error must not echo presented setup token");
+
+        // 3. Valid setup token on reg_start succeeds, but missing/wrong setup token on reg_finish is refused
+        let start = handle_start_registration(&test.context, None, WebauthnStartRegisterRequest {
+            username: "owner".to_string(),
+            label: None,
+            setup_token: Some(expected_token.clone()),
+        })
+        .await
+        .unwrap();
+
+        for bad_finish_token in [None, Some(wrong_token.to_string())] {
+            let err = handle_finish_registration(
+                &test.context,
+                None,
+                (axum_jrpc::Id::Num(1), WebauthnFinishRegisterRequest {
+                    session_id: start.session_id.clone(),
+                    credential: dummy_register_credential(),
+                    setup_token: bad_finish_token,
+                }),
+            )
+            .await
+            .unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("Invalid or expired setup token"), "{msg}");
+            assert!(!msg.contains(&expected_token));
+            assert!(!msg.contains(wrong_token));
+        }
+
+        // 4. Completing initial enrollment consumes the setup token
+        enrol_initial_passkey(&test).await;
+        assert!(test.context.webauthn_service().unwrap().setup_token().is_none());
+        assert!(
+            test.context
+                .webauthn_service()
+                .unwrap()
+                .verify_setup_token(Some(expected_token.as_str()))
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn reset_passkeys_removes_credentials_revokes_jwts_and_refresh_tokens_keeps_api_keys_and_issues_new_setup_token()
+     {
+        use axum_extra::extract::CookieJar;
+        use tari_ootle_walletd_client::types::AuthRefreshRequest;
+
+        use crate::handlers::auth::{REFRESH_TOKEN_COOKIE, handle_token_refresh};
+
+        let test = setup().await;
+        let initial_token = current_setup_token(&test);
+        enrol_initial_passkey(&test).await;
+        assert!(test.context.webauthn_service().unwrap().is_enrolled().unwrap());
+
+        // Mint a refresh token alongside the active admin_bearer JWT
+        let refresh = test
+            .context
+            .refresh_token_store()
+            .new_token(Permissions::from_str("admin").unwrap(), u64::MAX)
+            .await;
+        let jar = CookieJar::new().add(refresh.into_cookie(REFRESH_TOKEN_COOKIE));
+        assert!(
+            handle_token_refresh(&test.context, None, Some(jar.clone()), AuthRefreshRequest {})
+                .await
+                .is_ok()
+        );
+
+        // Reset passkeys on the wallet store (simulating `tari_ootle_walletd --reset-passkeys`)
+        let removed = crate::services::reset_wallet_passkeys(test.context.wallet_sdk().store(), None).unwrap();
+        assert_eq!(removed, 1);
+        assert!(!test.context.webauthn_service().unwrap().is_enrolled().unwrap());
+
+        // Outstanding JWTs are immediately rejected
+        let jwt_err = test
+            .context
+            .authorize(Some(&test.admin_bearer), &[Permission::Admin])
+            .unwrap_err();
+        assert!(
+            matches!(jwt_err, AuthError::JwtError(_)),
+            "expected revoked JWT, got {jwt_err:?}"
+        );
+
+        // Outstanding refresh tokens are also revoked
+        let refresh_err = handle_token_refresh(&test.context, None, Some(jar), AuthRefreshRequest {})
+            .await
+            .unwrap_err();
+        assert!(
+            refresh_err.to_string().contains("Invalid or expired refresh token"),
+            "{refresh_err}"
+        );
+
+        // API keys are preserved and continue to authenticate
+        let listed = handle_list_passkeys(
+            &test.context,
+            Some(&test.api_key_admin_bearer),
+            WebauthnListPasskeysRequest {},
+        )
+        .await
+        .unwrap();
+        assert!(listed.passkeys.is_empty());
+
+        // Resetting passkeys automatically issues a fresh setup token distinct from the consumed one
+        let next_setup_token = current_setup_token(&test);
+        assert_ne!(initial_token, next_setup_token);
+
+        // Re-enrolling with the new setup token succeeds
+        let new_id = enrol_initial_passkey(&test).await;
+        assert!(new_id > 0);
+        assert!(test.context.webauthn_service().unwrap().is_enrolled().unwrap());
     }
 }

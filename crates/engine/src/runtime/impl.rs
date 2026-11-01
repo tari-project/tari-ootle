@@ -439,6 +439,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 let _ignore = state.get_proof(*proof_id)?;
             }
 
+            for allocation in value.well_known_types().component_address_allocations() {
+                let _ignore = state.get_allocated_address(allocation.id())?;
+            }
+
+            for allocation in value.well_known_types().resource_address_allocations() {
+                let _ignore = state.get_allocated_address(allocation.id())?;
+            }
+
             for id in value.referenced_substates() {
                 if !state.substate_exists(&id)? {
                     debug!(

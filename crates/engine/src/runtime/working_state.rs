@@ -721,11 +721,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
         // Use of the bucket adds the resource to the scope
         let resource_addr = *bucket.resource_address();
-        {
-            let scope_mut = self.current_call_scope_mut()?;
-            scope_mut.remove_bucket_from_scope(bucket_id);
-            scope_mut.add_substate_to_owned(resource_addr.into());
-        }
+        self.remove_bucket_from_all_scopes(bucket_id);
+        self.current_call_scope_mut()?
+            .add_substate_to_owned(resource_addr.into());
         Ok(bucket)
     }
 
@@ -1339,10 +1337,24 @@ impl<TStore: StateReader> WorkingState<TStore> {
             .address_allocations
             .swap_remove(&id)
             .ok_or(RuntimeError::AddressAllocationNotFound { id })?;
-        self.current_call_scope_mut()?.remove_address_allocation_from_scope(id);
+        self.remove_address_allocation_from_all_scopes(id);
         self.used_address_allocations
             .insert(id, alloc_addr.substate_id().clone());
         Ok(alloc_addr)
+    }
+
+    fn remove_bucket_from_all_scopes(&mut self, bucket_id: BucketId) {
+        self.initial_call_scope.remove_bucket_from_scope(bucket_id);
+        for frame in &mut self.call_frames {
+            frame.scope_mut().remove_bucket_from_scope(bucket_id);
+        }
+    }
+
+    fn remove_address_allocation_from_all_scopes(&mut self, id: AddressAllocationId) {
+        self.initial_call_scope.remove_address_allocation_from_scope(id);
+        for frame in &mut self.call_frames {
+            frame.scope_mut().remove_address_allocation_from_scope(id);
+        }
     }
 
     pub fn get_allocated_address(&self, id: AddressAllocationId) -> Result<&AllocatedAddress, RuntimeError> {
@@ -1956,28 +1968,33 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn check_all_substates_known(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
+        let scope = self.current_call_scope()?;
         for id in value.referenced_substates() {
             if !self.substate_exists(&id)? {
                 return Err(RuntimeError::ReferencedSubstateNotFound { id: id.clone() });
             }
         }
         for bucket_id in value.bucket_ids() {
-            if !self.buckets().contains_key(bucket_id) {
+            if !scope.is_bucket_in_scope(*bucket_id) || !self.buckets().contains_key(bucket_id) {
                 return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
             }
         }
         for proof_id in value.proof_ids() {
-            if !self.proofs().contains_key(proof_id) {
+            if !scope.is_proof_in_scope(proof_id) || !self.proofs().contains_key(proof_id) {
                 return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
             }
         }
         for allocation in value.component_address_allocations() {
-            if !self.address_allocations.contains_key(&allocation.id()) {
+            if !scope.is_address_allocation_in_scope(allocation.id()) ||
+                !self.address_allocations.contains_key(&allocation.id())
+            {
                 return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
             }
         }
         for allocation in value.resource_address_allocations() {
-            if !self.address_allocations.contains_key(&allocation.id()) {
+            if !scope.is_address_allocation_in_scope(allocation.id()) ||
+                !self.address_allocations.contains_key(&allocation.id())
+            {
                 return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
             }
         }
@@ -2010,7 +2027,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             }
         }
         for bucket_id in value.bucket_ids() {
-            if !scope.is_bucket_in_scope(*bucket_id) {
+            if !scope.is_bucket_in_scope(*bucket_id) || !self.buckets().contains_key(bucket_id) {
                 return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
             }
         }
@@ -2018,12 +2035,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
             scope.require_held_proof(proof_id)?;
         }
         for allocation in value.component_address_allocations() {
-            if !scope.is_address_allocation_in_scope(allocation.id()) {
+            if !scope.is_address_allocation_in_scope(allocation.id()) ||
+                !self.address_allocations.contains_key(&allocation.id())
+            {
                 return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
             }
         }
         for allocation in value.resource_address_allocations() {
-            if !scope.is_address_allocation_in_scope(allocation.id()) {
+            if !scope.is_address_allocation_in_scope(allocation.id()) ||
+                !self.address_allocations.contains_key(&allocation.id())
+            {
                 return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
             }
         }
@@ -2449,7 +2470,155 @@ fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib::{
+        models::{Bucket, ComponentAddressAllocation, Proof},
+        types::ObjectKey,
+    };
+
     use super::*;
+    use crate::{runtime::scope::PushCallFrame, state_store::memory::MemoryStateStore};
+
+    fn test_working_state() -> WorkingState<MemoryStateStore> {
+        WorkingState::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        )
+    }
+
+    #[test]
+    fn check_all_substates_known_rejects_capabilities_outside_current_call_scope() {
+        let mut state = test_working_state();
+        let bucket_id = BucketId::from(0u32);
+        let proof_id = ProofId::from(0u32);
+        let comp_addr = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let resx_addr = ResourceAddress::new(ObjectKey::from_array([2u8; ObjectKey::LENGTH]));
+
+        state
+            .new_bucket(
+                bucket_id,
+                ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+            )
+            .unwrap();
+        state
+            .new_proof(
+                proof_id,
+                LockedResource::new(
+                    ContainerRef::Runtime,
+                    ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+                ),
+            )
+            .unwrap();
+        let comp_alloc_id = state.new_address_allocation(comp_addr).unwrap();
+        let resx_alloc_id = state.new_address_allocation(resx_addr).unwrap();
+
+        let child_frame = PushCallFrame::Static {
+            template_address: TemplateAddress::default(),
+            module_name: "Child".to_string(),
+            arg_scope: IndexedWellKnownTypes::new(),
+            entity_id: EntityId::default(),
+        }
+        .into_new_call_frame();
+        state.push_frame(child_frame, 10).unwrap();
+        state.revoke_boundary_proofs().unwrap();
+
+        let forged_bucket =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&Bucket::from_id(bucket_id)).unwrap()).unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_bucket),
+            Err(RuntimeError::BucketNotInScope { bucket_id: id }) if id == bucket_id
+        ));
+
+        let forged_proof =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&Proof::from_id(proof_id)).unwrap()).unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_proof),
+            Err(RuntimeError::ProofNotInScope { proof_id: id }) if id == proof_id
+        ));
+
+        let forged_comp_alloc = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&ComponentAddressAllocation::new(comp_alloc_id)).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_comp_alloc),
+            Err(RuntimeError::AddressAllocationNotInScope { id }) if id == comp_alloc_id
+        ));
+
+        let forged_resx_alloc = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&ResourceAddressAllocation::new(resx_alloc_id)).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_resx_alloc),
+            Err(RuntimeError::AddressAllocationNotInScope { id }) if id == resx_alloc_id
+        ));
+    }
+
+    #[test]
+    fn consuming_lent_capabilities_in_child_frame_removes_them_from_caller_scopes() {
+        let mut state = test_working_state();
+        let bucket_id = BucketId::from(1u32);
+        let proof_id = ProofId::from(1u32);
+        let comp_addr = ComponentAddress::from_array([3u8; ObjectKey::LENGTH]);
+
+        state
+            .new_bucket(
+                bucket_id,
+                ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(25u64)),
+            )
+            .unwrap();
+        state
+            .new_proof(
+                proof_id,
+                LockedResource::new(
+                    ContainerRef::Runtime,
+                    ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(25u64)),
+                ),
+            )
+            .unwrap();
+        let alloc_id = state.new_address_allocation(comp_addr).unwrap();
+
+        let lent_args = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&(
+                Bucket::from_id(bucket_id),
+                Proof::from_id(proof_id),
+                ComponentAddressAllocation::new(alloc_id),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let child_frame = PushCallFrame::Static {
+            template_address: TemplateAddress::default(),
+            module_name: "Child".to_string(),
+            arg_scope: lent_args.clone(),
+            entity_id: EntityId::default(),
+        }
+        .into_new_call_frame();
+        state.push_frame(child_frame, 10).unwrap();
+        state.revoke_boundary_proofs().unwrap();
+
+        let _bucket = state.take_bucket(bucket_id).unwrap();
+        state.drop_proof(proof_id).unwrap();
+        let _allocated = state.use_allocated_address(alloc_id).unwrap();
+
+        state.pop_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        let caller_scope = state.current_call_scope().unwrap();
+        assert!(!caller_scope.is_bucket_in_scope(bucket_id));
+        assert!(!caller_scope.is_proof_in_scope(&proof_id));
+        assert!(!caller_scope.auth_scope().contains_proof(&proof_id));
+        assert!(!caller_scope.is_address_allocation_in_scope(alloc_id));
+        assert!(state.check_all_substates_in_scope(&lent_args).is_err());
+    }
 
     #[test]
     fn the_burn_is_a_floor_share_of_what_was_paid_and_the_leader_gets_the_rest() {

@@ -309,16 +309,22 @@ impl WasmProcess {
     /// cost that follows its CBOR item count, so the charge is drawn from the transaction's compute
     /// allowance first: a transaction that cannot cover it fails having decoded nothing.
     fn decode_return_value(&self, store: &Store, raw: &[u8]) -> Result<IndexedValue, WasmExecutionError> {
+        let runtime = self.env(store).state()?;
         // An empty return decodes to the empty value without any per-item work.
         let items = if raw.is_empty() {
             0
         } else {
-            tari_bor::count_data_items(raw).map_err(BorError::from)?
+            let max_items = limits::ENGINE_LIMITS.max_call_size as u64;
+            match tari_bor::count_data_items_bounded(raw, limits::MAX_CBOR_NESTING_DEPTH, max_items) {
+                Ok(Some(items)) => items,
+                Ok(None) => max_items,
+                Err(err) => {
+                    runtime.interface().charge_return_value(raw.len() as u64, 0)?;
+                    return Err(BorError::from(err).into());
+                },
+            }
         };
-        self.env(store)
-            .state()?
-            .interface()
-            .charge_return_value(raw.len() as u64, items)?;
+        runtime.interface().charge_return_value(raw.len() as u64, items)?;
         let span = abi_metrics::Span::start();
         let value = IndexedValue::from_raw(raw)?;
         abi_metrics::record_return_decode(raw.len(), span.finish());

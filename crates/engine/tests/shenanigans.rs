@@ -10,7 +10,7 @@ use tari_engine_types::{
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
     args::VaultAction,
-    types::{Amount, ComponentAddress, ResourceType, VaultId, constants::TARI_TOKEN},
+    types::{Amount, ComponentAddress, ObjectKey, ResourceType, VaultId, constants::TARI_TOKEN},
 };
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -162,6 +162,28 @@ fn it_rejects_double_ownership_of_vault() {
     assert_reject_reason(reason, "Duplicate reference to substate");
 }
 
+/// Asserts that `reason` is [`RuntimeError::VaultAlreadyOwned`] for a vault the transaction created, whose id is
+/// unknown before it runs. The expected text is rendered from the variant around a placeholder id, so it follows
+/// the variant's message.
+#[track_caller]
+fn assert_new_vault_already_owned(reason: RejectReason) {
+    let placeholder = VaultId::new(ObjectKey::from_array([0u8; ObjectKey::LENGTH]));
+    let expected = RuntimeError::VaultAlreadyOwned { vault_id: placeholder }.to_string();
+    let (before_id, after_id) = expected.split_once(&placeholder.to_string()).unwrap();
+    let reason = reason.to_string();
+    let vault_id_start = reason
+        .find(before_id)
+        .unwrap_or_else(|| panic!("Expected reject reason \"{expected}\" but got \"{reason}\"")) +
+        before_id.len();
+    let rest = &reason[vault_id_start..];
+    let vault_id_end = rest
+        .find(after_id)
+        .unwrap_or_else(|| panic!("Expected reject reason \"{expected}\" but got \"{reason}\""));
+    rest[..vault_id_end]
+        .parse::<VaultId>()
+        .unwrap_or_else(|_| panic!("Expected a vault id in reject reason \"{reason}\""));
+}
+
 #[test]
 fn it_rejects_one_vault_in_two_new_components() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
@@ -174,7 +196,7 @@ fn it_rejects_one_vault_in_two_new_components() {
         vec![test.owner_proof()],
     );
 
-    assert_reject_reason(reason, "already belongs to a component");
+    assert_new_vault_already_owned(reason);
 }
 
 fn create_component_with_vault(test: &mut TemplateTest) -> (ComponentAddress, VaultId) {
@@ -218,7 +240,7 @@ fn it_rejects_another_components_vault_in_a_state_update() {
         vec![test.owner_proof()],
     );
 
-    assert_reject_reason(reason, "already belongs to a component");
+    assert_new_vault_already_owned(reason);
 }
 
 #[test]

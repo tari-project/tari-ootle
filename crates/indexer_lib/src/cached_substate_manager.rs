@@ -514,8 +514,10 @@ where
     /// Fresh cache entries are served first, an up head only together with the proof [`Self::read_live_proof`] serves
     /// for it while verification is on, and the rest are fetched from the committee in batches. A batch is answered by
     /// one member, which may leave an id out or report it down without being able to prove either. Every requested
-    /// id the batch does not settle is therefore confirmed through [`Self::get_substate`]'s committee agreement,
-    /// and a confirmation that fails fails the call: leaving the id out would tell the caller it is not live.
+    /// id the batch does not settle is therefore confirmed through [`Self::fetch_and_cache_substate`]'s committee
+    /// agreement, bypassing the cache: a cached head that came back without a live proof must not settle its own
+    /// confirmation. A confirmation that fails fails the call: leaving the id out would tell the caller it is not
+    /// live.
     pub async fn fetch_and_cache_substates(
         &self,
         substate_ids: &[SubstateId],
@@ -644,8 +646,8 @@ where
     /// Consensus aborts a transaction whose declared input is not up, so once one is found there is
     /// nothing left to learn from the rest. Fresh cache entries are consulted first, then the misses
     /// are fetched in batches. A batch omission says only that one member did not answer for the id,
-    /// so an omitted input is confirmed through [`Self::get_substate`]'s committee agreement before
-    /// the lookup stops at it.
+    /// so an omitted input is confirmed through [`Self::fetch_and_cache_substate`]'s committee
+    /// agreement before the lookup stops at it.
     pub async fn get_input_substates(
         &self,
         requirements: &[SubstateRequirementRef<'_>],
@@ -741,6 +743,9 @@ where
             .try_collect::<Vec<_>>()
             .await?;
 
+        // The writes run one after another and a stalled cache stalls each of them, so the first write
+        // that times out ends caching for the call and the lookup waits at most one bound.
+        let mut caching = self.cache_writes;
         let mut results = HashMap::with_capacity(substate_ids.len());
         for (batch, batch_verified) in batches {
             let commit_proof = batch.commit_proof;
@@ -776,7 +781,7 @@ where
                     };
                     // An unverified entry is not cached while verification is on, so the next read
                     // retries for a proven copy instead of pinning an unproven value.
-                    if self.cache_writes && (verified || !self.verify_substate_proofs) {
+                    if caching && (verified || !self.verify_substate_proofs) {
                         match tokio::time::timeout(
                             WARMING_WRITE_TIMEOUT,
                             self.substate_cache.write(&substate.substate_id, entry, watermark),
@@ -787,12 +792,15 @@ where
                             Ok(Err(e)) => {
                                 warn!(target: LOG_TARGET, "Failed to cache substate {}: {e}", substate.substate_id)
                             },
-                            Err(_) => warn!(
-                                target: LOG_TARGET,
-                                "Answered the batch lookup of {} without caching it: the cache write did not complete within {}ms",
-                                substate.substate_id,
-                                WARMING_WRITE_TIMEOUT.as_millis()
-                            ),
+                            Err(_) => {
+                                caching = false;
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "Answered the batch lookup without caching it from {} on: the cache write did not complete within {}ms",
+                                    substate.substate_id,
+                                    WARMING_WRITE_TIMEOUT.as_millis()
+                                );
+                            },
                         }
                     }
                 }
@@ -3674,9 +3682,11 @@ mod tests {
         }
     }
 
+    /// A batch's cache writes only warm the next read, so a stalled cache holds the lookup up for one write's bound
+    /// however many ids the batch caches, and a failing one still answers it.
     #[tokio::test(start_paused = true)]
     async fn stalled_or_failed_batch_cache_writes_still_answer_the_lookup() {
-        let ids = vec![component_id(1)];
+        let ids = (0..3).map(component_id).collect::<Vec<_>>();
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3685,12 +3695,12 @@ mod tests {
 
         let started = tokio::time::Instant::now();
         let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
-        assert!(found.contains_key(&ids[0]));
+        assert_eq!(found.len(), ids.len());
         assert_eq!(started.elapsed(), WARMING_WRITE_TIMEOUT);
 
         *manager.substate_cache.2.lock().unwrap() = CacheWrites::Fail;
         let found = manager.fetch_and_cache_substates(&ids).await.unwrap();
-        assert!(found.contains_key(&ids[0]));
+        assert_eq!(found.len(), ids.len());
     }
 
     #[tokio::test]

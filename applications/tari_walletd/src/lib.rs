@@ -201,7 +201,7 @@ pub async fn run_tari_ootle_walletd(
 
     if let Some(webauthn_service) = webauthn_service {
         if !webauthn_service.is_enrolled()? {
-            let (_setup_token, setup_token_path) =
+            let (setup_token, setup_token_path) =
                 webauthn_service.issue_setup_token_to_file(config.common.base_path())?;
             let ui_origin = config
                 .ootle_wallet_daemon
@@ -218,6 +218,11 @@ pub async fn run_tari_ootle_walletd(
                 target: LOG_TARGET,
                 "🔑 No WebAuthn passkey is enrolled. Register your first passkey at {register_url} using the one-time setup token in {}",
                 setup_token_path.display()
+            );
+            // The tokenised link goes to stdout only: log appenders persist it in files that outlive the token.
+            println!(
+                "🔑 Register your first passkey: {register_url}?token={}",
+                setup_token.as_str()
             );
         } else if let Err(err) = services::remove_setup_token_file(config.common.base_path()) {
             warn!(

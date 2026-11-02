@@ -1,0 +1,58 @@
+---
+# The autofix.ci GitHub App commits whatever this job changes back to the PR branch, forks included.
+# The workflow name must stay `autofix.ci`: the app identifies the run by it. The job holds a read-only
+# token; the write happens in the app, outside this job.
+name: autofix.ci
+
+'on':
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label }}'
+  cancel-in-progress: true
+
+env:
+  nightly_toolchain: nightly-2025-12-05
+
+jobs:
+  autofix:
+    name: autofix
+    runs-on: [ ubuntu-latest ]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: ${{ env.nightly_toolchain }}
+          components: rustfmt
+
+      - name: cargo format
+        run: cargo +${{ env.nightly_toolchain }} fmt --all
+
+      - name: install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: setup node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: 'pnpm'
+
+      - name: install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: prettier
+        run: pnpm run fmt
+
+      - name: commit fixes
+        uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4

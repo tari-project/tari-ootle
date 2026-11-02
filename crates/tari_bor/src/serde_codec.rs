@@ -520,9 +520,14 @@ where <W as Write>::Error: core::error::Error + 'static
 // Deserializer
 // ============================================================================
 
+/// Upper bound on how many elements we pre-allocate from an untrusted CBOR length header
+/// when reporting `size_hint()` to serde visitors.
+const MAX_PREALLOC: usize = 64;
+
 #[derive(Debug, Clone)]
 pub struct Deserializer<'de> {
     decoder: Decoder<'de>,
+    depth: usize,
 }
 
 impl<'de> Deserializer<'de> {
@@ -553,7 +558,7 @@ impl<'de> Deserializer<'de> {
 
 impl<'de> From<Decoder<'de>> for Deserializer<'de> {
     fn from(d: Decoder<'de>) -> Self {
-        Self { decoder: d }
+        Self { decoder: d, depth: 0 }
     }
 }
 
@@ -722,7 +727,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             },
             _ => {
                 let len = self.decoder.array()?;
-                visitor.visit_seq(Seq::new(self, len))
+                visitor.visit_seq(Seq::new(self, len)?)
             },
         }
     }
@@ -737,7 +742,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                     .into(),
             );
         }
-        visitor.visit_seq(Seq::new(self, n))
+        visitor.visit_seq(Seq::new(self, n)?)
     }
 
     fn deserialize_tuple_struct<V: Visitor<'de>>(
@@ -751,7 +756,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         let len = self.decoder.map()?;
-        visitor.visit_map(Seq::new(self, len))
+        visitor.visit_map(Seq::new(self, len)?)
     }
 
     fn deserialize_struct<V: Visitor<'de>>(
@@ -776,7 +781,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                 return Err(decode::Error::message("invalid enum map length").at(p).into());
             }
         }
-        visitor.visit_enum(Enum::new(self))
+        visitor.visit_enum(Enum::new(self)?)
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -799,8 +804,18 @@ struct Seq<'a, 'de> {
 }
 
 impl<'a, 'de> Seq<'a, 'de> {
-    fn new(d: &'a mut Deserializer<'de>, len: Option<u64>) -> Self {
-        Self { deserializer: d, len }
+    fn new(d: &'a mut Deserializer<'de>, len: Option<u64>) -> Result<Self, DecodeError> {
+        if d.depth >= crate::value::MAX_DECODE_DEPTH {
+            return Err(decode::Error::message("maximum CBOR nesting depth exceeded").into());
+        }
+        d.depth += 1;
+        Ok(Self { deserializer: d, len })
+    }
+}
+
+impl Drop for Seq<'_, '_> {
+    fn drop(&mut self) {
+        self.deserializer.depth -= 1;
     }
 }
 
@@ -808,7 +823,7 @@ impl<'de> SeqAccess<'de> for Seq<'_, 'de> {
     type Error = DecodeError;
 
     fn size_hint(&self) -> Option<usize> {
-        self.len.and_then(|n| n.try_into().ok())
+        self.len.and_then(|n| usize::try_from(n).ok()).map(|n| n.min(MAX_PREALLOC))
     }
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error> {
@@ -835,7 +850,7 @@ impl<'de> MapAccess<'de> for Seq<'_, 'de> {
     type Error = DecodeError;
 
     fn size_hint(&self) -> Option<usize> {
-        self.len.and_then(|n| n.try_into().ok())
+        self.len.and_then(|n| usize::try_from(n).ok()).map(|n| n.min(MAX_PREALLOC))
     }
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error> {
@@ -930,8 +945,18 @@ struct Enum<'a, 'de: 'a> {
 }
 
 impl<'a, 'de> Enum<'a, 'de> {
-    fn new(d: &'a mut Deserializer<'de>) -> Self {
-        Self { deserializer: d }
+    fn new(d: &'a mut Deserializer<'de>) -> Result<Self, DecodeError> {
+        if d.depth >= crate::value::MAX_DECODE_DEPTH {
+            return Err(decode::Error::message("maximum CBOR nesting depth exceeded").into());
+        }
+        d.depth += 1;
+        Ok(Self { deserializer: d })
+    }
+}
+
+impl Drop for Enum<'_, '_> {
+    fn drop(&mut self) {
+        self.deserializer.depth -= 1;
     }
 }
 
@@ -952,15 +977,15 @@ impl<'de> VariantAccess<'de> for Enum<'_, 'de> {
     }
 
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value, Self::Error> {
-        seed.deserialize(self.deserializer)
+        seed.deserialize(&mut *self.deserializer)
     }
 
     fn tuple_variant<V: Visitor<'de>>(self, len: usize, v: V) -> Result<V::Value, Self::Error> {
-        de::Deserializer::deserialize_tuple(self.deserializer, len, v)
+        de::Deserializer::deserialize_tuple(&mut *self.deserializer, len, v)
     }
 
     fn struct_variant<V: Visitor<'de>>(self, _fields: &'static [&'static str], v: V) -> Result<V::Value, Self::Error> {
-        de::Deserializer::deserialize_map(self.deserializer, v)
+        de::Deserializer::deserialize_map(&mut *self.deserializer, v)
     }
 }
 
@@ -1063,5 +1088,30 @@ mod tests {
             };
             super::roundtrip(&v);
         }
+    }
+
+    #[test]
+    fn truncated_huge_array_header_does_not_over_allocate() {
+        // CBOR array with u64::MAX declared elements (0x9b followed by 8 bytes of 0xff),
+        // truncated immediately after the header.
+        let payload = [0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        assert!(from_slice::<Vec<u64>>(&payload).is_err());
+    }
+
+    #[test]
+    fn truncated_huge_map_header_does_not_over_allocate() {
+        // CBOR map with u64::MAX declared entries (0xbb followed by 8 bytes of 0xff),
+        // truncated immediately after the header.
+        let payload = [0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        assert!(from_slice::<std::collections::BTreeMap<u64, u64>>(&payload).is_err());
+    }
+
+    #[test]
+    fn deeply_nested_arrays_rejected_by_depth_limit() {
+        let depth = crate::value::MAX_DECODE_DEPTH + 1;
+        let mut payload = vec![0x81; depth];
+        payload.push(0x00);
+        let err = from_slice::<crate::Value>(&payload).unwrap_err();
+        assert!(err.to_string().contains("maximum CBOR nesting depth exceeded"));
     }
 }

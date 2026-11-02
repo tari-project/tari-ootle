@@ -306,13 +306,16 @@ impl Transaction {
     /// under a layout of `num_committees` committees: the groups holding its inputs and the burn
     /// claim tombstones it creates, less one.
     ///
-    /// Global inputs are held by every group and never pledged, so they add no group. The receipt's
-    /// group is left out because the receipt address follows from the transaction id, which a fee
-    /// estimate made before the transaction is sealed cannot know.
+    /// A [global](Self::is_global) transaction executes in every group, and each group pledges its
+    /// inputs to all the others, so its fanout is every group less one. The receipt's group is left
+    /// out because the receipt address follows from the transaction id, which a fee estimate made
+    /// before the transaction is sealed cannot know.
     pub fn input_fanout(&self, num_preshards: NumPreshards, num_committees: u32) -> u32 {
+        if self.is_global() {
+            return num_committees.saturating_sub(1);
+        }
         let inputs = self
             .all_inputs_iter()
-            .filter(|input| !input.substate_id().is_global())
             // The version does not affect the shard group
             .map(|input| input.or_zero_version().to_substate_address());
         let tombstones = self
@@ -617,16 +620,23 @@ mod tests {
         assert_eq!(fanout_of(&[first.clone(), same_group], num_committees), one_input);
         assert_eq!(fanout_of(&[first.clone(), second], num_committees), one_input + 1);
 
+        assert_eq!(fanout_of(&[first], 1), 0);
+    }
+
+    #[test]
+    fn a_global_transaction_is_pledged_to_every_further_group() {
         let template = SubstateId::Template(PublishedTemplateAddress::from_template_address(
             TemplateAddress::from_array([0x99; 32]),
         ));
-        assert_eq!(
-            fanout_of(&[first.clone(), template], num_committees),
-            one_input,
-            "a global input is held by every group, so it is pledged to none"
-        );
+        assert_eq!(fanout_of(std::slice::from_ref(&template), 4), 3);
+        assert_eq!(fanout_of(&[component(0x00, 0), template.clone()], 4), 3);
+        assert_eq!(fanout_of(&[template], 1), 0);
 
-        assert_eq!(fanout_of(&[first], 1), 0);
+        let (k, _) = create_key_pair();
+        let publish = Transaction::builder_localnet(Epoch(1))
+            .publish_template(b"template".to_vec())
+            .build_and_seal(&k);
+        assert_eq!(publish.input_fanout(NumPreshards::P256, 4), 3);
     }
 
     #[test]

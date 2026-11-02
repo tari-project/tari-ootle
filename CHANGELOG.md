@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## Unreleased
+
+### ⚠️ Upgrade notes
+
+- **A proof authorizes only inside an explicit window, and a window lends one hop.** Templates that authorize a
+  `Proof` argument, and callers of the account's `*_with_auth` methods, must open the window on the caller's
+  side instead (see the authorization guide); the faucet's `take_with_proof` is gone, and `take` deposits only
+  into a component with an open deposit rule. (#3199, #3206)
+- **Component migrations run confined, like a resource auth hook, and neither carries signer badges.** A migration
+  may only rewrite its component's own state; anything else happens in a method call after the upgrade. (#3206)
+
 ## [0.48.0](https://github.com/tari-project/tari-ootle/compare/v0.47.0...v0.48.0) (2026-10-29)
 
 The testnet reset release. Protocol history collapses to a single `V0`, transaction and libp2p

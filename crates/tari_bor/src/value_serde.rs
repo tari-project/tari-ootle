@@ -200,7 +200,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
-        let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        let mut out = Vec::with_capacity(cautious_capacity(seq.size_hint()));
         while let Some(elem) = seq.next_element::<Value>()? {
             out.push(elem);
         }
@@ -225,13 +225,19 @@ impl<'de> Visitor<'de> for ValueVisitor {
         }
 
         let first_value: Value = map.next_value()?;
-        let mut entries: Vec<(Value, Value)> = Vec::with_capacity(map.size_hint().unwrap_or(0) + 1);
+        let mut entries: Vec<(Value, Value)> = Vec::with_capacity(cautious_capacity(map.size_hint()) + 1);
         entries.push((Value::Text(first_key), first_value));
         while let Some((k, v)) = map.next_entry::<String, Value>()? {
             entries.push((Value::Text(k), v));
         }
         Ok(Value::Map(entries))
     }
+}
+
+/// `size_hint` from a binary deserializer is the input's own length header, so it only seeds the capacity up to
+/// [`MAX_PREALLOC`](crate::adapters::MAX_PREALLOC); the collection grows as elements actually decode.
+fn cautious_capacity(hint: Option<usize>) -> usize {
+    hint.unwrap_or(0).min(crate::adapters::MAX_PREALLOC as usize)
 }
 
 fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Value, A::Error> {
@@ -392,6 +398,17 @@ mod tests {
         let json = serde_json::to_string(&v).unwrap();
         assert!(json.contains("@cbor"));
         assert!(serde_json::from_str::<Value>(&json).is_err());
+    }
+
+    #[test]
+    fn the_serde_decoder_rejects_a_huge_length_header_without_preallocating() {
+        // An array header claiming u64::MAX elements, followed by none.
+        const HUGE_ARRAY: &[u8] = &[0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        // A map header claiming u64::MAX entries, followed by one entry {"a": 1}: the visitor sizes the map after
+        // reading the first entry.
+        const HUGE_MAP: &[u8] = &[0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x61, b'a', 0x01];
+        assert!(crate::serde_codec::from_slice::<Value>(HUGE_ARRAY).is_err());
+        assert!(crate::serde_codec::from_slice::<Value>(HUGE_MAP).is_err());
     }
 
     // The CBOR serde route reaches `Value` through `deserialize_any`, which hands a 64-bit negative

@@ -1,13 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fmt::Display, num::NonZeroU64, time::Instant};
+use std::{collections::HashMap, fmt::Display, time::Instant};
 
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_consensus_types::{BlockId, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::{commit_result::RejectReason, fees::FeeScaleSchedule};
+use tari_engine_types::fees::FeeScaleSchedule;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -35,7 +35,6 @@ use tari_ootle_storage::{
         ForeignProposalRecord,
         ForeignProposalStatus,
         LockedEpoch,
-        MultiShardAtom,
         PendingShardStateTreeDiff,
         ProposalFilter,
         TransactionExecution,
@@ -59,7 +58,13 @@ use crate::{
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
-        command_derivation::{DerivedCommand, derive_local_only_command, derive_new_multishard_command},
+        command_derivation::{
+            DerivedCommand,
+            derive_local_only_command,
+            derive_multi_shard_atom_with_leader_fee,
+            derive_new_multishard_command,
+            lock_local_accept_execution,
+        },
         epoch_state::EpochState,
         error::HotStuffError,
         exceeds_block_foreign_proposal_bytes,
@@ -71,11 +76,9 @@ use crate::{
         substate_store::{InputPledge, PendingSubstateStore},
         transaction_manager::{
             ConsensusTransactionManager,
-            MultishardLockScope,
             PledgedTransaction,
             PreparedTransaction,
             TransactionLockConflicts,
-            lock_multishard_execution,
         },
     },
     messages::{HotstuffMessage, ProposalMessage},
@@ -1106,48 +1109,11 @@ where TConsensusSpec: ConsensusSpec
             }
         }
 
-        // Try to lock all local outputs
-        let locked = lock_multishard_execution(
-            substate_store,
-            local_committee_info,
-            *tx_rec.id(),
-            execution,
-            MultishardLockScope::LocalOutputs,
-            tx_rec.is_fee_intent_only(),
-        )
-        .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-        if let Some(err) = locked.lock_status.failures().first() {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Failed to lock outputs for transaction {}: {}",
-                tx_rec.id(),
-                err,
-            );
-            // If the transaction does not lock, we propose to abort it
-            let execution =
-                TransactionExecution::abort(tx_rec.id(), RejectReason::FailedToLockOutputs(err.to_string()));
-            tx_rec.update_from_execution(
-                local_committee_info.num_preshards(),
-                local_committee_info.num_committees(),
-                &execution,
-            );
-
-            executed_transactions.insert(*tx_rec.id(), execution);
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
-        }
-
-        tx_rec.update_from_execution(
-            local_committee_info.num_preshards(),
-            local_committee_info.num_committees(),
-            &locked.execution,
-        );
-        if locked.fee_intent_only {
-            tx_rec.set_fee_intent_only(true);
-        }
-        executed_transactions.insert(*tx_rec.id(), locked.execution);
+        let execution = lock_local_accept_execution(substate_store, local_committee_info, &mut tx_rec, execution)?;
+        executed_transactions.insert(*tx_rec.id(), execution);
         // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
         // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
-        let atom = self.get_multi_shard_atom_with_leader_fee(&tx_rec)?;
+        let atom = derive_multi_shard_atom_with_leader_fee(&tx_rec)?;
         Ok(Some(Command::LocalAccept(atom)))
     }
 
@@ -1211,27 +1177,8 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(None);
         }
-        let atom = self.get_multi_shard_atom_with_leader_fee(tx_rec)?;
+        let atom = derive_multi_shard_atom_with_leader_fee(tx_rec)?;
         Ok(Some(Command::AllAccept(atom)))
-    }
-
-    fn get_multi_shard_atom_with_leader_fee(
-        &self,
-        tx_rec: &TransactionPoolRecord,
-    ) -> Result<MultiShardAtom, HotStuffError> {
-        let mut atom = tx_rec.get_current_multi_shard_atom();
-        if tx_rec.current_decision().is_commit() {
-            let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
-            let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
-                HotStuffError::InvariantError(format!(
-                    "PROPOSE: Transaction {} involves zero shard groups",
-                    tx_rec.id(),
-                ))
-            })?;
-            let leader_fee = tx_rec.calculate_leader_fee(involved);
-            atom.leader_fee = Some(leader_fee);
-        }
-        Ok(atom)
     }
 
     fn execute_transaction<TTx: StateStoreReadTransaction>(

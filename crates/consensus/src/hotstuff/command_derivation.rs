@@ -7,25 +7,38 @@
 
 use std::{fmt, fmt::Display, num::NonZeroU64};
 
+use log::*;
 use tari_consensus_types::Decision;
-use tari_engine_types::substate::SubstateDiff;
+use tari_engine_types::{commit_result::RejectReason, substate::SubstateDiff};
 use tari_ootle_common_types::{ShardGroup, committee::CommitteeInfo};
-use tari_ootle_storage::consensus_models::{
-    Command,
-    InvalidEvidenceReason,
-    LeaderFee,
-    LocalOnlyAtom,
-    MultiShardAtom,
-    NoVoteReason,
-    TransactionExecution,
-    TransactionPoolRecord,
-    TransactionPoolStage,
+use tari_ootle_storage::{
+    StateStoreReadTransaction,
+    consensus_models::{
+        Command,
+        InvalidEvidenceReason,
+        LeaderFee,
+        LocalOnlyAtom,
+        MultiShardAtom,
+        NoVoteReason,
+        TransactionExecution,
+        TransactionPoolRecord,
+        TransactionPoolStage,
+    },
 };
 
 use crate::hotstuff::{
     error::HotStuffError,
-    transaction_manager::{EvidenceOrExecution, LocalPreparedTransaction, MultiShardPreparedTransaction},
+    substate_store::PendingSubstateStore,
+    transaction_manager::{
+        EvidenceOrExecution,
+        LocalPreparedTransaction,
+        MultiShardPreparedTransaction,
+        MultishardLockScope,
+        lock_multishard_execution,
+    },
 };
+
+const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::command_derivation";
 
 /// A transaction command derived for a block, with what including it changes.
 #[derive(Debug)]
@@ -243,6 +256,82 @@ pub(super) fn derive_new_multishard_command(
         leader_fee: 0,
         exhaust_burn: 0,
     })
+}
+
+/// Locks the local outputs of a `LocalPrepared` transaction's execution (narrowing to its fee intent or aborting if a
+/// local output cannot be locked) and updates `pool_record` from the resulting execution.
+pub(super) fn lock_local_accept_execution<TTx: StateStoreReadTransaction>(
+    substate_store: &mut PendingSubstateStore<TTx>,
+    local_committee_info: &CommitteeInfo,
+    pool_record: &mut TransactionPoolRecord,
+    execution: TransactionExecution,
+) -> Result<TransactionExecution, HotStuffError> {
+    if !execution.decision().is_commit() {
+        pool_record
+            .update_from_execution(
+                local_committee_info.num_preshards(),
+                local_committee_info.num_committees(),
+                &execution,
+            )
+            .no_leader_fee();
+        return Ok(execution);
+    }
+
+    let locked = lock_multishard_execution(
+        substate_store,
+        local_committee_info,
+        *pool_record.id(),
+        execution,
+        MultishardLockScope::LocalOutputs,
+        pool_record.is_fee_intent_only(),
+    )
+    .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
+    if let Some(err) = locked.lock_status.failures().first() {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ Failed to lock outputs for transaction {}: {}",
+            pool_record.id(),
+            err,
+        );
+        let execution = locked
+            .execution
+            .into_abort(pool_record.id(), RejectReason::FailedToLockOutputs(err.to_string()));
+        pool_record
+            .update_from_execution(
+                local_committee_info.num_preshards(),
+                local_committee_info.num_committees(),
+                &execution,
+            )
+            .no_leader_fee();
+        return Ok(execution);
+    }
+
+    pool_record.update_from_execution(
+        local_committee_info.num_preshards(),
+        local_committee_info.num_committees(),
+        &locked.execution,
+    );
+    if locked.fee_intent_only {
+        pool_record.set_fee_intent_only(true);
+    }
+    Ok(locked.execution)
+}
+
+/// Derives the `MultiShardAtom` for a transaction's `LocalAccept` or `AllAccept` command, setting `leader_fee` when
+/// `pool_record.current_decision().is_commit()`.
+pub(super) fn derive_multi_shard_atom_with_leader_fee(
+    pool_record: &TransactionPoolRecord,
+) -> Result<MultiShardAtom, HotStuffError> {
+    let mut atom = pool_record.get_current_multi_shard_atom();
+    if pool_record.current_decision().is_commit() {
+        let num_involved_shard_groups = pool_record.evidence().num_shard_groups();
+        let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
+            HotStuffError::InvariantError(format!("Transaction {} involves zero shard groups", pool_record.id()))
+        })?;
+        let leader_fee = pool_record.calculate_leader_fee(involved);
+        atom.leader_fee = Some(leader_fee);
+    }
+    Ok(atom)
 }
 
 /// The reason a replica refuses `proposed` when it derived `derived` for the same transaction. Fields are compared in

@@ -9,6 +9,7 @@
 
 use std::{fs, path::Path};
 
+use syn::{Token, punctuated::Punctuated};
 use tari_ootle_template_metadata::FunctionDoc;
 
 /// Read the given source file and return one [`FunctionDoc`] per public template function.
@@ -43,19 +44,13 @@ fn has_template_attr(attrs: &[syn::Attribute]) -> bool {
 }
 
 fn is_stateless_template(attrs: &[syn::Attribute]) -> bool {
-    let mut stateless = false;
-    for attr in attrs {
-        if !attr.path().segments.last().is_some_and(|seg| seg.ident == "template") {
-            continue;
-        }
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("stateless") {
-                stateless = true;
-            }
-            Ok(())
-        });
-    }
-    stateless
+    attrs
+        .iter()
+        .filter(|attr| attr.path().segments.last().is_some_and(|seg| seg.ident == "template"))
+        .any(|attr| {
+            attr.parse_args_with(Punctuated::<syn::Ident, Token![,]>::parse_terminated)
+                .is_ok_and(|flags| flags.iter().any(|flag| flag == "stateless"))
+        })
 }
 
 fn extract_from_mod(m: &syn::ItemMod) -> Vec<FunctionDoc> {

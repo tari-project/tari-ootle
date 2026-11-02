@@ -51,6 +51,16 @@ jobs:
       - name: install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      # The autofix commit takes every change in the tree, so only formatter output may reach it. A frozen
+      # install that dirties tracked files (e.g. pnpm's `allowBuilds:` scaffold in pnpm-workspace.yaml) fails
+      # the job; the author declares the dependency's allow/deny in pnpm-workspace.yaml.
+      - name: assert frozen install left the tree clean
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::pnpm install modified tracked files (diff above) — declare new build-script deps in pnpm-workspace.yaml (allowBuilds)."
+            exit 1
+          fi
+
       - name: prettier
         run: pnpm run fmt
 

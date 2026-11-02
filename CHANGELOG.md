@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.49.2](https://github.com/tari-project/tari-ootle/compare/v0.49.1...v0.49.2) (2026-11-02)
+
+Ships the validator, indexer, wallet daemon and swarm binaries that 0.49.0 and 0.49.1 failed to
+build.
+
+### Bug fixes
+
+- **build:** release binaries build again; the audited release build rejected the workspace's
+  feature set. (#3259)
+
 ## [0.49.1](https://github.com/tari-project/tari-ootle/compare/v0.49.0...v0.49.1) (2026-11-02)
 
 Ships the validator, indexer, wallet daemon and swarm binaries that 0.49.0 failed to build.

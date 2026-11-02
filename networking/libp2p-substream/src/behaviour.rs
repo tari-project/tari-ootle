@@ -306,7 +306,6 @@ impl NetworkBehaviour for Behaviour {
                 }
             },
             Event::InboundSubstreamOpen { .. } => {},
-            Event::InboundFailure { .. } => {},
         }
 
         self.pending_events.push_back(ToSwarm::GenerateEvent(event));

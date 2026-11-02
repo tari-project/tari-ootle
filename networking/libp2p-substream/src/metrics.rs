@@ -11,7 +11,6 @@ use crate::{Event, ProtocolEvent};
 pub struct Metrics {
     num_open_substreams: Gauge,
     inbound_open_count: Counter,
-    inbound_failure_count: Counter,
     outbound_failure_count: Counter,
     error_count: Counter,
 }
@@ -33,13 +32,6 @@ impl Metrics {
             inbound_open_count.clone(),
         );
 
-        let inbound_failure_count = Counter::default();
-        registry.register(
-            "inbound_failure_count",
-            "Number of inbound substream failures",
-            inbound_failure_count.clone(),
-        );
-
         let outbound_failure_count = Counter::default();
         registry.register(
             "outbound_failure_count",
@@ -57,7 +49,6 @@ impl Metrics {
         Self {
             num_open_substreams,
             inbound_open_count,
-            inbound_failure_count,
             outbound_failure_count,
             error_count,
         }
@@ -90,15 +81,6 @@ impl libp2p::metrics::Recorder<Event> for Metrics {
                         notification.protocol
                     );
                 },
-            },
-            Event::InboundFailure {
-                peer_id,
-                stream_id,
-                error,
-            } => {
-                self.inbound_failure_count.inc();
-                self.error_count.inc();
-                tracing::error!(error = ?error, "Inbound substream failure for peer {peer_id} (ID = {stream_id})");
             },
             Event::OutboundFailure {
                 peer_id,

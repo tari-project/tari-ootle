@@ -3,16 +3,75 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-## Unreleased
+## [0.49.0](https://github.com/tari-project/tari-ootle/compare/v0.48.0...v0.49.0) (2026-11-02)
+
+A second testnet reset, for a new authorization model. Proofs authorize only inside a window the
+caller opens, a window lends one hop, signer badges stay in the frame they are stamped into, and a
+component's template can be upgraded only if it opts in.
 
 ### ⚠️ Upgrade notes
 
-- **A proof authorizes only inside an explicit window, and a window lends one hop.** Templates that authorize a
-  `Proof` argument, and callers of the account's `*_with_auth` methods, must open the window on the caller's
-  side instead (see the authorization guide); the faucet's `take_with_proof` is gone, and `take` deposits only
-  into a component with an open deposit rule. (#3199, #3206)
-- **Component migrations run confined, like a resource auth hook, and neither carries signer badges.** A migration
-  may only rewrite its component's own state; anything else happens in a method call after the upgrade. (#3206)
+- **Every node, indexer and wallet resets**: component headers gain an upgrade rule, so delete
+  validator, indexer and wallet data directories before starting 0.49.0. (#3195)
+- **The whole fleet upgrades together**: authorization, metering and fee rules change with no
+  activation epoch. (#3190, #3202, #3206, #3207)
+- **A proof authorizes only inside an explicit window, and a window lends one hop.** Templates that
+  authorize a `Proof` argument, and callers of the account's `*_with_auth` methods, open the window
+  on the caller's side instead (see the authorization guide). The faucet's `take_with_proof` is
+  gone. (#3199, #3206)
+- **Public-key badges authorize only the frame they are stamped into.** `template_lib` drops the
+  signer and owner proof getters (use `transaction_signer_public_key` or `assert_badge_in_scope`),
+  the account's `withdraw_approved` takes the spender's badge address, and `create_ownership_proof`
+  is gone. (#3190)
+- **Component template upgrades are opt-in**: components default to `UpgradeRule::Locked`, and a
+  template that upgrades must set `.with_upgrade_rule(..)`. Rebuild templates against
+  `tari_template_lib` 0.37. (#3195)
+- **Component migrations run confined, like a resource auth hook, and neither carries signer
+  badges.** A migration may only rewrite its component's own state; anything else happens in a
+  method call after the upgrade. (#3206)
+- **A resource's auth hook component must be declared as an input**, or the transaction is rejected
+  with `AuthHookComponentNotDeclared`. walletd, the wallet SDK and ootle-rs do not add it yet.
+  (#3188)
+- **Fees rise**: declared templates and the governance component count toward the input load and
+  fanout charges, and each authorization is metered per rule node and proof examined. (#3202,
+  #3207)
+- **Host SDKs**: transactions gain `AuthorizeProof` and `DropProofAuthorization`, and component
+  headers gain `upgrade_rule`. ootle-go, ootle-py and ootle.ts must decode both and resync the
+  regenerated golden vectors. (#3195, #3199)
+- **walletd WebAuthn: the first passkey needs a setup token**, printed at startup and written to
+  `<base_path>/setup_token`. `tari_ootle_walletd reset-passkeys` clears enrolled passkeys. (#3114)
+
+### Features
+
+- **Proof authorization windows** in transactions and manifests (`authorize!` /
+  `drop_authorize!`), and `with_authorized_proof` in the transaction builder. (#3199, #3206)
+- **Opt-in component template upgrades** with an upgrade rule in the component header. (#3195)
+- **walletd `reset-passkeys`** recovers a wallet locked out of WebAuthn. (#3114)
+
+### Bug fixes
+
+- **consensus:** future timeout-recovery proposals are released at the right height, catch-up
+  proposes as soon as its batch lands, and the persisted NewView height survives a restart.
+  (#3233)
+- **consensus:** a block's foreign proposals are applied in block command order when proposing.
+  (#3254)
+- **consensus:** a fee-intent commit's evidence counts the shard groups of rejected outputs.
+  (#3191)
+- **common_types:** a committee tolerates fewer than a third of its members failing, and shard
+  state versions and shard groups reject malformed input. (#3244)
+- **transaction:** component template updates declare their migration arguments and are checked
+  against the target template. (#3233)
+- **engine:** a resource auth hook runs unless its component is an unused allocation. (#3188)
+- **epoch oracle:** a multi-batch scan no longer stops short of the tip. (#3192)
+- **indexer:** batch cache writes are bounded, and component references are deduplicated. (#3249)
+- **networking:** identified peers are disconnected only for a different network, and IPv6 scope,
+  bootstrap completion and topic peers are fixed. (#3252, #3237)
+- **tari_bor:** decoding a `Value` no longer preallocates from an untrusted length. (#3244)
+- **wallet:** a stored transaction is reported as submitted when its network call fails. (#3204)
+- **template_build:** stateless templates get docs, `extra_entry` merges, and a bad `source_path`
+  is reported. (#3241)
+- **swarm:** L1 watch paths, registration counts and protocol parsing are fixed. (#3240, #3242)
+- **deps:** libz-sys 1.1.31 (RUSTSEC-2026-0418). (#3196)
 
 ## [0.48.0](https://github.com/tari-project/tari-ootle/compare/v0.47.0...v0.48.0) (2026-10-29)
 

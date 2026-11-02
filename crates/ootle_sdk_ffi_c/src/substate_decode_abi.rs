@@ -4,7 +4,7 @@
 //! The flat `extern "C"` substate-decode + account-balances surface: read on-chain state back so a
 //! host can verify an operation landed.
 //!
-//! Four stateless, handle-free fns mirroring the rest of the facade (same [`OotleResult`] envelope,
+//! Three stateless, handle-free fns mirroring the rest of the facade (same [`OotleResult`] envelope,
 //! same [`guarded`]/[`flatten`] panic guard, same JSON-string marshalling, same stable error codes):
 //!
 //! - [`ootle_decode_substate`] — any fetched substate value (the indexer's base64 CBOR string) → the kind-tagged
@@ -12,14 +12,13 @@
 //! - [`ootle_account_balances`] — an account component + its fetched vault substates → the revealed balance per
 //!   resource (never a confidential total; see the core docs).
 //! - [`ootle_account_balance_wants`] — an account component → the `vault_<hex>` ids to fetch.
-//! - [`ootle_decode_event`] — a template-emitted event (the indexer's base64 CBOR string) → the engine `Event`.
 //!
 //! Balances cross as native JSON `u64`, never stringified-and-reparsed through a float. The host does
 //! the fetch; the core never touches the network.
 
 use std::os::raw::c_char;
 
-use ootle_sdk_core::{FetchedSubstate, account_balance_wants, account_balances, decode_event, decode_substate};
+use ootle_sdk_core::{FetchedSubstate, account_balance_wants, account_balances, decode_substate};
 
 use crate::c_abi::{OotleResult, flatten, guarded, output_json, parse_json, required_str};
 
@@ -125,33 +124,6 @@ pub unsafe extern "C" fn ootle_account_balance_wants(account_substate_json: *con
                     let payload = serde_json::json!({ "fetch_ids": fetch_ids });
                     Ok(OotleResult::ok_json(&output_json(&payload, "account balance wants")?))
                 },
-                Err(e) => Ok(OotleResult::from_core_err(&e)),
-            }
-        })())
-    })
-}
-
-/// Decodes a template-emitted event into the engine `Event`. **Stateless — returns no handle.**
-///
-/// `event_json` is the event as the indexer serves it (a JSON base64 CBOR string), passed verbatim, e.g. the `event`
-/// field of a `/transactions/events/stream` message. On success `data_json` is
-/// `{ "substate_id": "<id>" | null, "template_address": "<hex>", "topic": "<topic>", "payload": { … } }`, the same
-/// JSON `ootle-wasm-bor`'s `decodeEvent` returns.
-///
-/// A value that is not a base64 CBOR `Event` yields `"PARSE"`; a null arg yields `"INVALID"`.
-///
-/// # Safety
-/// `event_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
-/// [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn ootle_decode_event(event_json: *const c_char) -> OotleResult {
-    guarded(|| {
-        flatten((|| {
-            let event_json = unsafe { required_str(event_json, "event_json") }?;
-            let event: serde_json::Value = parse_json(event_json, "event")?;
-
-            match decode_event(&event) {
-                Ok(decoded) => Ok(OotleResult::ok_json(&output_json(&decoded, "decoded event")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
         })())

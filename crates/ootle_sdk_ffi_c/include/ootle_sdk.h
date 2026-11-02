@@ -413,6 +413,62 @@ void ootle_result_free(OotleResult result);
 void ootle_partial_transaction_free(OotlePartialTransaction *handle);
 
 /**
+ * Decodes a served `Event`. On success `data_json` is `{ "substate_id": "<id>" | null, "template_address": "<hex>",
+ * "topic": "<topic>", "payload": { … } }`.
+ *
+ * # Safety
+ * `event_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_event(const char *event_json);
+
+/**
+ * Decodes a served `SubstateValue` in full. On success `data_json` is the value's serde JSON, keyed by variant
+ * (`{ "Component": { … } }`, `{ "Vault": { … } }`, …).
+ *
+ * # Safety
+ * `substate_value_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_substate_value(const char *substate_value_json);
+
+/**
+ * Decodes a served `ExecuteResult`. On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `execute_result_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_execute_result(const char *execute_result_json);
+
+/**
+ * Decodes a served `TransactionReceipt`. On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `receipt_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_transaction_receipt(const char *receipt_json);
+
+/**
+ * Decodes a served `Resource`. On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `resource_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_resource(const char *resource_json);
+
+/**
+ * Decodes a served `Utxo`. On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `utxo_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_utxo(const char *utxo_json);
+
+/**
  * One-shot random-nonce default stealth send: build (resolve inputs + assemble) and seal/encode in
  * one call, expanding all proof + seal entropy from a fresh OS-RNG seed.
  *
@@ -764,22 +820,6 @@ OotleResult ootle_account_balances(const char *account_substate_json,
  * be freed with [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
  */
 OotleResult ootle_account_balance_wants(const char *account_substate_json);
-
-/**
- * Decodes a template-emitted event into the engine `Event`. **Stateless — returns no handle.**
- *
- * `event_json` is the event as the indexer serves it (a JSON base64 CBOR string), passed verbatim, e.g. the `event`
- * field of a `/transactions/events/stream` message. On success `data_json` is
- * `{ "substate_id": "<id>" | null, "template_address": "<hex>", "topic": "<topic>", "payload": { … } }`, the same
- * JSON `ootle-wasm-bor`'s `decodeEvent` returns.
- *
- * A value that is not a base64 CBOR `Event` yields `"PARSE"`; a null arg yields `"INVALID"`.
- *
- * # Safety
- * `event_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
- * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
- */
-OotleResult ootle_decode_event(const char *event_json);
 
 #ifdef __cplusplus
 }  // extern "C"

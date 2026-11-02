@@ -43,8 +43,10 @@ use ootle_sdk_ffi_c::{
     ootle_build_unsigned,
     ootle_build_unsigned_instructions,
     ootle_decode_event,
+    ootle_decode_execute_result,
     ootle_decode_stealth_utxo,
     ootle_decode_substate,
+    ootle_decode_substate_value,
     ootle_derive_account_address,
     ootle_derive_account_key_from_seed,
     ootle_derive_view_key_from_seed,
@@ -1758,7 +1760,7 @@ fn decode_substate_round_trips() {
 }
 
 /// `ootle_decode_event` turns the indexer's base64 CBOR event (a `/transactions/events/stream` message's `event`) into
-/// the engine `Event`'s JSON; a non-event ⇒ PARSE; bad JSON ⇒ PARSE; null arg ⇒ INVALID.
+/// the engine `Event`'s JSON; a value of another type ⇒ PARSE; bad JSON ⇒ PARSE; null arg ⇒ INVALID.
 #[test]
 fn decode_event_round_trips() {
     use tari_engine_types::{encoded::Encoded, events::Event};
@@ -1780,9 +1782,8 @@ fn decode_event_round_trips() {
     assert_eq!(decoded["topic"], "std.vault.deposit");
     unsafe { ootle_result_free(result) };
 
-    // A served value that is not an event ⇒ PARSE.
-    let not_an_event = CArg::new(&serde_json::to_string(&Encoded::encode(&"hello".to_string()).unwrap()).unwrap());
-    let r = unsafe { ootle_decode_event(not_an_event.ptr()) };
+    // A served value of another type ⇒ PARSE.
+    let r = unsafe { ootle_decode_execute_result(event_json.ptr()) };
     assert!(!ok(&r) && error_code(&r) == "PARSE");
     unsafe { ootle_result_free(r) };
 
@@ -1796,6 +1797,26 @@ fn decode_event_round_trips() {
     let r = unsafe { ootle_decode_event(std::ptr::null()) };
     assert!(!ok(&r) && error_code(&r) == "INVALID");
     unsafe { ootle_result_free(r) };
+}
+
+/// `ootle_decode_substate_value` turns the indexer's base64 CBOR substate value into the full `SubstateValue` JSON.
+#[test]
+fn decode_substate_value_round_trips() {
+    let fx = load_fixture("substate_decode/fungible_vault.json");
+    let served = &fx["input"]["substate_value"];
+    let substate_value = CArg::new(&serde_json::to_string(served).unwrap());
+
+    let result = unsafe { ootle_decode_substate_value(substate_value.ptr()) };
+    assert!(ok(&result), "decode failed: {}", error_code(&result));
+    assert!(result.handle.is_null(), "decode is stateless — no handle");
+    let expected: tari_engine_types::encoded::Encoded<tari_engine_types::substate::SubstateValue> =
+        serde_json::from_value(served.clone()).unwrap();
+    assert_eq!(
+        data_json(&result),
+        serde_json::to_value(expected.decode().unwrap()).unwrap()
+    );
+    assert!(data_json(&result).get("Vault").is_some());
+    unsafe { ootle_result_free(result) };
 }
 
 /// `ootle_account_balances` over the committed account-balances vector reproduces the per-resource

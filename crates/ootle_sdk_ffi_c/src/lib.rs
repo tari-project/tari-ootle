@@ -53,6 +53,7 @@
 //! `"INTERNAL"` error in the envelope, never undefined behaviour.
 
 mod c_abi;
+mod encoded_decode_abi;
 mod stealth_abi;
 mod substate_decode_abi;
 
@@ -81,6 +82,14 @@ pub use c_abi::{
     ootle_string_free,
     ootle_unsigned_record_for_cosign,
 };
+pub use encoded_decode_abi::{
+    ootle_decode_event,
+    ootle_decode_execute_result,
+    ootle_decode_resource,
+    ootle_decode_substate_value,
+    ootle_decode_transaction_receipt,
+    ootle_decode_utxo,
+};
 pub use stealth_abi::{
     OotleStealthPartialTransaction,
     ootle_apply_fetched_substates_stealth,
@@ -96,9 +105,4 @@ pub use stealth_abi::{
     ootle_stealth_partial_transaction_free,
     ootle_validate_stealth_transfer,
 };
-pub use substate_decode_abi::{
-    ootle_account_balance_wants,
-    ootle_account_balances,
-    ootle_decode_event,
-    ootle_decode_substate,
-};
+pub use substate_decode_abi::{ootle_account_balance_wants, ootle_account_balances, ootle_decode_substate};

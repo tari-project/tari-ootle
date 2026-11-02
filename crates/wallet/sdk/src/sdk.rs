@@ -36,12 +36,13 @@ use crate::{
         substate::SubstatesApi,
         template::TemplateApi,
         transaction::TransactionApi,
-        validator_set::{ValidatorSetApi, ValidatorSetShared},
+        validator_set::{ValidatorSetApi, ValidatorSetApiError, ValidatorSetShared},
         viewable_balance::ViewableBalanceApi,
     },
     cipher_seed::{CipherSeedRestore, WalletCipherSeed},
     local_key_store::LocalKeyStore,
     models::EpochBirthday,
+    network::WalletNetworkInterface,
     spec::WalletSdkSpec,
     storage::WalletStorageError,
 };
@@ -279,6 +280,22 @@ impl<TSpec: WalletSdkSpec> WalletSdk<TSpec> {
 
     pub fn viewable_balance_api(&self) -> ViewableBalanceApi {
         ViewableBalanceApi
+    }
+
+    /// The epoch the network has reached.
+    ///
+    /// Under [`IndexerTrust::Verify`] this is the epoch of the latest validator set the wallet trusts after a
+    /// [`ValidatorSetApi::sync`], which the network has reached as far as the wallet's anchor is right: past the
+    /// anchor, only a checkpoint signed by the previous set advances it, so it can trail the epoch manager's epoch
+    /// until the walked shard group's checkpoint lands.
+    pub async fn current_epoch(&self) -> Result<Epoch, ValidatorSetApiError> {
+        if self.config.indexer_trust.is_verify() {
+            return Ok(self.validator_set_api().sync().await?.epoch());
+        }
+        self.network_interface
+            .get_current_epoch()
+            .await
+            .map_err(|err| ValidatorSetApiError::NetworkInterfaceError(anyhow::Error::new(err)))
     }
 
     pub fn calculate_birthday_epoch(&self) -> Epoch {

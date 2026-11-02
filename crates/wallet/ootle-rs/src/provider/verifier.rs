@@ -1668,4 +1668,11 @@ mod tests {
         assert!(resumed.contains(&(shard, StateVersion::from(100))), "{resumed:?}");
         assert_eq!(cursor.position(shard).claim, None);
     }
+
+    #[tokio::test]
+    async fn a_verifying_provider_reads_epoch_and_num_preshards_from_its_trusted_validator_set() {
+        let (_, _, provider) = walked_provider(IndexerTrust::Verify).await;
+        assert_eq!(provider.get_epoch().await.unwrap(), Epoch(5));
+        assert_eq!(provider.get_num_preshards().await.unwrap(), NUM_PRESHARDS);
+    }
 }

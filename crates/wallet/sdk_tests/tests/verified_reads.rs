@@ -321,3 +321,70 @@ async fn a_substate_older_than_the_version_asked_for_is_refused() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn an_unrequested_substate_in_a_batch_fetch_is_refused() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
+    let (requested_id, requested_value) = substate(1);
+    let (unrequested_id, unrequested_value) = substate(2);
+    let requested_proof = substate_proof(&sets[4], &requested_id, VERSION, &requested_value);
+    let unrequested_proof = substate_proof(&sets[4], &unrequested_id, VERSION, &unrequested_value);
+    network.serve_substate(requested_id.clone(), VERSION, requested_value, Some(requested_proof));
+    network.serve_substate(
+        unrequested_id.clone(),
+        VERSION,
+        unrequested_value,
+        Some(unrequested_proof),
+    );
+    network.serve_unrequested_on_fetch(unrequested_id.clone());
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_substates_from_network(std::slice::from_ref(&requested_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SubstateApiError::UnrequestedSubstate { ref substate_id } if *substate_id == unrequested_id),
+        "{err}"
+    );
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_each_substate_from_network(std::slice::from_ref(&requested_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SubstateApiError::UnrequestedSubstate { ref substate_id } if *substate_id == unrequested_id),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn a_substate_of_another_type_than_its_id_is_refused() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
+    let (_, value) = substate(1);
+    let component_id = SubstateId::Component(tari_template_lib::types::ComponentAddress::from_array([9u8; 32]));
+    let proof = substate_proof(&sets[4], &component_id, VERSION, &value);
+    network.serve_substate(component_id.clone(), VERSION, value, Some(proof));
+
+    let err = read_error(&test, &component_id).await;
+    assert!(matches!(err, SubstateApiError::SubstateOfAnotherType(_)), "{err}");
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_substates_from_network(std::slice::from_ref(&component_id))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SubstateApiError::SubstateOfAnotherType(_)), "{err}");
+}
+
+#[tokio::test]
+async fn current_epoch_walks_the_trusted_validator_set_under_verify() {
+    let (sets, _, test) = walked_wallet(IndexerTrust::Verify).await;
+    // ProvingNetwork::get_current_epoch panics if called; under Verify, current_epoch syncs the validator set.
+    let epoch = test.sdk().current_epoch().await.unwrap();
+    assert_eq!(epoch, sets[4].epoch);
+}

@@ -76,6 +76,8 @@ struct ProvingNetworkState {
     /// Requests for a page of checkpoints to walk through.
     walk_requests: usize,
     substates: HashMap<SubstateId, ServedSubstate>,
+    /// A served substate every batch fetch answers with, requested or not.
+    unrequested_on_fetch: Option<SubstateId>,
     /// Versions served as gone down to requests that name them, beside the version `substates` serves.
     down_versions: HashMap<(SubstateId, SubstateVersion), Option<SubstateProof>>,
     /// How many of the next substate queries fail as if the indexer could not be reached.
@@ -135,6 +137,7 @@ impl ProvingNetwork {
                 unserved: None,
                 walk_requests: 0,
                 substates: HashMap::new(),
+                unrequested_on_fetch: None,
                 down_versions: HashMap::new(),
                 failing_substate_queries: 0,
                 failing_substate_fetches: 0,
@@ -235,6 +238,11 @@ impl ProvingNetwork {
             value: Some(value),
             proof,
         });
+    }
+
+    /// Answers every batch fetch with the served substate `id` as well, whether requested or not.
+    pub fn serve_unrequested_on_fetch(&self, id: SubstateId) {
+        self.state.lock().unwrap().unrequested_on_fetch = Some(id);
     }
 
     /// Serves `id` as gone down at `version`, with `proof` to requests for proofs that name the version.
@@ -354,7 +362,7 @@ impl WalletNetworkInterface for ProvingNetwork {
             return Err(ProvingNetworkError::Unreachable);
         }
         let mut fetched = FetchedSubstates::default();
-        for id in substate_ids {
+        for id in substate_ids.iter().chain(state.unrequested_on_fetch.iter()) {
             let Some(served) = state.substates.get(id) else {
                 continue;
             };

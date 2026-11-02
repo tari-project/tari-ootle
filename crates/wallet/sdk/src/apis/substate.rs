@@ -20,7 +20,7 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
-    substate_type::SubstateType,
+    substate_type::{SubstateType, SubstateTypeMismatch, check_substate_type},
 };
 use tari_ootle_light_client::{LightClientError, VerifiedCommittee, down_proof_up_anchor, verify_down_proof};
 use tari_template_lib::types::{ResourceAddress, TemplateAddress, constants::TARI_TOKEN};
@@ -108,6 +108,9 @@ where
             .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
         let mut read = HashMap::with_capacity(substates.len());
         for (id, substate) in substates {
+            if !ids.contains(&id) {
+                return Err(SubstateApiError::UnrequestedSubstate { substate_id: id });
+            }
             let read_substate = self.read_served(&id, &substate, verify, proofs.get(&id)).await?;
             read.insert(id, read_substate.substate);
         }
@@ -132,6 +135,9 @@ where
             .get_substates(ids, verify)
             .await
             .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
+        if let Some(substate_id) = substates.keys().find(|id| !ids.contains(id)).cloned() {
+            return Err(SubstateApiError::UnrequestedSubstate { substate_id });
+        }
         let mut results = Vec::with_capacity(ids.len());
         for id in ids {
             let Some(substate) = substates.remove(id) else {
@@ -542,6 +548,8 @@ where
                 })?;
             (value, None)
         };
+        // Backs up WalletNetworkInterface implementations that do not check encoded substate types at decode time.
+        check_substate_type(substate_id, &value)?;
         Ok(ReadSubstate {
             substate: Substate::new(served.version(), value),
             proven_up,
@@ -760,6 +768,10 @@ pub enum SubstateApiError {
         substate_id: SubstateId,
         source: LightClientError,
     },
+    #[error("The indexer returned unrequested substate {substate_id}")]
+    UnrequestedSubstate { substate_id: SubstateId },
+    #[error(transparent)]
+    SubstateOfAnotherType(#[from] SubstateTypeMismatch),
     #[error("Validator set error: {0}")]
     ValidatorSet(#[from] ValidatorSetApiError),
 }

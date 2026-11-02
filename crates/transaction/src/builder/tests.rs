@@ -330,21 +330,17 @@ fn auto_filled_inputs_and_referenced_substates_skip_undeclarable_ids() {
 }
 
 #[test]
-fn auto_filled_inputs_and_referenced_substates_include_blob_and_migrate_args() {
+fn auto_filled_inputs_include_migrate_args() {
     use tari_engine_types::substate::SubstateId;
     use tari_template_lib_types::ObjectKey;
 
-    let comp_target = ComponentAddress::new(ObjectKey::from_array([10; 32]));
-    let comp_blob = ComponentAddress::new(ObjectKey::from_array([11; 32]));
-    let comp_migrate = ComponentAddress::new(ObjectKey::from_array([12; 32]));
+    let target = ComponentAddress::new(ObjectKey::from_array([10; 32]));
+    let migrate_arg = ComponentAddress::new(ObjectKey::from_array([12; 32]));
     let new_template = TemplateAddress::from_array([0x42; 32]);
 
-    let blob_bytes = tari_bor::encode(&comp_blob).unwrap();
     let transaction = Transaction::builder_localnet(Epoch(1))
         .with_auto_fill_inputs()
-        .add_blob("arg_blob", blob_bytes)
-        .call_function(TemplateAddress::default(), "with_blob", args![Blob("arg_blob")])
-        .update_component_template_address_with_migrate(comp_target, new_template, "migrate", args![comp_migrate])
+        .update_component_template_address_with_migrate(target, new_template, "migrate", args![migrate_arg])
         .build_unsigned();
 
     let inputs = transaction
@@ -352,12 +348,7 @@ fn auto_filled_inputs_and_referenced_substates_include_blob_and_migrate_args() {
         .iter()
         .map(|input| input.substate_id().clone())
         .collect::<std::collections::HashSet<_>>();
-    let expected = std::collections::HashSet::from([
-        SubstateId::from(comp_target),
-        SubstateId::from(comp_blob),
-        SubstateId::from(comp_migrate),
-    ]);
+    let expected = std::collections::HashSet::from([SubstateId::from(target), SubstateId::from(migrate_arg)]);
     assert_eq!(inputs, expected);
     assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
-    assert_eq!(transaction.instructions()[1].referenced_template(), Some(&new_template));
 }

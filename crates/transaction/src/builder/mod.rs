@@ -996,12 +996,7 @@ impl<D> TransactionBuilder<D> {
 
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
-            let bytes = match arg {
-                InstructionArg::Literal(bytes) => Some(bytes.as_slice()),
-                InstructionArg::Blob(idx) => self.unsigned_transaction.blobs().get(*idx).map(|blob| blob.as_bytes()),
-                InstructionArg::Workspace(_) => None,
-            };
-            if let Some(bytes) = bytes &&
+            if let Some(bytes) = arg.as_literal_bytes() &&
                 let Ok(indexed) = IndexedValue::from_raw(bytes)
             {
                 declare_inputs(

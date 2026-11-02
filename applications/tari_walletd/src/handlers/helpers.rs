@@ -1,11 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    path::Path,
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use ootle_byte_type::ToByteType;
-use tari_engine_types::component::derive_component_address_from_public_key;
+use tari_engine_types::{
+    component::derive_component_address_from_public_key,
+    substate::{SubstateDiff, SubstateId},
+};
 use tari_ootle_app_utilities::burn_claim_proof::claim_proof_from_l1;
 use tari_ootle_common_types::{
     SubstateRequirement,
@@ -18,10 +26,19 @@ use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
     models::{AccountWithAddress, DerivedKeyIndex, KeyId, TransactionFinalizedEvent, WalletEvent},
 };
-use tari_ootle_walletd_client::{ComponentAddressOrName, types::ClaimBurnProofContents};
+use tari_ootle_walletd_client::{
+    ComponentAddressOrName,
+    types::{ClaimBurnProofContents, UpgradableComponentInfo},
+};
 use tari_sidechain::CompleteClaimBurnProof;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{ComponentAddress, EncryptedData};
+use tari_template_lib_types::{
+    AccessRule,
+    ComponentAddress,
+    EncryptedData,
+    SubstateOwnerRule,
+    access_rules::UpdateRule,
+};
 use tokio::{sync::broadcast, time};
 
 use crate::server::ApplicationErrorCode;
@@ -340,6 +357,155 @@ pub(crate) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> 
     Ok(ClaimBurnProofContents {
         claim_proof,
         encrypted_data,
+    })
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ComponentUpgradeInspection {
+    pub upgradable_components: Vec<UpgradableComponentInfo>,
+    pub uninspected_components: Vec<ComponentAddress>,
+}
+
+/// Returns `true` when `upgrade_rule` and `owner_rule` can never pass `check_component_upgrade_rule`
+/// in the engine (`UpdateRule::Locked`, `UpdateRule::AccessRule(AccessRule::DenyAll)`, or
+/// `UpdateRule::Owner` when ownership is `SubstateOwnerRule::None` or
+/// `SubstateOwnerRule::ByAccessRule(AccessRule::DenyAll)`).
+fn is_effectively_locked(upgrade_rule: &UpdateRule, owner_rule: &SubstateOwnerRule) -> bool {
+    matches!(
+        (upgrade_rule, owner_rule),
+        (UpdateRule::Locked, _) |
+            (UpdateRule::AccessRule(AccessRule::DenyAll), _) |
+            (
+                UpdateRule::Owner,
+                SubstateOwnerRule::None | SubstateOwnerRule::ByAccessRule(AccessRule::DenyAll)
+            )
+    )
+}
+
+/// Flags each component referenced by `component_addresses` (or upped in `diff`, if present) whose
+/// `upgrade_rule` is not effectively locked, and reports any component whose substate could not be
+/// fetched or verified from the network, in the order first referenced.
+///
+/// Builtin account components known to the wallet (either in the accounts table or cached with
+/// [`ACCOUNT_TEMPLATE_ADDRESS`]) are always [`UpdateRule::Locked`] and are skipped without a
+/// network round-trip.
+pub(crate) async fn find_upgradable_components<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
+    component_addresses: impl IntoIterator<Item = ComponentAddress>,
+    diff: Option<&SubstateDiff>,
+) -> Result<ComponentUpgradeInspection, anyhow::Error> {
+    let mut ordered = Vec::new();
+    let mut seen = HashSet::new();
+    for address in component_addresses {
+        if seen.insert(address) {
+            ordered.push(address);
+        }
+    }
+    if let Some(d) = diff {
+        for (id, substate) in d.up_iter() {
+            if substate.substate_value().component().is_some() &&
+                let Some(address) = id.as_component_address() &&
+                seen.insert(address)
+            {
+                ordered.push(address);
+            }
+        }
+    }
+
+    if ordered.is_empty() {
+        return Ok(ComponentUpgradeInspection::default());
+    }
+
+    let accounts_api = sdk.accounts_api();
+    let substate_api = sdk.substate_api();
+    let mut candidates = Vec::new();
+    let mut to_fetch = Vec::new();
+
+    for address in ordered {
+        if accounts_api.exists_by_address(&address)? {
+            continue;
+        }
+        let substate_id = SubstateId::Component(address);
+        if substate_api
+            .get_substate(&substate_id)
+            .optional()?
+            .is_some_and(|record| record.template_address == Some(ACCOUNT_TEMPLATE_ADDRESS))
+        {
+            continue;
+        }
+        let in_diff = diff.is_some_and(|d| {
+            d.up_iter()
+                .any(|(id, substate)| *id == substate_id && substate.substate_value().component().is_some())
+        });
+        if !in_diff {
+            to_fetch.push(substate_id);
+        }
+        candidates.push(address);
+    }
+
+    let fetched = if to_fetch.is_empty() {
+        HashMap::new()
+    } else {
+        match substate_api.get_each_substate_from_network(&to_fetch).await {
+            Ok(results) => {
+                let mut map = HashMap::with_capacity(results.len());
+                for (id, result) in results {
+                    match result {
+                        Ok(read_substate) => {
+                            map.insert(id, read_substate.substate);
+                        },
+                        Err(err) => {
+                            log::warn!(
+                                target: "tari::ootle::wallet_daemon::handlers",
+                                "Failed to fetch or verify component substate {id} to inspect upgrade rule: {err}"
+                            );
+                        },
+                    }
+                }
+                map
+            },
+            Err(err) => {
+                log::warn!(
+                    target: "tari::ootle::wallet_daemon::handlers",
+                    "Failed to fetch component substates to inspect upgrade rules: {err}"
+                );
+                HashMap::new()
+            },
+        }
+    };
+
+    let mut upgradable_components = Vec::new();
+    let mut uninspected_components = Vec::new();
+    for component_address in candidates {
+        let substate_id = SubstateId::Component(component_address);
+        let component = diff
+            .and_then(|d| {
+                d.up_iter()
+                    .find(|(id, _)| *id == substate_id)
+                    .and_then(|(_, s)| s.substate_value().component())
+            })
+            .or_else(|| fetched.get(&substate_id).and_then(|s| s.component()));
+
+        let Some(component) = component else {
+            uninspected_components.push(component_address);
+            continue;
+        };
+        if *component.template_address() == ACCOUNT_TEMPLATE_ADDRESS {
+            continue;
+        }
+        if !is_effectively_locked(component.upgrade_rule(), component.owner_rule()) {
+            upgradable_components.push(UpgradableComponentInfo {
+                component_address,
+                template_address: *component.template_address(),
+                upgrade_rule: component.upgrade_rule().clone(),
+                owner_rule: component.owner_rule().clone(),
+            });
+        }
+    }
+
+    Ok(ComponentUpgradeInspection {
+        upgradable_components,
+        uninspected_components,
     })
 }
 

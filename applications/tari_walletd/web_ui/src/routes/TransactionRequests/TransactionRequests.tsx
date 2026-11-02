@@ -24,6 +24,7 @@ import type {
   KeyId,
   TransactionRequestInfo,
   TransactionRequestMainSigner,
+  UpgradableComponentInfo,
 } from "@tari-project/ootle-ts-bindings";
 import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
@@ -112,6 +113,64 @@ function ValueSummaries({ request }: { request: TransactionRequestInfo }) {
   );
 }
 
+function formatOwnerPublicKey(key: Array<number> | string): string {
+  if (typeof key === "string") {
+    return key;
+  }
+  return key.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function describeUpgradeAuthority(item: UpgradableComponentInfo): string {
+  if (typeof item.upgrade_rule === "object" && "AccessRule" in item.upgrade_rule) {
+    if (item.upgrade_rule.AccessRule === "AllowAll") {
+      return "anyone (AllowAll)";
+    }
+    return `access rule (${JSON.stringify(item.upgrade_rule.AccessRule)})`;
+  }
+  if (typeof item.owner_rule === "object" && "ByPublicKey" in item.owner_rule) {
+    return `owner (${formatOwnerPublicKey(item.owner_rule.ByPublicKey)})`;
+  }
+  if (typeof item.owner_rule === "object" && "ByAccessRule" in item.owner_rule) {
+    return `owner rule (${JSON.stringify(item.owner_rule.ByAccessRule)})`;
+  }
+  return "owner";
+}
+
+function UpgradableComponentWarnings({ request }: { request: TransactionRequestInfo }) {
+  const { upgradable_components, uninspected_components } = request;
+  if (upgradable_components.length === 0 && uninspected_components.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      {upgradable_components.map((item) => (
+        <Alert key={item.component_address} severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Upgradable component: this dApp&apos;s code can be changed by {describeUpgradeAuthority(item)}
+          </Typography>
+          <Typography variant="body2" sx={{ opacity: 0.85, fontFamily: "monospace", wordBreak: "break-all" }}>
+            Component: {item.component_address}
+          </Typography>
+          <Typography variant="body2" sx={{ opacity: 0.7, fontFamily: "monospace", wordBreak: "break-all" }}>
+            Template: {item.template_address}
+          </Typography>
+        </Alert>
+      ))}
+      {uninspected_components.map((address) => (
+        <Alert key={address} severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Could not verify whether {address} is upgradable
+          </Typography>
+          <Typography variant="body2" sx={{ opacity: 0.85 }}>
+            The wallet could not fetch or verify this component&apos;s substate from the indexer, so its upgrade rule is
+            unknown.
+          </Typography>
+        </Alert>
+      ))}
+    </>
+  );
+}
+
 function RequestCard({ request }: { request: TransactionRequestInfo }) {
   const approve = useApproveTransactionRequest();
   const reject = useRejectTransactionRequest();
@@ -161,6 +220,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
       </Stack>
 
       <ValueSummaries request={request} />
+      <UpgradableComponentWarnings request={request} />
 
       <Grid container spacing={2} sx={{ mb: 1 }}>
         <Grid size={12}>

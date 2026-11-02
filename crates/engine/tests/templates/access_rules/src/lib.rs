@@ -365,12 +365,17 @@ mod access_rules_template {
             .create()
         }
 
-        /// Creates `count` proofs of the tokens, holding each so every later one is authorized with all of them in
-        /// scope, then drops them.
+        /// Creates `count` proofs of the tokens, opening an authorization window over each so every later one is
+        /// authorized with all of them in scope, then closes the windows and drops the proofs.
         pub fn hold_token_proofs(&mut self, count: u32) {
-            let proofs = (0..count)
-                .map(|_| self.tokens.create_proof_by_amount(1u32))
-                .collect::<Vec<_>>();
+            let mut proofs = Vec::with_capacity(count as usize);
+            let mut windows = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let proof = self.tokens.create_proof_by_amount(1u32);
+                windows.push(proof.authorize());
+                proofs.push(proof);
+            }
+            drop(windows);
             for proof in proofs {
                 proof.drop();
             }

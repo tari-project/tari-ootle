@@ -33,11 +33,15 @@ impl ProtocolVersion {
         self.version
     }
 
-    pub fn is_compatible(&self, protocol_str: &str) -> bool {
-        let Some((domain, network, version)) = parse_protocol_str(protocol_str) else {
+    /// Returns true if `protocol_str` is a well-formed protocol string for the same domain and network.
+    ///
+    /// Only the domain and network are compared; the version is informational. Consensus enforces agreement on
+    /// protocol rules, and each stream protocol negotiates its own wire version.
+    pub fn is_same_network(&self, protocol_str: &str) -> bool {
+        let Some((domain, network, _version)) = parse_protocol_str(protocol_str) else {
             return false;
         };
-        self.domain == domain && self.network == network && self.version.semantic_version_eq(&version)
+        self.domain == domain && self.network == network
     }
 }
 
@@ -109,27 +113,6 @@ impl Version {
     pub const fn patch(&self) -> u16 {
         self.patch
     }
-
-    pub const fn semantic_version_eq(&self, other: &Version) -> bool {
-        if self.major != other.major {
-            return false;
-        }
-        // Similar to https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#specifying-dependencies-from-cratesio
-        // 0.x.y any change to x is not compatible
-        if self.major == 0 {
-            if self.minor != other.minor {
-                return false;
-            }
-            // 0.0.x any change to x is not compatible
-            if self.minor == 0 {
-                return self.patch == other.patch;
-            }
-            return true;
-        }
-
-        // x.y.z any change to x is not compatible
-        true
-    }
 }
 
 impl FromStr for Version {
@@ -189,26 +172,18 @@ mod tests {
         assert!(Version::from_str("1.2.3.4").is_err());
 
         let version = ProtocolVersion::from_str("/tari/igor/1.2.3").unwrap();
-        assert!(!version.is_compatible("/tari/igor/1.2.3/extra"));
+        assert!(!version.is_same_network("/tari/igor/1.2.3/extra"));
         assert_ne!(version, "/tari/igor/1.2.3/extra".to_string());
     }
 
     #[test]
-    fn semantic_version_eq_checks_all_leading_zero_components() {
-        let v_0_0_1 = Version::new(0, 0, 1);
-        assert!(v_0_0_1.semantic_version_eq(&Version::new(0, 0, 1)));
-        assert!(!v_0_0_1.semantic_version_eq(&Version::new(0, 0, 2)));
-        assert!(!v_0_0_1.semantic_version_eq(&Version::new(0, 1, 1)));
-        assert!(!v_0_0_1.semantic_version_eq(&Version::new(1, 0, 1)));
-
-        let v_0_1_0 = Version::new(0, 1, 0);
-        assert!(v_0_1_0.semantic_version_eq(&Version::new(0, 1, 5)));
-        assert!(!v_0_1_0.semantic_version_eq(&Version::new(0, 2, 0)));
-        assert!(!v_0_1_0.semantic_version_eq(&Version::new(1, 1, 0)));
-
-        let v_1_0_0 = Version::new(1, 0, 0);
-        assert!(v_1_0_0.semantic_version_eq(&Version::new(1, 9, 9)));
-        assert!(!v_1_0_0.semantic_version_eq(&Version::new(0, 0, 0)));
-        assert!(!v_1_0_0.semantic_version_eq(&Version::new(2, 0, 0)));
+    fn is_same_network_ignores_the_version() {
+        let version = ProtocolVersion::from_str("/tari/igor/0.0.1").unwrap();
+        assert!(version.is_same_network("/tari/igor/0.0.1"));
+        assert!(version.is_same_network("/tari/igor/0.0.2"));
+        assert!(version.is_same_network("/tari/igor/2.0.0"));
+        assert!(!version.is_same_network("/tari/esmeralda/0.0.1"));
+        assert!(!version.is_same_network("/other/igor/0.0.1"));
+        assert!(!version.is_same_network("/tari/igor/not-a-version"));
     }
 }

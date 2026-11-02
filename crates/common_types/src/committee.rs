@@ -423,19 +423,14 @@ mod tests {
 
     #[test]
     fn it_computes_strict_one_third_max_node_failures() {
-        for (size, expected_failures) in [
-            (0usize, 0usize),
-            (1, 0),
-            (2, 0),
-            (3, 0),
-            (4, 1),
-            (5, 1),
-            (6, 1),
-            (7, 2),
-        ] {
+        for (size, expected_failures) in [(0usize, 0usize), (1, 0), (2, 0), (3, 0), (4, 1), (5, 1), (6, 1), (7, 2)] {
             let committee = create_committee(size);
             assert_eq!(committee.max_node_failures(), expected_failures, "size={size}");
-            assert_eq!(committee.max_failures().value() as usize, expected_failures, "size={size}");
+            assert_eq!(
+                committee.max_failures().value() as usize,
+                expected_failures,
+                "size={size}"
+            );
 
             let info = CommitteeInfo::new(
                 NumPreshards::P256,

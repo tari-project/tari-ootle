@@ -21,6 +21,7 @@ use tari_ootle_wallet_sdk::{
     apis::transaction::TransactionApiError,
     models::{
         KeyId,
+        LockOwner,
         OutputStatus,
         StealthUtxoSpendKeyId,
         TransactionContext,
@@ -28,7 +29,7 @@ use tari_ootle_wallet_sdk::{
         WalletEvent,
         WalletLockId,
     },
-    storage::ReadableWalletStore,
+    storage::{ReadableWalletStore, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_ootle_walletd_client::{
@@ -122,7 +123,7 @@ pub async fn handle_submit_instruction(
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],
     };
-    submit_inner(context, request, vec![*fee_account.component_address()]).await
+    submit_inner(context, request, vec![*fee_account.component_address()], None).await
 }
 
 pub async fn handle_submit(
@@ -146,7 +147,7 @@ pub async fn handle_submit(
     let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
         .map(|address| vec![address])
         .unwrap_or_default();
-    submit_inner(context, req, linked_accounts).await
+    submit_inner(context, req, linked_accounts, Some(auth.lock_owner())).await
 }
 
 /// Seal and submit an approved transaction request.
@@ -160,13 +161,19 @@ pub(crate) async fn submit_inner_for_request(
     let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
         .map(|address| vec![address])
         .unwrap_or_default();
-    submit_inner(context, req, linked_accounts).await
+    submit_inner(context, req, linked_accounts, None).await
 }
 
+/// Signs, links `req.lock_ids` to the transaction and submits it.
+///
+/// With `lock_claimant`, the locks are re-checked as free locks of that caller in the same write that links them, so
+/// two concurrent calls cannot both claim one lock. `None` links the locks as given and is for callers whose locks are
+/// already held on their behalf (an approved transaction request) or that name none.
 async fn submit_inner(
     context: &HandlerContext,
     req: TransactionSubmitRequest,
     linked_accounts: Vec<ComponentAddress>,
+    lock_claimant: Option<LockOwner>,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     req.transaction
@@ -236,11 +243,18 @@ async fn submit_inner(
 
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
 
+    // Linked locks are finalized or released when the transaction resolves.
     let tx_id = transaction.calculate_id();
-    for lock_id in req.lock_ids {
-        // update the locks with the corresponding transaction ID so that they can be finalized/released once the
-        // transaction resolves
-        sdk.transaction_api().locks_set_transaction_id(lock_id, tx_id)?;
+    if !req.lock_ids.is_empty() {
+        sdk.store().with_write_tx(|tx| {
+            if let Some(claimant) = lock_claimant {
+                ensure_free_locks_of(&mut **tx, claimant, &req.lock_ids, "lock_ids")?;
+            }
+            for lock_id in &req.lock_ids {
+                tx.locks_link_transaction(*lock_id, tx_id)?;
+            }
+            Ok::<_, anyhow::Error>(())
+        })?;
     }
 
     info!(
@@ -857,7 +871,7 @@ pub async fn handle_publish_template(
         detect_inputs_use_unversioned: true,
         lock_ids: vec![],
     };
-    let resp = submit_inner(context, request, vec![*fee_account.component_address()]).await?;
+    let resp = submit_inner(context, request, vec![*fee_account.component_address()], None).await?;
     Ok(PublishTemplateResponse {
         transaction_id: resp.transaction_id,
         dry_run_fee: None,
@@ -963,8 +977,8 @@ mod tests {
         signature::Sr25519SignatureBytes,
     };
     use tari_ootle_wallet_sdk::{
-        models::{KeyBranch, LockOwner, WalletLock, WalletTransactionUpdate},
-        storage::{WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+        models::{KeyBranch, WalletLock, WalletTransactionUpdate},
+        storage::WalletStoreReader,
     };
     use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
@@ -1259,6 +1273,38 @@ mod tests {
         let err = handle_submit(&daemon.context, Some(&tool), relinked).await.unwrap_err();
         assert_invalid_params(&err, "lock_ids");
         assert_eq!(get_lock(&daemon, lock_id).transaction_id, linked_to);
+    }
+
+    #[tokio::test]
+    async fn a_submit_does_not_link_a_lock_a_request_claimed_after_the_check() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+        let owner = owner_of(&daemon, &tool);
+        let lock_id = lock_for(&daemon, owner);
+
+        // A request claims the lock between `handle_submit`'s check and the link in `submit_inner`.
+        daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_write_tx(|tx| {
+                tx.transaction_request_insert(
+                    &UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100)),
+                    KeyId::derived(KeyBranch::Account, 0),
+                    &[],
+                    &[],
+                    &[lock_id],
+                    Some("tool"),
+                    Duration::from_secs(600),
+                )
+            })
+            .unwrap();
+
+        let err = submit_inner(&daemon.context, submit_with_locks(vec![lock_id]), vec![], Some(owner))
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, None);
     }
 
     #[tokio::test]

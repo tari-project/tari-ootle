@@ -20,8 +20,9 @@ const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.loca
 
 const createCredential = async (
   rpOptions: { rpId: string; rpName: string },
-  username: string,
+  user: PublicKeyCredentialUserEntity,
   challenge: BufferSource,
+  pubKeyCredParams: PublicKeyCredentialParameters[],
   excludeCredentials: PublicKeyCredentialDescriptor[] = [],
 ) => {
   const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
@@ -29,29 +30,9 @@ const createCredential = async (
       name: rpOptions.rpName,
       id: rpOptions.rpId,
     },
-    user: {
-      id: Uint8Array.from(username, (c) => c.charCodeAt(0)),
-      name: username,
-      displayName: username,
-    },
+    user,
     challenge,
-    pubKeyCredParams: [
-      {
-        type: "public-key",
-        // Ed25519
-        alg: -8,
-      },
-      {
-        type: "public-key",
-        // ES256
-        alg: -7,
-      },
-      {
-        type: "public-key",
-        // RS256
-        alg: -257,
-      },
-    ],
+    pubKeyCredParams,
     timeout: 60000,
     excludeCredentials,
     attestation: "none",
@@ -90,6 +71,21 @@ export async function performPasskeyRegistration(options?: {
   }
 
   const challenge = Buffer.from(publicKeyOptions.challenge, "base64");
+  // The daemon only accepts credentials signed with an algorithm it offered, so it alone chooses the list.
+  const pubKeyCredParams: PublicKeyCredentialParameters[] = publicKeyOptions.pubKeyCredParams;
+  if (!Array.isArray(pubKeyCredParams) || pubKeyCredParams.length === 0) {
+    throw new Error("Failed to start registration: missing pubKeyCredParams");
+  }
+  // Passkey managers key stored passkeys on (rp id, user id). The daemon issues a fresh user id per registration,
+  // which keeps passkeys for different wallets on the same host separate.
+  if (!publicKeyOptions.user?.id) {
+    throw new Error("Failed to start registration: missing user id");
+  }
+  const user: PublicKeyCredentialUserEntity = {
+    id: Buffer.from(publicKeyOptions.user.id, "base64"),
+    name: publicKeyOptions.user.name || APP_NAME,
+    displayName: publicKeyOptions.user.displayName || APP_NAME,
+  };
   const excludeCredentials: PublicKeyCredentialDescriptor[] = Array.isArray(publicKeyOptions.excludeCredentials)
     ? publicKeyOptions.excludeCredentials.map((cred: any) => ({
         type: cred.type || "public-key",
@@ -104,8 +100,9 @@ export async function performPasskeyRegistration(options?: {
       rpId: WEBAUTHN_RP_ID,
       rpName: "Tari Ootle Wallet Web UI",
     },
-    APP_NAME,
+    user,
     challenge,
+    pubKeyCredParams,
     excludeCredentials,
   );
 

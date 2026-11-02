@@ -856,14 +856,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
 
         // An execution may only be reused if it was recorded on an ancestor of `from_block`. This is determined with
-        // index lookups only - no blocks are loaded:
-        //  - a block on `from_block`'s pending chain is an uncommitted ancestor, so reusable;
-        //  - a block no longer in the pending-chain index has been committed, and because the committed chain is final
-        //    and linear every committed block is an ancestor, so reusable;
-        //  - a block still in the pending-chain index but not on `from_block`'s chain is an uncommitted
-        //    orphan/abandoned branch (e.g. left over across a restart) and must NOT be reused - its execution is pinned
-        //    to already-spent input versions.
-        let pending_chain = self.get_pending_chain_until(from_block.block_id())?;
+        // index and existence lookups only - no full blocks are loaded:
+        //  - a block in `from_block`'s chain scope (on its uncommitted pending chain, or at/below the commit position)
+        //    that is present in `BlockCf` is an ancestor, so reusable;
+        //  - an execution written for an unsaved block (e.g. during `OnPropose` before the block is inserted) or for a
+        //    deleted fork block above the commit position is either outside the chain scope or absent from `BlockCf`,
+        //    and must NOT be reused.
+        let scope = self.chain_scope(from_block.block_id())?;
 
         // Heights restart at zero each epoch, so the most recent ancestor is the one with the highest (epoch, height).
         let mut best: Option<(TransactionId, BlockId, Epoch, NodeHeight)> = None;
@@ -873,11 +872,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             if (epoch, height) > (from_block.epoch(), from_block.height()) {
                 continue;
             }
-            let is_ancestor = if pending_chain.contains_pending(&block_id) {
-                true
-            } else {
-                self.is_in_chain_scope(&pending_chain, &block_id, epoch, height)? && self.blocks_exists(&block_id)?
-            };
+            let is_ancestor =
+                self.is_in_chain_scope(&scope, &block_id, epoch, height)? && self.blocks_exists(&block_id)?;
             if is_ancestor && best.as_ref().is_none_or(|(_, _, e, h)| (*e, *h) < (epoch, height)) {
                 best = Some((tx_id, block_id, epoch, height));
             }

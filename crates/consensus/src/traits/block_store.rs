@@ -167,3 +167,124 @@ where
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_consensus_types::{LastExecuted, LockedBlock, ProposalCertificate, ShardGroupAccumulatedData};
+    use tari_crypto::tari_utilities::epoch_time::EpochTime;
+    use tari_ootle_common_types::{
+        Epoch,
+        ExtraData,
+        NodeHeight,
+        NumPreshards,
+        ProtocolVersion,
+        ShardGroup,
+    };
+    use tari_ootle_storage::{
+        StateStore,
+        StorageError,
+        consensus_models::{Block, BlockCommands, BlockHeader, BookkeepingModel},
+    };
+    use tari_ootle_transaction::Network;
+    use tari_sidechain::{FixedHash, QuorumDecision};
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+    use super::BlockStore;
+
+    fn make_block(parent: &Block, justify_block: &Block, height: NodeHeight) -> Block {
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+        let commands = BlockCommands::empty();
+        let justify = ProposalCertificate::new(
+            *justify_block.id().hash(),
+            *justify_block.id(),
+            justify_block.height(),
+            justify_block.epoch(),
+            shard_group,
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Accept,
+        );
+        let header = BlockHeader::create_unsigned(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            *parent.id(),
+            justify.calculate_id(),
+            None,
+            height,
+            Epoch::zero(),
+            shard_group,
+            RistrettoPublicKeyBytes::default(),
+            FixedHash::zero(),
+            &commands,
+            0,
+            EpochTime::now().as_u64(),
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+        Block::new(header, justify, commands, None)
+    }
+
+    #[test]
+    fn proposal_justified_by_locked_block_does_not_rewind_last_executed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store: RocksDbStateStore<String> =
+            RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap();
+
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        let b1 = make_block(&zero, &zero, NodeHeight(1));
+        let b2 = make_block(&b1, &b1, NodeHeight(2));
+        let b3 = make_block(&b2, &b2, NodeHeight(3));
+        let b4 = make_block(&b3, &b3, NodeHeight(4));
+        let b5 = make_block(&b4, &b4, NodeHeight(5));
+        // A later proposal justified by the locked block b3 (passes is_safe because justify_block == locked_block).
+        let b6_fork = make_block(&b3, &b3, NodeHeight(6));
+
+        let mut committed = Vec::new();
+        store
+            .with_write_tx(|tx| {
+                zero.justify().save(tx)?;
+                zero.insert(tx)?;
+                zero.as_locked().set(tx)?;
+                zero.as_last_executed().set(tx)?;
+
+                for block in [&b1, &b2, &b3, &b4, &b5] {
+                    block.justify().save(tx)?;
+                    block.insert(tx)?;
+                    block.update_nodes(
+                        tx,
+                        |_, _, _, _| Ok::<_, StorageError>(()),
+                        |_, b| {
+                            committed.push(*b.id());
+                            Ok(())
+                        },
+                    )?;
+                }
+
+                assert_eq!(*LockedBlock::get(&**tx, Epoch::zero())?.block_id(), *b3.id());
+                assert_eq!(LastExecuted::get(&**tx, Epoch::zero())?.height, NodeHeight(2));
+                assert_eq!(committed, vec![*b1.id(), *b2.id()]);
+
+                committed.clear();
+                b6_fork.justify().save(tx)?;
+                b6_fork.insert(tx)?;
+                b6_fork.update_nodes(
+                    tx,
+                    |_, _, _, _| Ok::<_, StorageError>(()),
+                    |_, b| {
+                        committed.push(*b.id());
+                        Ok(())
+                    },
+                )?;
+
+                let last_exec = LastExecuted::get(&**tx, Epoch::zero())?;
+                assert_eq!(last_exec.height, NodeHeight(2));
+                assert_eq!(last_exec.block_id, *b2.id());
+                assert!(committed.is_empty());
+
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+    }
+}

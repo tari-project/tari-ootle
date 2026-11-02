@@ -74,19 +74,12 @@ impl Evidence {
         }
 
         for obj in outputs {
+            let substate_address = obj.to_substate_address();
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
             let version = obj.version();
-            let substate_id = obj.into_substate_id();
-            if substate_id.is_global() {
-                for sg in num_preshards.all_shard_groups_iter(num_committees) {
-                    evidence
-                        .add_shard_group(sg)
-                        .insert_output(substate_id.clone(), version);
-                }
-            } else {
-                let substate_address = SubstateAddress::from_substate_id(&substate_id, version);
-                let sg = substate_address.to_shard_group(num_preshards, num_committees);
-                evidence.add_shard_group(sg).insert_output(substate_id, version);
-            }
+            evidence
+                .add_shard_group(sg)
+                .insert_output(obj.into_substate_id(), version);
         }
 
         evidence.evidence.sort_keys();
@@ -838,26 +831,24 @@ mod tests {
     }
 
     #[test]
-    fn from_inputs_and_outputs_fans_out_global_substates_across_all_committees() {
+    fn from_inputs_and_outputs_fans_out_global_inputs_across_all_committees() {
         use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
-        use tari_ootle_common_types::{SubstateRequirement, VersionedSubstateId};
+        use tari_ootle_common_types::SubstateRequirement;
 
         let global_id = SubstateId::Template(PublishedTemplateAddress::from_hash([7u8; 32].into()));
         let req = SubstateRequirement::unversioned(global_id.clone());
-        let out = VersionedSubstateId::new(global_id.clone(), 1.into());
 
         let evidence = Evidence::from_inputs_and_outputs(
             NumPreshards::P256,
             4,
             [req.as_ref()],
-            [out],
+            [],
         );
 
         assert_eq!(evidence.num_shard_groups(), 4);
         for sg in NumPreshards::P256.all_shard_groups_iter(4) {
             let sg_ev = evidence.get(&sg).expect("shard group present");
             assert!(sg_ev.inputs().contains_key(&global_id));
-            assert_eq!(sg_ev.outputs().get(&global_id), Some(&SubstateVersion::from(1)));
         }
     }
 }

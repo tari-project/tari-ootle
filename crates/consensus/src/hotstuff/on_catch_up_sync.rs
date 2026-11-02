@@ -38,7 +38,7 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
 
         let block_height = high_qc
             .filter(|qc| qc.epoch() == epoch)
-            .map(|qc| qc.height().max(NodeHeight(1)))
+            .map(|qc| qc.height())
             .unwrap_or(NodeHeight(1));
 
         info!(

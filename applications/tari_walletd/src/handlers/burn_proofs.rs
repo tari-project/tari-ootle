@@ -23,13 +23,12 @@ use super::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::burn_proofs";
 
-/// Extracts the public key prefix from a burn proof file name with format `{pubkey}_{commitment}.json`
-/// (or legacy `{pubkey}-{commitment}.json`).
+/// Extracts the public key prefix from a burn proof file name with format `{pubkey}-{commitment}.json`.
 /// Returns `None` if the file name does not match this format.
 fn extract_public_key_prefix(file_name: &str) -> Option<&str> {
     let stem = file_name.strip_suffix(".json")?;
-    let (pk, commitment) = stem.split_once('_').or_else(|| stem.split_once('-'))?;
-    if pk.is_empty() || commitment.is_empty() {
+    let (pk, _commitment) = stem.split_once('-')?;
+    if pk.is_empty() {
         return None;
     }
     Some(pk)
@@ -76,6 +75,8 @@ pub async fn handle_list(
 
         // Apply account public key filter if provided
         if let Some(ref filter_pk) = req.filter_by_public_key {
+            // If the file name matches the expected format, check if the key matches.
+            // If the file name doesn't match the format, always include it unless its parsed payload belongs to another key.
             if let Some(file_pk) = extract_public_key_prefix(name) &&
                 !file_pk.eq_ignore_ascii_case(filter_pk.as_str())
             {
@@ -83,38 +84,31 @@ pub async fn handle_list(
             }
         }
 
-        // Read value from the proof file and verify embedded burn_public_key when filtering
-        let mut matched_embedded_pk = true;
+        // Read value from the proof file
         let value = match tokio::fs::read(&path).await {
             Ok(bytes) => match serde_json::from_slice::<CompleteClaimBurnProof>(&bytes) {
                 Ok(proof) => {
-                    if let Some(ref filter_pk) = req.filter_by_public_key {
-                        let proof_pk_hex = proof.claim_proof.burn_public_key.to_string();
-                        if !proof_pk_hex.eq_ignore_ascii_case(filter_pk.as_str()) {
-                            matched_embedded_pk = false;
-                        }
+                    if let Some(ref filter_pk) = req.filter_by_public_key &&
+                        !proof
+                            .claim_proof
+                            .burn_public_key
+                            .to_string()
+                            .eq_ignore_ascii_case(filter_pk.as_str())
+                    {
+                        continue;
                     }
                     Some(proof.claim_proof.value)
                 },
                 Err(e) => {
                     warn!(target: LOG_TARGET, "Failed to parse burn proof {}: {}", path.display(), e);
-                    if req.filter_by_public_key.is_some() && extract_public_key_prefix(name).is_none() {
-                        matched_embedded_pk = false;
-                    }
                     None
                 },
             },
             Err(e) => {
                 warn!(target: LOG_TARGET, "Failed to read burn proof {}: {}", path.display(), e);
-                if req.filter_by_public_key.is_some() && extract_public_key_prefix(name).is_none() {
-                    matched_embedded_pk = false;
-                }
                 None
             },
         };
-        if !matched_embedded_pk {
-            continue;
-        }
 
         proofs.push(BurnProofFileInfo {
             file_name: name.to_string(),
@@ -137,15 +131,18 @@ pub async fn handle_get(
 
     validate_burn_proof_file_name(&req.file_name)?;
 
-    let file_path = dir.join(&req.file_name);
-    let raw_bytes = tokio::fs::read(&file_path)
-        .await
-        .map_err(|e| anyhow!("Failed to read burn proof file {}: {}", req.file_name, e))?;
+    let path = dir.join(&req.file_name);
+    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+        warn!(target: LOG_TARGET, "Failed to read burn proof file {}: {}", path.display(), e);
+        anyhow!("Burn proof file not found: {}", req.file_name)
+    })?;
 
-    let complete_proof: CompleteClaimBurnProof = serde_json::from_slice(&raw_bytes)
-        .map_err(|e| anyhow!("Failed to parse burn proof file {}: {}", req.file_name, e))?;
+    let complete_proof: CompleteClaimBurnProof = serde_json::from_slice(&bytes).map_err(|e| {
+        warn!(target: LOG_TARGET, "Failed to parse burn proof file {}: {}", path.display(), e);
+        anyhow!("Invalid burn proof file: {}", req.file_name)
+    })?;
 
-    let proof = complete_burn_proof_to_contents(complete_proof);
+    let proof = complete_burn_proof_to_contents(complete_proof)?;
 
     Ok(BurnProofsGetResponse { proof })
 }
@@ -155,17 +152,12 @@ mod tests {
     use super::extract_public_key_prefix;
 
     #[test]
-    fn extract_public_key_prefix_supports_underscore_and_hyphen_formats() {
-        assert_eq!(
-            extract_public_key_prefix("0123456789abcdef_deadbeef.json"),
-            Some("0123456789abcdef")
-        );
+    fn extract_public_key_prefix_parses_hyphen_format() {
         assert_eq!(
             extract_public_key_prefix("0123456789abcdef-deadbeef.json"),
             Some("0123456789abcdef")
         );
         assert_eq!(extract_public_key_prefix("custom.json"), None);
-        assert_eq!(extract_public_key_prefix("_deadbeef.json"), None);
-        assert_eq!(extract_public_key_prefix("pubkey_.json"), None);
+        assert_eq!(extract_public_key_prefix("-deadbeef.json"), None);
     }
 }

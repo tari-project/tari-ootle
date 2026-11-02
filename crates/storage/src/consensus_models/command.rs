@@ -275,8 +275,8 @@ impl Command {
             },
             Command::LocalOnly(tx) => CommandOrdering::TransactionId(&tx.id),
             Command::ForeignProposal(foreign_proposal) => {
-                // Order by shard group then by block id
-                CommandOrdering::ForeignProposal(foreign_proposal.shard_group, &foreign_proposal.block_id)
+                let (shard_group, block_id) = foreign_proposal.block_order_key();
+                CommandOrdering::ForeignProposal(shard_group, block_id)
             },
             Command::EndEpoch(_) => CommandOrdering::EndEpoch,
         }

@@ -331,6 +331,11 @@ fn return_value_charge(len: u32) -> u64 {
     limits::return_value_points(bytes, items)
 }
 
+/// The charge for decoding a `u32` instruction argument of `value`, whose encoding widens with it.
+fn literal_arg_charge(value: u32) -> u64 {
+    limits::engine_arg_points(tari_bor::encode(&value).unwrap().len() as u64, 1)
+}
+
 fn native_points_for(test: &mut TemplateTest, function: &str, args: Vec<NamedArg>) -> u64 {
     let template = test.get_template_address(TEMPLATE_NAME);
     let result = test.execute_expect_success(
@@ -355,7 +360,7 @@ fn a_return_value_is_charged_per_item() {
 
     assert_eq!(
         large_points - small_points,
-        return_value_charge(large) - return_value_charge(small),
+        return_value_charge(large) + literal_arg_charge(large) - return_value_charge(small) - literal_arg_charge(small),
         "returning {large} items rather than {small} must cost exactly the difference in return-value charges"
     );
 }
@@ -372,12 +377,12 @@ fn a_nested_return_value_is_charged_per_item() {
     let large_points = native_points_for(&mut test, "return_items_nested", args![template, large]);
 
     // The outer call passes `len` to the engine and returns the count, and both encodings widen
-    // with it. The engine reads `len` three times: in the engine call's argument, in the call's
-    // arguments nested in it, and as the callee's argument nested in those. The callee's value then
-    // reaches the caller as the engine call's response.
+    // with it. The engine reads `len` four times: as the instruction's argument, in the engine
+    // call's argument, in the call's arguments nested in it, and as the callee's argument nested in
+    // those. The callee's value then reaches the caller as the engine call's response.
     let width = |len: u32| tari_bor::encode(&len).unwrap().len() as u64;
     let count_charge = |len: u32| limits::return_value_points(width(len), 1);
-    let call_arg_charge = |len: u32| 3 * limits::engine_arg_points(width(len), 0);
+    let call_arg_charge = |len: u32| 4 * limits::engine_arg_points(width(len), 0);
     let response_charge = |len: u32| {
         let (bytes, items) = returned_items(len);
         limits::engine_response_points(bytes, items)
@@ -474,7 +479,7 @@ fn an_engine_call_argument_is_charged_per_byte_and_item() {
     };
     assert_eq!(
         large_points - small_points,
-        charge(large) - charge(small),
+        charge(large) + literal_arg_charge(large) - charge(small) - literal_arg_charge(small),
         "an argument of {large} items rather than {small} must cost exactly the difference in engine argument charges"
     );
 }
@@ -810,7 +815,7 @@ fn an_engine_call_is_charged_a_flat_cost() {
         limits::engine_response_points(response.len() as u64, tari_bor::count_data_items(&response).unwrap());
     assert_eq!(
         extra_points,
-        u64::from(calls) * per_call,
+        u64::from(calls) * per_call + literal_arg_charge(1 + calls) - literal_arg_charge(1),
         "{calls} engine calls must each be charged the flat cost, their argument and their response"
     );
 }

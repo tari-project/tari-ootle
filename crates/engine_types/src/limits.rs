@@ -425,10 +425,11 @@ pub const fn return_value_points(bytes: u64, items: u64) -> u64 {
 /// The engine walks it for its item count and nesting depth and decodes it into the op's argument
 /// type, and most ops then decode the byte strings nested in it again: into the handler's argument
 /// types, a component's state as a `Value` it indexes and compares, or a cross-template call's
-/// arguments as the `Value`s it encodes into the callee's `CallInfo`. Each of those decodes is
-/// charged here for the bytes and items it reads. That work runs outside the Wasmer meter and
-/// follows the number of CBOR items far more than the number of bytes, so `items` is priced per
-/// item, with the copies priced per byte.
+/// arguments as the `Value`s it encodes into the callee's `CallInfo`. A transaction instruction's
+/// literal and blob arguments are decoded and encoded into the callee's `CallInfo` the same way.
+/// Each of those decodes is charged here for the bytes and items it reads. That work runs outside
+/// the Wasmer meter and follows the number of CBOR items far more than the number of bytes, so
+/// `items` is priced per item, with the copies priced per byte.
 ///
 /// Measured with `cargo run -p tari_engine --release --example engine_arg_points_calibrate`, which
 /// times the walk and decode of each of those shapes at `max_internal_call_size`.

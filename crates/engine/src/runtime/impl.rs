@@ -564,11 +564,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         let resource_id: SubstateId = (*auth_caller.resource()).into();
-        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller). The hook's
-        // call decodes the acting component's state from these arguments, so they are charged as a cross-template
-        // call's are.
+        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller).
         let args = invoke_args![action, auth_caller];
-        self.charge_call_args(&args)?;
 
         // The hook frame only accepts the `AuthHookCaller` argument if the resource it names is in the acting
         // frame's scope. The reference is scoped to the hook call: the acting frame's scope must be the same after
@@ -682,21 +679,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method: method.to_string(),
             details: Box::new(e),
         })
-    }
-
-    /// Charges for the arguments a template passes to a cross-template call, which the engine
-    /// decodes into the callee's `CallInfo`.
-    fn charge_call_args(&self, args: &[Bytes]) -> Result<(), RuntimeError> {
-        for arg in args {
-            self.charge_engine_arg(arg).map_err(|e| match e {
-                EngineArgChargeError::Unreadable(e) => RuntimeError::InvalidArgument {
-                    argument: "args",
-                    reason: format!("Argument failed to decode. Err: {:?}", e),
-                },
-                EngineArgChargeError::Runtime(e) => e,
-            })?;
-        }
-        Ok(())
     }
 
     fn invoke_template_function(
@@ -1239,6 +1221,20 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// moves are charged here, since a frame's proofs can be dropped where no engine call is made.
     fn charge_non_fungible_ids_locked(&self, ids: usize) -> Result<(), RuntimeError> {
         self.charge_non_fungible_ids_moved(ids.saturating_mul(2))
+    }
+
+    /// Charges [`Self::charge_engine_arg`] for an argument's CBOR, then decodes it into the `Value`
+    /// the call is invoked with.
+    ///
+    /// Every argument the engine decodes for a call goes through here: the decode, the indexing of the
+    /// value for well-known types and its encoding into the callee's `CallInfo` all run outside the
+    /// Wasmer meter, and transaction weight prices an argument's bytes, which follow none of that.
+    fn decode_charged_arg(&self, bytes: &[u8]) -> Result<tari_bor::Value, RuntimeError> {
+        self.charge_engine_arg(bytes).map_err(|e| match e {
+            EngineArgChargeError::Unreadable(e) => RuntimeError::from(e),
+            EngineArgChargeError::Runtime(e) => e,
+        })?;
+        Ok(decode_exact(bytes)?)
     }
 
     /// Charges `points(input.len(), 0)` for the bytes of the CBOR in `input`, then counts its items
@@ -4125,7 +4121,6 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.charge_call_args(&args)?;
                 self.invoke_template_function(
                     &template_address,
                     &function,
@@ -4140,7 +4135,6 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.charge_call_args(&args)?;
                 self.invoke_component_method(component_address, &method, args, None)?
             },
         };
@@ -4589,12 +4583,11 @@ where
             .chain(args.iter())
             .map(|arg| match arg {
                 InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
-                InstructionArg::Literal(v) => Ok(decode_exact(v)?),
+                InstructionArg::Literal(v) => self.decode_charged_arg(v),
                 // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
                 // by the same path as `Literal`. Lookup is against the surrounding transaction's
-                // `Blobs`, set on the runtime at construction time. Each reference is charged via
-                // `charge_engine_arg` before decoding so repeating a single blob across many
-                // instructions cannot amplify host CBOR decoding without paying per reference.
+                // `Blobs`, set on the runtime at construction time. A blob is paid for once by
+                // transaction weight but may be referenced many times, so each reference is charged.
                 InstructionArg::Blob(idx) => {
                     let blob = self
                         .blobs
@@ -4603,11 +4596,7 @@ where
                             index: *idx,
                             count: self.blobs.len(),
                         })?;
-                    self.charge_engine_arg(blob.as_bytes()).map_err(|e| match e {
-                        EngineArgChargeError::Unreadable(e) => RuntimeError::from(e),
-                        EngineArgChargeError::Runtime(e) => e,
-                    })?;
-                    Ok(decode_exact(blob.as_bytes())?)
+                    self.decode_charged_arg(blob.as_bytes())
                 },
             })
             .collect()
@@ -4687,11 +4676,11 @@ mod tests {
         traits::VerifiedClaim,
     };
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct DummyTemplateProvider;
 
     impl TemplateProvider for DummyTemplateProvider {
-        type Error = String;
+        type Error = std::convert::Infallible;
         type Template = LoadedTemplate;
 
         fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
@@ -4739,6 +4728,23 @@ mod tests {
             Rc::new(blobs),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn resolving_a_literal_arg_charges_native_points_for_its_items() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected = engine_arg_points(encoded.len() as u64, items);
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resolved = runtime
+            .resolve_args(None, &[InstructionArg::Literal(encoded.into())])
+            .unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected);
     }
 
     #[test]

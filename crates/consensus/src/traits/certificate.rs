@@ -12,6 +12,7 @@ use tari_ootle_storage::{
     StorageError,
     consensus_models::{Block, BookkeepingModel},
 };
+use tari_sidechain::QuorumDecision;
 
 const LOG_TARGET: &str = "tari::ootle::consensus::quorum_certificate";
 
@@ -60,6 +61,34 @@ impl CertificateStore for ProposalCertificate {
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
     {
+        if !self.justifies_zero_block() {
+            let block = Block::get(&**tx, &self.calculate_block_id())?;
+            if block.height() != self.height() ||
+                block.epoch() != self.epoch() ||
+                block.shard_group() != self.shard_group()
+            {
+                return Err(StorageError::DataInconsistency {
+                    details: format!(
+                        "Certificate {} claims height {} in epoch {} (shard group {}) for block {} at height {} in \
+                         epoch {} (shard group {})",
+                        self.calculate_id(),
+                        self.height(),
+                        self.epoch(),
+                        self.shard_group(),
+                        block.id(),
+                        block.height(),
+                        block.epoch(),
+                        block.shard_group(),
+                    ),
+                });
+            }
+        }
+
+        if self.decision() != QuorumDecision::Accept {
+            self.save(tx)?;
+            return HighPc::get(&**tx, self.epoch());
+        }
+
         match HighPc::get(&**tx, self.epoch()).optional()? {
             Some(high_pc) if high_pc.height() >= self.height() => {
                 // EDGE CASE: If we receive a new high PC, clear the last sent new view. This is because we could have
@@ -76,25 +105,6 @@ impl CertificateStore for ProposalCertificate {
                 Ok(high_pc)
             },
             Some(_) | None => {
-                // The certificate id and the block id omit the height and epoch, so the stored block is the authority
-                // for them.
-                if !self.justifies_zero_block() {
-                    let block = Block::get(&**tx, &self.calculate_block_id())?;
-                    if block.height() != self.height() || block.epoch() != self.epoch() {
-                        return Err(StorageError::DataInconsistency {
-                            details: format!(
-                                "Certificate {} claims height {} in epoch {} for block {} at height {} in epoch {}",
-                                self.calculate_id(),
-                                self.height(),
-                                self.epoch(),
-                                block.id(),
-                                block.height(),
-                                block.epoch(),
-                            ),
-                        });
-                    }
-                }
-
                 let high_pc = self.as_high_pc();
                 info!(
                     target: LOG_TARGET,

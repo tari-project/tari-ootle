@@ -12,19 +12,16 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::{Epoch, Transaction, args, builder::named_args::NamedArg};
-use tari_template_lib::{
-    args::CallAction,
-    types::{
-        AccessRule,
-        ComponentAddress,
-        NonFungibleAddress,
-        OwnerRule,
-        TemplateAddress,
-        VaultId,
-        access_rules::UpdateRule,
-        crypto::RistrettoPublicKeyBytes,
-        rule,
-    },
+use tari_template_lib::types::{
+    AccessRule,
+    ComponentAddress,
+    NonFungibleAddress,
+    OwnerRule,
+    TemplateAddress,
+    VaultId,
+    access_rules::UpdateRule,
+    crypto::RistrettoPublicKeyBytes,
+    rule,
 };
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -136,7 +133,7 @@ fn it_migrates_to_a_new_template_with_args() {
         .remove(0);
     assert_eq!(*component.template_address(), v2_template);
 
-    // TemplateV2 fields: 0=signers, 1=current_id, 2=new_data, 3=manager, 4=supply_vault, 5=another_vault.
+    // TemplateV2 fields: 0=signers, 1=current_id, 2=new_data, 3=manager, 4=supply_vault.
     let new_data = IndexedValue::from_value(component.into_state())
         .unwrap()
         .get_value::<String>("$.2")
@@ -285,8 +282,66 @@ fn it_fails_when_a_migration_attempts_a_cross_template_call() {
         vec![],
     );
 
-    assert_reject_reason(reason, RuntimeError::CrossTemplateCallNotAllowed {
-        action: CallAction::CallFunction,
+    assert_reject_reason(
+        reason,
+        "Host operation 'call_invoke' is forbidden inside a component migration",
+    );
+}
+
+/// A migration frame reformats its component's own state and nothing else: it runs with the same restrictions as a
+/// resource auth hook, so it cannot create a vault, move funds, hold a proof or allocate an address.
+#[test]
+fn it_refuses_every_action_but_a_state_rewrite_in_a_migration() {
+    let (mut test, component) = setup();
+    let v2_template = test.get_template_address("TemplateV2");
+
+    for (function, expected) in [
+        ("faulty_migrate_create_vault", "Write to vault_"),
+        ("faulty_migrate_withdraw", "Write to vault_"),
+        ("faulty_migrate_create_proof", "Write to vault_"),
+        (
+            "faulty_migrate_allocate_address",
+            "Host operation 'allocate_address_invoke'",
+        ),
+    ] {
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .update_component_template_address_with_migrate(component, v2_template, function, args![])
+                .finish()
+                .seal(test.secret_key()),
+            vec![],
+        );
+        let message = reason.to_string();
+        assert!(
+            message.contains(expected) && message.contains("a component migration"),
+            "{function} gave: {reason}"
+        );
+    }
+}
+
+/// The upgrade rule is evaluated before any migration code runs.
+#[test]
+fn it_checks_the_upgrade_rule_before_running_the_migration() {
+    let mut test = TemplateTest::new(CRATE_PATH, vec![
+        "tests/templates/template_upgrade/v1",
+        "tests/templates/template_upgrade/v2",
+    ]);
+    let v2_template = test.get_template_address("TemplateV2");
+    let component = create_component_with(&mut test, "new", args![
+        OwnerRule::OwnedBySigner,
+        UpdateRule::AccessRule(AccessRule::DenyAll),
+        signers()
+    ]);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .update_component_template_address_with_migrate(component, v2_template, "faulty_migrate_panic", args![])
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(reason, RuntimeError::AccessDenied {
+        action_ident: NativeAction::UpdateComponentTemplate.into(),
     });
 }
 

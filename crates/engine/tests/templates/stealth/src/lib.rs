@@ -102,6 +102,35 @@ mod template {
             .create()
         }
 
+        /// Like [`new_with_auth_hook`], but the hook asserts that it carries the transaction signer's badge. A hook
+        /// frame carries no signer badge, however the action reached it, so every hooked action fails.
+        pub fn new_with_signer_asserting_hook(initial_supply: Amount, mint: StealthTransferStatement) -> Component<Self> {
+            let alloc = CallerContext::allocate_component_address(None);
+            let bucket = ResourceBuilder::stealth()
+                .freezable(rule!(allow_all), OWNER)
+                .with_authorization_hook(alloc.get_address(), "signer_asserting_auth_hook")
+                .initial_supply(initial_supply);
+
+            let resource_address = bucket.resource_address();
+            let revealed_output_bucket = bucket.stealth_transfer(mint);
+            let supply_vault = Vault::from_bucket(revealed_output_bucket);
+
+            Component::new(Self {
+                manager: resource_address.into(),
+                supply_vault,
+                hook_calls: 0,
+            })
+            .with_address_allocation(alloc)
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
+        pub fn signer_asserting_auth_hook(&mut self, _action: ResourceAuthAction, _caller: AuthHookCaller) {
+            let signer = NonFungibleAddress::from_public_key(CallerContext::transaction_signer_public_key());
+            CallerContext::assert_badge_in_scope(&signer);
+            self.hook_calls += 1;
+        }
+
         /// Records each invocation. The engine skips the hook when this component itself acts on the resource, so
         /// the `*_of` functions below are what exercise it.
         pub fn count_auth_hook(&mut self, _action: ResourceAuthAction, caller: AuthHookCaller) {

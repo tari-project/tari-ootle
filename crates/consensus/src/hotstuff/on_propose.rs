@@ -831,7 +831,7 @@ where TConsensusSpec: ConsensusSpec
         let max_block_weight = self.config.consensus_constants.max_block_weight;
         let max_commands = self.config.consensus_constants.max_commands_in_block;
 
-        let mut foreign_proposals =
+        let foreign_proposals =
             ForeignProposalRecord::get_all_new(tx, state_anchor_leaf.block_id(), MAX_FOREIGN_PROPOSALS_PER_BLOCK)?;
 
         if !foreign_proposals.is_empty() {
@@ -842,31 +842,10 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        // The block travels with every foreign proposal it includes, so they are taken in order for as long as they
-        // fit the byte budget. The rest stay new for a later block.
-        let max_foreign_proposal_bytes = self.config.consensus_constants.max_block_foreign_proposal_bytes;
-        let mut foreign_proposal_bytes = 0usize;
-        let num_fitting = foreign_proposals
-            .iter()
-            .enumerate()
-            .take_while(|(idx, fp)| {
-                let total_bytes = foreign_proposal_bytes.saturating_add(tari_bor::encoded_len(fp.proposal()));
-                if exceeds_block_foreign_proposal_bytes(total_bytes, idx + 1, max_foreign_proposal_bytes) {
-                    return false;
-                }
-                foreign_proposal_bytes = total_bytes;
-                true
-            })
-            .count();
-        if num_fitting < foreign_proposals.len() {
-            info!(
-                target: LOG_TARGET,
-                "📦 PROPOSE: foreign proposal budget ({max_foreign_proposal_bytes} bytes) reached after {num_fitting} \
-                 of {} foreign proposal(s); deferring the rest to a later block",
-                foreign_proposals.len(),
-            );
-            foreign_proposals.truncate(num_fitting);
-        }
+        let foreign_proposals = select_foreign_proposals(
+            foreign_proposals,
+            self.config.consensus_constants.max_block_foreign_proposal_bytes,
+        );
 
         let foreign_proposal_weight: u64 = foreign_proposals
             .iter()
@@ -1299,6 +1278,46 @@ impl Display for ProposalBatch {
     }
 }
 
+/// Selects the foreign proposals for the next block from `foreign_proposals`, which are in the order they are stored,
+/// and returns them in the order a replica applies them.
+///
+/// The block travels with every foreign proposal it includes, so they are taken in stored order for as long as they
+/// fit `max_bytes`. The rest stay new for a later block.
+///
+/// Applying foreign proposals is order-dependent (e.g. the first abort recorded for a transaction is the one it keeps),
+/// and the proposer derives the block's transaction commands from the state they leave behind. Replicas apply them in
+/// block command order, so the proposer must too, or it commits to atoms no replica reproduces.
+fn select_foreign_proposals(
+    mut foreign_proposals: Vec<ForeignProposalRecord>,
+    max_bytes: usize,
+) -> Vec<ForeignProposalRecord> {
+    let mut foreign_proposal_bytes = 0usize;
+    let num_fitting = foreign_proposals
+        .iter()
+        .enumerate()
+        .take_while(|(idx, fp)| {
+            let total_bytes = foreign_proposal_bytes.saturating_add(tari_bor::encoded_len(fp.proposal()));
+            if exceeds_block_foreign_proposal_bytes(total_bytes, idx + 1, max_bytes) {
+                return false;
+            }
+            foreign_proposal_bytes = total_bytes;
+            true
+        })
+        .count();
+    if num_fitting < foreign_proposals.len() {
+        info!(
+            target: LOG_TARGET,
+            "📦 PROPOSE: foreign proposal budget ({max_bytes} bytes) reached after {num_fitting} of {} foreign \
+             proposal(s); deferring the rest to a later block",
+            foreign_proposals.len(),
+        );
+        foreign_proposals.truncate(num_fitting);
+    }
+
+    foreign_proposals.sort_by(|a, b| a.to_atom().block_order_key().cmp(&b.to_atom().block_order_key()));
+    foreign_proposals
+}
+
 /// Subtract `by` from the remaining block weight budget, returning `None` once the budget is
 /// exhausted (i.e. drops to zero or would underflow). Mirrors the previous count-based helper but
 /// operates on the weight budget.
@@ -1309,6 +1328,99 @@ fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod select_foreign_proposals {
+        use tari_ootle_common_types::{ExtraData, ShardGroup};
+        use tari_ootle_storage::consensus_models::{
+            BlockCommands,
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandsCommitProof,
+            ForeignProposalAtom,
+        };
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
+
+        use super::*;
+
+        /// A stored `New` foreign proposal from `shard_group`'s block `block_id` in epoch 1.
+        fn stored_proposal(shard_group: ShardGroup, block_id: BlockId) -> ForeignProposalRecord {
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: ExtraData::new(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let header = SidechainBlockHeader {
+                network: Network::MainNet.as_byte(),
+                protocol_version: 0,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 1,
+                epoch: 1,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
+            };
+            let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+                header,
+                proof_elements: vec![],
+            });
+            ForeignProposalRecord::load(
+                block_id,
+                ForeignProposal::new(commit_proof, BlockPledge::default(), metadata),
+                None,
+                ForeignProposalStatus::New,
+            )
+        }
+
+        fn atoms(proposals: &[ForeignProposalRecord]) -> Vec<ForeignProposalAtom> {
+            proposals.iter().map(|fp| fp.to_atom()).collect()
+        }
+
+        /// Two same-epoch proposals whose stored order (block id) is the reverse of their shard group order.
+        fn stored_out_of_block_order() -> Vec<ForeignProposalRecord> {
+            vec![
+                stored_proposal(ShardGroup::new(32u32, 63u32), BlockId::from([0xaa; 32])),
+                stored_proposal(ShardGroup::new(0u32, 31u32), BlockId::from([0xbb; 32])),
+            ]
+        }
+
+        #[test]
+        fn it_returns_the_selection_in_the_order_replicas_apply_it() {
+            let stored = stored_out_of_block_order();
+            let selected = select_foreign_proposals(stored.clone(), usize::MAX);
+
+            let block_order = BlockCommands::init(selected.iter().map(|fp| Command::ForeignProposal(fp.to_atom())))
+                .unwrap()
+                .iter()
+                .filter_map(|cmd| cmd.foreign_proposal().cloned())
+                .collect::<Vec<_>>();
+
+            assert_ne!(atoms(&stored), block_order, "fixture must be stored out of block order");
+            assert_eq!(atoms(&selected), block_order);
+        }
+
+        #[test]
+        fn it_selects_in_stored_order_within_the_byte_budget() {
+            let stored = stored_out_of_block_order();
+            let max_bytes = tari_bor::encoded_len(stored[0].proposal());
+
+            let selected = select_foreign_proposals(stored.clone(), max_bytes);
+
+            assert_eq!(atoms(&selected), atoms(&stored[..1]));
+        }
+    }
 
     mod subtract_weight_checked {
         use super::*;

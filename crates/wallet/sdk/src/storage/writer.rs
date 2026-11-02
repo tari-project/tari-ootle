@@ -371,6 +371,8 @@ pub trait WalletStoreWriter: CommittableStore {
     fn webauthn_reg_rename_passkey(&mut self, id: u32, label: &str) -> Result<(), WalletStorageError>;
     /// Delete a passkey by id. Returns `NotFound` if `id` does not exist.
     fn webauthn_reg_delete_passkey(&mut self, id: u32) -> Result<(), WalletStorageError>;
+    /// Removes all stored WebAuthn passkeys and registration rows, returning how many passkeys were deleted.
+    fn webauthn_reg_clear_all(&mut self) -> Result<usize, WalletStorageError>;
 
     // Authored templates
     fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError>;

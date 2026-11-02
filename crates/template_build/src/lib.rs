@@ -60,6 +60,7 @@ pub struct TemplateMetadataBuilder {
     license: Option<String>,
     logo_url: Option<String>,
     extra: Option<BTreeMap<String, String>>,
+    extra_entries: BTreeMap<String, String>,
     source_path: Option<PathBuf>,
 }
 
@@ -83,6 +84,7 @@ impl TemplateMetadataBuilder {
             license: None,
             logo_url: None,
             extra: None,
+            extra_entries: BTreeMap::new(),
             source_path: None,
         }
     }
@@ -144,14 +146,13 @@ impl TemplateMetadataBuilder {
     /// Override the extra metadata map from Cargo.toml.
     pub fn extra(mut self, extra: BTreeMap<String, String>) -> Self {
         self.extra = Some(extra);
+        self.extra_entries.clear();
         self
     }
 
     /// Add a single extra metadata key-value pair, merging with existing extra entries.
     pub fn extra_entry(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.extra
-            .get_or_insert_with(BTreeMap::new)
-            .insert(key.into(), value.into());
+        self.extra_entries.insert(key.into(), value.into());
         self
     }
 
@@ -194,6 +195,9 @@ impl TemplateMetadataBuilder {
         if let Some(ref extra) = self.extra {
             metadata.extra = extra.clone();
         }
+        for (key, value) in &self.extra_entries {
+            metadata.extra.insert(key.clone(), value.clone());
+        }
         Ok(())
     }
 
@@ -214,7 +218,7 @@ impl TemplateMetadataBuilder {
         let mut metadata = from_cargo_toml(&cargo_toml_path)?;
 
         let source_path = resolve_source_path(manifest_dir, self.source_path.as_deref());
-        if source_path.is_file() {
+        if self.source_path.is_some() || source_path.is_file() {
             metadata.functions = extract_function_docs(&source_path)?;
         }
 
@@ -523,6 +527,49 @@ mod tpl {
         assert_eq!(output.metadata.functions.len(), 1);
         assert_eq!(output.metadata.functions[0].name, "alt");
         assert_eq!(output.metadata.functions[0].doc, "from custom path");
+    }
+
+    #[test]
+    fn extra_entries_merge_with_cargo_toml_extra() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml = r#"
+[package]
+name = "test-template"
+version = "1.0.0"
+
+[package.metadata.tari-template.extra]
+from_toml = "kept"
+overridden = "old"
+"#;
+        std::fs::write(dir.path().join("Cargo.toml"), toml).unwrap();
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let output = TemplateMetadataBuilder::new()
+            .extra_entry("overridden", "new")
+            .extra_entry("added", "val")
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+
+        assert_eq!(output.metadata.extra.get("from_toml").map(String::as_str), Some("kept"));
+        assert_eq!(output.metadata.extra.get("overridden").map(String::as_str), Some("new"));
+        assert_eq!(output.metadata.extra.get("added").map(String::as_str), Some("val"));
+    }
+
+    #[test]
+    fn missing_explicit_source_path_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_cargo_toml(dir.path());
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let result = TemplateMetadataBuilder::new()
+            .source_path("nonexistent.rs")
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap());
+        assert!(matches!(
+            result,
+            Err(TemplateBuildError::DocExtract(DocExtractError::Io { .. }))
+        ));
     }
 
     #[test]

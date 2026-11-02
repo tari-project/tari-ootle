@@ -95,12 +95,6 @@ pub async fn list(
         column_families::bookkeeping::CommitBlockCf,
         &mut table,
     )?;
-    add_item(
-        &tx,
-        "last_sent_new_view",
-        column_families::bookkeeping::LastSentNewViewCf,
-        &mut table,
-    )?;
 
     // Count the total number of entries in the bookkeeping column family (HighQcCf chosen arbitrarily)
     let cf = tx.cf(column_families::bookkeeping::HighPcCf)?;

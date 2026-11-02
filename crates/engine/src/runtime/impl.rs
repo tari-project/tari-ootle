@@ -4594,7 +4594,9 @@ where
                 InstructionArg::Literal(v) => Ok(decode_exact(v)?),
                 // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
                 // by the same path as `Literal`. Lookup is against the surrounding transaction's
-                // `Blobs`, set on the runtime at construction time.
+                // `Blobs`, set on the runtime at construction time. Each reference is charged via
+                // `charge_engine_arg` before decoding so repeating a single blob across many
+                // instructions cannot amplify host CBOR decoding without paying per reference.
                 InstructionArg::Blob(idx) => {
                     let blob = self
                         .blobs
@@ -4603,6 +4605,10 @@ where
                             index: *idx,
                             count: self.blobs.len(),
                         })?;
+                    self.charge_engine_arg(blob.as_bytes()).map_err(|e| match e {
+                        EngineArgChargeError::Unreadable(e) => RuntimeError::from(e),
+                        EngineArgChargeError::Runtime(e) => e,
+                    })?;
                     Ok(decode_exact(blob.as_bytes())?)
                 },
             })
@@ -4659,4 +4665,139 @@ fn validate_component_access_rule_methods(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use ootle_network::Network;
+    use tari_engine_types::{
+        confidential::MinotariBurnClaimProof,
+        fees::{ExhaustBurnRate, FeeScale},
+        limits::engine_arg_points,
+        virtual_substate::VirtualSubstates,
+    };
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::{Blob, Blobs, TransactionWeight};
+
+    use super::*;
+    use crate::{
+        fees::{FeeTable, WasmMeteringRate},
+        runtime::{DeclaredInputLoad, scope::CallScope},
+        state_store::memory::MemoryStateStore,
+        traits::VerifiedClaim,
+    };
+
+    #[derive(Default)]
+    struct DummyTemplateProvider;
+
+    impl TemplateProvider for DummyTemplateProvider {
+        type Error = String;
+        type Template = LoadedTemplate;
+
+        fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    struct DummyClaimVerifier;
+
+    impl ClaimProofVerifier for DummyClaimVerifier {
+        fn verify_claim_proof(
+            &self,
+            _epoch: Epoch,
+            _claim: &MinotariBurnClaimProof,
+        ) -> Result<VerifiedClaim, ClaimProofError> {
+            unimplemented!("not used in blob metering tests")
+        }
+    }
+
+    fn runtime_with_blobs(blobs: Blobs) -> RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider> {
+        let mut fee_table = FeeTable::zero_rated();
+        fee_table.per_wasm_point_cost = 1;
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::from_fee_table(&fee_table),
+            ExhaustBurnRate::default(),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        );
+        RuntimeInterfaceImpl::initialize(
+            tracker,
+            Arc::new(DummyTemplateProvider),
+            None,
+            EntityIdProvider::new(Hash32::zero(), 64),
+            Arc::from(Vec::new()),
+            Arc::new(DummyClaimVerifier),
+            Rc::new(blobs),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn resolving_a_blob_arg_charges_native_points_per_reference() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected_per_ref = engine_arg_points(encoded.len() as u64, items);
+        assert!(expected_per_ref > 0);
+
+        let blobs = Blobs::from_vec(vec![Blob::from(encoded)]);
+        let runtime = runtime_with_blobs(blobs);
+
+        assert_eq!(runtime.native_points_consumed(), 0);
+
+        // First reference to blob 0 charges `expected_per_ref`.
+        let resolved = runtime.resolve_args(None, &[InstructionArg::Blob(0)]).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref);
+
+        // Referencing the same blob three more times charges in direct proportion to the number of references.
+        let resolved_multi = runtime
+            .resolve_args(None, &[
+                InstructionArg::Blob(0),
+                InstructionArg::Blob(0),
+                InstructionArg::Blob(0),
+            ])
+            .unwrap();
+        assert_eq!(resolved_multi.len(), 3);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref * 4);
+    }
+
+    #[test]
+    fn repeating_a_large_blob_arg_across_instructions_exhausts_compute_allowance() {
+        // Build a CBOR blob with 2,000 items so each reference costs a substantial chunk of compute points,
+        // and repeating it across many instructions exceeds `FREE_COMPUTE_GRACE_POINTS`.
+        let payload: Vec<u64> = (0..2_000).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let blobs = Blobs::from_vec(vec![Blob::from(encoded)]);
+        let runtime = runtime_with_blobs(blobs);
+
+        let mut exhausted = false;
+        for _ in 0..500 {
+            match runtime.resolve_args(None, &[InstructionArg::Blob(0)]) {
+                Ok(_) => {},
+                Err(RuntimeError::FeeIntentComputeExceeded { .. }) => {
+                    exhausted = true;
+                    break;
+                },
+                Err(other) => panic!("expected FeeIntentComputeExceeded, got {other:?}"),
+            }
+        }
+        assert!(
+            exhausted,
+            "repeatedly referencing a large blob must exhaust the compute allowance"
+        );
+    }
 }

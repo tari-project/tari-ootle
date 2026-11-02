@@ -1402,6 +1402,68 @@ fn declared_inputs_are_charged_by_the_byte_and_by_each_further_group() {
     );
 }
 
+/// Every shard group resolves a declared global input locally and pledges it to the others, so its
+/// bytes are charged like those of any other declared input.
+#[test]
+fn a_declared_global_input_is_charged_by_the_byte() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    let template = compile_template("tests/templates/hello_world", &[]).unwrap();
+    let published = test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .pay_fee_from_component(account, 200_000u64)
+            .publish_template(template.into_code())
+            .build_and_seal(&private_key),
+        vec![owner_token.clone()],
+    );
+    let template_id = published
+        .expect_success()
+        .up_iter()
+        .map(|(id, _)| id.clone())
+        .find(SubstateId::is_template)
+        .expect("the publish creates a template substate");
+
+    test.enable_fees();
+    test.set_input_fanout(2);
+    let table = test.fee_table().clone();
+    let mut run = |declare_template: bool| {
+        let builder = test.transaction().add_input(InputDeclaration::write(account));
+        let builder = if declare_template {
+            builder.add_input(InputDeclaration::read(template_id.clone()))
+        } else {
+            builder
+        };
+        let transaction = builder
+            .pay_fee_from_component(account, 1_000_000u64)
+            .call_function(test.get_template_address("State"), "new", args![])
+            .build_and_seal(&private_key);
+        let input_bytes = test.declared_input_bytes(&transaction);
+        let result = test.execute_and_commit_on_success(transaction, vec![owner_token.clone()]);
+        (result.finalize.fee_receipt, input_bytes)
+    };
+
+    let (without, account_bytes) = run(false);
+    let (with, input_bytes) = run(true);
+    for source in [FeeSource::InputLoad, FeeSource::InputFanout] {
+        assert!(
+            with.fee_breakdown().get(source) > without.fee_breakdown().get(source),
+            "{source:?}"
+        );
+    }
+    assert!(
+        input_bytes > account_bytes + 10_000,
+        "the template's bytes are declared input bytes"
+    );
+    assert_eq!(
+        with.fee_breakdown().get(FeeSource::InputLoad),
+        table.per_byte_storage_cost() * input_bytes / table.input_load_bytes_cost_divisor()
+    );
+    assert_eq!(
+        with.fee_breakdown().get(FeeSource::InputFanout),
+        table.per_byte_storage_cost() * input_bytes * 2 / table.input_fanout_bytes_cost_divisor()
+    );
+}
+
 /// The inputs were loaded and pledged whatever the main intent went on to do, so a transaction whose
 /// main intent is rejected still pays for them.
 #[test]

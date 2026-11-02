@@ -441,6 +441,31 @@ mod fee_estimate {
         );
     }
 
+    /// Reading the native charge back with only native points priced pins the claim's native points to every point
+    /// the engine charged, verification and authorization alike. Every price is a multiple of the divisor, so no
+    /// point is lost to rounding.
+    #[test]
+    fn the_native_points_match_the_claim_shape() {
+        const DIVISOR: u64 = 100;
+        let mut test = setup();
+        let mut fee_table = FeeTable::zero_rated();
+        fee_table.per_wasm_point_cost = 1;
+        fee_table.wasm_points_cost_divisor = DIVISOR;
+        test.set_fee_table(fee_table);
+        test.set_burn_rate_bps(0);
+
+        let result = test.execute_expect_success(build(&test, &new_claim(), PLACEHOLDER_FEE).transaction, vec![]);
+        assert_eq!(
+            result
+                .finalize
+                .fee_receipt
+                .fee_breakdown()
+                .get(FeeSource::NativeExecution) *
+                DIVISOR,
+            ClaimBurnShape::native_points(),
+        );
+    }
+
     /// The bound rests on an underpaid claim being rejected. Revealing half the estimate shows that it
     /// is, so the bound is not passing vacuously.
     #[test]

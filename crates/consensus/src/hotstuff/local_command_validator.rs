@@ -512,11 +512,6 @@ where
                 // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all
                 // inputs as Write due to lack of information. We now know what locks are necessary, and this
                 // block has the correct evidence so this should be fine.
-                tx_rec.update_from_execution(
-                    local_committee_info.num_preshards(),
-                    local_committee_info.num_committees(),
-                    &locked.execution,
-                );
                 if let Some(err) = locked.lock_status.failures().first() {
                     if atom.decision.is_commit() {
                         // If we disagree with any local decision we abstain from voting
@@ -545,24 +540,23 @@ where
                         &transaction_id,
                         RejectReason::FailedToLockOutputs(err.to_string()),
                     );
-
-                    tx_rec
-                        .set_local_decision(execution.decision())
-                        .set_transaction_fee(0)
-                        .set_exhaust_burn(0)
-                        .no_leader_fee()
-                        .set_next_stage_and_readiness(TransactionPoolStage::LocalAccepted, block.shard_group())?;
-
-                    proposed_block_change_set
-                        .add_transaction_execution(*tx_rec.id(), execution)?
-                        .set_next_transaction_update(tx_rec)?;
-
-                    return Ok(None);
+                    tx_rec.update_from_execution(
+                        local_committee_info.num_preshards(),
+                        local_committee_info.num_committees(),
+                        &execution,
+                    );
+                    execution
+                } else {
+                    tx_rec.update_from_execution(
+                        local_committee_info.num_preshards(),
+                        local_committee_info.num_committees(),
+                        &locked.execution,
+                    );
+                    if locked.fee_intent_only {
+                        tx_rec.set_fee_intent_only(true);
+                    }
+                    locked.execution
                 }
-                if locked.fee_intent_only {
-                    tx_rec.set_fee_intent_only(true);
-                }
-                locked.execution
             } else {
                 tx_rec.update_from_execution(
                     local_committee_info.num_preshards(),
@@ -600,6 +594,21 @@ where
             if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "LocalAccept") {
                 return Ok(Some(reason));
             }
+        }
+
+        if tx_rec.current_decision() != atom.decision {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE LocalAccept: decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
+                tx_rec.id(),
+                block,
+                atom.decision,
+                tx_rec.current_decision(),
+            );
+            return Ok(Some(NoVoteReason::DecisionDisagreement {
+                local: tx_rec.current_decision(),
+                remote: atom.decision,
+            }));
         }
 
         if let Some(reason) = fee_intent_only_disagreement(tx_rec.is_fee_intent_only(), atom) {
@@ -958,20 +967,27 @@ where
 
         // We check that the leader decision is the same as our local decision (this will change to ABORT once we've
         // received the foreign LocalAccept).
-        if tx_rec.current_decision().is_commit() {
+        if tx_rec.current_decision() != atom.decision {
             warn!(
                 target: LOG_TARGET,
-                "❌ SomeAccept decision disagreement for transaction {} in block {}. Leader proposed ABORT, we decided COMMIT",
+                "❌ SomeAccept decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
                 tx_rec.id(),
                 block,
+                atom.decision,
+                tx_rec.current_decision(),
             );
             return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: Decision::Commit,
+                local: tx_rec.current_decision(),
                 remote: atom.decision,
             }));
         }
 
         if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "SomeAccept") {
+            return Ok(Some(reason));
+        }
+
+        if let Some(reason) = fee_intent_only_disagreement(tx_rec.is_fee_intent_only(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE SomeAccept in block {block}: {reason}");
             return Ok(Some(reason));
         }
 
@@ -985,6 +1001,30 @@ where
                 tx_rec.transaction_fee()
             );
             return Ok(Some(NoVoteReason::FeeDisagreement));
+        }
+
+        if atom.leader_fee.is_some() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: Leader fee in tx {} is set for SomeAccept ABORT command in block {}",
+                atom.id,
+                block,
+            );
+            return Ok(Some(NoVoteReason::LeaderFeeDisagreement));
+        }
+
+        if *tx_rec.evidence() != atom.evidence {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: SomeAccept disagreement for transaction {} in block {}. Leader proposed evidence {}, but we calculated {}",
+                tx_rec.id(),
+                block,
+                atom.evidence,
+                tx_rec.evidence()
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            }));
         }
 
         tx_rec.set_next_stage_and_readiness(TransactionPoolStage::SomeAccepted, block.shard_group())?;

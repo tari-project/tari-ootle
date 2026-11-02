@@ -765,6 +765,22 @@ OotleResult ootle_account_balances(const char *account_substate_json,
  */
 OotleResult ootle_account_balance_wants(const char *account_substate_json);
 
+/**
+ * Decodes a template-emitted event into the engine `Event`. **Stateless — returns no handle.**
+ *
+ * `event_json` is the event as the indexer serves it (a JSON base64 CBOR string), passed verbatim, e.g. the `event`
+ * field of a `/transactions/events/stream` message. On success `data_json` is
+ * `{ "substate_id": "<id>" | null, "template_address": "<hex>", "topic": "<topic>", "payload": { … } }`, the same
+ * JSON `ootle-wasm-bor`'s `decodeEvent` returns.
+ *
+ * A value that is not a base64 CBOR `Event` yields `"PARSE"`; a null arg yields `"INVALID"`.
+ *
+ * # Safety
+ * `event_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_event(const char *event_json);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

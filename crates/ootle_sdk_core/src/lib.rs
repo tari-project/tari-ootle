@@ -11,6 +11,7 @@
 pub mod address_codec;
 pub mod builder;
 pub mod cosign;
+pub mod event_decode;
 pub mod faucet;
 pub mod generic_builder;
 pub mod identity;
@@ -33,6 +34,7 @@ pub use cosign::{
     seal_and_encode_with_auth,
     unsigned_record_for_cosign,
 };
+pub use event_decode::decode_event;
 pub use faucet::{FaucetClaimIntent, build_faucet_claim_with_wants};
 pub use generic_builder::build_unsigned_instructions_with_wants;
 pub use identity::{

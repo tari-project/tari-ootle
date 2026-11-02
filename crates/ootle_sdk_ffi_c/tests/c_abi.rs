@@ -42,6 +42,7 @@ use ootle_sdk_ffi_c::{
     ootle_build_stealth_unsigned_with_seed,
     ootle_build_unsigned,
     ootle_build_unsigned_instructions,
+    ootle_decode_event,
     ootle_decode_stealth_utxo,
     ootle_decode_substate,
     ootle_derive_account_address,
@@ -1752,6 +1753,47 @@ fn decode_substate_round_trips() {
 
     // Null arg ⇒ INVALID.
     let r = unsafe { ootle_decode_substate(std::ptr::null()) };
+    assert!(!ok(&r) && error_code(&r) == "INVALID");
+    unsafe { ootle_result_free(r) };
+}
+
+/// `ootle_decode_event` turns the indexer's base64 CBOR event (a `/transactions/events/stream` message's `event`) into
+/// the engine `Event`'s JSON; a non-event ⇒ PARSE; bad JSON ⇒ PARSE; null arg ⇒ INVALID.
+#[test]
+fn decode_event_round_trips() {
+    use tari_engine_types::{encoded::Encoded, events::Event};
+
+    let event = Event::new(
+        None,
+        Default::default(),
+        "std.vault.deposit".to_string(),
+        [("amount", "100".to_string())].into_iter().collect(),
+    );
+    let served = serde_json::to_string(&Encoded::encode(&event).unwrap()).unwrap();
+    let event_json = CArg::new(&served);
+
+    let result = unsafe { ootle_decode_event(event_json.ptr()) };
+    assert!(ok(&result), "decode failed: {}", error_code(&result));
+    assert!(result.handle.is_null(), "decode is stateless — no handle");
+    let decoded = data_json(&result);
+    assert_eq!(decoded, serde_json::to_value(&event).unwrap());
+    assert_eq!(decoded["topic"], "std.vault.deposit");
+    unsafe { ootle_result_free(result) };
+
+    // A served value that is not an event ⇒ PARSE.
+    let not_an_event = CArg::new(&serde_json::to_string(&Encoded::encode(&"hello".to_string()).unwrap()).unwrap());
+    let r = unsafe { ootle_decode_event(not_an_event.ptr()) };
+    assert!(!ok(&r) && error_code(&r) == "PARSE");
+    unsafe { ootle_result_free(r) };
+
+    // Bad JSON ⇒ PARSE.
+    let bad = CArg::new("{ not json");
+    let r = unsafe { ootle_decode_event(bad.ptr()) };
+    assert!(!ok(&r) && error_code(&r) == "PARSE");
+    unsafe { ootle_result_free(r) };
+
+    // Null arg ⇒ INVALID.
+    let r = unsafe { ootle_decode_event(std::ptr::null()) };
     assert!(!ok(&r) && error_code(&r) == "INVALID");
     unsafe { ootle_result_free(r) };
 }

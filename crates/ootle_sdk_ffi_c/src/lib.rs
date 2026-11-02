@@ -96,4 +96,9 @@ pub use stealth_abi::{
     ootle_stealth_partial_transaction_free,
     ootle_validate_stealth_transfer,
 };
-pub use substate_decode_abi::{ootle_account_balance_wants, ootle_account_balances, ootle_decode_substate};
+pub use substate_decode_abi::{
+    ootle_account_balance_wants,
+    ootle_account_balances,
+    ootle_decode_event,
+    ootle_decode_substate,
+};

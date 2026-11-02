@@ -28,6 +28,7 @@ use tari_ootle_wallet_sdk::{
         WalletEvent,
         WalletLockId,
     },
+    storage::ReadableWalletStore,
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_ootle_walletd_client::{
@@ -61,16 +62,19 @@ use tokio::time;
 use super::context::HandlerContext;
 use crate::{
     WalletSdk,
-    handlers::helpers::{
-        OrJrpcNotFound,
-        ensure_signing_key,
-        ensure_transaction_signers,
-        get_account,
-        get_account_or_default,
-        invalid_params,
-        invalid_request,
-        not_found,
-        transaction_rejected,
+    handlers::{
+        helpers::{
+            OrJrpcNotFound,
+            ensure_signing_key,
+            ensure_transaction_signers,
+            get_account,
+            get_account_or_default,
+            invalid_params,
+            invalid_request,
+            not_found,
+            transaction_rejected,
+        },
+        transaction_requests::{ensure_free_locks_of, ensure_locks_owned_by},
     },
     services::wasm_optimizer::optimize_wasm_template,
 };
@@ -130,7 +134,13 @@ pub async fn handle_submit(
     // cannot constrain which accounts it touches. Callers that already
     // hold a narrower capability (transfer family, publish_template) call
     // `submit_inner` directly with their own scoped check upstream.
-    context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
+    let auth = context.authorize_with_identity(token, &[Permission::Transactions(Crud::Create)])?;
+    // `submit_inner` signs with the stealth spend keys of the named locks' outputs and links the locks to this
+    // transaction, so the caller may name only free locks it created.
+    context
+        .wallet_sdk()
+        .store()
+        .with_read_tx(|tx| ensure_free_locks_of(tx, auth.lock_owner(), &req.lock_ids, "lock_ids"))?;
     // Best-effort: tag the transaction with the account that seals (pays for) it, so it can be filtered
     // per account. The seal signer may not map to a known account (e.g. an imported key) — that is fine.
     let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
@@ -423,7 +433,13 @@ pub async fn handle_submit_dry_run(
 ) -> Result<TransactionSubmitDryRunResponse, anyhow::Error> {
     // Dry-run doesn't change state but uses the submission machinery for
     // an arbitrary transaction. Gated on `transactions:read`.
-    context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
+    let auth = context.authorize_with_identity(token, &[Permission::Transactions(Crud::Read)])?;
+    // The dry run signs with the stealth spend keys of the named locks' outputs but never links them, so the
+    // caller may name any lock it created, including one already in use.
+    context
+        .wallet_sdk()
+        .store()
+        .with_read_tx(|tx| ensure_locks_owned_by(tx, auth.lock_owner(), &req.lock_ids, "lock_ids"))?;
     submit_dry_run_inner(context, req).await
 }
 
@@ -947,8 +963,8 @@ mod tests {
         signature::Sr25519SignatureBytes,
     };
     use tari_ootle_wallet_sdk::{
-        models::{KeyBranch, WalletTransactionUpdate},
-        storage::{WalletStoreWriter, WriteableWalletStore},
+        models::{KeyBranch, LockOwner, WalletLock, WalletTransactionUpdate},
+        storage::{WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
     };
     use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
@@ -1155,6 +1171,119 @@ mod tests {
 
         // The test daemon has no transaction service, so the dry run fails after signing.
         let err = handle_submit_dry_run(&daemon.context, Some(&daemon.session), request)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");
+    }
+
+    fn lock_for(daemon: &TestDaemon, owner: LockOwner) -> WalletLockId {
+        daemon
+            .context
+            .wallet_sdk()
+            .locks_api()
+            .create_owned_lock_with_timeout(Duration::from_secs(5 * 60), owner)
+            .unwrap()
+            .keep_locked()
+    }
+
+    fn get_lock(daemon: &TestDaemon, lock_id: WalletLockId) -> WalletLock {
+        daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_read_tx(|tx| tx.locks_get(lock_id))
+            .unwrap()
+    }
+
+    fn owner_of(daemon: &TestDaemon, bearer: &Bearer) -> LockOwner {
+        daemon
+            .context
+            .check_auth_with_identity(Some(bearer))
+            .unwrap()
+            .lock_owner()
+    }
+
+    fn submit_with_locks(lock_ids: Vec<WalletLockId>) -> TransactionSubmitRequest {
+        TransactionSubmitRequest {
+            lock_ids,
+            ..submit_request(KeyId::derived(KeyBranch::Account, 0), vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn a_submit_cannot_use_a_lock_another_caller_created() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+        let other_tool = daemon.api_key("other-tool", "transactions:create");
+        let app = daemon.delegated_session("transactions:create");
+        let foreign = [
+            lock_for(&daemon, LockOwner::Wallet),
+            lock_for(&daemon, owner_of(&daemon, &other_tool)),
+            lock_for(&daemon, owner_of(&daemon, &app)),
+        ];
+
+        for lock_id in foreign {
+            let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
+                .await
+                .unwrap_err();
+            assert_invalid_params(&err, "lock_ids");
+            assert_eq!(
+                get_lock(&daemon, lock_id).transaction_id,
+                None,
+                "lock {lock_id} was linked"
+            );
+        }
+
+        let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![9999]))
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+    }
+
+    #[tokio::test]
+    async fn a_submit_cannot_reuse_a_lock_already_linked_to_a_transaction() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
+
+        // The test daemon has no transaction service, so the submission fails after the lock is linked.
+        let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");
+        let linked_to = get_lock(&daemon, lock_id).transaction_id;
+        assert!(linked_to.is_some());
+
+        let mut relinked = submit_with_locks(vec![lock_id]);
+        relinked.transaction = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(101));
+        let err = handle_submit(&daemon.context, Some(&tool), relinked).await.unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, linked_to);
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_cannot_use_a_lock_another_caller_created() {
+        let daemon = TestDaemon::start().await;
+        let reader = daemon.api_key("reader", "transactions:read");
+        let other_reader = daemon.api_key("other-reader", "transactions:read");
+        let app = daemon.delegated_session("transactions:read");
+        let foreign = [
+            lock_for(&daemon, LockOwner::Wallet),
+            lock_for(&daemon, owner_of(&daemon, &other_reader)),
+            lock_for(&daemon, owner_of(&daemon, &app)),
+            9999,
+        ];
+
+        for lock_id in foreign {
+            let err = handle_submit_dry_run(&daemon.context, Some(&reader), submit_with_locks(vec![lock_id]))
+                .await
+                .unwrap_err();
+            assert_invalid_params(&err, "lock_ids");
+        }
+
+        // The test daemon has no transaction service, so the dry run fails after signing.
+        let own = lock_for(&daemon, owner_of(&daemon, &reader));
+        let err = handle_submit_dry_run(&daemon.context, Some(&reader), submit_with_locks(vec![own]))
             .await
             .unwrap_err();
         assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");

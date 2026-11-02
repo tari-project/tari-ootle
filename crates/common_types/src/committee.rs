@@ -75,7 +75,7 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         if self.is_empty() {
             return 0;
         }
-        (self.len() + 1) / 3
+        (self.len() - 1) / 3
     }
 
     pub fn is_empty(&self) -> bool {
@@ -281,7 +281,7 @@ impl CommitteeInfo {
     pub fn max_failure_shard_group_members(&self) -> u32 {
         // max failures is < 1/3 of the total members
         // NOTE: this is not to be used as a threshold for quorum.
-        (self.num_shard_group_members + 1) / 3
+        self.num_shard_group_members.saturating_sub(1) / 3
     }
 
     pub fn num_preshards(&self) -> NumPreshards {
@@ -418,6 +418,34 @@ mod tests {
                 .copied()
                 .collect::<Vec<_>>();
             assert!(selected.is_empty());
+        }
+    }
+
+    #[test]
+    fn it_computes_strict_one_third_max_node_failures() {
+        for (size, expected_failures) in [(0usize, 0usize), (1, 0), (2, 0), (3, 0), (4, 1), (5, 1), (6, 1), (7, 2)] {
+            let committee = create_committee(size);
+            assert_eq!(committee.max_node_failures(), expected_failures, "size={size}");
+            assert_eq!(
+                committee.max_failures().value() as usize,
+                expected_failures,
+                "size={size}"
+            );
+
+            let info = CommitteeInfo::new(
+                NumPreshards::P256,
+                size as u32,
+                1,
+                ShardGroup::new(1, 256),
+                Epoch(0),
+                VotePower::of(size as u64),
+            );
+            assert_eq!(
+                info.max_failure_shard_group_members() as usize,
+                expected_failures,
+                "size={size}"
+            );
+            assert_eq!(info.max_failures().value() as usize, expected_failures, "size={size}");
         }
     }
 }

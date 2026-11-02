@@ -81,10 +81,15 @@ let addr = allocate_component_address!();  // Alias
 ### Proof Management
 
 ```rust
+authorize!(proof);
+drop_authorize!(proof);
 drop_all_proofs!();
 ```
 
-Drops all proofs currently in the workspace. Typically called after protected operations.
+`authorize!(proof)` opens an authorization window over a workspace proof: every instruction until
+`drop_authorize!(proof)` is lent it, one hop deep. A proof on the workspace authorizes nothing outside a window,
+and passing it as a method argument only shows it to the callee. `drop_all_proofs!()` drops every proof in the
+workspace, closing their windows; typically called after protected operations.
 
 ### Local Function Calls
 

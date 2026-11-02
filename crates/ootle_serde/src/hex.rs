@@ -139,4 +139,32 @@ mod tests {
             assert_eq!(data, deserialized_bin);
         }
     }
+
+    #[derive(Serialize)]
+    struct Required {
+        #[serde(with = "super")]
+        hash: Bytes32,
+    }
+
+    #[derive(Serialize)]
+    struct Optional {
+        #[serde(with = "super::option")]
+        hash: Option<Bytes32>,
+    }
+
+    #[test]
+    fn option_encodes_some_as_the_required_form() {
+        let hash = Bytes32::new([7; 32]);
+        let required = Required { hash };
+        let optional = Optional { hash: Some(hash) };
+
+        assert_eq!(
+            tari_bor::serde_codec::to_vec(&optional).unwrap(),
+            tari_bor::serde_codec::to_vec(&required).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&optional).unwrap(),
+            serde_json::to_value(&required).unwrap()
+        );
+    }
 }

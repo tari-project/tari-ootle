@@ -98,3 +98,24 @@ impl<'a> AsRef<[u8]> for BytesCow<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde::Deserializer;
+
+    use super::*;
+
+    #[test]
+    fn it_reads_bytes_from_a_sequence() {
+        // serde_json answers `deserialize_byte_buf` on an array with `visit_seq`
+        let mut de = serde_json::Deserializer::from_str("[1, 2, 255]");
+        let bytes = (&mut de).deserialize_byte_buf(BytesVisitor::new()).unwrap();
+        assert_eq!(bytes.as_ref(), [1, 2, 255]);
+    }
+
+    #[test]
+    fn it_rejects_a_sequence_element_above_u8() {
+        let mut de = serde_json::Deserializer::from_str("[1, 256]");
+        assert!((&mut de).deserialize_byte_buf(BytesVisitor::new()).is_err());
+    }
+}

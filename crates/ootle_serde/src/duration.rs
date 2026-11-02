@@ -64,6 +64,18 @@ mod tests {
     }
 
     #[test]
+    fn optional_seconds_writes_the_some_tag() {
+        let sample = Config {
+            timeout: Duration::from_secs(30),
+            optional_timeout: Some(Duration::from_secs(120)),
+        };
+        // postcard: varint 30, Some tag 0x01, varint 120
+        let encoded = postcard::to_allocvec(&sample).unwrap();
+        assert_eq!(encoded, [30, 1, 120]);
+        assert_eq!(postcard::from_bytes::<Config>(&encoded).unwrap(), sample);
+    }
+
+    #[test]
     fn round_trips_duration_in_json_and_binary() {
         for sample in [
             Config {

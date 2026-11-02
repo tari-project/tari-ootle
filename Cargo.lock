@@ -8153,6 +8153,7 @@ version = "0.6.1"
 dependencies = [
  "base64 0.22.1",
  "hex",
+ "postcard",
  "serde",
  "serde_json",
  "serde_urlencoded",

@@ -307,6 +307,39 @@ fn the_runtime_call_count_matches_the_instruction_sequence() {
     );
 }
 
+/// The estimate prices native execution from the shape alone. Reading the charge back with only native points priced
+/// pins it to every point the engine charged, verification and authorization alike. Every price is a multiple of the
+/// divisor, so no point is lost to rounding.
+#[test]
+fn the_native_points_match_the_shape() {
+    use tari_engine::fees::FeeTable;
+    use tari_engine_types::fees::FeeSource;
+    const DIVISOR: u64 = 100;
+
+    let mut harness = setup();
+    let minted = mint_utxos(&mut harness, 2);
+
+    let mut fee_table = FeeTable::zero_rated();
+    fee_table.per_wasm_point_cost = 1;
+    fee_table.wasm_points_cost_divisor = DIVISOR;
+    harness.test.set_fee_table(fee_table);
+    harness.test.set_burn_rate_bps(0);
+    harness.test.enable_fees();
+
+    let probe = build(&harness, &minted, 2, 2, PLACEHOLDER_FEE);
+    let shape = shape_of(&harness, &probe, 2, 2, 0);
+    let result = harness.test.execute_expect_success(probe.transaction, vec![]);
+    assert_eq!(
+        result
+            .finalize
+            .fee_receipt
+            .fee_breakdown()
+            .get(FeeSource::NativeExecution) *
+            DIVISOR,
+        shape.native_points(),
+    );
+}
+
 /// The matrix's lower bound rests on an underpaid transaction being rejected. Revealing a hair under
 /// what the shape costs shows that it is: without this, an estimate that came in under would still
 /// commit and the matrix would be asserting nothing.

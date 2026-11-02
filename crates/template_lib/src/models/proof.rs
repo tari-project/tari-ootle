@@ -117,17 +117,26 @@ impl Proof {
         resp.decode().expect("Proof GetAmount returned invalid amount")
     }
 
+    /// Opens an authorization window over this proof for as long as the returned guard lives. Inside the window the
+    /// proof satisfies this frame's own rules and is lent to every call the frame makes — one hop: the callee can
+    /// use it but not pass it further. Prefer [`Self::authorize_with`], which bounds the window to one closure; a
+    /// guard held across several calls lends to all of them.
+    ///
+    /// Only a proof this frame holds can be authorized: one it created, or one a callee returned. A proof received
+    /// as an argument is shown, not held, and this panics for it.
     #[must_use = "ProofAccess must used"]
     pub fn authorize(&self) -> ProofAccess {
         self.try_authorize().expect("Proof authorization failed")
     }
 
+    /// Runs `f` inside an authorization window over this proof. See [`Self::authorize`].
     pub fn authorize_with<F: FnOnce() -> R, R>(&self, f: F) -> R {
         let _auth = self.try_authorize().expect("Proof authorization failed");
         f()
     }
 
-    /// Try to authorize the proof. If the proof cannot be authorized, this will return an error.
+    /// Tries to open an authorization window over this proof. Fails when this frame does not hold the proof — it was
+    /// shown as an argument, or it belongs to another frame — or when a window over it is already open.
     pub fn try_authorize(&self) -> Result<ProofAccess, NotAuthorized> {
         let resp: InvokeResult = call_engine(EngineOp::ProofInvoke, &ProofInvokeArg {
             proof_ref: ProofRef::Ref(self.id),
@@ -140,15 +149,9 @@ impl Proof {
         Ok(ProofAccess { id: self.id })
     }
 
-    /// Drop/destroy this proof
+    /// Drop/destroy this proof. Only the frame holding the proof may drop it.
     pub fn drop(self) {
-        let resp: InvokeResult = call_engine(EngineOp::ProofInvoke, &ProofInvokeArg {
-            proof_ref: ProofRef::Ref(self.id),
-            action: ProofAction::Drop,
-            args: invoke_args![],
-        });
-
-        resp.decode().expect("Proof drop error")
+        drop_proof(self.id)
     }
 
     pub fn assert_resource(&self, resource_address: ResourceAddress) {
@@ -165,7 +168,17 @@ impl Proof {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NotAuthorized;
 
-/// TODO: Clean this up
+fn drop_proof(id: ProofId) {
+    let resp: InvokeResult = call_engine(EngineOp::ProofInvoke, &ProofInvokeArg {
+        proof_ref: ProofRef::Ref(id),
+        action: ProofAction::Drop,
+        args: invoke_args![],
+    });
+
+    resp.decode().expect("Proof drop error")
+}
+
+/// An open authorization window over a proof. The window closes when this is dropped; the proof itself stays held.
 #[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProofAccess {
@@ -186,24 +199,35 @@ impl Drop for ProofAccess {
     }
 }
 
-/// A RAII type that holds a reference to a proof that is authorized for use.
-/// Once this is dropped the proof goes out of scope and can no longer be used.
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// A proof together with an open authorization window over it, created by [`Vault::authorize`]. Dropping it closes
+/// the window and then destroys the proof, releasing the funds it locked.
+///
+/// [`Vault::authorize`]: crate::models::Vault::authorize
+#[must_use = "the window closes and the proof is dropped as soon as ProofAuth is dropped"]
+#[derive(Debug)]
 pub struct ProofAuth {
-    #[n(0)]
-    pub id: ProofId,
+    proof: Proof,
+    access: Option<ProofAccess>,
+}
+
+impl ProofAuth {
+    /// Opens a window over `proof`, which this frame must hold.
+    pub fn new(proof: Proof) -> Self {
+        let access = proof.authorize();
+        Self {
+            proof,
+            access: Some(access),
+        }
+    }
+
+    pub fn proof(&self) -> &Proof {
+        &self.proof
+    }
 }
 
 impl Drop for ProofAuth {
     fn drop(&mut self) {
-        let resp: InvokeResult = call_engine(EngineOp::ProofInvoke, &ProofInvokeArg {
-            proof_ref: ProofRef::Ref(self.id),
-            action: ProofAction::Drop,
-            args: invoke_args![],
-        });
-
-        resp.decode::<()>()
-            .unwrap_or_else(|_| panic!("Drop failed for proof {}", self.id));
+        self.access.take();
+        drop_proof(self.proof.id());
     }
 }

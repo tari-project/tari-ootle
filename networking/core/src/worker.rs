@@ -327,29 +327,32 @@ where
                 topic,
                 explicit_topic_peers,
                 reply_tx,
-            } => {
-                if !explicit_topic_peers.is_empty() {
-                    info!(target: LOG_TARGET, "📢 Adding {} explicit peers to topic {}", explicit_topic_peers.len(), topic);
-                    for peer in &explicit_topic_peers {
-                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(peer);
+            } => match self.swarm.behaviour_mut().gossipsub.subscribe(&topic) {
+                Ok(_) => {
+                    if !explicit_topic_peers.is_empty() {
+                        info!(target: LOG_TARGET, "📢 Adding {} explicit peers to topic {}", explicit_topic_peers.len(), topic);
+                        let entry = self.topic_peers.entry(topic.hash()).or_default();
+                        for peer in explicit_topic_peers {
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                            if !entry.contains(&peer) {
+                                entry.push(peer);
+                            }
+                        }
                     }
-                    self.topic_peers.insert(topic.hash(), explicit_topic_peers);
-                }
-                match self.swarm.behaviour_mut().gossipsub.subscribe(&topic) {
-                    Ok(_) => {
-                        debug!(target: LOG_TARGET, "📢 Subscribed to gossipsub topic: {}", topic);
-                        let _ignore = reply_tx.send(Ok(()));
-                    },
-                    Err(err) => {
-                        error!(target: LOG_TARGET, "🚨 Failed to subscribe to gossipsub topic: {}", err);
-                        let _ignore = reply_tx.send(Err(err.into()));
-                    },
-                }
+                    debug!(target: LOG_TARGET, "📢 Subscribed to gossipsub topic: {}", topic);
+                    let _ignore = reply_tx.send(Ok(()));
+                },
+                Err(err) => {
+                    error!(target: LOG_TARGET, "🚨 Failed to subscribe to gossipsub topic: {}", err);
+                    let _ignore = reply_tx.send(Err(err.into()));
+                },
             },
             NetworkingRequest::UnsubscribeTopic { topic, reply_tx } => {
                 if let Some(peers) = self.topic_peers.remove(&topic.hash()) {
                     for peer in peers {
-                        self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                        if !self.topic_peers.values().any(|remaining| remaining.contains(&peer)) {
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                        }
                     }
                 }
 
@@ -430,15 +433,14 @@ where
                     None => DialOpts::unknown_peer_id().address(addr).build(),
                 };
 
-                self.swarm.dial(opts).or_else(|err| {
-                    // Peer already has pending dial or established connection - OK
-                    if matches!(&err, DialError::DialPeerConditionFalse(_)) {
-                        Ok(())
-                    } else {
-                        Err(err)
-                    }
-                })?;
+                if let Err(err) = self.swarm.dial(opts) &&
+                    !matches!(&err, DialError::DialPeerConditionFalse(_))
+                {
+                    warn!(target: LOG_TARGET, "🚨 Failed to dial seed peer {peer:?}: {err}");
+                }
             }
+
+            self.is_initial_bootstrap_complete = true;
         }
 
         if self.active_connections.len() < self.relays.num_configured_relays() {
@@ -462,8 +464,6 @@ where
                     warn!(target: LOG_TARGET, "🚨 Failed to dial relay {peer}: {err}");
                 }
             }
-
-            self.is_initial_bootstrap_complete = true;
         }
 
         // A relay can be lost without a circuit ever closing (a failed dial or listen), so a node that needs a relay
@@ -980,8 +980,13 @@ where
         peer_id: PeerId,
         info: identify::Info,
     ) -> Result<(), NetworkingError> {
-        if !self.config.swarm.protocol_version.is_compatible(&info.protocol_version) {
-            info!(target: LOG_TARGET, "🚨 Peer {} is using an incompatible protocol version: {}. Our version {}", peer_id, info.protocol_version, self.config.swarm.protocol_version);
+        if !self
+            .config
+            .swarm
+            .protocol_version
+            .is_same_network(&info.protocol_version)
+        {
+            info!(target: LOG_TARGET, "🚨 Peer {} identified with protocol string {}, which is malformed or for a different network than ours ({}). Disconnecting.", peer_id, info.protocol_version, self.config.swarm.protocol_version);
             // Error can be ignored as the docs indicate that an error only occurs if there was no connection to the
             // peer.
             let _ignore = self.swarm.disconnect_peer_id(peer_id);

@@ -22,6 +22,7 @@ const createCredential = async (
   rpOptions: { rpId: string; rpName: string },
   username: string,
   challenge: BufferSource,
+  pubKeyCredParams: PublicKeyCredentialParameters[],
   excludeCredentials: PublicKeyCredentialDescriptor[] = [],
 ) => {
   const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
@@ -35,23 +36,7 @@ const createCredential = async (
       displayName: username,
     },
     challenge,
-    pubKeyCredParams: [
-      {
-        type: "public-key",
-        // Ed25519
-        alg: -8,
-      },
-      {
-        type: "public-key",
-        // ES256
-        alg: -7,
-      },
-      {
-        type: "public-key",
-        // RS256
-        alg: -257,
-      },
-    ],
+    pubKeyCredParams,
     timeout: 60000,
     excludeCredentials,
     attestation: "none",
@@ -90,6 +75,11 @@ export async function performPasskeyRegistration(options?: {
   }
 
   const challenge = Buffer.from(publicKeyOptions.challenge, "base64");
+  // The daemon only accepts credentials signed with an algorithm it offered, so it alone chooses the list.
+  const pubKeyCredParams: PublicKeyCredentialParameters[] = publicKeyOptions.pubKeyCredParams;
+  if (!Array.isArray(pubKeyCredParams) || pubKeyCredParams.length === 0) {
+    throw new Error("Failed to start registration: missing pubKeyCredParams");
+  }
   const excludeCredentials: PublicKeyCredentialDescriptor[] = Array.isArray(publicKeyOptions.excludeCredentials)
     ? publicKeyOptions.excludeCredentials.map((cred: any) => ({
         type: cred.type || "public-key",
@@ -106,6 +96,7 @@ export async function performPasskeyRegistration(options?: {
     },
     APP_NAME,
     challenge,
+    pubKeyCredParams,
     excludeCredentials,
   );
 

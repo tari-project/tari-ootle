@@ -13,6 +13,7 @@ use tari_ootle_common_types::{
     Epoch,
     InputDeclaration,
     SubstateRequirement,
+    engine_types::substate::SubstateId,
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
@@ -52,9 +53,10 @@ use tari_ootle_walletd_client::{
         TransactionSubmitResponse,
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
+        UpgradableComponent,
     },
 };
-use tari_template_lib_types::ComponentAddress;
+use tari_template_lib_types::{ComponentAddress, access_rules::UpdateRule};
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 use tokio::time;
 
@@ -481,6 +483,7 @@ async fn submit_dry_run_inner(
         }
     }
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
+    let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
 
     // A dry run never finalizes, so it must not link the locks: a lock tied to a
     // transaction that never resolves would never be released.
@@ -496,11 +499,41 @@ async fn submit_dry_run_inner(
         .map_err(map_transaction_submission_error)?;
 
     let required_fees = exec_result.finalize.required_fees();
+    let upgradable_components = fetch_upgradable_components(sdk, called_components).await?;
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         required_fees,
         result: exec_result,
+        upgradable_components,
     })
+}
+
+/// Looks up the components in `addresses` on the network and returns those whose template can be changed after
+/// creation, so a signer can be warned that the code they approve may not be the code that runs.
+async fn fetch_upgradable_components(
+    sdk: &WalletSdk,
+    addresses: Vec<ComponentAddress>,
+) -> Result<Vec<UpgradableComponent>, anyhow::Error> {
+    let addresses = addresses.into_iter().collect::<IndexSet<_>>();
+    let ids = addresses.iter().copied().map(SubstateId::Component).collect::<Vec<_>>();
+    let substates = sdk.substate_api().get_substates_from_network(&ids).await?;
+    let rules = addresses.into_iter().zip(ids).filter_map(|(address, id)| {
+        let component = substates.get(&id)?.substate_value().component()?;
+        Some((address, component.upgrade_rule().clone()))
+    });
+    Ok(filter_upgradable(rules))
+}
+
+/// Keeps every component whose upgrade rule is not [`UpdateRule::Locked`], in the given order.
+fn filter_upgradable<I: IntoIterator<Item = (ComponentAddress, UpdateRule)>>(rules: I) -> Vec<UpgradableComponent> {
+    rules
+        .into_iter()
+        .filter(|(_, rule)| !matches!(rule, UpdateRule::Locked))
+        .map(|(component_address, upgrade_rule)| UpgradableComponent {
+            component_address,
+            upgrade_rule,
+        })
+        .collect()
 }
 
 pub async fn handle_submit_manifest(
@@ -587,9 +620,11 @@ pub async fn handle_submit_manifest(
         sign_manifest_transaction(sdk, unsigned, seal_signer_key_id, &req.signing_key_ids)
     };
     if req.dry_run {
+        let transaction = sign(unsigned)?;
+        let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
         let exec_result = context
             .transaction_service()
-            .submit_dry_run_transaction(sign(unsigned)?)
+            .submit_dry_run_transaction(transaction)
             .await?;
 
         if let Some(reject) = exec_result.finalize.any_reject() {
@@ -601,10 +636,12 @@ pub async fn handle_submit_manifest(
             .into());
         }
         let required_fees = exec_result.finalize.required_fees();
+        let upgradable_components = fetch_upgradable_components(sdk, called_components).await?;
         return Ok(TransactionSubmitManifestResponse {
             transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
             required_fees: Some(required_fees),
             result: Some(exec_result),
+            upgradable_components,
         });
     }
 
@@ -622,6 +659,7 @@ pub async fn handle_submit_manifest(
         transaction_id,
         required_fees: None,
         result: None,
+        upgradable_components: Vec::new(),
     })
 }
 
@@ -954,6 +992,27 @@ mod tests {
 
     use super::*;
     use crate::handlers::test_support::TestDaemon;
+
+    #[test]
+    fn filter_upgradable_drops_locked_components_and_keeps_order() {
+        let owner = ComponentAddress::from_array([1; 32]);
+        let locked = ComponentAddress::from_array([2; 32]);
+        let rule = ComponentAddress::from_array([3; 32]);
+
+        let upgradable = filter_upgradable([
+            (owner, UpdateRule::Owner),
+            (locked, UpdateRule::Locked),
+            (
+                rule,
+                UpdateRule::AccessRule(tari_template_lib_types::AccessRule::AllowAll),
+            ),
+        ]);
+
+        let addresses = upgradable.iter().map(|c| c.component_address).collect::<Vec<_>>();
+        assert_eq!(addresses, [owner, rule]);
+        assert!(matches!(upgradable[0].upgrade_rule, UpdateRule::Owner));
+        assert!(matches!(upgradable[1].upgrade_rule, UpdateRule::AccessRule(_)));
+    }
 
     #[tokio::test]
     async fn waiting_on_a_transaction_rejected_before_consensus_returns_at_once() {

@@ -209,6 +209,7 @@ export * from "./types/wallet-types/TransferNftResponse";
 export * from "./types/wallet-types/TransferOutput";
 export * from "./types/wallet-types/TransferStatementRequest";
 export * from "./types/wallet-types/TrustedValidatorSetInfo";
+export * from "./types/wallet-types/UpgradableComponent";
 export * from "./types/wallet-types/UtxoInfo";
 export * from "./types/wallet-types/ValidatorSetGetStatusRequest";
 export * from "./types/wallet-types/ValidatorSetGetStatusResponse";

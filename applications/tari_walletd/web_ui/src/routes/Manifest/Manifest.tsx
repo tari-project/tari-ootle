@@ -34,6 +34,7 @@ import {
 } from "@mui/icons-material";
 import type { SelectChangeEvent } from "@mui/material";
 import {
+  Alert,
   Dialog,
   DialogActions,
   DialogContent,
@@ -60,7 +61,7 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import type { ManifestTab } from "@store/manifestStore";
 import useManifestCodeStore from "@store/manifestStore";
-import type { KeyId } from "@tari-project/ootle-ts-bindings";
+import type { KeyId, UpgradableComponent } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Highlight, themes } from "prism-react-renderer";
 import { useCallback, useRef, useState } from "react";
@@ -116,6 +117,7 @@ function ManifestEditor() {
   const manifest = useManifestCodeStore();
   const [fee, setFee] = useState<bigint>(0n);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [upgradableComponents, setUpgradableComponents] = useState<UpgradableComponent[]>([]);
   const theme = useTheme();
 
   const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
@@ -192,6 +194,7 @@ function ManifestEditor() {
           console.log("Manifest submitted successfully:", response);
           return;
         }
+        setUpgradableComponents(response.upgradable_components ?? []);
         const finalize = response.result?.finalize;
         if (!finalize && isDryRun) {
           throw new Error("No result returned for dry run");
@@ -312,6 +315,19 @@ function ManifestEditor() {
             <Box sx={{ color: "red" }}>
               <p>{finalizeError}</p>
             </Box>
+          )}
+          {upgradableComponents.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              This transaction calls components whose code can be changed after this estimate, so what runs on
+              submission may differ:
+              <ul>
+                {upgradableComponents.map((c) => (
+                  <li key={c.component_address}>
+                    {c.component_address} (upgradable by {c.upgrade_rule === "Owner" ? "owner" : "access rule"})
+                  </li>
+                ))}
+              </ul>
+            </Alert>
           )}
         </form>
       </Grid>

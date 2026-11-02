@@ -21,42 +21,44 @@ use crate::types::error::OotleSdkError;
 
 /// Decodes a served `Event`. Errors: a value that is not a base64 CBOR `Event` surfaces as `Parse`.
 pub fn decode_event(value: &serde_json::Value) -> Result<Event, OotleSdkError> {
-    decode_served(value, "event")
+    decode_served(value).map_err(|e| OotleSdkError::Parse(format!("undecodable event: {e}")))
 }
 
 /// Decodes a served `SubstateValue` in full (see [`decode_substate`](crate::decode_substate) for a summary view).
 /// Errors: a value that is not a base64 CBOR `SubstateValue` surfaces as `Parse`.
 pub fn decode_substate_value(value: &serde_json::Value) -> Result<SubstateValue, OotleSdkError> {
-    decode_served(value, "substate value")
+    decode_served(value).map_err(|e| OotleSdkError::Parse(format!("undecodable substate value: {e}")))
 }
 
 /// Decodes a served `ExecuteResult`. Errors: a value that is not a base64 CBOR `ExecuteResult` surfaces as `Parse`.
 pub fn decode_execute_result(value: &serde_json::Value) -> Result<ExecuteResult, OotleSdkError> {
-    decode_served(value, "execute result")
+    decode_served(value).map_err(|e| OotleSdkError::Parse(format!("undecodable execute result: {e}")))
 }
 
 /// Decodes a served `TransactionReceipt`. Errors: a value that is not a base64 CBOR `TransactionReceipt` surfaces as
 /// `Parse`.
 pub fn decode_transaction_receipt(value: &serde_json::Value) -> Result<TransactionReceipt, OotleSdkError> {
-    decode_served(value, "transaction receipt")
+    decode_served(value).map_err(|e| OotleSdkError::Parse(format!("undecodable transaction receipt: {e}")))
 }
 
 /// Decodes a served `Resource`. Errors: a value that is not a base64 CBOR `Resource` surfaces as `Parse`.
 pub fn decode_resource(value: &serde_json::Value) -> Result<Resource, OotleSdkError> {
-    decode_served(value, "resource")
+    decode_served(value).map_err(|e| OotleSdkError::Parse(format!("undecodable resource: {e}")))
 }
 
 /// Decodes a served `Utxo`. Errors: a value that is not a base64 CBOR `Utxo` surfaces as `Parse`.
 pub fn decode_utxo(value: &serde_json::Value) -> Result<Utxo, OotleSdkError> {
-    decode_served(value, "UTXO")
+    decode_served(value).map_err(|e| OotleSdkError::Parse(format!("undecodable UTXO: {e}")))
 }
 
-fn decode_served<T>(value: &serde_json::Value, what: &str) -> Result<T, OotleSdkError>
+/// Decodes a value the indexer serves as a JSON string holding its base64 CBOR encoding. The error names what is wrong
+/// with the value; callers add which value it was and pick the error kind.
+pub(crate) fn decode_served<T>(value: &serde_json::Value) -> Result<T, String>
 where T: for<'b> tari_bor::Decode<'b, ()> {
     Encoded::<T>::deserialize(value)
-        .map_err(|e| OotleSdkError::Parse(format!("{what} is not a base64 CBOR string: {e}")))?
+        .map_err(|e| format!("not a base64 CBOR string: {e}"))?
         .decode()
-        .map_err(|e| OotleSdkError::Parse(format!("undecodable {what}: {e}")))
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

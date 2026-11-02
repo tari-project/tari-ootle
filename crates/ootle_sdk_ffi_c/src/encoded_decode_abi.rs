@@ -53,7 +53,13 @@ unsafe fn decode_to_envelope<T: Serialize>(
     })
 }
 
-/// Decodes a served `Event`. On success `data_json` is `{ "substate_id": "<id>" | null, "template_address": "<hex>",
+/// Decodes a served `Event`.
+///
+/// `event_json` is an `Event` as the indexer serves it (e.g. the `event` field of a `/transactions/events/stream`
+/// message): a JSON string holding its base64 CBOR encoding, passed verbatim with its quotes (`"<base64>"`). Bare
+/// base64 yields `"PARSE"`.
+///
+/// On success `data_json` is `{ "substate_id": "<id>" | null, "template_address": "<hex>",
 /// "topic": "<topic>", "payload": { … } }`.
 ///
 /// # Safety
@@ -64,7 +70,12 @@ pub unsafe extern "C" fn ootle_decode_event(event_json: *const c_char) -> OotleR
     unsafe { decode_to_envelope(event_json, "event_json", "event", decode_event) }
 }
 
-/// Decodes a served `SubstateValue` in full. On success `data_json` is the value's serde JSON, keyed by variant
+/// Decodes a served `SubstateValue` in full.
+///
+/// `substate_value_json` is a `SubstateValue` as the indexer serves it: a JSON string holding its base64 CBOR encoding,
+/// passed verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+///
+/// On success `data_json` is the value's serde JSON, keyed by variant
 /// (`{ "Component": { … } }`, `{ "Vault": { … } }`, …).
 ///
 /// # Safety
@@ -82,7 +93,12 @@ pub unsafe extern "C" fn ootle_decode_substate_value(substate_value_json: *const
     }
 }
 
-/// Decodes a served `ExecuteResult`. On success `data_json` is its serde JSON.
+/// Decodes a served `ExecuteResult`.
+///
+/// `execute_result_json` is an `ExecuteResult` as the indexer serves it (e.g. a dry run's `result`): a JSON string
+/// holding its base64 CBOR encoding, passed verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+///
+/// On success `data_json` is its serde JSON.
 ///
 /// # Safety
 /// `execute_result_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
@@ -99,7 +115,12 @@ pub unsafe extern "C" fn ootle_decode_execute_result(execute_result_json: *const
     }
 }
 
-/// Decodes a served `TransactionReceipt`. On success `data_json` is its serde JSON.
+/// Decodes a served `TransactionReceipt`.
+///
+/// `receipt_json` is a `TransactionReceipt` as the indexer serves it: a JSON string holding its base64 CBOR encoding,
+/// passed verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+///
+/// On success `data_json` is its serde JSON.
 ///
 /// # Safety
 /// `receipt_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
@@ -116,7 +137,12 @@ pub unsafe extern "C" fn ootle_decode_transaction_receipt(receipt_json: *const c
     }
 }
 
-/// Decodes a served `Resource`. On success `data_json` is its serde JSON.
+/// Decodes a served `Resource`.
+///
+/// `resource_json` is a `Resource` as the indexer serves it: a JSON string holding its base64 CBOR encoding, passed
+/// verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+///
+/// On success `data_json` is its serde JSON.
 ///
 /// # Safety
 /// `resource_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
@@ -126,7 +152,12 @@ pub unsafe extern "C" fn ootle_decode_resource(resource_json: *const c_char) -> 
     unsafe { decode_to_envelope(resource_json, "resource_json", "resource", decode_resource) }
 }
 
-/// Decodes a served `Utxo`. On success `data_json` is its serde JSON.
+/// Decodes a served `Utxo`.
+///
+/// `utxo_json` is a `Utxo` as the indexer serves it: a JSON string holding its base64 CBOR encoding, passed verbatim
+/// with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+///
+/// On success `data_json` is its serde JSON.
 ///
 /// # Safety
 /// `utxo_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with

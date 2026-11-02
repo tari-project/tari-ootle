@@ -788,20 +788,18 @@ impl<TStore: StateReader> StateTracker<TStore> {
 impl<TStore: StateReader + Clone> StateTracker<TStore> {
     pub fn fee_checkpoint(&self) -> Result<(), RuntimeError> {
         let state = self.write_with(|state| {
-            // After checkpointing, the main intent has a cleared workspace. Clear items and drop
-            // workspace proofs before validating and snapshotting the checkpoint state.
-            state.workspace_mut().clear_items();
-            let proofs = state.workspace_mut().take_all_proofs();
-            for proof_id in proofs {
-                state.drop_proof(proof_id)?;
-            }
-
             // Check that the checkpoint is in a valid state. It is what commits if the main intent
             // fails, so it is held to every limit a full commit is.
             state.validate_finalized()?;
             state.enforce_output_size_limit()?;
             let checkpoint_state = state.clone();
 
+            // After checkpointing, the main intent has a cleared workspace
+            state.workspace_mut().clear_items();
+            let proofs = state.workspace_mut().take_all_proofs();
+            for proof_id in proofs {
+                state.drop_proof(proof_id)?;
+            }
             Ok::<_, RuntimeError>(checkpoint_state)
         })?;
 

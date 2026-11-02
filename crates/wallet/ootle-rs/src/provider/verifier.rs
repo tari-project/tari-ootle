@@ -77,11 +77,6 @@ const REANCHOR_AFTER_FAILING_FOR: Duration = Duration::from_secs(24 * 60 * 60);
 /// proofs anchored in the current or the previous epoch.
 const MAX_PROOF_AGE_EPOCHS: u64 = 1;
 
-/// How many epochs before the latest trusted validator set's epoch a shard group's latest checkpoint may end. The
-/// latest trusted validator set is named by the checkpoint ending the previous epoch, and another shard group may still
-/// be on the checkpoint ending the epoch before that.
-const MAX_CHECKPOINT_AGE_EPOCHS: u64 = 2;
-
 /// The most committees the provider keeps verified at once.
 const MAX_CACHED_COMMITTEES: usize = 256;
 
@@ -135,8 +130,6 @@ struct TrustState {
     /// Committees verified against the set of their epoch. An entry is used only while that set is the one trusted for
     /// its epoch.
     committees: HashMap<(Epoch, ShardGroup), VerifiedCommittee>,
-    /// The latest checkpoint epoch verified for each shard group. Cleared when anchoring anew.
-    shard_group_versions: HashMap<ShardGroup, Epoch>,
     synced_at: Option<SystemTime>,
     walk_failing_since: Option<SystemTime>,
 }
@@ -151,7 +144,6 @@ impl TrustState {
     fn anchor(&mut self, validator_set: TrustedValidatorSet) {
         self.sets.clear();
         self.committees.clear();
-        self.shard_group_versions.clear();
         self.synced_at = None;
         self.walk_failing_since = None;
         self.trust(validator_set);
@@ -474,16 +466,11 @@ impl IndexerVerifier {
     ) -> Result<BTreeMap<Shard, CheckpointStateVersion>, VerifyError> {
         let client = self.client()?;
         let mut state = self.state.lock().await;
-        let trusted = if state.needs_sync() {
-            self.sync_locked(&mut state).await?
-        } else {
-            state
-                .latest
-                .clone()
-                .expect("needs_sync is true when latest is None")
+        let trusted = match state.latest.clone() {
+            Some(trusted) => trusted,
+            None => self.sync_locked(&mut state).await?,
         };
         let mut versions = BTreeMap::new();
-        let mut group_epochs = Vec::new();
         for shard in trusted.num_preshards().all_shards_iter() {
             if versions.contains_key(&shard) {
                 continue;
@@ -499,15 +486,6 @@ impl IndexerVerifier {
             else {
                 return Ok(BTreeMap::new());
             };
-            if let Some(&verified_epoch) = state.shard_group_versions.get(&entry.shard_group) &&
-                entry.epoch < verified_epoch
-            {
-                return Err(VerifyError::CheckpointOlderThanVerified {
-                    shard_group: entry.shard_group,
-                    epoch: entry.epoch,
-                    verified_epoch,
-                });
-            }
             let committee = self
                 .verify_committee(&mut state, entry.epoch, entry.shard_group)
                 .await?
@@ -519,7 +497,6 @@ impl IndexerVerifier {
                     shard_group: checkpoint.shard_group(),
                 });
             }
-            group_epochs.push((checkpoint.shard_group(), checkpoint.epoch()));
             versions.extend(checkpoint.shard_group().shard_iter().filter_map(|shard| {
                 let state_version = checkpoint.shard_state_version(shard)?;
                 Some((shard, CheckpointStateVersion {
@@ -528,21 +505,6 @@ impl IndexerVerifier {
                 }))
             }));
         }
-        let latest_trusted_epoch = state
-            .latest
-            .as_ref()
-            .map(|latest| latest.epoch())
-            .unwrap_or_else(|| trusted.epoch());
-        if let Some(&(shard_group, epoch)) = group_epochs.iter().find(|&&(_, epoch)| {
-            epoch.as_u64().saturating_add(MAX_CHECKPOINT_AGE_EPOCHS) < latest_trusted_epoch.as_u64()
-        }) {
-            return Err(VerifyError::CheckpointStale {
-                shard_group,
-                epoch,
-                latest_trusted_epoch,
-            });
-        }
-        state.shard_group_versions.extend(group_epochs);
         Ok(versions)
     }
 
@@ -785,24 +747,6 @@ pub enum VerifyError {
     CheckpointOfUntrustedEpoch { epoch: Epoch },
     #[error("The indexer served a checkpoint of shard group {shard_group} as the latest checkpoint of shard {shard}")]
     CheckpointOfAnotherShardGroup { shard: Shard, shard_group: ShardGroup },
-    #[error(
-        "The indexer served a checkpoint of shard group {shard_group} ending {epoch}, older than the checkpoint ending \
-         {verified_epoch} already verified for that shard group"
-    )]
-    CheckpointOlderThanVerified {
-        shard_group: ShardGroup,
-        epoch: Epoch,
-        verified_epoch: Epoch,
-    },
-    #[error(
-        "The indexer served a checkpoint of shard group {shard_group} ending {epoch}, too long before \
-         {latest_trusted_epoch} to be its latest checkpoint"
-    )]
-    CheckpointStale {
-        shard_group: ShardGroup,
-        epoch: Epoch,
-        latest_trusted_epoch: Epoch,
-    },
     #[error("The indexer served no checkpoint ending {epoch} to walk the validator set handover through")]
     CheckpointNotServed { epoch: Epoch },
     #[error(
@@ -1723,57 +1667,5 @@ mod tests {
         let resumed = cursor.resume(&bound);
         assert!(resumed.contains(&(shard, StateVersion::from(100))), "{resumed:?}");
         assert_eq!(cursor.position(shard).claim, None);
-    }
-
-    #[tokio::test]
-    async fn a_stale_or_regressed_shard_group_checkpoint_is_refused() {
-        let (sets, indexer, provider) = provider_with_shard_state_versions().await;
-        provider.shard_state_version_bound().await.unwrap();
-
-        // Serving an older checkpoint than the one already verified for the shard group is refused.
-        indexer.serve_latest_of_group(checkpoint_entry(CheckpointSpec {
-            shard_group: high(),
-            signers: &sets[2].high,
-            shard_state_versions: vec![(Shard::from_u32(3), 10)],
-            ..CheckpointSpec::handover(&sets[2], &sets[3])
-        }));
-        let err = provider.shard_state_version_bound().await.unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ProviderError::Unverified(VerifyError::CheckpointOlderThanVerified {
-                    shard_group,
-                    epoch: Epoch(3),
-                    verified_epoch: Epoch(4),
-                }) if shard_group == high()
-            ),
-            "{err}"
-        );
-
-        // A fresh provider synced to epoch 5 refuses a checkpoint from epoch 2 (more than MAX_CHECKPOINT_AGE_EPOCHS
-        // before latest_trusted_epoch = 5).
-        let (sets, indexer, provider) = walked_provider(IndexerTrust::Verify).await;
-        indexer.serve_latest_of_group(checkpoint_of_epoch_4(&sets, low(), &sets[3].low, vec![(
-            Shard::from_u32(1),
-            100,
-        )]));
-        indexer.serve_latest_of_group(checkpoint_entry(CheckpointSpec {
-            shard_group: high(),
-            signers: &sets[1].high,
-            shard_state_versions: vec![(Shard::from_u32(3), 5)],
-            ..CheckpointSpec::handover(&sets[1], &sets[2])
-        }));
-        let err = provider.shard_state_version_bound().await.unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ProviderError::Unverified(VerifyError::CheckpointStale {
-                    shard_group,
-                    epoch: Epoch(2),
-                    latest_trusted_epoch: Epoch(5),
-                }) if shard_group == high()
-            ),
-            "{err}"
-        );
     }
 }

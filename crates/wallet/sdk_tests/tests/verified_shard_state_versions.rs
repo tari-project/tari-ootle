@@ -207,38 +207,3 @@ async fn an_empty_list_has_no_shard_state_versions() {
     network.list_shard_group_checkpoints(vec![]);
     assert!(verified_versions(&test).await.is_empty());
 }
-
-#[tokio::test]
-async fn an_older_or_stale_checkpoint_is_rejected() {
-    let sets = (1..=5).map(ValidatorSetFixture::new).collect::<Vec<_>>();
-    let (network, test) = anchored_wallet(&sets).await;
-    end_low_epoch(&network, &sets, 2, 20);
-    network.serve_latest_checkpoint(high_checkpoint(&sets, 2, &sets[2], 15));
-    let versions = verified_versions(&test).await;
-    assert_eq!(versions[&HIGH_SHARD], version(3, 15));
-
-    // Serving an older checkpoint (epoch 2) than the one already verified (epoch 3) is rejected.
-    network.serve_latest_checkpoint(high_checkpoint(&sets, 1, &sets[1], 7));
-    assert!(matches!(
-        verification_error(&test).await,
-        ValidatorSetApiError::CheckpointOlderThanVerified {
-            shard_group,
-            epoch: Epoch(2),
-            verified_epoch: Epoch(3),
-        } if shard_group == high()
-    ));
-
-    // A checkpoint more than MAX_CHECKPOINT_AGE_EPOCHS before the latest trusted validator set is rejected.
-    let (network, test) = anchored_wallet(&sets).await;
-    end_low_epoch(&network, &sets, 2, 20);
-    end_low_epoch(&network, &sets, 3, 30);
-    network.serve_latest_checkpoint(high_checkpoint(&sets, 1, &sets[1], 7));
-    assert!(matches!(
-        verification_error(&test).await,
-        ValidatorSetApiError::CheckpointStale {
-            shard_group,
-            epoch: Epoch(2),
-            latest_trusted_epoch: Epoch(5),
-        } if shard_group == high()
-    ));
-}

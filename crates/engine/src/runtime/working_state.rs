@@ -2473,7 +2473,7 @@ mod tests {
             types::{AccessRule, constants::TARI_TOKEN, rule},
         };
 
-        use crate::{runtime::StateTracker, state_store::memory::MemoryStateStore};
+        use crate::state_store::memory::MemoryStateStore;
 
         let mut state = WorkingState::new(
             MemoryStateStore::new(),
@@ -2528,28 +2528,5 @@ mod tests {
 
         state.pop_frame(&IndexedWellKnownTypes::new()).unwrap();
         state.validate_finalized().unwrap();
-
-        // `fee_checkpoint` drops workspace proofs before validating and snapshotting the checkpoint state.
-        let tracker = StateTracker::new(
-            MemoryStateStore::new(),
-            VirtualSubstates::new(),
-            CallScope::new(),
-            HashSet::new(),
-            Hash32::default(),
-            Hash32::default(),
-            ExhaustBurnRate::zero(),
-            FeeScale::IDENTITY,
-            Network::LocalNet,
-            false,
-        );
-        tracker.write_with(|ws| {
-            let locked = LockedResource::new(
-                ContainerRef::Runtime,
-                ResourceContainer::public_fungible(TARI_TOKEN, Amount::from(5u64)),
-            );
-            ws.new_proof(proof_id, locked).unwrap();
-            ws.workspace_mut().insert(0, indexed_proof).unwrap();
-        });
-        tracker.fee_checkpoint().unwrap();
     }
 }

@@ -23,7 +23,7 @@
 pub mod client;
 mod error;
 pub mod rpc_service;
-pub use error::ValidatorNodeRpcClientError;
+pub use error::{ValidatorNodeRpcClientError, does_not_store_substate_status};
 
 pub const STATE_SYNC_MAX_BATCH_SIZE: usize = 100;
 

@@ -53,7 +53,7 @@ impl Clone for MempoolHandle {
 }
 
 impl MempoolHandle {
-    pub(super) fn new(tx_mempool_request: mpsc::Sender<MempoolRequest>) -> Self {
+    pub(crate) fn new(tx_mempool_request: mpsc::Sender<MempoolRequest>) -> Self {
         Self { tx_mempool_request }
     }
 

@@ -101,10 +101,31 @@ impl SubConfigPath for PeerSeedsConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RpcConfig {
     pub max_simultaneous_sessions: usize,
     pub max_sessions_per_client: usize,
+    /// Serve public substate and transaction read RPCs (`GetSubstate`, `GetSubstateBatch`,
+    /// `GetTransactionResult`). Committee validators must keep this enabled (`true`) because indexers
+    /// still rely on the committee for `DoesNotExist` (`f + 1` agreement), unproven fallbacks, and
+    /// `GetTransactionResult`. Set to `false` only on nodes dedicated exclusively to consensus and
+    /// state sync where other peers cover those committee reads.
+    #[serde(default = "default_serve_public_reads")]
+    pub serve_public_reads: bool,
+    /// Maximum concurrent public read RPCs (`GetSubstate`, `GetSubstateBatch`, `GetTransactionResult`)
+    /// served at once per peer before excess requests from that peer are shed with `Unavailable`.
+    #[serde(default = "default_max_concurrent_public_reads")]
+    pub max_concurrent_public_reads: usize,
+}
+
+fn default_serve_public_reads() -> bool {
+    true
+}
+
+pub const DEFAULT_MAX_CONCURRENT_PUBLIC_READS: usize = 64;
+
+fn default_max_concurrent_public_reads() -> usize {
+    DEFAULT_MAX_CONCURRENT_PUBLIC_READS
 }
 
 impl Default for RpcConfig {
@@ -113,6 +134,8 @@ impl Default for RpcConfig {
             // TODO: autofiller uses a lot of sessions, once session management is improved we can reduce these
             max_simultaneous_sessions: 1000,
             max_sessions_per_client: 100,
+            serve_public_reads: default_serve_public_reads(),
+            max_concurrent_public_reads: default_max_concurrent_public_reads(),
         }
     }
 }

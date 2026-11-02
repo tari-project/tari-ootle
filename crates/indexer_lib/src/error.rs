@@ -5,7 +5,7 @@ use std::time;
 
 use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
 use tari_epoch_manager::EpochManagerError;
-use tari_ootle_common_types::SubstateVersion;
+use tari_ootle_common_types::{ShardGroup, SubstateVersion};
 
 use crate::substate_cache::SubstateCacheError;
 
@@ -17,6 +17,12 @@ pub enum IndexerError {
     AllRequestsFailed { num_requested: usize },
     #[error("Validator node client error: {0}")]
     ValidatorNodeClientError(String),
+    #[error("Validator node {vn} serves {shard_group}: {details}")]
+    ValidatorNodeWrongShardGroup {
+        vn: String,
+        shard_group: ShardGroup,
+        details: String,
+    },
     #[error("Committee members did not agree on the substate's state, and none could prove it")]
     InvalidSubstateState,
     #[error("A committee member answered v{answered} for a read of v{requested}")]

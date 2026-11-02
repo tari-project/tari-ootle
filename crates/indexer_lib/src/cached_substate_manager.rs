@@ -22,7 +22,10 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, SystemTime},
 };
 
@@ -65,7 +68,7 @@ use tari_validator_node_rpc::client::{
 };
 
 use crate::{
-    committee_read::{CommitteeReadTally, MemberResponse, READ_RACE_WIDTH, race_committee},
+    committee_read::{CommitteeReadTally, MemberResponse, READ_RACE_WIDTH, race_committee, race_followers},
     error::IndexerError,
     substate_cache::{SubstateCache, SubstateCacheEntry, SubstateCacheEntryRef, caches_nonexistence},
 };
@@ -82,6 +85,41 @@ pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(900);
 /// that stream does not deliver. It is kept short because it is the one entry whose staleness a
 /// caller feels as an absence: a substate it is waiting for stays missing until this expires.
 pub const DEFAULT_NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// Per-request timeout when querying a preferred `follower_peers` node before falling back to another peer or the
+/// committee.
+pub const DEFAULT_FOLLOWER_READ_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Cooldown duration during which a `follower_peers` node that timed out, failed, or served an invalid proof is
+/// skipped.
+pub const DEFAULT_FOLLOWER_COOLDOWN: Duration = Duration::from_secs(30);
+
+/// Short cooldown applied when a `follower_peers` node answers without a current anchor (e.g. immediately after an
+/// epoch change), so it is not benched for the rest of the epoch.
+pub const DEFAULT_FOLLOWER_UNANCHORED_COOLDOWN: Duration = Duration::from_secs(2);
+
+/// Per-follower routing and health state tracked across reads.
+#[derive(Debug, Default)]
+struct FollowerState {
+    /// The shard group this peer was observed serving in the given epoch (learned from a verified commit proof anchor
+    /// or from [`tari_validator_node_rpc::ValidatorNodeRpcClientError::reported_shard_group`]).
+    served_group: Option<(Epoch, ShardGroup)>,
+    /// When set and in the future, this peer is skipped due to a recent timeout, transport error, invalid proof, or
+    /// unanchored/stale response.
+    cooldown_until: Option<tokio::time::Instant>,
+}
+
+impl FollowerState {
+    fn prune_stale_epoch(&mut self, epoch: Epoch) {
+        if self.served_group.is_some_and(|(e, _)| e < epoch) {
+            self.served_group = None;
+        }
+    }
+
+    fn is_cooling_down(&self, now: tokio::time::Instant) -> bool {
+        self.cooldown_until.is_some_and(|until| now < until)
+    }
+}
 
 /// A store of committee-validated shard-group state merkle roots that the read path consults to
 /// avoid re-validating a served commit proof's QC chain when its root is already trusted.
@@ -202,11 +240,20 @@ impl InputSubstatesLookup {
 }
 
 #[derive(Debug, Clone)]
-pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
+pub struct CachedSubstateManager<TEpochManager: EpochManagerReader, TVnClient, TSubstateCache> {
     network: Network,
     committee_provider: TEpochManager,
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
+    /// Preferred validator peers consulted ahead of the full shard group committee when
+    /// [`Self::verify_substate_proofs`] is enabled. These peers can only settle a read here with a proof that
+    /// verifies against a committee-signed state root; any unproven or `DoesNotExist` response falls back to the
+    /// shard group committee.
+    follower_peers: Arc<[TEpochManager::Addr]>,
+    follower_cursor: Arc<AtomicUsize>,
+    follower_states: Arc<std::sync::Mutex<HashMap<TEpochManager::Addr, FollowerState>>>,
+    follower_timeout: Duration,
+    follower_cooldown: Duration,
     /// Coarse staleness backstop on every cache entry. Correctness rests on the cache's own
     /// invalidation, so this exists to bound how long a value may be served if the transitions that
     /// would have retracted it never arrive.
@@ -254,6 +301,11 @@ where
             committee_provider,
             validator_node_client_factory,
             substate_cache,
+            follower_peers: Arc::from([]),
+            follower_cursor: Arc::new(AtomicUsize::new(0)),
+            follower_states: Arc::default(),
+            follower_timeout: DEFAULT_FOLLOWER_READ_TIMEOUT,
+            follower_cooldown: DEFAULT_FOLLOWER_COOLDOWN,
             cache_ttl: DEFAULT_CACHE_TTL,
             negative_cache_ttl: DEFAULT_NEGATIVE_CACHE_TTL,
             verify_substate_proofs: false,
@@ -263,6 +315,213 @@ where
             num_preshards,
             #[cfg(feature = "metrics")]
             metrics: None,
+        }
+    }
+
+    /// Configures preferred validator peers to try first for verifiable reads before racing the full shard group
+    /// committee.
+    ///
+    /// These peers are only queried while [`Self::with_substate_proof_verification`] is enabled, and only a response
+    /// carrying a valid committee-anchored proof is accepted from them; unproven responses and `DoesNotExist`
+    /// fall back to the shard group committee.
+    pub fn with_follower_peers(mut self, peers: impl IntoIterator<Item = TAddr>) -> Self {
+        let mut deduped = Vec::new();
+        for peer in peers {
+            if !deduped.contains(&peer) {
+                deduped.push(peer);
+            }
+        }
+        self.follower_peers = Arc::from(deduped);
+        self
+    }
+
+    pub fn with_follower_timeout(mut self, timeout: Duration) -> Self {
+        self.follower_timeout = timeout;
+        self
+    }
+
+    pub fn with_follower_cooldown(mut self, cooldown: Duration) -> Self {
+        self.follower_cooldown = cooldown;
+        self
+    }
+
+    fn rotated_follower_peers<'a>(&'a self) -> impl Iterator<Item = &'a TAddr>
+    where TAddr: 'a {
+        let len = self.follower_peers.len();
+        let start = if len == 0 {
+            0
+        } else {
+            self.follower_cursor.fetch_add(1, Ordering::Relaxed) % len
+        };
+        self.follower_peers.iter().cycle().skip(start).take(len)
+    }
+
+    /// Selects eligible follower peers for a single-substate read at `epoch`: skips any follower in cooldown or known
+    /// to serve a different shard group, and orders followers known to serve this substate's shard group ahead of
+    /// followers whose shard group has not been learned yet.
+    fn candidate_followers_for_substate<'a>(&'a self, epoch: Epoch, substate_id: &SubstateId) -> Vec<&'a TAddr>
+    where TAddr: 'a {
+        let now = tokio::time::Instant::now();
+        let mut states = self
+            .follower_states
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if substate_id.is_global() {
+            return self
+                .rotated_follower_peers()
+                .filter(|peer| {
+                    let state = states.entry((*peer).clone()).or_default();
+                    state.prune_stale_epoch(epoch);
+                    !state.is_cooling_down(now)
+                })
+                .collect();
+        }
+        let shard = SubstateAddress::from_substate_id(substate_id, SubstateVersion::ZERO).to_shard(self.num_preshards);
+        let mut matched = Vec::new();
+        let mut unknown = Vec::new();
+        for peer in self.rotated_follower_peers() {
+            let state = states.entry(peer.clone()).or_default();
+            state.prune_stale_epoch(epoch);
+            if state.is_cooling_down(now) {
+                continue;
+            }
+            match state.served_group {
+                Some((_, group)) if group.contains(&shard) => matched.push(peer),
+                Some(_) => {},
+                None => unknown.push(peer),
+            }
+        }
+        matched.extend(unknown);
+        matched
+    }
+
+    /// Selects eligible follower peers for a batch read of `shard_group` at `epoch`: skips any follower in cooldown or
+    /// known to serve another shard group, and orders followers known to serve `shard_group` ahead of followers whose
+    /// shard group has not been learned yet.
+    fn candidate_followers_for_batch<'a>(&'a self, epoch: Epoch, shard_group: ShardGroup) -> Vec<&'a TAddr>
+    where TAddr: 'a {
+        let now = tokio::time::Instant::now();
+        let mut states = self
+            .follower_states
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut matched = Vec::new();
+        let mut unknown = Vec::new();
+        for peer in self.rotated_follower_peers() {
+            let state = states.entry(peer.clone()).or_default();
+            state.prune_stale_epoch(epoch);
+            if state.is_cooling_down(now) {
+                continue;
+            }
+            match state.served_group {
+                Some((_, group)) if group.start() <= shard_group.start() && group.end() >= shard_group.end() => {
+                    matched.push(peer)
+                },
+                Some(_) => {},
+                None => unknown.push(peer),
+            }
+        }
+        matched.extend(unknown);
+        matched
+    }
+
+    fn record_follower_served_group(&self, peer: &TAddr, epoch: Epoch, shard_group: ShardGroup) {
+        let mut states = self
+            .follower_states
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = states.entry(peer.clone()).or_default();
+        state.prune_stale_epoch(epoch);
+        state.served_group = Some((epoch, shard_group));
+    }
+
+    fn record_follower_served_proof(&self, peer: &TAddr, fallback_epoch: Epoch, commit_proof_bytes: &[u8]) {
+        let Ok(commit_proof) = decode_commit_proof(commit_proof_bytes) else {
+            return;
+        };
+        let Ok(shard_group) = commit_proof.shard_group() else {
+            return;
+        };
+        let epoch = commit_proof.epoch().max(fallback_epoch);
+        let mut states = self
+            .follower_states
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = states.entry(peer.clone()).or_default();
+        state.prune_stale_epoch(epoch);
+        state.served_group = Some((epoch, shard_group));
+        state.cooldown_until = None;
+    }
+
+    fn record_follower_failure(&self, peer: &TAddr) {
+        let until = tokio::time::Instant::now() + self.follower_cooldown;
+        let mut states = self
+            .follower_states
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        states.entry(peer.clone()).or_default().cooldown_until = Some(until);
+    }
+
+    fn record_follower_unanchored(&self, peer: &TAddr) {
+        let until = tokio::time::Instant::now() + DEFAULT_FOLLOWER_UNANCHORED_COOLDOWN.min(self.follower_cooldown);
+        let mut states = self
+            .follower_states
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        states.entry(peer.clone()).or_default().cooldown_until = Some(until);
+    }
+
+    async fn request_substate_from_follower(
+        &self,
+        follower: &TAddr,
+        epoch: Epoch,
+        substate_req: SubstateRequirementRef<'_>,
+    ) -> MemberResponse {
+        match tokio::time::timeout(
+            self.follower_timeout,
+            self.request_substate_from_vn(follower, substate_req),
+        )
+        .await
+        {
+            Ok(Ok((result, Some(proof)))) => {
+                self.record_follower_served_proof(follower, epoch, &proof.commit_proof);
+                Ok((result, Some(proof)))
+            },
+            Ok(Ok((result, None))) => {
+                // `DoesNotExist` and head `Down` reads never carry a proof; only an `Up` or versioned `Down` that came
+                // back unproven (e.g. briefly unanchored after an epoch change) gets a short cooldown.
+                let expected_proof = match &result {
+                    SubstateResult::Up { .. } => true,
+                    SubstateResult::Down { version } => substate_req.version() == Some(*version),
+                    SubstateResult::DoesNotExist => false,
+                };
+                if expected_proof {
+                    self.record_follower_unanchored(follower);
+                }
+                Ok((result, None))
+            },
+            Ok(Err(err)) => {
+                if let IndexerError::ValidatorNodeWrongShardGroup { shard_group, .. } = &err {
+                    self.record_follower_served_group(follower, epoch, *shard_group);
+                } else {
+                    self.record_follower_failure(follower);
+                }
+                Err(err)
+            },
+            Err(_) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "Follower {} timed out after {}ms for substate {}",
+                    follower,
+                    self.follower_timeout.as_millis(),
+                    substate_req
+                );
+                self.record_follower_failure(follower);
+                Err(IndexerError::ValidatorNodeClientError(format!(
+                    "Follower {follower} timed out after {}ms",
+                    self.follower_timeout.as_millis()
+                )))
+            },
         }
     }
 
@@ -803,6 +1062,68 @@ where
         chunk: &[&SubstateId],
         shard_group: ShardGroup,
     ) -> Result<(SubstateBatch, bool), IndexerError> {
+        if self.verify_substate_proofs && !self.follower_peers.is_empty() {
+            let epoch = self.committee_provider.current_epoch().await?;
+            for follower in self
+                .candidate_followers_for_batch(epoch, shard_group)
+                .into_iter()
+                .take(BATCH_READ_ATTEMPTS)
+            {
+                let mut client = self.validator_node_client_factory.create_client(follower);
+                let batch = match tokio::time::timeout(self.follower_timeout, client.get_substates_batch(chunk, true))
+                    .await
+                {
+                    Ok(Ok(batch)) => batch,
+                    Ok(Err(e)) => {
+                        if let Some(reported_group) = e.reported_shard_group() {
+                            self.record_follower_served_group(follower, epoch, reported_group);
+                        } else {
+                            self.record_follower_failure(follower);
+                        }
+                        debug!(target: LOG_TARGET, "Failed to get substate batch from follower {}: {}", follower, e);
+                        continue;
+                    },
+                    Err(_) => {
+                        self.record_follower_failure(follower);
+                        debug!(
+                            target: LOG_TARGET,
+                            "Follower {} timed out after {}ms fetching substate batch for {shard_group}",
+                            follower,
+                            self.follower_timeout.as_millis()
+                        );
+                        continue;
+                    },
+                };
+                match self.verify_substate_batch(&batch, follower).await {
+                    Ok(BatchTrust::Proven) => {
+                        if let Some(commit_proof) = batch.commit_proof.as_deref() {
+                            self.record_follower_served_proof(follower, epoch, commit_proof);
+                        }
+                        if !batch.substates.is_empty() {
+                            return Ok((batch, true));
+                        }
+                        debug!(
+                            target: LOG_TARGET,
+                            "Follower {} returned a proven batch with only missing substates for {shard_group}; falling back to committee",
+                            follower
+                        );
+                    },
+                    Ok(BatchTrust::Unanchored | BatchTrust::Stale | BatchTrust::NotRequired) => {
+                        self.record_follower_unanchored(follower);
+                        debug!(
+                            target: LOG_TARGET,
+                            "Follower {} could not prove substate batch for {shard_group}; trying next peer",
+                            follower
+                        );
+                    },
+                    Err(e) => {
+                        self.record_follower_failure(follower);
+                        warn!(target: LOG_TARGET, "⚠️Rejected substate batch from follower {}: {}", follower, e);
+                    },
+                }
+            }
+        }
+
         let mut unproven = None;
         for member in committee.shuffled().take(BATCH_READ_ATTEMPTS) {
             let mut client = self.validator_node_client_factory.create_client(&member.address);
@@ -935,6 +1256,22 @@ where
     ) -> Result<SubstateLookupResult, IndexerError> {
         debug!(target: LOG_TARGET, "get_specific_substate_from_committee: {substate_req}");
         let epoch = self.committee_provider.current_epoch().await?;
+        if self.verify_substate_proofs && !self.follower_peers.is_empty() {
+            let candidates = self.candidate_followers_for_substate(epoch, substate_req.substate_id());
+            if !candidates.is_empty() &&
+                let Some(lookup) = race_followers(
+                    candidates
+                        .into_iter()
+                        .map(|peer| self.request_substate_from_follower(peer, epoch, substate_req)),
+                    READ_RACE_WIDTH,
+                    substate_req.version(),
+                )
+                .boxed()
+                .await
+            {
+                return Ok(lookup);
+            }
+        }
         // A shard group with no assigned validators reads back as a missing committee rather than an
         // empty one, and both mean the same thing here: nothing answers for this substate at this
         // epoch, which is a temporary state of the network and not an internal failure.
@@ -1007,7 +1344,14 @@ where
         let (result, proof) = client
             .get_substate_with_proof(substate_requirement)
             .await
-            .map_err(|e| IndexerError::ValidatorNodeClientError(e.to_string()))?;
+            .map_err(|e| match e.reported_shard_group() {
+                Some(shard_group) => IndexerError::ValidatorNodeWrongShardGroup {
+                    vn: vn_addr.to_string(),
+                    shard_group,
+                    details: e.to_string(),
+                },
+                None => IndexerError::ValidatorNodeClientError(e.to_string()),
+            })?;
 
         let value = Self::validate_substate_result(&result, substate_requirement.substate_id(), vn_addr)?;
 
@@ -1479,6 +1823,44 @@ mod tests {
         up_with_proof: HashMap<SubstateId, (EncodedSubstate, SubstateProofData)>,
         /// Member-specific responses: if (member, substate_id) matches, return this response.
         member_responses: HashMap<(Addr, SubstateId), SubstateResult>,
+        /// Members whose requests never complete, exercising per-follower timeouts.
+        hanging_members: HashSet<Addr>,
+        /// Optional per-member shard group restriction; requests outside this group return the validator node's
+        /// `"This node in <group> does not store ..."` error.
+        member_shard_groups: HashMap<Addr, ShardGroup>,
+        /// Count of proven single or batch requests received by each member address.
+        requests_by_member: Mutex<HashMap<Addr, usize>>,
+    }
+
+    impl FakeNetwork {
+        fn clone_for_follower_test(&self, failing_members: impl IntoIterator<Item = Addr>) -> Self {
+            Self {
+                live: self.live.clone(),
+                omitted_from_batches: self.omitted_from_batches.clone(),
+                down_in_batches: self.down_in_batches.clone(),
+                down_with_proof: self.down_with_proof.clone(),
+                batch_requests: AtomicUsize::new(0),
+                batched_ids: Mutex::new(vec![]),
+                single_requests: AtomicUsize::new(0),
+                failing_single_reads: self.failing_single_reads.clone(),
+                proven_batch: self.proven_batch.clone(),
+                failing_members: failing_members.into_iter().collect(),
+                up_with_proof: self.up_with_proof.clone(),
+                member_responses: self.member_responses.clone(),
+                hanging_members: self.hanging_members.clone(),
+                member_shard_groups: self.member_shard_groups.clone(),
+                requests_by_member: Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn requests_for(&self, member: &str) -> usize {
+            self.requests_by_member
+                .lock()
+                .unwrap()
+                .get(member)
+                .copied()
+                .unwrap_or(0)
+        }
     }
 
     #[derive(Clone)]
@@ -1536,15 +1918,34 @@ mod tests {
             &mut self,
             substate_req: SubstateRequirementRef<'_>,
         ) -> Result<(SubstateResult, Option<SubstateProofData>), ValidatorNodeRpcClientError> {
-            if self
-                .1
-                .as_ref()
-                .is_some_and(|address| self.0.failing_members.contains(address))
-            {
-                return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
-                    "{} does not answer",
-                    substate_req.substate_id()
-                )));
+            if let Some(address) = &self.1 {
+                *self
+                    .0
+                    .requests_by_member
+                    .lock()
+                    .unwrap()
+                    .entry(address.clone())
+                    .or_default() += 1;
+                if self.0.hanging_members.contains(address) {
+                    std::future::pending::<()>().await;
+                }
+                if self.0.failing_members.contains(address) {
+                    return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
+                        "{} does not answer",
+                        substate_req.substate_id()
+                    )));
+                }
+                if let Some(group) = self.0.member_shard_groups.get(address) &&
+                    !substate_req.substate_id().is_global()
+                {
+                    let shard = SubstateAddress::from_substate_id(substate_req.substate_id(), SubstateVersion::ZERO)
+                        .to_shard(NumPreshards::P256);
+                    if !group.contains(&shard) {
+                        return Err(ValidatorNodeRpcClientError::from(
+                            tari_validator_node_rpc::does_not_store_substate_status(*group, substate_req),
+                        ));
+                    }
+                }
             }
             if let Some((version, proof)) = self.0.down_with_proof.get(substate_req.substate_id()) {
                 return Ok((SubstateResult::Down { version: *version }, Some(proof.clone())));
@@ -1566,6 +1967,36 @@ mod tests {
             _include_proofs: bool,
         ) -> Result<SubstateBatch, ValidatorNodeRpcClientError> {
             self.0.batch_requests.fetch_add(1, Ordering::Relaxed);
+            if let Some(address) = &self.1 {
+                *self
+                    .0
+                    .requests_by_member
+                    .lock()
+                    .unwrap()
+                    .entry(address.clone())
+                    .or_default() += 1;
+                if self.0.hanging_members.contains(address) {
+                    std::future::pending::<()>().await;
+                }
+                if self.0.failing_members.contains(address) {
+                    return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
+                        "batch peer does not answer"
+                    )));
+                }
+                if let Some(group) = self.0.member_shard_groups.get(address) {
+                    for &id in substate_ids {
+                        if !id.is_global() {
+                            let shard = SubstateAddress::from_substate_id(id, SubstateVersion::ZERO)
+                                .to_shard(NumPreshards::P256);
+                            if !group.contains(&shard) {
+                                return Err(ValidatorNodeRpcClientError::from(
+                                    tari_validator_node_rpc::does_not_store_substate_status(*group, id),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             self.0
                 .batched_ids
                 .lock()
@@ -3653,5 +4084,163 @@ mod tests {
             assert_eq!(template.to_template_address(), legitimate_address);
             assert_eq!(template.template_name.as_ref(), "Legit");
         }
+    }
+
+    /// A follower peer serving a committee-signed proof settles a single read or a batch read without querying the
+    /// committee (even when every committee member is unreachable), and falls back to the committee when the follower
+    /// fails or has no proof.
+    #[tokio::test]
+    async fn follower_peer_settles_proven_reads_and_falls_back_to_committee_when_unproven() {
+        let (id, mut manager) = anchored_up_setup(PROOF_EPOCH, 4, |root| vec![(PROOF_EPOCH, all_shards(), 4, root)]);
+        // Mark every committee validator as failing so only `follower0` can answer.
+        let mut net = (*manager.validator_node_client_factory.0).clone_for_follower_test([
+            "vn0".to_string(),
+            "vn1".to_string(),
+            "vn2".to_string(),
+            "vn3".to_string(),
+        ]);
+        let (substate, proof) = net.up_with_proof.get(&id).unwrap().clone();
+        net.proven_batch = Some(SubstateBatch {
+            commit_proof: Some(proof.commit_proof.clone()),
+            substates: vec![tari_validator_node_rpc::client::BatchedSubstate {
+                substate_id: id.clone(),
+                result: SubstateResult::Up {
+                    substate: substate.clone(),
+                },
+                value_proof: Some(proof.substate_value_proof.clone()),
+                proof_epoch: proof.proof_epoch,
+            }],
+            missing: vec![],
+        });
+        manager.validator_node_client_factory = FakeClient(Arc::new(net), None);
+        let manager = manager
+            .with_cache_writes(false)
+            .with_follower_peers(["follower0".to_string()]);
+
+        let single = manager.get_substate(&id, None).await.unwrap();
+        assert!(single.verified);
+        assert_eq!(single.result.into_up(), Some(substate.clone()));
+
+        let batch = manager
+            .fetch_and_cache_substates(std::slice::from_ref(&id))
+            .await
+            .unwrap();
+        assert!(batch[&id].proof.is_some());
+        assert_eq!(batch[&id].substate, substate);
+
+        // When the follower fails and committee members are reachable, the read falls back to the committee.
+        let (id, mut manager) = anchored_up_setup(PROOF_EPOCH, 4, |root| vec![(PROOF_EPOCH, all_shards(), 4, root)]);
+        let net = (*manager.validator_node_client_factory.0).clone_for_follower_test(["follower_offline".to_string()]);
+        manager.validator_node_client_factory = FakeClient(Arc::new(net), None);
+        let manager = manager.with_follower_peers(["follower_offline".to_string()]);
+        let fallback = manager.get_substate(&id, None).await.unwrap();
+        assert!(fallback.verified);
+    }
+
+    #[tokio::test]
+    async fn a_follower_is_asked_only_for_the_shard_group_it_serves() {
+        let (id, mut manager) = anchored_up_setup(PROOF_EPOCH, 4, |root| vec![(PROOF_EPOCH, all_shards(), 4, root)]);
+        let shard = SubstateAddress::from_substate_id(&id, SubstateVersion::ZERO).to_shard(NumPreshards::P256);
+        let group_a = ShardGroup::new(1, 128);
+        let group_b = ShardGroup::new(129, NumPreshards::P256.as_u32());
+        let (serving_group, other_group) = if group_a.contains(&shard) {
+            (group_a, group_b)
+        } else {
+            (group_b, group_a)
+        };
+
+        let mut net = (*manager.validator_node_client_factory.0).clone_for_follower_test([
+            "vn0".to_string(),
+            "vn1".to_string(),
+            "vn2".to_string(),
+            "vn3".to_string(),
+        ]);
+        net.member_shard_groups
+            .insert("follower_other".to_string(), other_group);
+        net.member_shard_groups
+            .insert("follower_serving".to_string(), serving_group);
+        let net = Arc::new(net);
+        manager.validator_node_client_factory = FakeClient(net.clone(), None);
+        let manager = manager
+            .with_cache_writes(false)
+            .with_follower_peers(["follower_other".to_string(), "follower_serving".to_string()]);
+
+        // First read: `follower_other` reports `"This node in ShardGroup(...) does not store ..."`, so the manager
+        // learns `follower_other`'s shard group and settles the read on `follower_serving`.
+        let first = manager.get_substate(&id, None).await.unwrap();
+        assert!(first.verified);
+        assert_eq!(net.requests_for("follower_other"), 1);
+        assert_eq!(net.requests_for("follower_serving"), 1);
+
+        // Subsequent reads for `id`'s shard group skip `follower_other` completely and ask only `follower_serving`.
+        for _ in 0..3 {
+            let next = manager.get_substate(&id, None).await.unwrap();
+            assert!(next.verified);
+        }
+        assert_eq!(net.requests_for("follower_other"), 1);
+        assert_eq!(net.requests_for("follower_serving"), 4);
+    }
+
+    #[tokio::test]
+    async fn a_failing_or_slow_follower_times_out_and_is_skipped_during_cooldown() {
+        let (id, mut manager) = anchored_up_setup(PROOF_EPOCH, 4, |root| vec![(PROOF_EPOCH, all_shards(), 4, root)]);
+        let mut net = (*manager.validator_node_client_factory.0).clone_for_follower_test([
+            "vn0".to_string(),
+            "vn1".to_string(),
+            "vn2".to_string(),
+            "vn3".to_string(),
+            "follower_failing".to_string(),
+        ]);
+        net.hanging_members.insert("follower_slow".to_string());
+        let net = Arc::new(net);
+        manager.validator_node_client_factory = FakeClient(net.clone(), None);
+        let manager = manager
+            .with_cache_writes(false)
+            .with_follower_timeout(Duration::from_millis(25))
+            .with_follower_cooldown(Duration::from_secs(30))
+            .with_follower_peers([
+                "follower_slow".to_string(),
+                "follower_failing".to_string(),
+                "follower_healthy".to_string(),
+            ]);
+
+        // First read: `follower_slow` times out after 25ms and `follower_failing` errors out; both enter cooldown and
+        // `follower_healthy` settles the read.
+        let first = manager.get_substate(&id, None).await.unwrap();
+        assert!(first.verified);
+        assert_eq!(net.requests_for("follower_slow"), 1);
+        assert_eq!(net.requests_for("follower_failing"), 1);
+        assert_eq!(net.requests_for("follower_healthy"), 1);
+
+        // During cooldown, neither `follower_slow` nor `follower_failing` is asked again.
+        for _ in 0..3 {
+            let next = manager.get_substate(&id, None).await.unwrap();
+            assert!(next.verified);
+        }
+        assert_eq!(net.requests_for("follower_slow"), 1);
+        assert_eq!(net.requests_for("follower_failing"), 1);
+        assert_eq!(net.requests_for("follower_healthy"), 4);
+    }
+
+    #[tokio::test]
+    async fn a_negative_answer_does_not_bench_a_serving_follower_for_the_epoch() {
+        let (id, mut manager) = anchored_up_setup(PROOF_EPOCH, 4, |root| vec![(PROOF_EPOCH, all_shards(), 4, root)]);
+        let missing_id = component_id(99);
+        let net = Arc::new((*manager.validator_node_client_factory.0).clone_for_follower_test([]));
+        manager.validator_node_client_factory = FakeClient(net.clone(), None);
+        let manager = manager
+            .with_cache_writes(false)
+            .with_follower_peers(["follower_serving".to_string()]);
+
+        // A `DoesNotExist` answer for `missing_id` falls back to the committee (which settles `DoesNotExist` via f+1),
+        // without benching `follower_serving` for the shard.
+        let missing = manager.get_substate(&missing_id, None).await.unwrap();
+        assert!(matches!(missing.result, SubstateResult::DoesNotExist));
+        assert_eq!(net.requests_for("follower_serving"), 1);
+
+        // The next read in the same shard still asks `follower_serving`, which settles it with a verified proof.
+        let found = manager.get_substate(&id, None).await.unwrap();
+        assert!(found.verified);
+        assert_eq!(net.requests_for("follower_serving"), 2);
     }
 }

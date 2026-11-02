@@ -1714,17 +1714,103 @@ mod tests {
 
             let mut wrong_net = create_request(vec![], 60 * 60);
             wrong_net.transaction = UnsignedTransaction::new(Network::MainNet.as_byte(), Epoch(100));
-            handle_create(&wallet.daemon.context, Some(&wallet.tool), wrong_net)
+            let err = handle_create(&wallet.daemon.context, Some(&wallet.tool), wrong_net)
                 .await
                 .expect_err("wrong network transaction must be rejected");
+            assert!(err.to_string().contains("transaction.network"), "{err}");
 
             let mut dry_run = create_request(vec![], 60 * 60);
             dry_run.transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
                 .with_dry_run(true)
                 .build_unsigned();
-            handle_create(&wallet.daemon.context, Some(&wallet.tool), dry_run)
+            let err = handle_create(&wallet.daemon.context, Some(&wallet.tool), dry_run)
                 .await
                 .expect_err("dry-run transaction must be rejected");
+            assert!(err.to_string().contains("transaction.dry_run"), "{err}");
+        }
+
+        #[tokio::test]
+        async fn request_submit_rejects_unnamed_locked_stealth_input_and_allows_named_inputs() {
+            let wallet = Wallet::start().await;
+            let unnamed = wallet_output(1, 100, OutputStatus::Unspent);
+            let named = wallet_output(2, 200, OutputStatus::Unspent);
+            let mut fee_input = wallet_output(3, 300, OutputStatus::Unspent);
+            fee_input.resource_address = TARI_TOKEN;
+            wallet.add_output(&unnamed);
+            wallet.add_output(&named);
+            wallet.add_output(&fee_input);
+
+            let unnamed_lock = wallet.tool_lock_over(&unnamed);
+            let named_lock = wallet.tool_lock_over(&named);
+            let fee_lock = lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
+            wallet
+                .daemon
+                .context
+                .wallet_sdk()
+                .stealth_outputs_api()
+                .lock_specific_outputs(&account(), &TARI_TOKEN, fee_lock, &[fee_input.to_utxo_address()])
+                .unwrap();
+
+            let fee_statement = StealthTransferStatement {
+                inputs_statement: StealthInputsStatement {
+                    inputs: vec![StealthInput::new(fee_input.commitment)],
+                    revealed_amount: Amount::ZERO,
+                },
+                outputs_statement: StealthOutputsStatement {
+                    outputs: vec![],
+                    revealed_output: None,
+                    agg_range_proof: RangeProofBytes::empty(),
+                },
+                balance_proof: None,
+                covenant_claims: vec![],
+            };
+            let tx = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+                .without_auto_fill_inputs()
+                .with_fee_instructions_builder(|b| {
+                    b.call_method(
+                        account(),
+                        "pay_fee_stealth",
+                        tari_ootle_transaction::args![fee_statement],
+                    )
+                })
+                .with_instructions(vec![stealth_transfer(
+                    ResourceAddressRef::Address(resource()),
+                    &[named.commitment],
+                    vec![],
+                )])
+                .build_unsigned();
+
+            // Named inputs in StealthTransfer and pay_fee_stealth pass the request check.
+            crate::handlers::transaction::ensure_locked_stealth_inputs_are_spent(
+                wallet.daemon.context.wallet_sdk(),
+                &tx,
+                &[named_lock, fee_lock],
+            )
+            .unwrap();
+
+            // An unnamed locked input is rejected with an error naming both the lock and the commitment.
+            let mut req = create_request(vec![unnamed_lock, named_lock, fee_lock], 60 * 60);
+            req.transaction = tx;
+            let created = handle_create(&wallet.daemon.context, Some(&wallet.tool), req)
+                .await
+                .unwrap();
+            handle_approve(
+                &wallet.daemon.context,
+                Some(&wallet.daemon.session),
+                TransactionRequestDecisionRequest {
+                    request_id: created.request_id,
+                },
+            )
+            .await
+            .unwrap();
+            let err = handle_submit(&wallet.daemon.context, Some(&wallet.tool), TransactionRequestSubmitRequest {
+                request_id: created.request_id,
+            })
+            .await
+            .expect_err("unnamed locked stealth input must be rejected on request submit");
+            let msg = err.to_string();
+            assert!(msg.contains(&unnamed.commitment.to_string()), "{msg}");
+            assert!(msg.contains(&format!("lock {unnamed_lock}")), "{msg}");
         }
     }
 }

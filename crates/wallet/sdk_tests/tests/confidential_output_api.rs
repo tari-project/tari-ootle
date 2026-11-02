@@ -145,3 +145,118 @@ fn outputs_locked_and_finalized() {
         assert_eq!(balance, 124);
     }
 }
+
+#[tokio::test]
+async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked_lock_until_submission() {
+    use tari_ootle_common_types::optional::IsNotFoundError;
+    use tari_ootle_wallet_sdk::apis::confidential_transfer::{ConfidentialTransferParams, UtxoInputSelection};
+    use tari_template_lib::types::{
+        Amount,
+        Metadata,
+        ResourceAddress,
+        ResourceType,
+        SubstateOwnerRule,
+        VaultId,
+        access_rules::ResourceAccessRules,
+        constants::TOKEN_SYMBOL,
+    };
+    use tari_engine_types::resource::Resource;
+
+    let test = Test::new();
+    let sdk = test.sdk();
+    let account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+    let destination_address = account.address().clone();
+
+    let conf_resource: ResourceAddress = "resource_0000000000000000000000000000000000000000000000000000000000000c0f"
+        .parse()
+        .unwrap();
+    let conf_vault: VaultId = "vault_0000000000000000000000000000000000000000000000000000000000000c0f"
+        .parse()
+        .unwrap();
+    sdk.resources_api()
+        .upsert_resource(
+            &conf_resource,
+            &Resource::new(
+                ResourceType::Confidential,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::from([(TOKEN_SYMBOL, "CONF".to_string())]),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    sdk.accounts_api()
+        .add_vault(
+            Test::test_account_address(),
+            conf_vault,
+            SubstateVersion::ZERO,
+            conf_resource,
+            ResourceType::Confidential,
+            Some("CONF".to_string()),
+            6,
+        )
+        .unwrap();
+    sdk.accounts_api()
+        .update_vault_balance(conf_vault, Amount::from(1_000u64), Amount::zero())
+        .unwrap();
+    sdk.substate_api()
+        .save_root(
+            tari_ootle_common_types::VersionedSubstateIdRef::new(
+                &SubstateId::Component(Test::test_account_address()),
+                SubstateVersion::ZERO,
+            ),
+            [SubstateId::Vault(conf_vault)],
+        )
+        .unwrap();
+    sdk.substate_api()
+        .save_root(
+            tari_ootle_common_types::VersionedSubstateIdRef::new(&SubstateId::Vault(conf_vault), SubstateVersion::ZERO),
+            [SubstateId::Resource(conf_resource)],
+        )
+        .unwrap();
+
+    let params = |is_dry_run| ConfidentialTransferParams {
+        from_account: Test::test_account_address(),
+        input_selection: UtxoInputSelection::RevealedOnly,
+        amount: Amount::from(250u64),
+        destination_address: destination_address.clone(),
+        resource_address: conf_resource,
+        max_fee: 100,
+        output_to_revealed: true,
+        proof_from_resource: None,
+        memo: None,
+        max_epoch: tari_ootle_common_types::Epoch(10),
+        is_dry_run,
+    };
+
+    // Dry run releases the lock immediately before returning.
+    let dry_run = sdk
+        .confidential_transfer_api()
+        .transfer(params(true))
+        .await
+        .unwrap();
+    let released = test
+        .store()
+        .with_read_tx(|tx| tx.locks_get(dry_run.transaction_proof_id))
+        .unwrap_err();
+    assert!(released.is_not_found_error(), "{released}");
+
+    // Real transfer keeps a timed lock that is not yet linked to a transaction until submission.
+    let real = sdk
+        .confidential_transfer_api()
+        .transfer(params(false))
+        .await
+        .unwrap();
+    let held = test
+        .store()
+        .with_read_tx(|tx| tx.locks_get(real.transaction_proof_id))
+        .unwrap();
+    assert!(held.timeout_at.is_some(), "expected a timed lock");
+    assert_eq!(held.transaction_id, None, "lock must not be linked before submission");
+}

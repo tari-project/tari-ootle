@@ -164,7 +164,7 @@ impl RestrictedAccessRule {
         }
     }
 
-    pub fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
+    fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
         match self {
             Self::Require(rule) => rule.find_invalid_rule(),
             Self::AnyOf(rules) if rules.is_empty() => Some(InvalidAccessRule::EmptyAnyOf),
@@ -198,7 +198,7 @@ impl RequireRule {
         }
     }
 
-    pub fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
+    fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
         let (threshold, requirements) = match self {
             Self::Require(_) => return None,
             Self::AnyOf(requirements) => return requirements.is_empty().then_some(InvalidAccessRule::EmptyAnyOf),

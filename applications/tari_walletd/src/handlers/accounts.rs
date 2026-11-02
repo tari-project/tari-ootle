@@ -1426,13 +1426,27 @@ pub async fn handle_confidential_transfer(
 
         let mut linked_accounts = vec![source_account_address];
         linked_accounts.extend(owned_destination);
-        let tx_id = transaction_service
+        let tx_id = match transaction_service
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
-                None,
+                Some(transfer.transaction_proof_id),
             )
-            .await?;
+            .await
+        {
+            Ok(tx_id) => tx_id,
+            Err(e) => {
+                if let Err(err) = sdk.locks_api().release_lock(transfer.transaction_proof_id) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Failed to release lock {} after confidential transfer submission error: {}",
+                        transfer.transaction_proof_id,
+                        err
+                    );
+                }
+                return Err(e.into());
+            },
+        };
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,

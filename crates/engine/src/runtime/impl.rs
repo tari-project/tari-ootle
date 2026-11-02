@@ -1114,6 +1114,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), RuntimeError> {
         match condition {
             AtomicCondition::AccessRule(access_rule) => {
+                // The engine rejects an invalid MOfN rule wherever it stores a rule. A stealth output commits only to a
+                // hash of its spend conditions, so its rules are first seen here and an invalid MOfN rule must fail
+                // closed.
+                if access_rule.find_invalid_m_of_n().is_some() {
+                    return Err(RuntimeError::AccessDenied {
+                        action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
+                    });
+                }
                 let allowed = self
                     .tracker
                     .write_with_authorization(|state| state.authorization().check_access_rule(access_rule))?;

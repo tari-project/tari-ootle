@@ -3,12 +3,20 @@
 
 use ootle_byte_type::FromByteType;
 use ootle_network::Network;
-use tari_bor::{Deserialize, Serialize};
-use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
+use tari_bor::{Deserialize, Serialize, decode_exact};
+use tari_engine_types::{crypto::MAX_LAZY_BP_AGG_FACTORS, limits::WASM_LIMITS};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo, stealth::validated_condition_root};
-use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, UtxoAddress};
+use tari_template_lib::types::{
+    AccessRule,
+    Amount,
+    ComponentAddress,
+    NonFungibleAddress,
+    ResourceAddress,
+    UtxoAddress,
+    stealth::{AtomicCondition, SpendCondition, TemplateFunction},
+};
 
 use crate::{
     apis::{
@@ -186,12 +194,55 @@ impl TransferOutput {
             );
         }
 
-        if let PayTo::Conditions(conditions) = &self.pay_to {
-            validated_condition_root(conditions).map_err(|e| e.to_string())?;
+        match &self.pay_to {
+            PayTo::StealthPublicKey => {},
+            PayTo::AccessRule(rule) => validate_access_rule_condition(rule)?,
+            PayTo::TemplateFunction(tf) => {
+                validate_template_function_condition(tf)?;
+                validated_condition_root(&[SpendCondition::template_function(tf.clone())])
+                    .map_err(|e| e.to_string())?;
+            },
+            PayTo::Conditions(conditions) => {
+                validated_condition_root(conditions).map_err(|e| e.to_string())?;
+                for leaf in conditions {
+                    for atom in leaf.conditions() {
+                        match atom {
+                            AtomicCondition::AccessRule(rule) => validate_access_rule_condition(rule)?,
+                            AtomicCondition::TemplateFunction(tf) => validate_template_function_condition(tf)?,
+                            AtomicCondition::Builtin(_) | AtomicCondition::Covenant(_) => {},
+                        }
+                    }
+                }
+            },
         }
 
         Ok(())
     }
+}
+
+fn validate_access_rule_condition(rule: &AccessRule) -> Result<(), String> {
+    if matches!(rule, AccessRule::DenyAll) {
+        return Err("AccessRule::DenyAll can never be satisfied and would permanently lock the output".to_string());
+    }
+    if let Some(invalid) = rule.find_invalid_m_of_n() {
+        return Err(format!("Invalid MOfN access rule in spend condition: {invalid:?}"));
+    }
+    Ok(())
+}
+
+fn validate_template_function_condition(tf: &TemplateFunction) -> Result<(), String> {
+    let max_bound_args = WASM_LIMITS.max_function_arguments.saturating_sub(1);
+    if tf.args.len() > max_bound_args {
+        return Err(format!(
+            "TemplateFunction has {} bound arguments, exceeding the limit of {max_bound_args}",
+            tf.args.len()
+        ));
+    }
+    for (i, arg) in tf.args.iter().enumerate() {
+        decode_exact::<tari_bor::Value>(arg)
+            .map_err(|e| format!("TemplateFunction bound argument {i} is not well-formed CBOR: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Where a transfer statement's input value comes from.
@@ -521,5 +572,34 @@ mod tests {
         blinded_paying_to(PayTo::Conditions(vec![a_condition(1), a_condition(2)]))
             .validate(NETWORK)
             .expect("distinct condition leaves form a tree");
+    }
+
+    #[test]
+    fn rejects_deny_all_and_invalid_m_of_n_access_rules() {
+        use tari_template_lib::types::{
+            TemplateAddress,
+            access_rules::{RequireRule, RestrictedAccessRule, RuleRequirement},
+            bytes::Bytes,
+        };
+
+        assert_rejects_pay_to(PayTo::AccessRule(AccessRule::DenyAll));
+        assert_rejects_pay_to(PayTo::Conditions(vec![SpendCondition::access_rule(
+            AccessRule::DenyAll,
+        )]));
+
+        let req = RuleRequirement::Resource(STEALTH_TARI_RESOURCE_ADDRESS);
+        let duplicate_m_of_n = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::MOfN(
+            2,
+            Box::new([req.clone(), req]),
+        )));
+        assert_rejects_pay_to(PayTo::AccessRule(duplicate_m_of_n.clone()));
+        assert_rejects_pay_to(PayTo::Conditions(vec![SpendCondition::access_rule(duplicate_m_of_n)]));
+
+        let invalid_cbor_tf = TemplateFunction {
+            template: TemplateAddress::default(),
+            function: "predicate".try_into().unwrap(),
+            args: vec![Bytes::from_vec(vec![0xff])],
+        };
+        assert_rejects_pay_to(PayTo::TemplateFunction(invalid_cbor_tf));
     }
 }

@@ -172,14 +172,7 @@ where
 mod tests {
     use tari_consensus_types::{LastExecuted, LockedBlock, ProposalCertificate, ShardGroupAccumulatedData};
     use tari_crypto::tari_utilities::epoch_time::EpochTime;
-    use tari_ootle_common_types::{
-        Epoch,
-        ExtraData,
-        NodeHeight,
-        NumPreshards,
-        ProtocolVersion,
-        ShardGroup,
-    };
+    use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ProtocolVersion, ShardGroup};
     use tari_ootle_storage::{
         StateStore,
         StorageError,
@@ -188,23 +181,30 @@ mod tests {
     use tari_ootle_transaction::Network;
     use tari_sidechain::{FixedHash, QuorumDecision};
     use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
     use super::BlockStore;
+    use crate::traits::CertificateStore;
 
     fn make_block(parent: &Block, justify_block: &Block, height: NodeHeight) -> Block {
         let shard_group = ShardGroup::all_shards(NumPreshards::P256);
         let commands = BlockCommands::empty();
-        let justify = ProposalCertificate::new(
-            *justify_block.id().hash(),
-            *justify_block.id(),
-            justify_block.height(),
-            justify_block.epoch(),
-            shard_group,
-            ProposalCertificate::genesis_signatures(),
-            QuorumDecision::Accept,
-        );
-        let header = BlockHeader::create_unsigned(
+        // A certificate names its block by header hash and parent. The zero block's id is fixed at zero, which only its
+        // own genesis certificate names.
+        let justify = if justify_block.id().is_zero() {
+            justify_block.justify().clone()
+        } else {
+            ProposalCertificate::new(
+                justify_block.header().calculate_hash(),
+                *justify_block.parent(),
+                justify_block.height(),
+                justify_block.epoch(),
+                shard_group,
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            )
+        };
+        let mut header = BlockHeader::create_unsigned(
             Network::LocalNet,
             ProtocolVersion::V0,
             *parent.id(),
@@ -223,14 +223,15 @@ mod tests {
             ExtraData::new(),
         )
         .unwrap();
+        // The block id hashes the header as signed, so the header must carry a signature to hash to it.
+        header.set_signature(SchnorrSignatureBytes::zero());
         Block::new(header, justify, commands, None)
     }
 
     #[test]
     fn proposal_justified_by_locked_block_does_not_rewind_last_executed() {
         let tmp = tempfile::tempdir().unwrap();
-        let store: RocksDbStateStore<String> =
-            RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap();
+        let store: RocksDbStateStore<String> = RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap();
 
         let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
         let b1 = make_block(&zero, &zero, NodeHeight(1));

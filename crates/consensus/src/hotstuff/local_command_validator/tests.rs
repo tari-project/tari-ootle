@@ -1820,7 +1820,13 @@ mod local_accept_from_local_prepared {
 
         assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
     }
+}
 
+mod pending_execution_reuse {
+    use super::*;
+
+    /// An execution stored for a block that was never saved, or for a branch block deleted above the commit position,
+    /// is outside the candidate's chain scope.
     #[test]
     fn an_execution_for_an_unsaved_or_deleted_block_above_the_commit_position_is_not_reused() {
         let (replica, id) = executing_cross_shard();
@@ -1828,9 +1834,6 @@ mod local_accept_from_local_prepared {
         replica.prepare_in_parent(&prepare);
         let execution = replica.pending_execution(&id);
 
-        // Insert executions for `orphan_tx_id` under:
-        // 1) an unsaved block at the parent height (simulating OnPropose writing before the block is inserted), and
-        // 2) a fork block at the parent height that is subsequently deleted from BlockCf and PendingChainIndex.
         let zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
         let unsaved_commands = BlockCommands::init([Command::LocalPrepare(prepare.clone())]).unwrap();
         let unsaved_block = child(&zero, replica.committee.shard_group(), unsaved_commands);
@@ -1842,9 +1845,6 @@ mod local_accept_from_local_prepared {
         replica
             .store
             .with_write_tx(|tx| {
-                // Anchor the commit position at zero so heights above 0 are uncommitted.
-                tx.blocks_set_qcs(zero.id(), Some(&PcId::zero()), Some(&PcId::zero()))?;
-
                 execution
                     .clone()
                     .for_block(unsaved_block.as_leaf(), orphan_tx_id)
@@ -1857,6 +1857,39 @@ mod local_accept_from_local_prepared {
                     .insert_if_required(tx)?;
                 tx.blocks_delete(fork_block.id())?;
                 Ok::<_, StorageError>(())
+            })
+            .unwrap();
+
+        let res = replica.store.with_read_tx(|tx| {
+            BlockTransactionExecution::get_pending_for_block(tx, &orphan_tx_id, &replica.candidate.as_leaf())
+        });
+        assert!(matches!(res, Err(StorageError::NotFound { .. })), "{res:?}");
+    }
+
+    /// A branch block deleted at the commit height has left the pending-chain index without being committed, so only
+    /// its absence from the block store tells it apart from the committed block at that height.
+    #[test]
+    fn an_execution_for_a_branch_block_deleted_at_the_commit_height_is_not_reused() {
+        let (replica, id) = executing_cross_shard();
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        let execution = replica.pending_execution(&id);
+
+        let zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+        let sibling_commands = BlockCommands::init([Command::LocalPrepare(prepare)]).unwrap();
+        let sibling = child(&zero, replica.committee.shard_group(), sibling_commands);
+
+        let orphan_tx_id = TransactionId::new([0xAB; 32]);
+        replica
+            .store
+            .with_write_tx(|tx| {
+                sibling.justify().save(tx)?;
+                sibling.insert(tx)?;
+                execution
+                    .for_block(sibling.as_leaf(), orphan_tx_id)
+                    .insert_if_required(tx)?;
+                tx.blocks_delete(sibling.id())?;
+                tx.blocks_set_qcs(replica.parent.id(), Some(&PcId::zero()), None)
             })
             .unwrap();
 

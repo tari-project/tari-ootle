@@ -838,12 +838,7 @@ mod tests {
         let global_id = SubstateId::Template(PublishedTemplateAddress::from_hash([7u8; 32].into()));
         let req = SubstateRequirement::unversioned(global_id.clone());
 
-        let evidence = Evidence::from_inputs_and_outputs(
-            NumPreshards::P256,
-            4,
-            [req.as_ref()],
-            [],
-        );
+        let evidence = Evidence::from_inputs_and_outputs(NumPreshards::P256, 4, [req.as_ref()], []);
 
         assert_eq!(evidence.num_shard_groups(), 4);
         for sg in NumPreshards::P256.all_shard_groups_iter(4) {

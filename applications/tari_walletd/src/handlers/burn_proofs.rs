@@ -75,8 +75,7 @@ pub async fn handle_list(
 
         // Apply account public key filter if provided
         if let Some(ref filter_pk) = req.filter_by_public_key {
-            // If the file name matches the expected format, check if the key matches.
-            // If the file name doesn't match the format, always include it unless its parsed payload belongs to another key.
+            // A file named `{pubkey}-{commitment}.json` must name the filter key; a parsed proof must be for it too.
             if let Some(file_pk) = extract_public_key_prefix(name) &&
                 !file_pk.eq_ignore_ascii_case(filter_pk.as_str())
             {

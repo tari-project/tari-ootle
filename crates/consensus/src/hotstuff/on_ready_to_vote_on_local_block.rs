@@ -59,7 +59,7 @@ use crate::{
         transaction_manager::{ConsensusTransactionManager, TransactionLockConflicts, UncommittedTemplateStore},
     },
     tracing::TraceTimer,
-    traits::{BlockStore, CertificateStore, ConsensusSpec},
+    traits::{BlockStore, BlockTransactionExecutor, CertificateStore},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_ready_to_vote_on_local_block";
@@ -74,26 +74,25 @@ pub struct LocalNextEpochView {
 }
 
 #[derive(Debug, Clone)]
-pub struct OnReadyToVoteOnLocalBlock<TConsensusSpec: ConsensusSpec> {
+pub struct OnReadyToVoteOnLocalBlock<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>> {
     local_validator_pk: RistrettoPublicKey,
     config: HotstuffConfig,
-    transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
+    transaction_pool: TransactionPool<TStateStore>,
     tx_events: broadcast::WeakSender<HotstuffEvent>,
-    transaction_manager: ConsensusTransactionManager<TConsensusSpec::TransactionExecutor, TConsensusSpec::StateStore>,
+    transaction_manager: ConsensusTransactionManager<TExecutor, TStateStore>,
 }
 
-impl<TConsensusSpec> OnReadyToVoteOnLocalBlock<TConsensusSpec>
-where TConsensusSpec: ConsensusSpec
+impl<TStateStore, TExecutor> OnReadyToVoteOnLocalBlock<TStateStore, TExecutor>
+where
+    TStateStore: StateStore,
+    TExecutor: BlockTransactionExecutor<TStateStore>,
 {
     pub fn new(
         local_validator_pk: RistrettoPublicKey,
         config: HotstuffConfig,
-        transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
+        transaction_pool: TransactionPool<TStateStore>,
         tx_events: broadcast::WeakSender<HotstuffEvent>,
-        transaction_manager: ConsensusTransactionManager<
-            TConsensusSpec::TransactionExecutor,
-            TConsensusSpec::StateStore,
-        >,
+        transaction_manager: ConsensusTransactionManager<TExecutor, TStateStore>,
     ) -> Self {
         Self {
             local_validator_pk,
@@ -110,10 +109,10 @@ where TConsensusSpec: ConsensusSpec
 
     pub fn handle(
         &mut self,
-        tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
+        tx: &mut TStateStore::WriteTransaction<'_>,
         valid_block: &ValidBlock,
         local_committee_info: &CommitteeInfo,
-        local_committee: &Committee<TConsensusSpec::Addr>,
+        local_committee: &Committee<TStateStore::Addr>,
         proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         can_propose_epoch_end: bool,
         // Used to ratify what an end-of-epoch block commits the next epoch to before voting. Where this node does
@@ -174,10 +173,6 @@ where TConsensusSpec: ConsensusSpec
         // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
         let processed_blocks =
             process_newly_justified_block(&**tx, &justified_block, block_qc_id, local_committee_info, change_set)?;
-        for mut block in processed_blocks {
-            block.add_justify_qc(tx, &block_qc_id)?;
-        }
-        justified_block.add_justify_qc(tx, &block_qc_id)?;
 
         if self.should_vote(&**tx, valid_block.block())? {
             let parent = valid_block.block().get_parent(&**tx)?;
@@ -199,6 +194,14 @@ where TConsensusSpec: ConsensusSpec
 
         let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
+            // Only mark the justified block (and any intermediate dummy blocks) as processed once this block is
+            // accepted and its `change_set` is saved. Otherwise, a rejected or unvoted proposal would stamp
+            // `justify_qc` on `justified_block` while discarding `change_set`, causing a subsequent valid proposal
+            // justifying the same block to skip `process_newly_justified_block` and lose its evidence updates.
+            for mut block in processed_blocks {
+                block.add_justify_qc(tx, &block_qc_id)?;
+            }
+            justified_block.add_justify_qc(tx, &block_qc_id)?;
             info!(
                 target: LOG_TARGET,
                 "✅ Saving changeset: {}",
@@ -746,9 +749,9 @@ where TConsensusSpec: ConsensusSpec
 
     fn on_commit(
         &self,
-        tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
+        tx: &mut TStateStore::WriteTransaction<'_>,
         local_committee_info: &CommitteeInfo,
-        local_committee: &Committee<TConsensusSpec::Addr>,
+        local_committee: &Committee<TStateStore::Addr>,
         commit_qc: &ProposalCertificate,
         commit_qc_id: &PcId,
         block: &Block,
@@ -776,7 +779,7 @@ where TConsensusSpec: ConsensusSpec
 
     fn on_lock_block(
         &self,
-        tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
+        tx: &mut TStateStore::WriteTransaction<'_>,
         new_locked_block: &Block,
     ) -> Result<(), HotStuffError> {
         info!(
@@ -810,9 +813,9 @@ where TConsensusSpec: ConsensusSpec
 
     fn finalize_block(
         &self,
-        tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
+        tx: &mut TStateStore::WriteTransaction<'_>,
         local_committee_info: &CommitteeInfo,
-        local_committee: &Committee<TConsensusSpec::Addr>,
+        local_committee: &Committee<TStateStore::Addr>,
         commit_qc: &ProposalCertificate,
         commit_qc_id: &PcId,
         block: &Block,
@@ -832,7 +835,7 @@ where TConsensusSpec: ConsensusSpec
 
         for atom in block.all_foreign_proposals() {
             // TODO: we need to keep these ATM to send them if a node needs to catch up
-            atom.set_status(tx, ForeignProposalStatus::Confirmed, None)?;
+            atom.set_status(tx, ForeignProposalStatus::Confirmed, Some(block.id()))?;
         }
 
         // NOTE: this must happen before we commit the substate diff because the state transitions use this version
@@ -1508,6 +1511,394 @@ mod tests {
                 let reason = chain.decide_epoch_end(true);
                 assert!(reason.is_none(), "unexpected reason: {reason:?}");
             }
+        }
+    }
+
+    mod handle {
+        use std::collections::HashMap;
+
+        use tari_consensus_types::{PcId, ProposalCertificate, ShardGroupAccumulatedData};
+        use tari_crypto::tari_utilities::epoch_time::EpochTime;
+        use tari_engine_types::{
+            creation_check::CreationCheck,
+            substate::{Substate, SubstateId},
+        };
+        use tari_ootle_common_types::{
+            ExtraData,
+            NodeHeight,
+            NumPreshards,
+            ProtocolVersion,
+            SubstateRequirement,
+            SubstateVersion,
+            VotePower,
+        };
+        use tari_ootle_storage::consensus_models::{
+            BlockCommands,
+            Evidence,
+            LockedEpoch,
+            MultiShardAtom,
+            TransactionExecution,
+            TransactionPoolStatusUpdate,
+        };
+        use tari_ootle_transaction::{Network, Transaction, TransactionId};
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+        use tari_template_lib_types::{ComponentAddress, crypto::SchnorrSignatureBytes};
+        use tempfile::TempDir;
+
+        use super::*;
+        use crate::{
+            consensus_constants::ConsensusConstants,
+            traits::{BlockTransactionExecutorError, UncommittedChainTemplates},
+        };
+
+        const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+        const NETWORK: Network = Network::LocalNet;
+
+        #[derive(Debug, Clone)]
+        struct NoopExecutor;
+
+        impl BlockTransactionExecutor<RocksDbStateStore<String>> for NoopExecutor {
+            fn execute(
+                &self,
+                _transaction: &Transaction,
+                _locked_epoch: LockedEpoch,
+                _input_fanout: u32,
+                _resolved_inputs: &HashMap<SubstateRequirement, Substate>,
+                _templates: &UncommittedChainTemplates,
+                _creation_check: &dyn CreationCheck,
+            ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
+                unimplemented!("no transaction execution needed in handle tests")
+            }
+        }
+
+        struct VoterFixture {
+            store: RocksDbStateStore<String>,
+            voter: OnReadyToVoteOnLocalBlock<RocksDbStateStore<String>, NoopExecutor>,
+            committee_info: CommitteeInfo,
+            committee: Committee<String>,
+            genesis: Block,
+            _tmp: TempDir,
+        }
+
+        impl VoterFixture {
+            fn new() -> Self {
+                let tmp = tempfile::tempdir().unwrap();
+                let store = RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap();
+                let shard_group = ShardGroup::all_shards(NUM_PRESHARDS);
+                let zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+                let genesis = Block::genesis(
+                    NETWORK,
+                    ProtocolVersion::V0,
+                    Epoch::zero(),
+                    FixedHash::zero(),
+                    shard_group,
+                    FixedHash::zero(),
+                    None,
+                    Default::default(),
+                );
+                store
+                    .with_write_tx(|tx| {
+                        zero.justify().save(tx)?;
+                        zero.insert(tx)?;
+                        tx.blocks_set_qcs(zero.id(), Some(&PcId::zero()), Some(&PcId::zero()))?;
+                        genesis.justify().save(tx)?;
+                        genesis.insert(tx)?;
+                        let gen_qc_id = genesis.justify().calculate_id();
+                        tx.blocks_set_qcs(genesis.id(), Some(&gen_qc_id), Some(&gen_qc_id))?;
+                        genesis.as_locked().set(tx)?;
+                        genesis.as_leaf().set(tx)?;
+                        genesis.justify().as_high_pc().set(tx)?;
+                        Ok::<_, HotStuffError>(())
+                    })
+                    .unwrap();
+
+                let config = HotstuffConfig {
+                    network: NETWORK,
+                    sidechain_id: None,
+                    consensus_constants: ConsensusConstants::devnet(1),
+                    state_history_length: 10,
+                    pinned_checkpoint_epochs: 2,
+                    state_tree_cleanup_interval: std::time::Duration::from_secs(60),
+                    epoch_gc_interval: std::time::Duration::from_secs(60),
+                    epoch_end_grace_period: std::time::Duration::from_secs(5),
+                    epoch_end_drain_period: std::time::Duration::from_secs(5),
+                    catch_up_request_timeout: std::time::Duration::from_secs(15),
+                };
+                let (tx_events, _rx_events) = broadcast::channel(16);
+                let manager = ConsensusTransactionManager::new(NoopExecutor, 2160, usize::MAX, usize::MAX);
+                let voter = OnReadyToVoteOnLocalBlock::new(
+                    RistrettoPublicKey::default(),
+                    config,
+                    TransactionPool::new(),
+                    tx_events.downgrade(),
+                    manager,
+                );
+                let committee_info = CommitteeInfo::new(
+                    NUM_PRESHARDS,
+                    1,
+                    1,
+                    shard_group,
+                    Epoch::zero(),
+                    VotePower::of(1),
+                );
+                let committee = Committee::new(vec![]);
+                Self {
+                    store,
+                    voter,
+                    committee_info,
+                    committee,
+                    genesis,
+                    _tmp: tmp,
+                }
+            }
+
+            fn make_block(
+                &self,
+                parent: &Block,
+                justify_block: &Block,
+                height: NodeHeight,
+                commands: BlockCommands,
+                state_merkle_root: FixedHash,
+                timestamp: u64,
+            ) -> Block {
+                let justify = ProposalCertificate::new(
+                    justify_block.header().calculate_hash().into(),
+                    *justify_block.parent(),
+                    justify_block.height(),
+                    justify_block.epoch(),
+                    ShardGroup::all_shards(NUM_PRESHARDS),
+                    ProposalCertificate::genesis_signatures(),
+                    QuorumDecision::Accept,
+                );
+                Block::create(
+                    NETWORK,
+                    ProtocolVersion::V0,
+                    *parent.id(),
+                    justify,
+                    None,
+                    height,
+                    Epoch::zero(),
+                    ShardGroup::all_shards(NUM_PRESHARDS),
+                    RistrettoPublicKeyBytes::default(),
+                    commands,
+                    state_merkle_root,
+                    0,
+                    SchnorrSignatureBytes::zero(),
+                    timestamp,
+                    FixedHash::zero(),
+                    ShardGroupAccumulatedData::default(),
+                    ExtraData::new(),
+                )
+                .unwrap()
+            }
+
+            fn handle_block(&mut self, block: &Block) -> BlockDecision {
+                self.store
+                    .with_write_tx(|tx| {
+                        block.justify().save(tx)?;
+                        if !tx.blocks_exists(block.id())? {
+                            block.insert(tx)?;
+                        }
+                        let valid_block = ValidBlock::new(block.clone());
+                        let mut change_set = ProposedBlockChangeSet::new(block.as_leaf());
+                        self.voter.handle(
+                            tx,
+                            &valid_block,
+                            &self.committee_info,
+                            &self.committee,
+                            &RistrettoPublicKeyBytes::default(),
+                            false,
+                            LocalNextEpochView::default(),
+                            false,
+                            &mut change_set,
+                        )
+                    })
+                    .unwrap()
+            }
+        }
+
+        #[test]
+        fn already_voted_height_returns_no_vote_and_does_not_vote_twice() {
+            let mut fixture = VoterFixture::new();
+
+            // `set_no_vote` must clear any previously set `quorum_decision`.
+            let mut cs = ProposedBlockChangeSet::new(fixture.genesis.as_leaf());
+            cs.set_quorum_decision(QuorumDecision::Accept);
+            cs.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
+            assert_eq!(cs.quorum_decision(), None);
+            assert!(!cs.is_accept());
+
+            let block_a = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                EpochTime::now().as_u64(),
+            );
+            // Competing block at the same height with a mismatched state merkle root; because the height was
+            // already voted at, `should_vote` must short-circuit with `AlreadyVotedAtHeight` rather than running
+            // `decide_what_to_vote` and returning `StateMerkleRootMismatch` (which would trigger a leader timeout).
+            let block_b = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::empty(),
+                FixedHash::from([0xAA; 32]),
+                EpochTime::now().as_u64() + 1,
+            );
+            let block_c = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                EpochTime::now().as_u64() + 2,
+            );
+
+            let decision_a = fixture.handle_block(&block_a);
+            assert_eq!(decision_a.local_decision, Some(QuorumDecision::Accept));
+            assert!(decision_a.no_vote_reason.is_none());
+
+            // Simulate `send_vote_to_leader` persisting `LastVoted` for `block_a`.
+            fixture
+                .store
+                .with_write_tx(|tx| block_a.as_last_voted().set(tx))
+                .unwrap();
+
+            let decision_b = fixture.handle_block(&block_b);
+            assert_eq!(decision_b.local_decision, None);
+            assert!(
+                matches!(decision_b.no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)),
+                "unexpected no_vote_reason: {:?}",
+                decision_b.no_vote_reason
+            );
+
+            let decision_c = fixture.handle_block(&block_c);
+            assert_eq!(decision_c.local_decision, None);
+            assert!(
+                matches!(decision_c.no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)),
+                "unexpected no_vote_reason: {:?}",
+                decision_c.no_vote_reason
+            );
+        }
+
+        #[test]
+        fn rejected_block_does_not_mark_justified_block_processed_so_next_valid_block_applies_evidence() {
+            let mut fixture = VoterFixture::new();
+            let shard_group = fixture.committee_info.shard_group();
+            let tx_id = TransactionId::new([7; 32]);
+            let mut evidence = Evidence::empty();
+            let substate_id: SubstateId = ComponentAddress::from_array([1; 32]).into();
+            evidence
+                .add_shard_group(shard_group)
+                .insert_output(substate_id, SubstateVersion::ZERO);
+
+            let prepare_atom = MultiShardAtom {
+                id: tx_id,
+                decision: Decision::Commit,
+                evidence: evidence.clone(),
+                transaction_fee: 100,
+                leader_fee: None,
+                fee_intent_only: false,
+            };
+            let block_1 = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::init([Command::LocalPrepare(prepare_atom)]).unwrap(),
+                FixedHash::zero(),
+                10,
+            );
+
+            // Insert `block_1` and its pending transaction pool update at `LocalPrepared` (not yet justified).
+            fixture
+                .store
+                .with_write_tx(|tx| {
+                    block_1.justify().save(tx)?;
+                    block_1.insert(tx)?;
+                    tx.transaction_pool_insert_new(tx_id, Decision::Commit, &evidence, false, false, Epoch(10), 0)?;
+                    let mut rec = tx.transaction_pool_get_all(1)?.pop().unwrap();
+                    rec.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, shard_group)
+                        .unwrap();
+                    rec.set_ready(false);
+                    tx.transaction_pool_add_pending_update(
+                        &block_1.as_leaf(),
+                        &TransactionPoolStatusUpdate::new(rec, false),
+                    )?;
+                    Ok::<_, HotStuffError>(())
+                })
+                .unwrap();
+
+            // `bad_block_2` justifies `block_1` but fails `decide_what_to_vote` (`StateMerkleRootMismatch`).
+            let bad_block_2 = fixture.make_block(
+                &block_1,
+                &block_1,
+                NodeHeight(2),
+                BlockCommands::empty(),
+                FixedHash::from([0xBB; 32]),
+                20,
+            );
+            let bad_decision = fixture.handle_block(&bad_block_2);
+            assert_eq!(bad_decision.local_decision, None);
+            assert!(matches!(
+                bad_decision.no_vote_reason,
+                Some(NoVoteReason::StateMerkleRootMismatch)
+            ));
+
+            // Because `bad_block_2` was rejected and its change_set was discarded, `block_1` must NOT be marked
+            // as `has_justify_qc() == true` in storage.
+            let block_1_has_qc = fixture
+                .store
+                .with_read_tx(|tx| Ok::<_, HotStuffError>(Block::get(tx, block_1.id())?.has_justify_qc()))
+                .unwrap();
+            assert!(!block_1_has_qc, "rejected block must not mark justified_block as processed");
+
+            // Now view 2 is filled by a dummy/empty block `block_2` extending `block_1`, and `good_block_3` at
+            // height 3 justifies `block_2`. `process_newly_justified_block` walks from `block_2` back to `block_1`
+            // (because `block_1.has_justify_qc()` is still false) and records `prepare_qc` for `tx_id`.
+            let block_2 = fixture.make_block(
+                &block_1,
+                &fixture.genesis,
+                NodeHeight(2),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                21,
+            );
+            fixture
+                .store
+                .with_write_tx(|tx| {
+                    block_2.justify().save(tx)?;
+                    block_2.insert(tx)
+                })
+                .unwrap();
+
+            let good_block_3 = fixture.make_block(
+                &block_2,
+                &block_2,
+                NodeHeight(3),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                30,
+            );
+            let good_decision = fixture.handle_block(&good_block_3);
+            assert_eq!(good_decision.local_decision, Some(QuorumDecision::Accept));
+
+            let (block_1_has_qc, rec) = fixture
+                .store
+                .with_read_tx(|tx| {
+                    let b1 = Block::get(tx, block_1.id())?;
+                    let chain = tx.pending_chain_get(good_block_3.id())?;
+                    let rec = tx.transaction_pool_get_for_blocks_in_chain(&chain, &tx_id)?;
+                    Ok::<_, HotStuffError>((b1.has_justify_qc(), rec))
+                })
+                .unwrap();
+            assert!(block_1_has_qc);
+            assert_eq!(
+                rec.evidence().get(&shard_group).and_then(|e| e.prepare_qc()),
+                Some(&good_block_3.justify().calculate_id())
+            );
+            assert!(rec.is_ready());
         }
     }
 }

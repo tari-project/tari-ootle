@@ -674,30 +674,14 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             Decision::Commit => {
                 // CASE: Multishard transaction, all inputs are local, consensus with output shard groups
                 // pending
-                let requested_locks = execution.resolved_inputs();
-                let lock_status = lock_multishard(store, transaction_id, requested_locks)?;
-                if let Some(err) = lock_status.hard_conflict() {
-                    warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
-                    let execution = TransactionExecution::abort(
-                        transaction.id(),
-                        RejectReason::FailedToLockInputs(err.to_string()),
-                    );
-                    return Ok(PreparedTransaction::new_multishard_executed(execution, lock_status));
-                }
-                if let Some(prepared) = self.pledge_local_inputs(
+                self.prepare_multishard_from_execution(
                     store,
-                    &transaction_id,
-                    &lock_status,
+                    local_committee_info,
+                    transaction_id,
+                    execution,
+                    false,
                     is_proposing,
-                    requested_locks
-                        .iter()
-                        .filter(|lock| local_committee_info.includes_substate_id(lock.substate_id()))
-                        .map(|lock| lock.to_versioned_substate_id_ref()),
-                )? {
-                    return Ok(prepared);
-                }
-                // We're committing, and one or more of the outputs are foreign
-                Ok(PreparedTransaction::new_multishard_executed(execution, lock_status))
+                )
             },
             Decision::Abort(reason) => {
                 // CASE: We're aborting, so this is a local-only transaction since no outputs need to be
@@ -2178,7 +2162,12 @@ mod tests {
     #[test]
     fn a_multishard_output_that_exists_without_a_fee_intent_fails_to_lock() {
         let transaction = multishard_transaction(1);
-        let execution = executing_to(&transaction, &component_id(1), &[&component_id(2)], false);
+        let execution = executing_to(
+            &transaction,
+            &component_id(1),
+            &[&component_id(3), &component_id(2)],
+            false,
+        );
 
         let (locked, locked_ids) = lock_local_accept_outputs(&[component_id(2)], &transaction, execution, false);
 
@@ -2186,6 +2175,179 @@ mod tests {
         assert!(locked.lock_status.is_hard_conflict());
         assert!(locked.execution.result().finalize.is_full_accept());
         assert!(locked_ids.is_empty(), "{locked_ids:?}");
+    }
+
+    #[test]
+    fn a_multishard_prepare_deferred_by_the_pledge_budget_releases_its_locks() {
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(0u32, 127u32),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        let (local, foreign): (Vec<_>, Vec<_>) = (1..=u8::MAX)
+            .map(component_id)
+            .partition(|id| committee.includes_substate_id(id));
+        let vault = local[0].clone();
+        let foreign_out = foreign[0].clone();
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
+        let block = zero.as_leaf();
+
+        db.with_read_tx(|tx| {
+            // Set a tiny block pledge budget (1 byte) so the transaction fits per-tx budget (usize::MAX)
+            // but exceeds the block pledge budget.
+            let mut store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?.with_pledge_budget(1);
+            let transaction = TransactionRecord::new(
+                Transaction::builder_localnet(Epoch(100))
+                    .add_input(SubstateRequirement::unversioned(vault.clone()))
+                    .build_and_seal(&PrivateKey::from(1u64)),
+            );
+            for input in transaction.transaction().all_inputs_iter() {
+                let id = input.substate_id().clone();
+                if committee.includes_substate_id(&id) {
+                    store.put(SubstateChange::Up {
+                        shard: shard_of(&id),
+                        id,
+                        substate: Box::new(substate(0)),
+                    })?;
+                }
+            }
+            let execution = executing_to(&transaction, &vault, &[&foreign_out], false);
+            let manager = ConsensusTransactionManager::<_, RocksDbStateStore<String>>::new(
+                FixedExecutor(execution.clone()),
+                2160,
+                usize::MAX,
+                usize::MAX,
+            );
+            let prepared = manager.prepare_multishard_from_execution(
+                &mut store,
+                &committee,
+                *transaction.id(),
+                execution,
+                false,
+                true,
+            )?;
+            assert!(
+                matches!(prepared, PreparedTransaction::PledgeBudgetReached { .. }),
+                "{prepared:?}"
+            );
+            assert!(store.new_locks().is_empty(), "{:?}", store.new_locks());
+            assert_eq!(store.pledge_bytes(), 0);
+            Ok::<_, BlockTransactionExecutorError>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_multishard_prepare_that_fails_to_lock_does_not_pledge_inputs() {
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(0u32, 127u32),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        let (local, foreign): (Vec<_>, Vec<_>) = (1..=u8::MAX)
+            .map(component_id)
+            .partition(|id| committee.includes_substate_id(id));
+        let vault = local[0].clone();
+        let foreign_out = foreign[0].clone();
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
+        let block = zero.as_leaf();
+
+        db.with_read_tx(|tx| {
+            let mut store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?;
+            store.put(SubstateChange::Up {
+                shard: shard_of(&vault),
+                id: vault.clone(),
+                substate: Box::new(substate(0)),
+            })?;
+            // Another transaction already holds a write lock on `vault`.
+            let holder = TransactionId::new([9; 32]);
+            store.try_lock(
+                holder,
+                &VersionedSubstateIdLockIntent::write(versioned(&vault, 0), true),
+                false,
+            )?;
+
+            let transaction = TransactionRecord::new(
+                Transaction::builder_localnet(Epoch(100))
+                    .add_input(SubstateRequirement::unversioned(vault.clone()))
+                    .build_and_seal(&PrivateKey::from(1u64)),
+            );
+            let execution = executing_to(&transaction, &vault, &[&foreign_out], false);
+            let manager = ConsensusTransactionManager::<_, RocksDbStateStore<String>>::new(
+                FixedExecutor(execution.clone()),
+                2160,
+                usize::MAX,
+                usize::MAX,
+            );
+            let prepared = manager.prepare_multishard_from_execution(
+                &mut store,
+                &committee,
+                *transaction.id(),
+                execution,
+                false,
+                true,
+            )?;
+            assert!(prepared.lock_status().is_any_failed(), "{prepared:?}");
+            // Locking failed before `pledge_local_inputs`, so no pledge budget was consumed.
+            assert_eq!(store.pledge_bytes(), 0);
+
+            // In `prepare_multishard_no_execution`, a hard lock conflict on a versioned local input aborts with
+            // `FailedToLockInputs` before touching the pledge budget, even when the pledge budget is 1 byte.
+            let mut tight_store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?.with_pledge_budget(1);
+            tight_store.put(SubstateChange::Up {
+                shard: shard_of(&vault),
+                id: vault.clone(),
+                substate: Box::new(substate(0)),
+            })?;
+            tight_store.try_lock(
+                holder,
+                &VersionedSubstateIdLockIntent::write(versioned(&vault, 0), true),
+                false,
+            )?;
+            let mut local_versions = IndexMap::new();
+            local_versions.insert(
+                InputDeclarationRef::new(&vault, Some(SubstateVersion::ZERO), true),
+                SubstateVersion::ZERO,
+            );
+            let mut non_local_inputs = IndexSet::new();
+            non_local_inputs.insert(InputDeclarationRef::new(&foreign_out, None, true));
+            let prepared_no_exec = manager.prepare_multishard_no_execution(
+                &mut tight_store,
+                &committee,
+                *transaction.id(),
+                local_versions,
+                non_local_inputs,
+                true,
+            )?;
+            let PreparedTransaction::MultiShard(multishard) = prepared_no_exec else {
+                panic!("expected MultiShard abort, got {prepared_no_exec:?}");
+            };
+            let EvidenceOrExecution::Execution { execution, .. } = multishard.into_evidence_or_execution() else {
+                panic!("expected execution abort");
+            };
+            assert_eq!(
+                execution.decision(),
+                Decision::Abort(AbortReason::LockInputsFailed),
+                "{execution:?}"
+            );
+            assert_eq!(tight_store.pledge_bytes(), 0);
+            Ok::<_, BlockTransactionExecutorError>(())
+        })
+        .unwrap();
     }
 
     #[test]

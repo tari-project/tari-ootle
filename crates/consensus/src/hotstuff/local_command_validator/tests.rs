@@ -1167,6 +1167,41 @@ mod local_only {
 
         assert_proposed_before_ready(&evaluation, "LocalOnly");
     }
+
+    #[test]
+    fn a_transaction_with_a_deferrable_lock_conflict_is_refused() {
+        let (local, foreign) = local_and_foreign_halves();
+        let replica = Replica::in_committee(local, 2);
+        let shared = component_id_in(local);
+        let other = (0x20..=u8::MAX)
+            .map(component_id)
+            .find(|id| {
+                *id != shared &&
+                    local.contains(&VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(NUM_PRESHARDS))
+            })
+            .unwrap();
+        replica.add_substate(&shared);
+        replica.add_substate(&other);
+        let holder = replica.pool_transaction(1, &[&shared, &component_id_in(foreign)], commits());
+        let prepare_cmd = replica.honest_new_multishard_command(&holder);
+        let conflicting = replica.pool_transaction(2, &[&other], Script {
+            commit: true,
+            extra_reads: vec![shared],
+            ..Default::default()
+        });
+
+        let evaluation = replica.evaluate(&[prepare_cmd, Command::LocalOnly(committing(conflicting))]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::ConflictingTransactionProposed { transaction_id, .. })
+                    if transaction_id == conflicting
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
 }
 
 /// The atom of a LocalPrepare or LocalAccept command.
@@ -1428,6 +1463,30 @@ mod local_prepare {
                 Some(NoVoteReason::InvalidEvidence {
                     reason: InvalidEvidenceReason::MismatchedEvidence
                 })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_transaction_with_a_deferrable_lock_conflict_is_refused() {
+        let (local, foreign) = local_and_foreign_halves();
+        let replica = Replica::in_committee(local, 2);
+        let shared = component_id_in(local);
+        replica.add_substate(&shared);
+        let first = replica.pool_transaction(1, &[&shared, &component_id_in(foreign)], commits());
+        let second = replica.pool_transaction(2, &[&shared, &component_id_in(foreign)], commits());
+        let first_cmd = replica.honest_new_multishard_command(&first);
+        let second_cmd = replica.honest_new_multishard_command(&second);
+
+        let evaluation = replica.evaluate(&[first_cmd, second_cmd]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::ConflictingTransactionProposed { transaction_id, .. })
+                    if transaction_id == second
             ),
             "{:?}",
             evaluation.no_vote

@@ -65,6 +65,7 @@ use crate::{
         OrJrpcNotFound,
         ensure_signing_key,
         ensure_transaction_signers,
+        find_upgradable_components,
         get_account,
         get_account_or_default,
         invalid_params,
@@ -489,17 +490,36 @@ async fn submit_dry_run_inner(
         "Submitted dry-run transaction {}",
         transaction.calculate_id()
     );
+    let referenced_components: Vec<ComponentAddress> = transaction
+        .as_referenced_components()
+        .copied()
+        .chain(
+            transaction
+                .inputs()
+                .iter()
+                .filter_map(|input| input.substate_id().as_component_address()),
+        )
+        .collect();
     let exec_result = context
         .transaction_service()
         .submit_dry_run_transaction(transaction)
         .await
         .map_err(map_transaction_submission_error)?;
 
+    let inspection = find_upgradable_components(
+        sdk,
+        referenced_components,
+        exec_result.finalize.result.any_accept(),
+    )
+    .await?;
+
     let required_fees = exec_result.finalize.required_fees();
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         required_fees,
         result: exec_result,
+        upgradable_components: inspection.upgradable_components,
+        uninspected_components: inspection.uninspected_components,
     })
 }
 

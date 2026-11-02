@@ -12,7 +12,10 @@
 //! supplies complete inputs and any out-of-band signatures). The approver views
 //! exactly what will be sealed, and submit seals it unchanged.
 
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
@@ -52,13 +55,25 @@ use tari_ootle_walletd_client::{
         TransactionRequestSubmitResponse,
         TransactionRequestValueSummary,
         TransactionSubmitRequest,
+        UpgradableComponentInfo,
     },
 };
-use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, stealth::SpendAuthorization};
+use tari_template_lib_types::{
+    ComponentAddress,
+    ResourceAddress,
+    crypto::PedersenCommitmentBytes,
+    stealth::SpendAuthorization,
+};
 
 use super::context::HandlerContext;
 use crate::handlers::{
-    helpers::{ensure_transaction_signers, invalid_params, invalid_request},
+    helpers::{
+        ComponentUpgradeInspection,
+        ensure_transaction_signers,
+        find_upgradable_components,
+        invalid_params,
+        invalid_request,
+    },
     transaction::submit_inner_for_request,
 };
 
@@ -178,8 +193,20 @@ pub async fn handle_get(
         .store()
         .with_read_tx(|tx| tx.transaction_request_get(req.request_id))?;
 
+    let status = model.effective_status_now();
+    let inspection = if matches!(status, EffectiveStatus::Pending) {
+        find_upgradable_components(
+            context.wallet_sdk(),
+            referenced_components(&model.unsigned_transaction),
+            None,
+        )
+        .await?
+    } else {
+        ComponentUpgradeInspection::default()
+    };
+
     Ok(TransactionRequestGetResponse {
-        request: to_info(context, model)?,
+        request: to_info(context, model, status, inspection)?,
     })
 }
 
@@ -195,14 +222,44 @@ pub async fn handle_list(
         .store()
         .with_read_tx(|tx| tx.transaction_requests_list())?;
 
-    let requests = models
-        .into_iter()
-        .map(|m| to_info(context, m))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
+    let mut filtered = Vec::new();
+    let mut pending_components = Vec::new();
+    for model in models {
+        let status = model.effective_status_now();
         // Expiry is derived, so it cannot be filtered in SQL.
-        .filter(|info| req.status.is_none_or(|s| s == info.status))
+        if req.status.is_some_and(|s| s != status) {
+            continue;
+        }
+        let components = if matches!(status, EffectiveStatus::Pending) {
+            let comps = referenced_components(&model.unsigned_transaction);
+            pending_components.extend(comps.iter().copied());
+            comps
+        } else {
+            Vec::new()
+        };
+        filtered.push((model, status, components));
+    }
+
+    let batch_inspection = find_upgradable_components(context.wallet_sdk(), pending_components, None).await?;
+    let upgradable_by_addr: HashMap<ComponentAddress, UpgradableComponentInfo> = batch_inspection
+        .upgradable_components
+        .into_iter()
+        .map(|info| (info.component_address, info))
         .collect();
+    let uninspected_set: HashSet<ComponentAddress> = batch_inspection.uninspected_components.into_iter().collect();
+
+    let mut requests = Vec::with_capacity(filtered.len());
+    for (model, status, components) in filtered {
+        let mut inspection = ComponentUpgradeInspection::default();
+        for addr in components {
+            if let Some(info) = upgradable_by_addr.get(&addr) {
+                inspection.upgradable_components.push(info.clone());
+            } else if uninspected_set.contains(&addr) {
+                inspection.uninspected_components.push(addr);
+            }
+        }
+        requests.push(to_info(context, model, status, inspection)?);
+    }
 
     Ok(TransactionRequestListResponse { requests })
 }
@@ -409,11 +466,30 @@ fn transition(
     Ok(model)
 }
 
-/// The wallet-computed view of a request, including what it moves.
-fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<TransactionRequestInfo, anyhow::Error> {
-    let status = model.effective_status_now();
-    let value_summaries = value_summaries(context, &model.unsigned_transaction, model.status, &model.lock_ids)?;
+fn referenced_components(transaction: &UnsignedTransaction) -> Vec<ComponentAddress> {
+    let mut ordered = Vec::new();
+    let mut seen = HashSet::new();
+    for address in transaction.as_referenced_components().copied().chain(
+        transaction
+            .inputs()
+            .iter()
+            .filter_map(|input| input.substate_id().as_component_address()),
+    ) {
+        if seen.insert(address) {
+            ordered.push(address);
+        }
+    }
+    ordered
+}
 
+/// The wallet-computed view of a request, including what it moves.
+fn to_info(
+    context: &HandlerContext,
+    model: TransactionRequestModel,
+    status: EffectiveStatus,
+    inspection: ComponentUpgradeInspection,
+) -> Result<TransactionRequestInfo, anyhow::Error> {
+    let value_summaries = value_summaries(context, &model.unsigned_transaction, model.status, &model.lock_ids)?;
     let main_signer = resolve_main_signer(context, &model.unsigned_transaction, &model.other_signers)?;
     let external_signers = model.signatures.iter().map(|sig| *sig.public_key()).collect();
 
@@ -426,6 +502,8 @@ fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<T
         status,
         transaction_id: model.transaction_id,
         value_summaries,
+        upgradable_components: inspection.upgradable_components,
+        uninspected_components: inspection.uninspected_components,
         main_signer,
         external_signers,
         expires_at: model.expires_at.assume_utc().unix_timestamp(),
@@ -718,6 +796,489 @@ mod tests {
             public_key: wallet_public_key
         });
         assert!(info.external_signers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_approver_is_warned_when_a_called_component_is_upgradable() {
+        use std::collections::HashMap;
+        use tari_engine_types::{
+            component::{Component, ComponentBody, ComponentHeader},
+            substate::{EncodedSubstate, Substate, SubstateId, SubstateValue},
+        };
+        use tari_ootle_common_types::{SubstateRequirement, VersionedSubstateIdRef};
+        use tari_ootle_transaction::{TransactionBuilder, args};
+        use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+        use tari_template_lib_types::{
+            AccessRule,
+            ComponentAddress,
+            EntityId,
+            SubstateOwnerRule,
+            TemplateAddress,
+            access_rules::{ComponentAccessRules, UpdateRule},
+            crypto::RistrettoPublicKeyBytes,
+        };
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        use url::Url;
+
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("dapp-tool", "transaction_requests:create");
+
+        let wallet_account: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000001"
+                .parse()
+                .unwrap();
+        daemon
+            .context
+            .wallet_sdk()
+            .accounts_api()
+            .add_account(
+                Some("default"),
+                &wallet_account,
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                KeyId::derived(KeyBranch::Account, 0),
+                Epoch::zero(),
+                true,
+                true,
+            )
+            .unwrap();
+
+        // An account cached in `substates` with `ACCOUNT_TEMPLATE_ADDRESS` (but not in `accounts`)
+        // must also be skipped without querying the indexer.
+        let cached_account: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000008"
+                .parse()
+                .unwrap();
+        let cached_account_id = SubstateId::Component(cached_account);
+        daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_write_tx(|tx| {
+                tx.substates_upsert_root(
+                    VersionedSubstateIdRef::new(&cached_account_id, 0),
+                    HashSet::new(),
+                    None,
+                    Some(ACCOUNT_TEMPLATE_ADDRESS),
+                )
+            })
+            .unwrap();
+
+        let locked_component: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000002"
+                .parse()
+                .unwrap();
+        let deny_all_component: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000005"
+                .parse()
+                .unwrap();
+        let owner_none_component: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000006"
+                .parse()
+                .unwrap();
+        let owner_deny_all_component: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000007"
+                .parse()
+                .unwrap();
+        let owner_upgradable: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000003"
+                .parse()
+                .unwrap();
+        let input_only_upgradable: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000004"
+                .parse()
+                .unwrap();
+
+        let dapp_template = TemplateAddress::from_array([0xab; 32]);
+        let owner_pk = RistrettoPublicKeyBytes::from_bytes(&[0xcd; 32]).unwrap();
+
+        let make_component = |upgrade_rule: UpdateRule, owner_rule: SubstateOwnerRule| {
+            let empty_body: ComponentBody = serde_json::from_str(r#"{"state":null}"#).unwrap();
+            EncodedSubstate::encode(&Substate::new(
+                0,
+                SubstateValue::Component(Component {
+                    header: ComponentHeader {
+                        template_address: dapp_template,
+                        owner_rule,
+                        access_rules: ComponentAccessRules::allow_all(),
+                        entity_id: EntityId::default(),
+                        upgrade_rule,
+                    },
+                    body: empty_body,
+                }),
+            ))
+            .unwrap()
+        };
+
+        let substates = HashMap::from([
+            (
+                SubstateId::Component(locked_component),
+                make_component(UpdateRule::Locked, SubstateOwnerRule::ByPublicKey(owner_pk)),
+            ),
+            (
+                SubstateId::Component(deny_all_component),
+                make_component(
+                    UpdateRule::AccessRule(AccessRule::DenyAll),
+                    SubstateOwnerRule::ByPublicKey(owner_pk),
+                ),
+            ),
+            (
+                SubstateId::Component(owner_none_component),
+                make_component(UpdateRule::Owner, SubstateOwnerRule::None),
+            ),
+            (
+                SubstateId::Component(owner_deny_all_component),
+                make_component(UpdateRule::Owner, SubstateOwnerRule::ByAccessRule(AccessRule::DenyAll)),
+            ),
+            (
+                SubstateId::Component(owner_upgradable),
+                make_component(UpdateRule::Owner, SubstateOwnerRule::ByPublicKey(owner_pk)),
+            ),
+            (
+                SubstateId::Component(input_only_upgradable),
+                make_component(
+                    UpdateRule::AccessRule(AccessRule::AllowAll),
+                    SubstateOwnerRule::None,
+                ),
+            ),
+        ]);
+        let body = serde_json::json!({
+            "substates": substates,
+            "proofs": {},
+        })
+        .to_string();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0u8; 4096];
+                let _ignore = socket.read(&mut buf).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ignore = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        daemon
+            .context
+            .wallet_sdk()
+            .get_network_interface()
+            .set_endpoints(vec![url])
+            .unwrap();
+
+        let mut req = create_request(vec![], 600);
+        req.transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .with_fee_instructions_builder(|b| b.call_method(wallet_account, "pay_fee", args![100]))
+            .call_method(cached_account, "balance", args![])
+            .call_method(locked_component, "ping", args![])
+            .call_method(deny_all_component, "ping", args![])
+            .call_method(owner_none_component, "ping", args![])
+            .call_method(owner_deny_all_component, "ping", args![])
+            .call_method(owner_upgradable, "swap", args![])
+            .add_input(SubstateRequirement::unversioned(input_only_upgradable))
+            .build_unsigned();
+
+        let request_id = handle_create(&daemon.context, Some(&tool), req)
+            .await
+            .unwrap()
+            .request_id;
+        let info = request_info(&daemon, request_id).await;
+
+        assert!(info.uninspected_components.is_empty());
+        assert_eq!(info.upgradable_components.len(), 2);
+        assert_eq!(info.upgradable_components[0].component_address, owner_upgradable);
+        assert_eq!(info.upgradable_components[0].template_address, dapp_template);
+        assert!(matches!(info.upgradable_components[0].upgrade_rule, UpdateRule::Owner));
+        assert_eq!(
+            info.upgradable_components[0].owner_rule,
+            SubstateOwnerRule::ByPublicKey(owner_pk)
+        );
+        assert_eq!(info.upgradable_components[1].component_address, input_only_upgradable);
+        assert_eq!(info.upgradable_components[1].template_address, dapp_template);
+        assert!(matches!(
+            info.upgradable_components[1].upgrade_rule,
+            UpdateRule::AccessRule(AccessRule::AllowAll)
+        ));
+        assert_eq!(info.upgradable_components[1].owner_rule, SubstateOwnerRule::None);
+    }
+
+    #[tokio::test]
+    async fn uninspected_components_are_reported_and_list_batches_pending_requests() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use tari_ootle_transaction::{TransactionBuilder, args};
+        use tari_template_lib_types::ComponentAddress;
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        use url::Url;
+
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("dapp-tool", "transaction_requests:create");
+
+        let comp_a: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000011"
+                .parse()
+                .unwrap();
+        let comp_b: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000012"
+                .parse()
+                .unwrap();
+        let comp_rejected: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000013"
+                .parse()
+                .unwrap();
+
+        // When the indexer is unreachable (default closed port in TestDaemon), the check must not
+        // fail open: `uninspected_components` lists the component so the UI warns the approver.
+        let mut req_a = create_request(vec![], 600);
+        req_a.transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .call_method(comp_a, "swap", args![])
+            .build_unsigned();
+        let id_a = handle_create(&daemon.context, Some(&tool), req_a)
+            .await
+            .unwrap()
+            .request_id;
+        let info_a = request_info(&daemon, id_a).await;
+        assert!(info_a.upgradable_components.is_empty());
+        assert_eq!(info_a.uninspected_components, vec![comp_a]);
+
+        // Create a second pending request and a third request that is immediately rejected.
+        let mut req_b = create_request(vec![], 600);
+        req_b.transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .call_method(comp_b, "swap", args![])
+            .build_unsigned();
+        let _id_b = handle_create(&daemon.context, Some(&tool), req_b)
+            .await
+            .unwrap()
+            .request_id;
+
+        let mut req_c = create_request(vec![], 600);
+        req_c.transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .call_method(comp_rejected, "swap", args![])
+            .build_unsigned();
+        let id_c = handle_create(&daemon.context, Some(&tool), req_c)
+            .await
+            .unwrap()
+            .request_id;
+        super::handle_reject(&daemon.context, Some(&daemon.session), TransactionRequestDecisionRequest {
+            request_id: id_c,
+        })
+        .await
+        .unwrap();
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_clone = hits.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                hits_clone.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ignore = socket.read(&mut buf).await;
+                let body = r#"{"substates":{},"proofs":{}}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ignore = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        daemon
+            .context
+            .wallet_sdk()
+            .get_network_interface()
+            .set_endpoints(vec![url])
+            .unwrap();
+
+        // Listing all requests batches the two pending requests into a single indexer fetch and
+        // does not query for the rejected request.
+        let list = handle_list(
+            &daemon.context,
+            Some(&daemon.session),
+            TransactionRequestListRequest { status: None },
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.requests.len(), 3);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        // Listing only rejected requests makes zero network calls.
+        let rejected_list = handle_list(
+            &daemon.context,
+            Some(&daemon.session),
+            TransactionRequestListRequest {
+                status: Some(EffectiveStatus::Rejected),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(rejected_list.requests.len(), 1);
+        assert!(rejected_list.requests[0].uninspected_components.is_empty());
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn dry_run_flags_upgradable_components_including_indirect_callees_in_diff() {
+        use std::time::Duration;
+        use tari_engine_types::{
+            commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
+            component::{Component, ComponentBody, ComponentHeader},
+            fees::FeeReceipt,
+            substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
+        };
+        use tari_ootle_transaction::{TransactionBuilder, args};
+        use tari_template_lib_types::{
+            AccessRule,
+            ComponentAddress,
+            EntityId,
+            SubstateOwnerRule,
+            TemplateAddress,
+            access_rules::{ComponentAccessRules, UpdateRule},
+            crypto::RistrettoPublicKeyBytes,
+        };
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        use url::Url;
+
+        let daemon = TestDaemon::start_with_transaction_service().await;
+        let locked_router: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000021"
+                .parse()
+                .unwrap();
+        let indirect_upgradable_pool: ComponentAddress =
+            "component_0000000000000000000000000000000000000000000000000000000000000022"
+                .parse()
+                .unwrap();
+        let dapp_template = TemplateAddress::from_array([0xef; 32]);
+        let owner_pk = RistrettoPublicKeyBytes::from_bytes(&[0xcd; 32]).unwrap();
+
+        let make_substate = |upgrade_rule: UpdateRule, owner_rule: SubstateOwnerRule| {
+            let empty_body: ComponentBody = serde_json::from_str(r#"{"state":null}"#).unwrap();
+            Substate::new(
+                1,
+                SubstateValue::Component(Component {
+                    header: ComponentHeader {
+                        template_address: dapp_template,
+                        owner_rule,
+                        access_rules: ComponentAccessRules::allow_all(),
+                        entity_id: EntityId::default(),
+                        upgrade_rule,
+                    },
+                    body: empty_body,
+                }),
+            )
+        };
+
+        let mut diff = SubstateDiff::new();
+        diff.up(
+            SubstateId::Component(locked_router),
+            make_substate(UpdateRule::Locked, SubstateOwnerRule::ByPublicKey(owner_pk)),
+        );
+        // `indirect_upgradable_pool` is never referenced directly by the transaction's instructions
+        // or inputs; it only appears in the dry-run `SubstateDiff`.
+        diff.up(
+            SubstateId::Component(indirect_upgradable_pool),
+            make_substate(
+                UpdateRule::AccessRule(AccessRule::AllowAll),
+                SubstateOwnerRule::None,
+            ),
+        );
+
+        let exec_result = ExecuteResult {
+            finalize: FinalizeResult::new(
+                [0x11; 32].into(),
+                vec![],
+                vec![],
+                TransactionResult::Accept(diff),
+                FeeReceipt::default(),
+            ),
+            execution_time: Duration::from_millis(10),
+            execute_epoch: None,
+            wasm_execution_points: 0,
+            native_execution_points: 0,
+        };
+        let encoded_result = tari_engine_types::substate::Encoded::encode(&exec_result).unwrap();
+        let body = serde_json::json!({
+            "transaction_id": "1111111111111111111111111111111111111111111111111111111111111111",
+            "result": encoded_result,
+        })
+        .to_string();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0u8; 4096];
+                let _ignore = socket.read(&mut buf).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ignore = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        daemon
+            .context
+            .wallet_sdk()
+            .get_network_interface()
+            .set_endpoints(vec![url])
+            .unwrap();
+
+        let unsigned = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .call_method(locked_router, "route_swap", args![])
+            .build_unsigned();
+        let dry_run_req = TransactionSubmitRequest {
+            transaction: unsigned,
+            seal_signer: KeyId::derived(KeyBranch::Account, 0),
+            other_signers: vec![],
+            signatures: vec![],
+            detect_inputs: false,
+            detect_inputs_use_unversioned: true,
+            lock_ids: vec![],
+        };
+        let resp = crate::handlers::transaction::handle_submit_dry_run(
+            &daemon.context,
+            Some(&daemon.session),
+            dry_run_req,
+        )
+        .await
+        .unwrap();
+
+        assert!(resp.uninspected_components.is_empty());
+        assert_eq!(resp.upgradable_components.len(), 1);
+        assert_eq!(
+            resp.upgradable_components[0].component_address,
+            indirect_upgradable_pool
+        );
+        assert_eq!(resp.upgradable_components[0].template_address, dapp_template);
+        assert!(matches!(
+            resp.upgradable_components[0].upgrade_rule,
+            UpdateRule::AccessRule(AccessRule::AllowAll)
+        ));
     }
 
     fn lock_for(daemon: &TestDaemon, owner: LockOwner) -> WalletLockId {

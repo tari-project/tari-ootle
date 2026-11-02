@@ -91,11 +91,13 @@ use tari_template_lib_types::{
     NonFungibleId,
     ResourceAddress,
     ResourceType,
+    SubstateOwnerRule,
     TemplateAddress,
     UtxoAddress,
     UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
+    access_rules::UpdateRule,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendAuthorization, StealthTransferStatement},
@@ -254,6 +256,17 @@ pub enum TransactionRequestMainSigner {
     None,
 }
 
+/// A component a transaction calls or declares as an input whose template code can be changed after
+/// creation (`upgrade_rule` is not effectively locked).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct UpgradableComponentInfo {
+    pub component_address: ComponentAddress,
+    pub template_address: TemplateAddress,
+    pub upgrade_rule: UpdateRule,
+    pub owner_rule: SubstateOwnerRule,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionRequestInfo {
@@ -272,6 +285,14 @@ pub struct TransactionRequestInfo {
     /// One entry per resource whose stealth outputs in this wallet the
     /// transaction spends; empty when it spends none.
     pub value_summaries: Vec<TransactionRequestValueSummary>,
+    /// Components the transaction calls or declares as inputs whose `upgrade_rule` can pass an
+    /// upgrade check, along with the rule governing who may swap their template code.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponentInfo>,
+    /// Components the transaction calls or declares as inputs whose substate could not be fetched
+    /// or verified from the indexer, so whether they are upgradable could not be checked.
+    #[serde(default)]
+    pub uninspected_components: Vec<ComponentAddress>,
     /// Who the transaction acts as wherever the engine needs a single signer.
     pub main_signer: TransactionRequestMainSigner,
     /// Public keys of the signatures the request's creator supplied out of band. Each one authorizes the
@@ -491,6 +512,15 @@ pub struct TransactionSubmitDryRunResponse {
     /// subtracted since it won't recur with a tighter max_fee.
     pub required_fees: u64,
     pub result: ExecuteResult,
+    /// Components the transaction calls, declares as inputs, or mutates during the dry run whose
+    /// `upgrade_rule` can pass an upgrade check, along with the rule governing who may swap their
+    /// template code.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponentInfo>,
+    /// Components the transaction calls or declares as inputs whose substate could not be fetched
+    /// or verified from the indexer, so whether they are upgradable could not be checked.
+    #[serde(default)]
+    pub uninspected_components: Vec<ComponentAddress>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1736,12 +1766,25 @@ pub struct WebauthnAlreadyRegisteredResponse {
     pub registered: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct WebauthnStartRegisterRequest {
     pub username: String,
     #[serde(default)]
     pub label: Option<String>,
+    /// One-time setup token required for initial passkey enrollment.
+    #[serde(default)]
+    pub setup_token: Option<String>,
+}
+
+impl std::fmt::Debug for WebauthnStartRegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebauthnStartRegisterRequest")
+            .field("username", &self.username)
+            .field("label", &self.label)
+            .field("setup_token", &self.setup_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1754,7 +1797,7 @@ pub struct WebauthnStartRegisterResponse {
     pub public_key: PublicKeyCredentialCreationOptions,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct WebauthnFinishRegisterRequest {
     /// Session ID received from [`WebauthnStartRegisterResponse`].
@@ -1762,6 +1805,19 @@ pub struct WebauthnFinishRegisterRequest {
     /// [`RegisterPublicKeyCredential`]
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub credential: RegisterPublicKeyCredential,
+    /// One-time setup token required for initial passkey enrollment.
+    #[serde(default)]
+    pub setup_token: Option<String>,
+}
+
+impl std::fmt::Debug for WebauthnFinishRegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebauthnFinishRegisterRequest")
+            .field("session_id", &self.session_id)
+            .field("credential", &self.credential)
+            .field("setup_token", &self.setup_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -2584,5 +2640,26 @@ mod tests {
         assert_eq!(finish_additional_json, serde_json::json!({}));
         let parsed_additional: WebauthnFinishRegisterResponse = serde_json::from_value(finish_additional_json).unwrap();
         assert!(parsed_additional.token.is_none());
+    }
+
+    #[test]
+    fn webauthn_start_register_request_accepts_setup_token_and_redacts_debug() {
+        let without_token: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+        }))
+        .unwrap();
+        assert_eq!(without_token.username, "tari-wallet-webui");
+        assert_eq!(without_token.setup_token, None);
+
+        let secret = "super-secret-setup-token-12345";
+        let with_token: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+            "setup_token": secret,
+        }))
+        .unwrap();
+        assert_eq!(with_token.setup_token.as_deref(), Some(secret));
+        let debug_str = format!("{with_token:?}");
+        assert!(!debug_str.contains(secret), "Debug output must not leak setup_token");
+        assert!(debug_str.contains("<redacted>"));
     }
 }

@@ -120,8 +120,7 @@ pub fn from_slice<'de, T: Deserialize<'de>>(b: &'de [u8]) -> Result<T, DecodeErr
 
 /// Deserialize, rejecting input nested deeper than `max_depth`.
 pub fn from_slice_with_max_depth<'de, T: Deserialize<'de>>(b: &'de [u8], max_depth: usize) -> Result<T, DecodeError> {
-    crate::check_nesting_depth(b, max_depth)?;
-    from_slice(b)
+    T::deserialize(&mut Deserializer::new(b).with_max_depth(max_depth))
 }
 
 // ============================================================================
@@ -520,19 +519,25 @@ where <W as Write>::Error: core::error::Error + 'static
 // Deserializer
 // ============================================================================
 
-/// Upper bound on how many elements we pre-allocate from an untrusted CBOR length header
-/// when reporting `size_hint()` to serde visitors.
-const MAX_PREALLOC: usize = 64;
+/// Default maximum CBOR nesting depth for [`Deserializer::new`] / [`from_slice`], matching the
+/// engine bound (`MAX_CBOR_NESTING_DEPTH = 256`).
+const DEFAULT_MAX_DEPTH: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct Deserializer<'de> {
     decoder: Decoder<'de>,
     depth: usize,
+    max_depth: usize,
 }
 
 impl<'de> Deserializer<'de> {
     pub fn new(b: &'de [u8]) -> Self {
         Self::from(Decoder::new(b))
+    }
+
+    pub fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = max_depth;
+        self
     }
 
     pub fn decoder_mut(&mut self) -> &mut Decoder<'de> {
@@ -558,7 +563,11 @@ impl<'de> Deserializer<'de> {
 
 impl<'de> From<Decoder<'de>> for Deserializer<'de> {
     fn from(d: Decoder<'de>) -> Self {
-        Self { decoder: d, depth: 0 }
+        Self {
+            decoder: d,
+            depth: 0,
+            max_depth: DEFAULT_MAX_DEPTH,
+        }
     }
 }
 
@@ -775,13 +784,14 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
         let p = self.decoder.position();
-        if Type::Map == self.decoder.datatype()? {
+        let is_map = Type::Map == self.decoder.datatype()?;
+        if is_map {
             let m = self.decoder.map()?;
             if m != Some(1) {
                 return Err(decode::Error::message("invalid enum map length").at(p).into());
             }
         }
-        visitor.visit_enum(Enum::new(self)?)
+        visitor.visit_enum(Enum::new(self, is_map)?)
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -805,7 +815,7 @@ struct Seq<'a, 'de> {
 
 impl<'a, 'de> Seq<'a, 'de> {
     fn new(d: &'a mut Deserializer<'de>, len: Option<u64>) -> Result<Self, DecodeError> {
-        if d.depth >= crate::value::MAX_DECODE_DEPTH {
+        if d.depth >= d.max_depth {
             return Err(decode::Error::message("maximum CBOR nesting depth exceeded").into());
         }
         d.depth += 1;
@@ -823,7 +833,9 @@ impl<'de> SeqAccess<'de> for Seq<'_, 'de> {
     type Error = DecodeError;
 
     fn size_hint(&self) -> Option<usize> {
-        self.len.and_then(|n| usize::try_from(n).ok()).map(|n| n.min(MAX_PREALLOC))
+        self.len
+            .and_then(|n| usize::try_from(n).ok())
+            .map(|n| n.min(crate::MAX_PREALLOC))
     }
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error> {
@@ -850,7 +862,9 @@ impl<'de> MapAccess<'de> for Seq<'_, 'de> {
     type Error = DecodeError;
 
     fn size_hint(&self) -> Option<usize> {
-        self.len.and_then(|n| usize::try_from(n).ok()).map(|n| n.min(MAX_PREALLOC))
+        self.len
+            .and_then(|n| usize::try_from(n).ok())
+            .map(|n| n.min(crate::MAX_PREALLOC))
     }
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error> {
@@ -942,21 +956,29 @@ impl<'de> SeqAccess<'de> for ByteSeqAccessOwned {
 
 struct Enum<'a, 'de: 'a> {
     deserializer: &'a mut Deserializer<'de>,
+    is_map: bool,
 }
 
 impl<'a, 'de> Enum<'a, 'de> {
-    fn new(d: &'a mut Deserializer<'de>) -> Result<Self, DecodeError> {
-        if d.depth >= crate::value::MAX_DECODE_DEPTH {
-            return Err(decode::Error::message("maximum CBOR nesting depth exceeded").into());
+    fn new(d: &'a mut Deserializer<'de>, is_map: bool) -> Result<Self, DecodeError> {
+        if is_map {
+            if d.depth >= d.max_depth {
+                return Err(decode::Error::message("maximum CBOR nesting depth exceeded").into());
+            }
+            d.depth += 1;
         }
-        d.depth += 1;
-        Ok(Self { deserializer: d })
+        Ok(Self {
+            deserializer: d,
+            is_map,
+        })
     }
 }
 
 impl Drop for Enum<'_, '_> {
     fn drop(&mut self) {
-        self.deserializer.depth -= 1;
+        if self.is_map {
+            self.deserializer.depth -= 1;
+        }
     }
 }
 
@@ -1091,24 +1113,39 @@ mod tests {
     }
 
     #[test]
-    fn truncated_huge_array_header_does_not_over_allocate() {
-        // CBOR array with u64::MAX declared elements (0x9b followed by 8 bytes of 0xff),
-        // truncated immediately after the header.
-        let payload = [0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-        assert!(from_slice::<Vec<u64>>(&payload).is_err());
-    }
+    fn huge_array_and_map_headers_cap_size_hint_to_max_prealloc() {
+        struct HintCheckVisitor;
 
-    #[test]
-    fn truncated_huge_map_header_does_not_over_allocate() {
-        // CBOR map with u64::MAX declared entries (0xbb followed by 8 bytes of 0xff),
-        // truncated immediately after the header.
-        let payload = [0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-        assert!(from_slice::<std::collections::BTreeMap<u64, u64>>(&payload).is_err());
+        impl<'de> Visitor<'de> for HintCheckVisitor {
+            type Value = Option<usize>;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("a sequence or map")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+                Ok(seq.size_hint())
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                Ok(map.size_hint())
+            }
+        }
+
+        let array_payload = [0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        let mut array_de = Deserializer::new(&array_payload);
+        let seq_hint = de::Deserializer::deserialize_seq(&mut array_de, HintCheckVisitor).unwrap();
+        assert_eq!(seq_hint, Some(crate::MAX_PREALLOC));
+
+        let map_payload = [0xbb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        let mut map_de = Deserializer::new(&map_payload);
+        let map_hint = de::Deserializer::deserialize_map(&mut map_de, HintCheckVisitor).unwrap();
+        assert_eq!(map_hint, Some(crate::MAX_PREALLOC));
     }
 
     #[test]
     fn deeply_nested_arrays_rejected_by_depth_limit() {
-        let depth = crate::value::MAX_DECODE_DEPTH + 1;
+        let depth = DEFAULT_MAX_DEPTH + 1;
         let mut payload = vec![0x81; depth];
         payload.push(0x00);
         let err = from_slice::<crate::Value>(&payload).unwrap_err();

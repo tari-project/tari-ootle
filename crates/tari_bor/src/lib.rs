@@ -38,6 +38,9 @@ pub use value::{INTEGER_RANGE, ItemCount, MAX_DECODE_DEPTH, Value};
 pub use value_form::check_value_form;
 pub use walker::*;
 
+/// Upper bound on how many elements are pre-allocated from an untrusted CBOR length header.
+pub(crate) const MAX_PREALLOC: usize = 64;
+
 /// Encode a value into a freshly allocated `Vec<u8>` using the unit context.
 pub fn encode<T: Encode<()> + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
     encode_with(val, &mut ())

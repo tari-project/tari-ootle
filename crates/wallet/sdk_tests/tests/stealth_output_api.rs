@@ -675,3 +675,84 @@ fn setting_the_frozen_flag_reports_whether_it_changed() {
     assert!(stored_output(&test, &Test::test_account_address(), &output.commitment).is_frozen);
     assert_eq!(outputs.set_utxo_frozen(&address, true).unwrap(), Some(false));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn fallback_from_merged_fee_statement_releases_first_lock_and_does_not_double_lock_fee() {
+    use ootle_byte_type::ToByteType;
+    use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+    use tari_engine_types::SubstateVersion;
+    use tari_ootle_address::{Network, OotleAddress};
+    use tari_ootle_wallet_crypto::pay_to::PayTo;
+    use tari_ootle_wallet_sdk::{
+        apis::{
+            confidential_transfer::UtxoInputSelection,
+            stealth_transfer::{BadgeUsage, StealthTransferParams, TransferFeeParams, TransferOutput},
+        },
+        storage::{WalletStoreWriter, WriteableWalletStore},
+    };
+
+    let test = Test::new();
+    let account = test
+        .sdk()
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    // Seed the account's vault with 1_400 revealed funds: enough for 4 * 100 (transfer) + 500 (fee) = 900,
+    // plus an extra 500 that would be locked if the fallback double-locked `max_fee`.
+    test.store()
+        .with_write_tx(|tx| {
+            tx.vaults_update(
+                Test::test_vault_address(),
+                SubstateVersion::new(1),
+                Amount::from(1_400u64),
+                Amount::zero(),
+            )
+        })
+        .unwrap();
+
+    let recipient = || {
+        let (_, view_only) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_, acct) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        OotleAddress::new(Network::LocalNet, view_only.to_byte_type(), acct.to_byte_type())
+    };
+
+    // Four blinded outputs exceed the 3-output merged-statement fee-intent credit ceiling, forcing fallback.
+    let params = StealthTransferParams {
+        fee_params: TransferFeeParams::new(UtxoInputSelection::RevealedOnly),
+        input_selection: UtxoInputSelection::RevealedOnly,
+        outputs: (0..4)
+            .map(|_| TransferOutput {
+                address: recipient(),
+                revealed_amount: Amount::zero(),
+                blinded_amount: 100,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            })
+            .collect(),
+        badge_usage: BadgeUsage::None,
+        resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+        max_fee: 500,
+        max_epoch: Epoch(10),
+        is_dry_run: false,
+    };
+
+    let (_lock, out) = test
+        .sdk()
+        .stealth_transfer_api()
+        .transfer(account, params)
+        .await
+        .unwrap();
+
+    // The transfer's revealed input covers only what the recipients are owed (400), not `max_fee` (500).
+    assert_eq!(out.fee_inputs.revealed, Amount::from(500u64));
+    assert_eq!(out.transfer_inputs.revealed, Amount::from(400u64));
+
+    // Only one `max_fee` (500) plus the transfer (400) stays locked in the vault.
+    let vault = test
+        .sdk()
+        .accounts_api()
+        .get_vault(&Test::test_vault_address())
+        .unwrap();
+    assert_eq!(vault.locked_revealed_balance, Amount::from(900u64));
+}

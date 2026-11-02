@@ -755,9 +755,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             };
 
             // The fee the transfer statement itself reveals. Non-zero only while the merge holds: on
-            // fallback the fee reverts to a statement of its own and this drops back to zero, so the
-            // transfer statement reveals only what the recipients are owed and the surplus locked against
-            // the fee becomes change.
+            // fallback the merged lock is released, the fee statement locks its own inputs first, and the
+            // transfer re-selects with `merged_fee_amount = 0` so it reveals only what the recipients are owed.
             let mut merged_fee_amount = if merge_candidate {
                 Amount::from(params.max_fee)
             } else {
@@ -797,10 +796,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         inputs_to_spend.inputs.len(),
                         num_outputs,
                     );
-                    // Release the merged selection so the fee statement can lock first and expose its
-                    // change output to the transfer selection without double-locking `params.max_fee`
-                    // or leaving `inputs_to_spend.revealed` inflated by the fee.
-                    drop(lock);
+                    // The fee statement locks and registers its change before transfer selection, so the
+                    // transfer locks only what the recipients are owed.
+                    self.locks_api.release_lock(lock.keep_locked())?;
                     lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
                     merged_fee_amount = Amount::zero();
                     fee_half = Some(self.build_fee_statement(

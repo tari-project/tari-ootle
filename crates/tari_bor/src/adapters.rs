@@ -10,7 +10,7 @@
 /// and let the collection grow as elements are actually decoded — decoding runs out of input
 /// long before a dishonest length can allocate unbounded memory. Mirrors the cap the dynamic
 /// `Value` decoder already applies in `value.rs`.
-const MAX_PREALLOC: u64 = 64;
+const MAX_PREALLOC: u64 = crate::MAX_PREALLOC as u64;
 
 /// Adapter that lets `Box<[T]>` participate in minicbor derives via `#[cbor(with = "boxed_slice")]`.
 /// On the wire this matches the canonical encoding of `Vec<T>` — a length-prefixed array.

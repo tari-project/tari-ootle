@@ -430,6 +430,13 @@ mod access_rules_template {
             );
         }
 
+        /// Asserts that the hook's frame carries `badge`. A hook frame receives no loan of the acting frame's
+        /// authorized proofs, so a badge carried only by such a proof is absent here.
+        pub fn hook_asserts_badge(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {
+            let badge = NonFungibleAddress::new(self.badges.resource_address(), NonFungibleId::from_string("mint"));
+            CallerContext::assert_badge_in_scope(&badge);
+        }
+
         pub fn invalid_auth_hook2(&self, _action: String, _caller: AuthHookCaller) {}
 
         pub fn invalid_auth_hook3(&self, _action: ResourceAuthAction, _caller: String) {}
@@ -464,10 +471,9 @@ mod access_rules_template {
             self.tokens.withdraw(amount)
         }
 
+        /// Tries to authorize a proof it was shown. A shown proof is the caller's to authorize, so this never
+        /// reaches the withdraw: the caller lends authority by authorizing the proof around the call instead.
         pub fn take_tokens_using_proof(&mut self, proof: Proof, amount: Amount) -> Bucket {
-            // let _access = proof.authorize(); is better if you want to panic immediately
-            // try_authorize can be used to determine if access is permitted and still run some other code branch if
-            // not.
             match proof.try_authorize() {
                 Ok(_access) => self.tokens.withdraw(amount),
                 Err(_) => {

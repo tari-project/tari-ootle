@@ -237,7 +237,7 @@ fn check_requirement<TStore: StateReader>(
                 return Ok(true);
             }
 
-            for proof_id in scope.proofs() {
+            for proof_id in scope.authorizing_proofs() {
                 let proof = state.get_proof(*proof_id)?;
 
                 // A resource rule requires possession, so the proof must hold some of the resource.
@@ -252,7 +252,7 @@ fn check_requirement<TStore: StateReader>(
                 return Ok(true);
             }
 
-            for proof_id in scope.proofs() {
+            for proof_id in scope.authorizing_proofs() {
                 let proof = state.get_proof(*proof_id)?;
 
                 if addr.resource_address() == proof.resource_address() &&

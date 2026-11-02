@@ -317,7 +317,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         match self.tracker.current_frame_write_mode() {
             FrameWriteMode::Full => Ok(()),
             FrameWriteMode::OwnComponent if FORBIDDEN_IN_OWN_COMPONENT.contains(&function) => {
-                Err(RuntimeError::ForbiddenInAuthHookContext { operation: function })
+                Err(RuntimeError::ForbiddenInRestrictedFrame {
+                    operation: function,
+                    frame: self.tracker.current_restricted_frame(),
+                })
             },
             FrameWriteMode::ReadOnly if FORBIDDEN_IN_READ_ONLY.contains(&function) => {
                 Err(RuntimeError::ForbiddenInReadOnlyContext { operation: function })
@@ -430,11 +433,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             }
 
             // `get_bucket` scope-checks; `get_proof` does not, so the frame's own scope is checked here to keep a
-            // returned proof to the same rule as a returned bucket.
+            // returned proof to the same rule as a returned bucket: only a held proof crosses to the caller.
             for proof_id in value.proof_ids() {
-                if !state.current_call_scope()?.is_proof_in_scope(proof_id) {
-                    return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
-                }
+                state.current_call_scope()?.require_held_proof(proof_id)?;
                 let _ignore = state.get_proof(*proof_id)?;
             }
 
@@ -3635,12 +3636,17 @@ where
 
                 self.tracker.write_with(|state| {
                     // A proof id is a sequential counter shared by the whole transaction, so authority has to come
-                    // from the frame's own scope: a proof it created, was passed as an argument, or a callee handed
-                    // back. Every other live proof in the transaction belongs to someone else.
-                    if !state.proof_exists(proof_id) || !state.current_call_scope()?.is_proof_in_scope(&proof_id) {
+                    // from a proof the frame holds: one it created or a callee handed back. A proof shown as an
+                    // argument is the caller's to authorize, and every other live proof belongs to someone else.
+                    // The answer is the same for all of them, so it reveals nothing about ids the frame cannot see.
+                    // A window that is already open is refused too: the auth scope holds one entry per proof, so a
+                    // second window would alias the first and close it when either guard drops.
+                    let is_live = state.proof_exists(proof_id);
+                    let scope = state.current_call_scope_mut()?;
+                    if !is_live || !scope.is_proof_in_scope(&proof_id) || scope.auth_scope().contains_proof(&proof_id) {
                         return Ok(InvokeResult::encode(&Err::<(), _>(NotAuthorized))?);
                     }
-                    state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
+                    scope.auth_scope_mut().add_proof(proof_id);
                     Ok(InvokeResult::encode(&Ok::<_, NotAuthorized>(()))?)
                 })
             },
@@ -3754,10 +3760,12 @@ where
                 let key: WorkspaceOffsetId = args.assert_one_arg()?;
                 self.tracker.write_with(|state| {
                     let proof_id = state.workspace_proof(key)?;
-                    if !state.current_call_scope()?.is_proof_in_scope(&proof_id) {
-                        return Err(RuntimeError::ProofNotInScope { proof_id });
+                    let scope = state.current_call_scope_mut()?;
+                    scope.require_held_proof(&proof_id)?;
+                    if scope.auth_scope().contains_proof(&proof_id) {
+                        return Err(RuntimeError::ProofAlreadyAuthorized { proof_id });
                     }
-                    state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
+                    scope.auth_scope_mut().add_proof(proof_id);
                     Ok(InvokeResult::unit())
                 })
             },
@@ -4168,28 +4176,16 @@ where
         })
     }
 
-    fn revoke_boundary_proofs(&self) -> Result<(), RuntimeError> {
-        self.tracker.write_with(|state| state.revoke_boundary_proofs())
-    }
-
-    fn check_component_upgrade_rule(&self) -> Result<(), RuntimeError> {
+    fn check_component_upgrade_rule(&self, component_lock: &LockedSubstate) -> Result<(), RuntimeError> {
         self.tracker.read_with(|state| {
-            let locked = state
-                .current_call_scope()?
-                .get_current_component_lock()
-                .ok_or_else(|| RuntimeError::InvariantError {
-                    function: "check_component_upgrade_rule",
-                    details: "No current component lock in call scope".to_string(),
-                })?;
-
-            let component = state.get_component(locked)?;
+            let component = state.get_component(component_lock)?;
             let action = NativeAction::UpdateComponentTemplate;
             match component.upgrade_rule() {
                 UpdateRule::Locked => Err(RuntimeError::ComponentUpgradesLocked {
-                    component: locked.substate_id().as_component_address().ok_or_else(|| {
+                    component: component_lock.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::InvariantError {
                             function: "check_component_upgrade_rule",
-                            details: "Current component lock is not a component".to_string(),
+                            details: "Locked substate is not a component".to_string(),
                         }
                     })?,
                 }),
@@ -4236,17 +4232,19 @@ where
     }
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {
-        self.tracker
-            .read_with(|state| state.check_all_substates_known(value.well_known_types()))
+        self.tracker.read_with(|state| {
+            state.check_all_substates_known(value.well_known_types())?;
+            // A proof crosses to the caller only from the frame that holds it: a shown proof is already the
+            // caller's, and returning it would let the callee hand it back as if it were its own.
+            for proof_id in value.proof_ids() {
+                state.current_call_scope()?.require_held_proof(proof_id)?;
+            }
+            Ok(())
+        })
     }
 
     fn push_call_frame(&self, frame: PushCallFrame, restrict_to: Option<FrameWriteMode>) -> Result<(), RuntimeError> {
-        self.tracker.push_call_frame(frame)?;
-        // The WASM only runs after this returns, so the restriction is in place before any host op can be issued.
-        if let Some(mode) = restrict_to {
-            self.tracker.write_with(|state| state.restrict_current_frame(mode))?;
-        }
-        Ok(())
+        self.tracker.push_call_frame(frame, restrict_to)
     }
 
     fn pop_call_frame(&self, returned: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {

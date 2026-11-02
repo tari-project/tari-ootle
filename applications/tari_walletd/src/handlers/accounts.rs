@@ -1436,7 +1436,14 @@ pub async fn handle_confidential_transfer(
         {
             Ok(tx_id) => tx_id,
             Err(e) => {
-                let _ = sdk.locks_api().release_lock(transfer.transaction_proof_id);
+                if let Err(err) = sdk.locks_api().release_lock(transfer.transaction_proof_id) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Failed to release lock {} after confidential transfer submission error: {}",
+                        transfer.transaction_proof_id,
+                        err
+                    );
+                }
                 return Err(e.into());
             },
         };

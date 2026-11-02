@@ -35,7 +35,7 @@ use crate::{
         key_manager::{KeyManagerApi, KeyManagerApiError},
         locks::{LocksApi, LocksApiError},
         substate::{SubstateApiError, SubstatesApi},
-        transaction::{TransactionApi, TransactionApiError},
+        transaction::TransactionApiError,
     },
     models::{ConfidentialOutputModel, KeyBranch, OutputStatus, WalletLockId},
     spec::WalletSdkSpec,
@@ -55,8 +55,6 @@ pub struct ConfidentialTransferApi<'a, TSpec: WalletSdkSpec> {
     locks_api: LocksApi<'a, TSpec::Store>,
     accounts_api: AccountsApi<'a, TSpec>,
     confidential_outputs_api: ConfidentialOutputsApi<'a, TSpec>,
-    #[allow(dead_code)]
-    transaction_api: TransactionApi<'a, TSpec::Store, TSpec::NetworkInterface>,
     substate_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
     crypto_api: ConfidentialCryptoApi,
     config_api: ConfigApi<'a, TSpec::Store>,
@@ -71,7 +69,6 @@ where TSpec: WalletSdkSpec
         locks_api: LocksApi<'a, TSpec::Store>,
         confidential_outputs_api: ConfidentialOutputsApi<'a, TSpec>,
         substate_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
-        transaction_api: TransactionApi<'a, TSpec::Store, TSpec::NetworkInterface>,
         crypto_api: ConfidentialCryptoApi,
         config_api: ConfigApi<'a, TSpec::Store>,
     ) -> Self {
@@ -81,7 +78,6 @@ where TSpec: WalletSdkSpec
             accounts_api,
             confidential_outputs_api,
             substate_api,
-            transaction_api,
             crypto_api,
             config_api,
         }

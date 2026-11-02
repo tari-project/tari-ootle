@@ -147,10 +147,50 @@ pub(crate) async fn submit_inner_for_request(
     context: &HandlerContext,
     req: TransactionSubmitRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
+    ensure_locked_stealth_inputs_are_spent(context.wallet_sdk(), &req.transaction, &req.lock_ids)?;
     let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
         .map(|address| vec![address])
         .unwrap_or_default();
     submit_inner(context, req, linked_accounts).await
+}
+
+/// Refuses a transaction request whose `lock_ids` hold a `LockedForSpend` stealth UTXO that no
+/// directly executed statement (`Instruction::StealthTransfer` or `Account::pay_fee_stealth`) in
+/// `transaction` spends, so `value_summaries` and the stealth spend keys walletd attaches agree.
+pub(crate) fn ensure_locked_stealth_inputs_are_spent(
+    sdk: &WalletSdk,
+    transaction: &UnsignedTransaction,
+    lock_ids: &[WalletLockId],
+) -> Result<(), anyhow::Error> {
+    if lock_ids.is_empty() {
+        return Ok(());
+    }
+    let statements = crate::handlers::transaction_requests::extract_stealth_statements(transaction);
+    for lock_id in lock_ids {
+        let Some(outputs) = sdk.stealth_outputs_api().get_locked_by_lock_id(*lock_id).optional()? else {
+            continue;
+        };
+        for output in outputs {
+            if !matches!(output.status, OutputStatus::LockedForSpend) {
+                continue;
+            }
+            let spent = statements.iter().any(|(res, stmt)| {
+                res.is_none_or(|r| r == output.resource_address) &&
+                    stmt.inputs_statement
+                        .inputs
+                        .iter()
+                        .any(|i| i.commitment == output.commitment)
+            });
+            if !spent {
+                return Err(invalid_request(format!(
+                    "Locked stealth input {} (lock {lock_id}) is not named by any stealth transfer statement in the \
+                     transaction",
+                    output.commitment
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn submit_inner(
@@ -198,19 +238,19 @@ async fn submit_inner(
         req.detect_inputs_use_unversioned,
     );
 
-    // Stealth inputs are spent with a key derived per-UTXO from the sender's
-    // account key and that UTXO's nonce. Derive the set from the locks rather
-    // than accepting it from the caller, and restrict it to UTXOs actually
-    // named by the transaction's stealth statements so an unapproved or hidden
-    // template spend cannot acquire a stealth spend signature.
-    let stealth_signers = derive_stealth_signers(sdk, &req.transaction, &req.lock_ids)?;
-
     // Signatures collected out of band are attached first; walletd's own
     // signatures are added on top and the seal signature commits to all of them.
     let mut transaction = context
         .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_signatures(req.signatures);
+
+    // Stealth inputs are spent with a key derived per-UTXO from the sender's
+    // account key and that UTXO's nonce. Derive the set from the locks rather
+    // than accepting it from the caller: the locked outputs are what this
+    // transaction actually spends, so a caller cannot ask the wallet to sign
+    // with a key of its choosing.
+    let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
 
     if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
         let seal_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
@@ -281,21 +321,8 @@ fn reject_detect_inputs_with_signatures(
 /// empty set rather than an error.
 fn derive_stealth_signers(
     sdk: &WalletSdk,
-    transaction: &UnsignedTransaction,
     lock_ids: &[WalletLockId],
 ) -> Result<Vec<StealthUtxoSpendKeyId>, anyhow::Error> {
-    if lock_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let statements = crate::handlers::transaction_requests::extract_stealth_statements(transaction);
-    let spent_in_tx = |resource_address: tari_template_lib_types::ResourceAddress,
-                       commitment: tari_template_lib_types::crypto::PedersenCommitmentBytes| {
-        statements.iter().any(|(res, stmt)| {
-            res.is_none_or(|r| r == resource_address) &&
-                stmt.inputs_statement.inputs.iter().any(|i| i.commitment == commitment)
-        })
-    };
-
     let mut signers = IndexSet::new();
 
     for lock_id in lock_ids {
@@ -308,9 +335,6 @@ fn derive_stealth_signers(
             // also holds the change outputs it created (`LockedUnconfirmed`),
             // which are not being spent by this transaction.
             if !matches!(output.status, OutputStatus::LockedForSpend) {
-                continue;
-            }
-            if !spent_in_tx(output.resource_address, output.commitment) {
                 continue;
             }
             // A view-only output has no spend key: the wallet can see it but
@@ -475,15 +499,16 @@ async fn submit_dry_run_inner(
         vec![]
     };
 
-    // Sign exactly as a real submission would, so the dry run reflects a
-    // spendable transaction: stealth inputs are signed with keys derived from
-    // the locks, and the seal signature is added last.
-    let stealth_signers = derive_stealth_signers(sdk, &req.transaction, &req.lock_ids)?;
     let mut transaction = context
         .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
         .with_signatures(req.signatures);
+
+    // Sign exactly as a real submission would, so the dry run reflects a
+    // spendable transaction: stealth inputs are signed with keys derived from
+    // the locks, and the seal signature is added last.
+    let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
     if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
         let seal_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
         let seal_signer_pk = seal_signer.public_key.to_byte_type();

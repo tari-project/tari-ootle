@@ -157,7 +157,7 @@ impl RestrictedAccessRule {
         }
     }
 
-    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+    fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
         match self {
             Self::Require(rule) => rule.find_invalid_m_of_n(),
             Self::AnyOf(rules) | Self::AllOf(rules) => rules.iter().find_map(Self::find_invalid_m_of_n),
@@ -189,7 +189,7 @@ impl RequireRule {
         }
     }
 
-    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+    fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
         let Self::MOfN(threshold, requirements) = self else {
             return None;
         };

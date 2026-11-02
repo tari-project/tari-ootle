@@ -205,10 +205,10 @@ fn check_require_rule<TStore: StateReader>(
             Ok(true)
         },
         RequireRule::MOfN(n, requirements) => {
-            // The engine rejects an invalid MOfN rule (threshold of zero, above `requirements.len()`, or duplicate
-            // requirements) wherever it stores a rule. A stealth output commits only to a hash of its spend conditions,
-            // so its rules are first seen here and an invalid MOfN rule must fail closed.
-            if rule.find_invalid_m_of_n().is_some() {
+            // The engine rejects a threshold of zero or above `requirements.len()` wherever it stores a rule. A stealth
+            // output commits only to a hash of its spend conditions, so its rules are first seen here and an invalid
+            // threshold must fail closed.
+            if *n == 0 {
                 return Ok(false);
             }
             let mut satisfied = 0u16;

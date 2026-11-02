@@ -352,7 +352,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         };
 
         let qc_epoch = qc.epoch();
-        if qc_epoch <= current_epoch || qc.justifies_zero_block() {
+        if qc_epoch <= current_epoch || qc.justifies_zero_block() || !qc.decision().is_accept() {
             return Ok(None);
         }
 

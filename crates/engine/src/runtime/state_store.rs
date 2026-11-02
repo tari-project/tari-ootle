@@ -39,6 +39,9 @@ pub struct WorkingStateStore<TStore> {
 
     /// Substates this transaction removed from state without writing a later version, in the order they were downed.
     downed: IndexSet<SubstateId>,
+    /// Substates created and then downed within this transaction. They did not exist before the transaction, so they
+    /// collapse out of the final diff without a down record, but still count as spent for the rest of the transaction.
+    collapsed: HashSet<SubstateId>,
     /// Inputs the transaction declared as reads. A shard group that does not hold an input locks it
     /// from that declaration without executing, so by the time execution runs, a read declaration is
     /// a promise the rest of the network has already acted on: the transaction produces no new
@@ -60,6 +63,7 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
             loaded_substates: HashMap::new(),
             locked_substates: LockedSubstates::default(),
             downed: IndexSet::default(),
+            collapsed: HashSet::default(),
             read_declared_inputs,
             state_store,
         }
@@ -184,7 +188,7 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
     /// transaction commits, so `downed` is the whole record of what this transaction has removed; every presence and
     /// load path consults it so that a downed substate reads as gone for the rest of the transaction.
     fn is_spent(&self, id: &SubstateId) -> bool {
-        self.downed.contains(id)
+        self.downed.contains(id) || self.collapsed.contains(id)
     }
 
     pub fn exists(&self, id: &SubstateId) -> Result<bool, RuntimeError> {
@@ -296,6 +300,8 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         if let Some(value) = self.new_substates.shift_remove(&substate_id) {
             if self.get_unmodified_substate(&substate_id).optional()?.is_some() {
                 self.downed.insert(substate_id);
+            } else {
+                self.collapsed.insert(substate_id);
             }
             return Ok(value);
         }
@@ -495,5 +501,27 @@ mod tests {
         let mut store = store_holding(slice::from_ref(&id), &[]);
 
         store.try_lock(id, LockFlag::Write).unwrap();
+    }
+
+    #[test]
+    fn a_created_and_downed_substate_collapses_and_cannot_be_recreated() {
+        let id = tombstone_id(7);
+        let mut store = store_holding(&[], &[]);
+
+        store
+            .insert(id.clone(), ClaimedOutputTombstone { value: 1 }.into())
+            .unwrap();
+        let lock_id = store.try_lock(id.clone(), LockFlag::Write).unwrap();
+        store.down(lock_id).unwrap();
+        store.try_unlock(lock_id).unwrap();
+
+        assert!(store.mutated_substates().is_empty());
+        assert!(store.downed().is_empty());
+        assert!(!store.exists(&id).unwrap());
+
+        let err = store
+            .insert(id.clone(), ClaimedOutputTombstone { value: 2 }.into())
+            .unwrap_err();
+        assert!(matches!(err, RuntimeError::SubstateAlreadySpent { id: got } if got == id));
     }
 }

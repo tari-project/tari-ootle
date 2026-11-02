@@ -47,6 +47,11 @@ impl<'b, C> minicbor::Decode<'b, C> for ShardStateVersions {
         let len = d.array()?;
         let vec: Vec<StateVersion> = match len {
             Some(n) => {
+                if n == 0 || n > MAX_SHARDS as u64 {
+                    return Err(minicbor::decode::Error::message(
+                        "ShardStateVersions length out of bounds",
+                    ));
+                }
                 let mut out = Vec::with_capacity(n as usize);
                 for _ in 0..n {
                     out.push(StateVersion::decode(d, ctx)?);
@@ -59,6 +64,11 @@ impl<'b, C> minicbor::Decode<'b, C> for ShardStateVersions {
                     if matches!(d.datatype()?, minicbor::data::Type::Break) {
                         d.skip()?;
                         break;
+                    }
+                    if out.len() >= MAX_SHARDS {
+                        return Err(minicbor::decode::Error::message(
+                            "ShardStateVersions length out of bounds",
+                        ));
                     }
                     out.push(StateVersion::decode(d, ctx)?);
                 }
@@ -238,6 +248,16 @@ mod tests {
         let v = vec![1; MAX_SHARDS + 1];
         let serialized = tari_bor::encode(&v).unwrap();
         tari_bor::decode::<ShardStateVersions>(&serialized).unwrap_err();
+    }
+
+    #[test]
+    fn minicbor_decode_rejects_oversized_or_empty_array_header_without_allocating() {
+        // CBOR array header claiming u64::MAX elements (0x9b followed by 8-byte u64::MAX).
+        let huge_header = [0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        minicbor::decode::<ShardStateVersions>(&huge_header).unwrap_err();
+
+        // CBOR empty array (0x80).
+        minicbor::decode::<ShardStateVersions>(&[0x80]).unwrap_err();
     }
 
     #[test]

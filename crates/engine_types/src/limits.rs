@@ -503,6 +503,19 @@ pub const fn non_fungible_move_points(ids: u64) -> u64 {
 pub struct NativeExecutionPoints;
 
 impl NativeExecutionPoints {
+    /// Each node of an access rule or owner rule visited while authorizing an action: a rule, a requirement list or a
+    /// requirement, before any proofs the requirement examines. A rule's size is set by its author, so each node
+    /// visited is charged. Measures at ~120 points a node.
+    pub const PER_ACCESS_RULE_NODE: u64 = 200;
+    /// Each lookup of a non-fungible requirement's id in a proof of its resource, on top of
+    /// [`Self::PER_ACCESS_RULE_PROOF`]. The lookup is a search of the proof's ids, which measures at ~300 points for
+    /// a handful of the longest string ids and ~1,500 for half a million. Set above that.
+    pub const PER_ACCESS_RULE_NON_FUNGIBLE_LOOKUP: u64 = 2_000;
+    /// Each proof in the authorizing frame's scope a resource or non-fungible requirement examines: a lookup of the
+    /// proof and a comparison of its resource. A requirement no proof satisfies examines every proof in scope, so the
+    /// cost of authorizing grows with the proofs the frame holds, and each one examined is charged. Measures at ~100
+    /// points a proof.
+    pub const PER_ACCESS_RULE_PROOF: u64 = 200;
     /// One Minotari burn-claim proof: a Schnorr ownership proof plus commitment arithmetic (the
     /// same primitives as [`Self::PER_STATEMENT`]) and a bounded kernel-MMR inclusion proof
     /// (Blake2b hashes, microseconds). Priced as the statement cost with headroom.

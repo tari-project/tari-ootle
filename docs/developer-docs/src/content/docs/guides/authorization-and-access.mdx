@@ -154,6 +154,7 @@ sufficient on its own; the hook must check `AuthHookCaller::resource()` against 
 its frame, usable at every auth point it reaches — a resource rule, an ownership rule, a spend condition — not
 only the method it entered through. Weigh that before calling into code you do not control, and gate anything
 that must not be reachable that way on a proof the callee cannot obtain rather than on the caller badge alone.
+A proof, by contrast, reaches a callee only while you have explicitly authorized it (next section).
 
 A resource auth hook is the one call-out you do not choose: any resource may bind a hook, and anyone may deposit
 that resource into an account. The engine therefore runs a hook in a sandboxed frame that may read, emit events
@@ -161,20 +162,49 @@ and update its own component state (when declared `&mut self`), but cannot write
 vault or resource, or call another component. The acting component's badge satisfies the hook's own method
 rule, and the sandbox is what stops the hook spending it on the acting component's behalf.
 
-#### Proofs reach a frame only as arguments
+#### Proofs authorize only inside an explicit window
 
-A `Proof` authorizes in the frame that holds it. A frame holds the proofs it creates itself and the proofs it
-was passed as arguments — nothing else. In particular, a proof a transaction left on its workspace authorizes
-the **call boundary**, where the callee's method access rule is evaluated, and stops there: the callee's frame
-does not hold it, so it cannot use it for a resource action or forward it onward.
+A `Proof` reaches a frame either **held** — the frame created it, or a callee returned it — or **shown** — it
+was passed in as an argument. Neither authorizes anything by itself. Authority comes from an **authorization
+window** the holder opens over a held proof:
 
-That makes the `Proof` parameter part of a method's contract. **A method that acts on a resource guarded by a
-badge must take the badge as a `Proof`**, and the caller must hand it in:
+- In a template: `proof.authorize_with(|| ...)`, or `let _auth = proof.authorize()` for a guard that lasts until
+  it is dropped. `vault.authorize_with(|| ...)` creates a proof of the vault's contents and opens the window in one
+  step.
+- In a transaction: `authorize!(proof)` ... `drop_authorize!(proof)` around the instructions, or the builder's
+  `with_authorized_proof("proof", |b| ...)`, which emits the `AuthorizeProof` / `DropProofAuthorization` pair.
+
+Inside the window the proof satisfies the frame's own rules — a resource's withdraw rule, a component's owner rule
+— **and is lent to every call the frame makes**: the callee's method access rule, its vault and resource actions
+and its `assert_badge_in_scope` all see it. The loan is **one hop**. The callee does not hold the proof, so it
+cannot authorize, pass on, return or drop it, and nothing it calls sees it.
 
 ```rust
-// Acts on `self.tokens`, whose withdraw rule names a badge. Only reachable with the badge.
-pub fn take_tokens(&mut self, auth: Proof, amount: Amount) -> Bucket {
-    auth.authorize_with(|| self.tokens.withdraw(amount))
+let p = self.admin_badges.create_proof();          // held: authorizes nothing yet
+p.authorize_with(|| self.token.mint(100));         // own action
+p.authorize_with(|| partner.invoke("register", args![]));   // explicit lend, one hop
+p.drop();
+```
+
+Prefer `authorize_with` over a long-lived guard: a guard held across several calls lends to all of them, and a
+`ProofAuth` from `vault.authorize()` lends until it is dropped. A proof has one window at a time: authorizing it
+again while a window is open fails.
+
+A **shown** proof is read-only. The callee may inspect its resource, amount and ids, and call `assert_resource`;
+it proves that the *immediate* caller holds the proof. Authorizing, forwarding, returning, storing or dropping a
+shown proof is rejected, and `assert_badge_in_scope` does not count it. A method that needs a badge for its own
+actions therefore does not take a `Proof`: the caller opens the window.
+
+```rust
+// Acts on `self.tokens`, whose withdraw rule names a badge. Reachable inside a window over that badge.
+pub fn take_tokens(&mut self, amount: Amount) -> Bucket {
+    self.tokens.withdraw(amount)
+}
+
+// Shown a proof: may inspect it, nothing more.
+pub fn check_in(&mut self, badge: Proof) -> Bucket {
+    badge.assert_resource(self.member_badge);
+    ...
 }
 ```
 
@@ -182,24 +212,31 @@ pub fn take_tokens(&mut self, auth: Proof, amount: Amount) -> Bucket {
 // In the transaction
 .call_method(account, "create_proof_for_resource", args![badge_resource])
 .put_last_instruction_output_on_workspace("proof")
-.call_method(component, "take_tokens", args![Workspace("proof"), 100])
+.with_authorized_proof("proof", |b| b.call_method(component, "take_tokens", args![100]))
+.drop_all_proofs_in_workspace()
 ```
 
-The built-in account follows the same rule: `withdraw`, `deposit` and the `create_proof_*` methods each have a
-`_with_auth` variant taking the proof, and a resource whose withdraw or deposit rule names a badge is reachable
-only through those.
+A proof the transaction leaves on its workspace is held until `authorize!`. Native instructions and top-level
+calls see only the proofs authorized at that point, and the workspace is cleared between the fee and main
+instructions, so no window crosses the fee boundary. The built-in account follows the same rule: `withdraw`,
+`deposit`, `withdraw_approved` and the `create_proof_*` methods are reached inside a window when the resource or
+approval names a badge the account does not carry on its own.
 
-A proof handed in remains the caller's — the callee may hold and forward it but never consumes it — and it stops
-authorizing when the caller drops it. Signer badges are not proofs: they are stamped into every frame a
-top-level instruction pushes, so a rule naming the transaction's signer needs no `Proof` argument.
+Hook and migration frames are lent nothing and carry no signer badges, however the action reached them: a resource
+auth hook runs with the acting frame's identity but none of its windows, and a component's upgrade rule is evaluated
+in the scope of the `UpdateComponentTemplate` instruction before the migration frame is pushed. A migration frame is
+confined exactly as a hook frame is: it may rewrite its component's own state and nothing else, so a migration that
+needs a vault, funds, a proof, an address allocation or a call into another component does that work in an ordinary
+method call after the upgrade.
 
-A signer badge authorizes only the frame it is stamped into, and no template can turn it into a `Proof`: the
-engine issues public-key badges from the transaction's signatures and nowhere else. A component the signer
-calls directly acts with the signer's authority in its own frame, but every call it makes carries the
-component's caller badges instead. Template code that needs to know whether a call carries a particular badge —
-a signer's key on a top-level call, the direct caller's component or template, or a badge it holds a proof of —
-asks the engine without minting anything. The check is `rule!(non_fungible(badge))` evaluated against the
-current frame:
+Signer badges are not proofs: they are stamped into every frame a top-level instruction pushes, so a rule naming
+the transaction's signer needs no window. A signer badge authorizes only the frame it is stamped into, and no
+template can turn it into a `Proof`: the engine issues public-key badges from the transaction's signatures and
+nowhere else. A component the signer calls directly acts with the signer's authority in its own frame, but every
+call it makes carries the component's caller badges instead. Template code that needs to know whether a call
+carries a particular badge — a signer's key on a top-level call, the direct caller's component or template, or
+a badge it holds or was lent a proof of — asks the engine without minting anything. The check is
+`rule!(non_fungible(badge))` evaluated against the current frame:
 
 ```rust
 CallerContext::assert_badge_in_scope(&badge);
@@ -210,8 +247,8 @@ and `withdraw_approved(spender_badge, resource, amount)` pays out only when the 
 public-key approval is spendable by that key's own top-level call to the account, an approval naming
 `NonFungibleAddress::caller_component_badge(dex)` is spendable by the `dex` component calling the account, and
 one naming `NonFungibleAddress::direct_caller_template_badge(t)` by every component and function of template
-`t`. An approval naming a badge held in a vault is spent with
-`withdraw_approved_with_auth(spender_badge, resource, amount, auth)`, where `auth` is a proof of that badge.
+`t`. An approval naming a badge held in a vault is spent by calling `withdraw_approved` inside a window over a
+proof of that badge.
 
 #### Resource Access Rules
 

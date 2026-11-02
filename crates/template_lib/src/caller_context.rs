@@ -31,7 +31,8 @@ impl CallerContext {
     /// against this frame. A call carries the badges the engine stamps into its frame (the transaction signers'
     /// public-key badges when the transaction calls this component or function directly, and otherwise the badges
     /// naming its direct caller: [`NonFungibleAddress::caller_component_badge`] and
-    /// [`NonFungibleAddress::direct_caller_template_badge`]), and the badges of the proofs the frame holds.
+    /// [`NonFungibleAddress::direct_caller_template_badge`]), the badges of the proofs the frame has authorized,
+    /// and those of the proofs its caller authorized around the call. A proof shown as an argument does not count.
     pub fn assert_badge_in_scope(badge: &NonFungibleAddress) {
         let _resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
             action: CallerContextAction::AssertBadgeInScope,

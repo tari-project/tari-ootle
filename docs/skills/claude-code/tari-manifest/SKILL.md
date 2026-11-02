@@ -115,6 +115,8 @@ let addr = new_component_addr!();
 let addr = new_resource_addr!();
 
 // Proof management
+authorize!(proof);          // Open an authorization window over a workspace proof
+drop_authorize!(proof);     // Close it
 drop_all_proofs!();
 ```
 
@@ -319,10 +321,16 @@ fn main() {
     let component = var!["component"];
 
     let proof = account.create_proof_by_amount(Address(admin_badge), 1);
+    authorize!(proof);
     component.admin_action();
+    drop_authorize!(proof);
     drop_all_proofs!();
 }
 ```
+
+A proof on the workspace authorizes nothing until `authorize!`. Inside the window every call is lent the proof
+(one hop: the callee cannot pass it on). Passing a proof as a method argument shows it to the callee without
+lending it.
 
 ### Instantiate a Component
 

@@ -36,6 +36,15 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
     where E: de::Error {
         Ok(BytesCow::Owned(v.to_vec().into_boxed_slice()))
     }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: de::SeqAccess<'a> {
+        let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(1024));
+        while let Some(byte) = seq.next_element::<u8>()? {
+            bytes.push(byte);
+        }
+        Ok(BytesCow::Owned(bytes.into_boxed_slice()))
+    }
 }
 
 // Cow is not available in no_std, so we define our own
@@ -87,5 +96,26 @@ impl<'a> AsRef<[u8]> for BytesCow<'a> {
             BytesCow::Borrowed(v) => v,
             BytesCow::Owned(v) => v.as_ref(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::Deserializer;
+
+    use super::*;
+
+    #[test]
+    fn it_reads_bytes_from_a_sequence() {
+        // serde_json answers `deserialize_byte_buf` on an array with `visit_seq`
+        let mut de = serde_json::Deserializer::from_str("[1, 2, 255]");
+        let bytes = (&mut de).deserialize_byte_buf(BytesVisitor::new()).unwrap();
+        assert_eq!(bytes.as_ref(), [1, 2, 255]);
+    }
+
+    #[test]
+    fn it_rejects_a_sequence_element_above_u8() {
+        let mut de = serde_json::Deserializer::from_str("[1, 256]");
+        assert!((&mut de).deserialize_byte_buf(BytesVisitor::new()).is_err());
     }
 }

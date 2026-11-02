@@ -188,8 +188,6 @@ impl ConnectionHandler for Handler {
             }
         }
 
-        debug_assert!(self.pending_behaviour_events.is_empty());
-
         if self.pending_behaviour_events.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
             self.pending_behaviour_events.shrink_to_fit();
         }

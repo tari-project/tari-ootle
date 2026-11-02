@@ -3,7 +3,7 @@
 
 use log::{info, warn};
 use tari_consensus_types::HighPc;
-use tari_ootle_common_types::{Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
 use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use crate::{
@@ -34,13 +34,12 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
     }
 
     pub async fn request_sync(&mut self, epoch: Epoch, from: TConsensusSpec::Addr) -> Result<(), HotStuffError> {
-        let high_qc = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?;
+        let high_qc = self.store.with_read_tx(|tx| HighPc::get(tx, epoch).optional())?;
 
-        let block_height = if high_qc.epoch() == epoch {
-            high_qc.height()
-        } else {
-            NodeHeight(1)
-        };
+        let block_height = high_qc
+            .filter(|qc| qc.epoch() == epoch)
+            .map(|qc| qc.height())
+            .unwrap_or(NodeHeight(1));
 
         info!(
             target: LOG_TARGET,

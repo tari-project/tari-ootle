@@ -125,6 +125,7 @@ impl ProposedBlockChangeSet {
     }
 
     pub fn set_no_vote(&mut self, no_vote_reason: NoVoteReason) -> &mut Self {
+        self.quorum_decision = None;
         self.no_vote_reason = Some(no_vote_reason);
         self
     }

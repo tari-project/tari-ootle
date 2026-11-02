@@ -14,7 +14,7 @@ use tari_ootle_common_types::{
     InputDeclaration,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, memo::Memo};
 use tari_template_lib::types::{
     Amount,
@@ -449,22 +449,22 @@ where TSpec: WalletSdkSpec
                 }
             })
             .then(|builder| {
-                // The badge authorizes the resource's withdraw rule inside the account's frame, which it
-                // reaches as a `Proof` argument.
+                // The badge authorizes the resource's withdraw rule inside the account's frame, which is lent it
+                // by the window opened around the call.
+                let withdraw = |builder: TransactionBuilder| {
+                    builder
+                        .call_method(*from_account.component_address(), "withdraw_confidential", args![
+                            params.resource_address,
+                            proof
+                        ])
+                        .put_last_instruction_output_on_workspace("bucket")
+                };
                 if params.proof_from_resource.is_some() {
-                    builder.call_method(
-                        *from_account.component_address(),
-                        "withdraw_confidential_with_auth",
-                        args![params.resource_address, proof, Workspace("proof")],
-                    )
+                    builder.with_authorized_proof("proof", withdraw)
                 } else {
-                    builder.call_method(*from_account.component_address(), "withdraw_confidential", args![
-                        params.resource_address,
-                        proof
-                    ])
+                    withdraw(builder)
                 }
             })
-            .put_last_instruction_output_on_workspace("bucket")
             .call_method(to_account.address, "deposit", args![Workspace("bucket")])
             .then(|builder| {
                 if params.proof_from_resource.is_some() {

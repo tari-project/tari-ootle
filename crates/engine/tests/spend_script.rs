@@ -200,6 +200,45 @@ fn script_path_access_rule_leaf_allows_spend() {
     );
 }
 
+/// A predicate frame keeps the signer badges of the instruction that reached it: a spend from a `StealthTransfer`
+/// instruction carries them, while a spend made from inside a component's frame carries that component's caller
+/// badges and no signer badge.
+#[test]
+fn script_path_predicate_sees_the_signer_badge_only_from_a_top_level_instruction() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let faucet_template = test.get_template_address(FAUCET_TEMPLATE);
+    let signer = test.to_public_key_bytes();
+    let condition = conditions(vec![script_condition(script_template, "require_signer_badge", vec![
+        encode_arg(&signer),
+    ])]);
+    let (resx, mint) = mint_utxos(&mut test, vec![condition.clone(), condition]);
+
+    let transfer =
+        stealth::generate_transfer_data([mint.input_spec_for(0, 100)], 0u64, [out(100, key_path(signer))], 0u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let transfer =
+        stealth::generate_transfer_data([mint.input_spec_for(1, 100)], 0u64, [out(100, key_path(signer))], 0u64);
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(faucet_template, "static_programmatic_transfer", args![
+                resx,
+                transfer.statement
+            ])
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "This call does not carry the badge");
+}
+
 #[test]
 fn script_path_access_rule_leaf_denies_spend() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);

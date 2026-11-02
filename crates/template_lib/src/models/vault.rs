@@ -324,7 +324,9 @@ impl Vault {
         });
     }
 
-    /// Creates a new [ProofAuth] that references a proof that proves ownership of all the vault's tokens.
+    /// Creates a proof of all the vault's tokens and opens an authorization window over it for as long as the
+    /// returned [ProofAuth] lives. The window covers this frame's own actions and lends the proof to every call made
+    /// inside it, one hop deep. Prefer [`Self::authorize_with`], which bounds the window to one closure.
     ///
     /// # Example
     /// ```rust,ignore
@@ -332,16 +334,14 @@ impl Vault {
     /// let vault = self.my_vault;
     /// let _auth = vault.authorize(); // RAII pattern
     /// perform_some_action_that_requires_authorization();
-    /// // _auth is dropped here, and the proof is goes out of scope
+    /// // _auth is dropped here: the window closes and the proof is destroyed
     /// /// ```
     pub fn authorize(&self) -> ProofAuth {
-        let proof = self.create_proof();
-        ProofAuth { id: proof.id() }
+        ProofAuth::new(self.create_proof())
     }
 
-    /// Uses all the tokens in the vault to authorize some actions within the provided function.
-    /// All tokens will be locked during the lifespan of the transaction until the proof is destroyed after the function
-    /// returns.
+    /// Runs `f` inside an authorization window over a proof of all the vault's tokens. The tokens are locked until
+    /// `f` returns and the proof is destroyed.
     ///
     /// # Example
     /// ```rust,ignore

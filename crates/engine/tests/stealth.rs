@@ -9,7 +9,7 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine::runtime::{ActionIdent, NativeAction};
+use tari_engine::runtime::{ActionIdent, NativeAction, RuntimeError};
 use tari_engine_types::{
     UtxoOutput,
     crypto::{ElgamalVerifiableBalance, ValueLookup, get_commitment_factory},
@@ -19,7 +19,9 @@ use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::{
     AccessRule,
+    Amount,
     ComponentAddress,
+    NonFungibleAddress,
     ResourceAddress,
     UtxoAddress,
     UtxoId,
@@ -1321,6 +1323,50 @@ fn stealth_transfer_instruction_invokes_the_auth_hook() {
     );
 
     assert_eq!(hook_calls(&mut test, faucet), 1);
+}
+
+/// A hook reached from a native top-level instruction is the first frame of the call, and still carries no signer
+/// badge: hook code the signer never chose cannot act with the signer's authority.
+#[test]
+fn a_hook_reached_from_a_native_instruction_carries_no_signer_badge() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    test.enable_auto_add_proofs_from_signers();
+    let mint = stealth::generate_mint_statement([100u64], 0u64, None);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    test.execute_expect_success(
+        test.transaction()
+            .call_function(template_addr, "new_with_signer_asserting_hook", args![
+                Amount::from(100u64),
+                mint.statement.clone()
+            ])
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    let faucet_resx = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+
+    let transfer = stealth::generate_transfer_data(
+        [MaskAndValue {
+            mask: mint.output_masks[0].clone(),
+            value: 100,
+        }],
+        0u64,
+        Some(100),
+        0,
+    );
+    let signer_badge = NonFungibleAddress::from_public_key(test.to_public_key_bytes());
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .stealth_transfer(faucet_resx, transfer.statement)
+            .finish()
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(reason, RuntimeError::BadgeNotInScope { badge: signer_badge });
 }
 
 #[test]

@@ -986,7 +986,7 @@ where
             .protocol_version
             .is_same_network(&info.protocol_version)
         {
-            info!(target: LOG_TARGET, "🚨 Peer {} is on a different network ({}). Ours is {}. Disconnecting.", peer_id, info.protocol_version, self.config.swarm.protocol_version);
+            info!(target: LOG_TARGET, "🚨 Peer {} identified with protocol string {}, which is malformed or for a different network than ours ({}). Disconnecting.", peer_id, info.protocol_version, self.config.swarm.protocol_version);
             // Error can be ignored as the docs indicate that an error only occurs if there was no connection to the
             // peer.
             let _ignore = self.swarm.disconnect_peer_id(peer_id);

@@ -36,7 +36,8 @@ impl ProtocolVersion {
     /// Returns true if `protocol_str` is a well-formed protocol string for the same domain and network.
     ///
     /// Only the domain and network are compared; the version is informational. Consensus enforces agreement on
-    /// protocol rules, and each stream protocol negotiates its own wire version.
+    /// protocol rules, stream protocols (RPC, messaging, peer sync) negotiate their own wire versions, and gossip
+    /// payloads are checked when decoded.
     pub fn is_same_network(&self, protocol_str: &str) -> bool {
         let Some((domain, network, _version)) = parse_protocol_str(protocol_str) else {
             return false;

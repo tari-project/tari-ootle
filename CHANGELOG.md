@@ -7,6 +7,11 @@ See [standard-version](https://github.com/conventional-changelog/standard-versio
 
 Ships the validator, indexer, wallet daemon and swarm binaries that 0.49.0 failed to build.
 
+### Features
+
+- **FFI: `ootle_decode_event`** decodes the events the indexer streams, for Go and C hosts. The ABI
+  tag stays `ootle-sdk-ffi-c/19`. (#3257)
+
 ### Bug fixes
 
 - **build:** release binaries build again; the indexer web UI's wasm build failed on every

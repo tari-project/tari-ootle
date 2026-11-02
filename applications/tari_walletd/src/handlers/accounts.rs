@@ -32,7 +32,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
 use tari_ootle_wallet_crypto::{
     OutputWitness,
     StealthCryptoApiError,
@@ -1266,22 +1266,22 @@ pub async fn handle_transfer(
             }
         })
         .then(|builder| {
-            // The badge authorizes the resource's withdraw rule inside the account's frame, which it reaches as
-            // a `Proof` argument.
+            // The badge authorizes the resource's withdraw rule inside the account's frame, which is lent it by
+            // the window opened around the call.
+            let withdraw = |builder: TransactionBuilder| {
+                builder
+                    .call_method(source_account_address, "withdraw", args![
+                        req.resource_address,
+                        req.amount
+                    ])
+                    .put_last_instruction_output_on_workspace("bucket")
+            };
             if req.proof_from_badge_resource.is_some() {
-                builder.call_method(source_account_address, "withdraw_with_auth", args![
-                    req.resource_address,
-                    req.amount,
-                    Workspace("proof")
-                ])
+                builder.with_authorized_proof("proof", withdraw)
             } else {
-                builder.call_method(source_account_address, "withdraw", args![
-                    req.resource_address,
-                    req.amount
-                ])
+                withdraw(builder)
             }
         })
-        .put_last_instruction_output_on_workspace("bucket")
         .call_method(destination_account_address, "deposit", args![Workspace("bucket")])
         .then(|builder| {
             if req.proof_from_badge_resource.is_some() {
@@ -1869,12 +1869,7 @@ impl DeclaredInputPricing {
     /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
     /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
     async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
-        let ids = ids
-            .into_iter()
-            .filter(|id| !id.is_global())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
         let started = tokio::time::Instant::now();
         let mut interval = Duration::from_millis(250);
         let substates = loop {

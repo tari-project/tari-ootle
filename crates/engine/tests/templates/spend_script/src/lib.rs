@@ -66,6 +66,13 @@ mod spend_scripts {
             assert!(signature.verify(&public_key, SIG_MESSAGE), "invalid spend signature");
         }
 
+        /// Signer lock: authorises only if the spending call carries the badge of `public_key`. A predicate reached
+        /// from a `StealthTransfer` instruction carries the transaction signers' badges; one reached through a
+        /// component's frame carries that component's caller badges instead.
+        pub fn require_signer_badge(public_key: RistrettoPublicKeyBytes, _ctx: SpendContext) {
+            CallerContext::assert_badge_in_scope(&NonFungibleAddress::from_public_key(public_key));
+        }
+
         /// Witness-data lock: authorises only if the spend-supplied witness `data` equals the committed `expected`
         /// bytes. Exercises reading uncommitted witness data (alongside a committed argument) inside a spend script.
         pub fn require_witness_data(expected: Vec<u8>, ctx: SpendContext) {

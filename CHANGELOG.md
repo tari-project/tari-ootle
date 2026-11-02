@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.49.1](https://github.com/tari-project/tari-ootle/compare/v0.49.0...v0.49.1) (2026-11-02)
+
+Ships the validator, indexer, wallet daemon and swarm binaries that 0.49.0 failed to build.
+
+### Features
+
+- **FFI decoders for indexer-served values**: events, substate values, execution results,
+  receipts, resources and UTXOs, matching `ootle-wasm-bor`, for Go and C hosts. The ABI tag stays
+  `ootle-sdk-ffi-c/19`. (#3257)
+
+### Bug fixes
+
+- **build:** release binaries build again; the indexer web UI's wasm build failed on every
+  platform for 0.48.0 and 0.49.0. (#3256)
+- **networking:** substream events queued before a poll are all delivered, and a closed connection
+  reports its pending outbound requests as outbound failures. (#3239)
+- **ootle_serde:** optional hex and duration fields round-trip through binary serde formats. (#3247)
+- **db_inspector:** state transition totals, proposal certificate signature counts and prefix
+  scans are fixed. (#3248)
+
 ## [0.49.0](https://github.com/tari-project/tari-ootle/compare/v0.48.0...v0.49.0) (2026-11-02)
 
 A second testnet reset, for a new authorization model. Proofs authorize only inside a window the

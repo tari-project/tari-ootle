@@ -1530,3 +1530,98 @@ fn doc_comments_and_attributes_are_ignored() {
     assert_eq!(instructions.len(), 1);
     assert_eq!(fee_instructions.len(), 1);
 }
+
+#[test]
+fn multi_segment_call_and_argument_paths_are_rejected() {
+    const STMT_CALL: &str = "Invalid function call, expected `Template::function(..)` or `local_function()`";
+    const LET_CALL: &str = "Invalid function call, expected `Template::function(..)`";
+    const ARG_PATH: &str = "Invalid path, only single segment paths are supported";
+    let cases = [
+        ("fn main() { Foo::Bar::baz(); }", STMT_CALL),
+        ("fn main() { let x = Foo::Bar::baz(); }", LET_CALL),
+        ("fn main() { ::Foo::bar(); }", STMT_CALL),
+        ("fn main() { let x = ::Foo::bar(); }", LET_CALL),
+        ("fn main() { Foo::bar(Baz::Qux); }", ARG_PATH),
+    ];
+    for (manifest, expected) in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("Expected syntax error for invalid path");
+        assert_eq!(
+            err.to_string(),
+            format!("Syntax error: {expected}"),
+            "Unexpected error for `{manifest}`"
+        );
+    }
+}
+
+#[test]
+fn local_function_call_with_arguments_is_rejected() {
+    let manifest = r#"
+        fn helper() {
+            drop_all_proofs!();
+        }
+
+        fn main() {
+            helper(1);
+        }
+    "#;
+
+    let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("local function calls take no arguments");
+    assert!(err.to_string().contains("take no arguments"), "{err}");
+}
+
+#[test]
+fn duplicate_functions_and_tuple_bindings_are_rejected() {
+    let dup_fn = r#"
+        fn helper() {}
+        fn helper() {}
+        fn main() {}
+    "#;
+    let err = parse_manifest(dup_fn, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate helper function should fail");
+    assert!(err.to_string().contains("duplicate function `helper`"), "{err}");
+
+    for name in ["main", "fee_main"] {
+        let dup_entry = format!("fn {name}() {{ drop_all_proofs!(); }} fn {name}() {{ drop_all_proofs!(); }}");
+        let err = parse_manifest(&dup_entry, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("duplicate `{name}` should fail"));
+        assert!(
+            err.to_string().contains(&format!("duplicate function `{name}`")),
+            "{err}"
+        );
+    }
+
+    let dup_tuple = r#"
+        fn main() {
+            let (a, a) = comp.redeem(100);
+        }
+    "#;
+    let err = parse_manifest(dup_tuple, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate identifier in tuple pattern should fail");
+    assert!(
+        err.to_string()
+            .contains("identifier `a` is bound more than once in the same pattern"),
+        "{err}"
+    );
+}
+
+#[test]
+fn zero_arg_macros_reject_arguments() {
+    let cases = [
+        "fn main() { let a = new_component_addr!(1); }",
+        "fn main() { let r = new_resource_addr!(1); }",
+        "fn main() { drop_all_proofs!(1); }",
+    ];
+    for manifest in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("zero-arg macro with arguments should fail");
+        assert!(err.to_string().contains("takes no arguments"), "{err}");
+    }
+}

@@ -111,6 +111,9 @@ impl<'de> Deserialize<'de> for Amount {
                 let digit2 = seq
                     .next_element::<u64>()?
                     .ok_or_else(|| Error::invalid_length(1, &self))?;
+                if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    return Err(Error::invalid_length(Amount::NUM_U64_DIGITS + 1, &self));
+                }
                 Ok(Amount::from_le_digits([digit1, digit2]))
             }
 
@@ -147,6 +150,12 @@ mod tests {
         let val = json!(123u32);
         let decoded: Amount = serde_json::from_value(val).unwrap();
         assert_eq!(decoded, amount);
+
+        let from_digits: Amount = serde_json::from_value(json!([42u64, 1u64])).unwrap();
+        assert_eq!(from_digits, Amount::from_le_digits([42, 1]));
+
+        serde_json::from_value::<Amount>(json!([42u64])).unwrap_err();
+        serde_json::from_value::<Amount>(json!([42u64, 1u64, 0u64])).unwrap_err();
     }
 
     #[test]

@@ -114,7 +114,15 @@ impl<'de> Deserialize<'de> for Amount {
                 let digit3 = seq
                     .next_element::<u64>()?
                     .ok_or_else(|| Error::invalid_length(2, &self))?;
+                if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    return Err(Error::invalid_length(Amount::NUM_DIGITS + 1, &self));
+                }
                 Ok(Amount::from_le_digits([digit1, digit2, digit3]))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where E: Error {
+                Amount::from_le_slice(v).ok_or_else(|| Error::custom("Invalid byte length for PrecisionAmount"))
             }
         }
 
@@ -145,6 +153,16 @@ mod tests {
         let val = json!(123u32);
         let decoded: Amount = serde_json::from_value(val).unwrap();
         assert_eq!(decoded, amount);
+
+        let from_digits: Amount = serde_json::from_value(json!([42u64, 1u64, 0u64])).unwrap();
+        assert_eq!(from_digits, Amount::from_le_digits([42, 1, 0]));
+
+        serde_json::from_value::<Amount>(json!([42u64, 1u64])).unwrap_err();
+        serde_json::from_value::<Amount>(json!([42u64, 1u64, 0u64, 0u64])).unwrap_err();
+
+        let neg = Amount::from(-1234567890i64);
+        let from_bytes: Amount = tari_bor::from_value(&tari_bor::Value::Bytes(neg.to_le_bytes().to_vec())).unwrap();
+        assert_eq!(from_bytes, neg);
     }
 
     #[test]

@@ -4687,11 +4687,11 @@ mod tests {
         traits::VerifiedClaim,
     };
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct DummyTemplateProvider;
 
     impl TemplateProvider for DummyTemplateProvider {
-        type Error = String;
+        type Error = std::convert::Infallible;
         type Template = LoadedTemplate;
 
         fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {

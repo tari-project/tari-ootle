@@ -904,6 +904,16 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
         // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
         for (i, arg) in tf.args.iter().enumerate() {
+            self.charge_engine_arg(arg).map_err(|e| match e {
+                EngineArgChargeError::Unreadable(e) => RuntimeError::InvalidArgument {
+                    argument: "TemplateFunction",
+                    reason: format!(
+                        "spend script '{}' bound argument {} is not well-formed CBOR: {}",
+                        tf.function, i, e
+                    ),
+                },
+                EngineArgChargeError::Runtime(e) => e,
+            })?;
             let _value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
@@ -2932,6 +2942,7 @@ where
                 if let Some(ref statement) = arg.statement {
                     self.tracker.account_fee_intent_stealth_transfer()?;
                     let has_view_key = self.tracker.write_with(|state| {
+                        state.account_stealth_transfer(statement)?;
                         let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
                         let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
                         state.unlock_substate(resource_lock)?;
@@ -4384,6 +4395,7 @@ where
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (address, has_view_key) = self.tracker.write_with(|state| {
+            state.account_stealth_transfer(&statement)?;
             let address = state.resolve_resource_address_ref(resource_address.clone())?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();

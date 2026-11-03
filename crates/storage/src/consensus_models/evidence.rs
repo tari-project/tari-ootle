@@ -70,12 +70,7 @@ impl Evidence {
         let mut evidence = Self::empty();
 
         for obj in inputs {
-            // Version does not affect the shard group
-            let substate_address = obj.or_zero_version().to_substate_address();
-            let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence
-                .add_shard_group(sg)
-                .insert_unpledged_input(obj.substate_id().clone());
+            evidence.insert_unpledged_from_substate_id(num_preshards, num_committees, obj.substate_id().clone());
         }
 
         for obj in outputs {
@@ -833,5 +828,22 @@ mod tests {
             evidence1.get(&sg1).unwrap().outputs.get(&seed_substate_id(2)),
             Some(&SubstateVersion::ZERO)
         );
+    }
+
+    #[test]
+    fn from_inputs_and_outputs_fans_out_global_inputs_across_all_committees() {
+        use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
+        use tari_ootle_common_types::SubstateRequirement;
+
+        let global_id = SubstateId::Template(PublishedTemplateAddress::from_hash([7u8; 32].into()));
+        let req = SubstateRequirement::unversioned(global_id.clone());
+
+        let evidence = Evidence::from_inputs_and_outputs(NumPreshards::P256, 4, [req.as_ref()], []);
+
+        assert_eq!(evidence.num_shard_groups(), 4);
+        for sg in NumPreshards::P256.all_shard_groups_iter(4) {
+            let sg_ev = evidence.get(&sg).expect("shard group present");
+            assert!(sg_ev.inputs().contains_key(&global_id));
+        }
     }
 }

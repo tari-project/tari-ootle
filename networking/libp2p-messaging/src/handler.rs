@@ -61,7 +61,10 @@ use crate::{
 pub struct Handler<TCodec: Codec> {
     peer_id: PeerId,
     protocol: StreamProtocol,
+    /// Streams with an outbound substream request in flight. libp2p reports one negotiation result per request.
     requested_streams: VecDeque<MessageStream<TCodec::Message>>,
+    /// Streams from the behaviour awaiting an outbound substream request. The behaviour sends a connection one stream
+    /// at a time; the queue keeps a later stream from replacing an earlier one regardless.
     pending_streams: VecDeque<MessageStream<TCodec::Message>>,
     pending_events: VecDeque<Event<TCodec::Message>>,
     pending_events_sender: mpsc::Sender<Event<TCodec::Message>>,
@@ -114,8 +117,13 @@ where TCodec: Codec + Send + Clone + 'static
     }
 
     fn on_dial_upgrade_error(&mut self, error: DialUpgradeError<(), Protocol<StreamProtocol>>) {
-        let Some(stream) = self.requested_streams.pop_front() else {
-            tracing::warn!("negotiated a stream without a requested stream");
+        let stream = self.requested_streams.pop_front();
+        debug_assert!(
+            stream.is_some(),
+            "outbound stream upgrade failed with no requested stream"
+        );
+        let Some(stream) = stream else {
+            tracing::warn!("outbound stream upgrade failed with no requested stream");
             return;
         };
 
@@ -156,7 +164,12 @@ where TCodec: Codec + Send + Clone + 'static
         let codec = self.codec.clone();
         let (peer_stream, _protocol) = outbound.protocol;
 
-        let Some(msg_stream) = self.requested_streams.pop_front() else {
+        let msg_stream = self.requested_streams.pop_front();
+        debug_assert!(
+            msg_stream.is_some(),
+            "negotiated outbound stream without a requested stream"
+        );
+        let Some(msg_stream) = msg_stream else {
             tracing::warn!("negotiated outbound stream without a requested stream");
             return;
         };

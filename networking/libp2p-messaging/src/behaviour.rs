@@ -151,7 +151,6 @@ where TCodec: Codec + Send + Clone + 'static
             connections.clear_closed_streams();
         }
         self.connected.retain(|_, connections| !connections.is_empty());
-        self.pending_outbound_dials.retain(|_, (sink, _)| !sink.is_closed());
 
         // Shrink the capacity of empty queues if they exceed the threshold.
         if self.connected.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
@@ -402,10 +401,7 @@ impl<TMsg> Connections<TMsg> {
     }
 
     pub(self) fn next_active_sink(&mut self) -> Option<&MessageSink<TMsg>> {
-        if self.connections.is_empty() {
-            return None;
-        }
-        let start = (self.last_selected_index + 1) % self.connections.len();
+        let start = self.sticky_start_index()?;
         let (last_index, sink) = cycle_once(self.connections.len(), start, |i| {
             let conn = self
                 .connections
@@ -419,10 +415,7 @@ impl<TMsg> Connections<TMsg> {
     }
 
     pub(self) fn next_pending_sink(&mut self) -> Option<&MessageSink<TMsg>> {
-        if self.connections.is_empty() {
-            return None;
-        }
-        let start = (self.last_selected_index + 1) % self.connections.len();
+        let start = self.sticky_start_index()?;
         let (last_index, sink) = cycle_once(self.connections.len(), start, |i| {
             let conn = self
                 .connections
@@ -433,6 +426,13 @@ impl<TMsg> Connections<TMsg> {
 
         self.last_selected_index = last_index;
         Some(sink)
+    }
+
+    /// The search for a sink starts at the last selected connection so that consecutive messages share one stream and
+    /// keep their order. The index is clamped because connections may have closed since it was recorded.
+    fn sticky_start_index(&self) -> Option<usize> {
+        let last = self.connections.len().checked_sub(1)?;
+        Some(self.last_selected_index.min(last))
     }
 
     /// Forgets streams whose handler task has ended so that the next message opens a new stream on the connection.
@@ -517,6 +517,35 @@ mod tests {
             ),
             "expected the next message to open a new stream on the existing connection"
         );
+    }
+
+    #[test]
+    fn consecutive_sink_selections_stay_on_one_connection() {
+        let peer_id = PeerId::random();
+        let mut connections = Connections::<Vec<u8>>::new();
+        let mut streams = Vec::new();
+        for id in 0..2 {
+            let mut connection = Connection::new(ConnectionId::new_unchecked(id), None);
+            let (sink, stream) = stream::channel(id as StreamId, peer_id);
+            connection.stream_id = Some(sink.stream_id());
+            connection.message_sink = Some(sink.clone());
+            connection.pending_sink = Some(sink);
+            connections.push(connection);
+            streams.push(stream);
+        }
+
+        let first = connections.next_active_sink().unwrap().stream_id();
+        assert_eq!(connections.next_active_sink().unwrap().stream_id(), first);
+        assert_eq!(connections.next_pending_sink().unwrap().stream_id(), first);
+
+        // The selected connection closes, leaving the recorded index past the end.
+        connections.last_selected_index = 1;
+        connections.connections.pop();
+        assert_eq!(connections.next_active_sink().unwrap().stream_id(), 0);
+
+        connections.connections.clear();
+        assert!(connections.next_active_sink().is_none());
+        assert!(connections.next_pending_sink().is_none());
     }
 
     #[test]

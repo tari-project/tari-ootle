@@ -15,8 +15,9 @@ use crate::traits::LeaderStrategy;
 /// At equal powers the schedule is `height mod len`: on every step all counters but the previous
 /// winners' are tied, so the lowest index that has not yet led wins.
 ///
-/// A call simulates the schedule up to the slot it asks about, costing up to `total_power × len`
-/// steps, so powers are expected to be small integers rather than raw stake amounts.
+/// Starting the schedule at a height simulates it up to that height's slot, costing up to
+/// `total_power × len` steps, and each later leader from [`LeaderStrategy::leaders_from`] costs `len`.
+/// Powers are therefore expected to be small integers rather than raw stake amounts.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SmoothWeightedRoundRobin;
 
@@ -30,33 +31,83 @@ impl<TAddr: PartialEq> LeaderStrategy<TAddr> for SmoothWeightedRoundRobin {
     /// Panics on an empty committee. A committee whose members all have zero power has no weights
     /// to follow and falls back to `height mod len`.
     fn calculate_leader(&self, committee: &Committee<TAddr>, height: NodeHeight) -> u32 {
+        Schedule::starting_at(committee, height)
+            .next()
+            .expect("the schedule yields a leader for every height")
+    }
+
+    fn leaders_from<'a>(
+        &'a self,
+        committee: &'a Committee<TAddr>,
+        height: NodeHeight,
+    ) -> impl Iterator<Item = u32> + 'a {
+        Schedule::starting_at(committee, height)
+    }
+}
+
+/// The leaders of successive heights under smooth weighted round robin.
+struct Schedule<'a, TAddr> {
+    committee: &'a Committee<TAddr>,
+    total_power: u64,
+    /// The counters as they stand before the step that picks the leader of `height`. They go negative
+    /// and stay within `len × total_power` of zero, so they need a signed type wider than u64.
+    counters: Vec<i128>,
+    height: u64,
+}
+
+impl<'a, TAddr: PartialEq> Schedule<'a, TAddr> {
+    fn starting_at(committee: &'a Committee<TAddr>, height: NodeHeight) -> Self {
         let total_power = committee.total_power().value();
-        if total_power == 0 {
-            return (height.as_u64() % committee.len() as u64) as u32;
-        }
-
-        // Counters go negative and stay within `len × total_power` of zero, so they need a signed type wider than u64.
-        let total_power_i128 = i128::from(total_power);
-        let mut counters = vec![0i128; committee.len()];
-        let mut leader = 0usize;
-        for _ in 0..=height.as_u64() % total_power {
-            let mut highest = None;
-            for (index, member) in committee.iter().enumerate() {
-                // A zero-power member's counter stays at zero, which can tie the maximum and would win the
-                // lowest-index tie-break.
-                if member.vote_power.is_zero() {
-                    continue;
-                }
-                counters[index] += i128::from(member.vote_power.value());
-                if highest.is_none_or(|best: usize| counters[index] > counters[best]) {
-                    highest = Some(index);
-                }
+        let mut schedule = Self {
+            committee,
+            total_power,
+            counters: vec![0; committee.len()],
+            height: height.as_u64(),
+        };
+        if total_power > 0 {
+            for _ in 0..height.as_u64() % total_power {
+                schedule.step();
             }
-            leader = highest.expect("a committee with non-zero total power has a member with non-zero power");
-            counters[leader] -= total_power_i128;
         }
+        schedule
+    }
 
-        leader as u32
+    /// Runs one step of the schedule and returns the index it picks. `total_power` must be non-zero.
+    fn step(&mut self) -> usize {
+        let mut highest = None;
+        for (index, member) in self.committee.iter().enumerate() {
+            // A zero-power member's counter stays at zero, which can tie the maximum and would win the
+            // lowest-index tie-break.
+            if member.vote_power.is_zero() {
+                continue;
+            }
+            self.counters[index] += i128::from(member.vote_power.value());
+            if highest.is_none_or(|best: usize| self.counters[index] > self.counters[best]) {
+                highest = Some(index);
+            }
+        }
+        let leader = highest.expect("a committee with non-zero total power has a member with non-zero power");
+        self.counters[leader] -= i128::from(self.total_power);
+        leader
+    }
+}
+
+impl<TAddr: PartialEq> Iterator for Schedule<'_, TAddr> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        let leader = if self.total_power == 0 {
+            self.height % self.committee.len() as u64
+        } else {
+            // Every period starts from zeroed counters, which also restarts the schedule when the height
+            // wraps past the top of its range to zero.
+            if self.height.is_multiple_of(self.total_power) {
+                self.counters.fill(0);
+            }
+            self.step() as u64
+        };
+        self.height = self.height.wrapping_add(1);
+        Some(leader as u32)
     }
 }
 
@@ -169,6 +220,26 @@ mod tests {
                 SmoothWeightedRoundRobin.calculate_leader(&committee, NodeHeight(height)),
                 (height % 3) as u32
             );
+        }
+    }
+
+    #[test]
+    fn leaders_from_matches_the_leader_of_each_height() {
+        for powers in [&[1, 1, 1, 1][..], &[8, 1, 1], &[3, 2, 1], &[2, 0, 3, 0, 1]] {
+            let committee = committee(powers);
+            let total_power = committee.total_power().value();
+            for start in (0..2 * total_power).chain(u64::MAX - 2 * total_power..=u64::MAX) {
+                let walked = SmoothWeightedRoundRobin
+                    .leaders_from(&committee, NodeHeight(start))
+                    .take(3 * total_power as usize)
+                    .collect::<Vec<_>>();
+                let per_height = (0..3 * total_power)
+                    .map(|offset| {
+                        SmoothWeightedRoundRobin.calculate_leader(&committee, NodeHeight(start.wrapping_add(offset)))
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(walked, per_height, "powers {powers:?}, start {start}");
+            }
         }
     }
 }

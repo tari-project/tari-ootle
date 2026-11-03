@@ -85,9 +85,10 @@ impl LeaderSkipSet {
     /// function total.
     ///
     /// `view_height` may come from a peer message, so the walk wraps past the top of the height
-    /// range to height zero. The heights it visits there are no longer consecutive, but they still
-    /// cover all but at most one slot of the schedule, so the fallback stays unreachable while less
-    /// than a third of the committee's power is faulty.
+    /// range to height zero. Its slots are then two consecutive runs, one either side of the wrap,
+    /// and the longer covers at least half of the schedule's slots. Skipped members hold fewer than
+    /// a third of them, so the fallback stays unreachable while less than a third of the committee's
+    /// power is faulty.
     pub fn effective_leader<'a, TAddr: PartialEq, TLeaderStrategy: LeaderStrategy<TAddr>>(
         &self,
         leader_strategy: &TLeaderStrategy,
@@ -99,10 +100,13 @@ impl LeaderSkipSet {
             return raw;
         }
 
-        for offset in 0..committee.total_power().value() {
-            let candidate = leader_strategy.get_leader(committee, view_height.wrapping_add(NodeHeight(offset)));
-            if !self.is_skipped(candidate.1) {
-                return candidate;
+        let period = usize::try_from(committee.total_power().value()).unwrap_or(usize::MAX);
+        for index in leader_strategy.leaders_from(committee, view_height).take(period) {
+            let member = committee
+                .get(index as usize)
+                .expect("the leader strategy picks an index into the committee");
+            if !self.is_skipped(&member.public_key) {
+                return (&member.address, &member.public_key);
             }
         }
 

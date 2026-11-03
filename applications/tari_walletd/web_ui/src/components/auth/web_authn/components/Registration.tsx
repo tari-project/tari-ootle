@@ -13,15 +13,16 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistration } from "@utils/json_rpc";
 import { Buffer } from "buffer";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Form } from "react-router-dom";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 
 const createCredential = async (
   rpOptions: { rpId: string; rpName: string },
-  username: string,
+  user: PublicKeyCredentialUserEntity,
   challenge: BufferSource,
+  pubKeyCredParams: PublicKeyCredentialParameters[],
   excludeCredentials: PublicKeyCredentialDescriptor[] = [],
 ) => {
   const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
@@ -29,29 +30,9 @@ const createCredential = async (
       name: rpOptions.rpName,
       id: rpOptions.rpId,
     },
-    user: {
-      id: Uint8Array.from(username, (c) => c.charCodeAt(0)),
-      name: username,
-      displayName: username,
-    },
+    user,
     challenge,
-    pubKeyCredParams: [
-      {
-        type: "public-key",
-        // Ed25519
-        alg: -8,
-      },
-      {
-        type: "public-key",
-        // ES256
-        alg: -7,
-      },
-      {
-        type: "public-key",
-        // RS256
-        alg: -257,
-      },
-    ],
+    pubKeyCredParams,
     timeout: 60000,
     excludeCredentials,
     attestation: "none",
@@ -69,12 +50,15 @@ const createCredential = async (
 
 export async function performPasskeyRegistration(options?: {
   label?: string;
+  setupToken?: string;
   updateClientToken?: boolean;
 }): Promise<string | null | undefined> {
   const trimmedLabel = options?.label?.trim() || undefined;
+  const trimmedSetupToken = options?.setupToken?.trim() || undefined;
   const startRegisterResponse = await webauthnStartRegistration({
     username: APP_NAME,
     label: trimmedLabel ?? null,
+    setup_token: trimmedSetupToken ?? null,
   });
 
   if (!startRegisterResponse) {
@@ -87,6 +71,21 @@ export async function performPasskeyRegistration(options?: {
   }
 
   const challenge = Buffer.from(publicKeyOptions.challenge, "base64");
+  // The daemon only accepts credentials signed with an algorithm it offered, so it alone chooses the list.
+  const pubKeyCredParams: PublicKeyCredentialParameters[] = publicKeyOptions.pubKeyCredParams;
+  if (!Array.isArray(pubKeyCredParams) || pubKeyCredParams.length === 0) {
+    throw new Error("Failed to start registration: missing pubKeyCredParams");
+  }
+  // Passkey managers key stored passkeys on (rp id, user id). The daemon issues a fresh user id per registration,
+  // which keeps passkeys for different wallets on the same host separate.
+  if (!publicKeyOptions.user?.id) {
+    throw new Error("Failed to start registration: missing user id");
+  }
+  const user: PublicKeyCredentialUserEntity = {
+    id: Buffer.from(publicKeyOptions.user.id, "base64"),
+    name: publicKeyOptions.user.name || APP_NAME,
+    displayName: publicKeyOptions.user.displayName || APP_NAME,
+  };
   const excludeCredentials: PublicKeyCredentialDescriptor[] = Array.isArray(publicKeyOptions.excludeCredentials)
     ? publicKeyOptions.excludeCredentials.map((cred: any) => ({
         type: cred.type || "public-key",
@@ -101,8 +100,9 @@ export async function performPasskeyRegistration(options?: {
       rpId: WEBAUTHN_RP_ID,
       rpName: "Tari Ootle Wallet Web UI",
     },
-    APP_NAME,
+    user,
     challenge,
+    pubKeyCredParams,
     excludeCredentials,
   );
 
@@ -113,6 +113,7 @@ export async function performPasskeyRegistration(options?: {
   const { token } = await webauthnFinishRegistration({
     credential,
     session_id: regSessionId,
+    setup_token: trimmedSetupToken ?? null,
   });
 
   if (options?.updateClientToken !== false && token) {
@@ -131,15 +132,36 @@ function WebauthnRegistration(props: WebauthnProps) {
   const [label, setLabel] = useState("");
   const [backupLabel, setBackupLabel] = useState("Backup Passkey");
   const [showBackupPrompt, setShowBackupPrompt] = useState(false);
+  const [setupToken, setSetupToken] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("token")?.trim() || "";
+  });
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const tokenFromQuery = url.searchParams.get("token")?.trim();
+    if (tokenFromQuery) {
+      setSetupToken(tokenFromQuery);
+      url.searchParams.delete("token");
+      window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+    }
+  }, []);
 
   const handleRegister = async (e: FormEvent) => {
     e.preventDefault();
+    const trimmedToken = setupToken.trim();
+    if (!trimmedToken) {
+      setError("A one-time setup token is required to register the first passkey.");
+      return;
+    }
+
     setLoading(true);
     setError("");
 
     try {
       await performPasskeyRegistration({
         label,
+        setupToken: trimmedToken,
         updateClientToken: true,
       });
       setShowBackupPrompt(true);
@@ -225,6 +247,16 @@ function WebauthnRegistration(props: WebauthnProps) {
                   }}
                 >
                   <TextField
+                    label="One-time setup token"
+                    placeholder="Paste setup token from wallet daemon log or setup_token file"
+                    value={setupToken}
+                    onChange={(e) => setSetupToken(e.target.value)}
+                    required
+                    fullWidth
+                    size="small"
+                    disabled={loading}
+                  />
+                  <TextField
                     label="Passkey Label (optional)"
                     placeholder="e.g. This Device"
                     value={label}
@@ -233,7 +265,7 @@ function WebauthnRegistration(props: WebauthnProps) {
                     size="small"
                     fullWidth
                   />
-                  <Button variant="contained" type="submit" disabled={loading}>
+                  <Button variant="contained" type="submit" disabled={loading || !setupToken.trim()}>
                     Register
                   </Button>
                   {loadingBar}

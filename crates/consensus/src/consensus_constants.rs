@@ -316,7 +316,7 @@ impl ConsensusConstants {
         max_block_pledge_bytes: MAX_BLOCK_PLEDGE_BYTES,
         max_block_foreign_proposal_bytes: MAX_BLOCK_FOREIGN_PROPOSAL_BYTES,
         max_block_validation_foreign_proposal_bytes: MAX_BLOCK_VALIDATION_FOREIGN_PROPOSAL_BYTES,
-        exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
+        exhaust_burn_rate: ExhaustBurnRate::new(10_000), // 100%
         max_transaction_validity_epochs: 2160,
     };
     pub const TESTNET: Self = Self {

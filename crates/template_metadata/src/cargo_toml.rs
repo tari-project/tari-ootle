@@ -71,21 +71,7 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         }
     };
 
-    let tags = match tari_template.and_then(|t| t.get("tags")) {
-        Some(v) => {
-            let arr = v
-                .as_array()
-                .ok_or(CargoTomlError::InvalidFieldType("tags", "array of strings"))?;
-            arr.iter()
-                .map(|item| {
-                    item.as_str()
-                        .map(String::from)
-                        .ok_or(CargoTomlError::InvalidFieldType("tags", "array of strings"))
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        },
-        None => Vec::new(),
-    };
+    let tags = parse_tags(tari_template.and_then(|t| t.get("tags")))?;
 
     let category = get_str("category")?.map(String::from);
 
@@ -114,22 +100,7 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         .transpose()
         .map_err(|_| CargoTomlError::InvalidTemplateAddress("supersedes"))?;
 
-    let extra = match tari_template.and_then(|t| t.get("extra")) {
-        Some(v) => {
-            let table = v
-                .as_table()
-                .ok_or(CargoTomlError::InvalidFieldType("extra", "table of strings"))?;
-            table
-                .iter()
-                .map(|(k, val)| {
-                    val.as_str()
-                        .map(|s| (k.clone(), s.to_string()))
-                        .ok_or(CargoTomlError::InvalidFieldType("extra", "table of strings"))
-                })
-                .collect::<Result<BTreeMap<String, String>, _>>()?
-        },
-        None => BTreeMap::new(),
-    };
+    let extra = parse_extra(tari_template.and_then(|t| t.get("extra")))?;
 
     Ok(TemplateMetadata {
         schema_version: SCHEMA_VERSION,
@@ -148,6 +119,32 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         functions: Vec::new(),
         extra,
     })
+}
+
+fn parse_tags(value: Option<&cargo_toml::Value>) -> Result<Vec<String>, CargoTomlError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let invalid = || CargoTomlError::InvalidFieldType("tags", "array of strings");
+    value
+        .as_array()
+        .ok_or_else(invalid)?
+        .iter()
+        .map(|item| item.as_str().map(String::from).ok_or_else(invalid))
+        .collect()
+}
+
+fn parse_extra(value: Option<&cargo_toml::Value>) -> Result<BTreeMap<String, String>, CargoTomlError> {
+    let Some(value) = value else {
+        return Ok(BTreeMap::new());
+    };
+    let invalid = || CargoTomlError::InvalidFieldType("extra", "table of strings");
+    value
+        .as_table()
+        .ok_or_else(invalid)?
+        .iter()
+        .map(|(key, val)| val.as_str().map(|s| (key.clone(), s.to_string())).ok_or_else(invalid))
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -287,5 +284,66 @@ license.workspace = true
             from_cargo_toml_str(inherited_license),
             Err(CargoTomlError::InheritedField("license"))
         ));
+    }
+
+    fn parse_with_package_tail(tail: &str) -> Result<TemplateMetadata, CargoTomlError> {
+        from_cargo_toml_str(&format!("[package]\nname = \"t\"\nversion = \"1.0.0\"\n{tail}"))
+    }
+
+    #[test]
+    fn rejects_non_string_tag_entry() {
+        let result = parse_with_package_tail("[package.metadata.tari-template]\ntags = [\"a\", 1]\n");
+        assert!(matches!(result, Err(CargoTomlError::InvalidFieldType("tags", _))));
+    }
+
+    #[test]
+    fn rejects_non_string_extra_value() {
+        let result = parse_with_package_tail("[package.metadata.tari-template.extra]\naudit = 1\n");
+        assert!(matches!(result, Err(CargoTomlError::InvalidFieldType("extra", _))));
+    }
+
+    #[test]
+    fn rejects_non_table_extra() {
+        let result = parse_with_package_tail("[package.metadata.tari-template]\nextra = \"x\"\n");
+        assert!(matches!(result, Err(CargoTomlError::InvalidFieldType("extra", _))));
+    }
+
+    #[test]
+    fn rejects_non_string_category() {
+        let result = parse_with_package_tail("[package.metadata.tari-template]\ncategory = 1\n");
+        assert!(matches!(
+            result,
+            Err(CargoTomlError::InvalidFieldType("category", "string"))
+        ));
+    }
+
+    #[test]
+    fn rejects_non_string_homepage() {
+        let result = parse_with_package_tail("[package.metadata.tari-template]\nhomepage = true\n");
+        assert!(matches!(
+            result,
+            Err(CargoTomlError::InvalidFieldType("homepage", "string"))
+        ));
+    }
+
+    #[test]
+    fn rejects_non_table_tari_template() {
+        let result = parse_with_package_tail("[package.metadata]\ntari-template = \"x\"\n");
+        assert!(matches!(
+            result,
+            Err(CargoTomlError::InvalidFieldType("tari-template", "table"))
+        ));
+    }
+
+    #[test]
+    fn rejects_inherited_description() {
+        let result = parse_with_package_tail("description.workspace = true\n");
+        assert!(matches!(result, Err(CargoTomlError::InheritedField("description"))));
+    }
+
+    #[test]
+    fn rejects_inherited_repository() {
+        let result = parse_with_package_tail("repository.workspace = true\n");
+        assert!(matches!(result, Err(CargoTomlError::InheritedField("repository"))));
     }
 }

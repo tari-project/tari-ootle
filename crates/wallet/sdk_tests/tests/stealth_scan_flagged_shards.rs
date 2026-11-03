@@ -375,7 +375,9 @@ async fn a_held_output_served_live_at_a_later_version_is_kept_proven_up_at_it() 
     let (id, utxo) = test.owned_utxo(&account, VALUE);
     hold(&test, &account, id, &utxo, Some(3));
     let later = VERSION.next();
-    let value = SubstateValue::Utxo(utxo.clone());
+    let mut frozen = utxo.clone();
+    frozen.freeze();
+    let value = SubstateValue::Utxo(frozen);
     let proof = substate_proof(&sets[4], &substate_id(id), later, &value);
     network.serve_substate(substate_id(id), later, value, Some(proof));
     index_below_horizon(&network, Vec::new(), false);
@@ -391,5 +393,7 @@ async fn a_held_output_served_live_at_a_later_version_is_kept_proven_up_at_it() 
         .find(|output| output.commitment == id.into_commitment_bytes())
         .unwrap();
     assert_eq!(stored.status, OutputStatus::Unspent);
+    assert!(stored.is_frozen);
     assert_eq!(stored.proven_up.map(|proven_up| proven_up.version), Some(later));
 }
+

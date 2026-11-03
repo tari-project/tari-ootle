@@ -321,3 +321,24 @@ async fn a_substate_older_than_the_version_asked_for_is_refused() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn a_substate_served_of_the_wrong_type_is_refused() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
+    let (_, value) = substate(1);
+    let wrong_id = SubstateId::Resource(tari_template_lib::types::constants::TARI_TOKEN);
+    let proof = substate_proof(&sets[4], &wrong_id, VERSION, &value);
+    network.serve_substate(wrong_id.clone(), VERSION, value, Some(proof));
+
+    let err = read_error(&test, &wrong_id).await;
+    assert!(matches!(err, SubstateApiError::SubstateOfAnotherType(_)), "{err}");
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_substates_from_network(std::slice::from_ref(&wrong_id))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SubstateApiError::SubstateOfAnotherType(_)), "{err}");
+}
+

@@ -514,6 +514,8 @@ where
             Ok(read) => read,
             Err(
                 err @ (SubstateApiError::SubstateDoesNotExist { .. } |
+                SubstateApiError::SubstateOfAnotherType(_) |
+                SubstateApiError::UndecodableSubstate { .. } |
                 SubstateApiError::SubstateUnproven { .. } |
                 SubstateApiError::SubstateUnverified { .. } |
                 SubstateApiError::SubstateProvenBeforeAnchor { .. } |
@@ -610,6 +612,8 @@ where
             },
             Err(
                 err @ (SubstateApiError::SubstateDoesNotExist { .. } |
+                SubstateApiError::SubstateOfAnotherType(_) |
+                SubstateApiError::UndecodableSubstate { .. } |
                 SubstateApiError::SubstateUnproven { .. } |
                 SubstateApiError::SubstateUnverified { .. } |
                 SubstateApiError::SubstateProvenBeforeAnchor { .. } |

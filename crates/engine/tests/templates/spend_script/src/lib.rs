@@ -119,6 +119,16 @@ mod spend_scripts {
                 .initial_supply(1u32)
         }
 
+        /// Creates a fungible resource guarded by an authorization hook on `component`.
+        pub fn create_hooked_mintable_resource(component: ComponentAddress) -> ResourceAddress {
+            ResourceBuilder::public_fungible()
+                .mintable(rule!(allow_all), LOCKED)
+                .with_authorization_hook(component, "auth_hook")
+                .build()
+        }
+
+        pub fn auth_hook(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {}
+
         /// Attempts a cross-template call. `call_invoke` is on the read-only deny-list (and cross-template calls are
         /// disabled at the frame level), so this always aborts the spend before the target runs.
         pub fn try_cross_template_call(template: TemplateAddress, _ctx: SpendContext) {

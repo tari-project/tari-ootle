@@ -859,8 +859,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         // index and existence lookups only - no full blocks are loaded:
         //  - a block in `from_block`'s chain scope (on its uncommitted pending chain, or at/below the commit position)
         //    that is present in `BlockCf` is an ancestor, so reusable;
-        //  - an execution written for an unsaved block (e.g. during `OnPropose` before the block is inserted) or for a
-        //    deleted fork block above the commit position is either outside the chain scope or absent from `BlockCf`,
+        //  - an execution written for a block that was never saved (`OnPropose` records executions before inserting its
+        //    block, and a proposal may never be inserted) is either outside the chain scope or absent from `BlockCf`,
         //    and must NOT be reused.
         // Epoch GC removes the blocks of earlier epochs but keeps their executions until the transaction is finalized,
         // and a transaction may still be pending across an epoch change. `BlockCf` therefore only decides ancestry for

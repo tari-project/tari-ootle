@@ -16,9 +16,8 @@ export type MultiShardAtom = {
    */
   fee_intent_only: boolean;
   /**
-   * The epoch the transaction executes in. Every shard group involved must execute it under the same pin, so a
-   * shard group that first learns of the transaction from this atom adopts the pin it carries rather than one
-   * derived from the block that carries it.
+   * The epoch the transaction executes in. Every shard group involved must execute the transaction under this pin.
+   * A shard group that first learns of the transaction from this atom adopts it.
    */
   locked_epoch: LockedEpoch;
 };

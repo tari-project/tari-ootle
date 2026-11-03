@@ -790,7 +790,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         // peer responses can never reach 3 without including us).
         if let Some(self_member) = committee.iter().find(|m| &m.address == our_addr) {
             counted_pks.insert(self_member.public_key);
-            attested_power += self_member.vote_power;
+            attested_power = attested_power.saturating_add(self_member.vote_power);
         }
 
         // Iterate committee members in a randomised order so that under repeated probes we
@@ -911,7 +911,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             // QC is at our leaf's epoch — count this peer's attestation (by public key) toward
             // the "no-higher-QC" quorum.
             if counted_pks.insert(member.public_key) {
-                attested_power += member.vote_power;
+                attested_power = attested_power.saturating_add(member.vote_power);
             }
 
             if attested_power >= quorum_threshold {
@@ -1125,7 +1125,7 @@ struct LaterGenesisReports {
 impl LaterGenesisReports {
     fn record<TAddr>(&mut self, member: &CommitteeMember<TAddr>, epoch: Epoch) {
         if self.reporters.insert(member.public_key) {
-            self.power += member.vote_power;
+            self.power = self.power.saturating_add(member.vote_power);
             self.lowest_epoch = Some(self.lowest_epoch.map_or(epoch, |lowest| lowest.min(epoch)));
         }
     }

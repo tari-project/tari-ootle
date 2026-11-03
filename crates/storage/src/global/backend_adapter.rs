@@ -103,6 +103,13 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<u64, Self::Error>;
+    /// Returns the sum of the vote power of the members of `shard_group` in `epoch`.
+    fn validator_nodes_total_power_for_shard_group(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<VotePower, Self::Error>;
 
     fn validator_nodes_clear_committees(
         &self,

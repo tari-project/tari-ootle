@@ -36,7 +36,7 @@ pub struct LeaderSkipSet {
 }
 
 impl LeaderSkipSet {
-    /// A set that skips nobody: leader selection is then plain round-robin.
+    /// A set that skips nobody: every view goes to the leader strategy's leader.
     pub fn none() -> Self {
         Self { skipped: Vec::new() }
     }
@@ -77,16 +77,17 @@ impl LeaderSkipSet {
     /// at `view_height` and proposes the next one, so a skipped validator costs no dummy block, no
     /// timeout certificate and no NEWVIEW.
     ///
-    /// The walk is bounded by the committee size, which covers every member because
-    /// [`LeaderStrategy::calculate_leader`] is a bijection over that many consecutive heights - a
-    /// strategy that is not would need a different bound. It falls back to the round-robin leader
-    /// when every candidate it visits is skipped, which cannot happen while fewer than a third of
-    /// the committee is faulty but keeps the function total.
+    /// The walk is bounded by the committee's total power, which covers every member with power
+    /// because [`LeaderStrategy::calculate_leader`] gives each member `vote_power` of any
+    /// `total_power` consecutive heights - a strategy that does not would need a different bound.
+    /// It falls back to the strategy's leader when every candidate it visits is skipped, which
+    /// cannot happen while less than a third of the committee's power is faulty but keeps the
+    /// function total.
     ///
     /// `view_height` may come from a peer message, so the walk wraps past the top of the height
-    /// range to height zero. The heights it visits there are no longer consecutive, but under
-    /// round-robin they still cover all but at most one member, so the fallback stays unreachable
-    /// while fewer than a third of the committee is faulty.
+    /// range to height zero. The heights it visits there are no longer consecutive, but they still
+    /// cover all but at most one slot of the schedule, so the fallback stays unreachable while less
+    /// than a third of the committee's power is faulty.
     pub fn effective_leader<'a, TAddr: PartialEq, TLeaderStrategy: LeaderStrategy<TAddr>>(
         &self,
         leader_strategy: &TLeaderStrategy,
@@ -98,7 +99,7 @@ impl LeaderSkipSet {
             return raw;
         }
 
-        for offset in 0..committee.len() as u64 {
+        for offset in 0..committee.total_power().value() {
             let candidate = leader_strategy.get_leader(committee, view_height.wrapping_add(NodeHeight(offset)));
             if !self.is_skipped(candidate.1) {
                 return candidate;
@@ -140,14 +141,7 @@ mod tests {
     use tari_ootle_common_types::committee::CommitteeMember;
 
     use super::*;
-
-    struct RoundRobin;
-
-    impl LeaderStrategy<u8> for RoundRobin {
-        fn calculate_leader(&self, committee: &Committee<u8>, height: NodeHeight) -> u32 {
-            (height.as_u64() % committee.len() as u64) as u32
-        }
-    }
+    use crate::leader_selection::SmoothWeightedRoundRobin;
 
     fn pk(n: u8) -> RistrettoPublicKeyBytes {
         let mut bytes = [0u8; 32];
@@ -156,12 +150,18 @@ mod tests {
     }
 
     fn committee(n: u8) -> Committee<u8> {
+        weighted_committee(&vec![1; n as usize])
+    }
+
+    fn weighted_committee(powers: &[u64]) -> Committee<u8> {
         Committee::new(
-            (0..n)
-                .map(|i| CommitteeMember {
-                    address: i,
-                    public_key: pk(i),
-                    vote_power: 1.into(),
+            powers
+                .iter()
+                .enumerate()
+                .map(|(i, power)| CommitteeMember {
+                    address: i as u8,
+                    public_key: pk(i as u8),
+                    vote_power: (*power).into(),
                 })
                 .collect(),
         )
@@ -178,7 +178,7 @@ mod tests {
         let committee = committee(4);
         let set = LeaderSkipSet::none();
         for height in 0..8u64 {
-            let (addr, _) = set.effective_leader(&RoundRobin, &committee, NodeHeight(height));
+            let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(height));
             assert_eq!(*addr, (height % 4) as u8);
         }
     }
@@ -187,10 +187,10 @@ mod tests {
     fn a_skipped_leader_hands_the_view_to_the_next_one() {
         let committee = committee(4);
         let set = skip_set(&[1]);
-        let (addr, _) = set.effective_leader(&RoundRobin, &committee, NodeHeight(1));
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(1));
         assert_eq!(*addr, 2);
         // The views around it are untouched.
-        let (addr, _) = set.effective_leader(&RoundRobin, &committee, NodeHeight(2));
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(2));
         assert_eq!(*addr, 2);
     }
 
@@ -198,7 +198,7 @@ mod tests {
     fn the_walk_passes_over_adjacent_skipped_leaders() {
         let committee = committee(4);
         let set = skip_set(&[1, 2]);
-        let (addr, _) = set.effective_leader(&RoundRobin, &committee, NodeHeight(1));
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(1));
         assert_eq!(*addr, 3);
     }
 
@@ -206,7 +206,7 @@ mod tests {
     fn the_walk_wraps_around_the_committee() {
         let committee = committee(4);
         let set = skip_set(&[3, 0]);
-        let (addr, _) = set.effective_leader(&RoundRobin, &committee, NodeHeight(3));
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(3));
         assert_eq!(*addr, 1);
     }
 
@@ -214,7 +214,7 @@ mod tests {
     fn everyone_skipped_falls_back_to_the_round_robin_leader() {
         let committee = committee(4);
         let set = skip_set(&[0, 1, 2, 3]);
-        let (addr, _) = set.effective_leader(&RoundRobin, &committee, NodeHeight(2));
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(2));
         assert_eq!(*addr, 2);
     }
 
@@ -223,13 +223,35 @@ mod tests {
         // u64::MAX % 4 == 3
         let four = committee(4);
         let set = skip_set(&[3]);
-        let (addr, _) = set.effective_leader(&RoundRobin, &four, NodeHeight::max());
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &four, NodeHeight::max());
         assert_eq!(*addr, 0);
 
         // u64::MAX % 3 == 0, and height zero after the wrap lands on the same skipped member.
         let three = committee(3);
         let set = skip_set(&[0]);
-        let (addr, _) = set.effective_leader(&RoundRobin, &three, NodeHeight::max());
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &three, NodeHeight::max());
         assert_eq!(*addr, 1);
+    }
+
+    #[test]
+    fn the_walk_reaches_past_a_skipped_heavy_leader() {
+        // Schedule: [0, 0, 0, 1, 0, 0, 2, 0, 0, 0]. Member 0 holds the first three slots, so a walk
+        // bounded by the committee size would never leave it.
+        let committee = weighted_committee(&[8, 1, 1]);
+        let set = skip_set(&[0]);
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(0));
+        assert_eq!(*addr, 1);
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(4));
+        assert_eq!(*addr, 2);
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(7));
+        assert_eq!(*addr, 1);
+    }
+
+    #[test]
+    fn a_skipped_light_leader_hands_the_view_to_the_next_slot() {
+        let committee = weighted_committee(&[8, 1, 1]);
+        let set = skip_set(&[1]);
+        let (addr, _) = set.effective_leader(&SmoothWeightedRoundRobin, &committee, NodeHeight(3));
+        assert_eq!(*addr, 0);
     }
 }

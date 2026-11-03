@@ -4,6 +4,7 @@
 mod bounded_spawn;
 pub mod consensus_constants;
 pub mod hotstuff;
+pub mod leader_selection;
 pub mod messages;
 mod tracing;
 pub mod traits;

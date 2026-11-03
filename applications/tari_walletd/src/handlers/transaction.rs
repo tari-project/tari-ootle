@@ -551,8 +551,10 @@ fn resolve_upgradable_components(
 /// Direct calls in instruction order, then components the dry run wrote that the instructions did not name.
 ///
 /// A component the run wrote takes its rule from the accept diff: the up'd header already carries
-/// `upgrade_rule`, which is fixed at creation. A directly called component that was only read takes its rule
-/// from `fetched`. A component the transaction creates has no down entry and is skipped.
+/// `upgrade_rule`, which is fixed at creation, so a nested write is not fetched. A directly called component
+/// that was only read takes its rule from `fetched`, because its header is not in the diff. A component a
+/// nested call only reads is absent: nothing in the diff names it. A component the transaction creates has no
+/// down entry and is skipped.
 fn collect_upgrade_rules(
     called: &[ComponentAddress],
     fetched: &HashMap<SubstateId, Substate>,

@@ -492,25 +492,19 @@ pub struct TransactionSubmitDryRunResponse {
     /// subtracted since it won't recur with a tighter max_fee.
     pub required_fees: u64,
     pub result: ExecuteResult,
-    /// Components whose template can be changed after creation, so the code that runs on submission may differ from
-    /// the dry run. See [`UpgradableComponent`].
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
     #[serde(default)]
     pub upgradable_components: Vec<UpgradableComponent>,
 }
 
 /// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
 /// transaction is submitted may differ from the code that ran in the dry run.
-///
-/// The list is every component the transaction calls directly, plus every component a nested call wrote a new
-/// version of. A write's up'd header, `upgrade_rule` included, is already in the dry run's accept diff, so nested
-/// writes are not fetched. A directly called component the run only read is fetched, because its header is not in
-/// the diff. A component a nested call only reads is absent: nothing in the diff names it. A component the
-/// transaction creates is absent too: it does not exist until the transaction is accepted, so nothing can swap
-/// its template beforehand.
-///
-/// [`UpdateRule::Locked`] and `AccessRule::DenyAll` are never listed. `check_component_upgrade_rule` rejects both,
-/// and an upgrade rule does not grant the component owner a bypass. An empty list does not mean every component
-/// the transaction reaches is locked.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct UpgradableComponent {
@@ -548,8 +542,13 @@ pub struct TransactionSubmitManifestResponse {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub required_fees: Option<u64>,
     pub result: Option<ExecuteResult>,
-    /// Components whose template can be changed after creation, so the code that runs on submission may differ from
-    /// the dry run. Only populated for dry runs. See [`UpgradableComponent`].
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. Only populated for dry runs. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
     #[serde(default)]
     pub upgradable_components: Vec<UpgradableComponent>,
 }

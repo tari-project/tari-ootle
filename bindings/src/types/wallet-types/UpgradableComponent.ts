@@ -5,16 +5,5 @@ import type { UpdateRule } from "../UpdateRule";
 /**
  * A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
  * transaction is submitted may differ from the code that ran in the dry run.
- *
- * The list is every component the transaction calls directly, plus every component a nested call wrote a new
- * version of. A write's up'd header, `upgrade_rule` included, is already in the dry run's accept diff, so nested
- * writes are not fetched. A directly called component the run only read is fetched, because its header is not in
- * the diff. A component a nested call only reads is absent: nothing in the diff names it. A component the
- * transaction creates is absent too: it does not exist until the transaction is accepted, so nothing can swap
- * its template beforehand.
- *
- * [`UpdateRule::Locked`] and `AccessRule::DenyAll` are never listed. `check_component_upgrade_rule` rejects both,
- * and an upgrade rule does not grant the component owner a bypass. An empty list does not mean every component
- * the transaction reaches is locked.
  */
 export type UpgradableComponent = { component_address: ComponentAddress; upgrade_rule: UpdateRule };

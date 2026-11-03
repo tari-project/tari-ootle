@@ -15,8 +15,13 @@ export type TransactionSubmitDryRunResponse = {
   required_fees: bigint;
   result: ExecuteResult;
   /**
-   * Components whose template can be changed after creation, so the code that runs on submission may differ from
-   * the dry run. See [`UpgradableComponent`].
+   * Components the transaction calls directly, plus components a nested call writes, whose template can still be
+   * swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+   * submission may differ from the dry run. See [`UpgradableComponent`].
+   *
+   * The list leaves out components a nested call only reads, components the transaction creates, and components
+   * whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+   * component the transaction reaches is locked.
    */
   upgradable_components: Array<UpgradableComponent>;
 };

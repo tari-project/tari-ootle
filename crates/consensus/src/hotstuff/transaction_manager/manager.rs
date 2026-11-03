@@ -81,21 +81,32 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         &self.uncommitted_templates
     }
 
-    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups, before they are
-    /// locked. Returns what the transaction is prepared as instead if they cannot be pledged: an abort if they are
-    /// more than any block may pledge, or a deferral if they only do not fit in this block. Only the shard group
-    /// holding the inputs measures them, so it aborts unilaterally and the other shard groups adopt the abort from
-    /// its foreign proposal.
+    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups, once `lock_status` shows
+    /// every lock the transaction requested was granted. A transaction with a deferrable lock conflict is left out of
+    /// the block by its proposer, so its inputs are not pledged.
+    ///
+    /// Returns what the transaction is prepared as instead if its inputs cannot be pledged, having released the locks
+    /// it took in the block: an abort if they are more than any block may pledge, or a deferral if they only do not
+    /// fit in this block. Only the shard group holding the inputs measures them, so it aborts unilaterally and the
+    /// other shard groups adopt the abort from its foreign proposal.
     fn pledge_local_inputs<'i, TTx: StateStoreReadTransaction, I>(
         &self,
         store: &mut PendingSubstateStore<TTx>,
         transaction_id: &TransactionId,
+        lock_status: &LockStatus,
         inputs: I,
     ) -> Result<Option<PreparedTransaction>, BlockTransactionExecutorError>
     where
         I: IntoIterator<Item = VersionedSubstateIdRef<'i>>,
     {
-        match store.pledge_inputs(inputs, self.max_transaction_pledge_bytes)? {
+        if lock_status.is_any_failed() {
+            return Ok(None);
+        }
+        let pledge = store.pledge_inputs(inputs, self.max_transaction_pledge_bytes)?;
+        if !matches!(pledge, InputPledge::Pledged) {
+            store.release_new_locks(transaction_id);
+        }
+        match pledge {
             InputPledge::Pledged => Ok(None),
             InputPledge::TransactionTooLarge { bytes } => {
                 warn!(
@@ -615,12 +626,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 if let Some(prepared) = self.pledge_local_inputs(
                     store,
                     &transaction_id,
+                    &lock_status,
                     requested_locks
                         .iter()
                         .filter(|lock| local_committee_info.includes_substate_id(lock.substate_id()))
                         .map(|lock| lock.to_versioned_substate_id_ref()),
                 )? {
-                    store.release_new_locks(&transaction_id);
                     return Ok(prepared);
                 }
                 // We're committing, and one or more of the outputs are foreign
@@ -744,9 +755,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         if let Some(prepared) = self.pledge_local_inputs(
             store,
             &transaction_id,
+            &locked.lock_status,
             local_inputs.iter().map(VersionedSubstateId::as_versioned_ref),
         )? {
-            store.release_new_locks(&transaction_id);
             return Ok(prepared);
         }
 
@@ -783,9 +794,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         if let Some(prepared) = self.pledge_local_inputs(
             store,
             &transaction_id,
+            &lock_status,
             requested_locks.iter().map(|lock| lock.to_versioned_substate_id_ref()),
         )? {
-            store.release_new_locks(&transaction_id);
             return Ok(prepared);
         }
 
@@ -2160,25 +2171,28 @@ mod tests {
             }
         }
 
-        /// A transaction that writes `free`, writes `held` at version 0, and reads `foreign` if `with_foreign_input`.
-        fn transaction(&self, with_foreign_input: bool) -> TransactionRecord {
+        /// A transaction that writes `free`, writes `held` (at version 0 if `requires_held_version`), and reads
+        /// `foreign` if `with_foreign_input`.
+        fn transaction(&self, requires_held_version: bool, with_foreign_input: bool) -> TransactionRecord {
+            let held = SubstateRequirement::new(
+                self.held.clone(),
+                requires_held_version.then_some(SubstateVersion::ZERO),
+            );
             let mut builder = Transaction::builder_localnet(Epoch(100))
                 .add_input(SubstateRequirement::unversioned(self.free.clone()))
-                .add_input(SubstateRequirement::versioned(self.held.clone(), SubstateVersion::ZERO));
+                .add_input(held);
             if with_foreign_input {
                 builder = builder.add_input(SubstateRequirement::unversioned(self.foreign.clone()));
             }
             TransactionRecord::new(builder.build_and_seal(&PrivateKey::from(1u64)))
         }
 
-        /// The execution of `transaction` that writes `free` and `held` at version 0, requiring version 0 of `held`,
-        /// and creates `foreign`.
-        fn execution(&self, transaction: &TransactionRecord) -> TransactionExecution {
+        /// The execution of `transaction` that writes `free` at version 0, reads `held` at version 0 (requiring that
+        /// version if `requires_held_version`), and creates `foreign`.
+        fn execution(&self, transaction: &TransactionRecord, requires_held_version: bool) -> TransactionExecution {
             let mut diff = SubstateDiff::new();
-            for id in [&self.free, &self.held] {
-                diff.down(id.clone(), SubstateVersion::ZERO);
-                diff.up(id.clone(), substate(1));
-            }
+            diff.down(self.free.clone(), SubstateVersion::ZERO);
+            diff.up(self.free.clone(), substate(1));
             diff.up(self.foreign.clone(), substate(0));
             let resulting_outputs = diff
                 .up_iter()
@@ -2202,26 +2216,18 @@ mod tests {
                 },
                 vec![
                     VersionedSubstateIdLockIntent::write(versioned(&self.free, 0), false),
-                    VersionedSubstateIdLockIntent::write(versioned(&self.held, 0), true),
+                    VersionedSubstateIdLockIntent::read(versioned(&self.held, 0), requires_held_version),
                 ],
                 resulting_outputs,
             )
         }
 
-        /// Runs `prepare` in a block in which another transaction holds a write lock on `held`. Returns the decision
-        /// it was prepared with, the substates `transaction_id` holds a lock on afterwards, and the bytes the block
-        /// pledges.
-        fn prepare_behind_held_lock<F>(
-            &self,
-            transaction: &TransactionRecord,
-            prepare: F,
-        ) -> (Decision, Vec<SubstateId>, usize)
-        where
-            F: FnOnce(
+        /// Runs `prepare` in a block in which another transaction holds a write lock on `held`.
+        fn prepare_behind_held_lock<F>(&self, transaction: &TransactionRecord, prepare: F) -> PreparedBehindHeldLock
+        where F: FnOnce(
                 &mut PendingSubstateStore<'_, <RocksDbStateStore<String> as StateStore>::ReadTransaction<'_>>,
                 LeafBlock,
-            ) -> Result<PreparedTransaction, BlockTransactionExecutorError>,
-        {
+            ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
             let dir = tempfile::tempdir().unwrap();
             let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
             let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
@@ -2245,7 +2251,9 @@ mod tests {
                     false,
                 )?;
 
-                let PreparedTransaction::MultiShard(prepared) = prepare(&mut store, block)? else {
+                let prepared = prepare(&mut store, block)?;
+                let is_deferrable = prepared.lock_status().is_deferrable_conflict();
+                let PreparedTransaction::MultiShard(prepared) = prepared else {
                     panic!("expected a multishard preparation");
                 };
                 let decision = match prepared.into_evidence_or_execution() {
@@ -2258,13 +2266,34 @@ mod tests {
                     .filter(|(_, locks)| locks.iter().any(|lock| lock.transaction_id() == transaction.id()))
                     .map(|(id, _)| id.clone())
                     .collect();
-                Ok::<_, BlockTransactionExecutorError>((decision, locked_ids, store.pledge_bytes()))
+                Ok::<_, BlockTransactionExecutorError>(PreparedBehindHeldLock {
+                    decision,
+                    is_deferrable,
+                    locked_ids,
+                    pledge_bytes: store.pledge_bytes(),
+                })
             })
             .unwrap()
         }
     }
 
-    fn assert_aborted_holding_nothing((decision, locked_ids, pledge_bytes): (Decision, Vec<SubstateId>, usize)) {
+    /// How a transaction was prepared behind another transaction's lock, and what the block holds for it afterwards.
+    struct PreparedBehindHeldLock {
+        decision: Decision,
+        is_deferrable: bool,
+        /// The substates the transaction holds a lock on
+        locked_ids: Vec<SubstateId>,
+        /// The bytes the block pledges
+        pledge_bytes: usize,
+    }
+
+    fn assert_aborted_holding_nothing(prepared: PreparedBehindHeldLock) {
+        let PreparedBehindHeldLock {
+            decision,
+            locked_ids,
+            pledge_bytes,
+            ..
+        } = prepared;
         assert_eq!(
             decision.abort_reason(),
             Some(AbortReason::LockInputsFailed),
@@ -2274,12 +2303,16 @@ mod tests {
         assert_eq!(pledge_bytes, 0);
     }
 
-    #[test]
-    fn a_cross_shard_transaction_declaring_a_locked_input_version_aborts_holding_nothing() {
-        let fixture = HeldLockFixture::new();
-        let transaction = fixture.transaction(true);
+    fn assert_deferrable_pledging_nothing(prepared: PreparedBehindHeldLock) {
+        assert!(prepared.is_deferrable);
+        assert_eq!(prepared.pledge_bytes, 0);
+    }
 
-        let prepared = fixture.prepare_behind_held_lock(&transaction, |store, block| {
+    fn prepare_cross_shard_behind_held_lock(requires_held_version: bool) -> PreparedBehindHeldLock {
+        let fixture = HeldLockFixture::new();
+        let transaction = fixture.transaction(requires_held_version, true);
+
+        fixture.prepare_behind_held_lock(&transaction, |store, block| {
             let manager = manager();
             let ResolvedTransactionInputs::LocalAndForeignInputs {
                 local_versions,
@@ -2298,37 +2331,33 @@ mod tests {
                 pinned_to(1),
                 false,
             )
-        });
-
-        assert_aborted_holding_nothing(prepared);
+        })
     }
 
-    #[test]
-    fn a_multishard_execution_requiring_a_locked_input_version_aborts_holding_nothing() {
+    fn prepare_multishard_execution_behind_held_lock(requires_held_version: bool) -> PreparedBehindHeldLock {
         let fixture = HeldLockFixture::new();
-        let transaction = fixture.transaction(false);
+        let transaction = fixture.transaction(requires_held_version, false);
 
-        let prepared = fixture.prepare_behind_held_lock(&transaction, |store, _| {
+        fixture.prepare_behind_held_lock(&transaction, |store, _| {
             manager().prepare_multishard_from_execution(
                 store,
                 &fixture.committee,
                 *transaction.id(),
-                fixture.execution(&transaction),
+                fixture.execution(&transaction, requires_held_version),
                 false,
             )
-        });
-
-        assert_aborted_holding_nothing(prepared);
+        })
     }
 
-    #[test]
-    fn a_local_input_transaction_with_foreign_outputs_requiring_a_locked_input_version_aborts_holding_nothing() {
+    fn prepare_local_inputs_with_foreign_outputs_behind_held_lock(
+        requires_held_version: bool,
+    ) -> PreparedBehindHeldLock {
         let fixture = HeldLockFixture::new();
-        let transaction = fixture.transaction(false);
+        let transaction = fixture.transaction(requires_held_version, false);
 
-        let prepared = fixture.prepare_behind_held_lock(&transaction, |store, block| {
+        fixture.prepare_behind_held_lock(&transaction, |store, block| {
             let manager = ConsensusTransactionManager::<_, RocksDbStateStore<String>>::new(
-                FixedExecutor(fixture.execution(&transaction)),
+                FixedExecutor(fixture.execution(&transaction, requires_held_version)),
                 2160,
                 usize::MAX,
             );
@@ -2341,8 +2370,36 @@ mod tests {
                 pinned_to(1),
                 false,
             )
-        });
+        })
+    }
 
-        assert_aborted_holding_nothing(prepared);
+    #[test]
+    fn a_cross_shard_transaction_declaring_a_locked_input_version_aborts_holding_nothing() {
+        assert_aborted_holding_nothing(prepare_cross_shard_behind_held_lock(true));
+    }
+
+    #[test]
+    fn a_multishard_execution_requiring_a_locked_input_version_aborts_holding_nothing() {
+        assert_aborted_holding_nothing(prepare_multishard_execution_behind_held_lock(true));
+    }
+
+    #[test]
+    fn a_local_input_transaction_with_foreign_outputs_requiring_a_locked_input_version_aborts_holding_nothing() {
+        assert_aborted_holding_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(true));
+    }
+
+    #[test]
+    fn a_cross_shard_transaction_using_a_locked_input_is_deferrable_pledging_nothing() {
+        assert_deferrable_pledging_nothing(prepare_cross_shard_behind_held_lock(false));
+    }
+
+    #[test]
+    fn a_multishard_execution_using_a_locked_input_is_deferrable_pledging_nothing() {
+        assert_deferrable_pledging_nothing(prepare_multishard_execution_behind_held_lock(false));
+    }
+
+    #[test]
+    fn a_local_input_transaction_with_foreign_outputs_using_a_locked_input_is_deferrable_pledging_nothing() {
+        assert_deferrable_pledging_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false));
     }
 }

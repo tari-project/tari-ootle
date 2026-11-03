@@ -1080,22 +1080,7 @@ where TConsensusSpec: ConsensusSpec
             locked_epoch.clone(),
         )?;
 
-        if execution.decision().is_commit() {
-            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
-            let pledge = substate_store.pledge_inputs(
-                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                usize::MAX,
-            )?;
-            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
-                info!(
-                    target: LOG_TARGET,
-                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
-                     past the {max_bytes} budget. Deferring it to a later block",
-                    tx_rec.id(),
-                );
-                return Ok(None);
-            }
-        }
+        let is_commit = execution.decision().is_commit();
 
         // Try to lock all local outputs
         let locked = lock_multishard_execution(
@@ -1125,6 +1110,24 @@ where TConsensusSpec: ConsensusSpec
 
             executed_transactions.insert(*tx_rec.id(), execution);
             return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+        }
+
+        if is_commit {
+            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
+            let pledge = substate_store.pledge_inputs(
+                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
+                usize::MAX,
+            )?;
+            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
+                info!(
+                    target: LOG_TARGET,
+                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
+                     past the {max_bytes} budget. Deferring it to a later block",
+                    tx_rec.id(),
+                );
+                substate_store.release_new_locks(tx_rec.id());
+                return Ok(None);
+            }
         }
 
         tx_rec.update_from_execution(

@@ -67,11 +67,10 @@ function TemplateFunctions() {
               <TableRow key={fn.name}>
                 <DataTableCell style={{ textAlign: "left" }}>{fn.name}</DataTableCell>
                 <DataTableCell>
-                  {fn.arguments
-                    .map((a) => {
-                      return a.name + ":" + a.arg_type;
-                    })
-                    .join(", ")}
+                  {[
+                    ...(fn.receiver ? [fn.receiver === "RefMut" ? "&mut self" : "&self"] : []),
+                    ...fn.arguments.map((a) => a.name + ":" + a.arg_type),
+                  ].join(", ")}
                 </DataTableCell>
                 <DataTableCell>{fn.output}</DataTableCell>
               </TableRow>

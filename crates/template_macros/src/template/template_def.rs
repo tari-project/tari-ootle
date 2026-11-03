@@ -28,7 +28,7 @@ use tari_template_abi::{
     FunctionDef,
     TEMPLATE_DEF_CUSTOM_SECTION,
     TemplateDef,
-    TemplateDefV1,
+    TemplateDefV2,
     Type as ArgType,
     version,
 };
@@ -64,18 +64,19 @@ pub fn generate_template_def(ast: &TemplateAst) -> Result<TokenStream> {
         ));
     }
 
-    let template_def = TemplateDef::V1(TemplateDefV1 {
+    let template_def = TemplateDef::V2(TemplateDefV2 {
         template_name: template_name_as_str.clone(),
         abi_version: version::LATEST_TEMPLATE_VERSION,
         functions: ast
             .get_functions()
             .map(|func| {
-                let is_mut = func.is_mut();
                 Ok::<_, syn::Error>(FunctionDef {
                     name: func.name.clone(),
+                    receiver: func.receiver(),
                     arguments: func
                         .input_types
                         .iter()
+                        .filter(|ty| !matches!(ty, TypeAst::Receiver { .. }))
                         .map(|ty| convert_to_arg_def(&template_name_as_str, ty))
                         .collect::<Result<_>>()?,
                     output: func
@@ -83,7 +84,6 @@ pub fn generate_template_def(ast: &TemplateAst) -> Result<TokenStream> {
                         .as_ref()
                         .map(|ty| convert_to_arg_type(&template_name_as_str, ty))
                         .unwrap_or(ArgType::Unit),
-                    is_mut,
                     is_migration: func.is_migration,
                 })
             })
@@ -128,19 +128,7 @@ fn convert_to_arg_type(template_name: &str, ty: &TypeAst) -> ArgType {
 
 fn convert_to_arg_def(template_name: &str, rust_type: &TypeAst) -> Result<ArgDef> {
     match rust_type {
-        // on "&self" we want to pass the component id
-        TypeAst::Receiver { mutability: false } => Ok(ArgDef {
-            name: "self".to_string(),
-            arg_type: ArgType::Other {
-                name: "&self".to_string(),
-            },
-        }),
-        TypeAst::Receiver { mutability: true } => Ok(ArgDef {
-            name: "self".to_string(),
-            arg_type: ArgType::Other {
-                name: "&mut self".to_string(),
-            },
-        }),
+        TypeAst::Receiver { .. } => unreachable!("receivers are taken out of the arguments before conversion"),
         // basic type
         TypeAst::Typed {
             name: arg_name,
@@ -280,7 +268,7 @@ mod tests {
     use indoc::indoc;
     use proc_macro2::TokenStream;
     use syn::parse2;
-    use tari_template_abi::{TemplateDef, Type as ArgType};
+    use tari_template_abi::{Receiver, TemplateDef, Type as ArgType};
 
     use super::generate_template_def;
     use crate::template::{ast::TemplateAst, options::TemplateOptions};
@@ -330,7 +318,7 @@ mod tests {
 
     fn get_functions(def: &TemplateDef) -> &[tari_template_abi::FunctionDef] {
         match def {
-            TemplateDef::V1(v1) => &v1.functions,
+            TemplateDef::V2(def) => &def.functions,
         }
     }
 
@@ -497,22 +485,22 @@ mod tests {
 
         // Constructor returning Self
         assert_eq!(funcs[0].name, "create");
-        assert!(!funcs[0].is_mut);
+        assert_eq!(funcs[0].receiver, None);
         assert_eq!(funcs[0].output, ArgType::Other {
             name: "TestTemplate".to_string()
         });
 
         // &self method
         assert_eq!(funcs[1].name, "read");
-        assert!(!funcs[1].is_mut);
-        assert_eq!(funcs[1].arguments[0].name, "self");
+        assert_eq!(funcs[1].receiver, Some(Receiver::Ref));
+        assert!(funcs[1].arguments.is_empty());
 
         // &mut self method
         assert_eq!(funcs[2].name, "write");
-        assert!(funcs[2].is_mut);
-        assert_eq!(funcs[2].arguments[0].name, "self");
-        assert_eq!(funcs[2].arguments[1].name, "value");
-        assert_eq!(funcs[2].arguments[1].arg_type, ArgType::U32);
+        assert_eq!(funcs[2].receiver, Some(Receiver::RefMut));
+        assert_eq!(funcs[2].arguments.len(), 1);
+        assert_eq!(funcs[2].arguments[0].name, "value");
+        assert_eq!(funcs[2].arguments[0].arg_type, ArgType::U32);
     }
 
     #[test]
@@ -555,8 +543,8 @@ mod tests {
         "});
 
         // Template name is taken from the module identifier, not a struct.
-        let TemplateDef::V1(v1) = &def;
-        assert_eq!(v1.template_name, "math");
+        let TemplateDef::V2(v2) = &def;
+        assert_eq!(v2.template_name, "math");
 
         let funcs = get_functions(&def);
         assert_eq!(funcs.len(), 2);
@@ -568,11 +556,11 @@ mod tests {
         assert_eq!(funcs[0].arguments[1].name, "b");
         assert_eq!(funcs[0].arguments[1].arg_type, ArgType::U32);
         assert_eq!(funcs[0].output, ArgType::U32);
-        // No component, so nothing is mutable.
-        assert!(!funcs[0].is_mut);
+        // No component, so no function takes a receiver.
+        assert_eq!(funcs[0].receiver, None);
 
         assert_eq!(funcs[1].name, "mul");
-        assert!(!funcs[1].is_mut);
+        assert_eq!(funcs[1].receiver, None);
     }
 
     #[test]

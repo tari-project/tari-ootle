@@ -19,7 +19,7 @@ use tari_engine::wasm::WasmModule;
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Epoch, Transaction, TransactionBuilder, args};
-use tari_template_abi::{ArgDef, FunctionDef, TemplateDef, TemplateDefV1, Type};
+use tari_template_abi::{FunctionDef, Receiver, TemplateDef, TemplateDefV2, Type};
 use tari_template_lib::{
     args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg},
     prelude::{ComponentAccessRules, UpdateRule},
@@ -67,27 +67,22 @@ fn tuple_tree(depth: usize) -> Type {
 
 /// A definition with a function `run` and a component method `poke`, both returning `output`.
 fn template_def(template_name: &str, output: Type) -> TemplateDef {
-    TemplateDef::V1(TemplateDefV1 {
+    TemplateDef::V2(TemplateDefV2 {
         template_name: template_name.to_string(),
         abi_version: 0,
         functions: vec![
             FunctionDef {
                 name: "run".to_string(),
+                receiver: None,
                 arguments: vec![],
                 output: output.clone(),
-                is_mut: false,
                 is_migration: false,
             },
             FunctionDef {
                 name: "poke".to_string(),
-                arguments: vec![ArgDef {
-                    name: "self".to_string(),
-                    arg_type: Type::Other {
-                        name: "&self".to_string(),
-                    },
-                }],
+                receiver: Some(Receiver::Ref),
+                arguments: vec![],
                 output,
-                is_mut: false,
                 is_migration: false,
             },
         ],

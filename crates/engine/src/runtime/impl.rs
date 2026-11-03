@@ -812,17 +812,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if func.arguments.len() != 3 {
-            return Err(RuntimeError::InvalidArgument {
-                argument,
-                reason: format!(
-                    "Authorize hook '{}' must take 3 arguments (incl &self), but found {}",
-                    hook,
-                    func.arguments.len()
-                ),
-            });
-        }
-
         if !func.has_receiver() {
             return Err(RuntimeError::InvalidArgument {
                 argument,
@@ -830,8 +819,19 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
+        if func.arguments.len() != 2 {
+            return Err(RuntimeError::InvalidArgument {
+                argument,
+                reason: format!(
+                    "Authorize hook '{}' must take 2 arguments after self, but found {}",
+                    hook,
+                    func.arguments.len()
+                ),
+            });
+        }
+
         if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
+            func.arguments.first().expect("length checked").arg_type.other(),
             Some("ResourceAuthAction")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -841,7 +841,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         if !matches!(
-            func.arguments.get(2).expect("length checked").arg_type.other(),
+            func.arguments.get(1).expect("length checked").arg_type.other(),
             Some("AuthHookCaller")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -858,7 +858,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// rule is load-bearing: a mutable predicate could take a write lock and cause side effects, defeating the
     /// read-only guarantee.
     fn validate_spend_script_signature(func: &FunctionDef) -> Result<(), RuntimeError> {
-        if func.is_mut {
+        if func.is_mut() {
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!("spend script function '{}' must not be mutable", func.name),

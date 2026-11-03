@@ -101,7 +101,13 @@ mod render {
                     "failed to decode component instance for function '{name}'{DETAIL_SEPARATOR}{detail}"
                 )),
                 Self::ArgDecode { index } => {
-                    let arg = func_def.arguments.get(index)?;
+                    // The dispatcher counts the receiver among a method's parameters, and `arguments` does not.
+                    let position = if func_def.has_receiver() {
+                        index.checked_sub(1)?
+                    } else {
+                        index
+                    };
+                    let arg = func_def.arguments.get(position)?;
                     let kind = match arg.arg_type {
                         Type::Tuple(_) => "tuple argument",
                         _ => "argument",
@@ -132,18 +138,13 @@ pub use render::expand_panic_message;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArgDef, FunctionDef, Type};
+    use crate::{ArgDef, FunctionDef, Receiver, Type};
 
     fn func_def() -> FunctionDef {
         FunctionDef {
             name: "withdraw".to_string(),
+            receiver: Some(Receiver::RefMut),
             arguments: vec![
-                ArgDef {
-                    name: "self".to_string(),
-                    arg_type: Type::Other {
-                        name: "&mut self".to_string(),
-                    },
-                },
                 ArgDef {
                     name: "amount".to_string(),
                     arg_type: Type::Other {
@@ -156,7 +157,6 @@ mod tests {
                 },
             ],
             output: Type::Unit,
-            is_mut: true,
             is_migration: false,
         }
     }
@@ -287,7 +287,9 @@ mod tests {
         for message in CRAFTED {
             let expanded = expand_panic_message(&func_def, message.to_string());
             match PanicDiagnostic::parse(message) {
-                Some((PanicDiagnostic::ArgDecode { index }, _)) if index >= func_def.arguments.len() => {
+                Some((PanicDiagnostic::ArgDecode { index }, _))
+                    if (index == 0 && func_def.has_receiver()) || index >= func_def.num_call_args() =>
+                {
                     assert_eq!(&expanded, message, "out-of-range index rewrote {message:?}");
                 },
                 Some(_) => assert!(

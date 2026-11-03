@@ -78,7 +78,7 @@ pub enum ExtractTemplateDefError {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_abi::{ArgDef, FunctionDef, TemplateDef, TemplateDefV1, Type, version};
+    use tari_template_abi::{ArgDef, FunctionDef, TemplateDef, TemplateDefV2, Type, version};
     use tari_template_builtin::all_builtin_templates;
 
     use super::*;
@@ -119,7 +119,7 @@ mod tests {
     }
 
     fn synthetic_template_def() -> TemplateDef {
-        TemplateDef::V1(TemplateDefV1 {
+        TemplateDef::V2(TemplateDefV2 {
             template_name: "Synthetic".to_string(),
             abi_version: version::LATEST_TEMPLATE_VERSION,
             functions: Vec::new(),
@@ -133,17 +133,17 @@ mod tests {
         const LEVELS: usize = 100_000;
 
         fn def_with_arg_type(arg_type: Type) -> TemplateDef {
-            TemplateDef::V1(TemplateDefV1 {
+            TemplateDef::V2(TemplateDefV2 {
                 template_name: "Synthetic".to_string(),
                 abi_version: version::LATEST_TEMPLATE_VERSION,
                 functions: vec![FunctionDef {
                     name: "f".to_string(),
+                    receiver: None,
                     arguments: vec![ArgDef {
                         name: "a".to_string(),
                         arg_type,
                     }],
                     output: Type::Unit,
-                    is_mut: false,
                     is_migration: false,
                 }],
             })

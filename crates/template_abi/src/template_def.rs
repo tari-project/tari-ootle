@@ -8,36 +8,41 @@ use crate::{
     version::WasmAbiVersion,
 };
 
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
+/// A template's definition, always in the current layout.
+///
+/// Decoding accepts every layout a published template can carry and converts it to the current one, so code reading a
+/// definition sees a single shape. Encoding always writes the current layout.
+#[derive(Debug, Clone, Encode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(from = "VersionedTemplateDef"))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TemplateDef {
-    #[n(0)]
-    V1(#[n(0)] TemplateDefV1),
+    #[n(1)]
+    V2(#[n(0)] TemplateDefV2),
 }
 
 impl TemplateDef {
     pub fn template_name(&self) -> &str {
         match self {
-            TemplateDef::V1(def) => def.template_name.as_str(),
+            TemplateDef::V2(def) => def.template_name.as_str(),
         }
     }
 
     pub fn abi_version(&self) -> u16 {
         match self {
-            TemplateDef::V1(def) => def.abi_version,
+            TemplateDef::V2(def) => def.abi_version,
         }
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionDef> {
         match self {
-            TemplateDef::V1(def) => def.get_function(name),
+            TemplateDef::V2(def) => def.get_function(name),
         }
     }
 
     pub fn functions(&self) -> &[FunctionDef] {
         match self {
-            TemplateDef::V1(def) => &def.functions,
+            TemplateDef::V2(def) => &def.functions,
         }
     }
 
@@ -63,10 +68,36 @@ impl TemplateDef {
     }
 }
 
+impl<'b, C> Decode<'b, C> for TemplateDef {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        VersionedTemplateDef::decode(d, ctx).map(Self::from)
+    }
+}
+
+/// Every template definition layout, as encoded. The variant indices match [`TemplateDef`]'s, so the current layout
+/// decodes and encodes identically through either type.
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum VersionedTemplateDef {
+    #[n(0)]
+    V1(#[n(0)] TemplateDefV1),
+    #[n(1)]
+    V2(#[n(0)] TemplateDefV2),
+}
+
+impl From<VersionedTemplateDef> for TemplateDef {
+    fn from(def: VersionedTemplateDef) -> Self {
+        match def {
+            VersionedTemplateDef::V1(def) => TemplateDef::V2(def.into()),
+            VersionedTemplateDef::V2(def) => TemplateDef::V2(def),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct TemplateDefV1 {
+pub struct TemplateDefV2 {
     #[n(0)]
     pub template_name: String,
     #[n(1)]
@@ -75,7 +106,7 @@ pub struct TemplateDefV1 {
     pub functions: Vec<FunctionDef>,
 }
 
-impl TemplateDefV1 {
+impl TemplateDefV2 {
     pub fn get_function(&self, name: &str) -> Option<&FunctionDef> {
         self.functions.iter().find(|f| f.name.as_str() == name)
     }
@@ -85,6 +116,79 @@ impl TemplateDefV1 {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FunctionDef {
+    #[n(0)]
+    pub name: String,
+    /// `None` for a static template function.
+    #[n(1)]
+    pub receiver: Option<Receiver>,
+    /// The parameters after the receiver, in declaration order.
+    #[n(2)]
+    pub arguments: Vec<ArgDef>,
+    #[n(3)]
+    pub output: Type,
+    #[n(4)]
+    pub is_migration: bool,
+}
+
+impl FunctionDef {
+    /// True for a component method, which the caller invokes on a component and which receives that component's
+    /// address ahead of [`Self::arguments`].
+    pub fn has_receiver(&self) -> bool {
+        self.receiver.is_some()
+    }
+
+    /// True for a method taking `&mut self`, which writes the component's state.
+    pub fn is_mut(&self) -> bool {
+        matches!(self.receiver, Some(Receiver::RefMut))
+    }
+
+    /// How many values a call passes: the component address for a method, then one per argument.
+    pub fn num_call_args(&self) -> usize {
+        usize::from(self.has_receiver()) + self.arguments.len()
+    }
+}
+
+/// How a method takes its component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cbor(index_only)]
+pub enum Receiver {
+    /// `&self`
+    #[n(0)]
+    Ref,
+    /// `&mut self`
+    #[n(1)]
+    RefMut,
+}
+
+/// The first template definition layout. A method's receiver is its first argument, named `self` and typed
+/// `Other { name: "&self" }` or `Other { name: "&mut self" }`, and `is_mut` sets the component lock.
+#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TemplateDefV1 {
+    #[n(0)]
+    pub template_name: String,
+    #[n(1)]
+    pub abi_version: WasmAbiVersion,
+    #[n(2)]
+    pub functions: Vec<FunctionDefV1>,
+}
+
+impl From<TemplateDefV1> for TemplateDefV2 {
+    fn from(def: TemplateDefV1) -> Self {
+        Self {
+            template_name: def.template_name,
+            abi_version: def.abi_version,
+            functions: def.functions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// A function in the [`TemplateDefV1`] layout.
+#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FunctionDefV1 {
     #[n(0)]
     pub name: String,
     #[n(1)]
@@ -97,13 +201,31 @@ pub struct FunctionDef {
     pub is_migration: bool,
 }
 
-impl FunctionDef {
-    /// True for a component method: its first argument is the `&self` or `&mut self` receiver, which the caller
-    /// passes as the component's address. A function without a receiver is a static template function.
-    pub fn has_receiver(&self) -> bool {
-        self.arguments
+impl From<FunctionDefV1> for FunctionDef {
+    /// A leading `&self` or `&mut self` argument becomes the receiver, whose mutability comes from `is_mut` because
+    /// that is what sets the component lock for a V1 method.
+    fn from(def: FunctionDefV1) -> Self {
+        let FunctionDefV1 {
+            name,
+            mut arguments,
+            output,
+            is_mut,
+            is_migration,
+        } = def;
+        let has_receiver = arguments
             .first()
-            .is_some_and(|arg| matches!(arg.arg_type.other(), Some("&self" | "&mut self")))
+            .is_some_and(|arg| matches!(arg.arg_type.other(), Some("&self" | "&mut self")));
+        let receiver = has_receiver.then(|| {
+            arguments.remove(0);
+            if is_mut { Receiver::RefMut } else { Receiver::Ref }
+        });
+        Self {
+            name,
+            receiver,
+            arguments,
+            output,
+            is_migration,
+        }
     }
 }
 
@@ -195,6 +317,97 @@ impl std::fmt::Display for Type {
             },
             Type::Other { name } => write!(f, "{}", name),
         }
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod layout_tests {
+    use super::*;
+
+    fn arg(name: &str, arg_type: Type) -> ArgDef {
+        ArgDef {
+            name: name.to_string(),
+            arg_type,
+        }
+    }
+
+    fn receiver_arg(ty: &str) -> ArgDef {
+        arg("self", Type::Other { name: ty.to_string() })
+    }
+
+    fn v1_function(name: &str, arguments: Vec<ArgDef>, is_mut: bool) -> FunctionDefV1 {
+        FunctionDefV1 {
+            name: name.to_string(),
+            arguments,
+            output: Type::Unit,
+            is_mut,
+            is_migration: false,
+        }
+    }
+
+    fn v1_def() -> VersionedTemplateDef {
+        VersionedTemplateDef::V1(TemplateDefV1 {
+            template_name: "Counter".to_string(),
+            abi_version: 0,
+            functions: vec![
+                v1_function("new", vec![arg("start", Type::U64)], false),
+                v1_function("get", vec![receiver_arg("&self")], false),
+                v1_function("add", vec![receiver_arg("&mut self"), arg("by", Type::U64)], true),
+            ],
+        })
+    }
+
+    fn assert_converted(def: &TemplateDef) {
+        let new = def.get_function("new").unwrap();
+        assert_eq!(new.receiver, None);
+        assert_eq!(new.arguments.len(), 1);
+        assert_eq!(new.arguments[0].name, "start");
+
+        let get = def.get_function("get").unwrap();
+        assert_eq!(get.receiver, Some(Receiver::Ref));
+        assert!(get.arguments.is_empty());
+        assert_eq!(get.num_call_args(), 1);
+
+        let add = def.get_function("add").unwrap();
+        assert_eq!(add.receiver, Some(Receiver::RefMut));
+        assert!(add.is_mut());
+        assert_eq!(add.arguments.len(), 1);
+        assert_eq!(add.arguments[0].name, "by");
+        assert_eq!(add.num_call_args(), 2);
+    }
+
+    #[test]
+    fn a_v1_definition_decodes_with_its_receivers_lifted_out_of_the_arguments() {
+        let bytes = tari_bor::encode(&v1_def()).unwrap();
+        let def = tari_bor::decode::<TemplateDef>(&bytes).unwrap();
+        assert_converted(&def);
+    }
+
+    #[test]
+    fn a_v1_receiver_takes_its_mutability_from_is_mut() {
+        let converted = FunctionDef::from(v1_function("f", vec![receiver_arg("&self")], true));
+        assert_eq!(converted.receiver, Some(Receiver::RefMut));
+    }
+
+    #[test]
+    fn the_current_layout_encodes_and_decodes_unchanged() {
+        let bytes = tari_bor::encode(&v1_def()).unwrap();
+        let def = tari_bor::decode::<TemplateDef>(&bytes).unwrap();
+
+        let reencoded = tari_bor::encode(&def).unwrap();
+        assert_converted(&tari_bor::decode::<TemplateDef>(&reencoded).unwrap());
+        assert!(matches!(
+            tari_bor::decode::<VersionedTemplateDef>(&reencoded).unwrap(),
+            VersionedTemplateDef::V2(_)
+        ));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_v1_definition_deserializes_through_serde_as_the_current_layout() {
+        let bytes = tari_bor::serde_codec::to_vec(v1_def()).unwrap();
+        let def: TemplateDef = tari_bor::serde_codec::from_slice(&bytes).unwrap();
+        assert_converted(&def);
     }
 }
 

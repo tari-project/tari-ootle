@@ -860,7 +860,7 @@
                 "functions": [
                   {
                     "arguments": [],
-                    "is_mut": false,
+                    "receiver": null,
                     "name": "new",
                     "output": "U32"
                   },
@@ -869,7 +869,7 @@
                       "U32",
                       "ResourceAddress"
                     ],
-                    "is_mut": false,
+                    "receiver": null,
                     "name": "balance",
                     "output": "Amount"
                   },
@@ -879,7 +879,7 @@
                       "ResourceAddress",
                       "Amount"
                     ],
-                    "is_mut": true,
+                    "receiver": "RefMut",
                     "name": "withdraw",
                     "output": "Bucket"
                   },
@@ -888,7 +888,7 @@
                       "U32",
                       "Bucket"
                     ],
-                    "is_mut": true,
+                    "receiver": "RefMut",
                     "name": "deposit",
                     "output": "Unit"
                   },
@@ -897,7 +897,7 @@
                       "U32",
                       "ResourceAddress"
                     ],
-                    "is_mut": false,
+                    "receiver": null,
                     "name": "get_non_fungible_ids",
                     "output": "Vec"
                   }

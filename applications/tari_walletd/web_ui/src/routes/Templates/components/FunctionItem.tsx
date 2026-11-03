@@ -45,10 +45,10 @@ function getTypeAsString(funcType: FuncType): string {
 
 export default function FunctionItem({ functionDef }: FunctionItemProps) {
   const theme = useTheme();
-  const { name, arguments: args, is_mut, is_migration, output } = functionDef;
+  const { name, arguments: args, receiver, is_migration, output } = functionDef;
+  const is_mut = receiver === "RefMut";
 
   const argumentItems = args.map(({ name, arg_type }) => {
-    if (name == "self") return;
     return (
       <TableRow key={`arg_${name}:${arg_type}`}>
         <NestedCell>
@@ -61,10 +61,8 @@ export default function FunctionItem({ functionDef }: FunctionItemProps) {
     );
   });
 
-  const isSelfArg = args.every((arg) => arg.name === "self");
-
   const argsTable =
-    args?.length > 0 && !isSelfArg ? (
+    args?.length > 0 ? (
       <TableContainer style={{ borderRadius: theme.spacing(1), border: `1px solid ${theme.palette.divider}` }}>
         <Table
           size="small"

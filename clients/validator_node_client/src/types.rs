@@ -51,7 +51,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::{FixedHash, QuorumDecision};
-use tari_template_abi::{ArgDef, version::WasmAbiVersion};
+use tari_template_abi::{ArgDef, Receiver, version::WasmAbiVersion};
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,9 +100,11 @@ pub struct TemplateAbi {
 )]
 pub struct FunctionDef {
     pub name: String,
+    /// `None` for a static template function.
+    pub receiver: Option<Receiver>,
+    /// The parameters after the receiver.
     pub arguments: Vec<ArgDef>,
     pub output: String,
-    pub is_mut: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

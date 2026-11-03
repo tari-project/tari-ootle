@@ -427,7 +427,7 @@ fn validate_export_signature(
 
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
-        TemplateDef::V1(def) => {
+        TemplateDef::V2(def) => {
             let function_count = def.functions.len();
             if function_count > limits::WASM_LIMITS.max_functions {
                 return Err(WasmValidationError::TooManyFunctions {
@@ -444,11 +444,11 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                     .into());
                 }
 
-                if func.arguments.len() > limits::WASM_LIMITS.max_function_arguments {
+                if func.num_call_args() > limits::WASM_LIMITS.max_function_arguments {
                     return Err(WasmValidationError::FunctionTooManyArguments {
                         name: func.name.clone(),
                         max_args: limits::WASM_LIMITS.max_function_arguments,
-                        num_args: func.arguments.len(),
+                        num_args: func.num_call_args(),
                     }
                     .into());
                 }

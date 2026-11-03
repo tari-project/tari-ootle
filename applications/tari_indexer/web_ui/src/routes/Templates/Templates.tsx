@@ -78,15 +78,19 @@ function formatType(type: Type): string {
 }
 
 function formatSelfParam(func: FunctionDef): string {
-  const hasSelf = func.arguments.some((arg) => arg.name === "self");
-  if (!hasSelf) return "";
-  return func.is_mut ? "&mut self" : "&self";
+  switch (func.receiver) {
+    case "Ref":
+      return "&self";
+    case "RefMut":
+      return "&mut self";
+    default:
+      return "";
+  }
 }
 
 function formatSignature(func: FunctionDef, isMethod: boolean): React.ReactNode {
   const selfParam = isMethod ? formatSelfParam(func) : "";
-  const visibleArgs = func.arguments.filter((arg) => arg.name !== "self");
-  const argParts = visibleArgs.map((a) => `${a.name}: ${formatType(a.arg_type)}`);
+  const argParts = func.arguments.map((a) => `${a.name}: ${formatType(a.arg_type)}`);
   if (selfParam) argParts.unshift(selfParam);
   const params = argParts.join(", ");
   const output = formatType(func.output);
@@ -124,29 +128,28 @@ function TemplateDetails({ data }: { data: any }) {
   // but the JS client types it as { template_definition: TemplateDef }.
   // Handle both shapes.
   const definition = data.definition || data.template_definition;
-  const name = data.name || definition?.V1?.template_name;
+  const name = data.name || definition?.V2?.template_name;
   const codeSize = data.code_size;
 
   if (!definition) {
     return <Alert severity="warning">No template definition found in response.</Alert>;
   }
 
-  const defV1 = definition.V1;
-  if (!defV1) {
+  const def = definition.V2;
+  if (!def) {
     return <Alert severity="warning">Unsupported template definition version.</Alert>;
   }
 
-  const allFunctions = defV1.functions || [];
-  const isSelfParam = (arg: { name: string }) => arg.name === "self";
-  const methods = allFunctions.filter((f: FunctionDef) => f.arguments.some(isSelfParam));
-  const functions = allFunctions.filter((f: FunctionDef) => !f.arguments.some(isSelfParam));
+  const allFunctions = def.functions || [];
+  const methods = allFunctions.filter((f: FunctionDef) => f.receiver != null);
+  const functions = allFunctions.filter((f: FunctionDef) => f.receiver == null);
 
   return (
     <Stack spacing={3}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
         <Typography variant="h6">{name}</Typography>
         {codeSize != null && <Chip label={`${(codeSize / 1024).toFixed(1)} KB`} size="small" variant="outlined" />}
-        <Chip label={`ABI v${defV1.abi_version}`} size="small" variant="outlined" />
+        <Chip label={`ABI v${def.abi_version}`} size="small" variant="outlined" />
       </Box>
 
       <Divider />

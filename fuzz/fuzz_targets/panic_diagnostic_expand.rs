@@ -22,6 +22,7 @@ use tari_template_abi::{
     diagnostics::{expand_panic_message, PanicDiagnostic, MARKER},
     ArgDef,
     FunctionDef,
+    Receiver,
     Type,
 };
 
@@ -46,9 +47,9 @@ fn func_def(arg_count: u8) -> FunctionDef {
 
     FunctionDef {
         name: "withdraw".to_string(),
+        receiver: Some(Receiver::RefMut),
         arguments,
         output: Type::Unit,
-        is_mut: true,
         is_migration: false,
     }
 }
@@ -72,8 +73,9 @@ fuzz_target!(|data: (&str, u8)| {
     let renders = match parsed {
         None => false,
         Some((PanicDiagnostic::ComponentDecode, _)) => true,
-        // Out of range means the marker did not come from this function's dispatcher.
-        Some((PanicDiagnostic::ArgDecode { index }, _)) => index < func_def.arguments.len(),
+        // Out of range means the marker did not come from this function's dispatcher. Position 0 is the receiver,
+        // which fails as `ComponentDecode`.
+        Some((PanicDiagnostic::ArgDecode { index }, _)) => index > 0 && index < func_def.num_call_args(),
     };
 
     if renders {

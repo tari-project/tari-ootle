@@ -1024,7 +1024,7 @@ where
             });
         }
 
-        let lock_flag = if function_def.is_mut {
+        let lock_flag = if function_def.is_mut() {
             LockFlag::Write
         } else {
             LockFlag::Read

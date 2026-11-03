@@ -823,6 +823,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
+        if !func.has_receiver() {
+            return Err(RuntimeError::InvalidArgument {
+                argument,
+                reason: format!("Authorize hook '{}' must be a method taking &self or &mut self", hook),
+            });
+        }
+
         if !matches!(
             func.arguments.get(1).expect("length checked").arg_type.other(),
             Some("ResourceAuthAction")
@@ -855,6 +862,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!("spend script function '{}' must not be mutable", func.name),
+            });
+        }
+        if func.has_receiver() {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "TemplateFunction",
+                reason: format!(
+                    "spend script function '{}' must be a template function, not a method taking &self",
+                    func.name
+                ),
             });
         }
         if !matches!(func.output, Type::Unit) {

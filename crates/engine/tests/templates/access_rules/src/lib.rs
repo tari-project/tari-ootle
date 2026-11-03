@@ -495,6 +495,8 @@ mod access_rules_template {
 
         pub fn invalid_auth_hook4(&self, _action: ResourceAuthAction, _caller: AuthHookCaller, _third: String) {}
 
+        pub fn invalid_auth_hook6(_first: u32, _action: ResourceAuthAction, _caller: AuthHookCaller) {}
+
         pub fn invalid_auth_hook5(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) -> String {
             unimplemented!()
         }

@@ -931,6 +931,15 @@ where
             });
         }
 
+        // A method runs only in its component's frame, after the component's access rules. A static frame has
+        // neither, and carries the template's identity.
+        if function_def.has_receiver() {
+            return Err(TransactionErrorKind::MethodCalledAsFunction {
+                template_address: *template_address,
+                name: function_def.name.clone(),
+            });
+        }
+
         let resolved_args = runtime.interface().resolve_args(None, &args)?;
         let arg_scope = resolved_args
             .iter()
@@ -1004,6 +1013,13 @@ where
 
         if function_def.is_migration {
             return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                name: function_def.name.clone(),
+            });
+        }
+
+        if !function_def.has_receiver() {
+            return Err(TransactionErrorKind::FunctionCalledAsMethod {
+                component_address: component.address,
                 name: function_def.name.clone(),
             });
         }

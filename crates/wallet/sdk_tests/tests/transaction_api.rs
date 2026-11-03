@@ -19,7 +19,7 @@ use tari_ootle_common_types::{SubstateVersion, optional::IsNotFoundError};
 use tari_ootle_transaction::{Transaction, TransactionId, args};
 use tari_ootle_wallet_sdk::{
     apis::transaction::{Submission, TRANSACTION_EXPIRY_GRACE_EPOCHS},
-    models::{TransactionStatus, WalletTransactionUpdate},
+    models::{TransactionStatus, WalletLockId, WalletTransactionUpdate},
     network::{TransactionFinalizedResult, TransactionQueryResult},
     storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
@@ -334,6 +334,111 @@ async fn a_rejected_submission_releases_its_inputs() {
     let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
     assert_eq!(stored.status, TransactionStatus::InvalidTransaction);
     assert_eq!(test.get_unspent_balance(), 74, "both outputs are released");
+}
+
+/// A wallet on `network` holding `transaction` as `New`, with outputs of 25 and 49 locked for it under two locks.
+fn wallet_with_two_locks_for(
+    network: CannedTransactionResultInterface,
+    transaction: &Transaction,
+) -> (TestWithNetwork<CannedTransactionResultInterface>, [WalletLockId; 2]) {
+    let test = TestWithNetwork::with_network(network);
+    let transaction_id = transaction.calculate_id();
+    test.add_unspent_output(25u64);
+    test.add_unspent_output(49u64);
+    test.store()
+        .with_write_tx(|tx| tx.transactions_insert(transaction, None, &[Test::test_account_address()], false))
+        .unwrap();
+    let lock_ids = [(); 2].map(|_| {
+        let lock_id = test.new_lock().keep_locked();
+        test.sdk()
+            .confidential_outputs_api()
+            .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 20u64)
+            .unwrap();
+        test.sdk()
+            .transaction_api()
+            .locks_set_transaction_id(lock_id, transaction_id)
+            .unwrap();
+        lock_id
+    });
+    assert_eq!(test.get_unspent_balance(), 0, "each lock holds one output");
+    (test, lock_ids)
+}
+
+fn assert_locks_resolved(test: &TestWithNetwork<CannedTransactionResultInterface>, lock_ids: [WalletLockId; 2]) {
+    for lock_id in lock_ids {
+        let err = test.store().with_read_tx(|tx| tx.locks_get(lock_id)).unwrap_err();
+        assert!(err.is_not_found_error(), "lock {lock_id} is resolved, got: {err}");
+    }
+}
+
+#[tokio::test]
+async fn a_rejected_submission_releases_every_lock_linked_to_it() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let (test, lock_ids) = wallet_with_two_locks_for(
+        CannedTransactionResultInterface::not_found().rejecting_submissions(),
+        &transaction,
+    );
+
+    let submission = test
+        .sdk()
+        .transaction_api()
+        .submit_transaction(transaction_id)
+        .await
+        .unwrap();
+
+    assert_eq!(submission, Submission::Rejected);
+    assert_eq!(test.get_unspent_balance(), 74, "the outputs of both locks are released");
+    assert_locks_resolved(&test, lock_ids);
+}
+
+#[tokio::test]
+async fn a_committed_transaction_spends_the_outputs_of_every_lock_linked_to_it() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+
+    let mut spends = SubstateDiff::new();
+    for amount in [25u64, 49] {
+        let commitment = commit_amount(&Default::default(), amount.into())
+            .unwrap()
+            .to_byte_type();
+        spends.down(
+            SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(
+                STEALTH_TARI_RESOURCE_ADDRESS,
+                commitment,
+            )),
+            SubstateVersion::ZERO,
+        );
+    }
+    let mut query_result = finalized_result(transaction_id, FeeReceipt::default());
+    let TransactionFinalizedResult::Finalized { execution_result, .. } = &mut query_result.result else {
+        unreachable!()
+    };
+    execution_result.as_mut().unwrap().finalize.result = TransactionResult::Accept(spends);
+    let (test, lock_ids) = wallet_with_two_locks_for(CannedTransactionResultInterface::new(query_result), &transaction);
+    test.store()
+        .with_write_tx(|tx| {
+            tx.transactions_update(
+                WalletTransactionUpdate::new(transaction_id).with_new_status(TransactionStatus::Pending),
+            )
+        })
+        .unwrap();
+
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(finalized.status, TransactionStatus::Accepted);
+    assert_locks_resolved(&test, lock_ids);
+    assert_eq!(
+        test.get_unspent_balance(),
+        0,
+        "the outputs of both locks are spent, not released"
+    );
 }
 
 fn build_dry_run_transaction() -> Transaction {

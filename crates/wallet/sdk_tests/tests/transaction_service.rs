@@ -597,18 +597,28 @@ async fn a_transaction_is_not_stored_when_its_lock_cannot_be_linked() {
     let transaction = build_transaction();
     let transaction_id = transaction.calculate_id();
     let sdk = running.test.sdk();
-    // A transaction id is linked to at most one lock, so linking a second lock to it fails.
-    let held = running.test.new_lock().keep_locked();
-    sdk.transaction_api()
-        .locks_set_transaction_id(held, transaction_id)
-        .unwrap();
+    // A lock belongs to one transaction, so a lock already linked to another cannot be linked to this one.
     let lock_id = running.test.new_lock().keep_locked();
+    let other_transaction_id = TransactionId::new([1u8; 32]);
+    sdk.transaction_api()
+        .locks_set_transaction_id(lock_id, other_transaction_id)
+        .unwrap();
 
     running
         .handle
         .submit_transaction_with_opts(transaction, None, Some(lock_id))
         .await
         .unwrap_err();
+
+    let linked = sdk
+        .locks_api()
+        .get_locks_by_transaction_id(other_transaction_id)
+        .unwrap();
+    assert_eq!(
+        linked,
+        vec![lock_id],
+        "the lock stays linked to the transaction it was linked to"
+    );
 
     assert!(
         sdk.transaction_api()

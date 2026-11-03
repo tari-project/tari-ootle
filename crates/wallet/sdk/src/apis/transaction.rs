@@ -85,15 +85,21 @@ where
     ///
     /// `linked_accounts` are the wallet account(s) this transaction involves; they are persisted so the
     /// transaction list can be filtered per account. Accounts not known to this wallet are ignored.
+    /// Stores `transaction` as `New` and links `lock_ids` to it in the same write, so a store that fails leaves the
+    /// locks unlinked.
     pub fn insert_new_transaction(
         &self,
         transaction: Transaction,
         new_account_info: Option<NewAccountData>,
         linked_accounts: &[ComponentAddress],
         is_dry_run: bool,
+        lock_ids: &[WalletLockId],
     ) -> Result<TransactionId, TransactionApiError> {
         let tx_id = transaction.calculate_id();
         self.store.with_write_tx(|tx| {
+            for lock_id in lock_ids {
+                tx.locks_link_transaction(*lock_id, tx_id)?;
+            }
             tx.transactions_insert(&transaction, new_account_info.as_ref(), linked_accounts, is_dry_run)
         })?;
 
@@ -374,7 +380,7 @@ where
                             .filter(|_| final_decision.is_commit());
                         match maybe_diff {
                             Some(diff) => {
-                                if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+                                for lock_id in tx.locks_get_by_transaction_id(transaction_id)? {
                                     info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {}", transaction_id, lock_id);
                                     tx.locks_unlock_finalized(lock_id, diff)?;
                                 }
@@ -533,7 +539,7 @@ where
         tx: &mut <TStore as WriteableWalletStore>::WriteTransaction<'_>,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+        for lock_id in tx.locks_get_by_transaction_id(transaction_id)? {
             debug!(target: LOG_TARGET, "Releasing lock {} (and associated outputs) for transaction {} that was not committed", lock_id, transaction_id);
             tx.locks_release(lock_id)?;
         }

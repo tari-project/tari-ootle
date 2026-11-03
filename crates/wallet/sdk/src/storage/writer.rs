@@ -333,7 +333,18 @@ pub trait WalletStoreWriter: CommittableStore {
     /// Returns `NotFound` when no unlinked lock has this id.
     fn locks_extend_timeout(&mut self, lock_id: WalletLockId, timeout: Duration) -> Result<(), WalletStorageError>;
 
+    /// Links the lock to `transaction_id`, which then resolves it. A transaction may hold several locks, but a lock
+    /// belongs to one transaction: linking it again to the same transaction is a no-op.
+    ///
+    /// Returns `NotFound` when no lock has this id or the lock is linked to another transaction.
     fn locks_link_transaction(
+        &mut self,
+        lock_id: WalletLockId,
+        transaction_id: TransactionId,
+    ) -> Result<(), WalletStorageError>;
+
+    /// Clears the lock's link if it is linked to `transaction_id`, leaving a lock linked elsewhere as it is.
+    fn locks_unlink_transaction(
         &mut self,
         lock_id: WalletLockId,
         transaction_id: TransactionId,

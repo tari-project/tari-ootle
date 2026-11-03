@@ -137,3 +137,71 @@ fn a_lock_records_its_owner() {
         assert_eq!(tx.locks_get(lock).unwrap().owner, owner);
     }
 }
+
+#[test]
+fn a_transaction_holds_every_lock_linked_to_it() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+    let transaction_id = TransactionId::new([1u8; 32]);
+
+    let first = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    let second = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(first, transaction_id).unwrap();
+    tx.locks_link_transaction(second, transaction_id).unwrap();
+
+    assert_eq!(tx.locks_get_by_transaction_id(transaction_id).unwrap(), vec![
+        first, second
+    ]);
+    assert!(
+        tx.locks_get_by_transaction_id(TransactionId::new([2u8; 32]))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_lock_linked_to_one_transaction_cannot_be_linked_to_another() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+    let linked_to = TransactionId::new([1u8; 32]);
+
+    let lock = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock, linked_to).unwrap();
+
+    let err = tx
+        .locks_link_transaction(lock, TransactionId::new([2u8; 32]))
+        .unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
+    assert_eq!(tx.locks_get(lock).unwrap().transaction_id, Some(linked_to));
+
+    tx.locks_link_transaction(lock, linked_to)
+        .expect("linking a lock again to its own transaction is a no-op");
+}
+
+#[test]
+fn linking_an_unknown_lock_is_not_found() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let err = tx
+        .locks_link_transaction(9999, TransactionId::new([1u8; 32]))
+        .unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
+}
+
+#[test]
+fn unlinking_clears_only_a_link_to_the_named_transaction() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+    let linked_to = TransactionId::new([1u8; 32]);
+
+    let lock = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock, linked_to).unwrap();
+
+    tx.locks_unlink_transaction(lock, TransactionId::new([2u8; 32]))
+        .unwrap();
+    assert_eq!(tx.locks_get(lock).unwrap().transaction_id, Some(linked_to));
+
+    tx.locks_unlink_transaction(lock, linked_to).unwrap();
+    assert_eq!(tx.locks_get(lock).unwrap().transaction_id, None);
+}

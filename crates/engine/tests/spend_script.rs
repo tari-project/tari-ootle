@@ -1008,6 +1008,11 @@ fn spend_rejects_mutable_function() {
 }
 
 #[test]
+fn spend_rejects_method() {
+    assert_spend_rejected("bad_receiver", vec![], "must be a template function, not a method");
+}
+
+#[test]
 fn spend_rejects_non_unit_function() {
     assert_spend_rejected("bad_returns_value", vec![], "must return unit");
 }

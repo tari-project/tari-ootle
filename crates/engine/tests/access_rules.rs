@@ -2356,6 +2356,7 @@ mod resource_access_rules {
             "invalid_auth_hook3",
             "invalid_auth_hook4",
             "invalid_auth_hook5",
+            "invalid_auth_hook6",
             "hook_doesnt_exist",
         ]
         .iter()
@@ -2583,6 +2584,7 @@ mod resource_access_rules {
             "invalid_auth_hook3",
             "invalid_auth_hook4",
             "invalid_auth_hook5",
+            "invalid_auth_hook6",
             "hook_doesnt_exist",
         ] {
             let reason = test.execute_expect_failure(

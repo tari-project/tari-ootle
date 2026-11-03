@@ -84,6 +84,25 @@ fn a_linked_lock_has_no_timeout_to_extend() {
 }
 
 #[test]
+fn a_linked_lock_cannot_be_linked_to_a_second_transaction() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let lock = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    let first = TransactionId::new([1u8; 32]);
+    tx.locks_link_transaction(lock, first).unwrap();
+
+    let err = tx
+        .locks_link_transaction(lock, TransactionId::new([2u8; 32]))
+        .unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
+    assert_eq!(tx.locks_get(lock).unwrap().transaction_id, Some(first));
+
+    let err = tx.locks_link_transaction(9999, first).unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
+}
+
+#[test]
 fn extending_a_timeout_saves_a_lock_from_the_stale_sweep() {
     let db = open_store();
     let mut tx = db.create_write_tx().unwrap();

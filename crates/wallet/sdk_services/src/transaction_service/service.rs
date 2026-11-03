@@ -272,11 +272,11 @@ where
             TransactionServiceRequest::SubmitTransaction {
                 transaction,
                 context,
-                lock_id,
+                lock_ids,
                 reply,
             } => {
                 reply
-                    .send(self.handle_submit_transaction(transaction, context, lock_id).await)
+                    .send(self.handle_submit_transaction(transaction, context, lock_ids).await)
                     .map_err(|_| TransactionServiceError::ServiceShutdown)?;
             },
             TransactionServiceRequest::SubmitDryRunTransaction { transaction, reply } => {
@@ -319,7 +319,7 @@ where
         &self,
         transaction: Transaction,
         context: Option<TransactionContext>,
-        lock_id: Option<WalletLockId>,
+        lock_ids: Vec<WalletLockId>,
     ) -> Result<TransactionId, TransactionServiceError> {
         let transaction_api = self.wallet_sdk.transaction_api();
         let new_account_info = context.as_ref().and_then(|c| c.new_account_data()).cloned();
@@ -327,14 +327,14 @@ where
             .as_ref()
             .map(|c| c.linked_accounts.as_slice())
             .unwrap_or_default();
-        // The poll submits any stored transaction, so the lock is linked in the write that stores it: an error
-        // returned from here on means the wallet holds no transaction for the caller's inputs.
+        // The poll submits a stored transaction, so the locks are linked in the same write that stores it: an error
+        // returned here means the wallet holds no transaction for the caller's inputs and the locks are still free.
         let transaction_id = transaction_api.insert_new_transaction(
             transaction,
             new_account_info,
             linked_accounts,
             false,
-            lock_id.as_slice(),
+            &lock_ids,
         )?;
 
         // A poll can submit the transaction while this call waits on the validator set, so the context is in place

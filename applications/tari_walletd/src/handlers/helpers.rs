@@ -184,6 +184,26 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
     .into()
 }
 
+/// Whether a caller-named key may sign, refusing an imported key id the wallet holds no key at as an
+/// invalid `field`.
+pub(super) fn is_signing_key<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
+    field: &str,
+    key_id: &KeyId,
+) -> Result<bool, anyhow::Error> {
+    sdk.key_manager_api()
+        .is_signing_key(*key_id)
+        .optional()?
+        .ok_or_else(|| {
+            invalid_params(
+                field,
+                Some(format!(
+                    "{key_id} does not exist: the wallet holds no imported key with that id"
+                )),
+            )
+        })
+}
+
 /// Refuses a caller-named key unless it may sign (see [`KeyId::is_signing_key`]). The key manager
 /// refuses the same keys when signing; checking here names the offending request field.
 pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
@@ -191,7 +211,7 @@ pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
     field: &str,
     key_id: &KeyId,
 ) -> Result<(), anyhow::Error> {
-    if sdk.key_manager_api().is_signing_key(*key_id)? {
+    if is_signing_key(sdk, field, key_id)? {
         return Ok(());
     }
     Err(invalid_params(

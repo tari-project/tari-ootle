@@ -263,7 +263,7 @@ pub async fn handle_claim_validator_fees(
         .submit_transaction_with_opts(
             transaction,
             Some(TransactionContext::with_accounts([account_component_address])),
-            None,
+            vec![],
         )
         .await?;
 

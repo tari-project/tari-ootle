@@ -829,7 +829,7 @@ async fn a_held_back_transaction_is_announced_with_the_context_it_was_submitted_
         file_name: "burn.json".to_string(),
     });
     let transaction_id = handle
-        .submit_transaction_with_opts(transaction, Some(context), None)
+        .submit_transaction_with_opts(transaction, Some(context), vec![])
         .await
         .unwrap();
     assert_eq!(network.submissions(), 0);

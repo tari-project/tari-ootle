@@ -14,7 +14,7 @@ pub(super) enum TransactionServiceRequest {
     SubmitTransaction {
         transaction: Transaction,
         context: Option<TransactionContext>,
-        lock_id: Option<WalletLockId>,
+        lock_ids: Vec<WalletLockId>,
         reply: Reply<Result<TransactionId, TransactionServiceError>>,
     },
 
@@ -37,7 +37,7 @@ impl TransactionServiceHandle {
 
 impl TransactionServiceHandle {
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionServiceError> {
-        self.submit_transaction_with_opts(transaction, None, None).await
+        self.submit_transaction_with_opts(transaction, None, Vec::new()).await
     }
 
     pub async fn submit_dry_run_transaction(
@@ -55,18 +55,20 @@ impl TransactionServiceHandle {
         reply_rx.await.map_err(|_| TransactionServiceError::ServiceShutdown)?
     }
 
+    /// Stores and submits `transaction`, linking each of `lock_ids` to it in the same write that stores it. If that
+    /// write fails, the wallet holds no transaction and the locks stay free.
     pub async fn submit_transaction_with_opts(
         &self,
         transaction: Transaction,
         context: Option<TransactionContext>,
-        lock_id: Option<WalletLockId>,
+        lock_ids: Vec<WalletLockId>,
     ) -> Result<TransactionId, TransactionServiceError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.sender
             .send(TransactionServiceRequest::SubmitTransaction {
                 transaction,
                 context,
-                lock_id,
+                lock_ids,
                 reply: reply_tx,
             })
             .await

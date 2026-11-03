@@ -164,11 +164,14 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
 
     let test = Test::new();
     let sdk = test.sdk();
-    let account = sdk
+    // A wallet account whose component derives from its key, so the transfer resolves it without the network. The
+    // harness's test account holds account key index 0.
+    let destination_keys = sdk.key_manager_api().derive_account_address(1).unwrap();
+    let destination = sdk
         .accounts_api()
-        .get_account_by_address(&Test::test_account_address())
+        .create_account(Some("destination"), false, destination_keys)
         .unwrap();
-    let destination_address = account.address().clone();
+    let destination_address = destination.address().clone();
 
     let conf_resource: ResourceAddress = "resource_0000000000000000000000000000000000000000000000000000000000000c0f"
         .parse()

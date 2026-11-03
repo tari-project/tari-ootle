@@ -418,13 +418,10 @@ fn charges_after_the_last_invocation_still_collect_the_payment() {
     assert_eq!(fee_receipt.unpaid_debt(), TRAILING_HOST_CALLS / 2);
 }
 
-/// A fee intent whose own commit costs more than it paid still commits nothing, whatever the main
-/// intent did. Its execution is priced only at finalization, so a payment can clear the checkpoint
-/// and still fall short of what the fee intent ran.
+/// A fee intent whose own commit costs more than it paid commits nothing.
 #[test]
 fn a_fee_intent_that_cannot_pay_for_itself_commits_nothing() {
-    // Clears the checkpoint, which prices no execution under this fee table, but not the points the
-    // fee intent's own call ran.
+    // Covers every charge under this fee table except the points the fee intent's own call ran.
     const FEE_PAYMENT: u64 = 1_000;
 
     let Harness {
@@ -457,4 +454,70 @@ fn a_fee_intent_that_cannot_pay_for_itself_commits_nothing() {
     );
     assert_eq!(result.finalize.fee_receipt.total_fees_paid(), 0);
     assert!(result.finalize.fee_receipt.total_fees_charged() > FEE_PAYMENT);
+}
+
+/// The fee checkpoint prices the fee intent's execution as the fee-intent fallback does. A payment
+/// that covers the fee intent's state but not the compute it ran is rejected at the checkpoint, so
+/// the main intent never starts, and the rejection reports the fee intent's execution in the fee it
+/// requires.
+#[test]
+fn the_fee_checkpoint_prices_the_fee_intents_execution() {
+    // Covers every charge under this fee table except the points the fee intent's own call ran.
+    const FEE_PAYMENT: u64 = 1_000;
+    const MAIN_HOST_CALLS: u64 = 8;
+
+    let Harness {
+        mut test,
+        bench,
+        account,
+        owner,
+        key,
+        per_round,
+    } = setup();
+    // Host-only instructions are charged as they run and need no compute allowance, so their
+    // charges show whether the main intent ran at all.
+    let mut fee_table = test.fee_table().clone();
+    fee_table.per_module_call_cost = 1;
+    test.set_fee_table(fee_table);
+
+    let rounds = BELOW_GRACE_POINTS / per_round;
+    let tx = |host_calls: u64| {
+        let mut builder = Transaction::builder_localnet(Epoch(1)).with_fee_instructions_builder(|builder| {
+            builder
+                .call_function(bench, "bench_div_u64", args![rounds])
+                .pay_fee_from_component(account, FEE_PAYMENT)
+        });
+        for _ in 0..host_calls {
+            builder = builder.drop_all_proofs_in_workspace();
+        }
+        builder.build_and_seal(&key)
+    };
+
+    let one_call = test.try_execute(tx(1), vec![owner.clone()]).unwrap();
+    let result = test.try_execute(tx(MAIN_HOST_CALLS), vec![owner]).unwrap();
+
+    let TransactionResult::Reject(RejectReason::InsufficientFeesPaid(message)) = &result.finalize.result else {
+        panic!(
+            "expected the whole transaction to be rejected, got {:?}",
+            result.finalize.result
+        );
+    };
+    let breakdown = result.finalize.fee_receipt.fee_breakdown();
+    assert_eq!(
+        breakdown.get(FeeSource::RuntimeCall),
+        one_call
+            .finalize
+            .fee_receipt
+            .fee_breakdown()
+            .get(FeeSource::RuntimeCall),
+        "the main intent must not start: {message}",
+    );
+    assert_eq!(result.finalize.fee_receipt.total_fees_paid(), 0);
+
+    let fee_intent_execution = breakdown.get(FeeSource::WasmExecution);
+    assert_eq!(
+        fee_intent_execution, result.wasm_execution_points,
+        "the rejection must price the fee intent's execution"
+    );
+    assert!(result.finalize.charged_fees() >= fee_intent_execution);
 }

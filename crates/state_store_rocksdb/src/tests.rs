@@ -339,6 +339,7 @@ fn multi_get_exact_returns_values_in_key_order_and_rejects_a_missing_key() {
 }
 
 #[test]
+#[expect(clippy::too_many_lines)]
 fn foreign_proposals_clear_proposed_in_does_not_reset_confirmed_or_invalid_status() {
     use tari_common_types::types::CompressedPublicKey;
     use tari_consensus_types::{PcId, ProposalCertificate, ShardGroupAccumulatedData};
@@ -488,9 +489,15 @@ fn foreign_proposals_clear_proposed_in_does_not_reset_confirmed_or_invalid_statu
     store
         .with_read_tx(|tx| {
             let new_on_a = tx.foreign_proposals_get_all_new(block_a.id(), usize::MAX)?;
-            assert!(new_on_a.is_empty(), "expected no new FPs on block_a chain, got {new_on_a:?}");
+            assert!(
+                new_on_a.is_empty(),
+                "expected no new FPs on block_a chain, got {new_on_a:?}"
+            );
             let new_on_b = tx.foreign_proposals_get_all_new(block_b.id(), usize::MAX)?;
-            assert!(new_on_b.is_empty(), "expected no new FPs on block_b chain, got {new_on_b:?}");
+            assert!(
+                new_on_b.is_empty(),
+                "expected no new FPs on block_b chain, got {new_on_b:?}"
+            );
             Ok::<_, StorageError>(())
         })
         .unwrap();
@@ -504,7 +511,10 @@ fn foreign_proposals_clear_proposed_in_does_not_reset_confirmed_or_invalid_statu
     store
         .with_read_tx(|tx| {
             let new_on_a = tx.foreign_proposals_get_all_new(block_a.id(), usize::MAX)?;
-            assert!(new_on_a.is_empty(), "expected block_a index to still suppress fp_proposed, got {new_on_a:?}");
+            assert!(
+                new_on_a.is_empty(),
+                "expected block_a index to still suppress fp_proposed, got {new_on_a:?}"
+            );
             let new_on_b = tx.foreign_proposals_get_all_new(block_b.id(), usize::MAX)?;
             assert_eq!(new_on_b.len(), 1);
             assert_eq!(new_on_b[0].block_id(), fp_proposed.block_id());
@@ -529,18 +539,16 @@ fn foreign_proposals_clear_proposed_in_does_not_reset_confirmed_or_invalid_statu
 
     store
         .with_read_tx(|tx| {
-            let records = tx.foreign_proposals_get_any([
-                fp_confirmed.block_id(),
-                fp_invalid.block_id(),
-                fp_proposed.block_id(),
-            ])?;
+            let records =
+                tx.foreign_proposals_get_any([fp_confirmed.block_id(), fp_invalid.block_id(), fp_proposed.block_id()])?;
             assert_eq!(records.len(), 3);
             for rec in &records {
                 if rec.block_id() == fp_confirmed.block_id() {
                     assert_eq!(rec.status(), ForeignProposalStatus::Confirmed);
                 } else if rec.block_id() == fp_invalid.block_id() {
                     assert_eq!(rec.status(), ForeignProposalStatus::Invalid);
-                } else if rec.block_id() == fp_proposed.block_id() {
+                } else {
+                    assert_eq!(rec.block_id(), fp_proposed.block_id());
                     // Still Proposed in block_b after clearing block_a
                     assert_eq!(rec.status(), ForeignProposalStatus::Proposed);
                     assert_eq!(rec.proposed_in_block(), Some(block_b.id()));

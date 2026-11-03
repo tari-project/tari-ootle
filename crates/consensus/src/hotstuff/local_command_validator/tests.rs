@@ -1177,7 +1177,9 @@ mod local_only {
             .map(component_id)
             .find(|id| {
                 *id != shared &&
-                    local.contains(&VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(NUM_PRESHARDS))
+                    local.contains(
+                        &VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(NUM_PRESHARDS),
+                    )
             })
             .unwrap();
         replica.add_substate(&shared);

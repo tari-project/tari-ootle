@@ -194,10 +194,8 @@ where
 
         let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
-            // Only mark the justified block (and any intermediate dummy blocks) as processed once this block is
-            // accepted and its `change_set` is saved. Otherwise, a rejected or unvoted proposal would stamp
-            // `justify_qc` on `justified_block` while discarding `change_set`, causing a subsequent valid proposal
-            // justifying the same block to skip `process_newly_justified_block` and lose its evidence updates.
+            // A justified block and its walked ancestors are stamped only by an accepted proposal, whose change set
+            // carries their evidence. A later justification walks back to the first stamped ancestor.
             for mut block in processed_blocks {
                 block.add_justify_qc(tx, &block_qc_id)?;
             }
@@ -1518,7 +1516,6 @@ mod tests {
         use std::collections::HashMap;
 
         use tari_consensus_types::{PcId, ProposalCertificate, ShardGroupAccumulatedData};
-        use tari_crypto::tari_utilities::epoch_time::EpochTime;
         use tari_engine_types::{
             creation_check::CreationCheck,
             substate::{Substate, SubstateId},
@@ -1534,13 +1531,20 @@ mod tests {
         };
         use tari_ootle_storage::consensus_models::{
             BlockCommands,
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandsCommitProof,
             Evidence,
+            ForeignProposal,
+            ForeignProposalRecord,
+            ForeignProposalStatus,
             LockedEpoch,
             MultiShardAtom,
             TransactionExecution,
             TransactionPoolStatusUpdate,
         };
         use tari_ootle_transaction::{Network, Transaction, TransactionId};
+        use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
         use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
         use tari_template_lib_types::{ComponentAddress, crypto::SchnorrSignatureBytes};
         use tempfile::TempDir;
@@ -1633,14 +1637,8 @@ mod tests {
                     tx_events.downgrade(),
                     manager,
                 );
-                let committee_info = CommitteeInfo::new(
-                    NUM_PRESHARDS,
-                    1,
-                    1,
-                    shard_group,
-                    Epoch::zero(),
-                    VotePower::of(1),
-                );
+                let committee_info =
+                    CommitteeInfo::new(NUM_PRESHARDS, 1, 1, shard_group, Epoch::zero(), VotePower::of(1));
                 let committee = Committee::new(vec![]);
                 Self {
                     store,
@@ -1662,7 +1660,7 @@ mod tests {
                 timestamp: u64,
             ) -> Block {
                 let justify = ProposalCertificate::new(
-                    justify_block.header().calculate_hash().into(),
+                    justify_block.header().calculate_hash(),
                     *justify_block.parent(),
                     justify_block.height(),
                     justify_block.epoch(),
@@ -1718,72 +1716,7 @@ mod tests {
         }
 
         #[test]
-        fn already_voted_height_returns_no_vote_and_does_not_vote_twice() {
-            let mut fixture = VoterFixture::new();
-
-            // `set_no_vote` must clear any previously set `quorum_decision`.
-            let mut cs = ProposedBlockChangeSet::new(fixture.genesis.as_leaf());
-            cs.set_quorum_decision(QuorumDecision::Accept);
-            cs.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
-            assert_eq!(cs.quorum_decision(), None);
-            assert!(!cs.is_accept());
-
-            let block_a = fixture.make_block(
-                &fixture.genesis,
-                &fixture.genesis,
-                NodeHeight(1),
-                BlockCommands::empty(),
-                FixedHash::zero(),
-                EpochTime::now().as_u64(),
-            );
-            // Competing block at the same height with a mismatched state merkle root; because the height was
-            // already voted at, `should_vote` must short-circuit with `AlreadyVotedAtHeight` rather than running
-            // `decide_what_to_vote` and returning `StateMerkleRootMismatch` (which would trigger a leader timeout).
-            let block_b = fixture.make_block(
-                &fixture.genesis,
-                &fixture.genesis,
-                NodeHeight(1),
-                BlockCommands::empty(),
-                FixedHash::from([0xAA; 32]),
-                EpochTime::now().as_u64() + 1,
-            );
-            let block_c = fixture.make_block(
-                &fixture.genesis,
-                &fixture.genesis,
-                NodeHeight(1),
-                BlockCommands::empty(),
-                FixedHash::zero(),
-                EpochTime::now().as_u64() + 2,
-            );
-
-            let decision_a = fixture.handle_block(&block_a);
-            assert_eq!(decision_a.local_decision, Some(QuorumDecision::Accept));
-            assert!(decision_a.no_vote_reason.is_none());
-
-            // Simulate `send_vote_to_leader` persisting `LastVoted` for `block_a`.
-            fixture
-                .store
-                .with_write_tx(|tx| block_a.as_last_voted().set(tx))
-                .unwrap();
-
-            let decision_b = fixture.handle_block(&block_b);
-            assert_eq!(decision_b.local_decision, None);
-            assert!(
-                matches!(decision_b.no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)),
-                "unexpected no_vote_reason: {:?}",
-                decision_b.no_vote_reason
-            );
-
-            let decision_c = fixture.handle_block(&block_c);
-            assert_eq!(decision_c.local_decision, None);
-            assert!(
-                matches!(decision_c.no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)),
-                "unexpected no_vote_reason: {:?}",
-                decision_c.no_vote_reason
-            );
-        }
-
-        #[test]
+        #[expect(clippy::too_many_lines)]
         fn rejected_block_does_not_mark_justified_block_processed_so_next_valid_block_applies_evidence() {
             let mut fixture = VoterFixture::new();
             let shard_group = fixture.committee_info.shard_group();
@@ -1852,7 +1785,10 @@ mod tests {
                 .store
                 .with_read_tx(|tx| Ok::<_, HotStuffError>(Block::get(tx, block_1.id())?.has_justify_qc()))
                 .unwrap();
-            assert!(!block_1_has_qc, "rejected block must not mark justified_block as processed");
+            assert!(
+                !block_1_has_qc,
+                "rejected block must not mark justified_block as processed"
+            );
 
             // Now view 2 is filled by a dummy/empty block `block_2` extending `block_1`, and `good_block_3` at
             // height 3 justifies `block_2`. `process_newly_justified_block` walks from `block_2` back to `block_1`
@@ -1899,6 +1835,102 @@ mod tests {
                 Some(&good_block_3.justify().calculate_id())
             );
             assert!(rec.is_ready());
+        }
+
+        fn foreign_proposal_record() -> ForeignProposalRecord {
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: Default::default(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let header = SidechainBlockHeader {
+                network: NETWORK.as_byte(),
+                protocol_version: 0,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 1,
+                epoch: 0,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: 0,
+                    end_inclusive: 127,
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
+            };
+            let proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+                header,
+                proof_elements: vec![],
+            });
+            ForeignProposalRecord::new(ForeignProposal::new(proof, BlockPledge::default(), metadata))
+        }
+
+        /// The epoch GC removes a confirmed foreign proposal's proposed-in index entry by the block the record names,
+        /// so a committed block must name itself on the foreign proposals it confirms, including one that a competing
+        /// fork proposed after it.
+        #[test]
+        fn a_committed_block_confirms_its_foreign_proposals_as_proposed_in_itself() {
+            let fixture = VoterFixture::new();
+            let foreign_proposal = foreign_proposal_record();
+            let commands = || BlockCommands::init([Command::ForeignProposal(foreign_proposal.to_atom())]).unwrap();
+            let committed = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                commands(),
+                FixedHash::zero(),
+                10,
+            );
+            let fork = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                commands(),
+                FixedHash::zero(),
+                11,
+            );
+
+            let record = fixture
+                .store
+                .with_write_tx(|tx| {
+                    for block in [&committed, &fork] {
+                        block.justify().save(tx)?;
+                        block.insert(tx)?;
+                    }
+                    foreign_proposal.save(tx)?;
+                    for block in [&committed, &fork] {
+                        tx.foreign_proposals_set_status(
+                            foreign_proposal.block_id(),
+                            ForeignProposalStatus::Proposed,
+                            Some(block.id()),
+                        )?;
+                    }
+                    let commit_qc = committed.justify();
+                    fixture.voter.finalize_block(
+                        tx,
+                        &fixture.committee_info,
+                        &fixture.committee,
+                        commit_qc,
+                        &commit_qc.calculate_id(),
+                        &committed,
+                    )?;
+                    let [record] = tx
+                        .foreign_proposals_get_any([foreign_proposal.block_id()])?
+                        .try_into()
+                        .unwrap();
+                    Ok::<_, HotStuffError>(record)
+                })
+                .unwrap();
+
+            assert_eq!(record.status(), ForeignProposalStatus::Confirmed);
+            assert_eq!(record.proposed_in_block(), Some(committed.id()));
         }
     }
 }

@@ -336,6 +336,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker + Send> EpochEventOra
 mod tests {
     use std::{
         collections::{HashMap, VecDeque},
+        num::NonZeroU64,
         sync::Mutex,
         task::{Context, Poll, Waker},
         time::Duration,
@@ -401,7 +402,7 @@ mod tests {
             shard_group: ShardGroup::new(1, 256),
             registration_epoch,
             claim_key_changes: vec![],
-            power: 1,
+            power: NonZeroU64::MIN,
         }
     }
 
@@ -791,7 +792,7 @@ mod tests {
     #[test]
     fn registration_and_rotation_carry_the_configured_power() {
         let heavy = Validator {
-            power: 5,
+            power: NonZeroU64::new(5).unwrap(),
             ..mk_validator_with_rotation(Epoch(10), Epoch(20))
         };
         let light = mk_validator(3, Epoch(10));

@@ -618,6 +618,45 @@ fn it_does_not_leak_a_callees_address_allocation_into_the_callers_scope() {
 }
 
 #[test]
+fn it_rejects_a_call_returning_a_bucket_it_does_not_hold() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    let (account, owner_token, owner_key) = test.create_funded_account();
+
+    // The bucket is held by the transaction's workspace, and the callee is handed nothing.
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(account, "withdraw", args![TARI_TOKEN, 1000])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_function(template_addr, "return_bucket_by_id", args![0u32])
+            .put_last_instruction_output_on_workspace("alias")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(&owner_key),
+        vec![owner_token],
+    );
+
+    assert_reject_reason(reason, RuntimeError::BucketNotInScope { bucket_id: 0.into() });
+}
+
+#[test]
+fn it_rejects_a_call_returning_an_address_allocation_it_does_not_hold() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+
+    // The allocation is held by the transaction's workspace, and the callee is handed nothing.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .allocate_component_address("allocation")
+            .call_function(template_addr, "return_allocation_by_id", args![0u32])
+            .put_last_instruction_output_on_workspace("alias")
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::AddressAllocationNotInScope { id: 0 });
+}
+
+#[test]
 fn it_refuses_to_authorize_a_proof_the_frame_does_not_hold() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template_addr = test.get_template_address(TEMPLATE_NAME);

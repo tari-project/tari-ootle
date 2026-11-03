@@ -418,48 +418,10 @@ fn charges_after_the_last_invocation_still_collect_the_payment() {
     assert_eq!(fee_receipt.unpaid_debt(), TRAILING_HOST_CALLS / 2);
 }
 
-/// A fee intent whose own commit costs more than it paid commits nothing.
-#[test]
-fn a_fee_intent_that_cannot_pay_for_itself_commits_nothing() {
-    // Covers every charge under this fee table except the points the fee intent's own call ran.
-    const FEE_PAYMENT: u64 = 1_000;
-
-    let Harness {
-        mut test,
-        bench,
-        account,
-        owner,
-        key,
-        per_round,
-    } = setup();
-
-    let rounds = BELOW_GRACE_POINTS / per_round;
-    let tx = Transaction::builder_localnet(Epoch(1))
-        .with_fee_instructions_builder(|builder| {
-            builder
-                .call_function(bench, "bench_div_u64", args![rounds])
-                .pay_fee_from_component(account, FEE_PAYMENT)
-        })
-        .drop_all_proofs_in_workspace()
-        .build_and_seal(&key);
-
-    let result = test.try_execute(tx, vec![owner]).unwrap();
-    assert!(
-        matches!(
-            result.finalize.result,
-            TransactionResult::Reject(RejectReason::InsufficientFeesPaid(_))
-        ),
-        "expected the whole transaction to be rejected, got {:?}",
-        result.finalize.result,
-    );
-    assert_eq!(result.finalize.fee_receipt.total_fees_paid(), 0);
-    assert!(result.finalize.fee_receipt.total_fees_charged() > FEE_PAYMENT);
-}
-
-/// The fee checkpoint prices the fee intent's execution as the fee-intent fallback does. A payment
-/// that covers the fee intent's state but not the compute it ran is rejected at the checkpoint, so
-/// the main intent never starts, and the rejection reports the fee intent's execution in the fee it
-/// requires.
+/// A fee intent whose own commit costs more than it paid commits nothing. The fee checkpoint prices
+/// the fee intent's execution as the fee-intent fallback does, so a payment that covers the fee
+/// intent's state but not the compute it ran is rejected at the checkpoint: the main intent never
+/// starts, and the rejection reports the fee intent's execution in the fee it requires.
 #[test]
 fn the_fee_checkpoint_prices_the_fee_intents_execution() {
     // Covers every charge under this fee table except the points the fee intent's own call ran.

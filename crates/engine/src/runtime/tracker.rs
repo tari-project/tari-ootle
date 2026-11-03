@@ -610,6 +610,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         // and there is no shallower checkpoint left to fall back to. Letting it through is what
         // would make an underfunded fee intent a way to write state for free.
         //
+        // The fee checkpoint already rejects a payment short of this figure before the main intent
+        // may run, since the fee module prices the checkpoint exactly as it prices the fallback
+        // here. This check is the backstop for a module whose persist-time charges exceed what it
+        // charged at the checkpoint.
+        //
         // The compute allowance holds the main intent's charges inside the payment only up to the
         // last allowance it sized, so charges accrued past that can leave the total a little over
         // the payment. A fee intent that paid for itself commits regardless, and settlement collects

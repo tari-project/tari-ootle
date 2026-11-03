@@ -5,6 +5,7 @@ use std::{
     collections::HashSet,
     fmt::Display,
     hash::{DefaultHasher, Hasher},
+    num::NonZeroU64,
     time::Duration,
 };
 
@@ -29,7 +30,20 @@ impl Config {
     /// than resolved by a default.
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut seen = HashSet::with_capacity(self.validators.len());
+        // Every committee's total power is a sum over a subset of these validators, so bounding the network-wide sum
+        // to the i64 storage range bounds every stored power and every committee total.
+        let mut total_power = 0u64;
         for validator in &self.validators {
+            total_power = total_power
+                .checked_add(validator.power.get())
+                .filter(|total| i64::try_from(*total).is_ok())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "The configured validators' vote power sums to more than {}. Lower the `power` of one or more \
+                         validators.",
+                        i64::MAX
+                    )
+                })?;
             // A second entry for a validator would activate it twice. Listing it twice at one registration epoch
             // produces two rows sharing a start_epoch, which `distinct_validators` and `set_committee_shard` resolve
             // by different tiebreaks; listing it at two registration epochs moves its shard key.
@@ -85,12 +99,12 @@ pub struct Validator {
     /// key is unaffected by a rotation.
     #[serde(default)]
     pub claim_key_changes: Vec<ClaimKeyChange>,
-    /// The validator's vote power in stake units. Must be at least 1.
+    /// The validator's vote power in stake units.
     ///
     /// Power is fixed for the life of the registration: a claim key rotation re-registers the validator with this
     /// same power. Shard key derivation excludes it, so a validator's place in its committee is independent of stake.
     #[serde(default = "Validator::default_power")]
-    pub power: u64,
+    pub power: NonZeroU64,
 }
 
 /// A scheduled claim key rotation for a [`Validator`].
@@ -109,22 +123,15 @@ impl Validator {
         self.registration_epoch.saturating_add(Epoch(1))
     }
 
-    fn default_power() -> u64 {
-        1
+    fn default_power() -> NonZeroU64 {
+        NonZeroU64::MIN
     }
 
     pub fn vote_power(&self) -> VotePower {
-        VotePower::of(self.power)
+        VotePower::of(self.power.get())
     }
 
     fn validate(&self) -> anyhow::Result<()> {
-        if self.power == 0 {
-            bail!(
-                "Validator {} has a vote power of 0. Every validator must have a vote power of at least 1.",
-                self.public_key
-            );
-        }
-
         let mut changes = self.claim_key_changes.iter().collect::<Vec<_>>();
         changes.sort_by_key(|change| change.effective_epoch);
 
@@ -199,7 +206,7 @@ mod tests {
             shard_group: ShardGroup::new(1, 256),
             registration_epoch: Epoch(10),
             claim_key_changes,
-            power: 1,
+            power: NonZeroU64::MIN,
         }
     }
 
@@ -377,18 +384,42 @@ mod tests {
 
     #[test]
     fn zero_power_is_rejected() {
-        let validator = Validator {
-            power: 0,
+        let err = serde_json::from_value::<Validator>(serde_json::json!({
+            "public_key": mk_key(1),
+            "claim_key": mk_key(2),
+            "shard_group": ShardGroup::new(1, 256),
+            "registration_epoch": Epoch(10),
+            "power": 0,
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("nonzero"), "{err}");
+    }
+
+    #[test]
+    fn total_power_beyond_the_storage_range_is_rejected() {
+        let with_power = |seed, power| Validator {
+            public_key: mk_key(seed),
+            power: NonZeroU64::new(power).unwrap(),
             ..mk_validator(vec![])
         };
-        let err = validator.validate().unwrap_err().to_string();
-        assert!(err.contains("has a vote power of 0"), "{err}");
+        let at_limit = mk_config(vec![with_power(1, i64::MAX as u64 - 1), with_power(9, 1)]);
+        at_limit.validate().unwrap();
+
+        for validators in [
+            vec![with_power(1, i64::MAX as u64 + 1)],
+            vec![with_power(1, i64::MAX as u64), with_power(9, 1)],
+            vec![with_power(1, u64::MAX), with_power(9, u64::MAX)],
+        ] {
+            let err = mk_config(validators).validate().unwrap_err().to_string();
+            assert!(err.contains("vote power sums to more than"), "{err}");
+        }
     }
 
     #[test]
     fn power_does_not_move_the_shard_key() {
         let heavy = Validator {
-            power: 8,
+            power: NonZeroU64::new(8).unwrap(),
             ..mk_validator(vec![])
         };
         assert_eq!(mk_validator(vec![]).calculate_shard_key(), heavy.calculate_shard_key());

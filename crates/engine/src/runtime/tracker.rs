@@ -232,6 +232,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// costs, and that share of the payment is already spoken for; funding compute out of the full
     /// payment would run work nothing is left to pay for.
     ///
+    /// The execution charges are left out of what the payment has spent: the allowance is in
+    /// points, and its users subtract every point the transaction has consumed — the fee intent's
+    /// included — so deducting the fee intent's priced execution here as well would count it twice.
+    ///
     /// That payment-funded figure is measured against the charges *standing when it is asked*.
     /// Anything charged after the last call — instructions that follow the final invocation — is
     /// outside it, so the total can end a little past the payment. The fallback commit is decided
@@ -258,7 +262,9 @@ impl<TStore: StateReader> StateTracker<TStore> {
             if fee_state.is_dry_run() {
                 return None;
             }
-            let unspent = fee_state.total_payments().saturating_sub(fee_state.total_charges());
+            let unspent = fee_state
+                .total_payments()
+                .saturating_sub(fee_state.total_charges_excluding_execution());
             Some(ComputeAllowance {
                 // `prices_execution` above is the only case that yields no figure, so nothing here
                 // may widen the allowance by failing to produce one. The rate is the fee table's, so
@@ -634,6 +640,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         // persists real state — substates, and a receipt carrying every event the intent emitted —
         // and there is no shallower checkpoint left to fall back to. Letting it through is what
         // would make an underfunded fee intent a way to write state for free.
+        //
+        // The fee checkpoint already rejects a payment short of this figure before the main intent
+        // may run, since the fee module prices the checkpoint exactly as it prices the fallback
+        // here. This check is the backstop for a module whose persist-time charges exceed what it
+        // charged at the checkpoint.
         //
         // The compute allowance holds the main intent's charges inside the payment only up to the
         // last allowance it sized, so charges accrued past that can leave the total a little over

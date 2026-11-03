@@ -336,7 +336,9 @@ impl ShardGroupLeaf {
         let value = shard_state_leaf(protocol_version, shard, shard_root, state_version, transition_acc);
         match protocol_version {
             ProtocolVersion::V0 | ProtocolVersion::V1 => {
-                let has_state = *shard_root != SPARSE_MERKLE_PLACEHOLDER_HASH || state_version != 0;
+                let has_state = *shard_root != SPARSE_MERKLE_PLACEHOLDER_HASH ||
+                    state_version != 0 ||
+                    *transition_acc != TransitionAccumulator::zero();
                 Self {
                     key: ShardKeyMapper::map_to_leaf_key(&shard),
                     value: has_state.then_some(value),

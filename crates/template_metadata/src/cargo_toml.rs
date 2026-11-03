@@ -34,7 +34,10 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
         .map_err(|_| CargoTomlError::InheritedField("version"))?
         .to_string();
     let description = match package.description.as_ref() {
-        Some(d) => d.get().map_err(|_| CargoTomlError::InheritedField("description"))?.clone(),
+        Some(d) => d
+            .get()
+            .map_err(|_| CargoTomlError::InheritedField("description"))?
+            .clone(),
         None => String::new(),
     };
     let license = match package.license.as_ref() {

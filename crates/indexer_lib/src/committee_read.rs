@@ -135,7 +135,7 @@ impl CommitteeReadTally {
                 },
                 SubstateResult::DoesNotExist => {
                     self.num_nexist += 1;
-                    (self.num_nexist > self.f).then_some(SubstateLookupResult {
+                    (self.f > 0 && self.num_nexist > self.f).then_some(SubstateLookupResult {
                         result: SubstateResult::DoesNotExist,
                         verified: false,
                         proof: None,
@@ -215,6 +215,14 @@ impl CommitteeReadTally {
                 self.f,
             );
             return Err(IndexerError::InvalidSubstateState);
+        }
+
+        if self.num_nexist > self.f {
+            return Ok(SubstateLookupResult {
+                result: SubstateResult::DoesNotExist,
+                verified: false,
+                proof: None,
+            });
         }
 
         log::warn!(
@@ -740,6 +748,49 @@ mod tests {
         .await
         .unwrap();
         assert!(matches!(result.result, SubstateResult::DoesNotExist));
+    }
+
+    #[tokio::test]
+    async fn with_f_zero_nonexistence_does_not_preempt_an_up_or_down() {
+        for size in [2, 3] {
+            let result = race(size, 1, true, None, vec![
+                (0, Ok((SubstateResult::DoesNotExist, None))),
+                (1, Ok((up(3), proven()))),
+            ])
+            .await
+            .unwrap();
+            assert!(matches!(result.result, SubstateResult::Up { .. }), "{size}");
+            assert!(result.verified, "{size}");
+
+            let result = race(size, 1, false, None, vec![
+                (0, Ok((SubstateResult::DoesNotExist, None))),
+                (1, Ok((up(3), None))),
+            ])
+            .await
+            .unwrap();
+            assert!(matches!(result.result, SubstateResult::Up { .. }), "{size}");
+
+            let result = race(size, 1, true, Some(3), vec![
+                (0, Ok((SubstateResult::DoesNotExist, None))),
+                (1, Ok((down(3), down_proven()))),
+            ])
+            .await
+            .unwrap();
+            assert!(matches!(result.result, SubstateResult::Down { .. }), "{size}");
+            assert!(result.verified, "{size}");
+        }
+    }
+
+    #[tokio::test]
+    async fn with_f_zero_nonexistence_is_concluded_once_everyone_answers() {
+        let result = race(2, 1, true, None, vec![
+            (0, Ok((SubstateResult::DoesNotExist, None))),
+            (1, Err(error())),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::DoesNotExist));
+        assert!(!result.verified);
     }
 
     #[tokio::test]

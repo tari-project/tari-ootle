@@ -682,9 +682,6 @@ where
             // stops at it, as an omitted one is.
             let from_batch = heads
                 .get(req.substate_id())
-                .filter(|head| {
-                    head.verified || !self.verify_substate_proofs || matches!(head.result, SubstateResult::Up { .. })
-                })
                 .and_then(|head| {
                     let entry = SubstateCacheEntry {
                         version: head.result.version(),
@@ -697,6 +694,11 @@ where
                         verified: entry.verified,
                         proof: None,
                     })
+                })
+                .filter(|lookup| {
+                    lookup.verified ||
+                        !self.verify_substate_proofs ||
+                        matches!(lookup.result, SubstateResult::Up { .. })
                 });
             let lookup = match from_batch {
                 Some(lookup) => lookup,
@@ -2693,6 +2695,38 @@ mod tests {
             panic!("expected every input to be up, got {lookup:?}");
         };
         assert_eq!(found.len(), ids.len());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn it_confirms_a_versioned_input_an_unproven_batch_implied_down() {
+        let ids = vec![component_id(0)];
+        let higher_up = Substate::new(1, SubstateValue::NonFungible(NonFungibleContainer::no_data()));
+        let (manager, network) = manager(FakeNetwork {
+            live: live(&ids),
+            proven_batch: Some(SubstateBatch {
+                commit_proof: None,
+                substates: vec![tari_validator_node_rpc::client::BatchedSubstate {
+                    substate_id: ids[0].clone(),
+                    result: SubstateResult::Up {
+                        substate: encoded(higher_up),
+                    },
+                    value_proof: None,
+                    proof_epoch: 0,
+                }],
+                missing: vec![],
+            }),
+            ..Default::default()
+        });
+        let manager = manager.with_substate_proof_verification(true);
+        let reqs = [SubstateRequirementRef::new(&ids[0], Some(SubstateVersion::ZERO))];
+
+        let lookup = manager.get_input_substates(&reqs).await.unwrap();
+
+        let InputSubstatesLookup::AllUp(found) = lookup else {
+            panic!("expected the versioned input to be confirmed up, got {lookup:?}");
+        };
+        assert_eq!(found.len(), 1);
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
     }
 

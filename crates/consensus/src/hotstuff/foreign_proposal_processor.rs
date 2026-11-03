@@ -174,7 +174,12 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                             end_shard: foreign_shard_group.end().as_u32(),
                             abort_reason,
                         });
-                    tx_rec.set_local_decision(exec.decision());
+                    tx_rec
+                        .set_local_decision(exec.decision())
+                        .set_transaction_fee(0)
+                        .set_exhaust_burn(0)
+                        .no_leader_fee()
+                        .set_fee_intent_only(false);
                     proposed_block_change_set.add_abort_execution(*tx_rec.id(), exec);
                 }
 
@@ -275,7 +280,12 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
 
                         // Add an abort execution since we previously decided to commit
                         let exec = TransactionExecution::abort(tx_rec.id(), RejectReason::ForeignPledgeInputConflict);
-                        tx_rec.set_local_decision(exec.decision());
+                        tx_rec
+                            .set_local_decision(exec.decision())
+                            .set_transaction_fee(0)
+                            .set_exhaust_burn(0)
+                            .no_leader_fee()
+                            .set_fee_intent_only(false);
                         proposed_block_change_set.add_abort_execution(*tx_rec.id(), exec);
                     } else {
                         info!(
@@ -446,7 +456,12 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                             end_shard: foreign_shard_group.end().as_u32(),
                             abort_reason,
                         });
-                    tx_rec.set_local_decision(exec.decision());
+                    tx_rec
+                        .set_local_decision(exec.decision())
+                        .set_transaction_fee(0)
+                        .set_exhaust_burn(0)
+                        .no_leader_fee()
+                        .set_fee_intent_only(false);
                     proposed_block_change_set.add_abort_execution(*tx_rec.id(), exec);
                 }
 
@@ -502,7 +517,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     // have them.
                     // CASE: Foreign SGs have pledged all inputs and executed the transaction, local SG is involved
                     // in the outputs
-                    let is_ready = //local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
+                    let is_ready = tx_rec.current_decision().is_abort() ||
+                        //local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
                         tx_rec.committee_involves_inputs(local_committee_info) ||
                         has_all_foreign_input_pledges(tx, &tx_rec, local_committee_info, proposed_block_change_set)?;
                     if is_ready {

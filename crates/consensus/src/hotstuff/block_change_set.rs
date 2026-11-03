@@ -650,7 +650,7 @@ impl TransactionChangeSet {
 
 #[cfg(test)]
 mod tests {
-    use std::{mem::size_of, time::Duration};
+    use std::{mem::size_of, num::NonZeroU64, time::Duration};
 
     use tari_consensus_types::Decision;
     use tari_engine_types::{
@@ -714,13 +714,60 @@ mod tests {
         };
         let mut change_set = ProposedBlockChangeSet::new(leaf);
         let mut switched = local_prepared_record();
-        switched.set_fee_intent_only(true);
+        switched
+            .set_fee_intent_only(true)
+            .set_transaction_fee(19)
+            .set_exhaust_burn(1);
+        let involved = NonZeroU64::new(2).unwrap();
+        let fee_intent_leader_fee = switched.calculate_leader_fee(involved);
+        switched.set_leader_fee(fee_intent_leader_fee.clone());
         change_set.set_next_transaction_update(switched).unwrap();
 
         let mut batched = local_prepared_record();
+        batched.set_transaction_fee(38).set_exhaust_burn(2);
+        let full_leader_fee = batched.calculate_leader_fee(involved);
+        batched.set_leader_fee(full_leader_fee);
         change_set.apply_transaction_update(&mut batched);
 
         assert!(batched.is_fee_intent_only());
+        assert_eq!(batched.transaction_fee(), 19);
+        assert_eq!(batched.exhaust_burn(), 1);
+        assert_eq!(batched.leader_fee(), Some(&fee_intent_leader_fee));
+    }
+
+    #[test]
+    fn an_abort_update_clears_batched_record_fees_and_fee_intent_flag() {
+        let leaf = LeafBlock {
+            block_id: BlockId::zero(),
+            height: NodeHeight(1),
+            epoch: Epoch(1),
+            shard_group: ShardGroup::all_shards(NumPreshards::P256),
+        };
+        let mut change_set = ProposedBlockChangeSet::new(leaf);
+        let mut aborted = local_prepared_record();
+        aborted
+            .set_local_decision(Decision::Abort(AbortReason::ForeignPledgeInputConflict))
+            .set_transaction_fee(0)
+            .set_exhaust_burn(0)
+            .no_leader_fee()
+            .set_fee_intent_only(false);
+        change_set.set_next_transaction_update(aborted).unwrap();
+
+        let involved = NonZeroU64::new(2).unwrap();
+        let mut batched = local_prepared_record();
+        batched
+            .set_fee_intent_only(true)
+            .set_transaction_fee(38)
+            .set_exhaust_burn(2);
+        let full_leader_fee = batched.calculate_leader_fee(involved);
+        batched.set_leader_fee(full_leader_fee);
+        change_set.apply_transaction_update(&mut batched);
+
+        assert!(batched.current_decision().is_abort());
+        assert!(!batched.is_fee_intent_only());
+        assert_eq!(batched.transaction_fee(), 0);
+        assert_eq!(batched.exhaust_burn(), 0);
+        assert_eq!(batched.leader_fee(), None);
     }
 
     /// A foreign proposal can switch a transaction to its fee-intent commit, recording that execution, before another

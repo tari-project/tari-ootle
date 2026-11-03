@@ -222,7 +222,7 @@ impl TransferOutput {
 
 fn validate_access_rule_condition(rule: &AccessRule) -> Result<(), String> {
     if matches!(rule, AccessRule::DenyAll) {
-        return Err("AccessRule::DenyAll can never be satisfied and would permanently lock the output".to_string());
+        return Err("an AccessRule::DenyAll spend condition can never be satisfied".to_string());
     }
     if let Some(invalid) = rule.find_invalid_rule() {
         return Err(format!("Invalid access rule in spend condition: {invalid:?}"));

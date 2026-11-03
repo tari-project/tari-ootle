@@ -276,7 +276,10 @@ fn script_path_zero_of_n_access_rule_leaf_denies_spend() {
             .seal(test.secret_key()),
         vec![],
     );
-    assert_reject_reason(&reason, "Access Denied");
+    assert_reject_reason(
+        &reason,
+        "spend_condition has an m_of_n rule requiring 0 of 1 requirements",
+    );
 }
 
 #[test]
@@ -303,7 +306,7 @@ fn script_path_duplicate_m_of_n_access_rule_leaf_denies_spend() {
             .seal(test.secret_key()),
         vec![],
     );
-    assert_reject_reason(&reason, "Access Denied");
+    assert_reject_reason(&reason, "spend_condition has an m_of_n rule that lists");
 }
 
 // -------------------------------- Script path: multi-leaf tree -------------------------------- //

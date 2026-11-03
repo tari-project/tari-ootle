@@ -172,7 +172,10 @@ pub(crate) async fn submit_inner_for_request(
     context: &HandlerContext,
     req: TransactionSubmitRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    ensure_locked_stealth_inputs_are_spent(context.wallet_sdk(), &req.transaction, &req.lock_ids)?;
+    context
+        .wallet_sdk()
+        .store()
+        .with_read_tx(|tx| ensure_locked_stealth_inputs_are_spent(tx, &req.transaction, &req.lock_ids))?;
     let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
         .map(|address| vec![address])
         .unwrap_or_default();
@@ -182,8 +185,11 @@ pub(crate) async fn submit_inner_for_request(
 /// Refuses a transaction request whose `lock_ids` hold a `LockedForSpend` stealth UTXO that no
 /// directly executed statement (`Instruction::StealthTransfer` or `Account::pay_fee_stealth`) in
 /// `transaction` spends, so `value_summaries` and the stealth spend keys walletd attaches agree.
-pub(crate) fn ensure_locked_stealth_inputs_are_spent(
-    sdk: &WalletSdk,
+///
+/// Runs when a request is created, so the approver never sees a request that cannot be submitted, and again when it is
+/// submitted, which is the check that gates signing.
+pub(crate) fn ensure_locked_stealth_inputs_are_spent<R: WalletStoreReader>(
+    reader: &mut R,
     transaction: &UnsignedTransaction,
     lock_ids: &[WalletLockId],
 ) -> Result<(), anyhow::Error> {
@@ -192,7 +198,7 @@ pub(crate) fn ensure_locked_stealth_inputs_are_spent(
     }
     let statements = crate::handlers::transaction_requests::extract_stealth_statements(transaction);
     for lock_id in lock_ids {
-        let Some(outputs) = sdk.stealth_outputs_api().get_locked_by_lock_id(*lock_id).optional()? else {
+        let Some(outputs) = reader.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()? else {
             continue;
         };
         for output in outputs {

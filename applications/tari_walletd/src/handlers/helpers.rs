@@ -6,12 +6,13 @@ use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 use anyhow::anyhow;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::component::derive_component_address_from_public_key;
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::burn_claim_proof::claim_proof_from_l1;
 use tari_ootle_common_types::{
     SubstateRequirement,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
@@ -221,6 +222,37 @@ pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
              sign"
         )),
     ))
+}
+
+/// Checks a transaction submitted for approval is committable on this wallet's network: its blob references resolve,
+/// its network byte is `network`, and it is not a dry run. Transaction requests and signing requests share these rules.
+pub(super) fn validate_transaction_for_approval(
+    network: Network,
+    transaction: &UnsignedTransaction,
+) -> Result<(), anyhow::Error> {
+    transaction
+        .validate_blob_references()
+        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
+
+    if transaction.network() != network.as_byte() {
+        return Err(invalid_params(
+            "transaction.network",
+            Some(format!(
+                "the transaction is for network byte {:#04x}, but this wallet is on {network} ({:#04x})",
+                transaction.network(),
+                network.as_byte()
+            )),
+        ));
+    }
+
+    if transaction.is_dry_run() {
+        return Err(invalid_params(
+            "transaction.dry_run",
+            Some("a dry-run transaction cannot be committed, so this wallet never signs it"),
+        ));
+    }
+
+    Ok(())
 }
 
 /// [`ensure_signing_key`] for a transaction's `seal_signer` and each of its `other_signers`.

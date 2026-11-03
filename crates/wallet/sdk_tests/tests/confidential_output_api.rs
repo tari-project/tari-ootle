@@ -12,7 +12,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::SubstateVersion;
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
+    models::{BalanceChangeSource, ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
     storage::{ReadableWalletStore, WalletStoreReader},
 };
 use tari_template_lib::types::{ConfidentialOutputAddress, EncryptedData, constants::STEALTH_TARI_RESOURCE_ADDRESS};
@@ -148,6 +148,7 @@ fn outputs_locked_and_finalized() {
 
 #[tokio::test]
 async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked_lock_until_submission() {
+    use tari_engine_types::resource::Resource;
     use tari_ootle_common_types::optional::IsNotFoundError;
     use tari_ootle_wallet_sdk::apis::confidential_transfer::{ConfidentialTransferParams, UtxoInputSelection};
     use tari_template_lib::types::{
@@ -160,7 +161,6 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
         access_rules::ResourceAccessRules,
         constants::TOKEN_SYMBOL,
     };
-    use tari_engine_types::resource::Resource;
 
     let test = Test::new();
     let sdk = test.sdk();
@@ -203,7 +203,13 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
         )
         .unwrap();
     sdk.accounts_api()
-        .update_vault_balance(conf_vault, Amount::from(1_000u64), Amount::zero())
+        .update_vault_balance_and_record_change(
+            conf_vault,
+            SubstateVersion::ZERO,
+            Amount::from(1_000u64),
+            Amount::zero(),
+            BalanceChangeSource::Scan,
+        )
         .unwrap();
     sdk.substate_api()
         .save_root(
@@ -236,11 +242,7 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
     };
 
     // Dry run releases the lock immediately before returning.
-    let dry_run = sdk
-        .confidential_transfer_api()
-        .transfer(params(true))
-        .await
-        .unwrap();
+    let dry_run = sdk.confidential_transfer_api().transfer(params(true)).await.unwrap();
     let released = test
         .store()
         .with_read_tx(|tx| tx.locks_get(dry_run.transaction_proof_id))
@@ -248,11 +250,7 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
     assert!(released.is_not_found_error(), "{released}");
 
     // Real transfer keeps a timed lock that is not yet linked to a transaction until submission.
-    let real = sdk
-        .confidential_transfer_api()
-        .transfer(params(false))
-        .await
-        .unwrap();
+    let real = sdk.confidential_transfer_api().transfer(params(false)).await.unwrap();
     let held = test
         .store()
         .with_read_tx(|tx| tx.locks_get(real.transaction_proof_id))

@@ -55,7 +55,7 @@ use super::context::{AuthIdentity, HandlerContext};
 use crate::handlers::{
     component_upgrades::component_upgrades,
     helpers,
-    helpers::{invalid_params, invalid_request},
+    helpers::{invalid_params, invalid_request, validate_transaction_for_approval},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::signing_requests";
@@ -152,29 +152,7 @@ fn validate_create_request(
     context: &HandlerContext,
     req: &SigningRequestCreateRequest,
 ) -> Result<Duration, anyhow::Error> {
-    let transaction = &req.transaction;
-    transaction
-        .validate_blob_references()
-        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
-
-    let network = context.config().network;
-    if transaction.network() != network.as_byte() {
-        return Err(invalid_params(
-            "transaction.network",
-            Some(format!(
-                "the transaction is for network byte {:#04x}, but this wallet is on {network} ({:#04x})",
-                transaction.network(),
-                network.as_byte()
-            )),
-        ));
-    }
-
-    if transaction.is_dry_run() {
-        return Err(invalid_params(
-            "transaction.dry_run",
-            Some("a dry-run transaction cannot be committed, so it is never co-signed"),
-        ));
-    }
+    validate_transaction_for_approval(context.config().network, &req.transaction)?;
 
     if req.memo.chars().count() > MAX_MEMO_CHARS {
         return Err(invalid_params(

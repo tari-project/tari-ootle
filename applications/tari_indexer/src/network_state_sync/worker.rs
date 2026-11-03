@@ -2990,6 +2990,7 @@ fn promote_snapshot(
                 let update = SubstateUpdateProof::Create(Box::new(SubstateCreate { substate }));
                 buf.extend_from_substate_update(shard, state_version, update, value_filters);
             }
+            buf.mark_burns(shard, state_version);
             let committed = buf.commit(tx, shard, state_version, epoch, event_filters, watched_templates)?;
             promoted.add(state_version, CommittedVersion {
                 finalized: Vec::new(),
@@ -3022,23 +3023,32 @@ impl VersionBuf {
                 buf.extend_from_substate_update(shard, state_version, update, value_filters);
             }
         }
-        buf.mark_burns();
+        buf.mark_burns(shard, state_version);
         Ok(buf)
     }
 
     /// Marks each spend of a UTXO version whose next version this version brings up with no output as a burn. A burn
     /// takes a version down and brings the next one up in the same transaction, and a UTXO's versions share its shard,
-    /// so both are in this version.
-    fn mark_burns(&mut self) {
+    /// so both are in this version. In a snapshot there is no accompanying destroy transition, so any burnt version
+    /// without a matching spend is appended directly as a burn.
+    fn mark_burns(&mut self, shard: Shard, state_version: StateVersion) {
         if self.burnt_utxos.is_empty() {
             return;
         }
         for update in &mut self.utxos {
             if let UtxoUpdateRecord::Spent(spent) = update &&
-                self.burnt_utxos.contains(&(spent.address.clone(), spent.version))
+                self.burnt_utxos.remove(&(spent.address.clone(), spent.version))
             {
                 *update = UtxoUpdateRecord::Burnt(spent.clone());
             }
+        }
+        for (address, version) in std::mem::take(&mut self.burnt_utxos) {
+            self.utxos.push(UtxoUpdateRecord::Burnt(UtxoSpent {
+                address,
+                shard,
+                version,
+                state_version,
+            }));
         }
     }
 
@@ -3421,8 +3431,28 @@ mod tests {
             for update in updates {
                 buf.extend_from_substate_update(SHARD, StateVersion::new(5), update, stream_value_filters());
             }
-            buf.mark_burns();
+            buf.mark_burns(SHARD, StateVersion::new(5));
             buf
+        }
+
+        /// A burnt UTXO in a snapshot arrives as a `Create` with `output: None` and no matching `Destroy`, and is
+        /// recorded as a `Burnt` update for the version the burn took down.
+        #[test]
+        fn a_burnt_utxo_in_a_snapshot_is_recorded_burnt() {
+            let (address, _) = output();
+
+            let buf = sorted(vec![up(&address, 1, None)]);
+
+            assert_eq!(buf.utxos.len(), 1);
+            assert!(
+                matches!(&buf.utxos[0], UtxoUpdateRecord::Burnt(burnt)
+                    if burnt.address == address &&
+                        burnt.version == SubstateVersion::ZERO &&
+                        burnt.shard == SHARD &&
+                        burnt.state_version == StateVersion::new(5)),
+                "{:?}",
+                buf.utxos[0]
+            );
         }
 
         /// A burn takes the output's version down and brings the next one up with no output, in either order.

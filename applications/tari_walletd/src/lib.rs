@@ -235,7 +235,11 @@ pub async fn run_tari_ootle_walletd(
                 setup_token_path.display()
             );
             // The tokenised link goes to stdout only: log appenders persist it in files that outlive the token.
-            let heading = if std::io::stdout().is_terminal() {
+            let heading = if cfg!(not(windows)) &&
+                std::io::stdout().is_terminal() &&
+                std::env::var_os("NO_COLOR").is_none() &&
+                std::env::var("TERM").as_deref() != Ok("dumb")
+            {
                 "\x1b[1;33mACTION REQUIRED — Set up your wallet passkey\x1b[0m"
             } else {
                 "ACTION REQUIRED — Set up your wallet passkey"

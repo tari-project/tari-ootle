@@ -27,7 +27,10 @@ impl LayerOneTransactionService {
     pub fn add_watch<P: AsRef<Path>>(&mut self, path: P) {
         let path = path.as_ref();
         assert!(path.is_dir(), "watch path must be a directory");
-        self.watch_list.push(path.to_path_buf());
+        let path_buf = path.to_path_buf();
+        if !self.watch_list.contains(&path_buf) {
+            self.watch_list.push(path_buf);
+        }
     }
 
     async fn find_new_transaction_files(&self) -> anyhow::Result<Vec<PathBuf>> {
@@ -60,7 +63,14 @@ impl LayerOneTransactionService {
 
         for path in new_files {
             log::info!("Processing file: {}", path.display());
-            let transaction: LayerOneTransactionDef<serde_json::Value> = decode_json_file(&path).await?;
+            let transaction: LayerOneTransactionDef<serde_json::Value> = match decode_json_file(&path).await {
+                Ok(transaction) => transaction,
+                Err(err) => {
+                    log::error!("Failed to decode transaction file {}: {}", path.display(), err);
+                    fs::rename(&path, path.with_extension("json.failed")).await?;
+                    return Err(err);
+                },
+            };
             match self.submitter.submit_transaction(transaction.clone()).await {
                 Ok(tx_id) => {
                     log::info!("Transaction submitted successfully: {}", path.display());

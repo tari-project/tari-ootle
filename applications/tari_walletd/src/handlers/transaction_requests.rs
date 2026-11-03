@@ -383,6 +383,32 @@ pub(crate) fn ensure_free_locks_of<R: WalletStoreReader>(
     Ok(())
 }
 
+/// Refuses `lock_ids` unless `caller` created each lock. Unlike
+/// [`ensure_free_locks_of`], a lock already linked to a transaction or held by
+/// a request is accepted, for paths that read the locks without claiming them.
+///
+/// Every refusal is the same error on `field`, so the call does not reveal
+/// which lock ids exist.
+pub(crate) fn ensure_locks_owned_by<R: WalletStoreReader>(
+    reader: &mut R,
+    caller: LockOwner,
+    lock_ids: &[WalletLockId],
+    field: &'static str,
+) -> Result<(), anyhow::Error> {
+    for lock_id in lock_ids {
+        let lock = reader.locks_get(*lock_id).optional()?;
+        if !lock.is_some_and(|l| l.owner == caller) {
+            return Err(invalid_params(
+                field,
+                Some(format!(
+                    "lock {lock_id} does not exist or was created by another caller"
+                )),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Guarded transition to `to`, refusing an already-expired request.
 fn transition(
     context: &HandlerContext,

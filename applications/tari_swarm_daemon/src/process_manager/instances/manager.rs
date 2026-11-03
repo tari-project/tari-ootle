@@ -496,7 +496,11 @@ impl InstanceManager {
                 instance.name(),
                 path.display()
             );
-            fs::remove_dir_all(path).await?;
+            if let Err(err) = fs::remove_dir_all(path).await &&
+                err.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(err.into());
+            }
         }
         Ok(())
     }
@@ -617,7 +621,15 @@ fn forward_logs<R: AsyncRead + Unpin + Send + 'static>(path: PathBuf, reader: R,
                 return;
             },
         };
-        while let Some(output) = lines.next_line().await.unwrap() {
+        loop {
+            let output = match lines.next_line().await {
+                Ok(Some(output)) => output,
+                Ok(None) => break,
+                Err(err) => {
+                    log::warn!("forward_logs read error ({target}): {err}");
+                    break;
+                },
+            };
             log::debug!(target: FORWARDED_TARGET, "[{target}] {output}");
             if let Err(err) = log_file.write_all(output.as_bytes()).await {
                 log::error!("forward_logs: {err}");

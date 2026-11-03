@@ -612,22 +612,9 @@ fn msg_relative_view(
 
             if has_processed_first_block {
                 if pc_height > next_height {
-                    let msg_height = if msg.block.timeout_certificate().is_some() {
-                        let Some(height) = pc_height.checked_add(NodeHeight(1)) else {
-                            warn!(
-                                target: LOG_TARGET,
-                                "❗️ Proposal {} has an out-of-range justify height {}. Discarding.", msg.block, pc_height
-                            );
-                            return MessageRelativeView::Discard;
-                        };
-                        height
-                    } else {
-                        pc_height
-                    };
-
                     return MessageRelativeView::Future {
                         epoch,
-                        height: msg_height,
+                        height: pc_height,
                     };
                 }
             } else {
@@ -800,6 +787,92 @@ mod tests {
                 Epoch(1),
                 local_group(),
                 NodeHeight(10)
+            ));
+        }
+    }
+
+    mod msg_relative_view {
+        use tari_consensus_types::{
+            BlockId,
+            ShardGroupAccumulatedData,
+            SignedTimeout,
+            TcSignatures,
+            TimeoutCertificate,
+        };
+        use tari_ootle_common_types::{ExtraData, NumPreshards, ProtocolVersion};
+        use tari_ootle_storage::consensus_models::{Block, BlockCommands, BlockHeader};
+        use tari_sidechain::{FixedHash, QuorumDecision, SignerBitmap};
+        use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+
+        use super::*;
+        use crate::messages::ProposalMessage;
+
+        const NETWORK: Network = Network::LocalNet;
+        const EPOCH: Epoch = Epoch(1);
+
+        /// A proposal justified at `justify_height` that skips the failed view `justify_height + 1` on a timeout
+        /// certificate.
+        fn timeout_recovery_proposal(justify_height: NodeHeight) -> HotstuffMessage {
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let justify = ProposalCertificate::new(
+                FixedHash::zero(),
+                BlockId::zero(),
+                justify_height,
+                EPOCH,
+                shard_group,
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            );
+            let tc = TimeoutCertificate::new(EPOCH, justify_height + NodeHeight(1), TcSignatures::Schnorr {
+                signers: SignerBitmap::from_indices(1, 0..1).unwrap(),
+                timeouts: vec![SignedTimeout {
+                    high_pc_height: justify_height,
+                    signature: SchnorrSignatureBytes::zero(),
+                }],
+            });
+            let header = BlockHeader::create_unsigned(
+                NETWORK,
+                ProtocolVersion::at(NETWORK, EPOCH),
+                BlockId::zero(),
+                justify.calculate_id(),
+                Some(tc.calculate_id()),
+                tc.height() + NodeHeight(1),
+                EPOCH,
+                shard_group,
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &BlockCommands::empty(),
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            HotstuffMessage::new_proposal(ProposalMessage {
+                block: Block::new(header, justify, BlockCommands::empty(), Some(tc)),
+                foreign_proposals: vec![],
+            })
+        }
+
+        /// `MessageBuffer::next` releases a message buffered at view `h` once the node reaches height `h - 1`, so a
+        /// future proposal must be buffered at the view after the first height at which it is current.
+        #[test]
+        fn a_future_timeout_recovery_proposal_is_released_at_the_first_view_it_is_current() {
+            let justify_height = NodeHeight(10);
+            let msg = timeout_recovery_proposal(justify_height);
+
+            let MessageRelativeView::Future { epoch, height } = msg_relative_view(&msg, EPOCH, NodeHeight(8), true)
+            else {
+                panic!("expected the proposal to be buffered as a future message");
+            };
+            assert_eq!(epoch, EPOCH);
+            assert_eq!(height, justify_height);
+
+            let release_height = height - NodeHeight(1);
+            assert!(matches!(
+                msg_relative_view(&msg, EPOCH, release_height, true),
+                MessageRelativeView::Current
             ));
         }
     }

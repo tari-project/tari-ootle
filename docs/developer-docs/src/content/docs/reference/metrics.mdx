@@ -61,9 +61,8 @@ These series are exported but not yet recorded, so they read zero.
 | --------------------------------------------------------- | ------- | ---------------------------------------------------------- |
 | `libp2p_ext_substream_num_open_substreams`                | gauge   | Substreams opened; never decremented, so it is cumulative. |
 | `libp2p_ext_substream_inbound_open_count_total`           | counter | Inbound substreams opened.                                 |
-| `libp2p_ext_substream_inbound_failure_count_total`        | counter | Inbound substream failures.                                |
 | `libp2p_ext_substream_outbound_failure_count_total`       | counter | Outbound substream failures.                               |
-| `libp2p_ext_substream_error_count_total`                  | counter | Inbound plus outbound substream failures.                  |
+| `libp2p_ext_substream_error_count_total`                  | counter | Substream failures.                                        |
 | `libp2p_ext_messaging_received_message_count_total`       | counter | Direct messages received.                                  |
 | `libp2p_ext_messaging_num_messages_sent_total`            | counter | Direct messages sent.                                      |
 | `libp2p_ext_messaging_inbound_failure_count_total`        | counter | Inbound messaging stream failures.                         |

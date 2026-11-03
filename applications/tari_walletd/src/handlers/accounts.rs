@@ -1419,12 +1419,10 @@ pub async fn handle_confidential_transfer(
             let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
                 .await;
-            if let Err(err) = &result &&
-                let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
-            {
+            if let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id) {
                 warn!(
                     target: LOG_TARGET,
-                    "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
+                    "Dry-run transfer {transaction_id} locked inputs could not be released: {release_err}"
                 );
             }
             let result = result?;

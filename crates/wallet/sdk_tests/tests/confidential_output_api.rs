@@ -12,8 +12,9 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::SubstateVersion;
 use tari_ootle_wallet_sdk::{
+    apis::confidential_transfer::{ConfidentialTransferApiError, UtxoInputSelection},
     models::{ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
-    storage::{ReadableWalletStore, WalletStoreReader},
+    storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_template_lib::types::{ConfidentialOutputAddress, EncryptedData, constants::STEALTH_TARI_RESOURCE_ADDRESS};
 
@@ -144,4 +145,34 @@ fn outputs_locked_and_finalized() {
             .unwrap();
         assert_eq!(balance, 124);
     }
+}
+
+#[test]
+fn prefer_confidential_respects_locked_revealed_balance() {
+    let test = Test::new();
+    let vault_id = Test::test_vault_address();
+
+    test.store()
+        .with_write_tx(|tx| tx.vaults_update(vault_id, SubstateVersion::ZERO, 100u64.into(), 0u64.into()))
+        .unwrap();
+
+    let first_lock = test.new_lock().keep_locked();
+    test.sdk()
+        .locks_api()
+        .lock_funds_in_vault(first_lock, &vault_id, 60u64)
+        .unwrap();
+
+    let second_lock = test.new_lock();
+    let err = test
+        .sdk()
+        .confidential_transfer_api()
+        .resolved_inputs_for_transfer(
+            second_lock.id(),
+            Test::test_account_address(),
+            STEALTH_TARI_RESOURCE_ADDRESS,
+            50u64.into(),
+            UtxoInputSelection::PreferConfidential,
+        )
+        .unwrap_err();
+    assert!(matches!(err, ConfidentialTransferApiError::InsufficientFunds));
 }

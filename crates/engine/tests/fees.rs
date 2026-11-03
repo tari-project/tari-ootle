@@ -1527,11 +1527,9 @@ fn fee_intent_underpaying_its_own_execution_is_rejected_before_the_main_intent()
         )
         .unwrap();
     let breakdown = probe.finalize.fee_receipt.fee_breakdown();
-    let wasm_charge = breakdown.get(FeeSource::WasmExecution);
-    assert!(wasm_charge > 0);
-    let state_only_fee = breakdown.get_total() - wasm_charge;
-    // Pay enough to cover all non-execution charges of the fee intent, but 1 short of its execution charges.
-    let underfunded_fee = state_only_fee + wasm_charge - 1;
+    assert!(breakdown.get(FeeSource::WasmExecution) > 0);
+    // One short of everything the fee intent costs on its own, execution included.
+    let underfunded_fee = breakdown.get_total() - 1;
     let probe_at_underfunded = test
         .try_execute(
             test.transaction()
@@ -1562,7 +1560,15 @@ fn fee_intent_underpaying_its_own_execution_is_rejected_before_the_main_intent()
         result.finalize.result
     );
     assert_eq!(result.wasm_execution_points, fee_intent_wasm_points);
-    assert!(result.finalize.fee_receipt.fee_breakdown().get(FeeSource::WasmExecution) > 0);
-    assert!(result.finalize.fee_receipt.fee_breakdown().get(FeeSource::NativeExecution) > 0);
+    let rejected = result.finalize.fee_receipt.fee_breakdown();
+    assert!(rejected.get(FeeSource::WasmExecution) > 0);
+    assert!(rejected.get(FeeSource::NativeExecution) > 0);
+    // The premise that makes this a checkpoint rejection: the payment covers every charge standing
+    // at the checkpoint except the execution ones, so pricing state alone would let it through.
+    let non_execution =
+        rejected.get_total() - rejected.get(FeeSource::WasmExecution) - rejected.get(FeeSource::NativeExecution);
+    assert!(
+        non_execution <= underfunded_fee,
+        "non-execution charges {non_execution} exceed the payment {underfunded_fee}; state alone rejects it"
+    );
 }
-

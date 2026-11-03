@@ -232,6 +232,13 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// costs, and that share of the payment is already spoken for; funding compute out of the full
     /// payment would run work nothing is left to pay for.
     ///
+    /// That share is reserved in two places. The state-derived charges come off the payment here,
+    /// via [`FeeState::non_execution_charges`]. The fee intent's execution charges (`WasmExecution`,
+    /// `NativeExecution`) are reserved by the callers: the allowance covers the whole transaction's
+    /// compute, and `transaction_headroom` and [`Self::charge_native_execution`] subtract every point
+    /// consumed so far, the fee intent's included, from `points`. Taking the execution charges off
+    /// here as well would reserve the fee intent's compute twice.
+    ///
     /// That payment-funded figure is measured against the charges *standing when it is asked*.
     /// Anything charged after the last call — instructions that follow the final invocation — is
     /// outside it, so the total can end a little past the payment. The fallback commit is decided
@@ -258,6 +265,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
             if fee_state.is_dry_run() {
                 return None;
             }
+            // Consumed points are reserved against `points` by the callers; see above.
             let unspent = fee_state
                 .total_payments()
                 .saturating_sub(fee_state.non_execution_charges());

@@ -76,16 +76,13 @@ where
                         ),
                     });
                 }
-                if let Some(existing) = store.get(&peer_id).await.map_err(|e| Error::StoreError(e.to_string()))? &&
-                    existing.updated_at > msg.updated_at
-                {
-                    tracing::debug!(
-                        "Ignoring stale local peer record from {peer_id} (updated_at={:?}, existing={:?})",
-                        msg.updated_at,
-                        existing.updated_at
-                    );
-                } else {
-                    store.put(msg).await.map_err(|e| Error::StoreError(e.to_string()))?;
+                let updated_at = msg.updated_at;
+                let is_stored = store
+                    .put_unless_older(msg)
+                    .await
+                    .map_err(|e| Error::StoreError(e.to_string()))?;
+                if !is_stored {
+                    tracing::debug!("Ignoring stale local peer record from {peer_id} (updated_at={updated_at:?})");
                 }
                 received_remote_peer_record = true;
             },

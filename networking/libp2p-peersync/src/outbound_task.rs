@@ -98,7 +98,9 @@ where
 
         match msg {
             Ok(msg) => {
-                let Some(rec) = validate_want_peer_response(peer_id, msg, &mut remaining_want_list, config)? else {
+                let Some(rec) =
+                    validate_want_peer_response(peer_id, msg, &want_list, &mut remaining_want_list, config)?
+                else {
                     continue;
                 };
 
@@ -132,6 +134,7 @@ where
 fn validate_want_peer_response(
     peer_id: PeerId,
     msg: proto::WantPeerResponse,
+    want_list: &WantList,
     remaining_want_list: &mut WantList,
     config: &Config,
 ) -> Result<Option<SignedPeerRecord>, Error> {
@@ -154,10 +157,12 @@ fn validate_want_peer_response(
 
     let subject_peer_id = rec.to_peer_id();
     if !remaining_want_list.remove(&subject_peer_id) {
-        return Err(Error::InvalidMessage {
-            peer_id,
-            details: format!("Peer {peer_id} sent us a peer we didnt request"),
-        });
+        let details = if want_list.contains(&subject_peer_id) {
+            format!("Peer {peer_id} sent the record for peer {subject_peer_id} more than once")
+        } else {
+            format!("Peer {peer_id} sent us peer {subject_peer_id}, which we did not request")
+        };
+        return Err(Error::InvalidMessage { peer_id, details });
     }
 
     if !rec.is_valid() {
@@ -426,7 +431,82 @@ mod tests {
             .await
             .unwrap_err();
 
-            assert!(matches!(err, Error::InvalidMessage { peer_id, .. } if peer_id == responder_peer));
+            match err {
+                Error::InvalidMessage { peer_id, details } => {
+                    assert_eq!(peer_id, responder_peer);
+                    assert!(details.contains("more than once"), "details={details}");
+                },
+                other => panic!("expected InvalidMessage, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn outbound_rejects_unrequested_peer_record() {
+        block_on(async {
+            let responder_peer = PeerId::random();
+
+            let kp = Arc::new(identity::Keypair::generate_ed25519());
+            let mut local = LocalPeerRecord::new(kp);
+            local.add_address("/ip4/127.0.0.1/tcp/9105".parse().unwrap());
+            let rec = SignedPeerRecord::from(local);
+
+            let want_list = Arc::new([PeerId::random()].into_iter().collect::<WantList>());
+            let mut framed = make_outbound_framed(vec![proto::WantPeerResponse { peer: Some(rec.into()) }]);
+
+            let err = outbound_request_want_list_task_inner(
+                responder_peer,
+                &mut framed,
+                MemoryPeerStore::new(),
+                want_list,
+                None,
+                &Config::default(),
+            )
+            .await
+            .unwrap_err();
+
+            match err {
+                Error::InvalidMessage { peer_id, details } => {
+                    assert_eq!(peer_id, responder_peer);
+                    assert!(details.contains("which we did not request"), "details={details}");
+                },
+                other => panic!("expected InvalidMessage, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn outbound_push_only_completes_with_empty_peer_batch() {
+        block_on(async {
+            let responder_peer = PeerId::random();
+            let kp = Arc::new(identity::Keypair::generate_ed25519());
+            let mut local = LocalPeerRecord::new(kp);
+            local.add_address("/ip4/127.0.0.1/tcp/9106".parse().unwrap());
+            let local_rec = SignedPeerRecord::from(local);
+
+            let mut framed = make_outbound_framed(vec![]);
+            let event = outbound_request_want_list_task_inner(
+                responder_peer,
+                &mut framed,
+                MemoryPeerStore::new(),
+                Arc::new(WantList::new()),
+                Some(&local_rec),
+                &Config::default(),
+            )
+            .await
+            .unwrap();
+
+            assert!(
+                matches!(
+                    event,
+                    Event::PeerBatchReceived {
+                        from_peer,
+                        new_peers: 0
+                    } if from_peer == responder_peer
+                ),
+                "event={event:?}"
+            );
+            assert!(!framed.into_parts().io.written.is_empty());
         });
     }
 }

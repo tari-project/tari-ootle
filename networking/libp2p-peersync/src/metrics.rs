@@ -91,7 +91,12 @@ impl libp2p::metrics::Recorder<Event> for Metrics {
             },
             PeerBatchReceived { from_peer, new_peers } => {
                 self.num_peers_received.inc_by(*new_peers as u64);
-                tracing::info!("Received peer batch from {} with {} new peers", from_peer, new_peers);
+                // An outbound sync that only pushed our local record, or found nothing new, ends with an empty batch
+                if *new_peers == 0 {
+                    tracing::debug!("Peer sync with {} completed with no new peers", from_peer);
+                } else {
+                    tracing::info!("Received peer batch from {} with {} new peers", from_peer, new_peers);
+                }
             },
             InboundStreamInterrupted { peer_id } => {
                 self.num_inbound_interrupted.inc();

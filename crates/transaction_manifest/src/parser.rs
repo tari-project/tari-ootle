@@ -183,6 +183,7 @@ impl ManifestParser {
         let mut instruction_intents = vec![];
         let mut fee_instruction_intents = vec![];
         let mut functions = HashMap::new();
+        let mut function_names = HashSet::new();
         let mut defines = vec![];
         defines.push(ManifestImport {
             template_address: Some(ACCOUNT_TEMPLATE_ADDRESS),
@@ -204,15 +205,15 @@ impl ManifestParser {
                 let body;
                 braced!(body in input);
                 let intents = self.parse_block(&body)?;
+                if !function_names.insert(ident.to_string()) {
+                    return Err(syn::Error::new_spanned(&ident, format!("duplicate function `{ident}`")));
+                }
                 if ident == "fee_main" {
-                    fee_instruction_intents.extend(intents);
+                    fee_instruction_intents = intents;
                 } else if ident == "main" {
-                    instruction_intents.extend(intents);
-                } else if functions.insert(ident.to_string(), intents).is_some() {
-                    return Err(syn::Error::new_spanned(
-                        &ident,
-                        format!("duplicate function `{ident}`"),
-                    ));
+                    instruction_intents = intents;
+                } else {
+                    functions.insert(ident.to_string(), intents);
                 }
             } else {
                 return Err(input.error("expected a `use` declaration or a function"));
@@ -622,7 +623,10 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
         },
         "new_component_addr" => {
             if !tokens.is_empty() {
-                return Err(syn::Error::new_spanned(tokens, "new_component_addr! takes no arguments"));
+                return Err(syn::Error::new_spanned(
+                    tokens,
+                    "new_component_addr! takes no arguments",
+                ));
             }
             Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
                 output_variable: var_name,

@@ -1533,20 +1533,24 @@ fn doc_comments_and_attributes_are_ignored() {
 
 #[test]
 fn multi_segment_call_and_argument_paths_are_rejected() {
+    const STMT_CALL: &str = "Invalid function call, expected `Template::function(..)` or `local_function()`";
+    const LET_CALL: &str = "Invalid function call, expected `Template::function(..)`";
+    const ARG_PATH: &str = "Invalid path, only single segment paths are supported";
     let cases = [
-        "fn main() { Foo::Bar::baz(); }",
-        "fn main() { let x = Foo::Bar::baz(); }",
-        "fn main() { ::Foo::bar(); }",
-        "fn main() { let x = ::Foo::bar(); }",
-        "fn main() { Foo::bar(Baz::Qux); }",
+        ("fn main() { Foo::Bar::baz(); }", STMT_CALL),
+        ("fn main() { let x = Foo::Bar::baz(); }", LET_CALL),
+        ("fn main() { ::Foo::bar(); }", STMT_CALL),
+        ("fn main() { let x = ::Foo::bar(); }", LET_CALL),
+        ("fn main() { Foo::bar(Baz::Qux); }", ARG_PATH),
     ];
-    for manifest in cases {
+    for (manifest, expected) in cases {
         let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
             .err()
             .expect("Expected syntax error for invalid path");
-        assert!(
-            err.to_string().contains("Invalid function call") || err.to_string().contains("Invalid path"),
-            "Unexpected error for `{manifest}`: {err}"
+        assert_eq!(
+            err.to_string(),
+            format!("Syntax error: {expected}"),
+            "Unexpected error for `{manifest}`"
         );
     }
 }
@@ -1570,7 +1574,7 @@ fn local_function_call_with_arguments_is_rejected() {
 }
 
 #[test]
-fn duplicate_helper_function_and_tuple_bindings_are_rejected() {
+fn duplicate_functions_and_tuple_bindings_are_rejected() {
     let dup_fn = r#"
         fn helper() {}
         fn helper() {}
@@ -1580,6 +1584,17 @@ fn duplicate_helper_function_and_tuple_bindings_are_rejected() {
         .err()
         .expect("duplicate helper function should fail");
     assert!(err.to_string().contains("duplicate function `helper`"), "{err}");
+
+    for name in ["main", "fee_main"] {
+        let dup_entry = format!("fn {name}() {{ drop_all_proofs!(); }} fn {name}() {{ drop_all_proofs!(); }}");
+        let err = parse_manifest(&dup_entry, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("duplicate `{name}` should fail"));
+        assert!(
+            err.to_string().contains(&format!("duplicate function `{name}`")),
+            "{err}"
+        );
+    }
 
     let dup_tuple = r#"
         fn main() {

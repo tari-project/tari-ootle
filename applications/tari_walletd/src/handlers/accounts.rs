@@ -1412,11 +1412,22 @@ pub async fn handle_confidential_transfer(
             })
             .await?;
 
+        // `transfer` links its lock to the transaction, and only a stored transaction resolves a linked lock. A dry
+        // run is never stored, and a failed submission may leave nothing stored.
+        let transaction_id = transfer.transaction.calculate_id();
         if req.dry_run {
-            let transaction_id = transfer.transaction.calculate_id();
             let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await?;
+                .await;
+            if let Err(err) = &result &&
+                let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
+                );
+            }
+            let result = result?;
             return Ok(ConfidentialTransferResponse {
                 transaction_id,
                 required_fees: Some(result.finalize.required_fees()),
@@ -1426,13 +1437,22 @@ pub async fn handle_confidential_transfer(
 
         let mut linked_accounts = vec![source_account_address];
         linked_accounts.extend(owned_destination);
-        let tx_id = transaction_service
+        let submission = transaction_service
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
                 None,
             )
-            .await?;
+            .await;
+        if let Err(err) = &submission &&
+            let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+        {
+            warn!(
+                target: LOG_TARGET,
+                "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
+            );
+        }
+        let tx_id = submission?;
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,

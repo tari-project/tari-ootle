@@ -16,7 +16,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
-use tari_ootle_transaction::{Transaction, TransactionSignature, UnsignedTransaction, args};
+use tari_ootle_transaction::{Transaction, TransactionId, TransactionSignature, UnsignedTransaction, args};
 use tari_ootle_wallet_sdk::{
     apis::transaction::TransactionApiError,
     models::{
@@ -29,7 +29,7 @@ use tari_ootle_wallet_sdk::{
         WalletEvent,
         WalletLockId,
     },
-    storage::{ReadableWalletStore, WalletStoreWriter, WriteableWalletStore},
+    storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_ootle_walletd_client::{
@@ -59,7 +59,7 @@ use tari_ootle_walletd_client::{
 };
 use tari_template_lib_types::ComponentAddress;
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
-use tokio::time;
+use tokio::{task, time};
 
 use super::context::HandlerContext;
 use crate::{
@@ -280,13 +280,52 @@ async fn submit_inner(
     // Link the transaction to the involved account(s) (if any are known) so the list can be filtered per
     // account.
     let tx_context = (!linked_accounts.is_empty()).then(|| TransactionContext::with_accounts(linked_accounts));
-    let transaction_id = context
-        .transaction_service()
-        .submit_transaction_with_opts(transaction, tx_context, None)
-        .await
-        .map_err(map_transaction_submission_error)?;
+    let transaction_service = context.transaction_service().clone();
+    let task_sdk = sdk.clone();
+    let lock_ids = req.lock_ids;
+    // The locks are already linked, so the submission runs to completion in its own task even if the caller drops
+    // the request.
+    let submission = task::spawn(async move {
+        let submission = transaction_service
+            .submit_transaction_with_opts(transaction, tx_context, None)
+            .await;
+        if let Err(err) = &submission &&
+            let Err(unlink_err) = unlink_locks_of_unstored_transaction(&task_sdk, tx_id, &lock_ids)
+        {
+            warn!(
+                target: LOG_TARGET,
+                "Submitting transaction {tx_id} failed ({err}) and its locks {lock_ids:?} could not be unlinked: \
+                 {unlink_err}"
+            );
+        }
+        submission
+    })
+    .await?;
+    let transaction_id = submission.map_err(map_transaction_submission_error)?;
 
     Ok(TransactionSubmitResponse { transaction_id })
+}
+
+/// Unlinks `lock_ids` from `transaction_id` unless the wallet stored the transaction. Only a stored transaction
+/// resolves its locks, and the stale sweep skips linked locks, so a lock left linked to a transaction the wallet does
+/// not hold would never be released.
+fn unlink_locks_of_unstored_transaction(
+    sdk: &WalletSdk,
+    transaction_id: TransactionId,
+    lock_ids: &[WalletLockId],
+) -> Result<(), anyhow::Error> {
+    if lock_ids.is_empty() {
+        return Ok(());
+    }
+    sdk.store().with_write_tx(|tx| {
+        if tx.transactions_get(transaction_id).optional()?.is_some() {
+            return Ok(());
+        }
+        for lock_id in lock_ids {
+            tx.locks_unlink_transaction(*lock_id, transaction_id)?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })
 }
 
 /// Signatures collected out of band are made over the transaction body as submitted, and detecting inputs adds to
@@ -1141,7 +1180,7 @@ mod tests {
             .build_and_seal(&RistrettoSecretKey::from(1u64));
         let transaction_id = sdk
             .transaction_api()
-            .insert_new_transaction(transaction, None, &[], false)
+            .insert_new_transaction(transaction, None, &[], false, &[])
             .unwrap();
         sdk.store()
             .with_write_tx(|tx| {
@@ -1400,24 +1439,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_submission_the_wallet_does_not_store_leaves_its_locks_unlinked() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+        let first = lock_for(&daemon, owner_of(&daemon, &tool));
+        let second = lock_for(&daemon, owner_of(&daemon, &tool));
+
+        // The test daemon has no transaction service, so the submission fails after the locks are linked and before
+        // the transaction is stored.
+        let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![first, second]))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");
+        for lock_id in [first, second] {
+            assert_eq!(
+                get_lock(&daemon, lock_id).transaction_id,
+                None,
+                "lock {lock_id} stayed linked"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_submit_cannot_reuse_a_lock_already_linked_to_a_transaction() {
         let daemon = TestDaemon::start().await;
         let tool = daemon.api_key("tool", "transactions:create");
         let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
+        let linked_to = TransactionId::new([1u8; 32]);
+        daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, linked_to))
+            .unwrap();
 
-        // The test daemon has no transaction service, so the submission fails after the lock is linked.
         let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
             .await
             .unwrap_err();
-        assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");
-        let linked_to = get_lock(&daemon, lock_id).transaction_id;
-        assert!(linked_to.is_some());
-
-        let mut relinked = submit_with_locks(vec![lock_id]);
-        relinked.transaction = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(101));
-        let err = handle_submit(&daemon.context, Some(&tool), relinked).await.unwrap_err();
         assert_invalid_params(&err, "lock_ids");
-        assert_eq!(get_lock(&daemon, lock_id).transaction_id, linked_to);
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(linked_to));
     }
 
     #[tokio::test]

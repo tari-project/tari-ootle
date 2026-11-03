@@ -1602,22 +1602,15 @@ impl WalletStoreReader for ReadTransaction<'_> {
     fn locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<WalletLockId, WalletStorageError> {
+    ) -> Result<Vec<WalletLockId>, WalletStorageError> {
         use crate::schema::locks;
 
-        let lock_id = locks::table
+        locks::table
             .filter(locks::transaction_id.eq(serialize_hex(transaction_id)))
             .select(locks::id)
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("locks_get_by_transaction_id", e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "locks_get_by_transaction_id",
-                entity: "locks".to_string(),
-                key: serialize_hex(transaction_id),
-            })?;
-
-        Ok(lock_id)
+            .order_by(locks::id.asc())
+            .get_results::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general("locks_get_by_transaction_id", e))
     }
 
     fn locks_get(&mut self, lock_id: WalletLockId) -> Result<WalletLock, WalletStorageError> {

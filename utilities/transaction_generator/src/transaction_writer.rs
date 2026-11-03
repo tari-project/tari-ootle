@@ -1,12 +1,20 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{io::Write, sync::mpsc, thread};
+use std::io::Write;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::prelude::*;
+use tari_ootle_transaction::Transaction;
 
 use crate::BoxedTransactionBuilder;
+
+/// How many transactions are built at once.
+///
+/// An indexed parallel collect returns a chunk in index order, and that order is the file: faucet
+/// transaction `i` spends the faucet state left by `i - 1`, entry `i` of a seeded flood is account
+/// `i`, and `--skip` resumes a prefix of the same sequence.
+const BUILD_CHUNK: usize = 1024;
 
 pub fn write_transactions<W: Write>(
     num_transactions: u64,
@@ -14,32 +22,38 @@ pub fn write_transactions<W: Write>(
     on_progress: &dyn Fn(usize),
     writer: &mut W,
 ) -> anyhow::Result<()> {
-    let (sender, receiver) = mpsc::sync_channel(1000);
+    writer.write_all(&num_transactions.to_le_bytes())?;
 
-    thread::spawn(move || {
-        (0..num_transactions).par_bridge().for_each_with(sender, |sender, i| {
-            let transaction = builder(i);
-            let buf = tari_bor::encode(&transaction).unwrap();
-            let buf = Bytes::from(buf);
-            let output = BytesMut::with_capacity(buf.len() + 2);
-            let len = (u16::try_from(buf.len()).unwrap()).to_le_bytes();
-            let mut writer = output.writer();
-            writer.write_all(&len).unwrap();
-            writer.write_all(&buf).unwrap();
-            sender.send(writer.into_inner().freeze()).unwrap();
-        });
-    });
-
-    let len_bytes = num_transactions.to_le_bytes();
-    writer.write_all(&len_bytes)?;
-    let mut count = 0;
-    while let Ok(buf) = receiver.recv() {
-        writer.write_all(&buf)?;
-        count += 1;
-        if count % 10000 == 0 {
-            on_progress(count);
+    let mut written = 0usize;
+    let mut start = 0u64;
+    while start < num_transactions {
+        let chunk = usize::try_from(num_transactions - start)
+            .unwrap_or(usize::MAX)
+            .min(BUILD_CHUNK);
+        // `0..chunk` is an indexed parallel iterator, so `collect` places frame `offset` at
+        // `frames[offset]` however the builds finish.
+        let frames: Vec<Bytes> = (0..chunk)
+            .into_par_iter()
+            .map(|offset| encode_frame(&builder(start + offset as u64)))
+            .collect();
+        for frame in frames {
+            writer.write_all(&frame)?;
+            written += 1;
+            if written.is_multiple_of(10_000) {
+                on_progress(written);
+            }
         }
+        start += chunk as u64;
     }
 
     Ok(())
+}
+
+fn encode_frame(transaction: &Transaction) -> Bytes {
+    let buf = tari_bor::encode(transaction).unwrap();
+    let len = u16::try_from(buf.len()).unwrap().to_le_bytes();
+    let mut output = BytesMut::with_capacity(buf.len() + len.len());
+    output.put_slice(&len);
+    output.put_slice(&buf);
+    output.freeze()
 }

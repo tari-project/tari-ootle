@@ -945,25 +945,29 @@ pub struct BalanceEntry {
 
 impl BalanceEntry {
     pub fn to_balance_string(&self) -> String {
-        let symbol = self.token_symbol.as_deref().unwrap_or_default();
-        match self.resource_type {
-            ResourceType::Fungible => {
-                format!("{} {}", self.balance, symbol)
+        let symbol = self.token_symbol.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        match (self.resource_type, symbol) {
+            (ResourceType::Fungible, Some(symbol)) => format!("{} {symbol}", self.balance),
+            (ResourceType::Fungible, None) => self.balance.to_string(),
+            (ResourceType::NonFungible, Some(symbol)) => format!("{} {symbol} tokens", self.balance),
+            (ResourceType::NonFungible, None) => format!("{} tokens", self.balance),
+            (ResourceType::Confidential, Some(symbol)) => format!(
+                "{} revealed + {} blinded = {} {symbol}",
+                self.balance,
+                self.confidential_balance,
+                self.balance + self.confidential_balance,
+            ),
+            (ResourceType::Confidential, None) => format!(
+                "{} revealed + {} blinded = {}",
+                self.balance,
+                self.confidential_balance,
+                self.balance + self.confidential_balance,
+            ),
+            (ResourceType::Stealth, Some(symbol)) => {
+                format!("{} {symbol} (stealth)", self.balance + self.confidential_balance)
             },
-            ResourceType::NonFungible => {
-                format!("{} {} tokens", self.balance, symbol)
-            },
-            ResourceType::Confidential => {
-                format!(
-                    "{} revealed + {} blinded = {} {}",
-                    self.balance,
-                    self.confidential_balance,
-                    self.balance + self.confidential_balance,
-                    symbol
-                )
-            },
-            ResourceType::Stealth => {
-                format!("{} {} (stealth)", self.balance + self.confidential_balance, symbol)
+            (ResourceType::Stealth, None) => {
+                format!("{} (stealth)", self.balance + self.confidential_balance)
             },
         }
     }
@@ -2691,5 +2695,50 @@ mod tests {
         let debug_str = format!("{with_token:?}");
         assert!(!debug_str.contains(secret), "Debug output must not leak setup_token");
         assert!(debug_str.contains("<redacted>"));
+    }
+
+    #[test]
+    fn balance_entry_to_balance_string_formats_with_and_without_symbol() {
+        let resource_address: ResourceAddress =
+            "resource_0000000000000000000000000000000000000000000000000000000000000001"
+                .parse()
+                .unwrap();
+        let entry = |resource_type, token_symbol: Option<&str>| BalanceEntry {
+            vault_address: None,
+            resource_address,
+            balance: Amount::from(100u64),
+            resource_type,
+            confidential_balance: Amount::from(50u64),
+            token_symbol: token_symbol.map(str::to_string),
+            divisibility: 6,
+        };
+
+        assert_eq!(
+            entry(ResourceType::Fungible, Some("TARI")).to_balance_string(),
+            "100 TARI"
+        );
+        assert_eq!(entry(ResourceType::Fungible, None).to_balance_string(), "100");
+        assert_eq!(entry(ResourceType::Fungible, Some("  ")).to_balance_string(), "100");
+
+        assert_eq!(
+            entry(ResourceType::NonFungible, Some("NFT")).to_balance_string(),
+            "100 NFT tokens"
+        );
+        assert_eq!(entry(ResourceType::NonFungible, None).to_balance_string(), "100 tokens");
+
+        assert_eq!(
+            entry(ResourceType::Confidential, Some("TARI")).to_balance_string(),
+            "100 revealed + 50 blinded = 150 TARI"
+        );
+        assert_eq!(
+            entry(ResourceType::Confidential, None).to_balance_string(),
+            "100 revealed + 50 blinded = 150"
+        );
+
+        assert_eq!(
+            entry(ResourceType::Stealth, Some("TARI")).to_balance_string(),
+            "150 TARI (stealth)"
+        );
+        assert_eq!(entry(ResourceType::Stealth, None).to_balance_string(), "150 (stealth)");
     }
 }

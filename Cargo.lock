@@ -12840,6 +12840,7 @@ dependencies = [
  "tari_template_lib_types",
  "thiserror 2.0.18",
  "time",
+ "tokio",
  "ts-rs",
  "url",
  "webauthn-rs-proto",

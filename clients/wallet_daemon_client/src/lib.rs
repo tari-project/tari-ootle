@@ -1174,7 +1174,11 @@ impl WalletDaemonClient {
             // If we don't have the token and the method is anything else than "auth.login" it will fail.
             builder = builder.header(AUTHORIZATION, format!("Bearer {}", token.as_str()));
         }
-        let resp = builder.body(request_json.to_string()).send().await?;
+        let resp = builder
+            .body(request_json.to_string())
+            .send()
+            .await?
+            .error_for_status()?;
         let val = resp.json().await?;
         jsonrpc_result(val)
     }
@@ -1199,7 +1203,7 @@ impl WalletDaemonClient {
     }
 }
 
-fn jsonrpc_result(val: json::Value) -> Result<json::Value, WalletDaemonClientError> {
+fn jsonrpc_result(mut val: json::Value) -> Result<json::Value, WalletDaemonClientError> {
     if let Some(err) = val.get("error") {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err
@@ -1210,19 +1214,152 @@ fn jsonrpc_result(val: json::Value) -> Result<json::Value, WalletDaemonClientErr
         return Err(WalletDaemonClientError::from_error_code(code, message));
     }
 
-    let result = val
-        .get("result")
-        .ok_or_else(|| WalletDaemonClientError::InvalidResponse {
-            message: "Missing result field".to_string(),
-        })?;
-    Ok(result.clone())
+    let result =
+        val.get_mut("result")
+            .map(json::Value::take)
+            .ok_or_else(|| WalletDaemonClientError::InvalidResponse {
+                message: "Missing result field".to_string(),
+            })?;
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use tari_ootle_common_types::optional::IsNotFoundError;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
     use super::*;
+
+    /// Serves a single HTTP response with the given status line and body, after reading the full request.
+    async fn serve_once(status: &'static str, content_type: &'static str, body: &'static str) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = stream.read(&mut buf).await.unwrap();
+                request.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(header_end) = text.find("\r\n\r\n") {
+                    let content_length = text[..header_end]
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= header_end + 4 + content_length {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: \
+                 close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        Url::parse(&format!("http://{addr}/json_rpc")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn non_2xx_response_fails_with_http_status() {
+        let url = serve_once("502 Bad Gateway", "text/html", "<html>Bad Gateway</html>").await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                WalletDaemonClientError::RequestFailed { ref source }
+                    if source.status() == Some(reqwest::StatusCode::BAD_GATEWAY)
+            ),
+            "unexpected error: {err}"
+        );
+        assert!(err.to_string().contains("(HTTP 502)"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn http_404_is_a_routing_failure_and_not_a_missing_resource() {
+        let url = serve_once("404 Not Found", "text/plain", "404 page not found").await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                WalletDaemonClientError::RequestFailed { ref source }
+                    if source.status() == Some(reqwest::StatusCode::NOT_FOUND)
+            ),
+            "unexpected error: {err}"
+        );
+        assert!(!err.is_not_found_error());
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_not_found_error_is_a_not_found_error() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":404,"message":"Account not found"}}"#,
+        )
+        .await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(err.is_not_found_error(), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_unauthorized_error_is_unauthorized() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":401,"message":"Invalid token"}}"#,
+        )
+        .await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(err.is_unauthorized(), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_success_deserializes_result() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"result":{"version":"0.51.0","network":"localnet","network_byte":16}}"#,
+        )
+        .await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let info = client.get_wallet_info().await.unwrap();
+        assert_eq!(info.version, "0.51.0");
+        assert_eq!(info.network, "localnet");
+        assert_eq!(info.network_byte, 16);
+    }
+
+    #[test]
+    fn jsonrpc_result_rejects_missing_result_field() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1
+        });
+        let err = jsonrpc_result(payload).unwrap_err();
+        assert!(matches!(err, WalletDaemonClientError::InvalidResponse { .. }));
+    }
 
     fn unique_temp_dir(label: &str) -> PathBuf {
         let nanos = SystemTime::now()

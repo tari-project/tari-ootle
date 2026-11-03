@@ -64,7 +64,7 @@ import useManifestCodeStore from "@store/manifestStore";
 import type { KeyId, UpgradableComponent } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Highlight, themes } from "prism-react-renderer";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import EditorImport from "react-simple-code-editor";
 // Vite 8 dev pre-bundler doesn't unwrap exports.default for CJS packages
@@ -98,6 +98,16 @@ function formatManifestCode(code: string): string {
   return formatted.join("\n");
 }
 
+function upgradableBy(rule: UpgradableComponent["upgrade_rule"]): string {
+  if (rule === "Owner") {
+    return "owner";
+  }
+  if (typeof rule === "object" && rule.AccessRule === "AllowAll") {
+    return "anyone";
+  }
+  return "access rule";
+}
+
 function Manifest() {
   return (
     <>
@@ -122,8 +132,15 @@ function ManifestEditor() {
 
   const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // A dry run that is still in flight must not restore a warning after the manifest changes or a later submit starts.
+  const dryRunGeneration = useRef(0);
 
   const isDryRun = !fee;
+
+  useEffect(() => {
+    dryRunGeneration.current += 1;
+    setUpgradableComponents([]);
+  }, [manifest.code, manifest.activeTabId]);
 
   const handleSave = useCallback(() => {
     const data = manifest.tabs.map(({ name, code, variables, signingKeys, blobs }) => ({
@@ -178,6 +195,8 @@ function ManifestEditor() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const generation = ++dryRunGeneration.current;
+    setUpgradableComponents([]);
     console.log("Manifest code submitted:", manifest.code);
     console.log("Fee submitted:", fee);
     submitManifest({
@@ -190,6 +209,9 @@ function ManifestEditor() {
       blobs: manifest.blobs,
     })
       .then((response) => {
+        if (dryRunGeneration.current !== generation) {
+          return;
+        }
         if (!isDryRun) {
           console.log("Manifest submitted successfully:", response);
           return;
@@ -323,7 +345,7 @@ function ManifestEditor() {
               <ul>
                 {upgradableComponents.map((c) => (
                   <li key={c.component_address}>
-                    {c.component_address} (upgradable by {c.upgrade_rule === "Owner" ? "owner" : "access rule"})
+                    {c.component_address} (upgradable by {upgradableBy(c.upgrade_rule)})
                   </li>
                 ))}
               </ul>

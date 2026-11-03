@@ -273,27 +273,23 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         Ok(holds)
     }
 
-    /// True if this node's committed state already matches the stored checkpoints at `checkpoint`'s epoch for every
-    /// shard it is responsible for at `oracle_epoch` (its local shard group plus the global shard), with the value of
-    /// every up substate. Distinguishes a rolled-back node (complete state, checkpoint retained) from one whose
-    /// first-time state sync was interrupted after one shard group's checkpoint was stored but before the others
-    /// finished streaming (checkpoint present, state incomplete).
+    /// True if this node's committed state already matches the stored checkpoints of `checkpoint_epoch` for every shard
+    /// it is responsible for at `local_epoch` (its local shard group plus the global shard), with the value of every up
+    /// substate. Distinguishes a rolled-back node (complete state, checkpoint retained) from one whose first-time state
+    /// sync was interrupted after one shard group's checkpoint was stored but before the others finished streaming
+    /// (checkpoint present, state incomplete).
     async fn local_state_matches_checkpoint(
         &self,
-        checkpoint: &EpochCheckpoint,
-        oracle_epoch: Epoch,
+        checkpoint_epoch: Epoch,
+        local_epoch: Epoch,
     ) -> Result<bool, RpcStateSyncError> {
-        let checkpoint_epoch = checkpoint.epoch();
-        let Some(local_info) = self
-            .epoch_manager
-            .get_local_committee_info(oracle_epoch)
-            .await
-            .optional()?
-        else {
+        let Some(local_info) = self.epoch_manager.get_local_committee_info(local_epoch).await.optional()? else {
             return Ok(false);
         };
-        self.state_store
-            .with_read_tx(|tx| local_state_matches_checkpoints(tx, checkpoint_epoch, local_info.shard_group()))
+        self.state_store.with_read_tx(|tx| {
+            let checkpoints = EpochCheckpoint::get_all_for_epoch(tx, checkpoint_epoch)?;
+            local_state_matches_checkpoints(tx, local_info.shard_group(), &checkpoints)
+        })
     }
 
     async fn get_sync_sources(
@@ -1042,7 +1038,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                 .optional()?;
             if let Some(checkpoint) = maybe_checkpoint &&
                 checkpoint_admits_leafless_join(checkpoint.epoch(), oracle_epoch) &&
-                self.local_state_matches_checkpoint(&checkpoint, oracle_epoch).await?
+                self.local_state_matches_checkpoint(checkpoint.epoch(), oracle_epoch)
+                    .await?
             {
                 return Ok(SyncStatus::UpToDate);
             }
@@ -1241,53 +1238,79 @@ fn holds_missing_values<TTx: StateStoreReadTransaction>(
     Ok(false)
 }
 
-/// True if every shard of `shard_group`, and the global shard, holds the committed state of a checkpoint stored at
-/// `checkpoint_epoch` that covers it, with the value of every up substate. The checkpoint epoch's groups may be split
-/// or merged into `shard_group`, so each shard is checked against the stored checkpoint of the group that held it then.
-/// A shard no stored checkpoint covers does not match. Every group carries the global shard, so any stored checkpoint
-/// covers it.
+/// True if every shard of `local_shard_group`, and the global shard, holds the committed state of the checkpoint in
+/// `checkpoints` that covers it, with the value of every up substate. The checkpoint epoch's groups may be split or
+/// merged into `local_shard_group`, so each shard is checked against the checkpoint of the group that held it then. A
+/// shard no checkpoint covers does not match. Every group carries the global shard, so it is checked against every
+/// checkpoint.
 fn local_state_matches_checkpoints<TTx: StateStoreReadTransaction>(
     tx: &TTx,
-    checkpoint_epoch: Epoch,
-    shard_group: ShardGroup,
+    local_shard_group: ShardGroup,
+    checkpoints: &[EpochCheckpoint],
 ) -> Result<bool, RpcStateSyncError> {
-    let checkpoints = EpochCheckpoint::get_all_for_epoch(tx, checkpoint_epoch)?;
-    for shard in shard_group.shard_iter_with_global() {
-        let covering_checkpoint = if shard.is_global() {
-            checkpoints.first()
-        } else {
-            checkpoints
-                .iter()
-                .find(|cp| cp.checked_shard_group().is_ok_and(|sg| sg.contains(&shard)))
-        };
-        let Some(checkpoint) = covering_checkpoint else {
+    if checkpoints.is_empty() {
+        return Ok(false);
+    }
+
+    let mut checkpoints_with_groups = Vec::with_capacity(checkpoints.len());
+    for checkpoint in checkpoints {
+        let Ok(shard_group) = checkpoint.checked_shard_group() else {
             return Ok(false);
         };
+        checkpoints_with_groups.push((shard_group, checkpoint));
+    }
+
+    for shard in local_shard_group.shard_iter_with_global() {
+        if tx.state_sync_missing_values_get_earliest(shard, 0)?.is_some() {
+            return Ok(false);
+        }
         let version = tx.state_tree_versions_get_latest(shard)?;
+        let local_version = version.unwrap_or(0);
         let local_root = calculate_state_root_for_shard(tx, shard, version)?;
         let local_acc = match version {
             Some(version) => tx.state_transitions_get_accumulator(shard, version)?,
             None => TransitionAccumulator::zero(),
         };
-        if local_root != checkpoint.get_shard_root(shard) ||
-            local_acc != checkpoint.get_shard_transition_acc(shard) ||
-            tx.state_sync_missing_values_get_earliest(shard, 0)?.is_some()
-        {
-            return Ok(false);
+
+        if shard.is_global() {
+            if checkpoints_with_groups.iter().any(|(_, checkpoint)| {
+                local_root != checkpoint.get_shard_root(shard) ||
+                    local_version != checkpoint.get_shard_state_version(shard) ||
+                    local_acc != checkpoint.get_shard_transition_acc(shard)
+            }) {
+                return Ok(false);
+            }
+        } else {
+            let Some((_, checkpoint)) = checkpoints_with_groups
+                .iter()
+                .find(|(shard_group, _)| shard_group.contains(&shard))
+            else {
+                return Ok(false);
+            };
+            if local_root != checkpoint.get_shard_root(shard) ||
+                local_version != checkpoint.get_shard_state_version(shard) ||
+                local_acc != checkpoint.get_shard_transition_acc(shard)
+            {
+                return Ok(false);
+            }
         }
     }
+
     Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_common_types::ExtraData;
     use tari_ootle_storage::{
+        ShardScopedTreeStoreWriter,
         StateStoreWriteTransaction,
         consensus_models::{BlockHeaderMetadata, EndOfEpochCommand, TreeRootSummary},
     };
     use tari_rpc_framework::RpcStatus;
+    use tari_sidechain::{CommandCommitProof, FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
     use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
-    use tari_state_tree::{TreeHash, compute_proof_for_hashes};
+    use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, SpreadPrefixStateTree, TreeHash, compute_proof_for_hashes};
     use tempfile::TempDir;
 
     use super::*;
@@ -1371,7 +1394,10 @@ mod tests {
 
     fn matches<TStore: StateStore>(store: &TStore, shard_group: ShardGroup) -> bool {
         store
-            .with_read_tx(|tx| local_state_matches_checkpoints(tx, CHECKPOINT_EPOCH, shard_group))
+            .with_read_tx(|tx| {
+                let checkpoints = EpochCheckpoint::get_all_for_epoch(tx, CHECKPOINT_EPOCH)?;
+                local_state_matches_checkpoints(tx, shard_group, &checkpoints)
+            })
             .unwrap()
     }
 
@@ -1631,5 +1657,107 @@ mod tests {
             &RpcStateSyncError::CheckpointNotAvailable { epoch: Epoch(2) },
             Epoch(3)
         ));
+    }
+
+    fn make_checkpoint(shard_group: ShardGroup, summaries: Vec<(Shard, TreeRootSummary)>) -> EpochCheckpoint {
+        let key = TreeHash::new([1; 32]);
+        let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
+        let metadata = BlockHeaderMetadata {
+            total_leader_fee: 0,
+            timestamp: 0,
+            extra_data: ExtraData::new(),
+            timeout_certificate_id: None,
+            is_dummy: false,
+        };
+        let header = SidechainBlockHeader {
+            network: 0,
+            protocol_version: 0,
+            parent_id: Default::default(),
+            justify_id: Default::default(),
+            height: 0,
+            epoch: 3,
+            epoch_hash: Default::default(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: shard_group.start().as_u32(),
+                end_inclusive: shard_group.end().as_u32(),
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            transaction_merkle_root: Default::default(),
+            signature: Default::default(),
+            accumulated_data: Default::default(),
+            metadata_hash: metadata.calculate_hash(),
+        };
+        EpochCheckpoint::new(
+            CommandCommitProof::new(
+                EndOfEpochCommand::new(FixedHash::default()),
+                SidechainBlockCommitProof {
+                    header,
+                    proof_elements: vec![],
+                },
+                inclusion_proof,
+            ),
+            summaries.into_iter().collect(),
+            metadata,
+        )
+    }
+
+    #[test]
+    fn interrupted_multi_group_sync_does_not_match_partial_checkpoint_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store: RocksDbStateStore<u8> =
+            RocksDbStateStore::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap();
+
+        let group_a = ShardGroup::new(Shard::from(1u32), Shard::from(2u32));
+        let group_b = ShardGroup::new(Shard::from(3u32), Shard::from(4u32));
+        let merged_group = ShardGroup::new(Shard::from(1u32), Shard::from(4u32));
+
+        let cp_a = make_checkpoint(group_a, vec![]);
+        let cp_b = make_checkpoint(group_b, vec![]);
+
+        let matches_partial = store
+            .with_read_tx(|tx| local_state_matches_checkpoints(tx, merged_group, std::slice::from_ref(&cp_a)))
+            .unwrap();
+        assert!(!matches_partial);
+
+        let matches_complete = store
+            .with_read_tx(|tx| local_state_matches_checkpoints(tx, merged_group, &[cp_a, cp_b]))
+            .unwrap();
+        assert!(matches_complete);
+    }
+
+    #[test]
+    fn local_state_below_checkpoint_version_does_not_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store: RocksDbStateStore<u8> =
+            RocksDbStateStore::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap();
+
+        let shard = Shard::from(1u32);
+        let group = ShardGroup::new(shard, shard);
+        let cp = make_checkpoint(group, vec![(shard, TreeRootSummary {
+            root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
+            state_version: 3,
+            transition_acc: TransitionAccumulator::zero(),
+        })]);
+
+        let matches_before = store
+            .with_read_tx(|tx| local_state_matches_checkpoints(tx, group, std::slice::from_ref(&cp)))
+            .unwrap();
+        assert!(!matches_before);
+
+        store
+            .with_write_tx(|tx| {
+                let mut tree_store = ShardScopedTreeStoreWriter::new(tx, shard);
+                SpreadPrefixStateTree::new(&mut tree_store).batch_put_substate_changes(None, 3, [])?;
+                tree_store.set_state_version(3)?;
+                Ok::<_, RpcStateSyncError>(())
+            })
+            .unwrap();
+
+        let matches_after = store
+            .with_read_tx(|tx| local_state_matches_checkpoints(tx, group, std::slice::from_ref(&cp)))
+            .unwrap();
+        assert!(matches_after);
     }
 }

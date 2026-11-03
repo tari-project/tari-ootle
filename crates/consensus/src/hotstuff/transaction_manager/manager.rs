@@ -81,9 +81,10 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         &self.uncommitted_templates
     }
 
-    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups, once `lock_status` shows
-    /// every lock the transaction requested was granted. A transaction with a deferrable lock conflict is left out of
-    /// the block by its proposer, so its inputs are not pledged.
+    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups. A proposer leaves a
+    /// transaction with a deferrable lock conflict out of the block, so when `is_proposing` its inputs are pledged only
+    /// once `lock_status` shows every lock it requested was granted. A node evaluating a block counts the inputs of
+    /// every command the block carries, since the block pledges them whatever this node could lock.
     ///
     /// Returns what the transaction is prepared as instead if its inputs cannot be pledged, having released the locks
     /// it took in the block: an abort if they are more than any block may pledge, or a deferral if they only do not
@@ -94,12 +95,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         store: &mut PendingSubstateStore<TTx>,
         transaction_id: &TransactionId,
         lock_status: &LockStatus,
+        is_proposing: bool,
         inputs: I,
     ) -> Result<Option<PreparedTransaction>, BlockTransactionExecutorError>
     where
         I: IntoIterator<Item = VersionedSubstateIdRef<'i>>,
     {
-        if lock_status.is_any_failed() {
+        if is_proposing && lock_status.is_any_failed() {
             return Ok(None);
         }
         let pledge = store.pledge_inputs(inputs, self.max_transaction_pledge_bytes)?;
@@ -251,6 +253,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 block,
                 execution_epoch.clone(),
                 pool_tx.is_fee_intent_only(),
+                is_proposing,
             ),
             ResolvedTransactionInputs::OnlyForeignInputs { non_local_inputs } => self
                 .prepare_multishard_output_only_transaction(
@@ -262,6 +265,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     change_set,
                     execution_epoch.clone(),
                     pool_tx.is_fee_intent_only(),
+                    is_proposing,
                 ),
             ResolvedTransactionInputs::OnlyTombstones => {
                 // Because we have only local inputs, this shard group unilaterally decides the locked epoch (though
@@ -627,6 +631,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     store,
                     &transaction_id,
                     &lock_status,
+                    is_proposing,
                     requested_locks
                         .iter()
                         .filter(|lock| local_committee_info.includes_substate_id(lock.substate_id()))
@@ -657,6 +662,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         block: LeafBlock,
         execution_locked_epoch: LockedEpoch,
         fee_intent_only: bool,
+        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         // CASE: Multishard transaction, some inputs are local, some are foreign
 
@@ -698,6 +704,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 *transaction.id(),
                 exec,
                 fee_intent_only,
+                is_proposing,
             ),
             None => self.prepare_multishard_no_execution(
                 store,
@@ -705,6 +712,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 *transaction.id(),
                 local_versions,
                 non_local_inputs,
+                is_proposing,
             ),
         }
     }
@@ -718,6 +726,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction_id: TransactionId,
         execution: TransactionExecution,
         fee_intent_only: bool,
+        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         if let Some(reason) = execution.decision().abort_reason() {
             warn!(target: LOG_TARGET, "⚠️ PREPARE: Transaction {transaction_id} is ABORTED before prepare: {reason}");
@@ -756,6 +765,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             store,
             &transaction_id,
             &locked.lock_status,
+            is_proposing,
             local_inputs.iter().map(VersionedSubstateId::as_versioned_ref),
         )? {
             return Ok(prepared);
@@ -772,6 +782,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction_id: TransactionId,
         local_versions: IndexMap<InputDeclarationRef<'_>, SubstateVersion>,
         non_local_inputs: IndexSet<InputDeclarationRef<'_>>,
+        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         // This shard group does not hold every input, so it cannot execute to discover how each one is
         // used and must lock on what the transaction declared.
@@ -795,6 +806,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             store,
             &transaction_id,
             &lock_status,
+            is_proposing,
             requested_locks.iter().map(|lock| lock.to_versioned_substate_id_ref()),
         )? {
             return Ok(prepared);
@@ -832,6 +844,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         change_set: &ProposedBlockChangeSet,
         execution_locked_epoch: LockedEpoch,
         fee_intent_only: bool,
+        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // We're output-only, so only need to gather foreign pledges
@@ -879,7 +892,14 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             execution.decision()
         );
 
-        self.prepare_multishard_from_execution(store, local_committee_info, transaction_id, execution, fee_intent_only)
+        self.prepare_multishard_from_execution(
+            store,
+            local_committee_info,
+            transaction_id,
+            execution,
+            fee_intent_only,
+            is_proposing,
+        )
     }
 }
 
@@ -1581,6 +1601,7 @@ mod tests {
                 non_local_inputs,
                 block,
                 pinned_to(1),
+                false,
                 false,
             )?
             else {
@@ -2308,7 +2329,12 @@ mod tests {
         assert_eq!(prepared.pledge_bytes, 0);
     }
 
-    fn prepare_cross_shard_behind_held_lock(requires_held_version: bool) -> PreparedBehindHeldLock {
+    fn assert_deferrable_still_pledged(prepared: PreparedBehindHeldLock) {
+        assert!(prepared.is_deferrable);
+        assert!(prepared.pledge_bytes > 0);
+    }
+
+    fn prepare_cross_shard_behind_held_lock(requires_held_version: bool, is_proposing: bool) -> PreparedBehindHeldLock {
         let fixture = HeldLockFixture::new();
         let transaction = fixture.transaction(requires_held_version, true);
 
@@ -2330,11 +2356,15 @@ mod tests {
                 block,
                 pinned_to(1),
                 false,
+                is_proposing,
             )
         })
     }
 
-    fn prepare_multishard_execution_behind_held_lock(requires_held_version: bool) -> PreparedBehindHeldLock {
+    fn prepare_multishard_execution_behind_held_lock(
+        requires_held_version: bool,
+        is_proposing: bool,
+    ) -> PreparedBehindHeldLock {
         let fixture = HeldLockFixture::new();
         let transaction = fixture.transaction(requires_held_version, false);
 
@@ -2345,12 +2375,14 @@ mod tests {
                 *transaction.id(),
                 fixture.execution(&transaction, requires_held_version),
                 false,
+                is_proposing,
             )
         })
     }
 
     fn prepare_local_inputs_with_foreign_outputs_behind_held_lock(
         requires_held_version: bool,
+        is_proposing: bool,
     ) -> PreparedBehindHeldLock {
         let fixture = HeldLockFixture::new();
         let transaction = fixture.transaction(requires_held_version, false);
@@ -2368,38 +2400,55 @@ mod tests {
                 IndexMap::new(),
                 block,
                 pinned_to(1),
-                false,
+                is_proposing,
             )
         })
     }
 
     #[test]
     fn a_cross_shard_transaction_declaring_a_locked_input_version_aborts_holding_nothing() {
-        assert_aborted_holding_nothing(prepare_cross_shard_behind_held_lock(true));
+        assert_aborted_holding_nothing(prepare_cross_shard_behind_held_lock(true, false));
     }
 
     #[test]
     fn a_multishard_execution_requiring_a_locked_input_version_aborts_holding_nothing() {
-        assert_aborted_holding_nothing(prepare_multishard_execution_behind_held_lock(true));
+        assert_aborted_holding_nothing(prepare_multishard_execution_behind_held_lock(true, false));
     }
 
     #[test]
     fn a_local_input_transaction_with_foreign_outputs_requiring_a_locked_input_version_aborts_holding_nothing() {
-        assert_aborted_holding_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(true));
+        assert_aborted_holding_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(true, false));
     }
 
     #[test]
-    fn a_cross_shard_transaction_using_a_locked_input_is_deferrable_pledging_nothing() {
-        assert_deferrable_pledging_nothing(prepare_cross_shard_behind_held_lock(false));
+    fn a_proposer_pledges_nothing_for_a_cross_shard_transaction_using_a_locked_input() {
+        assert_deferrable_pledging_nothing(prepare_cross_shard_behind_held_lock(false, true));
     }
 
     #[test]
-    fn a_multishard_execution_using_a_locked_input_is_deferrable_pledging_nothing() {
-        assert_deferrable_pledging_nothing(prepare_multishard_execution_behind_held_lock(false));
+    fn a_proposer_pledges_nothing_for_a_multishard_execution_using_a_locked_input() {
+        assert_deferrable_pledging_nothing(prepare_multishard_execution_behind_held_lock(false, true));
     }
 
     #[test]
-    fn a_local_input_transaction_with_foreign_outputs_using_a_locked_input_is_deferrable_pledging_nothing() {
-        assert_deferrable_pledging_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false));
+    fn a_proposer_pledges_nothing_for_a_local_input_transaction_with_foreign_outputs_using_a_locked_input() {
+        assert_deferrable_pledging_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false, true));
+    }
+
+    /// A block pledges the inputs of every command it carries, so a node evaluating one counts them all against the
+    /// block's pledge budget
+    #[test]
+    fn a_validator_counts_the_pledge_of_a_cross_shard_transaction_using_a_locked_input() {
+        assert_deferrable_still_pledged(prepare_cross_shard_behind_held_lock(false, false));
+    }
+
+    #[test]
+    fn a_validator_counts_the_pledge_of_a_multishard_execution_using_a_locked_input() {
+        assert_deferrable_still_pledged(prepare_multishard_execution_behind_held_lock(false, false));
+    }
+
+    #[test]
+    fn a_validator_counts_the_pledge_of_a_local_input_transaction_with_foreign_outputs_using_a_locked_input() {
+        assert_deferrable_still_pledged(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false, false));
     }
 }

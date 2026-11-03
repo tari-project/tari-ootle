@@ -279,7 +279,12 @@ where
         // The epoch-dependent rules are checked here, alongside the structural ones, so that a
         // transaction outside its validity window is refused before it is admitted or re-gossiped
         // rather than after. Both feed the single acceptance verdict below.
-        let current_epoch = self.consensus_handle.current_view().get_epoch();
+        let is_running = self.consensus_handle.is_running();
+        let current_epoch = if is_running {
+            self.consensus_handle.current_view().get_epoch()
+        } else {
+            self.epoch_manager.current_epoch().await?
+        };
         let validation_result = self.before_execute_validator.validate(&current_epoch, &transaction);
 
         // Reported here rather than at the end of this function: everything below is about whether
@@ -305,6 +310,13 @@ where
             #[cfg(feature = "metrics")]
             self.metrics.on_transaction_validation_error(&tx_id, &e);
             return Err(e.into());
+        }
+
+        if !is_running {
+            if is_local {
+                self.propagate(tx_id, transaction).await;
+            }
+            return Ok(());
         }
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;

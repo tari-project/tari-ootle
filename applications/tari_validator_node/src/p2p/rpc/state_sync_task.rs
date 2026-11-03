@@ -448,7 +448,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     if !transitions.updates.is_empty() {
                         debug!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) for {} up to v{}", transitions.updates.len(), shard, transitions.state_version);
                     }
-                    if current_state_version == 0 && transitions.state_version > 0 {
+                    if current_state_version == 0 && (transitions.state_version > 0 || transitions.updates.is_empty()) {
                         self.send_empty_genesis(shard).await?;
                         last_sent_version = Some(0);
                     }
@@ -1355,6 +1355,32 @@ mod tests {
     async fn a_stream_from_v0_streams_the_genesis_state_of_a_shard_that_has_it() {
         let (store, _dir) = store_with_versions(0..=1);
         assert_eq!(streamed_versions(store, 0).await, [(0, 1), (1, 1)]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v0_streams_an_empty_v0_when_genesis_updates_are_filtered_out() {
+        let (store, _dir) = store_with_versions(0..=1);
+        let (sender, mut receiver) = mpsc::channel(100);
+        let task = sync_task_from(
+            store,
+            sender,
+            SubstateValueFilterFlags::COMPONENT,
+            Arc::new(Semaphore::new(1)),
+            0,
+        );
+        let handle = tokio::spawn(task.run());
+        let mut versions = Vec::new();
+        while let Some(Ok(response)) = receiver.recv().await {
+            match response.response {
+                Some(rpc::sync_state_response::Response::Batch(batch)) => {
+                    versions.push((batch.state_version, batch.updates.len()));
+                },
+                _ => break,
+            }
+        }
+        drop(receiver);
+        handle.await.unwrap().ok();
+        assert_eq!(versions, [(0, 0)]);
     }
 
     #[tokio::test]

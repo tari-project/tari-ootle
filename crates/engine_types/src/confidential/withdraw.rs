@@ -115,14 +115,6 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         .map(|o| o.commitment.as_public_key().clone())
         .unwrap_or_default();
 
-    if let (Some(output), Some(change)) = (&validated_proof.output, &validated_proof.change_output) &&
-        output.commitment == change.commitment
-    {
-        return Err(ResourceError::InvalidConfidentialProof {
-            details: "Confidential withdraw output commitment cannot equal change commitment".to_string(),
-        });
-    }
-
     // 0.G + v.H - users may convert revealed funds to confidential outputs so this must be part of the balance proof
     // We already checked that input_revealed_amount is non-negative, but not that
     let revealed_input_commitment = commit_amount(&Default::default(), input_revealed_amount).ok_or_else(|| {
@@ -130,22 +122,9 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
             details: "Input revealed amount is too large to commit".to_string(),
         }
     })?;
-    let mut agg_inputs = RistrettoPublicKey::default();
-    for commit in inputs {
-        if validated_proof.output.as_ref().is_some_and(|o| &o.commitment == commit) ||
-            validated_proof
-                .change_output
-                .as_ref()
-                .is_some_and(|c| &c.commitment == commit)
-        {
-            return Err(ResourceError::InvalidConfidentialProof {
-                details: "Confidential withdraw output or change commitment cannot equal an input commitment"
-                    .to_string(),
-            });
-        }
-        agg_inputs = agg_inputs + commit.as_public_key();
-    }
-    let agg_inputs_with_revealed = agg_inputs + revealed_input_commitment.as_public_key();
+    let agg_inputs_with_revealed = inputs.into_iter().fold(RistrettoPublicKey::default(), |sum, commit| {
+        sum + commit.as_public_key()
+    }) + revealed_input_commitment.as_public_key();
 
     // 0.G + v.H
     let revealed_output_commitment =

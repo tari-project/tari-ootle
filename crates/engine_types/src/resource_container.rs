@@ -289,7 +289,6 @@ impl ResourceContainer {
                 Self::Confidential {
                     commitments,
                     revealed_amount,
-                    locked_commitments,
                     locked_revealed_amount,
                     ..
                 },
@@ -300,7 +299,7 @@ impl ResourceContainer {
                 },
             ) => {
                 for commit in other_commitments {
-                    if locked_commitments.contains(&commit) || !commitments.insert(commit) {
+                    if !commitments.insert(commit) {
                         return Err(ResourceError::InvariantError(
                             "Confidential deposit contained duplicate commitment".to_string(),
                         ));
@@ -464,7 +463,6 @@ impl ResourceContainer {
                 address,
                 commitments,
                 revealed_amount,
-                locked_commitments,
                 locked_revealed_amount,
                 ..
             } => {
@@ -517,7 +515,7 @@ impl ResourceContainer {
 
                 if let Some(change) = validated_proof.change_output {
                     let change_commitment = change.commitment.to_byte_type();
-                    if locked_commitments.contains(&change_commitment) || !commitments.insert(change_commitment) {
+                    if !commitments.insert(change_commitment) {
                         return Err(ResourceError::InvariantError(
                             "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
                         ));

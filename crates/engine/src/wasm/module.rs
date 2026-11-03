@@ -313,7 +313,7 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
         .try_into()
         .expect("section.len() >= WASM_PTR_SIZE checked above");
     let full_len = u32::from_le_bytes(prefix) as usize;
-    if full_len < WASM_PTR_SIZE || full_len > section.len() {
+    if full_len != section.len() {
         return Err(WasmExecutionError::AbiTemplateDefSectionMalformed {
             reason: format!(
                 "declared length {} is inconsistent with section size {}",
@@ -322,7 +322,7 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
             ),
         });
     }
-    let template = tari_bor::decode_with_max_depth::<TemplateDef>(
+    let template = tari_bor::decode_exact_with_max_depth::<TemplateDef>(
         &section[WASM_PTR_SIZE..full_len],
         limits::MAX_CBOR_NESTING_DEPTH,
     )

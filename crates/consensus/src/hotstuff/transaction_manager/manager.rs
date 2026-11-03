@@ -2200,6 +2200,90 @@ mod tests {
     }
 
     #[test]
+    fn a_cross_shard_transaction_with_a_hard_input_lock_conflict_aborts_without_locking_or_pledging() {
+        let local_first = component_id(1);
+        let local_shard = shard_of(&local_first);
+        let local_second = (2..=u8::MAX)
+            .map(component_id)
+            .find(|id| shard_of(id) == local_shard)
+            .unwrap();
+        let foreign = (2..=u8::MAX)
+            .map(component_id)
+            .find(|id| shard_of(id) != local_shard)
+            .unwrap();
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(local_shard, local_shard),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        let transaction = TransactionRecord::new(
+            Transaction::builder_localnet(Epoch(2))
+                .add_input(SubstateRequirement::unversioned(local_first.clone()))
+                .add_input(SubstateRequirement::versioned(local_second.clone(), SubstateVersion::ZERO))
+                .add_input(SubstateRequirement::unversioned(foreign))
+                .build_and_seal(&PrivateKey::from(1u64)),
+        );
+        let holder = TransactionId::new([9; 32]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
+        let block = zero.as_leaf();
+        db.with_read_tx(|tx| {
+            let mut store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?;
+            for input in transaction.transaction().all_inputs_iter() {
+                if committee.includes_substate_id(input.substate_id()) {
+                    store.put(SubstateChange::Up {
+                        id: input.substate_id().clone(),
+                        shard: local_shard,
+                        substate: Box::new(Substate::new(SubstateVersion::ZERO, NonFungibleContainer::no_data())),
+                    })?;
+                }
+            }
+            store.try_lock(
+                holder,
+                &VersionedSubstateIdLockIntent::write(versioned(&local_second, 0), true),
+                false,
+            )?;
+
+            let manager = manager();
+            let ResolvedTransactionInputs::LocalAndForeignInputs {
+                local_versions,
+                non_local_inputs,
+            } = manager.resolve_inputs(&mut store, &transaction, &committee)?
+            else {
+                panic!("expected local and foreign inputs");
+            };
+            let PreparedTransaction::MultiShard(prepared) = manager.prepare_multishard_involved_transaction(
+                &mut store,
+                &committee,
+                &transaction,
+                local_versions,
+                non_local_inputs,
+                block,
+                pinned_to(1),
+                false,
+            )?
+            else {
+                panic!("expected a multishard preparation");
+            };
+            let decision = match prepared.into_evidence_or_execution() {
+                EvidenceOrExecution::Execution { execution, .. } => execution.decision(),
+                EvidenceOrExecution::Evidence { .. } => Decision::Commit,
+            };
+            assert_eq!(decision.abort_reason(), Some(AbortReason::LockInputsFailed));
+            assert!(!store.new_locks().contains_key(&local_first));
+            assert_eq!(store.pledge_bytes(), 0);
+            Ok::<_, BlockTransactionExecutorError>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn a_multishard_prepare_deferred_by_the_pledge_budget_releases_its_locks() {
         let committee = CommitteeInfo::new(
             NumPreshards::P256,

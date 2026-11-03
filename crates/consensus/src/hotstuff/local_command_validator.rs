@@ -532,11 +532,13 @@ where
                         &transaction_id,
                         RejectReason::FailedToLockOutputs(err.to_string()),
                     );
-                    tx_rec.update_from_execution(
-                        local_committee_info.num_preshards(),
-                        local_committee_info.num_committees(),
-                        &execution,
-                    );
+                    tx_rec
+                        .update_from_execution(
+                            local_committee_info.num_preshards(),
+                            local_committee_info.num_committees(),
+                            &execution,
+                        )
+                        .no_leader_fee();
                     execution
                 } else {
                     // Counted for the block pledge check once every command is evaluated. Preparing the transaction
@@ -597,6 +599,9 @@ where
             }
         }
 
+        // The abort reason must match as well as the outcome, as for every other command. A forced epoch-end abort
+        // keeps the prepared evidence, so a leader that aborts for a different reason also proposes aborted evidence
+        // and is refused by the pledge check below in any case.
         if tx_rec.current_decision() != atom.decision {
             warn!(
                 target: LOG_TARGET,

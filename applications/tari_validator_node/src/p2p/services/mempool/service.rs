@@ -423,31 +423,20 @@ where
         }
 
         let transaction_exists = self.state_store.with_read_tx(|tx| {
-            if tx.transaction_pool_exists(id)? {
+            if tx
+                .finalized_transaction_execution_get_finalized_time(id)
+                .optional()?
+                .is_some()
+            {
                 debug!(
                     target: LOG_TARGET,
-                    "🎱 Transaction {} already in consensus pool. Ignoring",
+                    "🎱 Transaction {} already finalized. Ignoring",
                     id
                 );
                 return Ok(true);
             }
-            match TransactionRecord::get_finalized_decision(tx, id)? {
-                Some(decision) if decision.is_commit() => {
-                    debug!(
-                        target: LOG_TARGET,
-                        "🎱 Transaction {} already finalized as committed. Ignoring",
-                        id
-                    );
-                    return Ok(true);
-                },
-                Some(_) => {
-                    // Previously finalized as ABORT: consensus allows an aborted transaction to be
-                    // re-sequenced, so the mempool must not reject its re-submission.
-                },
-                None if TransactionRecord::exists(tx, id)? => {
-                    return Ok(true);
-                },
-                None => {},
+            if TransactionRecord::exists(tx, id)? {
+                return Ok(true);
             }
             // A commit outlives the local records: the transaction's receipt substate proves the id
             // has committed even when the records were pruned. Best-effort — a node that does not

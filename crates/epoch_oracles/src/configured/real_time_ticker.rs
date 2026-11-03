@@ -86,20 +86,21 @@ impl EpochTicker for RealTimeEpochTicker {
             }));
         }
 
-        while let Some(interval_mut) = self.interval.as_mut() {
-            // Every tick, check if we need to emit a new epoch
-            ready!(interval_mut.poll_tick(cx));
+        if let Some(interval_mut) = self.interval.as_mut() {
+            loop {
+                // Every tick, check if we need to emit a new epoch
+                ready!(interval_mut.poll_tick(cx));
 
-            let calculated_epoch = self.calc_current_epoch();
-            if calculated_epoch >= self.epoch {
-                let epoch = self.increment_epoch();
-                let epoch_hash = calc_static_epoch_hash(epoch);
-                return Poll::Ready(Some(EpochTickerData {
-                    epoch,
-                    epoch_hash,
-                    // Catching up if calculated_epoch > self.epoch
-                    done_for_now: calculated_epoch == epoch,
-                }));
+                if calculated_epoch >= self.epoch {
+                    let epoch = self.increment_epoch();
+                    let epoch_hash = calc_static_epoch_hash(epoch);
+                    return Poll::Ready(Some(EpochTickerData {
+                        epoch,
+                        epoch_hash,
+                        // Catching up if calculated_epoch > self.epoch
+                        done_for_now: calculated_epoch == epoch,
+                    }));
+                }
             }
         }
         // Ticks have been disabled, never return any new epochs
@@ -178,6 +179,31 @@ mod tests {
                 eprintln!("res: {:?}", res);
             }
         }
+    }
+
+    /// An initial epoch ahead of the wall clock is reached quickly, and the ticker then waits for the wall clock.
+    #[tokio::test]
+    async fn it_emits_up_to_an_initial_epoch_ahead_of_the_wall_clock_and_then_waits() {
+        let base_time = time::OffsetDateTime::now_utc();
+        let mut ticker =
+            RealTimeEpochTicker::new(Epoch(10), base_time, Epoch(0)).with_epoch_time_secs(1_000.try_into().unwrap());
+
+        for i in 0..10 {
+            let res = timeout(Duration::from_secs(10), poll_fn(|cx| ticker.poll_tick(cx)))
+                .await
+                .expect("elapsed");
+            assert_eq!(
+                res,
+                Some(EpochTickerData {
+                    epoch: Epoch(i),
+                    epoch_hash: calc_static_epoch_hash(Epoch(i)),
+                    done_for_now: i == 9,
+                })
+            );
+        }
+
+        let next = timeout(Duration::from_secs(3), poll_fn(|cx| ticker.poll_tick(cx))).await;
+        assert!(next.is_err(), "epoch 10 is not due for 10,000 seconds, got {next:?}");
     }
 
     #[tokio::test]

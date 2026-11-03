@@ -61,28 +61,16 @@ impl RealTimeEpochTicker {
 
 impl EpochTicker for RealTimeEpochTicker {
     fn poll_tick(&mut self, cx: &mut Context) -> Poll<Option<EpochTickerData>> {
-        let calculated_epoch = self.calc_current_epoch();
+        let target_epoch = self.calc_current_epoch().max(self.initial_epoch);
 
-        // Emit quickly to the initial epoch
-        if calculated_epoch < self.initial_epoch {
+        // Emit quickly to catch up to the target epoch
+        if target_epoch >= self.epoch {
             let epoch = self.increment_epoch();
             let epoch_hash = calc_static_epoch_hash(epoch);
             return Poll::Ready(Some(EpochTickerData {
                 epoch,
                 epoch_hash,
-                done_for_now: false,
-            }));
-        }
-
-        // Emit quickly to catch up to the calculated epoch
-        if calculated_epoch >= self.epoch {
-            let epoch = self.increment_epoch();
-            let epoch_hash = calc_static_epoch_hash(epoch);
-            return Poll::Ready(Some(EpochTickerData {
-                epoch,
-                epoch_hash,
-                // Catching up
-                done_for_now: calculated_epoch == epoch,
+                done_for_now: target_epoch == epoch,
             }));
         }
 
@@ -91,14 +79,14 @@ impl EpochTicker for RealTimeEpochTicker {
                 // Every tick, check if we need to emit a new epoch
                 ready!(interval_mut.poll_tick(cx));
 
-                if calculated_epoch >= self.epoch {
+                let target_epoch = self.calc_current_epoch().max(self.initial_epoch);
+                if target_epoch >= self.epoch {
                     let epoch = self.increment_epoch();
                     let epoch_hash = calc_static_epoch_hash(epoch);
                     return Poll::Ready(Some(EpochTickerData {
                         epoch,
                         epoch_hash,
-                        // Catching up if calculated_epoch > self.epoch
-                        done_for_now: calculated_epoch == epoch,
+                        done_for_now: target_epoch == epoch,
                     }));
                 }
             }
@@ -194,5 +182,28 @@ mod tests {
                 .unwrap();
             assert_eq!(res.epoch, Epoch(i + 1));
         }
+    }
+
+    #[test]
+    fn it_stops_at_initial_epoch_when_calculated_epoch_is_behind() {
+        use std::task::Waker;
+
+        let base_time = time::OffsetDateTime::now_utc();
+        let mut ticker = RealTimeEpochTicker::new(Epoch(3), base_time, Epoch(0))
+            .with_epoch_time_secs(60.try_into().unwrap())
+            .disable_ticks();
+        let mut cx = Context::from_waker(Waker::noop());
+
+        for i in 0..=3 {
+            assert_eq!(
+                ticker.poll_tick(&mut cx),
+                Poll::Ready(Some(EpochTickerData {
+                    epoch: Epoch(i),
+                    epoch_hash: calc_static_epoch_hash(Epoch(i)),
+                    done_for_now: i == 3,
+                }))
+            );
+        }
+        assert_eq!(ticker.poll_tick(&mut cx), Poll::Pending);
     }
 }

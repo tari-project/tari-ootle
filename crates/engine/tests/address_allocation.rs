@@ -2,7 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::runtime::{RuntimeError, TransactionCommitError};
-use tari_engine_types::{component::derive_component_address_from_public_key, indexed_value::IndexedValue};
+use tari_engine_types::{
+    commit_result::ExecutionFailureCode,
+    component::derive_component_address_from_public_key,
+    indexed_value::IndexedValue,
+};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{ComponentAddress, ResourceAddress};
@@ -253,7 +257,7 @@ fn it_scopes_address_allocations() {
 }
 
 #[test]
-fn it_rejects_cross_template_component_allocation_hijack_and_unscoped_auth_hook_bypass() {
+fn it_rejects_consuming_an_allocation_made_by_another_template() {
     let mut test = TemplateTest::new(CRATE_PATH, [
         "tests/templates/address_allocation",
         "tests/templates/faucet",
@@ -262,57 +266,65 @@ fn it_rejects_cross_template_component_allocation_hijack_and_unscoped_auth_hook_
     let template_a = test.get_template_address("AddressAllocationTest");
     let template_b = test.get_template_address("TestFaucet");
     let pk = test.to_public_key_bytes();
-    let expected_addr = derive_component_address_from_public_key(&template_a, &pk);
 
-    // 1. A component address allocation created by `template_a` cannot be consumed by `template_b`
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
             .call_function(template_a, "allocate_and_pass_to_foreign_template", args![
-                pk,
-                template_b
+                pk, template_b
             ])
             .build_and_seal(test.secret_key()),
         vec![],
     );
-    assert_reject_reason(
-        reason,
-        RuntimeError::AddressAllocationTemplateMismatch {
-            id: 0,
-            allocated_by: template_a,
-            used_by: template_b,
-        },
-    );
+    assert_reject_reason(reason, RuntimeError::AddressAllocationTemplateMismatch {
+        id: 0,
+        allocated_by: template_a,
+        used_by: template_b,
+    });
+}
 
-    // 2. A child call frame that does not have the component address allocation in scope cannot skip
-    //    the resource auth hook for that allocated component address
+#[test]
+fn it_runs_the_auth_hook_in_a_frame_that_does_not_hold_the_hook_allocation() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
+
+    let template_addr = test.get_template_address("AddressAllocationTest");
+    let pk = test.to_public_key_bytes();
+    let hook_component = derive_component_address_from_public_key(&template_addr, &pk);
+
+    // The creating frame holds the hook component's allocation and may act on the resource. The child frame it
+    // calls does not, so its mint runs the hook, which needs the hook component to exist.
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
-            .call_function(
-                template_a,
-                "create_hooked_resource_and_call_unscoped_frame",
-                args![template_a],
-            )
+            .call_function(template_addr, "create_hooked_resource_and_call_unscoped_frame", args![
+                template_addr,
+                pk
+            ])
             .build_and_seal(test.secret_key()),
         vec![],
     );
-    assert!(
-        format!("{reason:?}").contains("has an auth hook on component"),
-        " unexpected reject reason: {reason:?}"
-    );
 
-    // 3. Allocating a public-key component address that already exists is rejected at allocation time
+    // The resource address is unknown before execution, so this pins the error's message from the hook component
+    // onwards, together with its failure code.
+    assert_eq!(reason.execution_failure_code(), Some(ExecutionFailureCode::NotFound));
+    let expected =
+        format!("has an auth hook on component {hook_component}, which the transaction did not declare as an input");
+    assert!(
+        reason.to_string().contains(&expected),
+        "Expected reject reason containing \"{expected}\" but got \"{reason}\""
+    );
+}
+
+#[test]
+fn it_lets_a_callee_forward_and_store_a_pending_address_it_was_given() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
+
+    let template_addr = test.get_template_address("AddressAllocationTest");
+
+    // The callee holds only the address, so it can name the pending component without being able to skip its hooks
+    // or consume its allocation.
     test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
-            .call_function(template_a, "create_for_pk", args![pk])
+            .call_function(template_addr, "hand_pending_address_to_callee", args![template_addr])
             .build_and_seal(test.secret_key()),
         vec![],
     );
-    let reason = test.execute_expect_failure(
-        Transaction::builder_localnet(Epoch(1))
-            .add_input(expected_addr)
-            .call_function(template_a, "create_for_pk", args![pk])
-            .build_and_seal(test.secret_key()),
-        vec![],
-    );
-    assert_reject_reason(reason, RuntimeError::ComponentAlreadyExists { address: expected_addr });
 }

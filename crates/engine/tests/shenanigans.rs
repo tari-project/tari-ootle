@@ -605,8 +605,8 @@ fn it_does_not_leak_a_callees_address_allocation_into_the_callers_scope() {
     );
     let victim = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
 
-    // An allocation is a reservation of an address, and nothing checks that the template consuming one is the
-    // template that made it, so the caller must never be handed one it was not given.
+    // An allocation is a reservation of an address. Whichever frame holds one may consume it, provided the frame runs
+    // the template that made it, so the caller must never be handed one it was not given.
     let reason = test.execute_expect_failure(
         test.transaction()
             .call_function(template_addr, "call_then_use_abandoned_allocation", args![victim, 0u32])

@@ -1337,11 +1337,12 @@ fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64
     remaining_weight.and_then(|w| w.checked_sub(by)).filter(|w| *w > 0)
 }
 
-/// Drops the executions of this node's previous proposal in `epoch` if that proposal was never inserted.
+/// Drops the executions of this node's last proposal in `epoch` if that proposal was never inserted.
 ///
 /// `OnPropose` records a proposal's executions before its block is inserted, so a proposal that is never inserted
 /// leaves executions with no block. Execution reuse rejects them within the epoch because the block is absent, but not
-/// in a later epoch, where epoch GC has pruned committed blocks too. They must therefore not outlive the epoch.
+/// in a later epoch, where epoch GC has pruned committed blocks too. This runs before each proposal and in the
+/// transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do not outlive it.
 pub(crate) fn drop_executions_of_uninserted_proposal<TTx>(tx: &mut TTx, epoch: Epoch) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,

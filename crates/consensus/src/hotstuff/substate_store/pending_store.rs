@@ -260,6 +260,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                 break;
             }
         }
+        if lock_status.is_any_failed() {
+            self.release_new_locks(&transaction_id);
+        }
         Ok(lock_status)
     }
 

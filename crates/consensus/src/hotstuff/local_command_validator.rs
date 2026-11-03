@@ -25,6 +25,7 @@ use tari_ootle_storage::{
         TransactionRecord,
     },
 };
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     hotstuff::{
@@ -136,6 +137,10 @@ where
                 proposed_block_change_set,
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
+
+        if let Some(reason) = check_no_deferrable_conflict(*atom.id(), prepared.lock_status(), block) {
+            return Ok(Some(reason));
+        }
 
         let local = match prepared {
             PreparedTransaction::LocalOnly(local) => *local,
@@ -285,6 +290,10 @@ where
                 )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?
         };
+
+        if let Some(reason) = check_no_deferrable_conflict(*atom.id(), prepared.lock_status(), block) {
+            return Ok(Some(reason));
+        }
 
         let multishard = match prepared {
             PreparedTransaction::MultiShard(multishard) => multishard,
@@ -489,15 +498,6 @@ where
             };
             let execution = execution.into_transaction_execution();
 
-            if execution.decision().is_commit() {
-                // Counted for the block pledge check once every command is evaluated. Preparing the transaction
-                // bounded what its inputs alone may pledge.
-                substate_store.pledge_inputs(
-                    local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                    usize::MAX,
-                )?;
-            }
-
             let execution = if execution.decision().is_commit() {
                 // Lock all local outputs
                 let locked = lock_multishard_execution(
@@ -559,6 +559,12 @@ where
 
                     return Ok(None);
                 }
+                // Counted for the block pledge check once every command is evaluated. Preparing the transaction
+                // bounded what its inputs alone may pledge.
+                substate_store.pledge_inputs(
+                    local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
+                    usize::MAX,
+                )?;
                 if locked.fee_intent_only {
                     tx_rec.set_fee_intent_only(true);
                 }
@@ -1029,6 +1035,26 @@ where
 
         Ok(execution.for_block(block, transaction_id))
     }
+}
+
+fn check_no_deferrable_conflict(
+    transaction_id: TransactionId,
+    lock_status: &LockStatus,
+    block: &Block,
+) -> Option<NoVoteReason> {
+    let err = lock_status
+        .failures()
+        .first()
+        .filter(|_| lock_status.is_deferrable_conflict())?;
+    warn!(
+        target: LOG_TARGET,
+        "❌ Transaction {transaction_id} in block {block} has a lock conflict that an honest proposer skips: \
+         {err}. Not voting on block.",
+    );
+    Some(NoVoteReason::ConflictingTransactionProposed {
+        transaction_id,
+        details: err.to_string(),
+    })
 }
 
 #[cfg(test)]

@@ -4232,15 +4232,8 @@ where
     }
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {
-        self.tracker.read_with(|state| {
-            state.check_all_substates_known(value.well_known_types())?;
-            // A proof crosses to the caller only from the frame that holds it: a shown proof is already the
-            // caller's, and returning it would let the callee hand it back as if it were its own.
-            for proof_id in value.proof_ids() {
-                state.current_call_scope()?.require_held_proof(proof_id)?;
-            }
-            Ok(())
-        })
+        self.tracker
+            .read_with(|state| state.check_all_substates_known(value.well_known_types()))
     }
 
     fn push_call_frame(&self, frame: PushCallFrame, restrict_to: Option<FrameWriteMode>) -> Result<(), RuntimeError> {

@@ -740,11 +740,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         if let Some(proposed_in_block) = set_proposed_in_block {
             let index_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
-            if let Some(prev_id) = fp.proposed_in_block() &&
-                prev_id != proposed_in_block
-            {
-                index_cf.delete(&(*prev_id, *fp.block_id()), OPERATION)?;
-            }
             index_cf.put(&(*proposed_in_block, *fp.block_id()), &(), OPERATION)?;
 
             // Update the epoch index
@@ -772,13 +767,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         for (proposed_in_block, fp_id) in proposed_keys {
             let mut fp = db.cf(ForeignProposalCf)?.get(&fp_id, OPERATION)?;
-            if fp.proposed_in_block() == Some(&proposed_in_block) {
-                // Setting the status to New in this case
-                if !fp.status().is_unconfirmed() {
-                    db.cf(foreign_proposal::UnconfirmedIndex)?
-                        .put(&(fp.epoch(), *fp.block_id()), &(), OPERATION)?;
-                }
-
+            if fp.proposed_in_block() == Some(&proposed_in_block) && fp.status().is_unconfirmed() {
                 fp.reset_proposed();
                 db.cf(ForeignProposalCf)?.put(&fp_id, &fp, OPERATION)?;
             }
@@ -2455,6 +2444,8 @@ mod cleanup {
         let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
         let cf = db.cf(BlockCf)?;
         let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
+        let pending_chain_cf = db.cf(PendingChainIndex)?;
+        let pending_parent_child_cf = db.cf(chain::PendingParentChildIndex)?;
         let index_cf = db.cf(block::EpochHeightIndex)?;
 
         // Don't delete epoch 0 blocks (i.e the zero block)
@@ -2464,8 +2455,15 @@ mod cleanup {
 
         let count = keys.len();
         for (epoch, height, block_id) in keys {
+            if let Some(block) = cf.get(&block_id, OPERATION).optional()? {
+                if block.is_committed() {
+                    committed_cf.delete(block.parent(), OPERATION)?;
+                } else {
+                    pending_chain_cf.delete(&block_id, OPERATION)?;
+                    pending_parent_child_cf.delete(&(*block.parent(), block_id), OPERATION)?;
+                }
+            }
             cf.delete(&block_id, OPERATION)?;
-            committed_cf.delete(&block_id, OPERATION)?;
             index_cf.delete(&(epoch, height, block_id), OPERATION)?;
         }
         Ok(count)

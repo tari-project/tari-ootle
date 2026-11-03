@@ -405,3 +405,78 @@ mod block_filters {
         tx.rollback().unwrap();
     }
 }
+
+#[test]
+fn epoch_cleanup_removes_committed_parent_child_index_and_keeps_next_epoch_child() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let network = Network::LocalNet;
+    let shard_group = ShardGroup::all_shards(NumPreshards::P64);
+    let atom1 = create_tx_atom();
+    let atom2 = create_tx_atom();
+
+    let zero_block = Block::zero_block(network, NumPreshards::P64);
+    zero_block.insert(&mut tx).unwrap();
+    tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), None).unwrap();
+
+    let block1 = Block::create(
+        network,
+        ProtocolVersion::V0,
+        *zero_block.id(),
+        zero_block.justify().clone(),
+        None,
+        NodeHeight(1),
+        Epoch(1),
+        shard_group,
+        Default::default(),
+        BlockCommands::init([Command::LocalPrepare(atom1)]).unwrap(),
+        Default::default(),
+        Default::default(),
+        SchnorrSignatureBytes::zero(),
+        EpochTime::now().as_u64(),
+        FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
+        ExtraData::default(),
+    )
+    .unwrap();
+    block1.insert(&mut tx).unwrap();
+    tx.blocks_set_qcs(block1.id(), Some(&PcId::zero()), None).unwrap();
+
+    let block2 = Block::create(
+        network,
+        ProtocolVersion::V0,
+        *block1.id(),
+        block1.justify().clone(),
+        None,
+        NodeHeight(2),
+        Epoch(2),
+        shard_group,
+        Default::default(),
+        BlockCommands::init([Command::LocalPrepare(atom2)]).unwrap(),
+        Default::default(),
+        Default::default(),
+        SchnorrSignatureBytes::zero(),
+        EpochTime::now().as_u64(),
+        FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
+        ExtraData::default(),
+    )
+    .unwrap();
+    block2.insert(&mut tx).unwrap();
+    tx.blocks_set_qcs(block2.id(), Some(&PcId::zero()), None).unwrap();
+
+    tx.epoch_cleanup(Epoch(2)).unwrap();
+
+    assert!(
+        tx.blocks_get_committed_by_parent(zero_block.id())
+            .optional()
+            .unwrap()
+            .is_none()
+    );
+    let child_of_b1 = tx.blocks_get_committed_by_parent(block1.id()).unwrap();
+    assert_eq!(child_of_b1.id(), block2.id());
+
+    tx.rollback().unwrap();
+}
+

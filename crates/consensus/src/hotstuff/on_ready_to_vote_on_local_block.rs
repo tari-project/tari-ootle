@@ -26,6 +26,7 @@ use tari_ootle_storage::{
         ForeignProposalStatus,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        ProposalOrigin,
         SubstateRecord,
         TransactionPool,
         TransactionPoolRecord,
@@ -123,6 +124,7 @@ where TConsensusSpec: ConsensusSpec
         // a transaction from LocalPrepared (see `abort_local_prepared_for_epoch_end`) and requires the end-of-epoch
         // block to leave none there (see `check_epoch_end_drained`).
         next_epoch_changes_layout: bool,
+        origin: ProposalOrigin,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -174,12 +176,8 @@ where TConsensusSpec: ConsensusSpec
         // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
         let processed_blocks =
             process_newly_justified_block(&**tx, &justified_block, block_qc_id, local_committee_info, change_set)?;
-        for mut block in processed_blocks {
-            block.add_justify_qc(tx, &block_qc_id)?;
-        }
-        justified_block.add_justify_qc(tx, &block_qc_id)?;
 
-        if self.should_vote(&**tx, valid_block.block())? {
+        if origin.is_catch_up() || self.should_vote(&**tx, valid_block.block())? {
             let parent = valid_block.block().get_parent(&**tx)?;
 
             self.decide_what_to_vote(
@@ -204,6 +202,10 @@ where TConsensusSpec: ConsensusSpec
                 "✅ Saving changeset: {}",
                 change_set
             );
+            for mut block in processed_blocks {
+                block.add_justify_qc(tx, &block_qc_id)?;
+            }
+            justified_block.add_justify_qc(tx, &block_qc_id)?;
             change_set.save(tx)?;
             self.transaction_manager
                 .uncommitted_templates()
@@ -828,7 +830,7 @@ where TConsensusSpec: ConsensusSpec
 
         for atom in block.all_foreign_proposals() {
             // TODO: we need to keep these ATM to send them if a node needs to catch up
-            atom.set_status(tx, ForeignProposalStatus::Confirmed, None)?;
+            atom.set_status(tx, ForeignProposalStatus::Confirmed, Some(block.id()))?;
         }
 
         // NOTE: this must happen before we commit the substate diff because the state transitions use this version

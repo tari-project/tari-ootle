@@ -149,3 +149,89 @@ fn epoch_cleanup_prunes_foreign_proposals() {
 
     tx.rollback().unwrap();
 }
+
+#[test]
+fn fork_proposing_same_foreign_proposal_preserves_chain_and_confirmed_status() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let network = Network::LocalNet;
+    const EPOCH: Epoch = Epoch(2);
+    let shard_group = ShardGroup::all_shards(NumPreshards::P64);
+
+    let zero_block = Block::zero_block(network, NumPreshards::P64);
+    tx.blocks_insert(&zero_block).unwrap();
+    zero_block.as_locked().set(&mut tx).unwrap();
+
+    let proposal1 = create_foreign_proposal(*zero_block.id(), EPOCH);
+    tx.foreign_proposals_save(&proposal1).unwrap();
+
+    let block1 = Block::create(
+        network,
+        ProtocolVersion::V0,
+        *zero_block.id(),
+        zero_block.justify().clone(),
+        None,
+        NodeHeight(2),
+        EPOCH,
+        shard_group,
+        Default::default(),
+        BlockCommands::init([Command::ForeignProposal(proposal1.to_atom())]).unwrap(),
+        Default::default(),
+        2,
+        SchnorrSignatureBytes::zero(),
+        EpochTime::now().as_u64(),
+        FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
+        ExtraData::new(),
+    )
+    .unwrap();
+    tx.blocks_insert(&block1).unwrap();
+
+    let fork_block = Block::create(
+        network,
+        ProtocolVersion::V0,
+        *zero_block.id(),
+        zero_block.justify().clone(),
+        None,
+        NodeHeight(2),
+        EPOCH,
+        shard_group,
+        Default::default(),
+        BlockCommands::init([Command::ForeignProposal(proposal1.to_atom())]).unwrap(),
+        Default::default(),
+        5,
+        SchnorrSignatureBytes::zero(),
+        EpochTime::now().as_u64(),
+        FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
+        ExtraData::new(),
+    )
+    .unwrap();
+    tx.blocks_insert(&fork_block).unwrap();
+
+    tx.foreign_proposals_set_status(proposal1.block_id(), ForeignProposalStatus::Proposed, Some(block1.id()))
+        .unwrap();
+    tx.foreign_proposals_set_status(
+        proposal1.block_id(),
+        ForeignProposalStatus::Proposed,
+        Some(fork_block.id()),
+    )
+    .unwrap();
+
+    let res = tx.foreign_proposals_get_all_new(block1.id(), 10).unwrap();
+    assert!(res.is_empty());
+    let res = tx.foreign_proposals_get_all_new(fork_block.id(), 10).unwrap();
+    assert!(res.is_empty());
+
+    tx.foreign_proposals_set_status(proposal1.block_id(), ForeignProposalStatus::Confirmed, None)
+        .unwrap();
+    tx.foreign_proposals_clear_proposed_in(fork_block.id()).unwrap();
+
+    let res = tx.foreign_proposals_get_any([proposal1.block_id()]).unwrap();
+    assert_eq!(res[0].status(), ForeignProposalStatus::Confirmed);
+    assert!(!tx.foreign_proposals_has_unconfirmed(EPOCH).unwrap());
+
+    tx.rollback().unwrap();
+}
+

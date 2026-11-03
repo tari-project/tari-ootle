@@ -94,8 +94,11 @@ impl ProposalCertificate {
     /// avoid any collision issues e.g. storage keys.
     pub fn calculate_id(&self) -> PcId {
         quorum_certificate_id_hasher()
+            .chain(&self.height)
             .chain(&self.header_hash)
             .chain(&self.parent_id)
+            .chain(&self.epoch)
+            .chain(&self.shard_group)
             .chain(&self.signatures)
             .chain(&self.decision)
             .finalize_into_array()

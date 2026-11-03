@@ -179,7 +179,10 @@ impl ValidatorNodeClient {
         self.send_request("get_shard_key", request).await
     }
 
-    pub async fn get_all_vns(&mut self, request: GetAllVnsRequest) -> Result<GetAllVnsResponse, ValidatorNodeClientError> {
+    pub async fn get_all_vns(
+        &mut self,
+        request: GetAllVnsRequest,
+    ) -> Result<GetAllVnsResponse, ValidatorNodeClientError> {
         self.send_request("get_all_vns", request).await
     }
 
@@ -192,7 +195,7 @@ impl ValidatorNodeClient {
     }
 
     fn next_request_id(&mut self) -> i64 {
-        self.request_id = self.request_id.wrapping_add(1);
+        self.request_id += 1;
         self.request_id
     }
 
@@ -234,7 +237,7 @@ impl ValidatorNodeClient {
 }
 
 fn jsonrpc_result(mut val: json::Value) -> Result<json::Value, ValidatorNodeClientError> {
-    if let Some(err) = val.get("error").filter(|err| !err.is_null()) {
+    if let Some(err) = val.get("error") {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
         return Err(ValidatorNodeClientError::RequestFailedWithStatus {
@@ -243,31 +246,122 @@ fn jsonrpc_result(mut val: json::Value) -> Result<json::Value, ValidatorNodeClie
         });
     }
 
-    let result = val
-        .get_mut("result")
-        .map(json::Value::take)
-        .ok_or_else(|| ValidatorNodeClientError::InvalidResponse {
-            message: "Missing result field".to_string(),
-        })?;
+    let result =
+        val.get_mut("result")
+            .map(json::Value::take)
+            .ok_or_else(|| ValidatorNodeClientError::InvalidResponse {
+                message: "Missing result field".to_string(),
+            })?;
     Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use tari_ootle_common_types::optional::IsNotFoundError;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
 
     use super::*;
 
-    #[test]
-    fn jsonrpc_result_accepts_null_error_field() {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": { "size": 42 },
-            "error": null
+    /// Serves a single HTTP response with the given status line and body, after reading the full request.
+    async fn serve_once(status: &'static str, content_type: &'static str, body: &'static str) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = stream.read(&mut buf).await.unwrap();
+                request.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(header_end) = text.find("\r\n\r\n") {
+                    let content_length = text[..header_end]
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= header_end + 4 + content_length {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: \
+                 close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
         });
-        let result = jsonrpc_result(payload).unwrap();
-        let stats: GetMempoolStatsResponse = serde_json::from_value(result).unwrap();
+        Url::parse(&format!("http://{addr}/json_rpc")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn non_2xx_response_fails_with_http_status() {
+        let url = serve_once("502 Bad Gateway", "text/html", "<html>Bad Gateway</html>").await;
+        let mut client = ValidatorNodeClient::connect(url).unwrap();
+        let err = client.get_mempool_stats().await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ValidatorNodeClientError::RequestFailed { ref source }
+                    if source.status() == Some(reqwest::StatusCode::BAD_GATEWAY)
+            ),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_404_is_a_routing_failure_and_not_a_missing_resource() {
+        let url = serve_once("404 Not Found", "text/plain", "404 page not found").await;
+        let mut client = ValidatorNodeClient::connect(url).unwrap();
+        let err = client.get_mempool_stats().await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ValidatorNodeClientError::RequestFailed { ref source }
+                    if source.status() == Some(reqwest::StatusCode::NOT_FOUND)
+            ),
+            "unexpected error: {err}"
+        );
+        assert!(!err.is_not_found_error());
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_not_found_error_is_a_not_found_error() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":404,"message":"Substate not found"}}"#,
+        )
+        .await;
+        let mut client = ValidatorNodeClient::connect(url).unwrap();
+        let err = client.get_mempool_stats().await.unwrap_err();
+        assert!(err.is_not_found_error(), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_success_deserializes_result() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"result":{"size":42}}"#,
+        )
+        .await;
+        let mut client = ValidatorNodeClient::connect(url).unwrap();
+        let stats = client.get_mempool_stats().await.unwrap();
         assert_eq!(stats.size, 42);
     }
 

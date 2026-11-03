@@ -33,17 +33,6 @@ mod template {
             component.invoke("deposit", args!(bucket));
         }
 
-        /// Gives exactly 1,000 TARI to the caller using a proof to authorize the deposit. Can only be called once per
-        /// component.
-        pub fn take_with_proof(&self, proof: Proof, component: ComponentManager) {
-            self.record_claim(component.component_address());
-            emit_event("take", metadata!["amount" => FAUCET_AMOUNT]);
-            let bucket = self.vault.withdraw(FAUCET_AMOUNT);
-            proof.authorize_with(|| {
-                component.invoke("deposit", args!(bucket));
-            })
-        }
-
         /// Tops up the faucet vault. Permissionless: any caller may return or add funds. A bucket of any
         /// resource other than the faucet's own is rejected by the vault.
         pub fn deposit(&self, bucket: Bucket) {

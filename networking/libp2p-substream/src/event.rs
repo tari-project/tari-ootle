@@ -16,11 +16,6 @@ pub enum Event {
     InboundSubstreamOpen {
         notification: ProtocolNotification<Stream>,
     },
-    InboundFailure {
-        peer_id: PeerId,
-        stream_id: StreamId,
-        error: Error,
-    },
     OutboundFailure {
         peer_id: PeerId,
         protocol: StreamProtocol,

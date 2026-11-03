@@ -140,7 +140,7 @@ pub fn decode_stealth_utxo(
 
     // Decode the indexer's value into the internal SubstateValue (undecodable bytes ⇒ Encoding,
     // matching the spend site's convention).
-    let value = crate::substate_decode::decode_indexer_substate_value(substate_value)
+    let value = crate::encoded_decode::decode_served::<SubstateValue>(substate_value)
         .map_err(|e| OotleSdkError::Encoding(format!("undecodable substate value for '{substate_id}': {e}")))?;
 
     // Validate the substate + recover the nonce via the shared extraction.

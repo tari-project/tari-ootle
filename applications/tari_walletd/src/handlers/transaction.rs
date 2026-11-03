@@ -58,7 +58,7 @@ use tari_ootle_walletd_client::{
 };
 use tari_template_lib_types::ComponentAddress;
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
-use tokio::time;
+use tokio::{task, time};
 
 use super::context::HandlerContext;
 use crate::{
@@ -266,13 +266,27 @@ async fn submit_inner(
     // Link the transaction to the involved account(s) (if any are known) so the list can be filtered per
     // account.
     let tx_context = (!linked_accounts.is_empty()).then(|| TransactionContext::with_accounts(linked_accounts));
-    let submission = context
-        .transaction_service()
-        .submit_transaction_with_opts(transaction, tx_context, None)
-        .await;
-    if submission.is_err() {
-        unlink_locks_of_unstored_transaction(sdk, tx_id, &req.lock_ids)?;
-    }
+    let transaction_service = context.transaction_service().clone();
+    let task_sdk = sdk.clone();
+    let lock_ids = req.lock_ids;
+    // The locks are already linked, so the submission runs to completion in its own task even if the caller drops
+    // the request.
+    let submission = task::spawn(async move {
+        let submission = transaction_service
+            .submit_transaction_with_opts(transaction, tx_context, None)
+            .await;
+        if let Err(err) = &submission &&
+            let Err(unlink_err) = unlink_locks_of_unstored_transaction(&task_sdk, tx_id, &lock_ids)
+        {
+            warn!(
+                target: LOG_TARGET,
+                "Submitting transaction {tx_id} failed ({err}) and its locks {lock_ids:?} could not be unlinked: \
+                 {unlink_err}"
+            );
+        }
+        submission
+    })
+    .await?;
     let transaction_id = submission.map_err(map_transaction_submission_error)?;
 
     Ok(TransactionSubmitResponse { transaction_id })

@@ -85,8 +85,8 @@ where
     ///
     /// `linked_accounts` are the wallet account(s) this transaction involves; they are persisted so the
     /// transaction list can be filtered per account. Accounts not known to this wallet are ignored.
-    /// Stores `transaction` as `New` and links `lock_ids` to it in the same write, so a store that fails leaves the
-    /// locks unlinked.
+    ///
+    /// `lock_ids` are linked in the same write that stores the transaction, so a failed store leaves them unlinked.
     pub fn insert_new_transaction(
         &self,
         transaction: Transaction,
@@ -522,6 +522,20 @@ where
     pub fn release_all_locks_for_transaction(&self, transaction_id: TransactionId) -> Result<(), TransactionApiError> {
         self.store
             .with_write_tx(|tx| self.release_all_locks_for_transaction_internal(tx, transaction_id))
+    }
+
+    /// Releases every lock linked to `transaction_id` unless the wallet stored the transaction. Only a stored
+    /// transaction resolves its locks, and the stale sweep skips linked locks.
+    pub fn release_locks_of_unstored_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<(), TransactionApiError> {
+        self.store.with_write_tx(|tx| {
+            if tx.transactions_get(transaction_id).optional()?.is_some() {
+                return Ok(());
+            }
+            self.release_all_locks_for_transaction_internal(tx, transaction_id)
+        })
     }
 
     pub fn locks_set_transaction_id(

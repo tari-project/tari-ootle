@@ -9,7 +9,12 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
-use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{
+    ComponentAddress,
+    UtxoAddress,
+    crypto::RistrettoPublicKeyBytes,
+    stealth::AtomicCondition,
+};
 
 use crate::{
     Blobs,
@@ -249,19 +254,35 @@ impl UnsignedTransactionV1 {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
                 },
                 Instruction::StealthTransfer {
-                    resource_address_ref: ResourceAddressRef::Address(addr),
+                    resource_address_ref,
                     statement,
                     ..
                 } => {
-                    substates.insert(SubstateId::Resource(*addr));
-                    substates.extend(
-                        statement
-                            .inputs_statement
-                            .inputs
-                            .iter()
-                            .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
-                            .map(SubstateId::Utxo),
-                    );
+                    if let ResourceAddressRef::Address(addr) = resource_address_ref {
+                        substates.insert(SubstateId::Resource(*addr));
+                        substates.extend(
+                            statement
+                                .inputs_statement
+                                .inputs
+                                .iter()
+                                .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
+                                .map(SubstateId::Utxo),
+                        );
+                    }
+                    for arg in statement
+                        .stealth_inputs()
+                        .iter()
+                        .filter_map(|i| i.witness.as_script_path())
+                        .flat_map(|(leaf, _, _)| leaf.conditions())
+                        .filter_map(|c| match c {
+                            AtomicCondition::TemplateFunction(tf) => Some(&tf.args),
+                            _ => None,
+                        })
+                        .flatten()
+                    {
+                        let value = IndexedValue::from_raw(arg)?;
+                        substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
+                    }
                 },
                 Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                     if let Some(component_address) = component.address() {

@@ -29,7 +29,7 @@ use tari_template_lib_types::{
     access_rules::ComponentAccessRules,
     constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
-    stealth::StealthTransferStatement,
+    stealth::{AtomicCondition, StealthTransferStatement},
 };
 
 use crate::{
@@ -262,9 +262,10 @@ impl TransactionBuilder<MainIntent> {
             .fee_instruction_builder
             .take()
             .expect("Fee instruction builder is None");
-        self.unsigned_transaction
-            .inputs_mut()
-            .extend(fee_builder.unsigned_transaction.inputs_mut().drain(..));
+        declare_inputs(
+            self.unsigned_transaction.inputs_mut(),
+            fee_builder.unsigned_transaction.inputs_mut().drain(..),
+        );
 
         let fee_blobs = std::mem::take(fee_builder.unsigned_transaction.blobs_mut());
         // A transaction may hold `BlobIndex::MAX + 1` blobs, so the count alone does not fit a
@@ -431,9 +432,10 @@ impl<D> TransactionBuilder<D> {
         } = other;
 
         // Merge inputs first (before consuming the transaction)
-        self.unsigned_transaction
-            .inputs_mut()
-            .extend(other_tx.inputs().iter().cloned());
+        declare_inputs(
+            self.unsigned_transaction.inputs_mut(),
+            other_tx.inputs().iter().cloned(),
+        );
 
         // Move other's blobs over, appending in order so existing indices on `other`'s
         // instructions just shift by `blob_id_offset` after remapping.
@@ -551,7 +553,7 @@ impl<D> TransactionBuilder<D> {
 
     fn add_input_for_component_ref(&mut self, component_ref: &ComponentReference) {
         if let Some(address) = component_ref.address() {
-            self.unsigned_transaction.inputs_mut().insert((*address).into());
+            declare_input(self.unsigned_transaction.inputs_mut(), (*address).into());
         }
     }
 
@@ -994,18 +996,22 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    fn add_inputs_for_raw_arg(&mut self, bytes: &[u8]) {
+        if let Ok(indexed) = IndexedValue::from_raw(bytes) {
+            declare_inputs(
+                self.unsigned_transaction.inputs_mut(),
+                indexed
+                    .referenced_substates()
+                    .filter(SubstateId::is_declarable_input)
+                    .map(InputDeclaration::write),
+            );
+        }
+    }
+
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
-            if let Some(bytes) = arg.as_literal_bytes() &&
-                let Ok(indexed) = IndexedValue::from_raw(bytes)
-            {
-                declare_inputs(
-                    self.unsigned_transaction.inputs_mut(),
-                    indexed
-                        .referenced_substates()
-                        .filter(SubstateId::is_declarable_input)
-                        .map(InputDeclaration::write),
-                );
+            if let Some(bytes) = arg.as_literal_bytes() {
+                self.add_inputs_for_raw_arg(bytes);
             }
         }
     }
@@ -1024,15 +1030,30 @@ impl<D> TransactionBuilder<D> {
                 self.add_inputs_for_args(args);
             },
             Instruction::StealthTransfer {
-                resource_address_ref, ..
+                resource_address_ref,
+                statement,
+                ..
             } => {
                 // NOTE: UTXO inputs may have come from previous instructions, and therefore are not an existing
                 // on-chain substate input. This means the user will have to manually add them as inputs as required.
 
                 self.add_input_for_resource_ref(resource_address_ref);
+                for arg in statement
+                    .stealth_inputs()
+                    .iter()
+                    .filter_map(|i| i.witness.as_script_path())
+                    .flat_map(|(leaf, _, _)| leaf.conditions())
+                    .filter_map(|c| match c {
+                        AtomicCondition::TemplateFunction(tf) => Some(&tf.args),
+                        _ => None,
+                    })
+                    .flatten()
+                {
+                    self.add_inputs_for_raw_arg(arg);
+                }
             },
             Instruction::ClaimValidatorFees { address, .. } => {
-                self.unsigned_transaction.inputs_mut().insert((*address).into());
+                declare_input(self.unsigned_transaction.inputs_mut(), (*address).into());
             },
             Instruction::Assert {
                 assertion:
@@ -1041,9 +1062,7 @@ impl<D> TransactionBuilder<D> {
                 ..
             } => {
                 if *resource_address != TARI_TOKEN {
-                    self.unsigned_transaction
-                        .inputs_mut()
-                        .insert((*resource_address).into());
+                    declare_input(self.unsigned_transaction.inputs_mut(), (*resource_address).into());
                 }
             },
             Instruction::UpdateComponentTemplate { component, migrate, .. } => {

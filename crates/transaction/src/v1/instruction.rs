@@ -14,7 +14,7 @@ use tari_template_lib_types::{
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
     crypto::RistrettoPublicKeyBytes,
-    stealth::StealthTransferStatement,
+    stealth::{AtomicCondition, StealthTransferStatement},
 };
 
 use crate::{
@@ -183,6 +183,23 @@ impl Instruction {
             Self::UpdateComponentTemplate { new_template, .. } => Some(new_template),
             _ => None,
         }
+    }
+
+    pub fn referenced_templates(&self) -> impl Iterator<Item = &TemplateAddress> + '_ {
+        let single = self.referenced_template();
+        let stealth_inputs = match self {
+            Self::StealthTransfer { statement, .. } => statement.stealth_inputs(),
+            _ => &[],
+        };
+        let stealth = stealth_inputs
+            .iter()
+            .filter_map(|input| input.witness.as_script_path())
+            .flat_map(|(leaf, _, _)| leaf.conditions())
+            .filter_map(|condition| match condition {
+                AtomicCondition::TemplateFunction(tf) => Some(&tf.template),
+                _ => None,
+            });
+        single.into_iter().chain(stealth)
     }
 
     /// Iterate over every `BlobIndex` this instruction references — both `PublishTemplate.binary`

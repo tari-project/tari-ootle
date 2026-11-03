@@ -9,7 +9,7 @@ use std::{
 };
 
 use anyhow::bail;
-use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, displayable::Displayable};
+use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower, displayable::Displayable};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -85,6 +85,12 @@ pub struct Validator {
     /// key is unaffected by a rotation.
     #[serde(default)]
     pub claim_key_changes: Vec<ClaimKeyChange>,
+    /// The validator's vote power in stake units. Must be at least 1.
+    ///
+    /// Power is fixed for the life of the registration: a claim key rotation re-registers the validator with this
+    /// same power. Shard key derivation excludes it, so a validator's place in its committee is independent of stake.
+    #[serde(default = "Validator::default_power")]
+    pub power: u64,
 }
 
 /// A scheduled claim key rotation for a [`Validator`].
@@ -103,7 +109,22 @@ impl Validator {
         self.registration_epoch.saturating_add(Epoch(1))
     }
 
+    fn default_power() -> u64 {
+        1
+    }
+
+    pub fn vote_power(&self) -> VotePower {
+        VotePower::of(self.power)
+    }
+
     fn validate(&self) -> anyhow::Result<()> {
+        if self.power == 0 {
+            bail!(
+                "Validator {} has a vote power of 0. Every validator must have a vote power of at least 1.",
+                self.public_key
+            );
+        }
+
         let mut changes = self.claim_key_changes.iter().collect::<Vec<_>>();
         changes.sort_by_key(|change| change.effective_epoch);
 
@@ -178,6 +199,7 @@ mod tests {
             shard_group: ShardGroup::new(1, 256),
             registration_epoch: Epoch(10),
             claim_key_changes,
+            power: 1,
         }
     }
 
@@ -338,5 +360,37 @@ mod tests {
             claim_key: mk_key(3),
         }]);
         assert_eq!(without.calculate_shard_key(), with.calculate_shard_key());
+    }
+
+    #[test]
+    fn power_defaults_to_one_when_omitted() {
+        let validator: Validator = serde_json::from_value(serde_json::json!({
+            "public_key": mk_key(1),
+            "claim_key": mk_key(2),
+            "shard_group": ShardGroup::new(1, 256),
+            "registration_epoch": Epoch(10),
+        }))
+        .unwrap();
+        assert_eq!(validator.vote_power(), VotePower::of(1));
+        validator.validate().unwrap();
+    }
+
+    #[test]
+    fn zero_power_is_rejected() {
+        let validator = Validator {
+            power: 0,
+            ..mk_validator(vec![])
+        };
+        let err = validator.validate().unwrap_err().to_string();
+        assert!(err.contains("has a vote power of 0"), "{err}");
+    }
+
+    #[test]
+    fn power_does_not_move_the_shard_key() {
+        let heavy = Validator {
+            power: 8,
+            ..mk_validator(vec![])
+        };
+        assert_eq!(mk_validator(vec![]).calculate_shard_key(), heavy.calculate_shard_key());
     }
 }

@@ -79,6 +79,15 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
             .validator_nodes_count_for_shard_group(self.tx, epoch, shard_group)
     }
 
+    pub fn total_power_in_shard_group(
+        &mut self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<VotePower, TGlobalDbAdapter::Error> {
+        self.backend
+            .validator_nodes_total_power_for_shard_group(self.tx, epoch, shard_group)
+    }
+
     pub fn get_by_public_key(
         &mut self,
         epoch: Epoch,

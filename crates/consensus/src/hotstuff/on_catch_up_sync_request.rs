@@ -273,16 +273,14 @@ mod tests {
     use tari_consensus_types::{ProposalCertificate, ShardGroupAccumulatedData};
     use tari_crypto::tari_utilities::epoch_time::EpochTime;
     use tari_ootle_common_types::{ExtraData, NumPreshards, ProtocolVersion, ShardGroup};
-    use tari_ootle_storage::{
-        StateStoreWriteTransaction,
-        consensus_models::{BlockCommands, BlockHeader},
-    };
+    use tari_ootle_storage::consensus_models::{BlockCommands, BlockHeader};
     use tari_ootle_transaction::Network;
     use tari_sidechain::{FixedHash, QuorumDecision};
     use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
     use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
     use super::*;
+    use crate::traits::CertificateStore;
 
     const NETWORK: Network = Network::LocalNet;
     const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;

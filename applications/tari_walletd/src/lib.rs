@@ -27,7 +27,7 @@ mod server;
 mod services;
 mod webrtc;
 
-use std::{fs, panic, pin, process, time::Duration};
+use std::{fs, io::IsTerminal, panic, pin, process, time::Duration};
 
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
@@ -199,6 +199,21 @@ pub async fn run_tari_ootle_walletd(
     .with_cookie_token(cookie);
     let (jrpc_address, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
 
+    #[cfg(not(feature = "web_ui"))]
+    info!(
+        target: LOG_TARGET,
+        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml. JSON-RPC address is {jrpc_address}"
+    );
+
+    if let Err(e) = fs::write(config.common.base_path.join("pid"), process::id().to_string()) {
+        error!(
+            target: LOG_TARGET,
+            "Failed to create PID file {}: {}",
+            config.common.base_path.join("pid").display(),
+            e
+        )
+    }
+
     if let Some(webauthn_service) = webauthn_service {
         if !webauthn_service.is_enrolled()? {
             let (setup_token, setup_token_path) =
@@ -220,8 +235,15 @@ pub async fn run_tari_ootle_walletd(
                 setup_token_path.display()
             );
             // The tokenised link goes to stdout only: log appenders persist it in files that outlive the token.
+            let heading = if std::io::stdout().is_terminal() {
+                "\x1b[1;33mACTION REQUIRED — Set up your wallet passkey\x1b[0m"
+            } else {
+                "ACTION REQUIRED — Set up your wallet passkey"
+            };
+            let separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
             println!(
-                "🔑 Register your first passkey: {register_url}?token={}",
+                "\n{separator}\n{heading}\n{separator}\n\nOpen this link in your \
+                 browser:\n\n{register_url}?token={}\n\n{separator}\n",
                 setup_token.as_str()
             );
         } else if let Err(err) = services::remove_setup_token_file(config.common.base_path()) {
@@ -236,20 +258,6 @@ pub async fn run_tari_ootle_walletd(
         }
     }
 
-    #[cfg(not(feature = "web_ui"))]
-    info!(
-        target: LOG_TARGET,
-        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml. JSON-RPC address is {jrpc_address}"
-    );
-
-    if let Err(e) = fs::write(config.common.base_path.join("pid"), process::id().to_string()) {
-        error!(
-            target: LOG_TARGET,
-            "Failed to create PID file {}: {}",
-            config.common.base_path.join("pid").display(),
-            e
-        )
-    }
     // Wait for shutdown, or for any service to error
     let result = tokio::select! {
         res = listen_fut => match res {

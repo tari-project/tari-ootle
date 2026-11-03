@@ -222,8 +222,39 @@ pub fn check_diff_matches_receipt(
     receipt: &TransactionReceipt,
     diff: &SubstateDiff,
 ) -> Result<(), LightClientError> {
+    let fee_withdrawals_match = diff.validator_fee_withdrawals().len() == receipt.fee_withdrawals().len() &&
+        diff.validator_fee_withdrawals()
+            .iter()
+            .zip(receipt.fee_withdrawals())
+            .all(|(a, b)| a.address == b.address && a.amount == b.amount);
+    if !fee_withdrawals_match {
+        return Err(LightClientError::DiffDoesNotMatchReceipt {
+            details: "the diff's validator fee withdrawals are not the receipt's".to_string(),
+        });
+    }
+
     let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());
     let epoch = receipt.epoch();
+
+    let mut upped_ids = HashSet::with_capacity(diff.up_len());
+    for (id, substate) in diff.up_iter() {
+        if !upped_ids.insert(id) {
+            return Err(LightClientError::DiffDoesNotMatchReceipt {
+                details: format!("the diff ups {id} more than once"),
+            });
+        }
+        if *id == receipt_id {
+            let receipt_value = SubstateValue::TransactionReceipt(receipt.clone());
+            if substate.version() != SubstateVersion::ZERO ||
+                hash_substate(network, substate.substate_value(), substate.version(), epoch) !=
+                    hash_substate(network, &receipt_value, SubstateVersion::ZERO, epoch)
+            {
+                return Err(LightClientError::DiffDoesNotMatchReceipt {
+                    details: "the receipt substate in the diff is not the verified receipt".to_string(),
+                });
+            }
+        }
+    }
 
     let diff_ups = diff
         .up_iter()
@@ -243,11 +274,26 @@ pub fn check_diff_matches_receipt(
         format!("{id}v{version}")
     })?;
 
-    // The receipt leaves out the downs that an up of the same substate implies.
-    let upped_ids = diff.up_iter().map(|(id, _)| id).collect::<HashSet<_>>();
+    let mut downed_ids = HashSet::with_capacity(diff.down_len());
+    for (id, _) in diff.down_iter() {
+        if !downed_ids.insert(id) {
+            return Err(LightClientError::DiffDoesNotMatchReceipt {
+                details: format!("the diff downs {id} more than once"),
+            });
+        }
+    }
+
+    // The receipt leaves out the downs that an up of a later version of the same substate implies.
+    let implied_downs = receipt
+        .diff_summary()
+        .upped
+        .iter()
+        .filter_map(|up| {
+            let previous = up.version.as_u64().checked_sub(1)?;
+            Some((&up.substate_id, SubstateVersion::new(previous)))
+        });
     let diff_downs = diff
         .down_iter()
-        .filter(|(id, _)| !upped_ids.contains(id))
         .map(|(id, version)| (id, *version))
         .collect::<BTreeSet<_>>();
     let receipt_downs = receipt
@@ -255,6 +301,7 @@ pub fn check_diff_matches_receipt(
         .downed
         .iter()
         .map(|down| (&down.substate_id, down.version))
+        .chain(implied_downs)
         .collect::<BTreeSet<_>>();
     check_same("down", &diff_downs, &receipt_downs, |(id, version)| {
         format!("{id}v{version}")

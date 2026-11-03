@@ -182,7 +182,11 @@ where TPeerStore: PeerStore
             peer_id, connection_id, ..
         }: ConnectionClosed,
     ) {
-        if self.active_outbound_connections.get(&peer_id) == Some(&connection_id) {
+        if self
+            .active_outbound_connections
+            .get(&peer_id)
+            .is_some_and(|id| *id == connection_id)
+        {
             self.active_outbound_connections.remove(&peer_id);
         }
         if let Some(pos) = self.pending_syncs.iter().position(|p| *p == peer_id) {

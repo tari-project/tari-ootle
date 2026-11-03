@@ -10,15 +10,48 @@
 //! hold its inputs across a human approval window that is longer than that
 //! deadline, so it extends the timeout of the locks it is given.
 
-use std::time::Duration;
+use std::{collections::HashSet, str::FromStr, time::Duration};
 
-use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_ootle_transaction::TransactionId;
+use ootle_byte_type::ToByteType;
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
+use tari_engine_types::{
+    Utxo,
+    resource::Resource,
+    substate::{Substate, SubstateDiff, SubstateId},
+};
+use tari_ootle_common_types::{Epoch, SubstateVersion, optional::IsNotFoundError};
+use tari_ootle_transaction::{Transaction, TransactionId, args};
 use tari_ootle_wallet_sdk::{
-    models::LockOwner,
+    models::{
+        BalanceChangeSource,
+        KeyBranch,
+        KeyId,
+        LockOwner,
+        OutputStatus,
+        StealthOutputModel,
+        VaultModel,
+        WalletLockId,
+    },
     storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tari_template_lib_types::{
+    Amount,
+    ComponentAddress,
+    EncryptedData,
+    Metadata,
+    ResourceAddress,
+    ResourceType,
+    SubstateOwnerRule,
+    VaultId,
+    access_rules::ResourceAccessRules,
+    constants::TOKEN_SYMBOL,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    stealth::SpendAuthorization,
+};
 
 fn open_store() -> SqliteWalletStore {
     let db = SqliteWalletStore::try_open(":memory:").unwrap();
@@ -204,4 +237,149 @@ fn unlinking_clears_only_a_link_to_the_named_transaction() {
 
     tx.locks_unlink_transaction(lock, linked_to).unwrap();
     assert_eq!(tx.locks_get(lock).unwrap().transaction_id, None);
+}
+
+fn stealth_output(
+    account: ComponentAddress,
+    resource_address: ResourceAddress,
+    value: u64,
+    seed: u8,
+    status: OutputStatus,
+    lock_id: Option<WalletLockId>,
+) -> StealthOutputModel {
+    StealthOutputModel {
+        owner_account: account,
+        resource_address,
+        commitment: PedersenCommitmentBytes::from_array([seed; PedersenCommitmentBytes::length()]),
+        value,
+        sender_public_nonce: RistrettoPublicKeyBytes::from_bytes(
+            &[seed.wrapping_add(1); RistrettoPublicKeyBytes::length()],
+        )
+        .unwrap(),
+        view_only_key_id: KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+        owner_key_id: Some(KeyId::derived(KeyBranch::Account, 0)),
+        encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
+        tag_byte: UtxoTag::new(u32::from(seed)),
+        memo: None,
+        auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
+        minimum_value_promise: 0,
+        status,
+        is_burnt: false,
+        is_frozen: false,
+        is_on_chain: !matches!(status, OutputStatus::LockedUnconfirmed),
+        is_condition_spendable: true,
+        lock_id,
+        proven_up: None,
+        spent_version: None,
+    }
+}
+
+#[test]
+fn finalizing_a_lock_marks_burnt_stealth_outputs_as_burnt_and_records_balance_change() {
+    let db = open_store();
+    let account =
+        ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8ffffffff")
+            .unwrap();
+    let stealth_resource: ResourceAddress = format!("resource_{:064x}", 3u8).parse().unwrap();
+    let stealth_vault: VaultId = format!("vault_{:064x}", 3u8).parse().unwrap();
+    let owner_public_key = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(1000u64)).to_byte_type();
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .allocate_component_address("component")
+        .put_last_instruction_output_on_workspace("bucket")
+        .call_method("component", "new", args!["bucket"])
+        .build_and_seal(&RistrettoSecretKey::from(42u64));
+    let transaction_id = transaction.calculate_id();
+
+    let mut tx = db.create_write_tx().unwrap();
+    tx.accounts_insert(
+        Some("test"),
+        &account,
+        KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+        Some(KeyId::derived(KeyBranch::Account, 0)),
+        &owner_public_key,
+        &HashSet::new(),
+        Epoch::zero(),
+        true,
+        true,
+    )
+    .unwrap();
+    tx.resources_upsert(
+        &stealth_resource,
+        &Resource::new(
+            ResourceType::Stealth,
+            SubstateOwnerRule::None,
+            ResourceAccessRules::new(),
+            Metadata::from([(TOKEN_SYMBOL, "STEALTH".to_string())]),
+            None,
+            None,
+            6,
+            false,
+        ),
+    )
+    .unwrap();
+    tx.vaults_insert(VaultModel {
+        account_address: account,
+        id: stealth_vault,
+        vault_version: SubstateVersion::ZERO,
+        resource_address: stealth_resource,
+        resource_type: ResourceType::Stealth,
+        confidential_balance: Amount::from(1_000_000u64),
+        revealed_balance: Amount::zero(),
+        locked_revealed_balance: Amount::zero(),
+        token_symbol: Some("STEALTH".to_string()),
+        divisibility: 6,
+    })
+    .unwrap();
+    tx.transactions_insert(&transaction, None, &[account], false).unwrap();
+
+    let burnt_input = stealth_output(account, stealth_resource, 400_000, 7, OutputStatus::Unspent, None);
+    let kept_output = stealth_output(account, stealth_resource, 600_000, 8, OutputStatus::Unspent, None);
+    tx.stealth_outputs_insert(&burnt_input).unwrap();
+    tx.stealth_outputs_insert(&kept_output).unwrap();
+
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_id, transaction_id).unwrap();
+    tx.stealth_outputs_lock_many(&stealth_resource, &[&burnt_input.commitment], lock_id)
+        .unwrap();
+
+    let burnt_addr = burnt_input.to_utxo_address();
+    let mut diff = SubstateDiff::new();
+    diff.down(SubstateId::Utxo(burnt_addr.clone()), SubstateVersion::new(2));
+    diff.up(
+        SubstateId::Utxo(burnt_addr),
+        Substate::new(SubstateVersion::new(3), Utxo {
+            output: None,
+            is_frozen: false,
+        }),
+    );
+
+    tx.locks_unlock_finalized(lock_id, &diff).unwrap();
+
+    let stored = tx
+        .stealth_outputs_get_by_commitment(&stealth_resource, &burnt_input.commitment)
+        .unwrap();
+    assert_eq!(stored.status, OutputStatus::Burnt);
+    assert!(stored.is_burnt);
+    assert_eq!(stored.lock_id, None);
+    assert_eq!(stored.spent_version, Some(SubstateVersion::new(2)));
+
+    let unspent = tx
+        .stealth_outputs_get_unspent_by_account(&account, Some(&stealth_resource), false)
+        .unwrap();
+    assert_eq!(unspent.len(), 1);
+    assert_eq!(unspent[0].commitment, kept_output.commitment);
+
+    let vault = tx.vaults_get(&stealth_vault).unwrap();
+    assert_eq!(vault.confidential_balance, Amount::from(600_000u64));
+
+    let page = tx
+        .balance_changes_get_page_by_account(&account, 0, 10, Some(&stealth_resource), None, None)
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].source, BalanceChangeSource::Transaction { transaction_id });
+    assert_eq!(page.changes[0].confidential_before, Amount::from(1_000_000u64));
+    assert_eq!(page.changes[0].confidential_after, Amount::from(600_000u64));
+    assert_eq!(page.changes[0].confidential_delta, "-400000");
+
+    tx.commit().unwrap();
 }

@@ -193,13 +193,19 @@ impl<'a> WriteTransaction<'a> {
                 stealth_outputs::owner_account_id,
                 stealth_outputs::resource_address,
                 stealth_outputs::commitment,
+                stealth_outputs::status,
             ))
             .filter(stealth_outputs::lock_id.eq(lock_id))
-            .load_iter::<(i32, i32, String, String), _>(self.connection())
+            .load_iter::<(i32, i32, String, String, String), _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let up_id_index = diff
             .up_iter()
+            .filter_map(|(id, _)| id.as_utxo_address())
+            .collect::<HashSet<_>>();
+        let burnt_id_index = diff
+            .up_iter()
+            .filter(|(_, s)| s.substate_value().as_utxo().is_some_and(|u| u.is_burnt()))
             .filter_map(|(id, _)| id.as_utxo_address())
             .collect::<HashSet<_>>();
         let down_id_index = diff
@@ -208,11 +214,12 @@ impl<'a> WriteTransaction<'a> {
             .collect::<HashMap<_, _>>();
         let mut to_confirm = vec![];
         let mut to_spend = vec![];
+        let mut to_burn = vec![];
         let mut spent_versions = vec![];
         let mut affected_balances = HashSet::new();
 
         for res in locked_outputs {
-            let (id, owner_account_id, resx, commitment) =
+            let (id, owner_account_id, resx, commitment, status) =
                 res.map_err(|e| WalletStorageError::general(OPERATION, e))?;
             let resource_address: ResourceAddress = resx.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_to_substate_id",
@@ -229,8 +236,16 @@ impl<'a> WriteTransaction<'a> {
             let addr = UtxoAddress::new(resource_address, commitment.into());
             let downed_version = down_id_index.get(&addr).copied();
             let is_upped = up_id_index.contains(&addr);
+            let is_burnt = burnt_id_index.contains(&addr);
+            let is_locked_unconfirmed = status == OutputStatus::LockedUnconfirmed.as_key_str();
 
-            if is_upped {
+            if is_burnt && (!is_locked_unconfirmed || downed_version.is_some()) {
+                if let Some(version) = downed_version {
+                    spent_versions.push((addr.clone(), version));
+                }
+                to_burn.push(addr);
+                affected_balances.insert((owner_account_id, resource_address));
+            } else if is_locked_unconfirmed && is_upped {
                 to_confirm.push(id);
                 affected_balances.insert((owner_account_id, resource_address));
             } else if let Some(version) = downed_version {
@@ -271,9 +286,14 @@ impl<'a> WriteTransaction<'a> {
                 ))
                 .execute(self.connection())
                 .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            for (address, version) in spent_versions {
-                self.stealth_outputs_record_spent_version(&address, version)?;
-            }
+        }
+
+        for address in &to_burn {
+            self.stealth_outputs_mark_as_burnt(address)?;
+        }
+
+        for (address, version) in spent_versions {
+            self.stealth_outputs_record_spent_version(&address, version)?;
         }
 
         // Any outputs that were not confirmed or spent are released

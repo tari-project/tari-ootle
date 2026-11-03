@@ -5,6 +5,7 @@ pub mod accounts;
 pub mod address_book;
 pub mod auth;
 pub mod burn_proofs;
+pub(crate) mod component_upgrades;
 pub mod confidential;
 mod context;
 pub mod error;

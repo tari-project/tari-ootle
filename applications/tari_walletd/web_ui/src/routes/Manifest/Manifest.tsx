@@ -23,6 +23,7 @@
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { useSubmitManifest } from "@api/hooks/useTransactions";
+import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import PageHeading from "@components/PageHeading";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
 import {
@@ -34,6 +35,7 @@ import {
 } from "@mui/icons-material";
 import type { SelectChangeEvent } from "@mui/material";
 import {
+  Alert,
   Dialog,
   DialogActions,
   DialogContent,
@@ -60,10 +62,10 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import type { ManifestTab } from "@store/manifestStore";
 import useManifestCodeStore from "@store/manifestStore";
-import type { KeyId } from "@tari-project/ootle-ts-bindings";
+import type { ComponentUpgrade, KeyId, UpgradableComponent } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Highlight, themes } from "prism-react-renderer";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import EditorImport from "react-simple-code-editor";
 // Vite 8 dev pre-bundler doesn't unwrap exports.default for CJS packages
@@ -97,6 +99,16 @@ function formatManifestCode(code: string): string {
   return formatted.join("\n");
 }
 
+function upgradableBy(rule: UpgradableComponent["upgrade_rule"]): string {
+  if (rule === "Owner") {
+    return "owner";
+  }
+  if (typeof rule === "object" && rule.AccessRule === "AllowAll") {
+    return "anyone";
+  }
+  return "access rule";
+}
+
 function Manifest() {
   return (
     <>
@@ -116,12 +128,22 @@ function ManifestEditor() {
   const manifest = useManifestCodeStore();
   const [fee, setFee] = useState<bigint>(0n);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [upgradableComponents, setUpgradableComponents] = useState<UpgradableComponent[]>([]);
+  const [componentUpgrades, setComponentUpgrades] = useState<ComponentUpgrade[]>([]);
   const theme = useTheme();
 
   const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // A dry run that is still in flight must not restore a warning after the manifest changes or a later submit starts.
+  const dryRunGeneration = useRef(0);
 
   const isDryRun = !fee;
+
+  useEffect(() => {
+    dryRunGeneration.current += 1;
+    setUpgradableComponents([]);
+    setComponentUpgrades([]);
+  }, [manifest.code, manifest.activeTabId]);
 
   const handleSave = useCallback(() => {
     const data = manifest.tabs.map(({ name, code, variables, signingKeys, blobs }) => ({
@@ -176,6 +198,9 @@ function ManifestEditor() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const generation = ++dryRunGeneration.current;
+    setUpgradableComponents([]);
+    setComponentUpgrades([]);
     console.log("Manifest code submitted:", manifest.code);
     console.log("Fee submitted:", fee);
     submitManifest({
@@ -188,10 +213,15 @@ function ManifestEditor() {
       blobs: manifest.blobs,
     })
       .then((response) => {
+        if (dryRunGeneration.current !== generation) {
+          return;
+        }
         if (!isDryRun) {
           console.log("Manifest submitted successfully:", response);
           return;
         }
+        setUpgradableComponents(response.upgradable_components ?? []);
+        setComponentUpgrades(response.component_upgrades ?? []);
         const finalize = response.result?.finalize;
         if (!finalize && isDryRun) {
           throw new Error("No result returned for dry run");
@@ -312,6 +342,20 @@ function ManifestEditor() {
             <Box sx={{ color: "red" }}>
               <p>{finalizeError}</p>
             </Box>
+          )}
+          <ComponentUpgradeWarning upgrades={componentUpgrades} />
+          {upgradableComponents.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              This transaction calls components whose code can be changed after this estimate, so what runs on
+              submission may differ:
+              <ul>
+                {upgradableComponents.map((c) => (
+                  <li key={c.component_address}>
+                    {c.component_address} (upgradable by {upgradableBy(c.upgrade_rule)})
+                  </li>
+                ))}
+              </ul>
+            </Alert>
           )}
         </form>
       </Grid>

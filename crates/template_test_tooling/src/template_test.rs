@@ -449,16 +449,15 @@ impl TemplateTest {
         self
     }
 
-    /// The encoded bytes of `transaction`'s own declared inputs, global ones excepted, as this
-    /// harness holds them: what the engine charges the transaction for loading and pledging its
-    /// inputs, and what a wallet measures to estimate that charge.
+    /// The encoded bytes of `transaction`'s own declared inputs as this harness holds them: what the
+    /// engine charges the transaction for loading and pledging its inputs, and what a wallet
+    /// measures to estimate that charge.
     pub fn declared_input_bytes(&self, transaction: &Transaction) -> u64 {
         transaction
             .all_inputs_iter()
             .map(|input| input.substate_id().clone())
             .collect::<HashSet<_>>()
             .into_iter()
-            .filter(|id| !id.is_global())
             .map(|id| {
                 let substate = self
                     .state_store

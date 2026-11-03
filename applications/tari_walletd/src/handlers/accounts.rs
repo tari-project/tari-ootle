@@ -32,7 +32,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
 use tari_ootle_wallet_crypto::{
     OutputWitness,
     StealthCryptoApiError,
@@ -1266,22 +1266,22 @@ pub async fn handle_transfer(
             }
         })
         .then(|builder| {
-            // The badge authorizes the resource's withdraw rule inside the account's frame, which it reaches as
-            // a `Proof` argument.
+            // The badge authorizes the resource's withdraw rule inside the account's frame, which is lent it by
+            // the window opened around the call.
+            let withdraw = |builder: TransactionBuilder| {
+                builder
+                    .call_method(source_account_address, "withdraw", args![
+                        req.resource_address,
+                        req.amount
+                    ])
+                    .put_last_instruction_output_on_workspace("bucket")
+            };
             if req.proof_from_badge_resource.is_some() {
-                builder.call_method(source_account_address, "withdraw_with_auth", args![
-                    req.resource_address,
-                    req.amount,
-                    Workspace("proof")
-                ])
+                builder.with_authorized_proof("proof", withdraw)
             } else {
-                builder.call_method(source_account_address, "withdraw", args![
-                    req.resource_address,
-                    req.amount
-                ])
+                withdraw(builder)
             }
         })
-        .put_last_instruction_output_on_workspace("bucket")
         .call_method(destination_account_address, "deposit", args![Workspace("bucket")])
         .then(|builder| {
             if req.proof_from_badge_resource.is_some() {
@@ -1412,11 +1412,22 @@ pub async fn handle_confidential_transfer(
             })
             .await?;
 
+        // `transfer` links its lock to the transaction, and only a stored transaction resolves a linked lock. A dry
+        // run is never stored, and a failed submission may leave nothing stored.
+        let transaction_id = transfer.transaction.calculate_id();
         if req.dry_run {
-            let transaction_id = transfer.transaction.calculate_id();
             let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await?;
+                .await;
+            if let Err(err) = &result &&
+                let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
+                );
+            }
+            let result = result?;
             return Ok(ConfidentialTransferResponse {
                 transaction_id,
                 required_fees: Some(result.finalize.required_fees()),
@@ -1426,13 +1437,22 @@ pub async fn handle_confidential_transfer(
 
         let mut linked_accounts = vec![source_account_address];
         linked_accounts.extend(owned_destination);
-        let tx_id = transaction_service
+        let submission = transaction_service
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
                 None,
             )
-            .await?;
+            .await;
+        if let Err(err) = &submission &&
+            let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+        {
+            warn!(
+                target: LOG_TARGET,
+                "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
+            );
+        }
+        let tx_id = submission?;
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
@@ -1869,12 +1889,7 @@ impl DeclaredInputPricing {
     /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
     /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
     async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
-        let ids = ids
-            .into_iter()
-            .filter(|id| !id.is_global())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
         let started = tokio::time::Instant::now();
         let mut interval = Duration::from_millis(250);
         let substates = loop {

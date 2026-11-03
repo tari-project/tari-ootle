@@ -80,11 +80,15 @@ impl<'a, TStore: WriteableWalletStore> LocksApi<'a, TStore> {
 }
 
 impl<TStore: ReadableWalletStore> LocksApi<'_, TStore> {
-    pub fn get_lock_by_transaction_id(&self, transaction_id: TransactionId) -> Result<WalletLockId, LocksApiError> {
-        let lock_id = self
+    /// Every lock linked to `transaction_id`. Empty when none is.
+    pub fn get_locks_by_transaction_id(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<Vec<WalletLockId>, LocksApiError> {
+        let lock_ids = self
             .store
             .with_read_tx(|tx| tx.locks_get_by_transaction_id(transaction_id))?;
-        Ok(lock_id)
+        Ok(lock_ids)
     }
 }
 

@@ -122,6 +122,12 @@ pub enum AuthError {
     UserAuthOnly,
     #[error("Insufficient permissions. Required '{required:?}'")]
     InsufficientPermissions { required: Permission },
+    #[error(
+        "Access denied. The transaction replaces the template of component {component} with {new_template}, and only \
+         an admin credential may submit a component upgrade. Review the upgrade and submit it from an admin session, \
+         or remove the UpdateComponentTemplate instruction"
+    )]
+    ComponentUpgradeRequiresAdmin { component: String, new_template: String },
     #[error("Invalid expiry")]
     InvalidExpiry,
 }

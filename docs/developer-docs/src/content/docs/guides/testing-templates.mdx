@@ -124,15 +124,17 @@ stay, include that signer's badge explicitly — `test.owner_proof()` for transa
 alongside the key it generates — otherwise it is silently dropped.
 
 To exercise a badge that lives in a vault, do what a real transaction does rather than reaching for
-the vector: call `create_proof_for_resource` on the account holding it, pass the resulting `Proof` to
-the code that needs it, and have that code authorize with it — `Proof::authorize`, `try_authorize` or
-`authorize_with`. Authorizing adds the proof to the *current* call frame's scope, and access rules
-match a held proof just as readily as a virtual badge.
+the vector: call `create_proof_for_resource` on the account holding it, put the `Proof` on the
+workspace, and open an authorization window over it around the calls that need it —
+`with_authorized_proof("proof", |b| ...)` on the builder, or `authorize!` / `drop_authorize!` in a
+manifest. Inside the window every top-level call is lent the proof, and access rules match a lent
+proof just as readily as a virtual badge. Passing the proof as an argument shows it to the callee
+without lending it.
 
 That difference in reach is the last thing worth knowing: virtual badges are in scope for the
-**top-level call only**. A component reached through another template starts from an empty badge set,
-so a method that passes when called directly can be denied across a template boundary.
-`it_permits_cross_template_calls_using_proofs` in
+**top-level call only**, and a lent proof reaches **one hop**. A component reached through another
+template starts from an empty badge set, so a method that passes when called directly can be denied
+across a template boundary. `a_window_lends_through_one_cross_template_hop` in
 [`crates/engine/tests/access_rules.rs`](https://github.com/tari-project/tari-ootle/blob/development/crates/engine/tests/access_rules.rs)
 shows the denial, with the account's own badge in scope the whole time — the cross-template call
 itself is a plain `ComponentManager::get(address).call(...)` inside the `CrossTemplate` fixture:
@@ -157,9 +159,9 @@ let reason = test.execute_expect_failure(
 assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
 ```
 
-The rest of that test then does it the working way: mint the badge, deposit it into the account,
-create a `Proof` for its resource, and pass that proof across the boundary for the callee to
-authorize with.
+The rest of that test shows the one-hop rule: a window the transaction opens lends the proof to the
+`CrossTemplate` frame, and that frame's own call into the component is lent nothing. A template that
+needs to lend a badge it holds opens its own window with `authorize_with` around the call.
 
 ## Overriding the epoch and epoch hash
 

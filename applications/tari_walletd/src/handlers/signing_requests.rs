@@ -52,7 +52,10 @@ use tari_ootle_walletd_client::{
 };
 
 use super::context::{AuthIdentity, HandlerContext};
-use crate::handlers::helpers::{invalid_params, invalid_request};
+use crate::handlers::{
+    component_upgrades::component_upgrades,
+    helpers::{invalid_params, invalid_request},
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::signing_requests";
 
@@ -352,10 +355,15 @@ fn fingerprint(message_hash: &[u8; 64]) -> String {
 }
 
 fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
+    let component_upgrades = component_upgrades(
+        model.unsigned_transaction.fee_instructions(),
+        model.unsigned_transaction.instructions(),
+    );
     SigningRequestInfo {
         request_id: model.id,
         status: model.effective_status_now(),
         transaction: model.unsigned_transaction,
+        component_upgrades,
         seal_public_key: model.seal_public_key,
         key_id: model.key_id,
         signer_public_key: model.signer_public_key,

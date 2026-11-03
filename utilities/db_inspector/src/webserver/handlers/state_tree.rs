@@ -45,7 +45,7 @@ pub async fn list(
     type Key = <StateTreeCf as Cf>::Key;
     type Value = <StateTreeCf as Cf>::Value;
     let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
-        if let Some(prefix_hex) = req.query.as_ref() {
+        if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
             let key_prefix = decode_hex_prefix::<StateTreeCf>(prefix_hex)?;
             Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
         } else {

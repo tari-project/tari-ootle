@@ -32,10 +32,7 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use tari_engine_types::{
-    encoded::Encoded,
-    substate::{SubstateId, SubstateValue},
-};
+use tari_engine_types::substate::{SubstateId, SubstateValue};
 
 use crate::{
     FetchedSubstate,
@@ -132,18 +129,11 @@ fn amount_to_u64(amount: tari_template_lib_types::Amount, context: &str) -> Resu
     })
 }
 
-/// Decodes a substate value as the indexer serves it: a JSON string holding the value's CBOR encoding in base64.
-pub(crate) fn decode_indexer_substate_value(value: &serde_json::Value) -> Result<SubstateValue, String> {
-    Encoded::<SubstateValue>::deserialize(value)
-        .map_err(|e| format!("not a base64 CBOR substate value: {e}"))?
-        .decode()
-        .map_err(|e| e.to_string())
-}
-
-/// `value` as the indexer serves it, for [`decode_indexer_substate_value`].
+/// `value` as the indexer serves it, for [`decode_served`](crate::encoded_decode::decode_served).
 #[cfg(test)]
 pub(crate) fn indexer_substate_json(value: &SubstateValue) -> serde_json::Value {
-    serde_json::to_value(Encoded::encode(value).expect("substate value encodes")).expect("base64 serializes")
+    serde_json::to_value(tari_engine_types::encoded::Encoded::encode(value).expect("substate value encodes"))
+        .expect("base64 serializes")
 }
 
 /// Decodes the indexer's substate value into the engine [`SubstateValue`].
@@ -151,7 +141,7 @@ pub(crate) fn indexer_substate_json(value: &SubstateValue) -> serde_json::Value 
 /// A malformed/unknown substate value surfaces as `Parse` (host-supplied input, not an internal
 /// encoding fault).
 fn parse_substate_value(value: &serde_json::Value, context: &str) -> Result<SubstateValue, OotleSdkError> {
-    decode_indexer_substate_value(value)
+    crate::encoded_decode::decode_served(value)
         .map_err(|e| OotleSdkError::Parse(format!("undecodable substate value for {context}: {e}")))
 }
 
@@ -189,11 +179,11 @@ fn component_vault_id_strings(
 /// `u64` surfaces as `Validation`.
 pub fn decode_substate(substate_value: &serde_json::Value) -> Result<DecodedSubstate, OotleSdkError> {
     let value = parse_substate_value(substate_value, "decode_substate")?;
-    decode_substate_value(&value)
+    summarize_substate_value(&value)
 }
 
 /// The shared parsed-value → typed mapping (used by [`decode_substate`] and reusable internally).
-fn decode_substate_value(value: &SubstateValue) -> Result<DecodedSubstate, OotleSdkError> {
+fn summarize_substate_value(value: &SubstateValue) -> Result<DecodedSubstate, OotleSdkError> {
     match value {
         SubstateValue::Component(component) => Ok(DecodedSubstate::Component {
             template_address: component.template_address().to_string(),

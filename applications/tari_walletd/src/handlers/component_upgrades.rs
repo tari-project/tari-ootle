@@ -133,44 +133,58 @@ fn effective_upgrade_rule(component: &Component) -> UpdateRule {
     }
 }
 
-/// Directly called components whose upgrade rule the cache does not hold, in instruction order without duplicates.
-pub fn uncached_components(cache: &UpgradeRuleCache, called: &[ComponentAddress]) -> Vec<ComponentAddress> {
-    called
-        .iter()
-        .copied()
-        .collect::<IndexSet<_>>()
-        .into_iter()
-        .filter(|address| cache.get(address).is_none())
-        .collect()
+/// Upgrade rules the cache holds for the directly called components, and the components it lacks, in instruction
+/// order without duplicates.
+///
+/// The cache may evict an entry at any time, so the rules are read out once here and resolution works from the
+/// returned map.
+pub fn cached_upgrade_rules(
+    cache: &UpgradeRuleCache,
+    called: &[ComponentAddress],
+) -> (HashMap<ComponentAddress, UpdateRule>, Vec<ComponentAddress>) {
+    let mut known = HashMap::new();
+    let mut uncached = Vec::new();
+    for address in called.iter().copied().collect::<IndexSet<_>>() {
+        match cache.get(&address) {
+            Some(rule) => {
+                known.insert(address, rule);
+            },
+            None => uncached.push(address),
+        }
+    }
+    (known, uncached)
 }
 
-/// Fetches each of `addresses` from the network and caches its upgrade rule. A component that does not exist yet is
-/// skipped: nothing can upgrade it before this transaction creates it.
+/// Fetches each of `addresses` from the network and returns its upgrade rule, caching it for later transactions. A
+/// component that does not exist yet is absent: nothing can upgrade it before this transaction creates it.
 pub async fn fetch_upgrade_rules(
     sdk: &WalletSdk,
     cache: &UpgradeRuleCache,
     addresses: &[ComponentAddress],
-) -> Result<(), anyhow::Error> {
+) -> Result<HashMap<ComponentAddress, UpdateRule>, anyhow::Error> {
     let ids = addresses.iter().copied().map(SubstateId::Component).collect::<Vec<_>>();
     let fetched = sdk.substate_api().get_substates_from_network(&ids).await?;
+    let mut rules = HashMap::with_capacity(fetched.len());
     for (id, substate) in fetched {
         if let (Some(address), Some(component)) = (id.as_component_address(), substate.substate_value().component()) {
             cache.insert(address, component);
+            rules.insert(address, effective_upgrade_rule(component));
         }
     }
-    Ok(())
+    Ok(rules)
 }
 
 /// Components whose template can still be swapped: direct calls in instruction order, then components the dry run
 /// wrote that the instructions did not name.
 ///
 /// A component the run wrote takes its rule from the accept diff, whose up'd header carries it, and the cache learns
-/// it. A directly called component the run only read takes its rule from the cache, which the caller fills with
-/// [`fetch_upgrade_rules`] for the components [`uncached_components`] names. A component a nested call only reads is
-/// absent: nothing in the diff names it. A component the transaction creates has no down entry and is skipped.
+/// it. A directly called component the run only read takes its rule from `known`, which the caller builds from
+/// [`cached_upgrade_rules`] and [`fetch_upgrade_rules`]. A component a nested call only reads is absent: nothing in
+/// the diff names it. A component the transaction creates has no down entry and is skipped.
 pub fn resolve_upgradable_components(
     cache: &UpgradeRuleCache,
     called: &[ComponentAddress],
+    known: &HashMap<ComponentAddress, UpdateRule>,
     diff: Option<&SubstateDiff>,
 ) -> Vec<UpgradableComponent> {
     let written = diff.map(written_components).unwrap_or_default();
@@ -188,9 +202,8 @@ pub fn resolve_upgradable_components(
         if !seen.insert(*address) {
             continue;
         }
-        let rule = written_by_address.get(address).cloned().or_else(|| cache.get(address));
-        if let Some(rule) = rule {
-            rules.push((*address, rule));
+        if let Some(rule) = written_by_address.get(address).or_else(|| known.get(address)) {
+            rules.push((*address, rule.clone()));
         }
     }
     for (address, _) in &written {
@@ -386,12 +399,26 @@ mod tests {
 
     #[test]
     fn only_components_the_cache_does_not_hold_are_fetched() {
-        let cache = cache_with(&[(address(1), owned_component(UpdateRule::Locked))]);
+        let cache = cache_with(&[(address(1), owned_component(UpdateRule::Owner))]);
 
-        assert_eq!(
-            uncached_components(&cache, &[address(2), address(1), address(3), address(2)]),
-            [address(2), address(3)]
-        );
+        let (known, uncached) = cached_upgrade_rules(&cache, &[address(2), address(1), address(3), address(2)]);
+
+        assert_eq!(uncached, [address(2), address(3)]);
+        assert_eq!(known.keys().copied().collect::<Vec<_>>(), [address(1)]);
+        assert!(matches!(known[&address(1)], UpdateRule::Owner));
+    }
+
+    #[test]
+    fn resolution_uses_the_known_rules_when_the_cache_is_empty() {
+        // The cache holds nothing, as after it evicts entries a fetch has just inserted.
+        let cache = UpgradeRuleCache::new(1);
+        let known = HashMap::from([(address(1), UpdateRule::Owner)]);
+
+        let upgradable = resolve_upgradable_components(&cache, &[address(1)], &known, None);
+
+        assert_eq!(upgradable.iter().map(|c| c.component_address).collect::<Vec<_>>(), [
+            address(1)
+        ]);
     }
 
     #[test]
@@ -414,6 +441,8 @@ mod tests {
                 component_with_owner(UpdateRule::Owner, SubstateOwnerRule::None),
             ),
         ]);
+        let called = [read_only, written, read_only, missing, deny_all, ownerless];
+        let (known, _) = cached_upgrade_rules(&cache, &called);
 
         let tombstone =
             SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::new(ObjectKey::from_array([9; 32])));
@@ -435,11 +464,7 @@ mod tests {
         );
         diff.up(SubstateId::Component(created), component_substate(0, UpdateRule::Owner));
 
-        let upgradable = resolve_upgradable_components(
-            &cache,
-            &[read_only, written, read_only, missing, deny_all, ownerless],
-            Some(&diff),
-        );
+        let upgradable = resolve_upgradable_components(&cache, &called, &known, Some(&diff));
 
         let addresses = upgradable.iter().map(|c| c.component_address).collect::<Vec<_>>();
         assert_eq!(addresses, [read_only, written, nested]);

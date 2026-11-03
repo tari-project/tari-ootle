@@ -67,10 +67,10 @@ use crate::{
     handlers::{
         component_upgrades::{
             authorize_component_upgrades,
+            cached_upgrade_rules,
             component_upgrades,
             fetch_upgrade_rules,
             resolve_upgradable_components,
-            uncached_components,
         },
         helpers::{
             OrJrpcNotFound,
@@ -536,18 +536,18 @@ async fn submit_dry_run_inner(
         transaction.calculate_id()
     );
     let upgrade_rules = context.upgrade_rules();
-    let uncached = uncached_components(upgrade_rules, &called_components);
+    let (mut known, uncached) = cached_upgrade_rules(upgrade_rules, &called_components);
     // Addresses are known before execution, so the fetch runs alongside the dry run. A dry-run failure is
     // reported before a fetch failure.
     let fetch = fetch_upgrade_rules(sdk, upgrade_rules, &uncached);
     let dry_run = context.transaction_service().submit_dry_run_transaction(transaction);
     let (exec_result, fetched) = tokio::join!(dry_run, fetch);
     let exec_result = exec_result.map_err(map_transaction_submission_error)?;
-    fetched?;
+    known.extend(fetched?);
 
     let required_fees = exec_result.finalize.required_fees();
     let upgradable_components =
-        resolve_upgradable_components(upgrade_rules, &called_components, exec_result.finalize.accept());
+        resolve_upgradable_components(upgrade_rules, &called_components, &known, exec_result.finalize.accept());
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         required_fees,
@@ -571,13 +571,19 @@ pub async fn handle_submit_manifest(
     if !req.dry_run {
         context.enforce_max_fee_limit(req.max_fee)?;
     }
+    let instructions = parse_manifest_request(&req)?;
+    if !req.dry_run {
+        authorize_component_upgrades(
+            context,
+            token,
+            &component_upgrades(&instructions.fee_instructions, &instructions.instructions),
+        )?;
+    }
     let default_account = sdk
         .accounts_api()
         .get_default()
         .optional()?
         .ok_or_else(|| invalid_request("No default account found".to_string()))?;
-
-    let instructions = parse_manifest_request(&req)?;
 
     let default_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
         invalid_params(
@@ -644,8 +650,6 @@ pub async fn handle_submit_manifest(
     if req.dry_run {
         return submit_manifest_dry_run(context, sign(unsigned)?, component_upgrades).await;
     }
-    authorize_component_upgrades(context, token, &component_upgrades)?;
-
     let transaction = declare_written_inputs_only(context, unsigned, sign).await?;
 
     // Link the fee payer and the seal signer's account (when it maps to one of the wallet's
@@ -672,7 +676,7 @@ async fn submit_manifest_dry_run(
 ) -> Result<TransactionSubmitManifestResponse, anyhow::Error> {
     let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
     let upgrade_rules = context.upgrade_rules();
-    let uncached = uncached_components(upgrade_rules, &called_components);
+    let (mut known, uncached) = cached_upgrade_rules(upgrade_rules, &called_components);
     // Addresses are known before execution, so the fetch runs alongside the dry run. A dry-run failure is
     // reported before a fetch failure, and a rejected execution does not depend on the fetch.
     let fetch = fetch_upgrade_rules(context.wallet_sdk(), upgrade_rules, &uncached);
@@ -688,10 +692,10 @@ async fn submit_manifest_dry_run(
         )
         .into());
     }
-    fetched?;
+    known.extend(fetched?);
     let required_fees = exec_result.finalize.required_fees();
     let upgradable_components =
-        resolve_upgradable_components(upgrade_rules, &called_components, exec_result.finalize.accept());
+        resolve_upgradable_components(upgrade_rules, &called_components, &known, exec_result.finalize.accept());
     Ok(TransactionSubmitManifestResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         required_fees: Some(required_fees),

@@ -146,11 +146,9 @@ fn outputs_locked_and_finalized() {
     }
 }
 
-#[tokio::test]
-async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked_lock_until_submission() {
+/// Gives the test account a confidential-resource vault holding 1,000 revealed units, and returns the resource.
+fn add_revealed_confidential_vault(test: &Test) -> tari_template_lib::types::ResourceAddress {
     use tari_engine_types::resource::Resource;
-    use tari_ootle_common_types::optional::IsNotFoundError;
-    use tari_ootle_wallet_sdk::apis::confidential_transfer::{ConfidentialTransferParams, UtxoInputSelection};
     use tari_template_lib::types::{
         Amount,
         Metadata,
@@ -162,17 +160,7 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
         constants::TOKEN_SYMBOL,
     };
 
-    let test = Test::new();
     let sdk = test.sdk();
-    // A wallet account whose component derives from its key, so the transfer resolves it without the network. The
-    // harness's test account holds account key index 0.
-    let destination_keys = sdk.key_manager_api().derive_account_address(1).unwrap();
-    let destination = sdk
-        .accounts_api()
-        .create_account(Some("destination"), false, destination_keys)
-        .unwrap();
-    let destination_address = destination.address().clone();
-
     let conf_resource: ResourceAddress = "resource_0000000000000000000000000000000000000000000000000000000000000c0f"
         .parse()
         .unwrap();
@@ -229,6 +217,26 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
             [SubstateId::Resource(conf_resource)],
         )
         .unwrap();
+    conf_resource
+}
+
+#[tokio::test]
+async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked_lock_until_submission() {
+    use tari_ootle_common_types::optional::IsNotFoundError;
+    use tari_ootle_wallet_sdk::apis::confidential_transfer::{ConfidentialTransferParams, UtxoInputSelection};
+    use tari_template_lib::types::Amount;
+
+    let test = Test::new();
+    let sdk = test.sdk();
+    // A wallet account whose component derives from its key, so the transfer resolves it without the network. The
+    // harness's test account holds account key index 0.
+    let destination_keys = sdk.key_manager_api().derive_account_address(1).unwrap();
+    let destination = sdk
+        .accounts_api()
+        .create_account(Some("destination"), false, destination_keys)
+        .unwrap();
+    let destination_address = destination.address().clone();
+    let conf_resource = add_revealed_confidential_vault(&test);
 
     let params = |is_dry_run| ConfidentialTransferParams {
         from_account: Test::test_account_address(),

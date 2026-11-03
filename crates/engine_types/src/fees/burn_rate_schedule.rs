@@ -67,7 +67,7 @@ impl ExhaustBurnRateSchedule {
     const fn activations(network: Network) -> &'static [(Epoch, ExhaustBurnRate)] {
         // Named consts rather than inline arrays: `ExhaustBurnRate::new` asserts, so an array built
         // inline is a temporary rather than a promoted `'static`.
-        const MAINNET: &[(Epoch, ExhaustBurnRate)] = &[(Epoch(0), ExhaustBurnRate::new(500))];
+        const MAINNET: &[(Epoch, ExhaustBurnRate)] = &[(Epoch(0), ExhaustBurnRate::new(10_000))];
         const STAGENET: &[(Epoch, ExhaustBurnRate)] = &[(Epoch(0), ExhaustBurnRate::new(500))];
         const NEXTNET: &[(Epoch, ExhaustBurnRate)] = &[(Epoch(0), ExhaustBurnRate::new(500))];
         const IGOR: &[(Epoch, ExhaustBurnRate)] = &[(Epoch(0), ExhaustBurnRate::new(500))];
@@ -161,6 +161,14 @@ mod tests {
                 prev = *at;
             }
         }
+    }
+
+    #[test]
+    fn mainnet_genesis_burns_every_fee() {
+        assert_eq!(
+            ExhaustBurnRateSchedule::genesis(Network::MainNet).as_bps(),
+            MAX_EXHAUST_BURN_RATE_BPS
+        );
     }
 
     #[test]

@@ -347,7 +347,7 @@ Fees flow onward as two separate quantities: leaders are paid `pre_burn_fees_pai
 
 ## The exhaust burn
 
-`exhaust_burn_rate` is a consensus constant — 500 bps (5%) on mainnet — and every validator must
+`exhaust_burn_rate` is a consensus constant — 10 000 bps (100%) at mainnet genesis, 500 bps (5%) on the testnets — and every validator must
 use the same value or nodes diverge on block headers. It is an `ExhaustBurnRate`, which cannot hold a
 rate above `MAX_EXHAUST_BURN_RATE_BPS` (10 000 bps): the whole of what was paid.
 

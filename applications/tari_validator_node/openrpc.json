@@ -866,16 +866,14 @@
                   },
                   {
                     "arguments": [
-                      "U32",
                       "ResourceAddress"
                     ],
-                    "receiver": null,
+                    "receiver": "Ref",
                     "name": "balance",
                     "output": "Amount"
                   },
                   {
                     "arguments": [
-                      "U32",
                       "ResourceAddress",
                       "Amount"
                     ],
@@ -885,7 +883,6 @@
                   },
                   {
                     "arguments": [
-                      "U32",
                       "Bucket"
                     ],
                     "receiver": "RefMut",
@@ -894,10 +891,9 @@
                   },
                   {
                     "arguments": [
-                      "U32",
                       "ResourceAddress"
                     ],
-                    "receiver": null,
+                    "receiver": "Ref",
                     "name": "get_non_fungible_ids",
                     "output": "Vec"
                   }

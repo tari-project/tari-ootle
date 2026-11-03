@@ -92,8 +92,9 @@ mod render {
         /// Renders the message the template would have carried, drawing the function name and the
         /// argument type from `func_def`.
         ///
-        /// `None` when the diagnostic does not describe `func_def` — an index past its arguments —
-        /// which means the marker did not come from this function's dispatcher.
+        /// `None` when the diagnostic does not describe `func_def`, which means the marker did not
+        /// come from this function's dispatcher: an index past its parameters, or index 0 on a
+        /// method, whose receiver the dispatcher reports as `ComponentDecode`.
         pub fn render(&self, func_def: &FunctionDef, detail: &str) -> Option<String> {
             let name = &func_def.name;
             match *self {

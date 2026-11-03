@@ -18,8 +18,8 @@ use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::TemplateAddress;
 use tari_template_test_tooling::{Package, TemplateTest};
 
-/// Bor-encoded `TemplateDef::V1(TemplateDefV1 { template_name: "Buggy", abi_version: 0, functions:
-/// [FunctionDef { name: "main", arguments: [], output: Type::Unit, is_mut: false, is_migration:
+/// Bor-encoded `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy", abi_version: 0, functions:
+/// [FunctionDefV1 { name: "main", arguments: [], output: Type::Unit, is_mut: false, is_migration:
 /// false }] })`, behind the 4-byte little-endian length prefix `encode_for_wasm_embedding` adds.
 /// Shared with `tests/templates/buggy`, which embeds the same blob.
 const TEMPLATE_DEF: &[u8] = &[

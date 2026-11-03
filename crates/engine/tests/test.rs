@@ -197,13 +197,14 @@ fn test_composed() {
 fn test_buggy_template() {
     // Uncomment the following lines to print the template definition bytes embedded in the
     // `tari_tdef` custom section
-    // let bytes = tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    // let encoded = tari_bor::encode(&tari_template_abi::VersionedTemplateDef::V1(tari_template_abi::TemplateDefV1 {
     //     template_name: "Buggy".to_string(),
     //     abi_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
     //     functions: vec![],
-    // })
-    // .encode_for_wasm_embedding()
+    // }))
     // .unwrap();
+    // let mut bytes = ((encoded.len() + 4) as u32).to_le_bytes().to_vec();
+    // bytes.extend(encoded);
     // println!("static _TARI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
     // for chunk in bytes.chunks(16) {
     //     print!("    ");

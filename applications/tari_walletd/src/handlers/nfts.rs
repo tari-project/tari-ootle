@@ -308,8 +308,18 @@ pub async fn handle_transfer(
     inputs.insert(SubstateRequirement::unversioned(src_vault.resource_address));
 
     let nfts = req.nfts;
+    if nfts.is_empty() {
+        return Err(invalid_params("nfts", Some("At least one NFT must be specified")));
+    }
+    let mut seen_nfts = HashSet::with_capacity(nfts.len());
     // Validate every NFT exists on the source wallet before emitting any instructions.
     for nft_id in &nfts {
+        if !seen_nfts.insert(nft_id) {
+            return Err(invalid_params(
+                "nfts",
+                Some(format!("Duplicate NFT ID {} in transfer request", nft_id)),
+            ));
+        }
         let nft = non_fungible_api
             .get(req.resource_address, nft_id.clone())
             .optional()

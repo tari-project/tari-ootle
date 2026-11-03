@@ -1,6 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
@@ -13,7 +16,7 @@ use tari_ootle_common_types::{
     Epoch,
     InputDeclaration,
     SubstateRequirement,
-    engine_types::substate::SubstateId,
+    engine_types::substate::{Substate, SubstateDiff, SubstateId},
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
@@ -56,7 +59,10 @@ use tari_ootle_walletd_client::{
         UpgradableComponent,
     },
 };
-use tari_template_lib_types::{ComponentAddress, access_rules::UpdateRule};
+use tari_template_lib_types::{
+    ComponentAddress,
+    access_rules::{AccessRule, UpdateRule},
+};
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 use tokio::time;
 
@@ -492,14 +498,17 @@ async fn submit_dry_run_inner(
         "Submitted dry-run transaction {}",
         transaction.calculate_id()
     );
-    let exec_result = context
-        .transaction_service()
-        .submit_dry_run_transaction(transaction)
-        .await
-        .map_err(map_transaction_submission_error)?;
+    // Addresses are known before execution, so the fetch runs alongside the dry run. A dry-run failure is
+    // reported before a fetch failure.
+    let fetch = fetch_called_component_substates(sdk, &called_components);
+    let dry_run = context.transaction_service().submit_dry_run_transaction(transaction);
+    let (exec_result, fetched) = tokio::join!(dry_run, fetch);
+    let exec_result = exec_result.map_err(map_transaction_submission_error)?;
+    let fetched = fetched?;
 
     let required_fees = exec_result.finalize.required_fees();
-    let upgradable_components = fetch_upgradable_components(sdk, called_components).await?;
+    let upgradable_components =
+        resolve_upgradable_components(&called_components, &fetched, exec_result.finalize.accept());
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         required_fees,
@@ -508,32 +517,113 @@ async fn submit_dry_run_inner(
     })
 }
 
-/// Looks up the components in `addresses` on the network and returns those whose template can be changed after
-/// creation, so a signer can be warned that the code they approve may not be the code that runs.
-async fn fetch_upgradable_components(
+/// Fetches the latest substate of each directly called component. Missing ids are absent from the map.
+///
+/// The caller uses this only for components the dry run did not write. Duplicates are requested once, in the
+/// order the instructions name them.
+async fn fetch_called_component_substates(
     sdk: &WalletSdk,
-    addresses: Vec<ComponentAddress>,
-) -> Result<Vec<UpgradableComponent>, anyhow::Error> {
-    let addresses = addresses.into_iter().collect::<IndexSet<_>>();
-    let ids = addresses.iter().copied().map(SubstateId::Component).collect::<Vec<_>>();
-    let substates = sdk.substate_api().get_substates_from_network(&ids).await?;
-    let rules = addresses.into_iter().zip(ids).filter_map(|(address, id)| {
-        let component = substates.get(&id)?.substate_value().component()?;
-        Some((address, component.upgrade_rule().clone()))
-    });
-    Ok(filter_upgradable(rules))
+    addresses: &[ComponentAddress],
+) -> Result<HashMap<SubstateId, Substate>, anyhow::Error> {
+    let ids = component_substate_ids(addresses);
+    Ok(sdk.substate_api().get_substates_from_network(&ids).await?)
 }
 
-/// Keeps every component whose upgrade rule is not [`UpdateRule::Locked`], in the given order.
+fn component_substate_ids(addresses: &[ComponentAddress]) -> Vec<SubstateId> {
+    addresses
+        .iter()
+        .copied()
+        .collect::<IndexSet<_>>()
+        .into_iter()
+        .map(SubstateId::Component)
+        .collect()
+}
+
+/// Components whose template can still be swapped, direct calls first and then nested writes.
+fn resolve_upgradable_components(
+    called: &[ComponentAddress],
+    fetched: &HashMap<SubstateId, Substate>,
+    diff: Option<&SubstateDiff>,
+) -> Vec<UpgradableComponent> {
+    filter_upgradable(collect_upgrade_rules(called, fetched, diff))
+}
+
+/// Direct calls in instruction order, then components the dry run wrote that the instructions did not name.
+///
+/// A component the run wrote takes its rule from the accept diff: the up'd header already carries
+/// `upgrade_rule`, which is fixed at creation. A directly called component that was only read takes its rule
+/// from `fetched`. A component the transaction creates has no down entry and is skipped.
+fn collect_upgrade_rules(
+    called: &[ComponentAddress],
+    fetched: &HashMap<SubstateId, Substate>,
+    diff: Option<&SubstateDiff>,
+) -> Vec<(ComponentAddress, UpdateRule)> {
+    let written = diff.map(written_component_upgrade_rules).unwrap_or_default();
+    let written_by_address = written.iter().cloned().collect::<HashMap<_, _>>();
+
+    let mut rules = Vec::new();
+    let mut seen = IndexSet::new();
+    for address in called {
+        if !seen.insert(*address) {
+            continue;
+        }
+        let rule = written_by_address
+            .get(address)
+            .cloned()
+            .or_else(|| fetched_upgrade_rule(fetched, *address));
+        if let Some(rule) = rule {
+            rules.push((*address, rule));
+        }
+    }
+    for (address, rule) in written {
+        if seen.insert(address) {
+            rules.push((address, rule));
+        }
+    }
+    rules
+}
+
+/// Upgrade rules of components the dry run replaced, in diff order.
+///
+/// A create is an up with no down: the component does not exist until the transaction is accepted, so nothing
+/// can swap its template before this submission.
+fn written_component_upgrade_rules(diff: &SubstateDiff) -> Vec<(ComponentAddress, UpdateRule)> {
+    let written = diff.down_iter().map(|(id, _)| id).collect::<HashSet<_>>();
+    diff.up_iter()
+        .filter(|(id, _)| written.contains(id))
+        .filter_map(|(id, substate)| {
+            let address = id.as_component_address()?;
+            let rule = substate.substate_value().component()?.upgrade_rule().clone();
+            Some((address, rule))
+        })
+        .collect()
+}
+
+fn fetched_upgrade_rule(fetched: &HashMap<SubstateId, Substate>, address: ComponentAddress) -> Option<UpdateRule> {
+    fetched
+        .get(&SubstateId::Component(address))?
+        .substate_value()
+        .component()
+        .map(|component| component.upgrade_rule().clone())
+}
+
+/// Keeps every component whose template can still be swapped, in the given order.
+///
+/// [`UpdateRule::Locked`] and [`AccessRule::DenyAll`] can never pass `check_component_upgrade_rule`, and the
+/// upgrade rule does not grant the owner a bypass.
 fn filter_upgradable<I: IntoIterator<Item = (ComponentAddress, UpdateRule)>>(rules: I) -> Vec<UpgradableComponent> {
     rules
         .into_iter()
-        .filter(|(_, rule)| !matches!(rule, UpdateRule::Locked))
+        .filter(|(_, rule)| is_upgradable(rule))
         .map(|(component_address, upgrade_rule)| UpgradableComponent {
             component_address,
             upgrade_rule,
         })
         .collect()
+}
+
+fn is_upgradable(rule: &UpdateRule) -> bool {
+    !matches!(rule, UpdateRule::Locked | UpdateRule::AccessRule(AccessRule::DenyAll))
 }
 
 pub async fn handle_submit_manifest(
@@ -622,10 +712,12 @@ pub async fn handle_submit_manifest(
     if req.dry_run {
         let transaction = sign(unsigned)?;
         let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
-        let exec_result = context
-            .transaction_service()
-            .submit_dry_run_transaction(transaction)
-            .await?;
+        // Addresses are known before execution, so the fetch runs alongside the dry run. A dry-run failure is
+        // reported before a fetch failure, and a rejected execution does not depend on the fetch.
+        let fetch = fetch_called_component_substates(sdk, &called_components);
+        let dry_run = context.transaction_service().submit_dry_run_transaction(transaction);
+        let (exec_result, fetched) = tokio::join!(dry_run, fetch);
+        let exec_result = exec_result?;
 
         if let Some(reject) = exec_result.finalize.any_reject() {
             return Err(JsonRpcError::new(
@@ -635,8 +727,10 @@ pub async fn handle_submit_manifest(
             )
             .into());
         }
+        let fetched = fetched?;
         let required_fees = exec_result.finalize.required_fees();
-        let upgradable_components = fetch_upgradable_components(sdk, called_components).await?;
+        let upgradable_components =
+            resolve_upgradable_components(&called_components, &fetched, exec_result.finalize.accept());
         return Ok(TransactionSubmitManifestResponse {
             transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
             required_fees: Some(required_fees),
@@ -994,24 +1088,141 @@ mod tests {
     use crate::handlers::test_support::TestDaemon;
 
     #[test]
-    fn filter_upgradable_drops_locked_components_and_keeps_order() {
+    fn filter_upgradable_drops_rules_that_can_never_upgrade_and_keeps_order() {
+        use tari_template_lib_types::access_rules::{RequireRule, RestrictedAccessRule, RuleRequirement};
+
         let owner = ComponentAddress::from_array([1; 32]);
         let locked = ComponentAddress::from_array([2; 32]);
-        let rule = ComponentAddress::from_array([3; 32]);
+        let allow_all = ComponentAddress::from_array([3; 32]);
+        let deny_all = ComponentAddress::from_array([4; 32]);
+        let restricted = ComponentAddress::from_array([5; 32]);
 
         let upgradable = filter_upgradable([
             (owner, UpdateRule::Owner),
             (locked, UpdateRule::Locked),
+            (allow_all, UpdateRule::AccessRule(AccessRule::AllowAll)),
+            (deny_all, UpdateRule::AccessRule(AccessRule::DenyAll)),
             (
-                rule,
-                UpdateRule::AccessRule(tari_template_lib_types::AccessRule::AllowAll),
+                restricted,
+                UpdateRule::AccessRule(AccessRule::Restricted(RestrictedAccessRule::Require(
+                    RequireRule::Require(RuleRequirement::CallerComponent(owner)),
+                ))),
             ),
         ]);
 
         let addresses = upgradable.iter().map(|c| c.component_address).collect::<Vec<_>>();
-        assert_eq!(addresses, [owner, rule]);
+        assert_eq!(addresses, [owner, allow_all, restricted]);
         assert!(matches!(upgradable[0].upgrade_rule, UpdateRule::Owner));
-        assert!(matches!(upgradable[1].upgrade_rule, UpdateRule::AccessRule(_)));
+        assert!(matches!(
+            upgradable[1].upgrade_rule,
+            UpdateRule::AccessRule(AccessRule::AllowAll)
+        ));
+        assert!(matches!(
+            upgradable[2].upgrade_rule,
+            UpdateRule::AccessRule(AccessRule::Restricted(_))
+        ));
+    }
+
+    #[test]
+    fn component_substate_ids_drop_duplicates_and_keep_order() {
+        let first = ComponentAddress::from_array([1; 32]);
+        let second = ComponentAddress::from_array([2; 32]);
+
+        assert_eq!(component_substate_ids(&[first, second, first]), vec![
+            SubstateId::Component(first),
+            SubstateId::Component(second)
+        ]);
+    }
+
+    #[test]
+    fn nested_writes_come_from_the_diff_and_read_only_calls_come_from_the_fetch() {
+        use tari_ootle_common_types::engine_types::{confidential::ClaimedOutputTombstone, substate::SubstateValue};
+        use tari_template_lib_types::{ClaimedOutputTombstoneAddress, ObjectKey};
+
+        let read_only = ComponentAddress::from_array([1; 32]);
+        let written = ComponentAddress::from_array([2; 32]);
+        let missing = ComponentAddress::from_array([3; 32]);
+        let deny_all = ComponentAddress::from_array([4; 32]);
+        let not_component = ComponentAddress::from_array([5; 32]);
+        let nested = ComponentAddress::from_array([6; 32]);
+        let created = ComponentAddress::from_array([7; 32]);
+
+        let mut fetched = HashMap::new();
+        fetched.insert(
+            SubstateId::Component(read_only),
+            component_substate(4, UpdateRule::Owner),
+        );
+        // Present, and wrong: a component the run wrote is taken from the diff, not this copy.
+        fetched.insert(
+            SubstateId::Component(written),
+            component_substate(1, UpdateRule::Locked),
+        );
+        fetched.insert(
+            SubstateId::Component(deny_all),
+            component_substate(1, UpdateRule::AccessRule(AccessRule::DenyAll)),
+        );
+        fetched.insert(
+            SubstateId::Component(not_component),
+            Substate::new(
+                SubstateVersion::new(1),
+                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
+            ),
+        );
+
+        let tombstone =
+            SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::new(ObjectKey::from_array([9; 32])));
+        let mut diff = SubstateDiff::new();
+        diff.down(SubstateId::Component(written), SubstateVersion::ZERO);
+        diff.up(SubstateId::Component(written), component_substate(1, UpdateRule::Owner));
+        diff.down(tombstone.clone(), SubstateVersion::ZERO);
+        diff.up(
+            tombstone,
+            Substate::new(
+                SubstateVersion::new(1),
+                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
+            ),
+        );
+        diff.down(SubstateId::Component(nested), SubstateVersion::new(1));
+        diff.up(
+            SubstateId::Component(nested),
+            component_substate(2, UpdateRule::AccessRule(AccessRule::AllowAll)),
+        );
+        diff.up(SubstateId::Component(created), component_substate(0, UpdateRule::Owner));
+
+        let upgradable = resolve_upgradable_components(
+            &[read_only, written, read_only, missing, deny_all, not_component],
+            &fetched,
+            Some(&diff),
+        );
+
+        let addresses = upgradable.iter().map(|c| c.component_address).collect::<Vec<_>>();
+        assert_eq!(addresses, [read_only, written, nested]);
+        assert!(matches!(upgradable[0].upgrade_rule, UpdateRule::Owner));
+        assert!(matches!(upgradable[1].upgrade_rule, UpdateRule::Owner));
+        assert!(matches!(
+            upgradable[2].upgrade_rule,
+            UpdateRule::AccessRule(AccessRule::AllowAll)
+        ));
+    }
+
+    fn component_substate(version: u64, rule: UpdateRule) -> Substate {
+        use tari_engine_types::component::{Component, ComponentBody, ComponentHeader};
+        use tari_ootle_common_types::engine_types::substate::SubstateValue;
+        use tari_template_lib_types::{EntityId, SubstateOwnerRule, access_rules::ComponentAccessRules};
+
+        Substate::new(
+            SubstateVersion::new(version),
+            SubstateValue::Component(Component {
+                header: ComponentHeader {
+                    template_address: Default::default(),
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: ComponentAccessRules::new(),
+                    entity_id: EntityId::default(),
+                    upgrade_rule: rule,
+                },
+                body: ComponentBody::empty(),
+            }),
+        )
     }
 
     #[tokio::test]

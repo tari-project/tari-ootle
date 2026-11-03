@@ -492,17 +492,25 @@ pub struct TransactionSubmitDryRunResponse {
     /// subtracted since it won't recur with a tighter max_fee.
     pub required_fees: u64,
     pub result: ExecuteResult,
-    /// Components the transaction calls directly whose code can be changed after creation. See
-    /// [`UpgradableComponent`].
+    /// Components whose template can be changed after creation, so the code that runs on submission may differ from
+    /// the dry run. See [`UpgradableComponent`].
     #[serde(default)]
     pub upgradable_components: Vec<UpgradableComponent>,
 }
 
-/// A component called by a transaction whose template can be swapped by whoever satisfies `upgrade_rule`, so the
-/// code that runs when the transaction is submitted may differ from the code that ran in the dry run.
+/// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
+/// transaction is submitted may differ from the code that ran in the dry run.
 ///
-/// Components with a [`UpdateRule::Locked`] rule are never listed, but that alone does not make a component
-/// trustworthy.
+/// The list is every component the transaction calls directly, plus every component a nested call wrote a new
+/// version of. A write's up'd header, `upgrade_rule` included, is already in the dry run's accept diff, so nested
+/// writes are not fetched. A directly called component the run only read is fetched, because its header is not in
+/// the diff. A component a nested call only reads is absent: nothing in the diff names it. A component the
+/// transaction creates is absent too: it does not exist until the transaction is accepted, so nothing can swap
+/// its template beforehand.
+///
+/// [`UpdateRule::Locked`] and `AccessRule::DenyAll` are never listed. `check_component_upgrade_rule` rejects both,
+/// and an upgrade rule does not grant the component owner a bypass. An empty list does not mean every component
+/// the transaction reaches is locked.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct UpgradableComponent {
@@ -540,8 +548,8 @@ pub struct TransactionSubmitManifestResponse {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub required_fees: Option<u64>,
     pub result: Option<ExecuteResult>,
-    /// Components the transaction calls directly whose code can be changed after creation. Only populated for dry
-    /// runs. See [`UpgradableComponent`].
+    /// Components whose template can be changed after creation, so the code that runs on submission may differ from
+    /// the dry run. Only populated for dry runs. See [`UpgradableComponent`].
     #[serde(default)]
     pub upgradable_components: Vec<UpgradableComponent>,
 }

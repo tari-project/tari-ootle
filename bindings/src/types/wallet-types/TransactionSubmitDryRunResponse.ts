@@ -15,8 +15,8 @@ export type TransactionSubmitDryRunResponse = {
   required_fees: bigint;
   result: ExecuteResult;
   /**
-   * Components the transaction calls directly whose code can be changed after creation. See
-   * [`UpgradableComponent`].
+   * Components whose template can be changed after creation, so the code that runs on submission may differ from
+   * the dry run. See [`UpgradableComponent`].
    */
   upgradable_components: Array<UpgradableComponent>;
 };

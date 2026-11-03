@@ -13,8 +13,8 @@ export type TransactionSubmitManifestResponse = {
   required_fees: number | null;
   result: ExecuteResult | null;
   /**
-   * Components the transaction calls directly whose code can be changed after creation. Only populated for dry
-   * runs. See [`UpgradableComponent`].
+   * Components whose template can be changed after creation, so the code that runs on submission may differ from
+   * the dry run. Only populated for dry runs. See [`UpgradableComponent`].
    */
   upgradable_components: Array<UpgradableComponent>;
 };

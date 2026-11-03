@@ -32,7 +32,7 @@ explained in full. Use your browser's find to jump to a term.
 | **Epoch** | A fixed number of base-layer blocks. Ootle's membership and timing rotate on epoch boundaries. | <a href={basePath("/concepts/architecture/")}>Architecture</a> |
 | **Epoch checkpoint** | A committee's end-of-epoch commit proof plus state roots for its shard group and the global shard. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **Epoch oracle** | The seam that reads base-layer validator registrations and epoch length, turning them into Ootle committee membership. | <a href={basePath("/concepts/architecture/")}>Architecture</a> |
-| **Exhaust burn rate** | `exhaust_burn_rate` — the per-network share of each fee that is burned: 500 bps (5%) on every network in this repository. | <a href={basePath("/concepts/tokenomics/")}>Tokenomics</a> |
+| **Exhaust burn rate** | `exhaust_burn_rate` — the per-network share of each fee that is burned: 10 000 bps (100%) at mainnet genesis, 500 bps (5%) on every other network. | <a href={basePath("/concepts/tokenomics/")}>Tokenomics</a> |
 | **Finality** | Irreversibility. On Ootle a block is final when its chain reaches the three-chain rule inside its committee — not on the base layer. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
 | **Global shard** | Shard 0, reserved for global substates such as published templates. All other shards are numbered 1–256. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **HotStuff** | The chained, leader-based BFT protocol Ootle runs per shard group. (The name "Cerberus" from older design docs does not appear in the code.) | <a href={basePath("/concepts/consensus/")}>Consensus</a> |

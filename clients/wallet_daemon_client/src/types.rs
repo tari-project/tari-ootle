@@ -96,6 +96,7 @@ use tari_template_lib_types::{
     UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
+    access_rules::UpdateRule,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendAuthorization, StealthTransferStatement},
@@ -491,6 +492,24 @@ pub struct TransactionSubmitDryRunResponse {
     /// subtracted since it won't recur with a tighter max_fee.
     pub required_fees: u64,
     pub result: ExecuteResult,
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponent>,
+}
+
+/// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
+/// transaction is submitted may differ from the code that ran in the dry run.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct UpgradableComponent {
+    pub component_address: ComponentAddress,
+    pub upgrade_rule: UpdateRule,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -523,6 +542,15 @@ pub struct TransactionSubmitManifestResponse {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub required_fees: Option<u64>,
     pub result: Option<ExecuteResult>,
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. Only populated for dry runs. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponent>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

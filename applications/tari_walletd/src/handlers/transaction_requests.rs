@@ -58,6 +58,7 @@ use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, 
 
 use super::context::HandlerContext;
 use crate::handlers::{
+    component_upgrades::component_upgrades,
     helpers::{ensure_transaction_signers, invalid_params, invalid_request},
     transaction::submit_inner_for_request,
 };
@@ -442,6 +443,10 @@ fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<T
 
     let main_signer = resolve_main_signer(context, &model.unsigned_transaction, &model.other_signers)?;
     let external_signers = model.signatures.iter().map(|sig| *sig.public_key()).collect();
+    let component_upgrades = component_upgrades(
+        model.unsigned_transaction.fee_instructions(),
+        model.unsigned_transaction.instructions(),
+    );
 
     Ok(TransactionRequestInfo {
         request_id: model.id,
@@ -452,6 +457,7 @@ fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<T
         status,
         transaction_id: model.transaction_id,
         value_summaries,
+        component_upgrades,
         main_signer,
         external_signers,
         expires_at: model.expires_at.assume_utc().unix_timestamp(),

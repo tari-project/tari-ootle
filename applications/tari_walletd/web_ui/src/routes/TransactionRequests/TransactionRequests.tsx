@@ -8,6 +8,7 @@ import {
   useSubmitTransactionRequest,
 } from "@api/hooks/useTransactionRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
+import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
 import { StyledPaper } from "@components/StyledComponents";
@@ -160,6 +161,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
         </Stack>
       </Stack>
 
+      <ComponentUpgradeWarning upgrades={request.component_upgrades} />
       <ValueSummaries request={request} />
 
       <Grid container spacing={2} sx={{ mb: 1 }}>

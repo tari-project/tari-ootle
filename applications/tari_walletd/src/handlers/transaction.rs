@@ -1,9 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::{collections::HashSet, time::Duration};
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
@@ -16,7 +13,6 @@ use tari_ootle_common_types::{
     Epoch,
     InputDeclaration,
     SubstateRequirement,
-    engine_types::substate::{Substate, SubstateDiff, SubstateId},
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
@@ -40,6 +36,7 @@ use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
         CallInstructionRequest,
+        ComponentUpgrade,
         PublishTemplateRequest,
         PublishTemplateResponse,
         TransactionDetectInputsRequest,
@@ -58,13 +55,9 @@ use tari_ootle_walletd_client::{
         TransactionSubmitResponse,
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
-        UpgradableComponent,
     },
 };
-use tari_template_lib_types::{
-    ComponentAddress,
-    access_rules::{AccessRule, UpdateRule},
-};
+use tari_template_lib_types::ComponentAddress;
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 use tokio::time;
 
@@ -72,6 +65,13 @@ use super::context::HandlerContext;
 use crate::{
     WalletSdk,
     handlers::{
+        component_upgrades::{
+            authorize_component_upgrades,
+            cached_upgrade_rules,
+            component_upgrades,
+            fetch_upgrade_rules,
+            resolve_upgradable_components,
+        },
         helpers::{
             OrJrpcNotFound,
             ensure_signing_key,
@@ -99,6 +99,7 @@ pub async fn handle_submit_instruction(
     // fee account is only the fee payer, not a scope boundary. Require the
     // broad `transactions:create` grant.
     context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
+    authorize_component_upgrades(context, token, &component_upgrades(&[], &req.instructions))?;
     context.enforce_max_fee_limit(req.max_fee)?;
     let sdk = context.wallet_sdk();
 
@@ -144,6 +145,11 @@ pub async fn handle_submit(
     // hold a narrower capability (transfer family, publish_template) call
     // `submit_inner` directly with their own scoped check upstream.
     let auth = context.authorize_with_identity(token, &[Permission::Transactions(Crud::Create)])?;
+    authorize_component_upgrades(
+        context,
+        token,
+        &component_upgrades(req.transaction.fee_instructions(), req.transaction.instructions()),
+    )?;
     // `submit_inner` signs with the stealth spend keys of the named locks' outputs and links the locks to this
     // transaction, so the caller may name only free locks it created.
     context
@@ -520,6 +526,7 @@ async fn submit_dry_run_inner(
     }
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
     let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
+    let component_upgrades = component_upgrades(transaction.fee_instructions(), transaction.instructions());
 
     // A dry run never finalizes, so it must not link the locks: a lock tied to a
     // transaction that never resolves would never be released.
@@ -528,134 +535,26 @@ async fn submit_dry_run_inner(
         "Submitted dry-run transaction {}",
         transaction.calculate_id()
     );
+    let upgrade_rules = context.upgrade_rules();
+    let (mut known, uncached) = cached_upgrade_rules(upgrade_rules, &called_components);
     // Addresses are known before execution, so the fetch runs alongside the dry run. A dry-run failure is
     // reported before a fetch failure.
-    let fetch = fetch_called_component_substates(sdk, &called_components);
+    let fetch = fetch_upgrade_rules(sdk, upgrade_rules, &uncached);
     let dry_run = context.transaction_service().submit_dry_run_transaction(transaction);
     let (exec_result, fetched) = tokio::join!(dry_run, fetch);
     let exec_result = exec_result.map_err(map_transaction_submission_error)?;
-    let fetched = fetched?;
+    known.extend(fetched?);
 
     let required_fees = exec_result.finalize.required_fees();
     let upgradable_components =
-        resolve_upgradable_components(&called_components, &fetched, exec_result.finalize.accept());
+        resolve_upgradable_components(upgrade_rules, &called_components, &known, exec_result.finalize.accept());
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         required_fees,
         result: exec_result,
         upgradable_components,
+        component_upgrades,
     })
-}
-
-/// Fetches the latest substate of each directly called component. Missing ids are absent from the map.
-///
-/// The caller uses this only for components the dry run did not write. Duplicates are requested once, in the
-/// order the instructions name them.
-async fn fetch_called_component_substates(
-    sdk: &WalletSdk,
-    addresses: &[ComponentAddress],
-) -> Result<HashMap<SubstateId, Substate>, anyhow::Error> {
-    let ids = component_substate_ids(addresses);
-    Ok(sdk.substate_api().get_substates_from_network(&ids).await?)
-}
-
-fn component_substate_ids(addresses: &[ComponentAddress]) -> Vec<SubstateId> {
-    addresses
-        .iter()
-        .copied()
-        .collect::<IndexSet<_>>()
-        .into_iter()
-        .map(SubstateId::Component)
-        .collect()
-}
-
-/// Components whose template can still be swapped, direct calls first and then nested writes.
-fn resolve_upgradable_components(
-    called: &[ComponentAddress],
-    fetched: &HashMap<SubstateId, Substate>,
-    diff: Option<&SubstateDiff>,
-) -> Vec<UpgradableComponent> {
-    filter_upgradable(collect_upgrade_rules(called, fetched, diff))
-}
-
-/// Direct calls in instruction order, then components the dry run wrote that the instructions did not name.
-///
-/// A component the run wrote takes its rule from the accept diff: the up'd header already carries
-/// `upgrade_rule`, which is fixed at creation, so a nested write is not fetched. A directly called component
-/// that was only read takes its rule from `fetched`, because its header is not in the diff. A component a
-/// nested call only reads is absent: nothing in the diff names it. A component the transaction creates has no
-/// down entry and is skipped.
-fn collect_upgrade_rules(
-    called: &[ComponentAddress],
-    fetched: &HashMap<SubstateId, Substate>,
-    diff: Option<&SubstateDiff>,
-) -> Vec<(ComponentAddress, UpdateRule)> {
-    let written = diff.map(written_component_upgrade_rules).unwrap_or_default();
-    let written_by_address = written.iter().cloned().collect::<HashMap<_, _>>();
-
-    let mut rules = Vec::new();
-    let mut seen = IndexSet::new();
-    for address in called {
-        if !seen.insert(*address) {
-            continue;
-        }
-        let rule = written_by_address
-            .get(address)
-            .cloned()
-            .or_else(|| fetched_upgrade_rule(fetched, *address));
-        if let Some(rule) = rule {
-            rules.push((*address, rule));
-        }
-    }
-    for (address, rule) in written {
-        if seen.insert(address) {
-            rules.push((address, rule));
-        }
-    }
-    rules
-}
-
-/// Upgrade rules of components the dry run replaced, in diff order.
-///
-/// A create is an up with no down: the component does not exist until the transaction is accepted, so nothing
-/// can swap its template before this submission.
-fn written_component_upgrade_rules(diff: &SubstateDiff) -> Vec<(ComponentAddress, UpdateRule)> {
-    let written = diff.down_iter().map(|(id, _)| id).collect::<HashSet<_>>();
-    diff.up_iter()
-        .filter(|(id, _)| written.contains(id))
-        .filter_map(|(id, substate)| {
-            let address = id.as_component_address()?;
-            let rule = substate.substate_value().component()?.upgrade_rule().clone();
-            Some((address, rule))
-        })
-        .collect()
-}
-
-fn fetched_upgrade_rule(fetched: &HashMap<SubstateId, Substate>, address: ComponentAddress) -> Option<UpdateRule> {
-    fetched
-        .get(&SubstateId::Component(address))?
-        .substate_value()
-        .component()
-        .map(|component| component.upgrade_rule().clone())
-}
-
-/// Keeps every component whose template can still be swapped, in the given order.
-///
-/// [`UpdateRule::Locked`] and [`AccessRule::DenyAll`] can never pass `check_component_upgrade_rule`, and the
-/// upgrade rule does not grant the owner a bypass.
-fn filter_upgradable<I: IntoIterator<Item = (ComponentAddress, UpdateRule)>>(rules: I) -> Vec<UpgradableComponent> {
-    rules
-        .into_iter()
-        .filter(|(_, rule)| is_upgradable(rule))
-        .map(|(component_address, upgrade_rule)| UpgradableComponent {
-            component_address,
-            upgrade_rule,
-        })
-        .collect()
-}
-
-fn is_upgradable(rule: &UpdateRule) -> bool {
-    !matches!(rule, UpdateRule::Locked | UpdateRule::AccessRule(AccessRule::DenyAll))
 }
 
 pub async fn handle_submit_manifest(
@@ -672,13 +571,19 @@ pub async fn handle_submit_manifest(
     if !req.dry_run {
         context.enforce_max_fee_limit(req.max_fee)?;
     }
+    let instructions = parse_manifest_request(&req)?;
+    if !req.dry_run {
+        authorize_component_upgrades(
+            context,
+            token,
+            &component_upgrades(&instructions.fee_instructions, &instructions.instructions),
+        )?;
+    }
     let default_account = sdk
         .accounts_api()
         .get_default()
         .optional()?
         .ok_or_else(|| invalid_request("No default account found".to_string()))?;
-
-    let instructions = parse_manifest_request(&req)?;
 
     let default_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
         invalid_params(
@@ -737,40 +642,14 @@ pub async fn handle_submit_manifest(
         .map(|input| InputDeclaration::write(input.into_substate_id()));
 
     let unsigned = transaction.with_inputs(inputs);
+    let component_upgrades = component_upgrades(unsigned.fee_instructions(), unsigned.instructions());
 
     let sign = |unsigned: UnsignedTransaction| {
         sign_manifest_transaction(sdk, unsigned, seal_signer_key_id, &req.signing_key_ids)
     };
     if req.dry_run {
-        let transaction = sign(unsigned)?;
-        let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
-        // Addresses are known before execution, so the fetch runs alongside the dry run. A dry-run failure is
-        // reported before a fetch failure, and a rejected execution does not depend on the fetch.
-        let fetch = fetch_called_component_substates(sdk, &called_components);
-        let dry_run = context.transaction_service().submit_dry_run_transaction(transaction);
-        let (exec_result, fetched) = tokio::join!(dry_run, fetch);
-        let exec_result = exec_result?;
-
-        if let Some(reject) = exec_result.finalize.any_reject() {
-            return Err(JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(5),
-                format!("Dry-run transaction rejected: {reject}"),
-                serde_json::Value::Null,
-            )
-            .into());
-        }
-        let fetched = fetched?;
-        let required_fees = exec_result.finalize.required_fees();
-        let upgradable_components =
-            resolve_upgradable_components(&called_components, &fetched, exec_result.finalize.accept());
-        return Ok(TransactionSubmitManifestResponse {
-            transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
-            required_fees: Some(required_fees),
-            result: Some(exec_result),
-            upgradable_components,
-        });
+        return submit_manifest_dry_run(context, sign(unsigned)?, component_upgrades).await;
     }
-
     let transaction = declare_written_inputs_only(context, unsigned, sign).await?;
 
     // Link the fee payer and the seal signer's account (when it maps to one of the wallet's
@@ -786,6 +665,43 @@ pub async fn handle_submit_manifest(
         required_fees: None,
         result: None,
         upgradable_components: Vec::new(),
+        component_upgrades: Vec::new(),
+    })
+}
+
+async fn submit_manifest_dry_run(
+    context: &HandlerContext,
+    transaction: Transaction,
+    component_upgrades: Vec<ComponentUpgrade>,
+) -> Result<TransactionSubmitManifestResponse, anyhow::Error> {
+    let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
+    let upgrade_rules = context.upgrade_rules();
+    let (mut known, uncached) = cached_upgrade_rules(upgrade_rules, &called_components);
+    // Addresses are known before execution, so the fetch runs alongside the dry run. A dry-run failure is
+    // reported before a fetch failure, and a rejected execution does not depend on the fetch.
+    let fetch = fetch_upgrade_rules(context.wallet_sdk(), upgrade_rules, &uncached);
+    let dry_run = context.transaction_service().submit_dry_run_transaction(transaction);
+    let (exec_result, fetched) = tokio::join!(dry_run, fetch);
+    let exec_result = exec_result?;
+
+    if let Some(reject) = exec_result.finalize.any_reject() {
+        return Err(JsonRpcError::new(
+            JsonRpcErrorReason::ApplicationError(5),
+            format!("Dry-run transaction rejected: {reject}"),
+            serde_json::Value::Null,
+        )
+        .into());
+    }
+    known.extend(fetched?);
+    let required_fees = exec_result.finalize.required_fees();
+    let upgradable_components =
+        resolve_upgradable_components(upgrade_rules, &called_components, &known, exec_result.finalize.accept());
+    Ok(TransactionSubmitManifestResponse {
+        transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
+        required_fees: Some(required_fees),
+        result: Some(exec_result),
+        upgradable_components,
+        component_upgrades,
     })
 }
 
@@ -1110,151 +1026,108 @@ mod tests {
         engine_types::substate::SubstateId,
         signature::Sr25519SignatureBytes,
     };
+    use tari_ootle_transaction::{ComponentReference, Instruction, TransactionBuilder};
     use tari_ootle_wallet_sdk::{
         models::{KeyBranch, WalletLock, WalletTransactionUpdate},
         storage::WalletStoreReader,
     };
-    use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
+    use tari_ootle_walletd_client::ComponentAddressOrName;
+    use tari_template_lib_types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
     use super::*;
-    use crate::handlers::test_support::TestDaemon;
+    use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
 
-    #[test]
-    fn filter_upgradable_drops_rules_that_can_never_upgrade_and_keeps_order() {
-        use tari_template_lib_types::access_rules::{RequireRule, RestrictedAccessRule, RuleRequirement};
-
-        let owner = ComponentAddress::from_array([1; 32]);
-        let locked = ComponentAddress::from_array([2; 32]);
-        let allow_all = ComponentAddress::from_array([3; 32]);
-        let deny_all = ComponentAddress::from_array([4; 32]);
-        let restricted = ComponentAddress::from_array([5; 32]);
-
-        let upgradable = filter_upgradable([
-            (owner, UpdateRule::Owner),
-            (locked, UpdateRule::Locked),
-            (allow_all, UpdateRule::AccessRule(AccessRule::AllowAll)),
-            (deny_all, UpdateRule::AccessRule(AccessRule::DenyAll)),
-            (
-                restricted,
-                UpdateRule::AccessRule(AccessRule::Restricted(RestrictedAccessRule::Require(
-                    RequireRule::Require(RuleRequirement::CallerComponent(owner)),
-                ))),
-            ),
-        ]);
-
-        let addresses = upgradable.iter().map(|c| c.component_address).collect::<Vec<_>>();
-        assert_eq!(addresses, [owner, allow_all, restricted]);
-        assert!(matches!(upgradable[0].upgrade_rule, UpdateRule::Owner));
-        assert!(matches!(
-            upgradable[1].upgrade_rule,
-            UpdateRule::AccessRule(AccessRule::AllowAll)
-        ));
-        assert!(matches!(
-            upgradable[2].upgrade_rule,
-            UpdateRule::AccessRule(AccessRule::Restricted(_))
-        ));
+    fn upgrade_instruction() -> Instruction {
+        Instruction::UpdateComponentTemplate {
+            component: ComponentReference::Address(ComponentAddress::from_array([1; 32])),
+            migrate: None,
+            new_template: TemplateAddress::from_array([2; 32]),
+        }
     }
 
-    #[test]
-    fn component_substate_ids_drop_duplicates_and_keep_order() {
-        let first = ComponentAddress::from_array([1; 32]);
-        let second = ComponentAddress::from_array([2; 32]);
-
-        assert_eq!(component_substate_ids(&[first, second, first]), vec![
-            SubstateId::Component(first),
-            SubstateId::Component(second)
-        ]);
+    fn upgrade_submit_request() -> TransactionSubmitRequest {
+        TransactionSubmitRequest {
+            transaction: TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+                .without_auto_fill_inputs()
+                .with_instructions([upgrade_instruction()])
+                .build_unsigned(),
+            ..submit_request(KeyId::derived(KeyBranch::Account, 0), vec![])
+        }
     }
 
-    #[test]
-    fn nested_writes_come_from_the_diff_and_read_only_calls_come_from_the_fetch() {
-        use tari_ootle_common_types::engine_types::{confidential::ClaimedOutputTombstone, substate::SubstateValue};
-        use tari_template_lib_types::{ClaimedOutputTombstoneAddress, ObjectKey};
-
-        let read_only = ComponentAddress::from_array([1; 32]);
-        let written = ComponentAddress::from_array([2; 32]);
-        let missing = ComponentAddress::from_array([3; 32]);
-        let deny_all = ComponentAddress::from_array([4; 32]);
-        let not_component = ComponentAddress::from_array([5; 32]);
-        let nested = ComponentAddress::from_array([6; 32]);
-        let created = ComponentAddress::from_array([7; 32]);
-
-        let mut fetched = HashMap::new();
-        fetched.insert(
-            SubstateId::Component(read_only),
-            component_substate(4, UpdateRule::Owner),
-        );
-        // Present, and wrong: a component the run wrote is taken from the diff, not this copy.
-        fetched.insert(
-            SubstateId::Component(written),
-            component_substate(1, UpdateRule::Locked),
-        );
-        fetched.insert(
-            SubstateId::Component(deny_all),
-            component_substate(1, UpdateRule::AccessRule(AccessRule::DenyAll)),
-        );
-        fetched.insert(
-            SubstateId::Component(not_component),
-            Substate::new(
-                SubstateVersion::new(1),
-                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
-            ),
-        );
-
-        let tombstone =
-            SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::new(ObjectKey::from_array([9; 32])));
-        let mut diff = SubstateDiff::new();
-        diff.down(SubstateId::Component(written), SubstateVersion::ZERO);
-        diff.up(SubstateId::Component(written), component_substate(1, UpdateRule::Owner));
-        diff.down(tombstone.clone(), SubstateVersion::ZERO);
-        diff.up(
-            tombstone,
-            Substate::new(
-                SubstateVersion::new(1),
-                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
-            ),
-        );
-        diff.down(SubstateId::Component(nested), SubstateVersion::new(1));
-        diff.up(
-            SubstateId::Component(nested),
-            component_substate(2, UpdateRule::AccessRule(AccessRule::AllowAll)),
-        );
-        diff.up(SubstateId::Component(created), component_substate(0, UpdateRule::Owner));
-
-        let upgradable = resolve_upgradable_components(
-            &[read_only, written, read_only, missing, deny_all, not_component],
-            &fetched,
-            Some(&diff),
-        );
-
-        let addresses = upgradable.iter().map(|c| c.component_address).collect::<Vec<_>>();
-        assert_eq!(addresses, [read_only, written, nested]);
-        assert!(matches!(upgradable[0].upgrade_rule, UpdateRule::Owner));
-        assert!(matches!(upgradable[1].upgrade_rule, UpdateRule::Owner));
-        assert!(matches!(
-            upgradable[2].upgrade_rule,
-            UpdateRule::AccessRule(AccessRule::AllowAll)
-        ));
+    fn upgrade_call_request() -> CallInstructionRequest {
+        CallInstructionRequest {
+            instructions: vec![upgrade_instruction()],
+            fee_account: ComponentAddressOrName::Name("default".to_string()),
+            max_fee: 1000,
+            inputs: vec![],
+            override_inputs: None,
+            new_outputs: None,
+            proof_ids: vec![],
+            min_epoch: None,
+            max_epoch: None,
+        }
     }
 
-    fn component_substate(version: u64, rule: UpdateRule) -> Substate {
-        use tari_engine_types::component::{Component, ComponentBody, ComponentHeader};
-        use tari_ootle_common_types::engine_types::substate::SubstateValue;
-        use tari_template_lib_types::{EntityId, SubstateOwnerRule, access_rules::ComponentAccessRules};
-
-        Substate::new(
-            SubstateVersion::new(version),
-            SubstateValue::Component(Component {
-                header: ComponentHeader {
-                    template_address: Default::default(),
-                    owner_rule: SubstateOwnerRule::None,
-                    access_rules: ComponentAccessRules::new(),
-                    entity_id: EntityId::default(),
-                    upgrade_rule: rule,
-                },
-                body: ComponentBody::empty(),
-            }),
+    fn is_upgrade_refusal(err: &anyhow::Error) -> bool {
+        matches!(
+            err.downcast_ref::<AuthError>(),
+            Some(AuthError::ComponentUpgradeRequiresAdmin { .. })
         )
+    }
+
+    #[tokio::test]
+    async fn a_tool_without_admin_cannot_submit_a_component_upgrade() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+        let app = daemon.delegated_session("transactions:create");
+
+        for bearer in [&tool, &app] {
+            let err = handle_submit(&daemon.context, Some(bearer), upgrade_submit_request())
+                .await
+                .unwrap_err();
+            assert!(is_upgrade_refusal(&err), "{err}");
+
+            let err = handle_submit_instruction(&daemon.context, Some(bearer), upgrade_call_request())
+                .await
+                .unwrap_err();
+            assert!(is_upgrade_refusal(&err), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_admin_session_may_submit_a_component_upgrade() {
+        let daemon = TestDaemon::start().await;
+
+        // The submission fails later, on a daemon with no network; the upgrade check is what this asserts.
+        let result = handle_submit(&daemon.context, Some(&daemon.session), upgrade_submit_request()).await;
+        assert!(
+            result.as_ref().err().is_none_or(|err| !is_upgrade_refusal(err)),
+            "{result:?}"
+        );
+
+        let result = handle_submit_instruction(&daemon.context, Some(&daemon.session), upgrade_call_request()).await;
+        assert!(
+            result.as_ref().err().is_none_or(|err| !is_upgrade_refusal(err)),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tool_may_submit_a_transaction_without_upgrades() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+
+        let result = handle_submit(
+            &daemon.context,
+            Some(&tool),
+            submit_request(KeyId::derived(KeyBranch::Account, 0), vec![]),
+        )
+        .await;
+        assert!(
+            result.as_ref().err().is_none_or(|err| !is_upgrade_refusal(err)),
+            "{result:?}"
+        );
     }
 
     #[tokio::test]

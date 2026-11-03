@@ -85,6 +85,7 @@ export * from "./types/wallet-types/ClaimBurnResponse";
 export * from "./types/wallet-types/ClaimValidatorFeesRequest";
 export * from "./types/wallet-types/ClaimValidatorFeesResponse";
 export * from "./types/wallet-types/ComponentAddressOrName";
+export * from "./types/wallet-types/ComponentUpgrade";
 export * from "./types/wallet-types/ConfidentialCreateOutputProofRequest";
 export * from "./types/wallet-types/ConfidentialCreateOutputProofResponse";
 export * from "./types/wallet-types/ConfidentialOutputInfo";

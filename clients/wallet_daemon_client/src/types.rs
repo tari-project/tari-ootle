@@ -44,7 +44,9 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{
+    ComponentReference,
     Instruction,
+    MigrateFunction,
     PrunedTransaction,
     TransactionId,
     TransactionSignature,
@@ -273,6 +275,10 @@ pub struct TransactionRequestInfo {
     /// One entry per resource whose stealth outputs in this wallet the
     /// transaction spends; empty when it spends none.
     pub value_summaries: Vec<TransactionRequestValueSummary>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
     /// Who the transaction acts as wherever the engine needs a single signer.
     pub main_signer: TransactionRequestMainSigner,
     /// Public keys of the signatures the request's creator supplied out of band. Each one authorizes the
@@ -383,6 +389,10 @@ pub struct SigningRequestInfo {
     pub request_id: SigningRequestId,
     /// The transaction body the signature commits to.
     pub transaction: UnsignedTransaction,
+    /// Every `UpdateComponentTemplate` instruction in `transaction`, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
     pub seal_public_key: RistrettoPublicKeyBytes,
     pub key_id: KeyId,
     /// Public key of `key_id`.
@@ -501,6 +511,24 @@ pub struct TransactionSubmitDryRunResponse {
     /// component the transaction reaches is locked.
     #[serde(default)]
     pub upgradable_components: Vec<UpgradableComponent>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
+}
+
+/// An `UpdateComponentTemplate` instruction: the transaction replaces the code of `component` with `new_template`
+/// and runs `migrate` from the new template, if given. Whoever signs the transaction lends their signer badge to the
+/// upgrade, so a signer who satisfies the component's upgrade rule hands its code, and every vault it holds, to the
+/// new template.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ComponentUpgrade {
+    /// A workspace reference names a component the transaction resolves during execution, such as one an earlier
+    /// instruction returns.
+    pub component: ComponentReference,
+    pub new_template: TemplateAddress,
+    pub migrate: Option<MigrateFunction>,
 }
 
 /// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
@@ -551,6 +579,10 @@ pub struct TransactionSubmitManifestResponse {
     /// component the transaction reaches is locked.
     #[serde(default)]
     pub upgradable_components: Vec<UpgradableComponent>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. Only populated for dry
+    /// runs. See [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

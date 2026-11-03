@@ -25,7 +25,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::consensus_models::{Block, BlockHeader};
 use tari_ootle_transaction::Network;
-use tari_sidechain::{FixedHash, ProposalVoteMessage, QcSignatures, QcSignaturesError, QuorumDecision, SignerBitmap};
+use tari_sidechain::{FixedHash, ProposalVoteMessage, QcSignatures, QcSignaturesError, SignerBitmap};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
@@ -312,6 +312,20 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
     committee: &Committee<TConsensusSpec::Addr>,
     signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
+    check_justify_precedes_block(candidate_block)?;
+    check_quorum_certificate_signatures::<TConsensusSpec>(
+        network,
+        candidate_block.justify().into(),
+        committee,
+        signing_service,
+    )?;
+
+    Ok(())
+}
+
+/// Checks that the justify of `candidate_block` accepts a lower block of the same shard group. The shard group lies
+/// outside both the certificate id and the signed vote message, so the candidate block is what binds it.
+pub fn check_justify_precedes_block(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
     if candidate_block.height() <= qc.height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
@@ -330,15 +344,13 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
             ),
         });
     }
-    if qc.decision() != QuorumDecision::Accept {
+    if !qc.decision().is_accept() {
         return Err(ProposalValidationError::JustifyBlockInvalid {
             proposed_by: candidate_block.proposed_by().to_string(),
             block_id: *candidate_block.id(),
-            details: format!("Justify QC has decision {:?}, expected Accept", qc.decision()),
+            details: format!("Justify QC has decision {}, expected Accept", qc.decision()),
         });
     }
-
-    check_quorum_certificate_signatures::<TConsensusSpec>(network, qc.into(), committee, signing_service)?;
 
     Ok(())
 }

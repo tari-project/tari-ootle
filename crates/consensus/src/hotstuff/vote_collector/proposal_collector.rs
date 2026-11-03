@@ -6,7 +6,7 @@ use tari_consensus_types::{HighPc, ProposalCertificate, ProposalVote, ValidatorS
 use tari_ootle_common_types::{Epoch, NodeHeight, ProtocolVersion, committee::Committee, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
-    consensus_models::{Block, BookkeepingModel, VoteEquivocation},
+    consensus_models::{Block, VoteEquivocation},
 };
 use tari_ootle_transaction::Network;
 use tari_sidechain::{ProposalVoteMessage, QcSignatures, QuorumDecision, SignerBitmap};
@@ -135,19 +135,6 @@ where TConsensusSpec: ConsensusSpec
                 let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
                 let signatures = qc_signatures(epoch_state.local_committee(), signatures)?;
                 let new_qc = create_proposal_certificate(signatures, quorum_decision, block);
-                if new_qc.decision() != QuorumDecision::Accept {
-                    warn!(
-                        target: LOG_TARGET,
-                        "❓️ Quorum reached with decision {:?} on {}, not advancing HighPc",
-                        new_qc.decision(),
-                        new_qc
-                    );
-                    let high_qc = self.store.with_write_tx(|tx| {
-                        new_qc.save(tx)?;
-                        HighPc::get(&**tx, current_epoch)
-                    })?;
-                    return Ok(Some((new_qc, high_qc)));
-                }
                 let high_qc = self.store.with_write_tx(|tx| new_qc.update_highest(tx))?;
                 if new_qc.calculate_id() == *high_qc.id() {
                     info!(target: LOG_TARGET, "🔥 New HIGH {}", new_qc);
@@ -185,15 +172,7 @@ where TConsensusSpec: ConsensusSpec
     }
 
     fn validate_vote(&self, current_epoch: Epoch, vote: &ProposalVote) -> Result<(), HotStuffError> {
-        if current_epoch != vote.epoch {
-            return Err(HotStuffError::InvalidVote {
-                signer_public_key: vote.signature.public_key,
-                details: format!(
-                    "Our current view is at epoch {} but the vote was for epoch {}",
-                    current_epoch, vote.epoch
-                ),
-            });
-        }
+        check_vote_fields(current_epoch, vote)?;
 
         let message = ProposalVoteMessage::new(
             ProtocolVersion::at(self.network, vote.epoch).as_u32(),
@@ -214,6 +193,30 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(())
     }
+}
+
+/// Checks `vote` is an Accept vote cast in `current_epoch`. Honest validators vote only to accept, so no certificate
+/// is ever formed from Reject votes.
+fn check_vote_fields(current_epoch: Epoch, vote: &ProposalVote) -> Result<(), HotStuffError> {
+    if current_epoch != vote.epoch {
+        return Err(HotStuffError::InvalidVote {
+            signer_public_key: vote.signature.public_key,
+            details: format!(
+                "Our current view is at epoch {} but the vote was for epoch {}",
+                current_epoch, vote.epoch
+            ),
+        });
+    }
+    if !vote.decision.is_accept() {
+        return Err(HotStuffError::InvalidVote {
+            signer_public_key: vote.signature.public_key,
+            details: format!(
+                "The vote for block {} has decision {} but only Accept votes are collected",
+                vote.block_id, vote.decision
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// The certificate signatures of `signatures`, each a verified vote by a member of `committee`.
@@ -311,6 +314,33 @@ mod tests {
             assert_eq!(*certificate, expected);
             certificate.check_well_formed(committee.len()).unwrap();
         }
+    }
+
+    fn vote(epoch: Epoch, decision: QuorumDecision) -> ProposalVote {
+        ProposalVote {
+            epoch,
+            block_id: tari_consensus_types::BlockId::from([1u8; 32]),
+            block_height: NodeHeight(1),
+            decision,
+            signature: signature(1),
+        }
+    }
+
+    #[test]
+    fn it_accepts_an_accept_vote_in_the_current_epoch() {
+        check_vote_fields(Epoch(1), &vote(Epoch(1), QuorumDecision::Accept)).unwrap();
+    }
+
+    #[test]
+    fn it_rejects_a_reject_vote() {
+        let err = check_vote_fields(Epoch(1), &vote(Epoch(1), QuorumDecision::Reject)).unwrap_err();
+        assert!(matches!(err, HotStuffError::InvalidVote { .. }), "{err}");
+    }
+
+    #[test]
+    fn it_rejects_a_vote_from_another_epoch() {
+        let err = check_vote_fields(Epoch(1), &vote(Epoch(2), QuorumDecision::Accept)).unwrap_err();
+        assert!(matches!(err, HotStuffError::InvalidVote { .. }), "{err}");
     }
 
     #[test]

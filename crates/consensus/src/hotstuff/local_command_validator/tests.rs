@@ -1797,8 +1797,154 @@ mod all_accept {
     }
 }
 
+/// A replica that has prepared [`pledging_cross_shard`]'s transaction and holds the other shard group's pledge of its
+/// input there, with the record ready for LocalAccept. The transaction's execution also creates a local component
+/// that already exists, so locking its outputs at LocalAccept fails. Returns the record and the LocalAccept(ABORT)
+/// an honest proposer derives from it.
+fn prepared_cross_shard_creating_an_existing_output() -> (Replica, TransactionPoolRecord, MultiShardAtom) {
+    let (local, foreign) = local_and_foreign_halves();
+    let replica = Replica::in_committee(local, 2);
+    let input = component_id_in(local);
+    replica.add_substate(&input);
+    let existing = (0x20..=u8::MAX)
+        .map(component_id)
+        .filter(|id| replica.committee.includes_substate_id(id))
+        .find(|id| *id != input)
+        .expect("a second seed falls in the shard group");
+    replica.add_substate(&existing);
+    let foreign_input = component_id_in(foreign);
+    let id = replica.pool_transaction(1, &[&input, &foreign_input], Script {
+        commit: true,
+        new_outputs: vec![existing],
+        ..Default::default()
+    });
+    let command = replica.honest_new_multishard_command(&id);
+    assert!(command.is_local_prepare(), "{command}");
+    replica.prepare_in_parent(&multishard_atom(&command));
+    replica.receive_input_pledges(&id, foreign, &[&foreign_input]);
+
+    let mut rec = replica.pending_record(&id);
+    rec.evidence_mut().add_shard_group(foreign).set_prepare_qc(PcId::zero());
+    rec.set_ready(true);
+    let mut honest_abort = rec.clone();
+    honest_abort.update_from_execution(
+        NUM_PRESHARDS,
+        replica.committee.num_committees(),
+        &TransactionExecution::abort(&id, RejectReason::FailedToLockOutputs("exists".to_string())),
+    );
+    let atom = honest_abort.get_current_multi_shard_atom();
+    assert_eq!(atom.decision, Decision::Abort(AbortReason::LockOutputsFailed));
+    (replica, rec, atom)
+}
+
 mod local_accept_from_local_prepared {
     use super::*;
+
+    fn evaluate_accept(replica: &Replica, rec: TransactionPoolRecord, atom: MultiShardAtom) -> Evaluation {
+        replica.evaluate_after(&[Command::LocalAccept(atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        })
+    }
+
+    #[test]
+    fn an_honest_abort_after_failing_to_lock_outputs_is_voted_for() {
+        let (replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+
+        let evaluation = evaluate_accept(&replica, rec, abort);
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+    }
+
+    #[test]
+    fn a_commit_after_failing_to_lock_outputs_is_refused() {
+        let (replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+        let commit = MultiShardAtom {
+            decision: Decision::Commit,
+            ..abort
+        };
+
+        let evaluation = evaluate_accept(&replica, rec, commit);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::LockOutputsFailed),
+                    remote: Decision::Commit,
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn an_abort_with_a_transaction_fee_after_failing_to_lock_outputs_is_refused() {
+        let (replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+        let with_fee = MultiShardAtom {
+            transaction_fee: FEE,
+            ..abort
+        };
+
+        let evaluation = evaluate_accept(&replica, rec, with_fee);
+
+        assert!(
+            matches!(evaluation.no_vote, Some(NoVoteReason::FeeDisagreement)),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn an_abort_with_a_leader_fee_after_failing_to_lock_outputs_is_refused() {
+        let (replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+        let with_leader_fee = MultiShardAtom {
+            leader_fee: Some(local_leader_fee()),
+            ..abort
+        };
+
+        let evaluation = evaluate_accept(&replica, rec, with_leader_fee);
+
+        assert!(
+            matches!(evaluation.no_vote, Some(NoVoteReason::LeaderFeeDisagreement)),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn an_abort_with_different_evidence_after_failing_to_lock_outputs_is_refused() {
+        let (replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+        let (_, foreign) = local_and_foreign_halves();
+        let undeclared = (0x20..=u8::MAX)
+            .map(component_id)
+            .filter(|id| *id != component_id_in(foreign))
+            .find(|id| !replica.committee.includes_substate_id(id))
+            .expect("a second seed falls in the foreign shard group");
+        let mut forged_evidence = abort.evidence.clone();
+        forged_evidence.insert_unpledged_from_substate_id(
+            NUM_PRESHARDS,
+            replica.committee.num_committees(),
+            undeclared,
+        );
+        let forged = MultiShardAtom {
+            evidence: forged_evidence,
+            ..abort
+        };
+
+        let evaluation = evaluate_accept(&replica, rec, forged);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::InvalidEvidence {
+                    reason: InvalidEvidenceReason::MismatchedEvidence,
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
 
     /// The execution a foreign proposal in the block left for the transaction, such as the fee-intent commit another
     /// shard group switched it to, is the one the transaction's LocalAccept locks.

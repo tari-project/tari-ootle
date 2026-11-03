@@ -6,7 +6,7 @@ use std::num::NonZeroU64;
 use log::*;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::commit_result::{AbortReason, RejectReason};
+use tari_engine_types::commit_result::RejectReason;
 use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
@@ -510,21 +510,6 @@ where
                 )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
                 if let Some(err) = locked.lock_status.failures().first() {
-                    if atom.decision.is_commit() {
-                        // If we disagree with any local decision we abstain from voting
-                        warn!(
-                            target: LOG_TARGET,
-                            "❌ NO VOTE LocalAccept: Lock failure: {} but leader decided COMMIT for tx {} in block {}. Leader proposed COMMIT, we decided ABORT",
-                            err,
-                            tx_rec.id(),
-                            block,
-                        );
-                        return Ok(Some(NoVoteReason::DecisionDisagreement {
-                            local: Decision::Abort(AbortReason::LockOutputsFailed),
-                            remote: Decision::Commit,
-                        }));
-                    }
-
                     info!(
                         target: LOG_TARGET,
                         "⚠️ Failed to lock outputs for transaction {} in block {}. Error: {}",

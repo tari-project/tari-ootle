@@ -9,7 +9,15 @@ use std::{
 use futures::StreamExt;
 use log::{debug, info, trace, warn};
 use ootle_byte_type::FromByteType;
-use tari_ootle_common_types::{NumPreshards, StateVersion, optional::Optional, shard::Shard};
+use tari_engine_types::substate::SubstateId;
+use tari_ootle_common_types::{
+    NumPreshards,
+    StateVersion,
+    SubstateVersion,
+    VersionedSubstateIdRef,
+    optional::Optional,
+    shard::Shard,
+};
 use tari_ootle_transaction::Network;
 use tari_ootle_wallet_sdk::{
     NetworkInterfaceError,
@@ -23,6 +31,8 @@ use tari_ootle_wallet_sdk::{
         OutputStatus,
         StartOfShard,
         StealthOutputModel,
+        UtxoBurnt,
+        UtxoBurntEvent,
         UtxoSpent,
         UtxoSpentEvent,
         UtxoUnspent,
@@ -31,9 +41,16 @@ use tari_ootle_wallet_sdk::{
         WalletUtxoUpdate,
     },
     network::{UtxoUpdateStream, WalletNetworkInterface},
-    storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{
+        QueuedUtxo,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
 };
-use tari_template_lib_types::{ComponentAddress, ResourceAddress, UtxoAddress};
+use tari_template_lib_types::{ResourceAddress, UtxoAddress, UtxoId};
 
 use crate::{notify::Notify, utxo_scanner::StealthScannerApiError};
 
@@ -66,8 +83,17 @@ pub struct UtxoScannerRound<'a, TSpec: WalletSdkSpec> {
     /// after the claim expires asks again for every update the claim may have skipped.
     resumed_from_claim: HashSet<Shard>,
     shard_state_versions_to_set: HashMap<Shard, StateVersion>,
-    utxos_to_recover: Vec<(ComponentAddress, UtxoUnspent)>,
+    /// The shards the indexer flagged as possibly lacking spends below their cursors. The outputs the wallet holds in
+    /// a flagged shard are checked once a round, before the shard's cursor is stored.
+    flagged: HashSet<Shard>,
+    utxos_to_recover: Vec<(UtxoUnspent, QueuedUtxo)>,
     utxos_to_spend: Vec<UtxoSpent>,
+    /// The spends of held outputs that the check of a flagged shard showed gone.
+    checked_spends: Vec<UtxoSpent>,
+    /// The burns the indexer reported, which are settled before they are recorded.
+    utxos_to_burn: Vec<UtxoBurnt>,
+    /// The held outputs that a read of their latest version showed burnt.
+    checked_burns: Vec<UtxoId>,
     notify: &'a Notify<WalletEvent>,
 }
 
@@ -93,8 +119,12 @@ where TSpec: WalletSdkSpec
             claims: HashMap::new(),
             resumed_from_claim: HashSet::new(),
             shard_state_versions_to_set: HashMap::new(),
+            flagged: HashSet::new(),
             utxos_to_recover: Vec::new(),
             utxos_to_spend: Vec::new(),
+            checked_spends: Vec::new(),
+            utxos_to_burn: Vec::new(),
+            checked_burns: Vec::new(),
             notify,
             stats: UtxoScanRoundStats::default(),
         }
@@ -253,11 +283,18 @@ where TSpec: WalletSdkSpec
         let mut num_received = 0usize;
         let mut sos: Option<StartOfShard> = None;
         let mut has_more = false;
+        // The shards this stream flagged first, and the cursors they reached, which are stored only once their held
+        // outputs are checked.
+        let mut newly_flagged = HashSet::new();
+        let mut awaiting_check = HashMap::new();
 
         while let Some(result) = stream.next().await {
             let payload = result.map_err(|e| StealthScannerApiError::NetworkInterfaceError(e.into()))?;
             if let Some(recv_sos) = payload.sos {
                 debug!(target: LOG_TARGET, "Received StartOfShard for {}", recv_sos.shard);
+                if recv_sos.spends_incomplete && self.flagged.insert(recv_sos.shard) {
+                    newly_flagged.insert(recv_sos.shard);
+                }
                 if let Some(unterminated) = sos.replace(recv_sos) {
                     warn!(
                         target: LOG_TARGET,
@@ -269,29 +306,8 @@ where TSpec: WalletSdkSpec
 
             if let Some(update) = payload.update {
                 num_received += 1;
-                match update {
-                    WalletUtxoUpdate::Unspent(unspent) => {
-                        if self.check_if_tag_matches(&unspent)? {
-                            debug!(
-                                target: LOG_TARGET,
-                                "🏷️ Stealth output tag {} matches. Queueing for recovery.",
-                                unspent.tag
-                            );
-                            self.utxos_to_recover.push((*self.account.component_address(), unspent));
-                        }
-                    },
-                    WalletUtxoUpdate::Spent(spent) => {
-                        self.utxos_to_spend.push(spent);
-                    },
-                    WalletUtxoUpdate::Burnt(burnt) => {
-                        // NOTE: we treat burnt outputs the same as spent for now. In future, we may want to track them
-                        // separately
-                        self.utxos_to_spend.push(UtxoSpent {
-                            id: burnt.id,
-                            version: burnt.version,
-                        });
-                    },
-                }
+                // A UTXO a read reports unspent is unspent at the read's max state version
+                self.process_update(update, sos.as_ref().map(|sos| (sos.shard, sos.max_state_version)))?;
             }
 
             if payload.eos.is_some() {
@@ -307,7 +323,12 @@ where TSpec: WalletSdkSpec
                     self.account.component_address(),
                     sos.max_state_version
                 );
-                for versions in [&mut self.cursors, &mut self.shard_state_versions_to_set] {
+                let to_set = if newly_flagged.contains(&sos.shard) {
+                    &mut awaiting_check
+                } else {
+                    &mut self.shard_state_versions_to_set
+                };
+                for versions in [&mut self.cursors, to_set] {
                     versions
                         .entry(sos.shard)
                         .and_modify(|v| {
@@ -321,7 +342,7 @@ where TSpec: WalletSdkSpec
 
                 self.stats.num_received += num_received;
                 num_received = 0;
-                self.commit_progress().await?;
+                self.commit_updates().await?;
             }
         }
 
@@ -333,6 +354,11 @@ where TSpec: WalletSdkSpec
             );
         }
 
+        if !newly_flagged.is_empty() {
+            self.check_held_outputs(&newly_flagged).await?;
+            self.stats.num_flagged_shards += newly_flagged.len();
+            self.shard_state_versions_to_set.extend(awaiting_check);
+        }
         self.commit_progress().await?;
         self.stats.num_received += num_received;
 
@@ -347,19 +373,66 @@ where TSpec: WalletSdkSpec
         Ok(has_more)
     }
 
+    /// Processes one update of a read, `unspent_at` being the read's shard and max state version.
+    fn process_update(
+        &mut self,
+        update: WalletUtxoUpdate,
+        unspent_at: Option<(Shard, StateVersion)>,
+    ) -> Result<(), StealthScannerApiError> {
+        match update {
+            WalletUtxoUpdate::Unspent(unspent) => {
+                if self.check_if_tag_matches(&unspent)? {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🏷️ Stealth output tag {} matches. Queueing for recovery.",
+                        unspent.tag
+                    );
+                    self.utxos_to_recover.push((unspent, QueuedUtxo {
+                        account: *self.account.component_address(),
+                        unspent_at,
+                    }));
+                }
+            },
+            WalletUtxoUpdate::Spent(spent) => {
+                self.utxos_to_spend.push(spent);
+            },
+            WalletUtxoUpdate::Burnt(burnt) => {
+                self.utxos_to_burn.push(burnt);
+            },
+        }
+        Ok(())
+    }
+
+    /// Commits the pending progress if any outputs or spends are pending. Cursors alone wait for
+    /// [`Self::commit_progress`], so a pass over shards that deliver nothing commits once rather than once a shard.
+    async fn commit_updates(&mut self) -> Result<bool, StealthScannerApiError> {
+        if !self.has_pending_updates() {
+            return Ok(false);
+        }
+        self.commit_progress().await
+    }
+
+    fn has_pending_updates(&self) -> bool {
+        !self.utxos_to_recover.is_empty() ||
+            !self.utxos_to_spend.is_empty() ||
+            !self.checked_spends.is_empty() ||
+            !self.utxos_to_burn.is_empty() ||
+            !self.checked_burns.is_empty()
+    }
+
     async fn commit_progress(&mut self) -> Result<bool, StealthScannerApiError> {
-        if self.utxos_to_recover.is_empty() &&
-            self.utxos_to_spend.is_empty() &&
-            self.shard_state_versions_to_set.is_empty()
-        {
+        if !self.has_pending_updates() && self.shard_state_versions_to_set.is_empty() {
             return Ok(false);
         }
 
         if self.sdk.sdk_config().indexer_trust.is_verify() {
             self.retain_proven_spends().await?;
         }
+        self.settle_burns().await?;
+        self.utxos_to_spend.append(&mut self.checked_spends);
 
         let mut num_spent = 0;
+        let mut num_burnt = 0;
         let num_recovered = self.utxos_to_recover.len();
         self.stats.num_potential_recoveries += num_recovered;
         self.sdk.store().with_write_tx(|tx| {
@@ -371,6 +444,18 @@ where TSpec: WalletSdkSpec
                         address: UtxoAddress::new(*self.resource_address, spent.id),
                     });
                     num_spent += 1;
+                }
+            }
+
+            for id in self.checked_burns.drain(..) {
+                let address = UtxoAddress::new(*self.resource_address, id);
+                if tx.stealth_outputs_mark_as_burnt(&address)? {
+                    info!(target: LOG_TARGET, "🔥 Marked stealth output {} as burnt", address);
+                    self.notify.notify(UtxoBurntEvent {
+                        account_address: *self.account.component_address(),
+                        address,
+                    });
+                    num_burnt += 1;
                 }
             }
 
@@ -417,7 +502,110 @@ where TSpec: WalletSdkSpec
         })?;
 
         self.stats.num_spent += num_spent;
+        self.stats.num_burnt += num_burnt;
         Ok(true)
+    }
+
+    /// Settles each reported burn of an output the wallet holds as neither spent nor burnt, and queues it to be
+    /// recorded as a burn or, failing that, as a spend.
+    ///
+    /// Under [`IndexerTrust::Verify`](tari_ootle_wallet_sdk::IndexerTrust::Verify) the indexer must prove that the
+    /// reported version has gone down, as for a spend (see [`Self::retain_proven_spends`]). That shows the version
+    /// gone, not that a burn took it down, so the outputs proven gone are read once more, in one fetch. A proven read
+    /// of a burnt UTXO records the burn. A proven read of a live UTXO shows a re-versioning, and the output is kept at
+    /// the proven version. An answer that refuses the read for good records the spend of the reported version. Any
+    /// other failure fails the round before it stores its progress, so the next scan asks for the burn again.
+    async fn settle_burns(&mut self) -> Result<(), StealthScannerApiError> {
+        if self.utxos_to_burn.is_empty() {
+            return Ok(());
+        }
+        let mut burns = Vec::with_capacity(self.utxos_to_burn.len());
+        for burnt in mem::take(&mut self.utxos_to_burn) {
+            let held = self
+                .sdk
+                .store()
+                .with_read_tx(|tx| {
+                    tx.stealth_outputs_get_by_commitment(self.resource_address, &burnt.id.into_commitment_bytes())
+                })
+                .optional()?;
+            let Some(held) = held.filter(|output| !output.status.is_final()) else {
+                continue;
+            };
+            let reported = UtxoSpent {
+                id: burnt.id,
+                version: burnt.version,
+            };
+            if Self::is_superseded(&held, &reported) {
+                continue;
+            }
+            burns.push((held, reported));
+        }
+
+        if !self.sdk.sdk_config().indexer_trust.is_verify() {
+            self.checked_burns.extend(burns.into_iter().map(|(_, burnt)| burnt.id));
+            return Ok(());
+        }
+
+        let substate_api = self.sdk.substate_api();
+        let mut proven_down = Vec::with_capacity(burns.len());
+        for (held, burnt) in burns {
+            let address = UtxoAddress::new(*self.resource_address, burnt.id);
+            match substate_api
+                .verify_down(&address.clone().into(), burnt.version, held.proven_up)
+                .await
+            {
+                Ok(()) => proven_down.push(burnt),
+                Err(err) if is_refusal(&err) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ The indexer reported stealth output {} burnt at v{} without proving it gone ({}). Keeping the output.",
+                        address,
+                        burnt.version,
+                        err
+                    );
+                },
+                Err(err) => return Err(err.into()),
+            }
+        }
+        if proven_down.is_empty() {
+            return Ok(());
+        }
+
+        let ids = proven_down
+            .iter()
+            .map(|burnt| SubstateId::Utxo(UtxoAddress::new(*self.resource_address, burnt.id)))
+            .collect::<Vec<_>>();
+        let reads = substate_api.get_each_substate_from_network(&ids).await?;
+        for (burnt, (_, read)) in proven_down.into_iter().zip(reads) {
+            let address = UtxoAddress::new(*self.resource_address, burnt.id);
+            match read {
+                Ok(read) if read.is_burnt_utxo() => self.checked_burns.push(burnt.id),
+                Ok(read) => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "The indexer reported stealth output {} burnt at v{}, but proved it live at v{}. Keeping the output.",
+                        address,
+                        burnt.version,
+                        read.substate.version()
+                    );
+                    if let Some(proven_up) = read.proven_up {
+                        self.sdk.stealth_outputs_api().record_proven_up(&address, proven_up)?;
+                    }
+                },
+                Err(err) if is_refusal(&err) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ The indexer proved stealth output {} gone at v{}, but did not prove it burnt ({}). Recording it spent.",
+                        address,
+                        burnt.version,
+                        err
+                    );
+                    self.checked_spends.push(burnt);
+                },
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Ok(())
     }
 
     /// Drops each reported spend of an output the wallet holds as not spent, unless the indexer proves that the output
@@ -442,7 +630,7 @@ where TSpec: WalletSdkSpec
                     tx.stealth_outputs_get_by_commitment(self.resource_address, &spent.id.into_commitment_bytes())
                 })
                 .optional()?;
-            let Some(held) = held.filter(|output| !matches!(output.status, OutputStatus::Spent)) else {
+            let Some(held) = held.filter(|output| !output.status.is_final()) else {
                 retained.push(spent);
                 continue;
             };
@@ -456,13 +644,7 @@ where TSpec: WalletSdkSpec
                 .await
             {
                 Ok(()) => retained.push(spent),
-                Err(
-                    err @ (SubstateApiError::SubstateDoesNotExist { .. } |
-                    SubstateApiError::SubstateNotDown { .. } |
-                    SubstateApiError::SubstateUnproven { .. } |
-                    SubstateApiError::SubstateUnverified { .. } |
-                    SubstateApiError::SubstateProvenBeforeAnchor { .. }),
-                ) => {
+                Err(err) if is_refusal(&err) => {
                     warn!(
                         target: LOG_TARGET,
                         "⚠️ The indexer reported stealth output {} spent at v{} without proving it ({}). Keeping the output.",
@@ -475,6 +657,114 @@ where TSpec: WalletSdkSpec
             }
         }
         self.utxos_to_spend = retained;
+        Ok(())
+    }
+
+    /// Queues the spend of each output the wallet holds as live and on chain in one of `shards`, which the indexer may
+    /// lack spends for below the cursor, once the indexer shows that it is gone. The outputs are read in one fetch. One
+    /// the indexer serves live is kept, and one it serves without an output is recorded burnt. Under
+    /// [`IndexerTrust::Verify`](tari_ootle_wallet_sdk::IndexerTrust::Verify) the read must be proven, and the
+    /// indexer must prove gone the version of each other output the wallet holds proven up (see
+    /// [`SubstatesApi::verify_down`]). Otherwise an output the indexer does not serve is gone.
+    ///
+    /// The indexer keeps every unspent output, so the scan of the shard still delivers each new one. A spend after the
+    /// check lands above the indexer's tombstone horizon, so a later scan delivers it.
+    ///
+    /// [`SubstatesApi::verify_down`]: tari_ootle_wallet_sdk::apis::substate::SubstatesApi::verify_down
+    async fn check_held_outputs(&mut self, shards: &HashSet<Shard>) -> Result<(), StealthScannerApiError> {
+        let account = self.account.component_address();
+        let held = self
+            .sdk
+            .store()
+            .with_read_tx(|tx| {
+                let mut held = Vec::new();
+                for status in [OutputStatus::Unspent, OutputStatus::LockedForSpend] {
+                    held.extend(tx.stealth_outputs_get_many(self.resource_address, Some(account), Some(status))?);
+                }
+                Ok::<_, WalletStorageError>(held)
+            })?
+            .into_iter()
+            .filter(|output| output.is_on_chain && shards.contains(&shard_of(output)))
+            .collect::<Vec<_>>();
+        if held.is_empty() {
+            return Ok(());
+        }
+        info!(
+            target: LOG_TARGET,
+            "🔄️ The indexer may lack spends below the scan cursors of {} shard(s) of account {account} (resource {}). Checking the {} stealth output(s) the wallet holds in them.",
+            shards.len(),
+            self.resource_address,
+            held.len(),
+        );
+
+        let substate_api = self.sdk.substate_api();
+        let ids = held
+            .iter()
+            .map(|output| SubstateId::Utxo(output.to_utxo_address()))
+            .collect::<Vec<_>>();
+        let reads = substate_api.get_each_substate_from_network(&ids).await?;
+        let verify = self.sdk.sdk_config().indexer_trust.is_verify();
+        for (output, (_, read)) in held.into_iter().zip(reads) {
+            let address = output.to_utxo_address();
+            match read {
+                Ok(read) if read.is_burnt_utxo() => {
+                    self.checked_burns.push(output.commitment.into());
+                    continue;
+                },
+                Ok(read) => {
+                    // An output a freeze or unfreeze took to a later version is live at it, and later checks prove
+                    // that version gone.
+                    if let Some(proven_up) = read.proven_up {
+                        self.sdk.stealth_outputs_api().record_proven_up(&address, proven_up)?;
+                    }
+                    continue;
+                },
+                Err(SubstateApiError::SubstateDoesNotExist { .. }) => {},
+                Err(err) if is_refusal(&err) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ The indexer served stealth output {address} as live without proving it ({err}). Keeping the output.",
+                    );
+                    continue;
+                },
+                Err(err) => return Err(err.into()),
+            }
+
+            if !verify {
+                // The indexer does not say which version went down. The latest the wallet saw up is the floor.
+                let version = output
+                    .proven_up
+                    .map_or(SubstateVersion::ZERO, |proven_up| proven_up.version);
+                self.checked_spends.push(UtxoSpent {
+                    id: output.commitment.into(),
+                    version,
+                });
+                continue;
+            }
+            let Some(proven_up) = output.proven_up else {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ The indexer does not serve stealth output {address}, and the wallet holds no proof of a version of it to prove it gone with. Keeping the output.",
+                );
+                continue;
+            };
+            match substate_api
+                .verify_down(&address.clone().into(), proven_up.version, Some(proven_up))
+                .await
+            {
+                Ok(()) => self.checked_spends.push(UtxoSpent {
+                    id: output.commitment.into(),
+                    version: proven_up.version,
+                }),
+                Err(err) if is_refusal(&err) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ The indexer does not serve stealth output {address}, but did not prove it gone ({err}). Keeping the output.",
+                    );
+                },
+                Err(err) => return Err(err.into()),
+            }
+        }
         Ok(())
     }
 
@@ -545,8 +835,8 @@ where TSpec: WalletSdkSpec
             );
             return Ok(false);
         };
-        if output.status == OutputStatus::Spent {
-            debug!(target: LOG_TARGET, "Stealth output {} is already spent", spent.id);
+        if output.status.is_final() {
+            debug!(target: LOG_TARGET, "Stealth output {} is already {:?}", spent.id, output.status);
             return Ok(false);
         }
         if Self::is_superseded(&output, spent) {
@@ -556,6 +846,27 @@ where TSpec: WalletSdkSpec
         info!(target: LOG_TARGET, "Marked stealth output {} as spent", spent.id);
         Ok(true)
     }
+}
+
+/// Whether an answer to [`SubstatesApi::verify_down`] or to a proven read refuses the proof for good, so asking again
+/// shows nothing more.
+///
+/// [`SubstatesApi::verify_down`]: tari_ootle_wallet_sdk::apis::substate::SubstatesApi::verify_down
+fn is_refusal(err: &SubstateApiError) -> bool {
+    matches!(
+        err,
+        SubstateApiError::SubstateDoesNotExist { .. } |
+            SubstateApiError::SubstateNotDown { .. } |
+            SubstateApiError::SubstateUnproven { .. } |
+            SubstateApiError::SubstateUnverified { .. } |
+            SubstateApiError::SubstateProvenBeforeAnchor { .. }
+    )
+}
+
+fn shard_of(output: &StealthOutputModel) -> Shard {
+    let id = SubstateId::Utxo(output.to_utxo_address());
+    // A substate's shard is the same at every version.
+    VersionedSubstateIdRef::new(&id, SubstateVersion::ZERO).to_shard(NUM_PRESHARDS)
 }
 
 /// How far a round may move the cursors it stores.
@@ -640,6 +951,11 @@ pub struct UtxoScanRoundStats {
     pub num_potential_recoveries: usize,
     /// Number of UTXOs that were marked as spent
     pub num_spent: usize,
+    /// Number of UTXOs that were marked as burnt
+    pub num_burnt: usize,
+    /// Number of shards the indexer flagged as possibly lacking spends below their cursors, whose held outputs were
+    /// checked
+    pub num_flagged_shards: usize,
 }
 
 #[cfg(test)]

@@ -36,25 +36,14 @@ mod caller_context_template {
             info!("{}", caller_pub_key);
         }
 
-        pub fn main_signer_proof() -> Proof {
-            CallerContext::get_main_signer_proof()
+        pub fn assert_badge_in_scope(badge: NonFungibleAddress) {
+            CallerContext::assert_badge_in_scope(&badge);
         }
 
-        pub fn signer_proof_for_pk(public_key: RistrettoPublicKeyBytes) -> Proof {
-            CallerContext::get_signer_proof_for_public_key(public_key)
-        }
-
-        pub fn check_pk_proof(proof: Proof, expected_pk: RistrettoPublicKeyBytes) {
-            assert!(proof.resource_address().is_public_key_resource());
-            proof.authorize_with(|| {});
-            let badge = proof.get_non_fungibles().pop_first().unwrap();
-            assert_eq!(badge.as_u256().unwrap(), expected_pk.as_bytes());
-        }
-
-        /// Calls the `main_signer_proof` function of the template at the given address, using the `TemplateManager` to
-        /// call across template contexts. All signers are out of scope in cross-template calls
-        pub fn call_using_cross_template(addr: TemplateAddress) -> Proof {
-            TemplateManager::get(addr).call("main_signer_proof", args![])
+        /// Calls `assert_badge_in_scope` of the template at `addr` through the `TemplateManager`, so that the check
+        /// runs in a frame this function pushes.
+        pub fn assert_badge_in_scope_cross_template(addr: TemplateAddress, badge: NonFungibleAddress) {
+            TemplateManager::get(addr).invoke("assert_badge_in_scope", args![badge]);
         }
     }
 }

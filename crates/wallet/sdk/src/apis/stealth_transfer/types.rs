@@ -5,9 +5,9 @@ use tari_engine_types::stealth::MergedStealthTransferShape;
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_crypto::{StealthInputWitness, memo::Memo, pay_to::PayTo};
-use tari_template_lib::types::{Amount, ComponentAddress, VaultId};
+use tari_template_lib::types::{Amount, ComponentAddress, VaultId, stealth::StealthTransferStatement};
 
-use crate::models::{InputSpendData, StealthUtxoSpendKeyId, WalletPublicKey};
+use crate::models::{InputSpendData, KeyId, StealthUtxoSpendKeyId, WalletPublicKey};
 
 pub struct StealthTransferOutput {
     pub transaction: UnsignedTransaction,
@@ -19,6 +19,16 @@ pub struct StealthTransferOutput {
     /// What a static fee estimate needs to price this build, when its shape is one the estimate
     /// covers. `None` for every other shape — see [`StaticallyPricedShape`].
     pub statically_priced_shape: Option<StaticallyPricedShape>,
+}
+
+/// The statements built by `StealthTransferApi::create_transfer_statements`, in request order, and the keys that must
+/// sign a transaction carrying them.
+pub struct TransferStatements {
+    pub statements: Vec<StealthTransferStatement>,
+    /// The signer of each statement, without repeats. A statement's revealed output is authorised to its signer.
+    pub signing_keys: Vec<KeyId>,
+    /// The stealth spend keys of every input the statements spend.
+    pub utxo_signers: Vec<StealthUtxoSpendKeyId>,
 }
 
 /// The counts a [`MergedStealthTransferShape`] is built from, recorded while the transfer is built.

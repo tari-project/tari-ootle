@@ -136,7 +136,7 @@ pub enum JmtHashScheme {
 
 // Leaf and internal node hashes use distinct labels so that a leaf can never be passed off as an internal node (or
 // vice versa) in a proof, since both hash two 32-byte values.
-fn jmt_leaf_hash(scheme: JmtHashScheme, key: &LeafKey, value_hash: &TreeHash) -> TreeHash {
+pub(crate) fn jmt_leaf_hash(scheme: JmtHashScheme, key: &LeafKey, value_hash: &TreeHash) -> TreeHash {
     match scheme {
         JmtHashScheme::V1 => tari_hasher32::<JmtHashDomain>("Leaf")
             .chain(&key.bytes)
@@ -146,7 +146,7 @@ fn jmt_leaf_hash(scheme: JmtHashScheme, key: &LeafKey, value_hash: &TreeHash) ->
     }
 }
 
-fn jmt_internal_hash(scheme: JmtHashScheme, left: &TreeHash, right: &TreeHash) -> TreeHash {
+pub(crate) fn jmt_internal_hash(scheme: JmtHashScheme, left: &TreeHash, right: &TreeHash) -> TreeHash {
     match scheme {
         JmtHashScheme::V1 => tari_hasher32::<JmtHashDomain>("Internal")
             .chain(left)

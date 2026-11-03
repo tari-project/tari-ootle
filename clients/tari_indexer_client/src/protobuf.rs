@@ -30,13 +30,14 @@ pub struct StartOfShard {
     pub has_more: bool,
     /// This indexer may lack the tombstones of outputs spent in the shard between the request's
     /// cursor and its tombstone horizon (`utxo_tombstone_horizons` on `/info`), so a held output
-    /// that is not reported spent may still be spent. Set only when the request includes spends. A
-    /// client clears the shard's cursor and rescans it for unspent outputs, then checks each held
-    /// output the rescan does not return. A pass that reaches the end of the shard reports at least
-    /// the horizon as its `max_state_version`, so resuming from the rescan clears the flag.
+    /// that is not reported spent may still be spent. Set only when the request includes spends.
+    /// Every unspent output is kept, so the pass still delivers each new one. A client checks each
+    /// output it holds in the shard before it stores the shard's cursor. A pass that reaches the
+    /// end of the shard reports at least the horizon as its `max_state_version`, so resuming from
+    /// it clears the flag.
     #[prost(bool, tag = "5")]
     #[serde(default)]
-    pub resync_required: bool,
+    pub spends_incomplete: bool,
 }
 
 #[derive(::prost::Message, serde::Serialize, serde::Deserialize)]

@@ -413,7 +413,7 @@ pub async fn handle_view_vault_balance(
         .iter()
         .map(|commitment| SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(resource_address, *commitment)))
         .collect::<Vec<_>>();
-    let mut substates = sdk.substate_api().get_substates_from_network(addresses).await?;
+    let mut substates = sdk.substate_api().get_substates_from_network(&addresses).await?;
 
     let mut viewable = Vec::new();
     for commitment in commitments {

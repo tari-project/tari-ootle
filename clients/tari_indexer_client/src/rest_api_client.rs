@@ -49,8 +49,6 @@ use crate::{
         ListTemplateCatalogueResponse,
         ListTransactionReceiptsRequest,
         ListTransactionReceiptsResponse,
-        ListUtxosRequest,
-        ListUtxosResponse,
         ListWatchedSubstatesRequest,
         ListWatchedSubstatesResponse,
         ListWatchedTemplatesResponse,
@@ -298,10 +296,6 @@ impl IndexerRestApiClient {
 
     pub async fn get_utxos(&self, req: GetUtxosRequest) -> Result<GetUtxosResponse, IndexerRestClientError> {
         self.send_post("utxos/fetch", req).await
-    }
-
-    pub async fn list_utxos(&self, req: ListUtxosRequest) -> Result<ListUtxosResponse, IndexerRestClientError> {
-        self.send_get("utxos", req).await
     }
 
     pub async fn list_transaction_receipts(

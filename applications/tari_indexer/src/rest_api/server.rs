@@ -67,7 +67,6 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::templates::list_template_catalogue,
     handlers::templates::get_template_catalogue_entry,
     handlers::utxos::fetch_utxos,
-    handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
     handlers::transaction_receipts::list_transaction_receipts,
     handlers::transaction_receipts::get_transaction_receipt,
@@ -284,9 +283,6 @@ fn api_routes(rate_limits: &IndexerRateLimitsConfig, sse_metrics: &SseConnection
                 .route_layer(middleware::from_fn_with_state(reads_limiter.clone(), rate_limit_middleware))
             )
             .nest("/utxos", Router::new()
-                // GET /utxos – per-IP rate limit (rate_limits.utxos_fetch_rate)
-                .route("/", get(handlers::utxos::list_utxos)
-                .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter.clone(), rate_limit_middleware)))
                 // POST /utxos/fetch – per-IP rate limit (rate_limits.utxos_fetch_rate)
                 .route("/fetch", post(handlers::utxos::fetch_utxos)
                     .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter, rate_limit_middleware)))

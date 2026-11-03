@@ -1,7 +1,7 @@
 [package]
 name = "tari_ootle_wallet_storage_sqlite"
 description = "The Tari wallet SQLite storage library"
-version = "0.49.0"
+version = "0.51.0"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -33,6 +33,7 @@ ootle_byte_type = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_crypto = { workspace = true }
 tari_ootle_light_client = { workspace = true, features = ["test-fixtures"] }
+tempfile = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = [

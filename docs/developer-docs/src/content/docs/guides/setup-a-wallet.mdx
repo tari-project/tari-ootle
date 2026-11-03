@@ -147,6 +147,10 @@ To reset your wallet and clear all local on-chain state (accounts, transactions,
 This will move your wallet database to a timestamped backup file (e.g. `wallet.sqlite.1711540000.bak`) and
 print a confirmation. The next time you start the wallet daemon, a fresh database will be created automatically.
 
+The backup may come with `-wal` and `-shm` files beside it (e.g. `wallet.sqlite.1711540000.bak-wal`), which can
+hold changes not yet written into the `.bak` file. Keep them together, and to restore the backup, rename all of
+them back to `wallet.sqlite`, `wallet.sqlite-wal` and `wallet.sqlite-shm`.
+
 <Aside type="tip">
   Your seed key is stored in the OS keyring and is **not** affected by the reset. After resetting, your
   wallet will derive the same addresses from the seed, so your send addresses remain the same. However,

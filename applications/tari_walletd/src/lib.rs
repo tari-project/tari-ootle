@@ -27,7 +27,7 @@ mod server;
 mod services;
 mod webrtc;
 
-use std::{fs, panic, pin, process};
+use std::{fs, io::IsTerminal, panic, pin, process, time::Duration};
 
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
@@ -156,6 +156,7 @@ pub async fn run_tari_ootle_walletd(
         );
     }
     let authenticator = create_authenticator(&config.ootle_wallet_daemon, wallet_store.clone())?;
+    let webauthn_service = authenticator.webauthn_service().cloned();
     if config.ootle_wallet_daemon.enable_webrtc {
         info!(
             target: LOG_TARGET,
@@ -193,10 +194,10 @@ pub async fn run_tari_ootle_walletd(
         config.ootle_wallet_daemon.clone(),
         authenticator,
         jwt_secret,
-        shutdown_signal,
+        shutdown_signal.clone(),
     )
     .with_cookie_token(cookie);
-    let (_jrpc_address, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
+    let (jrpc_address, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
 
     #[cfg(not(feature = "web_ui"))]
     info!(
@@ -212,24 +213,103 @@ pub async fn run_tari_ootle_walletd(
             e
         )
     }
+
+    if let Some(webauthn_service) = webauthn_service {
+        if !webauthn_service.is_enrolled()? {
+            let (setup_token, setup_token_path) =
+                webauthn_service.issue_setup_token_to_file(config.common.base_path())?;
+            let ui_origin = config
+                .ootle_wallet_daemon
+                .webauthn
+                .rp_origin
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| {
+                    Url::parse(format!("http://localhost:{}", jrpc_address.port()).as_str())
+                        .expect("url cannot be invalid")
+                });
+            let register_url = format!("{}/register", ui_origin.as_str().trim_end_matches('/'));
+            info!(
+                target: LOG_TARGET,
+                "🔑 No WebAuthn passkey is enrolled. Register your first passkey at {register_url} using the one-time setup token in {}",
+                setup_token_path.display()
+            );
+            // The tokenised link goes to stdout only: log appenders persist it in files that outlive the token.
+            let heading = if cfg!(not(windows)) &&
+                std::io::stdout().is_terminal() &&
+                std::env::var_os("NO_COLOR").is_none() &&
+                std::env::var("TERM").as_deref() != Ok("dumb")
+            {
+                "\x1b[1;33mACTION REQUIRED — Set up your wallet passkey\x1b[0m"
+            } else {
+                "ACTION REQUIRED — Set up your wallet passkey"
+            };
+            let separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            println!(
+                "\n{separator}\n{heading}\n{separator}\n\nOpen this link in your \
+                 browser:\n\n{register_url}?token={}\n\n{separator}\n",
+                setup_token.as_str()
+            );
+        } else if let Err(err) = services::remove_setup_token_file(config.common.base_path()) {
+            warn!(
+                target: LOG_TARGET,
+                "Failed to remove stale setup token file in {}: {}",
+                config.common.base_path().display(),
+                err
+            );
+        } else {
+            // Already enrolled and no stale setup token removal error
+        }
+    }
+
     // Wait for shutdown, or for any service to error
-    tokio::select! {
-        res = listen_fut => {
-            res??;
+    let result = tokio::select! {
+        res = listen_fut => match res {
+            Ok(res) => res,
+            Err(err) => Err(err.into()),
         },
         res = services.services_fut => {
             match res {
                 Ok(_) => {
                     info!(target: LOG_TARGET, "All services have shut down");
+                    Ok(())
                 },
                 Err(err) => {
                     error!(target: LOG_TARGET, "🚨 A service has crashed: {}. Shutting down", err);
-                    return Err(err);
+                    Err(err)
                 },
             }
         },
+    };
+    close_wallet_store(&wallet_store, shutdown_signal).await;
+    result
+}
+
+/// How long a shutdown waits for the services to stop before it checkpoints the wallet database regardless.
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Folds the write-ahead log into the wallet database, so that the database file alone holds the wallet once walletd
+/// exits. On a shutdown, each service drops its shutdown signal as it stops, so the checkpoint waits for those signals
+/// to take in the services' last writes.
+async fn close_wallet_store(wallet_store: &SqliteWalletStore, shutdown_signal: ShutdownSignal) {
+    if shutdown_signal.is_triggered() &&
+        tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, shutdown_signal.drained())
+            .await
+            .is_err()
+    {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ Services did not stop within {}s. Checkpointing the wallet database without them.",
+            SHUTDOWN_DRAIN_TIMEOUT.as_secs()
+        );
     }
-    Ok(())
+    match wallet_store.checkpoint() {
+        Ok(()) => info!(target: LOG_TARGET, "💾 Wallet database checkpointed"),
+        Err(err) => warn!(
+            target: LOG_TARGET,
+            "⚠️ Failed to checkpoint the wallet database: {err}. The next start applies the write-ahead log."
+        ),
+    }
 }
 
 /// Installs the OS-native credential store that the wallet SDK uses to hold the cipher seed password.
@@ -274,6 +354,22 @@ pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWal
     Ok(store)
 }
 
+/// Removes all enrolled WebAuthn passkeys from the wallet database and deletes
+/// `<base_path>/setup_token` if present.
+///
+/// Stop or restart the wallet daemon when running this: restarting the daemon rotates its
+/// in-memory JWT signing secret (invalidating any active sessions) and issues a fresh one-time
+/// setup token for passkey enrollment.
+pub fn reset_wallet_passkeys(config: &ApplicationConfig) -> anyhow::Result<usize> {
+    use tari_ootle_wallet_sdk::storage::{CommittableStore, WalletStoreWriter, WriteableWalletStore};
+    let store = init_wallet_store(config)?;
+    let mut tx = store.create_write_tx()?;
+    let deleted = tx.webauthn_reg_clear_all()?;
+    tx.commit()?;
+    services::remove_setup_token_file(config.common.base_path())?;
+    Ok(deleted)
+}
+
 pub fn initialize_wallet_sdk(config: &ApplicationConfig, store: SqliteWalletStore) -> anyhow::Result<WalletSdk> {
     let sdk_config = WalletSdkConfig {
         network: config.ootle_wallet_daemon.network,
@@ -309,4 +405,64 @@ fn create_secret_password() -> SafePassword {
     let secret = RistrettoSecretKey::random(&mut rand::rng());
     // It is safe to use to_hex() since the String's underlying Vec is moved directly into SafePassword
     SafePassword::from(secret.to_hex())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::Path};
+
+    use tari_ootle_wallet_sdk::storage::{WalletStoreWriter, WriteableWalletStore};
+    use tari_shutdown::Shutdown;
+    use tokio::time::{Instant, sleep};
+
+    use super::*;
+
+    fn open_store(dir: &Path) -> SqliteWalletStore {
+        let store = SqliteWalletStore::try_open(dir.join("wallet.sqlite")).unwrap();
+        store.run_migrations().unwrap();
+        store
+    }
+
+    fn wal_len(dir: &Path) -> u64 {
+        fs::metadata(dir.join("wallet.sqlite-wal")).unwrap().len()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_checkpoint_takes_in_the_last_write_of_a_service_that_is_stopping() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = open_store(temp.path());
+        let shutdown = Shutdown::new();
+        let service_signal = shutdown.to_signal();
+        let service_store = store.clone();
+        let service = tokio::spawn(async move {
+            sleep(Duration::from_secs(1)).await;
+            service_store
+                .with_write_tx(|tx| tx.config_set("last_write", &1u64, false))
+                .unwrap();
+            drop(service_signal);
+        });
+        shutdown.trigger();
+
+        let started = Instant::now();
+        close_wallet_store(&store, shutdown.to_signal()).await;
+
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
+        assert_eq!(wal_len(temp.path()), 0, "the service's last write is checkpointed");
+        service.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_service_that_does_not_stop_delays_the_checkpoint_by_the_drain_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = open_store(temp.path());
+        let shutdown = Shutdown::new();
+        let _stuck_service_signal = shutdown.to_signal();
+        shutdown.trigger();
+
+        let started = Instant::now();
+        close_wallet_store(&store, shutdown.to_signal()).await;
+
+        assert_eq!(started.elapsed(), SHUTDOWN_DRAIN_TIMEOUT);
+        assert_eq!(wal_len(temp.path()), 0);
+    }
 }

@@ -9,8 +9,8 @@
 //! - [`Instruction`] — the APDU instruction set (sent under class byte `0x80`).
 //! - [`OotleStatusWord`] — app-specific error status words returned by the device.
 //! - [`arg_types`] — borsh-encoded request/response bodies and the framing of the streamed `SignTransaction` exchange.
-//! - [`signing`] — domain-separation constants the device uses to recompute the transaction signing message and Schnorr
-//!   challenge.
+//! - [`signing`] — domain-separation constants the device uses to recompute the transaction signing message, and the
+//!   sr25519 signing context of the signature over it.
 //!
 //! The crate is `no_std` by default so it can build inside the Ledger embedded app; the host
 //! enables the `std` feature.
@@ -20,9 +20,10 @@
 pub mod arg_types;
 
 /// Constants defining the exact byte recipe a hardware signer reproduces to recompute a
-/// transaction's signing message and Schnorr challenge. These mirror the domains used by
-/// `tari_ootle_transaction`'s `transaction_hasher_v1` and `tari_crypto`'s `SchnorrSigChallenge`,
-/// and are shared by the device implementation and the host reference test so both stay aligned.
+/// transaction's signing message and sign it. These mirror the domain used by
+/// `tari_ootle_transaction`'s `transaction_hasher_v1` and the signing context of
+/// `tari_ootle_common_types::signature`, and are shared by the device implementation and the host
+/// reference test so both stay aligned.
 pub mod signing {
     /// Domain for the Ootle transaction message digest (`transaction_hasher_v1`).
     pub const TX_DOMAIN: &str = "com.tari.ootle.transaction";
@@ -32,10 +33,8 @@ pub mod signing {
     /// Label for a seal signature message.
     pub const TX_LABEL_SEAL: &str = "SealSignature";
 
-    /// Domain for the `tari_crypto` Ristretto Schnorr challenge (`SchnorrSigChallenge`).
-    pub const SCHNORR_DOMAIN: &str = "com.tari.schnorr_signature";
-    pub const SCHNORR_DOMAIN_VERSION: u8 = 1;
-    pub const SCHNORR_LABEL: &str = "challenge";
+    /// sr25519 signing context of transaction signatures (`TRANSACTION_SIGNING_CONTEXT`).
+    pub const SIGNING_CONTEXT: &[u8] = b"substrate";
 
     /// Domain for Ootle wallet key-derivation KDFs, mirroring `OotleWalletHashDomain` in
     /// `tari_ootle_wallet_crypto::hashers`. Used to derive the stealth owner signing key on-device.
@@ -45,9 +44,11 @@ pub mod signing {
     /// appends `.n{network_byte}`, matching `wallet_hasher64`.
     pub const STEALTH_OWNER_LABEL: &str = "stealth_owner";
 
-    /// Device-internal domain tag for deterministic (synthetic) nonce derivation. Not part of any
-    /// network format — only the resulting signature must verify — so this is chosen freely.
-    pub const NONCE_DOMAIN: &[u8] = b"com.tari.ootle.ledger.schnorr_nonce.v1";
+    /// Device-internal domain tag for deterministic (synthetic) nonce derivation. Only the resulting
+    /// signature must verify, so this is chosen freely, but it must change with any change to the
+    /// signature scheme: two schemes that share a nonce for the same key and message but hash
+    /// different challenges leak the key from one signature of each.
+    pub const NONCE_DOMAIN: &[u8] = b"com.tari.ootle.ledger.sr25519_nonce.v1";
 }
 
 /// APDU instruction set for the Ootle Ledger app.

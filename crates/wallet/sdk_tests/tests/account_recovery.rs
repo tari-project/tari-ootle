@@ -31,13 +31,13 @@ use tari_ootle_wallet_sdk::{
     network::{
         FetchedSubstates,
         FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedStream,
         TransactionQueryResult,
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
-    storage::TagAndPublicNoncePair,
 };
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitor,
@@ -121,7 +121,7 @@ impl WalletNetworkInterface for OneUtxoNetwork {
         Err(FakeError::NotFound)
     }
 
-    async fn get_substates(&self, _: Vec<SubstateId>, _: bool) -> Result<FetchedSubstates, Self::Error> {
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("OneUtxoNetwork::get_substates called")
     }
 
@@ -168,6 +168,7 @@ impl WalletNetworkInterface for OneUtxoNetwork {
                 shard,
                 max_state_version: StateVersion::from(1),
                 has_more: false,
+                spends_incomplete: false,
             }),
             update: Some(WalletUtxoUpdate::Unspent(utxo)),
             eos: Some(EndOfShard {
@@ -189,7 +190,7 @@ impl WalletNetworkInterface for OneUtxoNetwork {
     async fn fetch_utxos(
         &self,
         _: ResourceAddress,
-        _: Vec<TagAndPublicNoncePair>,
+        _: Vec<PlacedTagAndNoncePair>,
     ) -> Result<FetchedUtxos, Self::Error> {
         panic!("OneUtxoNetwork::fetch_utxos called")
     }

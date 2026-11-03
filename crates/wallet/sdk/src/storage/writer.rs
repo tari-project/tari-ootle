@@ -57,7 +57,7 @@ use crate::{
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{CommittableStore, WalletStorageError},
+    storage::{CommittableStore, QueuedUtxo, WalletStorageError},
 };
 
 pub trait WalletStoreWriter: CommittableStore {
@@ -219,6 +219,9 @@ pub trait WalletStoreWriter: CommittableStore {
         id: &UtxoId,
         version: SubstateVersion,
     ) -> Result<(), WalletStorageError>;
+    /// Marks the output at `address` burnt and releases it from any lock, unless it is spent or burnt already. A burn
+    /// is final, so a spent or burnt output keeps its status. Returns whether the output was marked.
+    fn stealth_outputs_mark_as_burnt(&mut self, address: &UtxoAddress) -> Result<bool, WalletStorageError>;
     fn stealth_outputs_update(
         &mut self,
         address: &UtxoAddress,
@@ -368,6 +371,8 @@ pub trait WalletStoreWriter: CommittableStore {
     fn webauthn_reg_rename_passkey(&mut self, id: u32, label: &str) -> Result<(), WalletStorageError>;
     /// Delete a passkey by id. Returns `NotFound` if `id` does not exist.
     fn webauthn_reg_delete_passkey(&mut self, id: u32) -> Result<(), WalletStorageError>;
+    /// Removes all stored WebAuthn passkeys and registration rows, returning how many passkeys were deleted.
+    fn webauthn_reg_clear_all(&mut self) -> Result<usize, WalletStorageError>;
 
     // Authored templates
     fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError>;
@@ -390,7 +395,9 @@ pub trait WalletStoreWriter: CommittableStore {
         shards: I,
     ) -> Result<(), WalletStorageError>;
 
-    fn utxo_process_queue_extend<I: IntoIterator<Item = (ComponentAddress, UtxoUnspent)>>(
+    /// Queues each UTXO for recovery. A UTXO already queued for the account keeps one entry, unspent where
+    /// [`QueuedUtxo::merge_unspent_at`] places both.
+    fn utxo_process_queue_extend<I: IntoIterator<Item = (UtxoUnspent, QueuedUtxo)>>(
         &mut self,
         resource_address: &ResourceAddress,
         items: I,

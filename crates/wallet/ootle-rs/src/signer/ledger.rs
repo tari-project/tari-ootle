@@ -21,6 +21,7 @@ use ootle_ledger_client::{Exchange, LedgerClient, LedgerClientError};
 use ootle_ledger_common::arg_types::{KeyType, SignMode, SigningField, StealthTweak};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_ootle_address::OotleAddress;
+use tari_ootle_common_types::signature::Sr25519SignatureBytes;
 use tari_ootle_transaction::{
     IntoSigned,
     PreimageField,
@@ -29,9 +30,11 @@ use tari_ootle_transaction::{
     TransactionSealSignature,
     TransactionSignature,
     UnsealedTransaction,
+    UnsealedTransactionV1,
     UnsignedTransaction,
+    UnsignedTransactionV1,
 };
-use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     Address,
@@ -41,9 +44,10 @@ use crate::{
     wallet::TransactionAuthorization,
 };
 
-/// The oldest device app whose stealth keys this signer can use. Earlier apps tweak the account key
-/// with `H(k·R)`, which matches no output a current sender creates.
-const MIN_APP_VERSION: (u64, u64, u64) = (0, 3, 0);
+/// The oldest device app that signs sr25519. Earlier apps sign Tari Schnorr signatures, which do not
+/// verify as transaction signatures, and tweak stealth keys with `H(k·R)`, which matches no output a
+/// current sender creates.
+const MIN_APP_VERSION: (u64, u64, u64) = (0, 4, 0);
 
 /// A signer backed by an Ootle Ledger device over an arbitrary APDU transport `T`.
 pub struct LedgerSigner<T> {
@@ -103,7 +107,7 @@ where
         mode: SignMode,
         stealth_public_nonce: Option<[u8; 32]>,
         segments: Vec<PreimageSegment>,
-    ) -> signer::Result<(RistrettoPublicKeyBytes, SchnorrSignatureBytes)> {
+    ) -> signer::Result<(RistrettoPublicKeyBytes, Sr25519SignatureBytes)> {
         let refs: Vec<(SigningField, &[u8])> = segments
             .iter()
             .map(|seg| (to_wire(seg.field), seg.bytes.as_slice()))
@@ -123,8 +127,7 @@ where
             .map_err(map_client_err)?;
 
         let public_key = RistrettoPublicKeyBytes::from(response.public_key);
-        let signature = SchnorrSignatureBytes::try_from(&response.signature[..])
-            .map_err(|_| SignerError::other("device returned malformed signature bytes"))?;
+        let signature = Sr25519SignatureBytes::from_array(response.signature);
         Ok((public_key, signature))
     }
 
@@ -157,7 +160,7 @@ where
         let UnsealedTransaction::V1(unsealed) = message;
         let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
         let (public_key, signature) = self.stream(SignMode::Seal, None, segments).await?;
-        Ok(TransactionSealSignature::new(public_key, signature))
+        verified_seal(TransactionSealSignature::new(public_key, signature), unsealed)
     }
 
     async fn sign_authorization(
@@ -168,7 +171,7 @@ where
         let UnsignedTransaction::V1(unsigned) = tx;
         let segments = TransactionSignature::signing_preimage_v1(seal_signer, unsigned);
         let (public_key, signature) = self.stream(SignMode::AddSigner, None, segments).await?;
-        Ok(TransactionSignature::new(public_key, signature).into())
+        verified_authorization(TransactionSignature::new(public_key, signature), seal_signer, unsigned)
     }
 }
 
@@ -205,7 +208,7 @@ where
         let (public_key, signature) = self
             .stream(SignMode::AddSigner, Some(nonce_bytes(public_nonce)), segments)
             .await?;
-        Ok(TransactionSignature::new(public_key, signature).into())
+        verified_authorization(TransactionSignature::new(public_key, signature), seal_signer, unsigned)
     }
 
     async fn seal_transaction_with_stealth(
@@ -219,7 +222,7 @@ where
         let (public_key, signature) = self
             .stream(SignMode::Seal, Some(nonce_bytes(public_nonce)), segments)
             .await?;
-        Ok(TransactionSealSignature::new(public_key, signature))
+        verified_seal(TransactionSealSignature::new(public_key, signature), unsealed)
     }
 }
 
@@ -235,6 +238,33 @@ where
     }
 }
 
+/// The device computes the signing message from the streamed preimage itself, so its signature is
+/// checked against the message the host computes before it is attached.
+fn verified_seal(
+    signature: TransactionSealSignature,
+    unsealed: &UnsealedTransactionV1,
+) -> signer::Result<TransactionSealSignature> {
+    if !signature.verify_v1(unsealed) {
+        return Err(SignerError::other(
+            "the Ledger device returned a seal signature that does not verify for this transaction",
+        ));
+    }
+    Ok(signature)
+}
+
+fn verified_authorization(
+    signature: TransactionSignature,
+    seal_signer: &RistrettoPublicKeyBytes,
+    unsigned: &UnsignedTransactionV1,
+) -> signer::Result<TransactionAuthorization> {
+    if !signature.verify_v1(seal_signer, unsigned) {
+        return Err(SignerError::other(
+            "the Ledger device returned an authorization signature that does not verify for this transaction",
+        ));
+    }
+    Ok(signature.into())
+}
+
 fn check_app_version(version: &str) -> signer::Result<()> {
     let parsed = version
         .split('.')
@@ -247,7 +277,7 @@ fn check_app_version(version: &str) -> signer::Result<()> {
         Some(_) => {
             let (major, minor, patch) = MIN_APP_VERSION;
             Err(SignerError::other(format!(
-                "Ledger app {version} derives stealth keys this wallet cannot use; update the Ootle Ledger app to \
+                "Ledger app {version} signs in a format this wallet cannot use; update the Ootle Ledger app to \
                  {major}.{minor}.{patch} or later"
             )))
         },
@@ -356,10 +386,11 @@ mod tests {
 
     #[test]
     fn app_versions_below_the_minimum_are_rejected() {
-        assert!(check_app_version("0.3.0").is_ok());
-        assert!(check_app_version("0.3.1").is_ok());
+        assert!(check_app_version("0.4.0").is_ok());
+        assert!(check_app_version("0.4.1").is_ok());
         assert!(check_app_version("1.0.0").is_ok());
-        assert!(check_app_version("0.2.9").is_err());
+        assert!(check_app_version("0.3.9").is_err());
+        assert!(check_app_version("0.3.0").is_err());
         assert!(check_app_version("0.2.0").is_err());
         assert!(check_app_version("0.3").is_err());
         assert!(check_app_version("not-a-version").is_err());

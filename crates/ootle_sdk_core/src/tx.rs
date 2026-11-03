@@ -3,8 +3,8 @@
 
 //! Sign → seal → BOR-encode an [`UnsignedTransaction`] into submit-ready bytes + transaction id.
 //!
-//! Signing always uses a fresh random Schnorr nonce (`RistrettoSchnorr::sign(secret, msg,
-//! &mut rand::rng())` inside `TransactionSignature::sign_v1` / `TransactionSealSignature::sign_v1`),
+//! Signing always uses a fresh random nonce (`TRANSACTION_SIGNING_CONTEXT.sign` inside
+//! `TransactionSignature::sign_v1` / `TransactionSealSignature::sign_v1`),
 //! so the sealed bytes and id are unique per call — the safe default for real submission. Nothing here
 //! pins a signature nonce from a seed.
 //!
@@ -22,6 +22,7 @@ use tari_ootle_transaction::{
     Transaction,
     TransactionEnvelope,
     TransactionId,
+    TransactionMessage,
     TransactionSignature,
     UnsealedTransactionV1,
     UnsignedTransaction,
@@ -107,7 +108,10 @@ fn main_signer_with_auth(
 /// Re-derives the authorization signing message a co-signer must sign: the digest committing to the
 /// seal signer's public key and the unsigned transaction (`TransactionSignature::create_message_v1`).
 /// A and B both compute this from the identical unsigned record, so they agree on the message.
-pub fn cosign_auth_message(seal_signer_pk: &RistrettoPublicKeyBytes, unsigned: &UnsignedTransaction) -> [u8; 64] {
+pub fn cosign_auth_message(
+    seal_signer_pk: &RistrettoPublicKeyBytes,
+    unsigned: &UnsignedTransaction,
+) -> TransactionMessage {
     let UnsignedTransaction::V1(v1) = unsigned;
     TransactionSignature::create_message_v1(seal_signer_pk, v1)
 }

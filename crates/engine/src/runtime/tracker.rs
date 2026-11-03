@@ -51,18 +51,19 @@ use tari_template_lib::{
         Metadata,
         SubstateOwnerRule,
         TemplateAddress,
-        access_rules::ComponentAccessRules,
+        access_rules::{ComponentAccessRules, UpdateRule},
     },
 };
 
 use crate::{
     fees::WasmMeteringRate,
+    intrinsics::IntrinsicEnv,
     runtime::{
         RuntimeError,
         error::ArgumentValidationError,
         fee_state::FeeState,
         locking::LockedSubstate,
-        scope::{CallScope, FrameWriteMode, PushCallFrame},
+        scope::{CallScope, FrameWriteMode, PushCallFrame, RestrictedFrame},
         working_state::{ChargeableState, WorkingState},
         workspace::Workspace,
     },
@@ -150,6 +151,20 @@ pub struct StateTracker<TStore> {
     /// intent is delimited by `fee_checkpoint`, and because the checkpoint clones the working state — a count held
     /// there would be duplicated into the clone.
     fee_intent_stealth_transfers: Cell<usize>,
+}
+
+impl<TStore: StateReader> IntrinsicEnv for StateTracker<TStore> {
+    fn network(&self) -> Network {
+        self.read_with(|state| state.network())
+    }
+
+    fn current_template(&self) -> Result<TemplateAddress, RuntimeError> {
+        self.read_with(|state| state.current_template().copied())
+    }
+
+    fn current_component(&self) -> Result<Option<ComponentAddress>, RuntimeError> {
+        self.read_with(|state| state.current_component())
+    }
 }
 
 impl<TStore: StateReader> StateTracker<TStore> {
@@ -310,6 +325,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         owner_rule: SubstateOwnerRule,
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
+        upgrade_rule: UpdateRule,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
             let template_address = *state.current_template()?;
@@ -333,6 +349,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 access_rules,
                 owner_rule,
                 entity_id: component_address.entity_id(),
+                upgrade_rule,
             };
 
             let component = Component { header, body };
@@ -373,7 +390,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| state.unlock_substate(locked))
     }
 
-    pub fn push_call_frame(&self, push_frame: PushCallFrame) -> Result<(), RuntimeError> {
+    pub fn push_call_frame(
+        &self,
+        push_frame: PushCallFrame,
+        restrict_to: Option<FrameWriteMode>,
+    ) -> Result<(), RuntimeError> {
         self.write_with(|state| {
             // If substates used in args are in scope for the current frame, we can bring then into scope for the new
             // frame
@@ -384,7 +405,12 @@ impl<TStore: StateReader> StateTracker<TStore> {
             );
             state.check_all_substates_in_scope(push_frame.arg_scope())?;
 
-            let new_frame = push_frame.into_new_call_frame();
+            let mut new_frame = push_frame.into_new_call_frame();
+            // Restricted before the push, so the push installs neither signer badges nor a loan into a confined
+            // frame.
+            if let Some(mode) = restrict_to {
+                new_frame.restrict(mode);
+            }
             trace!(target: LOG_TARGET, "NEW CALL FRAME:\n{}", new_frame.scope());
 
             state.push_frame(new_frame, limits::ENGINE_LIMITS.max_call_depth)
@@ -483,6 +509,26 @@ impl<TStore: StateReader> StateTracker<TStore> {
             },
             None => cap_remaining,
         }
+    }
+
+    /// Runs `f` on the working state with access-rule evaluation metered, then charges what the evaluation used as
+    /// native execution. Every access rule is evaluated inside `f`, while the working state is borrowed and no charge
+    /// can be made, so the meter is opened with [`Self::native_execution_headroom`] read beforehand and evaluation
+    /// stops once it has used that. A transaction that cannot pay for the evaluation then fails out of compute here,
+    /// whatever `f` returned.
+    pub(super) fn write_with_authorization<R, E, F>(&self, f: F) -> Result<R, E>
+    where
+        F: FnOnce(&mut WorkingState<TStore>) -> Result<R, E>,
+        E: From<RuntimeError>,
+    {
+        let budget = self.native_execution_headroom();
+        let (result, used) = self.write_with(|state| {
+            state.authorization_meter().open(budget);
+            let result = f(state);
+            (result, state.authorization_meter().close())
+        });
+        self.charge_native_execution(used)?;
+        result
     }
 
     /// Chooses the state that finalization will persist.
@@ -710,6 +756,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub fn is_fee_state_dry_run(&self) -> bool {
         self.read_with(|state| state.fee_state().is_dry_run())
+    }
+
+    pub fn current_restricted_frame(&self) -> RestrictedFrame {
+        self.read_with(|state| state.current_restricted_frame())
     }
 
     /// The write mode of the current call frame. Used by the engine's core sandbox enforcement to deny the few

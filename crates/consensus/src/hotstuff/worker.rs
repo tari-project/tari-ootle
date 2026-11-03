@@ -423,6 +423,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let _cancel_state_tree_gc_task_on_drop = StateTreeGc::new(
             self.state_store.clone(),
             epoch_state.local_committee_info.num_preshards(),
+            self.config.pinned_checkpoint_epochs,
         )
         .do_work_periodically(self.config.state_tree_cleanup_interval);
 
@@ -1669,6 +1670,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             self.on_receive_local_proposal.handle(epoch_state, msg, origin).await,
         ) {
             Ok(no_vote) => {
+                let current_height = self.pacemaker.current_view().get_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
                     if current_height >= catch_up.expected_batch_height {
                         if catch_up.set_next_batch(current_height, self.config.catch_up_request_timeout) {

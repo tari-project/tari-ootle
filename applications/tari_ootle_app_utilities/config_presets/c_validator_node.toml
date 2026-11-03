@@ -37,6 +37,11 @@
 # Set to true to enable auto registration for each epoch (default = true)
 #auto_register = true
 
+# The number of most recent epoch checkpoints at whose versions each shard's whole state tree is kept, so that indexers
+# can take a shard snapshot at one. Disk use grows with the distinct substates changed since the oldest. At least 2.
+# (default = 2)
+#pinned_checkpoint_epochs = 2
+
 #[validator_node.consensus]
 ## Skip the startup state-sync check and go straight into consensus (default = false)
 #skip_sync = false
@@ -48,6 +53,8 @@
 ## The streaming rate, in bytes per second, at which a state version's bytes extend that time, 0 for no extension
 ## (default = 262144)
 #state_sync_min_throughput_bytes_per_sec = 262144
+## How often, in seconds, stale state tree nodes past the history window are deleted (default = 3600)
+#state_tree_cleanup_interval_secs = 3600
 
 #[validator_node.logging]
 ## A filter is a comma-separated list of `target=level` directives plus an optional bare level for every other target.

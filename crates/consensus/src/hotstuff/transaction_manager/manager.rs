@@ -569,7 +569,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             execution_locked_epoch,
         )?;
 
-        let is_outputs_local_only = local_committee_info.is_all_local(execution.resulting_outputs());
+        let is_outputs_local_only = local_committee_info.is_all_local(execution.involved_outputs());
         if is_outputs_local_only {
             // CASE: All inputs are local and all outputs are local
             info!(
@@ -1760,6 +1760,13 @@ mod tests {
                 .up_iter()
                 .any(|(id, _)| [component_id(2), component_id(3)].contains(id))
         );
+        let evidence = prepared[0].execution.to_evidence(NumPreshards::P256, 1);
+        assert_eq!(evidence.num_shard_groups(), 1);
+        assert!(
+            !evidence
+                .all_outputs_iter()
+                .any(|(_, id, _)| [component_id(2), component_id(3)].contains(id))
+        );
         // The failed attempt's locks are released, so nothing only the main intent creates stays locked
         for id in [component_id(2), component_id(3)] {
             assert!(!locks.iter().any(|(_, locked, _)| *locked == id), "{id} in {locks:?}");
@@ -1939,9 +1946,17 @@ mod tests {
         assert!(!locked.lock_status.is_any_failed(), "{:?}", locked.lock_status);
         assert!(locked.execution.result().finalize.is_fee_only());
         assert!(locked_ids.contains(&component_id(1)), "{locked_ids:?}");
+        let rejected = locked
+            .execution
+            .rejected_outputs()
+            .iter()
+            .map(|output| output.substate_id().clone())
+            .collect::<Vec<_>>();
         for id in [component_id(2), component_id(3)] {
             assert!(!locked_ids.contains(&id), "{id} in {locked_ids:?}");
+            assert!(rejected.contains(&id), "{id} not in {rejected:?}");
         }
+        assert_eq!(rejected.len(), 2, "{rejected:?}");
     }
 
     #[test]

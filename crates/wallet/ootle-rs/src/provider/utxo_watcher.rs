@@ -74,6 +74,18 @@ pub enum StealthUtxoFrame {
         /// The shard has updates beyond this pass. Poll again to drain it rather than waiting for
         /// the next scheduled pass.
         has_more: bool,
+        /// The indexer may lack the spends of the shard's outputs below its tombstone horizon, which
+        /// the request's cursor is below, so an output the application holds that this pass does
+        /// not report spent may still be spent. Set only when the request includes spends. The
+        /// indexer keeps every unspent output, so the pass still delivers each new one.
+        ///
+        /// Process the shard as usual, but before persisting its watermark, check each output the
+        /// application holds in the shard, for instance with
+        /// [`IndexerProvider::get_substate`](crate::provider::IndexerProvider::get_substate): an
+        /// output the indexer no longer serves is gone. A spend after the check lands above the
+        /// horizon, so a later pass reports it. A monitor that stops before the check is asked
+        /// again, as its persisted watermark is still below the horizon.
+        spends_incomplete: bool,
     },
     /// A currently-unspent output. Carries only the `(tag, public_nonce)` fetch key — the commitment
     /// and viewable-balance ciphertext must be resolved via
@@ -165,6 +177,7 @@ impl StealthUtxoStream {
                                 max_state_version: StateVersion::from(sos.max_state_version),
                                 num_updates: sos.num_updates,
                                 has_more: sos.has_more,
+                                spends_incomplete: sos.spends_incomplete,
                             });
                         }
                         if let Some(update) = update {

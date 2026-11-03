@@ -896,6 +896,9 @@ pub struct GetUtxoUpdatesResponse {
     pub updates: UtxoUpdateSet,
 }
 
+/// A shard and a state version of it.
+pub type ShardStateVersion = (Shard, StateVersion);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -904,42 +907,41 @@ pub struct GetUtxosRequest {
     pub tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub resource_address: ResourceAddress,
+    /// Empty, or for each pair of `tag_and_nonce_pairs` in order, the shard and state version the client saw its UTXO
+    /// unspent at, or `null` when it does not know them. A pair with no unspent UTXO is reported in `spent` once this
+    /// indexer has indexed its shard through that state version, as this indexer keeps every unspent UTXO.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Option<(u32, u64)>>))]
+    pub unspent_at: Vec<Option<ShardStateVersion>>,
+    /// Resume after the previous page: pass its `next_cursor`. UTXOs are paged in the order of their ids, which every
+    /// indexer shares, so any indexer can resume a page another returned. A UTXO created or spent while the pages are
+    /// read may or may not be returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub cursor: Option<UtxoId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetUtxosResponse {
-    /// The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`.
+    /// The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`, in id order. Any number
+    /// of UTXOs may share a pair.
     #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, String)>))]
     pub utxos: Vec<(UtxoId, Encoded<Utxo>)>,
     /// The requested tag and nonce pairs this indexer holds as spent or burnt. A requested pair in neither list is
-    /// unknown to this indexer, which may not yet have indexed it.
+    /// unknown to this indexer, which may not yet have indexed it, or may have pruned its tombstone.
     #[serde(default)]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(u32, String)>))]
     pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListUtxosRequest {
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub resource_address: ResourceAddress,
-    pub limit: u32,
+    /// The `cursor` for the next page, or `None` once `utxos` holds the last matching UTXO.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub from_id: Option<UtxoId>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListUtxosResponse {
-    /// Each UTXO's id and its CBOR-encoded `Utxo`.
-    #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, String)>))]
-    pub utxos: Vec<(UtxoId, Encoded<Utxo>)>,
+    pub next_cursor: Option<UtxoId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1009,11 +1011,16 @@ pub struct GetIndexerInfoResponse {
     /// Whether this indexer stores every event on the network. When false it is configured with event
     /// filters, so event queries answer over a subset and absence is not proof an event did not occur.
     pub indexes_all_events: bool,
+    /// How many epochs past the epoch a UTXO was spent in this indexer retains its tombstone before
+    /// pruning it. `None` means tombstones are retained indefinitely. Pruning raises the shard's
+    /// entry in `utxo_tombstone_horizons`, so a UTXO stream resuming from further back is told its
+    /// spends are incomplete.
+    pub utxo_tombstone_retention_epochs: Option<u64>,
     /// Per shard, the state version at and below which this indexer may lack the tombstone of a spent
     /// UTXO, ascending by shard. A shard's first sync fetches only its live substates, so a spend
-    /// before it is not seen. A shard not listed has every tombstone. The UTXO stream sets
-    /// `StartOfShard::resync_required` for a shard whose cursor is below its horizon. This is sync
-    /// state, and rises while the indexer runs.
+    /// before it is not seen, and pruning a tombstone raises the horizon over it. A shard not listed
+    /// has every tombstone. The UTXO stream sets `StartOfShard::spends_incomplete` for a shard whose
+    /// cursor is below its horizon. This is sync state, and rises while the indexer runs.
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(u32, u64)>))]
     pub utxo_tombstone_horizons: Vec<(Shard, StateVersion)>,
 }
@@ -1028,6 +1035,227 @@ pub struct GetNetworkSyncStateResponse {
     /// validators that have never been contacted for a sync will not appear here.
     #[serde(default)]
     pub validators: Vec<ValidatorStatus>,
+    /// What each shard group's sync is doing, ascending by shard group.
+    #[serde(default)]
+    pub shard_groups: Vec<ShardGroupSyncStatus>,
+    /// How far each shard of the network is synced, ascending by shard, from the global shard.
+    #[serde(default)]
+    pub shards: Vec<ShardSyncStatus>,
+    /// The width in seconds of each bucket of `ShardGroupSyncStatus::activity`.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub activity_bucket_secs: u64,
+}
+
+/// One shard group's sync, as its loop last reported it. Kept in memory, so it starts empty when the indexer does.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardGroupSyncStatus {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub shard_group: ShardGroup,
+    pub phase: ShardGroupSyncPhase,
+    /// Unix timestamp (seconds) at which the group entered `phase`.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub phase_since_unix_s: u64,
+    /// libp2p PeerId of the committee member the group's current or last round streams from.
+    pub stream_peer: Option<String>,
+    /// The group's most recent blames, oldest first.
+    pub blames: Vec<SyncBlame>,
+    /// libp2p PeerIds of every peer blamed during the current epoch, each excluded from the group for the rest of it.
+    pub excluded_peers: Vec<String>,
+    /// The group's latest committed tip whose commit proof verified.
+    pub tip: Option<SyncObservedTip>,
+    /// The epoch of the last checkpoint the group stored, and when it was stored.
+    pub last_checkpoint: Option<SyncStoredCheckpoint>,
+    /// The versions and transactions promoted from the group's shards in each bucket of the last ten minutes, oldest
+    /// first. The last bucket is still filling.
+    pub activity: Vec<SyncActivityBucket>,
+}
+
+/// What a shard group's sync loop is doing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ShardGroupSyncPhase {
+    /// No round has started yet.
+    Starting,
+    SyncingCheckpoints,
+    /// Indexing a new shard from a verified snapshot of its tree.
+    Snapshotting {
+        #[cfg_attr(feature = "utoipa", schema(value_type = u32))]
+        shard: Shard,
+    },
+    /// Following a stream from `ShardGroupSyncStatus::stream_peer`.
+    Streaming,
+    /// Waiting until `until_unix_s` before the next round.
+    Paused {
+        reason: String,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        until_unix_s: u64,
+    },
+    /// Every committee member streamed history of `shard` above `from_version` that mismatches a verified leaf, which
+    /// points at this indexer's own recomputation. The group stops following until the epoch moves.
+    Halted {
+        #[cfg_attr(feature = "utoipa", schema(value_type = u32))]
+        shard: Shard,
+        #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
+        from_version: Option<StateVersion>,
+    },
+}
+
+/// Peers blamed for history no verified leaf covers. A blamed peer is excluded from its shard group for the rest of
+/// `epoch`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncBlame {
+    /// libp2p PeerIds of the blamed peers.
+    pub peer_ids: Vec<String>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub at_unix_s: u64,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncObservedTip {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub height: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub observed_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncStoredCheckpoint {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub stored_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncActivityBucket {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub start_unix_s: u64,
+    /// State versions promoted to the indexed tables.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub versions: u64,
+    /// Transaction receipts promoted to the indexed tables.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub transactions: u64,
+}
+
+/// How far one shard is synced.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardSyncStatus {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u32))]
+    pub shard: Shard,
+    pub state: ShardSyncState,
+    /// The last version a verified leaf authenticated, through which every version is promoted to the indexed tables.
+    pub verified: Option<ShardVersionAt>,
+    /// The last version staged, where the stream resumes. Those above `verified` await a verified leaf.
+    pub staged: Option<ShardVersionAt>,
+    /// The latest verified leaf a probe of the shard's committee returned.
+    pub tip_leaf: Option<ShardObservedLeaf>,
+    /// The version the stream last found the shard level with its committee at.
+    pub level: Option<ShardLevel>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub last_promoted_at_unix_s: Option<u64>,
+    /// State versions promoted in the last minute.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub versions_last_minute: u64,
+    /// When a peer was last blamed for this shard's history, and why.
+    pub last_mismatch: Option<ShardMismatch>,
+    pub snapshot: Option<ShardSnapshotProgress>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ShardSyncState {
+    /// Nothing of the shard is staged or verified yet.
+    Waiting,
+    /// Indexing the shard from a verified snapshot of its tree.
+    Snapshotting,
+    /// Streaming or verifying history the shard's committee is ahead of.
+    CatchingUp,
+    /// Level with the shard's committee recently enough that the substate cache serves it.
+    Following,
+    /// The shard's group stopped following. See `ShardGroupSyncPhase::Halted`.
+    Halted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardVersionAt {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    /// The epoch the version was committed in.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardObservedLeaf {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub observed_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardLevel {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub confirmed_secs_ago: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardMismatch {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub at_unix_s: u64,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardSnapshotProgress {
+    /// The version of the verified leaf the snapshot is taken at.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub substates: u64,
+    /// How far through the shard's leaf key space the snapshot has paged, from 0 to 1. Leaf keys are hashes, so this
+    /// estimates the share of the shard's substates received.
+    pub fraction: f64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub started_at_unix_s: u64,
 }
 
 /// The latest probe of one validator's consensus pacemaker state, made by the indexer when it

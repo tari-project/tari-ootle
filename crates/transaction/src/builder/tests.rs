@@ -4,7 +4,7 @@
 use ootle_byte_type::ToByteType;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
-    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_common_types::Epoch;
 use tari_template_lib_types::{ComponentAddress, TemplateAddress};
@@ -15,6 +15,7 @@ use crate::{
     Instruction,
     IntoSigned,
     Signable,
+    TRANSACTION_SIGNING_CONTEXT,
     Transaction,
     TransactionSignature,
     args,
@@ -65,6 +66,60 @@ fn it_converts_workspace_names_to_ids() {
         call: ComponentReference::Workspace(2),
         method: "do_something_else".try_into().unwrap(),
         args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))]
+    });
+}
+
+#[test]
+fn proof_authorization_resolves_workspace_names() {
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("bucket")
+        .put_last_instruction_output_on_workspace("proofs")
+        .authorize_proof("proofs.1")
+        .drop_proof_authorization("proofs.1")
+        .build_unsigned();
+
+    assert_eq!(transaction.instructions()[2], Instruction::AuthorizeProof {
+        proof: WorkspaceOffsetId::new(1).with_offset(1),
+    });
+    assert_eq!(transaction.instructions()[3], Instruction::DropProofAuthorization {
+        proof: WorkspaceOffsetId::new(1).with_offset(1),
+    });
+}
+
+#[test]
+fn with_authorized_proof_wraps_the_closure_in_a_window() {
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("proof")
+        .with_authorized_proof("proof", |builder| {
+            builder.call_function(TemplateAddress::default(), "guarded", args![])
+        })
+        .build_unsigned();
+
+    let proof = WorkspaceOffsetId::new(0);
+    assert_eq!(transaction.instructions()[1], Instruction::AuthorizeProof { proof });
+    assert!(matches!(
+        transaction.instructions()[2],
+        Instruction::CallFunction { .. }
+    ));
+    assert_eq!(transaction.instructions()[3], Instruction::DropProofAuthorization {
+        proof
+    });
+    assert_eq!(transaction.instructions().len(), 4);
+}
+
+#[test]
+fn with_authorized_proof_closes_the_window_it_opened_when_the_closure_rebinds_the_label() {
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("proof")
+        .with_authorized_proof("proof", |builder| {
+            builder.put_last_instruction_output_on_workspace("proof")
+        })
+        .build_unsigned();
+
+    let proof = WorkspaceOffsetId::new(0);
+    assert_eq!(transaction.instructions()[1], Instruction::AuthorizeProof { proof });
+    assert_eq!(transaction.instructions()[3], Instruction::DropProofAuthorization {
+        proof
     });
 }
 
@@ -235,9 +290,7 @@ fn a_signature_over_the_builder_message_verifies_once_fee_instructions_are_appli
     let message = builder.to_signing_message(&seal_signer);
     let signature = TransactionSignature::new(
         RistrettoPublicKey::from_secret_key(&signer_secret).to_byte_type(),
-        RistrettoSchnorr::sign(&signer_secret, message, &mut rand::rng())
-            .unwrap()
-            .to_byte_type(),
+        TRANSACTION_SIGNING_CONTEXT.sign(&signer_secret, &message),
     );
     let unsealed = builder.into_signed(signature);
 
@@ -274,4 +327,28 @@ fn auto_filled_inputs_and_referenced_substates_skip_undeclarable_ids() {
             .collect::<Vec<_>>(),
         vec![SubstateId::from(component)]
     );
+}
+
+#[test]
+fn auto_filled_inputs_include_migrate_args() {
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::ObjectKey;
+
+    let target = ComponentAddress::new(ObjectKey::from_array([10; 32]));
+    let migrate_arg = ComponentAddress::new(ObjectKey::from_array([12; 32]));
+    let new_template = TemplateAddress::from_array([0x42; 32]);
+
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .update_component_template_address_with_migrate(target, new_template, "migrate", args![migrate_arg])
+        .build_unsigned();
+
+    let inputs = transaction
+        .inputs()
+        .iter()
+        .map(|input| input.substate_id().clone())
+        .collect::<std::collections::HashSet<_>>();
+    let expected = std::collections::HashSet::from([SubstateId::from(target), SubstateId::from(migrate_arg)]);
+    assert_eq!(inputs, expected);
+    assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
 }

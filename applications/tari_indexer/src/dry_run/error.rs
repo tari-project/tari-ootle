@@ -55,12 +55,15 @@ pub enum DryRunTransactionProcessorError {
 }
 
 impl DryRunTransactionProcessorError {
-    /// True when an input's committee disagrees on it and none can prove it, which passes as the network settles.
+    /// True when an input's committee disagrees on it and none can prove it, or every member that answered a
+    /// versioned read named another version; each passes as the network settles.
     pub fn is_unavailable(&self) -> bool {
         matches!(
             self,
-            Self::IndexerError(IndexerError::InvalidSubstateState) |
-                Self::SubstateManagerError(SubstateManagerError::IndexerError(IndexerError::InvalidSubstateState))
+            Self::IndexerError(IndexerError::InvalidSubstateState | IndexerError::VersionMismatch { .. }) |
+                Self::SubstateManagerError(SubstateManagerError::IndexerError(
+                    IndexerError::InvalidSubstateState | IndexerError::VersionMismatch { .. }
+                ))
         )
     }
 
@@ -80,15 +83,23 @@ impl DryRunTransactionProcessorError {
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_common_types::SubstateVersion;
+
     use super::*;
 
     #[test]
     fn a_committee_that_cannot_agree_on_an_input_is_unavailable() {
+        let mismatch = || IndexerError::VersionMismatch {
+            requested: SubstateVersion::new(2),
+            answered: SubstateVersion::new(1),
+        };
         for e in [
             DryRunTransactionProcessorError::IndexerError(IndexerError::InvalidSubstateState),
+            DryRunTransactionProcessorError::IndexerError(mismatch()),
             DryRunTransactionProcessorError::SubstateManagerError(SubstateManagerError::IndexerError(
                 IndexerError::InvalidSubstateState,
             )),
+            DryRunTransactionProcessorError::SubstateManagerError(SubstateManagerError::IndexerError(mismatch())),
         ] {
             assert!(e.is_unavailable(), "{e}");
             assert!(!e.is_invalid_transaction(), "{e}");

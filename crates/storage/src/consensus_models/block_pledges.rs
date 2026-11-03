@@ -331,6 +331,7 @@ mod tests {
                 owner_rule: SubstateOwnerRule::None,
                 access_rules: ComponentAccessRules::allow_all(),
                 entity_id: EntityId::from_array([seed; EntityId::LENGTH]),
+                upgrade_rule: Default::default(),
             },
             body: ComponentBody::empty(),
         })

@@ -25,6 +25,7 @@ use tari_ootle_wallet_sdk::{
         EffectiveStatus,
         KeyId,
         LockOwner,
+        OutputStatus,
         TransactionRequestCreatedEvent,
         TransactionRequestId,
         TransactionRequestModel,
@@ -53,7 +54,7 @@ use tari_ootle_walletd_client::{
         TransactionSubmitRequest,
     },
 };
-use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes};
+use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, stealth::SpendAuthorization};
 
 use super::context::HandlerContext;
 use crate::handlers::{
@@ -305,10 +306,10 @@ pub async fn handle_submit(
     let response = match submit_inner_for_request(context, submit).await {
         Ok(response) => response,
         Err(e) => {
-            // Release the claim so the approval survives a failed submit and
-            // another holder can retry. Best-effort: if this also fails the
-            // claim expires with the request and the stale sweep reclaims the
-            // (still unlinked) locks.
+            // A failed submit never stored a transaction, so nothing will
+            // submit one for this request. Release the claim so the approval
+            // survives and another holder can retry. Best-effort: if this also
+            // fails the claim expires with the request.
             if let Err(release_err) = sdk.store().with_write_tx(|tx| {
                 tx.transaction_request_transition(
                     req.request_id,
@@ -382,6 +383,32 @@ pub(crate) fn ensure_free_locks_of<R: WalletStoreReader>(
     Ok(())
 }
 
+/// Refuses `lock_ids` unless `caller` created each lock. Unlike
+/// [`ensure_free_locks_of`], a lock already linked to a transaction or held by
+/// a request is accepted, for paths that read the locks without claiming them.
+///
+/// Every refusal is the same error on `field`, so the call does not reveal
+/// which lock ids exist.
+pub(crate) fn ensure_locks_owned_by<R: WalletStoreReader>(
+    reader: &mut R,
+    caller: LockOwner,
+    lock_ids: &[WalletLockId],
+    field: &'static str,
+) -> Result<(), anyhow::Error> {
+    for lock_id in lock_ids {
+        let lock = reader.locks_get(*lock_id).optional()?;
+        if !lock.is_some_and(|l| l.owner == caller) {
+            return Err(invalid_params(
+                field,
+                Some(format!(
+                    "lock {lock_id} does not exist or was created by another caller"
+                )),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Guarded transition to `to`, refusing an already-expired request.
 fn transition(
     context: &HandlerContext,
@@ -411,7 +438,7 @@ fn transition(
 /// The wallet-computed view of a request, including what it moves.
 fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<TransactionRequestInfo, anyhow::Error> {
     let status = model.effective_status_now();
-    let value_summaries = value_summaries(context, &model.unsigned_transaction)?;
+    let value_summaries = value_summaries(context, &model.unsigned_transaction, model.status, &model.lock_ids)?;
 
     let main_signer = resolve_main_signer(context, &model.unsigned_transaction, &model.other_signers)?;
     let external_signers = model.signatures.iter().map(|sig| *sig.public_key()).collect();
@@ -463,6 +490,8 @@ fn resolve_main_signer(
 fn value_summaries(
     context: &HandlerContext,
     transaction: &UnsignedTransaction,
+    status: TransactionRequestStatus,
+    lock_ids: &[WalletLockId],
 ) -> Result<Vec<TransactionRequestValueSummary>, anyhow::Error> {
     // A workspace reference resolves only at execution, so its commitments
     // match a wallet output of any resource.
@@ -521,15 +550,31 @@ fn value_summaries(
         }
     }
 
+    let before_submission = !matches!(
+        status,
+        TransactionRequestStatus::Submitting | TransactionRequestStatus::Submitted
+    );
     let mut change = HashSet::new();
     for (resource, created) in created {
-        for output in wallet_outputs(resource, *created.commitment()) {
-            // Change is an output the wallet holds the spend key for, created
-            // with exactly the authorisation and encrypted opening the wallet
-            // recorded: a different `auth` hands the same commitment to
-            // whoever holds that key. An output the transaction also spends
-            // is not coming back.
-            let returns_to_wallet = output.owner_key_id.is_some() &&
+        // An output under a workspace reference resolves its resource at execution time,
+        // so change is attributed only when the statement names an explicit resource address.
+        let Some(resource) = resource else {
+            continue;
+        };
+        for output in wallet_outputs(Some(resource), *created.commitment()) {
+            // Before submission, change is a pending output recorded under one of the request's
+            // locks; once submission begins or completes, finalizing the lock promotes the change
+            // output to Unspent and clears lock_id, so the pending-lock check applies only
+            // beforehand. Change is an output the wallet holds the spend key for alone, created
+            // with exactly the authorisation and encrypted opening the wallet recorded: a
+            // different `auth` hands the same commitment to whoever holds that key. An output the
+            // transaction also spends is not coming back.
+            let lock_and_status_match = !before_submission ||
+                (matches!(output.status, OutputStatus::LockedUnconfirmed) &&
+                    output.lock_id.is_some_and(|id| lock_ids.contains(&id)));
+            let returns_to_wallet = lock_and_status_match &&
+                output.owner_key_id.is_some() &&
+                matches!(output.auth, SpendAuthorization::Key(_)) &&
                 output.auth == created.auth &&
                 output.encrypted_data == created.output.encrypted_data &&
                 output.sender_public_nonce == created.output.sender_public_nonce;
@@ -563,7 +608,7 @@ mod tests {
     use tari_ootle_address::Network;
     use tari_ootle_common_types::{Epoch, crypto::create_key_pair, optional::IsNotFoundError};
     use tari_ootle_transaction::TransactionSignature;
-    use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, KeyType, LockOwner, WalletLock};
+    use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, KeyType, LockOwner, TransactionStatus, WalletLock};
 
     use super::*;
     use crate::handlers::test_support::TestDaemon;
@@ -841,6 +886,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_request_stored_for_submission_is_submitted_when_the_indexer_is_unreachable() {
+        let daemon = TestDaemon::start_with_transaction_service().await;
+        let tool = daemon.api_key("htlc-swap-tool", "transaction_requests:create");
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
+        let request_id = handle_create(&daemon.context, Some(&tool), create_request(vec![lock_id], 60 * 60))
+            .await
+            .unwrap()
+            .request_id;
+        handle_approve(
+            &daemon.context,
+            Some(&daemon.session),
+            TransactionRequestDecisionRequest { request_id },
+        )
+        .await
+        .unwrap();
+        let submit = || {
+            handle_submit(&daemon.context, Some(&tool), TransactionRequestSubmitRequest {
+                request_id,
+            })
+        };
+
+        // The wallet stores the sealed transaction and submits it again on its poll, so the request is linked to it.
+        let transaction_id = submit().await.unwrap().transaction_id;
+        let model = daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_read_tx(|tx| tx.transaction_request_get(request_id))
+            .unwrap();
+        assert_eq!(model.status, TransactionRequestStatus::Submitted);
+        assert_eq!(model.transaction_id, Some(transaction_id));
+        let transaction = daemon
+            .context
+            .wallet_sdk()
+            .transaction_api()
+            .get(transaction_id)
+            .unwrap();
+        assert_eq!(transaction.status, TransactionStatus::New);
+
+        // Neither a second seal nor a rejection can follow a transaction the wallet is going to submit.
+        submit().await.unwrap_err();
+        handle_reject(
+            &daemon.context,
+            Some(&daemon.session),
+            TransactionRequestDecisionRequest { request_id },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
+        assert_eq!(
+            daemon
+                .context
+                .wallet_sdk()
+                .transaction_api()
+                .fetch_all(Some(TransactionStatus::New), None)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn a_lock_is_held_by_at_most_one_live_request() {
         let daemon = TestDaemon::start().await;
         let tool = daemon.api_key("htlc-swap-tool", "transaction_requests:create");
@@ -976,14 +1083,14 @@ mod tests {
 
     mod value_summaries {
         use tari_ootle_transaction::{TransactionBuilder, args::WorkspaceOffsetId};
-        use tari_ootle_wallet_sdk::models::{OutputStatus, StealthOutputModel};
+        use tari_ootle_wallet_sdk::models::StealthOutputModel;
         use tari_template_lib_types::{
             Amount,
             ComponentAddress,
             EncryptedData,
+            Hash32,
             crypto::{RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
             stealth::{
-                SpendAuthorization,
                 StealthInput,
                 StealthInputsStatement,
                 StealthOutputsStatement,
@@ -1154,13 +1261,14 @@ mod tests {
                 &self,
                 inputs: &[PedersenCommitmentBytes],
                 outputs: Vec<StealthUnspentOutput>,
+                lock_ids: Vec<WalletLockId>,
             ) -> (u64, u64, u64) {
                 let tx = with_instructions(vec![stealth_transfer(
                     ResourceAddressRef::Address(resource()),
                     inputs,
                     outputs,
                 )]);
-                let info = self.info(tx, vec![]).await;
+                let info = self.info(tx, lock_ids).await;
                 let [summary] = info.value_summaries.as_slice() else {
                     panic!("expected one summary: {:?}", info.value_summaries);
                 };
@@ -1232,32 +1340,210 @@ mod tests {
         #[tokio::test]
         async fn change_is_an_output_created_exactly_as_the_wallet_recorded_it() {
             let wallet = Wallet::start().await;
+            let new_lock = || lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
             let input = wallet_output(2, 1_000_000, OutputStatus::LockedForSpend);
-            let change = wallet_output(3, 400_000, OutputStatus::LockedUnconfirmed);
             wallet.add_output(&input);
-            wallet.add_output(&change);
-
-            let mut redirected = as_statement_output(&change);
-            redirected.auth = SpendAuthorization::Key(RistrettoPublicKeyBytes::from_bytes(&[9; 32]).unwrap());
-            let mut not_ours = wallet_output(4, 300_000, OutputStatus::LockedUnconfirmed);
-            not_ours.owner_key_id = None;
-            wallet.add_output(&not_ours);
-
             let spend = &[input.commitment];
+
+            let lock_a = new_lock();
+            let mut change = wallet_output(3, 400_000, OutputStatus::LockedUnconfirmed);
+            change.lock_id = Some(lock_a);
+            wallet.add_output(&change);
             assert_eq!(
-                wallet.totals(spend, vec![as_statement_output(&change)]).await,
+                wallet
+                    .totals(spend, vec![as_statement_output(&change)], vec![lock_a])
+                    .await,
                 (1_000_000, 400_000, 600_000)
             );
-            assert_eq!(wallet.totals(spend, vec![redirected]).await, (1_000_000, 0, 1_000_000));
+
+            let lock_b = new_lock();
+            let mut redirected_out = wallet_output(12, 400_000, OutputStatus::LockedUnconfirmed);
+            redirected_out.lock_id = Some(lock_b);
+            wallet.add_output(&redirected_out);
+            let mut redirected = as_statement_output(&redirected_out);
+            redirected.auth = SpendAuthorization::Key(RistrettoPublicKeyBytes::from_bytes(&[9; 32]).unwrap());
             assert_eq!(
-                wallet.totals(spend, vec![as_statement_output(&not_ours)]).await,
+                wallet.totals(spend, vec![redirected], vec![lock_b]).await,
                 (1_000_000, 0, 1_000_000)
             );
+
+            let lock_c = new_lock();
+            let mut not_ours = wallet_output(4, 300_000, OutputStatus::LockedUnconfirmed);
+            not_ours.lock_id = Some(lock_c);
+            not_ours.owner_key_id = None;
+            wallet.add_output(&not_ours);
             assert_eq!(
-                wallet.totals(spend, vec![as_statement_output(&input)]).await,
+                wallet
+                    .totals(spend, vec![as_statement_output(&not_ours)], vec![lock_c])
+                    .await,
+                (1_000_000, 0, 1_000_000)
+            );
+
+            let lock_d = new_lock();
+            assert_eq!(
+                wallet
+                    .totals(spend, vec![as_statement_output(&input)], vec![lock_d])
+                    .await,
                 (1_000_000, 0, 1_000_000),
                 "an output the transaction also spends was counted as change"
             );
+        }
+
+        #[tokio::test]
+        async fn change_is_a_pending_key_output_under_one_of_the_requests_locks() {
+            let wallet = Wallet::start().await;
+            let new_lock = || lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
+            let input = wallet_output(2, 1_000_000, OutputStatus::LockedForSpend);
+            wallet.add_output(&input);
+            let spend = &[input.commitment];
+
+            for (n, status) in [
+                (5, OutputStatus::Unspent),
+                (6, OutputStatus::Spent),
+                (7, OutputStatus::LockedForSpend),
+            ] {
+                let lock_id = new_lock();
+                let mut existing = wallet_output(n, 1_000_000, status);
+                existing.lock_id = Some(lock_id);
+                wallet.add_output(&existing);
+                assert_eq!(
+                    wallet
+                        .totals(spend, vec![as_statement_output(&existing)], vec![lock_id])
+                        .await,
+                    (1_000_000, 0, 1_000_000),
+                    "a {status:?} wallet output was replayed as change"
+                );
+            }
+
+            for (n, auth) in [
+                (8, SpendAuthorization::Script(Hash32::zero())),
+                (9, SpendAuthorization::KeyAndScript {
+                    spend_key: RistrettoPublicKeyBytes::default(),
+                    condition_root: Hash32::zero(),
+                }),
+            ] {
+                let lock_id = new_lock();
+                let mut script_gated = wallet_output(n, 400_000, OutputStatus::LockedUnconfirmed);
+                script_gated.lock_id = Some(lock_id);
+                script_gated.auth = auth;
+                wallet.add_output(&script_gated);
+                assert_eq!(
+                    wallet
+                        .totals(spend, vec![as_statement_output(&script_gated)], vec![lock_id])
+                        .await,
+                    (1_000_000, 0, 1_000_000),
+                    "a condition-tree output was counted as change"
+                );
+            }
+
+            let held_lock = new_lock();
+            let mut foreign_locked = wallet_output(10, 400_000, OutputStatus::LockedUnconfirmed);
+            foreign_locked.lock_id = Some(new_lock());
+            wallet.add_output(&foreign_locked);
+            assert_eq!(
+                wallet
+                    .totals(spend, vec![as_statement_output(&foreign_locked)], vec![held_lock])
+                    .await,
+                (1_000_000, 0, 1_000_000),
+                "an unconfirmed output from an unheld lock was counted as change"
+            );
+
+            let held_lock_2 = new_lock();
+            let unlocked_unconfirmed = wallet_output(11, 400_000, OutputStatus::LockedUnconfirmed);
+            wallet.add_output(&unlocked_unconfirmed);
+            assert_eq!(
+                wallet
+                    .totals(spend, vec![as_statement_output(&unlocked_unconfirmed)], vec![
+                        held_lock_2
+                    ])
+                    .await,
+                (1_000_000, 0, 1_000_000),
+                "an unconfirmed output with no lock_id was counted as change"
+            );
+        }
+
+        #[tokio::test]
+        async fn submitted_or_submitting_request_retains_change_summary_after_outputs_finalize() {
+            let wallet = Wallet::start().await;
+            let input = wallet_output(2, 1_000_000, OutputStatus::Spent);
+            let change = wallet_output(3, 400_000, OutputStatus::Unspent);
+            wallet.add_output(&input);
+            wallet.add_output(&change);
+
+            for target_status in [
+                TransactionRequestStatus::Submitting,
+                TransactionRequestStatus::Submitted,
+            ] {
+                let tx = with_instructions(vec![stealth_transfer(
+                    ResourceAddressRef::Address(resource()),
+                    &[input.commitment],
+                    vec![as_statement_output(&change)],
+                )]);
+                let mut req = create_request(vec![], 60 * 60);
+                req.transaction = tx;
+                let created = handle_create(&wallet.daemon.context, Some(&wallet.tool), req)
+                    .await
+                    .unwrap();
+                wallet
+                    .daemon
+                    .context
+                    .wallet_sdk()
+                    .store()
+                    .with_write_tx(|tx| {
+                        tx.transaction_request_transition(
+                            created.request_id,
+                            &[TransactionRequestStatus::Pending],
+                            target_status,
+                        )
+                    })
+                    .unwrap();
+
+                let info = handle_get(
+                    &wallet.daemon.context,
+                    Some(&wallet.daemon.session),
+                    TransactionRequestGetRequest {
+                        request_id: created.request_id,
+                    },
+                )
+                .await
+                .unwrap()
+                .request;
+                let [summary] = info.value_summaries.as_slice() else {
+                    panic!("expected one summary: {:?}", info.value_summaries);
+                };
+                assert_eq!(
+                    (summary.inputs_total, summary.change_total, summary.amount_leaving),
+                    (1_000_000, 400_000, 600_000)
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn workspace_resource_outputs_do_not_offset_spent_inputs_as_change() {
+            let wallet = Wallet::start().await;
+            let lock_id = lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
+            let mut input = wallet_output(2, 1_000_000, OutputStatus::LockedForSpend);
+            input.lock_id = Some(lock_id);
+            let mut change = wallet_output(3, 1_000_000, OutputStatus::LockedUnconfirmed);
+            change.lock_id = Some(lock_id);
+            wallet.add_output(&input);
+            wallet.add_output(&change);
+
+            let tx = with_instructions(vec![
+                stealth_transfer(ResourceAddressRef::Address(resource()), &[input.commitment], vec![]),
+                stealth_transfer(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(0)), &[], vec![
+                    as_statement_output(&change),
+                ]),
+            ]);
+            let info = wallet.info(tx, vec![lock_id]).await;
+
+            let [summary] = info.value_summaries.as_slice() else {
+                panic!("expected one summary: {:?}", info.value_summaries);
+            };
+            assert_eq!(summary.resource_address, resource());
+            assert_eq!(summary.inputs_total, 1_000_000);
+            assert_eq!(summary.change_total, 0);
+            assert_eq!(summary.amount_leaving, 1_000_000);
         }
 
         #[tokio::test]

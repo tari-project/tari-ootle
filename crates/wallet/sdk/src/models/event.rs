@@ -22,6 +22,7 @@ pub enum WalletEvent {
     UtxoRecovered(UtxoRecoveredEvent),
     UtxoRecoveryCompleted(UtxoRecoveryCompletedEvent),
     UtxoSpent(UtxoSpentEvent),
+    UtxoBurnt(UtxoBurntEvent),
     TransactionRequestCreated(TransactionRequestCreatedEvent),
     ValidatorSetReanchored(ValidatorSetReanchoredEvent),
 }
@@ -92,6 +93,12 @@ impl From<UtxoSpentEvent> for WalletEvent {
     }
 }
 
+impl From<UtxoBurntEvent> for WalletEvent {
+    fn from(value: UtxoBurntEvent) -> Self {
+        Self::UtxoBurnt(value)
+    }
+}
+
 impl Display for WalletEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         WalletEventType::from(self).fmt(f)
@@ -158,6 +165,13 @@ pub struct UtxoSpentEvent {
     pub address: UtxoAddress,
 }
 
+/// The resource issuer burnt a stealth output the wallet held.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UtxoBurntEvent {
+    pub account_address: ComponentAddress,
+    pub address: UtxoAddress,
+}
+
 /// A transaction request is waiting for a person to approve it.
 ///
 /// Carries only the id: an approver must fetch the request to see what it does,
@@ -196,6 +210,7 @@ pub enum WalletEventType {
     UtxoRecovered,
     UtxoRecoveryCompleted,
     UtxoSpent,
+    UtxoBurnt,
     ValidatorSetReanchored,
 }
 
@@ -212,6 +227,7 @@ impl Display for WalletEventType {
             WalletEventType::UtxoRecovered => "UtxoRecovered",
             WalletEventType::UtxoRecoveryCompleted => "UtxoRecoveryCompleted",
             WalletEventType::UtxoSpent => "UtxoSpent",
+            WalletEventType::UtxoBurnt => "UtxoBurnt",
             WalletEventType::TransactionRequestCreated => "TransactionRequestCreated",
             WalletEventType::ValidatorSetReanchored => "ValidatorSetReanchored",
         };
@@ -232,6 +248,7 @@ impl From<&WalletEvent> for WalletEventType {
             WalletEvent::UtxoRecovered(_) => Self::UtxoRecovered,
             WalletEvent::UtxoRecoveryCompleted(_) => Self::UtxoRecoveryCompleted,
             WalletEvent::UtxoSpent(_) => Self::UtxoSpent,
+            WalletEvent::UtxoBurnt(_) => Self::UtxoBurnt,
             WalletEvent::TransactionRequestCreated(_) => Self::TransactionRequestCreated,
             WalletEvent::ValidatorSetReanchored(_) => Self::ValidatorSetReanchored,
         }

@@ -59,6 +59,7 @@ CREATE TABLE transactions
     finalized_time        DATETIME NULL,
     new_account_info      TEXT     NULL,
     invalid_reason        TEXT     NULL,
+    submitted_at          DATETIME NULL,
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -310,11 +311,17 @@ CREATE TABLE utxo_process_queue
     resource_address TEXT     NOT NULL,
     utxo_tag         INT      NOT NULL,
     public_nonce     TEXT     NOT NULL,
+    -- The shard the UTXO was streamed unspent in, and a state version it was unspent at. Both are NULL when unknown.
+    shard            INTEGER  NULL,
+    state_version    BIGINT   NULL,
     created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX utxo_process_queue_account_resource_tag_nonce_uniq
     ON utxo_process_queue (account_id, resource_address, utxo_tag, public_nonce);
+
+-- Serves the lookup of every account's queued rows of a batch's pairs
+CREATE INDEX utxo_process_queue_public_nonce_idx ON utxo_process_queue (public_nonce);
 
 CREATE TABLE wallet_events
 (

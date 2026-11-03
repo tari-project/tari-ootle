@@ -24,7 +24,12 @@
 // (query_prefix_range_keys and friends) are the way to read a range here.
 #![deny(clippy::disallowed_methods)]
 
-use std::{collections::HashSet, iter, ops::Deref, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    iter,
+    ops::Deref,
+    sync::Arc,
+};
 
 use indexmap::IndexMap;
 use log::*;
@@ -51,7 +56,6 @@ use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
-    NumPreshards,
     ShardGroup,
     SubstateAddress,
     ToSubstateAddress,
@@ -64,6 +68,7 @@ use tari_ootle_storage::{
     Ordering,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     StateTreeTruncateStats,
     StorageError,
     SubstateRewindStats,
@@ -167,7 +172,7 @@ use crate::{
             StateTransitionType,
         },
         state_tree,
-        state_tree::{StateTreeCf, StateTreeStaleNodesCf},
+        state_tree::{StateTreeCf, StateTreeDeferredStaleNodesCf, StateTreeStaleNodesCf},
         state_tree_shard_versions::StateTreeShardVersionCf,
         state_version_proof::{
             BlockCommitProofCf,
@@ -1732,26 +1737,50 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn state_tree_nodes_clear_stale(
         &mut self,
-        num_preshards: NumPreshards,
-        max_deletes: usize,
+        retention: &StateTreeRetention,
+        max_writes: usize,
     ) -> Result<usize, StorageError> {
         const OPERATION: &str = "state_tree_nodes_clear_stale";
 
         let db = self.db();
         let cf = self.db().cf(StateTreeCf)?;
-        let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardVersionQuery)?;
         let stale_nodes_cf = self.db().cf(StateTreeStaleNodesCf)?;
+        let deferred_cf = self.db().cf(StateTreeDeferredStaleNodesCf)?;
+        let deferred_by_pin = self.db().cf(state_tree::ByDeferredStaleShardPinQuery)?;
 
-        let mut num_deleted = 0usize;
-        let shards = iter::once(Shard::global()).chain(ShardGroup::all_shards(num_preshards).shard_iter());
-        for shard in shards {
-            if num_deleted >= max_deletes {
+        let mut num_written = 0usize;
+        for (shard, shard_retention) in retention.iter() {
+            if num_written >= max_writes {
                 break;
             }
-            let max_version = versions_cf.get(&shard, OPERATION).optional()?.unwrap_or(0);
-            let Some(to_version) = max_version.checked_sub(self.options.state_history_length) else {
-                trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.state_history_length);
+            // Pins are released oldest first, so the nodes kept for a pin below the lowest are needed by no tree kept
+            let released_below = shard_retention.lowest_pin().unwrap_or(Version::MAX);
+            let released = deferred_by_pin.query_range_keys_limited(
+                Ordering::Ascending,
+                (shard, 0)..(shard, released_below),
+                max_writes - num_written,
+            )?;
+            for key in released {
+                if num_written >= max_writes {
+                    break;
+                }
+                let nodes = deferred_cf.get(&key, OPERATION)?;
+                for node in &nodes {
+                    cf.delete(&(shard, node.as_node_key().clone()), OPERATION)?;
+                }
+                deferred_cf.delete(&key, OPERATION)?;
+                num_written += nodes.len() + 1;
+            }
+            if num_written >= max_writes {
+                break;
+            }
+
+            let Some(to_version) = shard_retention
+                .latest_version
+                .checked_sub(self.options.state_history_length)
+            else {
+                trace!(target: LOG_TARGET, "Shard {shard} is at version {}, skipping stale node deletion due to history length {}", shard_retention.latest_version, self.options.state_history_length);
                 continue;
             };
             // Only the keys are taken up front: this loop deletes the stale-node record it is reading, and a write
@@ -1760,66 +1789,46 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             let stale_keys = stale_cf.query_range_keys_limited(
                 Ordering::Ascending,
                 (shard, 0)..(shard, to_version.saturating_add(1)),
-                max_deletes - num_deleted,
+                max_writes - num_written,
             )?;
             for (shard, version) in stale_keys {
-                if num_deleted >= max_deletes {
+                if num_written >= max_writes {
                     break;
                 }
                 let nodes = stale_nodes_cf.get(&(shard, version), OPERATION)?;
+                let stale_keys = gather_stale_node_keys(&cf, shard, nodes)?;
 
-                // A version's nodes are gathered before any is deleted, because the subtree walk reads the nodes it
-                // descends through.
-                let mut delete_buffer = Vec::new();
-                for node in nodes {
-                    match node {
-                        StaleTreeNode::Node(key) => {
-                            trace!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
-                            delete_buffer.push((shard, key));
-                        },
-                        StaleTreeNode::Subtree(parent_key) => {
-                            trace!(target: LOG_TARGET, "Deleting stale substree {parent_key} from shard {shard}", );
-                            // A subtree already deleted along with an earlier version is skipped.
-                            let Some(parent_node) = cf.get(&(shard, parent_key.clone()), OPERATION).optional()? else {
-                                continue;
-                            };
-
-                            match parent_node {
-                                Node::Internal(node) => {
-                                    delete_buffer.extend(recurse_subtree_depth_first_post_order(
-                                        &cf,
-                                        shard,
-                                        parent_key,
-                                        node.into_children(),
-                                    ));
-                                },
-                                Node::Leaf(_) => {
-                                    trace!(target: LOG_TARGET, "Deleting stale leaf node {parent_key} from shard {shard}", );
-                                    delete_buffer.push((shard, parent_key));
-                                },
-                                Node::Null => {},
-                            }
+                let mut num_deleted = 0usize;
+                let mut deferred = BTreeMap::<Version, Vec<StaleTreeNode>>::new();
+                for key in stale_keys {
+                    match shard_retention.pin_holding(key.version(), version) {
+                        Some(pin) => deferred.entry(pin).or_default().push(StaleTreeNode::Node(key)),
+                        None => {
+                            trace!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}");
+                            cf.delete(&(shard, key), OPERATION)?;
+                            num_deleted += 1;
                         },
                     }
                 }
-
-                for key in &delete_buffer {
-                    cf.delete(key, OPERATION)?;
+                for (pin, nodes) in &deferred {
+                    trace!(target: LOG_TARGET, "Keeping {} stale nodes of shard {shard} for the tree at pinned version {pin}", nodes.len());
+                    deferred_cf.put(&(shard, *pin, version), nodes, OPERATION)?;
+                    num_written += nodes.len();
                 }
                 // The record goes in the same transaction as its nodes, so a version is never left half-cleared.
                 stale_nodes_cf.delete(&(shard, version), OPERATION)?;
-                num_deleted += delete_buffer.len() + 1;
+                num_written += num_deleted + 1;
                 // Every committed version records its stale nodes, and the nodes made stale at `version` are the last
                 // of the tree at the version below it, so that version can no longer be proved up in.
                 if let Some(below) = version.checked_sub(1) &&
                     state_version_proofs::prune_out_of_window(&db, (shard, below))?
                 {
-                    num_deleted += 1;
+                    num_written += 1;
                 }
             }
         }
 
-        Ok(num_deleted)
+        Ok(num_written)
     }
 
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {
@@ -1863,6 +1872,17 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for key in &stale_keys {
             debug_assert_eq!(key.0, shard, "range iterator leaked across shard boundary");
             stale_cf.delete(key, OPERATION)?;
+        }
+        // The nodes kept for a pinned tree that went stale at versions > target are live again.
+        let deferred_cf = db.cf(StateTreeDeferredStaleNodesCf)?;
+        for key in db
+            .cf(state_tree::ByDeferredStaleShardQuery)?
+            .query_prefix_range_keys(Ordering::Ascending, &shard)?
+        {
+            let (_, _, stale_at) = key;
+            if stale_at >= start_version {
+                deferred_cf.delete(&key, OPERATION)?;
+            }
         }
 
         // 3. Delete the proofs of versions > target for this shard: they prove state that no longer exists.
@@ -2102,6 +2122,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             EpochCleanupStep::SubstateDownProofs | EpochCleanupStep::StateVersionProofs => {
                 self.options.down_proof_history_length
             },
+            // A pinned tree is read with the values of the substates it holds, which those destroyed since it was
+            // pinned still need
+            EpochCleanupStep::DownedSubstateValues => self
+                .options
+                .epoch_history_length
+                .max(self.options.pinned_checkpoint_epochs),
             _ => self.options.epoch_history_length,
         };
         let Some(prune_epoch) = epoch.checked_sub(history_length) else {
@@ -2195,6 +2221,37 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
             }
         }
     }
+}
+
+/// The keys of every node in `nodes`, a version's stale list, with each subtree expanded node by node, since a pinned
+/// tree may hold some of its nodes. They are gathered before any is deleted, because the subtree walk reads the nodes
+/// it descends through. A subtree already deleted along with an earlier version is skipped.
+fn gather_stale_node_keys(
+    cf: &CfContext<Transaction<TransactionDB>, StateTreeCf>,
+    shard: Shard,
+    nodes: Vec<StaleTreeNode>,
+) -> Result<Vec<NodeKey>, StorageError> {
+    const OPERATION: &str = "gather_stale_node_keys";
+    let mut keys = Vec::new();
+    for node in nodes {
+        match node {
+            StaleTreeNode::Node(key) => keys.push(key),
+            StaleTreeNode::Subtree(parent_key) => {
+                let Some(parent_node) = cf.get(&(shard, parent_key.clone()), OPERATION).optional()? else {
+                    continue;
+                };
+                match parent_node {
+                    Node::Internal(node) => keys.extend(
+                        recurse_subtree_depth_first_post_order(cf, shard, parent_key, node.into_children())
+                            .map(|(_, key)| key),
+                    ),
+                    Node::Leaf(_) => keys.push(parent_key),
+                    Node::Null => {},
+                }
+            },
+        }
+    }
+    Ok(keys)
 }
 
 fn recurse_subtree_depth_first_post_order<'a>(

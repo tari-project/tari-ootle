@@ -14,7 +14,7 @@ use tari_engine_types::{
     component::derive_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
 };
-use tari_ootle_address::{Network, RistrettoOotleAddress};
+use tari_ootle_address::{Network, OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{
     Epoch,
     optional::{IsNotFoundError, Optional},
@@ -611,6 +611,19 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             account,
             address: address.to_byte_type(),
         })
+    }
+
+    /// The wallet account that owns an output paid to `address`: the one whose account key, view key and network the
+    /// address carries. A destination tag does not change who can spend the output, so it is not compared.
+    pub fn find_account_paid_by(&self, address: &OotleAddress) -> Result<Option<AccountWithAddress>, AccountsApiError> {
+        let Some(account) = self
+            .get_account_by_public_key(address.account_public_key())
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let paid = address.clone().without_destination_tag();
+        Ok((*account.address() == paid).then_some(account))
     }
 
     pub fn get_account_or_default(&self, address: Option<&ComponentAddress>) -> Result<Account, AccountsApiError> {

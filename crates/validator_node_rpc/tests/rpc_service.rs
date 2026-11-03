@@ -97,6 +97,13 @@ impl ValidatorNodeRpcService for UnservedService {
     ) -> Result<Response<proto::GetCommittedBlockProofResponse>, RpcStatus> {
         unserved()
     }
+
+    async fn get_shard_snapshot(
+        &self,
+        _: Request<proto::GetShardSnapshotRequest>,
+    ) -> Result<Response<proto::GetShardSnapshotResponse>, RpcStatus> {
+        unserved()
+    }
 }
 
 /// Serves `UnservedService` and returns a client session to it.
@@ -137,7 +144,7 @@ async fn a_method_past_the_table_is_not_served() {
     let (mut client, server) = connect().await;
 
     let result = client
-        .server_streaming::<_, _, proto::SyncStateResponse>(proto::SyncStateRequest::default(), 10u32)
+        .server_streaming::<_, _, proto::SyncStateResponse>(proto::SyncStateRequest::default(), 11u32)
         .await;
     let status = match result {
         Ok(mut stream) => stream

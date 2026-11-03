@@ -220,6 +220,7 @@ function ComponentView({ data }: { data: Component }) {
           { label: "Entity ID", value: String(data.header.entity_id) },
           { label: "Owner Rule", value: <CodeBlock>{renderJson(data.header.owner_rule)}</CodeBlock> },
           { label: "Access Rules", value: <CodeBlock>{renderJson(data.header.access_rules)}</CodeBlock> },
+          { label: "Upgrade Rule", value: <CodeBlock>{renderJson(data.header.upgrade_rule)}</CodeBlock> },
         ]}
       />
       <Typography variant="subtitle2">State</Typography>

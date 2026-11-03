@@ -90,7 +90,7 @@ pub async fn handle_get_validator_fees(
         let substates = context
             .wallet_sdk()
             .substate_api()
-            .get_substates_from_network(id_chunk.to_vec())
+            .get_substates_from_network(id_chunk)
             .await?;
 
         info!(target: LOG_TARGET, "🔍️ Found {}/{} fee pool substates for claim key {}", substates.len(), CHUNK_SIZE, claim_public_key);
@@ -309,7 +309,7 @@ async fn build_self_stealth_statement(
     let mut amounts: HashMap<ValidatorFeePoolAddress, u64> = HashMap::with_capacity(substate_ids.len());
     const CHUNK_SIZE: usize = 20;
     for chunk in substate_ids.chunks(CHUNK_SIZE) {
-        let substates = sdk.substate_api().get_substates_from_network(chunk.to_vec()).await?;
+        let substates = sdk.substate_api().get_substates_from_network(chunk).await?;
         for (id, substate) in substates {
             let Some(addr) = id.as_validator_fee_pool_address() else {
                 continue;

@@ -140,7 +140,9 @@ where
             Ok(_) => {
                 self.store.with_write_tx(|tx| {
                     tx.transactions_update(
-                        WalletTransactionUpdate::new(transaction_id).with_new_status(TransactionStatus::Pending),
+                        WalletTransactionUpdate::new(transaction_id)
+                            .with_new_status(TransactionStatus::Pending)
+                            .with_submitted_at(now_utc()),
                     )
                 })?;
             },
@@ -220,6 +222,7 @@ where
                     finalized_time: Some(Duration::try_from(finalized_time - submitted_at).unwrap_or(Duration::ZERO)),
                     new_account_info: None,
                     is_dry_run: true,
+                    submitted_at: None,
                     last_update_time: now_utc(),
                 })
             },
@@ -244,7 +247,8 @@ where
     ///
     /// Under [`IndexerTrust::Verify`] a committed transaction stays pending until the indexer serves a proof of its
     /// receipt that verifies against a validator set the wallet trusts, and its result must be the one that receipt
-    /// commits.
+    /// commits. A transaction submitted before the wallet's anchor, whose receipt is proven in an epoch before it, is
+    /// stored with the result the indexer serves, as [`Self::verify_committed_result`] describes.
     #[allow(clippy::too_many_lines)]
     pub async fn check_and_store_finalized_transaction(
         &self,
@@ -294,17 +298,18 @@ where
             } => {
                 let mut execution_result = execution_result;
                 if self.indexer_trust.is_verify() && !transaction.is_dry_run && final_decision.is_commit() {
-                    let Some(verified) = self
+                    match self
                         .verify_committed_result(
-                            transaction_id,
+                            &transaction,
                             resp.encoded_execution_result.as_ref(),
                             resp.receipt.as_ref(),
                         )
                         .await?
-                    else {
-                        return Ok(None);
-                    };
-                    execution_result = Some(Box::new(verified));
+                    {
+                        CommittedResult::Verified(verified) => execution_result = Some(verified),
+                        CommittedResult::PredatesAnchor => {},
+                        CommittedResult::Unproven => return Ok(None),
+                    }
                 }
 
                 if let Some(diff) = execution_result.as_ref().and_then(|e| e.finalize.result.any_accept()) {
@@ -437,35 +442,53 @@ where
         Ok(Some(self.network_interface.get_current_epoch().await?))
     }
 
-    /// Verifies the result the network committed for `transaction_id` and returns it decoded: the indexer's proof of
-    /// the committed receipt verifies against a validator set the wallet trusts, and `execution_result` is the result
-    /// that receipt commits. Returns `None` while there is no proof to verify yet.
+    /// Verifies the result the network committed for `transaction` and returns it decoded: the indexer's proof of the
+    /// committed receipt verifies against a validator set the wallet trusts, and `execution_result` is the result that
+    /// receipt commits.
+    ///
+    /// A receipt proven in an epoch before the wallet's anchor can never verify, because the wallet trusts no set
+    /// before it. When `transaction` was also submitted before the wallet anchored, its result is
+    /// [`CommittedResult::PredatesAnchor`] and is taken from the indexer, as the anchor itself was. A transaction
+    /// submitted after the anchor gets no such fallback, because the indexer chooses the epoch it proves a receipt in
+    /// and could back-date any proof past verification. Its result stays [`CommittedResult::Unproven`], including when
+    /// it committed in the epoch before the anchor's, in a shard group that had not yet ended that epoch when the
+    /// wallet anchored.
     async fn verify_committed_result(
         &self,
-        transaction_id: TransactionId,
+        transaction: &WalletTransaction,
         execution_result: Option<&Encoded<ExecuteResult>>,
         proven: Option<&ProvenTransactionReceipt>,
-    ) -> Result<Option<ExecuteResult>, TransactionApiError> {
+    ) -> Result<CommittedResult, TransactionApiError> {
+        let transaction_id = transaction.id;
         let Some((proven, proof)) = proven.and_then(|proven| proven.proof.as_ref().map(|proof| (proven, proof))) else {
             info!(
                 target: LOG_TARGET,
                 "Transaction {} committed, but the indexer served no proof of its receipt yet. Will check again later.",
                 transaction_id
             );
-            return Ok(None);
+            return Ok(CommittedResult::Unproven);
         };
         let Some(committee) = self
             .validator_set_api
             .verify_committee(proof.anchor.epoch, proof.anchor.shard_group)
             .await?
         else {
+            if self.predates_anchor(transaction, proof.anchor.epoch)? {
+                warn!(
+                    target: LOG_TARGET,
+                    "The receipt of transaction {} is proven in {}, before the wallet's anchor, and the transaction was submitted before the wallet anchored. Storing the result its indexer serves.",
+                    transaction_id,
+                    proof.anchor.epoch
+                );
+                return Ok(CommittedResult::PredatesAnchor);
+            }
             info!(
                 target: LOG_TARGET,
                 "The receipt of transaction {} is proven in {}, for which the wallet trusts no validator set yet. Will check again later.",
                 transaction_id,
                 proof.anchor.epoch
             );
-            return Ok(None);
+            return Ok(CommittedResult::Unproven);
         };
         if execution_result.is_none() {
             return Err(TransactionApiError::InvalidTransactionQueryResponse {
@@ -476,7 +499,18 @@ where
         let (_, result) = committee
             .verify_result(transaction_id, proven, execution_result)
             .map_err(unverified)?;
-        Ok(Some(result))
+        Ok(CommittedResult::Verified(Box::new(result)))
+    }
+
+    /// Whether `transaction` was submitted before the wallet anchored, and `proven_in` is an epoch before the anchor.
+    fn predates_anchor(&self, transaction: &WalletTransaction, proven_in: Epoch) -> Result<bool, TransactionApiError> {
+        let Some(anchor) = self.validator_set_api.anchor()? else {
+            return Ok(false);
+        };
+        let submitted_before_anchor = transaction
+            .submitted_at
+            .is_some_and(|submitted_at| submitted_at < anchor.anchored_at);
+        Ok(submitted_before_anchor && proven_in < anchor.validator_set.epoch())
     }
 
     pub fn release_all_locks_for_transaction(&self, transaction_id: TransactionId) -> Result<(), TransactionApiError> {
@@ -739,6 +773,16 @@ pub enum Submission {
     /// The wallet verifies results and trusts no validator set yet, so the transaction stays `New` for a later
     /// submission.
     Deferred,
+}
+
+/// What [`TransactionApi::verify_committed_result`] found for a committed transaction.
+enum CommittedResult {
+    /// The result the verified receipt commits.
+    Verified(Box<ExecuteResult>),
+    /// The receipt is proven before the wallet's anchor, and the transaction was submitted before it anchored.
+    PredatesAnchor,
+    /// No proof the wallet can verify yet.
+    Unproven,
 }
 
 #[derive(Debug, thiserror::Error)]

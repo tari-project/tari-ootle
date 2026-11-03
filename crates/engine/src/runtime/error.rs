@@ -48,6 +48,7 @@ use tari_template_lib::{
         Amount,
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
+        NonFungibleAddress,
         NonFungibleId,
         ResourceAddress,
         ResourceType,
@@ -60,7 +61,7 @@ use tari_template_lib::{
     },
 };
 
-use super::workspace::WorkspaceError;
+use super::{scope::RestrictedFrame, workspace::WorkspaceError};
 use crate::{
     runtime::{ActionIdent, RuntimeModuleError, locking::LockError},
     state_store::StateStoreError,
@@ -112,10 +113,21 @@ pub enum RuntimeError {
     BucketNotInScope { bucket_id: BucketId },
     #[error("Encountered unknown or out of scope proof {proof_id}")]
     ProofNotInScope { proof_id: ProofId },
+    #[error(
+        "Proof {proof_id} was shown to this call and remains the caller's: it can be read here but not authorized, \
+         passed on, returned, stored or dropped"
+    )]
+    ProofNotHeld { proof_id: ProofId },
     #[error("Encountered unknown or out of scope address allocation {id}")]
     AddressAllocationNotInScope { id: AddressAllocationId },
     #[error("Encountered unknown or out of scope signer badge with public key {public_key}")]
     SignerBadgeNotInScope { public_key: RistrettoPublicKeyBytes },
+    #[error(
+        "This call does not carry the badge {badge}. A call carries the transaction signers' badges when the \
+         transaction makes it directly, its direct caller's badges when a template makes it, and the badges of the \
+         proofs authorized in this frame or around the call"
+    )]
+    BadgeNotInScope { badge: NonFungibleAddress },
     #[error(
         "{needed_for} needs the transaction's main signer, but the transaction has no main signer that signed it. \
          Declare a main signer that signs the transaction, or name the key explicitly"
@@ -144,6 +156,16 @@ pub enum RuntimeError {
          and indexers must be upgraded before it can be called."
     )]
     IntrinsicNotSupported { intrinsic: IntrinsicId },
+    #[error(
+        "A template verified a signature under an empty domain. A signature domain names what the signature is for; \
+         declare one with custom_signature_domain!"
+    )]
+    EmptySignatureDomain,
+    #[error(
+        "A template verified a signature scoped to the current component outside a component method. Only a method \
+         call has a component to bind the signature to."
+    )]
+    SignatureScopeOutsideComponent,
     #[error("Invalid number of arguments: expected {expected}, but got {len}")]
     InvalidNumberOfArguments { expected: usize, len: usize },
     #[error("Invalid amount '{amount}': {reason}")]
@@ -212,6 +234,12 @@ pub enum RuntimeError {
         id: WorkspaceOffsetId,
         existing_ids: Vec<WorkspaceId>,
     },
+    #[error("Workspace item {key} is not a proof")]
+    WorkspaceItemNotAProof { key: WorkspaceOffsetId },
+    #[error("Proof {proof_id} is not authorized, so there is no authorization to drop")]
+    ProofNotAuthorized { proof_id: ProofId },
+    #[error("Proof {proof_id} is already authorized")]
+    ProofAlreadyAuthorized { proof_id: ProofId },
     #[error("Attempted to take the last output but there was no previous instruction output")]
     NoLastInstructionOutput,
     #[error(transparent)]
@@ -232,18 +260,31 @@ pub enum RuntimeError {
     },
     #[error("Resource Auth Hook Denied Access for action {action_ident}: {details}")]
     AccessDeniedAuthHook { action_ident: ActionIdent, details: String },
+    #[error(
+        "Resource {resource_address} has an auth hook on component {component_address}, which the transaction did not \
+         declare as an input. Declare the hook component as an input to act on this resource."
+    )]
+    AuthHookComponentNotDeclared {
+        resource_address: ResourceAddress,
+        component_address: ComponentAddress,
+    },
     #[error("Access Denied: You must be the owner to perform this action: {action}")]
     AccessDeniedOwnerRequired { action: ActionIdent },
+    #[error("Component {component} cannot be upgraded: its upgrade rule is Locked")]
+    ComponentUpgradesLocked { component: ComponentAddress },
     #[error("Write attempted in a read-only execution context")]
     WriteInReadOnlyContext,
     #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
     ForbiddenInReadOnlyContext { operation: &'static str },
-    #[error("Write to {id} attempted in a resource auth hook, which may only modify its own component state")]
-    WriteOutsideOwnComponent { id: SubstateId },
+    #[error("Write to {id} attempted in {frame}, which may only modify its own component state")]
+    WriteOutsideOwnComponent { id: SubstateId, frame: RestrictedFrame },
     #[error("Write to {id} attempted, but the transaction declared it as a read-only input")]
     WriteToReadDeclaredInput { id: SubstateId },
-    #[error("Host operation '{operation}' is forbidden inside a resource auth hook")]
-    ForbiddenInAuthHookContext { operation: &'static str },
+    #[error("Host operation '{operation}' is forbidden inside {frame}")]
+    ForbiddenInRestrictedFrame {
+        operation: &'static str,
+        frame: RestrictedFrame,
+    },
     #[error("Freeze on resource {resource_address} targeted vault {vault_id}, which holds resource {vault_resource}")]
     FreezeResourceMismatch {
         vault_id: VaultId,
@@ -498,11 +539,14 @@ impl RuntimeError {
             Self::WorkspaceError(_) |
             Self::SubstateAlreadySpent { .. } |
             Self::ProofNotInScope { .. } |
+            Self::ProofNotHeld { .. } |
             Self::AddressAllocationNotInScope { .. } |
             Self::SignerBadgeNotInScope { .. } |
             Self::NoMainSigner { .. } |
             Self::InvalidArgument { .. } |
             Self::IntrinsicNotSupported { .. } |
+            Self::EmptySignatureDomain |
+            Self::SignatureScopeOutsideComponent |
             Self::InvalidNumberOfArguments { .. } |
             Self::InvalidMOfNThreshold { .. } |
             Self::DuplicateMOfNRequirement { .. } |
@@ -511,6 +555,9 @@ impl RuntimeError {
             Self::BucketNotInScope { .. } |
             Self::ProofNotFound { .. } |
             Self::ItemNotOnWorkspace { .. } |
+            Self::WorkspaceItemNotAProof { .. } |
+            Self::ProofNotAuthorized { .. } |
+            Self::ProofAlreadyAuthorized { .. } |
             Self::NoLastInstructionOutput |
             Self::SpendContextUnavailable |
             Self::NoFeesPaid { .. } |
@@ -528,6 +575,7 @@ impl RuntimeError {
             Self::SubstateNotFound { .. } |
             Self::RootSubstateNotFound { .. } |
             Self::ReferencedSubstateNotFound { .. } |
+            Self::AuthHookComponentNotDeclared { .. } |
             Self::NonExistentSubstateReturned { .. } |
             Self::ComponentReferencedUnknownSubstate { .. } |
             Self::LayerOneCommitmentNotFound { .. } |
@@ -544,10 +592,12 @@ impl RuntimeError {
             Self::AccessDeniedSetComponentState { .. } |
             Self::AccessDeniedAuthHook { .. } |
             Self::AccessDeniedOwnerRequired { .. } |
+            Self::ComponentUpgradesLocked { .. } |
             Self::WriteInReadOnlyContext |
             Self::ForbiddenInReadOnlyContext { .. } |
             Self::WriteOutsideOwnComponent { .. } |
-            Self::ForbiddenInAuthHookContext { .. } |
+            Self::ForbiddenInRestrictedFrame { .. } |
+            Self::BadgeNotInScope { .. } |
             Self::CrossTemplateCallNotAllowed { .. } => C::AccessDenied,
 
             Self::VaultFrozen { .. } |

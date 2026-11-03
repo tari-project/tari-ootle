@@ -274,6 +274,7 @@ diesel::table! {
         finalized_time -> Nullable<Timestamp>,
         new_account_info -> Nullable<Text>,
         invalid_reason -> Nullable<Text>,
+        submitted_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -313,6 +314,8 @@ diesel::table! {
         resource_address -> Text,
         utxo_tag -> Integer,
         public_nonce -> Text,
+        shard -> Nullable<Integer>,
+        state_version -> Nullable<BigInt>,
         created_at -> Timestamp,
     }
 }

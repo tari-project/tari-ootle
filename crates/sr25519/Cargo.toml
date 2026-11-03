@@ -17,5 +17,8 @@ rand = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-rand_core_06 = { workspace = true }
-schnorrkel = { workspace = true }
+# schnorrkel's RNG interface
+rand_core_06 = { package = "rand_core", version = "0.6.4", default-features = false }
+# Reference implementation for interop tests. Pinned exactly because a test reproduces its deterministic batch
+# weight derivation.
+schnorrkel = { version = "=0.11.5", default-features = false, features = ["alloc", "getrandom"] }

@@ -229,6 +229,10 @@ pub trait WalletStoreReader {
         by_status: Option<OutputStatus>,
     ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
 
+    /// Every stealth output of any account and resource that the wallet holds unspent or locked for spending, is on
+    /// chain, and has no proof of any version.
+    fn stealth_outputs_get_unproven_held(&mut self) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
+
     // Output Locks
     fn locks_get_by_transaction_id(
         &mut self,
@@ -359,14 +363,41 @@ pub trait WalletStoreReader {
     ) -> Result<Vec<ValidatorSetReanchor>, WalletStorageError>;
 }
 
+/// A UTXO queued for recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueuedUtxo {
+    /// The account whose view key the UTXO's tag matched.
+    pub account: ComponentAddress,
+    /// The shard the UTXO was streamed unspent in, and a state version of the shard the UTXO was unspent at. `None`
+    /// when they are not known.
+    pub unspent_at: Option<(Shard, StateVersion)>,
+}
+
+impl QueuedUtxo {
+    /// Where a pair queued twice is unspent: at the higher state version when both name the same shard, and unknown
+    /// otherwise. Two outputs can share a pair, so a pair is placed in one shard only when every entry of it is.
+    pub fn merge_unspent_at(
+        a: Option<(Shard, StateVersion)>,
+        b: Option<(Shard, StateVersion)>,
+    ) -> Option<(Shard, StateVersion)> {
+        match (a, b) {
+            (Some((a_shard, a_version)), Some((b_shard, b_version))) if a_shard == b_shard => {
+                Some((a_shard, a_version.max(b_version)))
+            },
+            _ => None,
+        }
+    }
+}
+
 /// The position of an entry in the UTXO process queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UtxoProcessQueueCursor(pub i64);
 
 #[derive(Debug, Clone, Default)]
 pub struct UtxoProcessQueueBatch {
-    /// The queued UTXOs of each resource, by tag and nonce, with the account each belongs to.
-    pub entries: HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, ComponentAddress>>,
+    /// The queued UTXOs of each resource, by tag and nonce. A pair queued for several accounts is one entry, unspent
+    /// where [`QueuedUtxo::merge_unspent_at`] places every queued entry of the pair, in this batch or not.
+    pub entries: HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, QueuedUtxo>>,
     /// The last entry of the batch, or `None` for an empty batch.
     pub last: Option<UtxoProcessQueueCursor>,
 }

@@ -918,6 +918,64 @@ fn put_into_bucket_unknown_variable_errors() {
     assert!(err.contains("missing"), "unexpected error: {err}");
 }
 
+#[test]
+fn authorize_and_drop_authorize_macros() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let bucket = MyTemplate::make_bucket();
+            let proof = MyTemplate::make_proof();
+            authorize!(proof);
+            MyTemplate::guarded();
+            drop_authorize!(proof);
+        }
+    "#;
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+    assert_eq!(instructions[4], Instruction::AuthorizeProof {
+        proof: WorkspaceOffsetId::new(1),
+    });
+    assert!(matches!(instructions[5], Instruction::CallFunction { .. }));
+    assert_eq!(instructions[6], Instruction::DropProofAuthorization {
+        proof: WorkspaceOffsetId::new(1),
+    });
+}
+
+#[test]
+fn authorize_unknown_variable_errors() {
+    let manifest = r#"
+        fn main() {
+            authorize!(missing);
+        }
+    "#;
+
+    let err = match parse_manifest(manifest, HashMap::new(), Default::default(), HashMap::new()) {
+        Ok(_) => panic!("expected an error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("missing"), "unexpected error: {err}");
+}
+
+#[test]
+fn authorize_rejects_an_input_value() {
+    let manifest = r#"
+        fn main() {
+            let pk = var!["pk"];
+            authorize!(pk);
+        }
+    "#;
+    let globals = HashMap::from([("pk".to_string(), PK1.parse().unwrap())]);
+
+    let err = match parse_manifest(manifest, globals, Default::default(), HashMap::new()) {
+        Ok(_) => panic!("expected an error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("workspace value"), "unexpected error: {err}");
+}
+
 const LIST_TEMPLATE: &str = "c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7";
 const PK1: &str = "044bccd4d01ceb41816bc9106a836806e6f9412646ecda4c2d726d8372b2c843";
 const PK2: &str = "5e8b3e7e6e3aa6d8f9c3a3c4e5d9b1f2a7c6e8d0f1a2b3c4d5e6f708192a3b4c";

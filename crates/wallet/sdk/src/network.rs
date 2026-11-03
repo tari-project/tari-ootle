@@ -77,7 +77,7 @@ pub trait WalletNetworkInterface {
     /// proof of each substate a committee member could prove.
     fn get_substates(
         &self,
-        substate_ids: Vec<SubstateId>,
+        substate_ids: &[SubstateId],
         include_proofs: bool,
     ) -> impl Future<Output = Result<FetchedSubstates, Self::Error>> + Send;
 
@@ -123,11 +123,12 @@ pub trait WalletNetworkInterface {
     ) -> impl Future<Output = Result<UtxoUpdateStream<Self::Error>, Self::Error>> + Send;
 
     /// Fetches the unspent UTXOs of `resource_address` matching `tag_and_nonce_pairs`, and which of the pairs are spent
-    /// or burnt.
+    /// or burnt. A pair placed where its UTXO was seen unspent, and with no unspent UTXO, is spent once the indexer has
+    /// indexed the shard through that state version, whether or not the indexer still holds its tombstone.
     fn fetch_utxos(
         &self,
         resource_address: ResourceAddress,
-        tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+        tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
     ) -> impl Future<Output = Result<FetchedUtxos, Self::Error>> + Send;
 
     fn list_watched_substates(
@@ -195,12 +196,15 @@ pub struct FetchedSubstates {
     pub proofs: HashMap<SubstateId, SubstateProof>,
 }
 
+/// A tag and nonce pair, with the shard and state version its UTXO was seen unspent at, when known.
+pub type PlacedTagAndNoncePair = ((UtxoTag, RistrettoPublicKeyBytes), Option<(Shard, StateVersion)>);
+
 #[derive(Debug, Clone, Default)]
 pub struct FetchedUtxos {
     /// The unspent UTXOs matching a requested tag and nonce pair.
     pub unspent: Vec<(UtxoId, Utxo)>,
     /// The requested tag and nonce pairs whose UTXO is spent or burnt. A requested pair in neither list is unknown to
-    /// the indexer that answered, which may not yet have indexed it.
+    /// the indexer that answered, which may not yet have indexed it, or may have pruned its tombstone.
     pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
 }
 

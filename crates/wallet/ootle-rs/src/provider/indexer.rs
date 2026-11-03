@@ -223,7 +223,9 @@ impl<Wallet> IndexerProvider<Wallet> {
     /// Each drained pass yields typed [`StealthUtxoFrame`](crate::provider::StealthUtxoFrame)s. An
     /// `Unspent` frame carries only the `(tag, public_nonce)` fetch key — resolve the commitment and
     /// viewable-balance ciphertext with [`Self::fetch_unspent_utxos`]. Set `unspent_only = false` on
-    /// the request to also receive `Spent`/`Burnt` frames.
+    /// the request to also receive `Spent`/`Burnt` frames. Such a request is told when a shard's
+    /// spends below its cursor may be missing; see
+    /// [`StealthUtxoFrame::StartOfShard::spends_incomplete`](crate::provider::StealthUtxoFrame::StartOfShard::spends_incomplete).
     pub fn watch_stealth_utxos(&self, request: StealthUtxoWatchRequest) -> StealthUtxoStream {
         StealthUtxoStream::new(Arc::downgrade(&self.client), request)
     }
@@ -234,7 +236,9 @@ impl<Wallet> IndexerProvider<Wallet> {
     ///
     /// Only currently-unspent outputs are returned — the indexer prunes an output's ciphertext once
     /// it is spent, so a key whose output has since been spent is simply absent from the result.
-    /// Requests are automatically chunked to the indexer's per-request limit.
+    /// Requests are automatically chunked to the indexer's per-request limit, and every page of a chunk's outputs is
+    /// read. Any number of outputs may share a tag and nonce pair. An output re-versioned while its pages are read is
+    /// returned at the version its page held.
     ///
     /// The outputs are served unproven and are not verified under any [`IndexerTrust`]. Read an output with
     /// [`Self::get_substate`] to verify it.
@@ -249,18 +253,27 @@ impl<Wallet> IndexerProvider<Wallet> {
         }
         let mut utxos = Vec::with_capacity(tag_and_nonce_pairs.len());
         for chunk in tag_and_nonce_pairs.chunks(MAX_PAIRS_PER_REQUEST) {
-            let resp = self
-                .client
-                .get_utxos(GetUtxosRequest {
-                    resource_address,
-                    tag_and_nonce_pairs: chunk.to_vec(),
-                })
-                .await?;
-            for (id, utxo) in resp.utxos {
-                let utxo = utxo.decode().map_err(|e| IndexerRestClientError::InvalidResponse {
-                    message: format!("The indexer served UTXO {id} that does not decode: {e}"),
-                })?;
-                utxos.push((id, utxo));
+            let mut cursor = None;
+            loop {
+                let resp = self
+                    .client
+                    .get_utxos(GetUtxosRequest {
+                        resource_address,
+                        tag_and_nonce_pairs: chunk.to_vec(),
+                        unspent_at: Vec::new(),
+                        cursor,
+                    })
+                    .await?;
+                for (id, utxo) in resp.utxos {
+                    let utxo = utxo.decode().map_err(|e| IndexerRestClientError::InvalidResponse {
+                        message: format!("The indexer served UTXO {id} that does not decode: {e}"),
+                    })?;
+                    utxos.push((id, utxo));
+                }
+                cursor = resp.next_cursor;
+                if cursor.is_none() {
+                    break;
+                }
             }
         }
         Ok(utxos)
@@ -382,5 +395,58 @@ impl<Wallet: NetworkWallet + Send + Sync> WalletProvider for IndexerProvider<Wal
 
     fn wallet_mut(&mut self) -> &mut Self::Wallet {
         &mut self.wallet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::engine_types::{UtxoOutput, crypto::OutputBody};
+    use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
+    use tari_template_lib_types::{
+        EncryptedData,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        stealth::SpendAuthorization,
+    };
+
+    use super::*;
+    use crate::provider::{IndexerTrust, test_indexer::TestIndexer};
+
+    fn utxo(seed: u8) -> (UtxoId, Utxo) {
+        let key = RistrettoPublicKeyBytes::from_bytes(&[seed; 32]).unwrap();
+        let utxo = Utxo::new(UtxoOutput {
+            output: OutputBody {
+                public_nonce: key,
+                encrypted_data: EncryptedData::empty(),
+                minimum_value_promise: 0,
+                viewable_balance: None,
+            },
+            auth: SpendAuthorization::Key(key),
+            tag: UtxoTag::new(0),
+        });
+        (UtxoId::from_array([seed; 32]), utxo)
+    }
+
+    #[tokio::test]
+    async fn fetching_unspent_utxos_reads_every_page() {
+        let sets = (1..=2).map(ValidatorSetFixture::new).collect::<Vec<_>>();
+        let indexer = TestIndexer::spawn(&sets, 0).await;
+        indexer.serve_utxos((1..=5).map(utxo).collect(), 2);
+        let provider = indexer.provider(IndexerTrust::Trust);
+
+        let pair = (UtxoTag::new(0), RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap());
+        let utxos = provider
+            .fetch_unspent_utxos(STEALTH_TARI_RESOURCE_ADDRESS, &[pair])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            (1..=5).map(|seed| UtxoId::from_array([seed; 32])).collect::<Vec<_>>()
+        );
+        assert_eq!(indexer.utxo_fetch_cursors(), [
+            None,
+            Some(UtxoId::from_array([2; 32])),
+            Some(UtxoId::from_array([4; 32]))
+        ]);
     }
 }

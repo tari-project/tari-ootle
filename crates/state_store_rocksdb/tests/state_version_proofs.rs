@@ -11,6 +11,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     consensus_models::{
         STATE_VERSION_PROOF_INTERVAL,
         StateVersionProof,
@@ -116,7 +117,10 @@ fn prune_at(store: &RocksDbStateStore<String>, epoch: Epoch) {
 
 fn clear_stale(store: &RocksDbStateStore<String>) {
     store
-        .with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards(), usize::MAX))
+        .with_write_tx(|tx| {
+            let retention = StateTreeRetention::read(&**tx, num_preshards(), 0)?;
+            tx.state_tree_nodes_clear_stale(&retention, usize::MAX)
+        })
         .unwrap();
 }
 

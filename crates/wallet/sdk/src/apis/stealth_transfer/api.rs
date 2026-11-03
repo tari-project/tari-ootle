@@ -15,7 +15,7 @@ use tari_engine_types::{
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{InputDeclaration, displayable::Displayable, optional::Optional};
 use tari_ootle_transaction::{Transaction, TransactionBuilder, UnsignedTransaction, args};
-use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
+use tari_ootle_wallet_crypto::pay_to::PayTo;
 use tari_template_lib::{
     models::Account as BuiltinAccount,
     types::{
@@ -24,7 +24,7 @@ use tari_template_lib::{
         ResourceAddress,
         UtxoAddress,
         constants::TARI_TOKEN,
-        stealth::{RevealedOutput, StealthTransferStatement, StealthUnspentOutput},
+        stealth::{RevealedOutput, StealthTransferStatement},
     },
 };
 use tokio::{sync::Semaphore, task::block_in_place};
@@ -33,8 +33,8 @@ use super::{
     BadgeUsage,
     TransferFeeParams,
     error::StealthTransferApiError,
-    params::StealthTransferParams,
-    types::{InputsToSpend, StaticallyPricedShape, StealthOutputToCreate, StealthTransferOutput},
+    params::{InputSelection, StealthTransferParams, TransferStatementSpec},
+    types::{InputsToSpend, StaticallyPricedShape, StealthOutputToCreate, StealthTransferOutput, TransferStatements},
 };
 use crate::{
     WalletSdkSpec,
@@ -57,8 +57,6 @@ use crate::{
         AccountWithAddress,
         KeyBranch,
         KeyId,
-        OutputStatus,
-        StealthOutputModel,
         StealthUtxoSpendKeyId,
         WalletLockDropGuard,
         WalletLockId,
@@ -135,6 +133,218 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             input_selection,
             MAX_TRANSFER_INPUTS,
         )
+    }
+
+    /// Builds one stealth transfer statement per spec, in order, locking the inputs each one spends under `lock_id`.
+    ///
+    /// Every spec is checked before any input is locked. An output paying a wallet account with a plain key-path spend
+    /// is recorded as `LockedUnconfirmed` under `lock_id` once every statement is built, so each statement spends only
+    /// outputs already on chain: input selection counts same-lock unconfirmed outputs as spendable.
+    ///
+    /// On error, the inputs already locked and any outputs already recorded stay under `lock_id`; releasing the lock
+    /// undoes both.
+    pub async fn create_transfer_statements(
+        &self,
+        lock_id: WalletLockId,
+        specs: &[TransferStatementSpec],
+    ) -> Result<TransferStatements, StealthTransferApiError> {
+        let mut checked = Vec::with_capacity(specs.len());
+        for spec in specs {
+            checked.push(self.check_statement_spec(spec).await?);
+        }
+
+        let mut statements = Vec::with_capacity(specs.len());
+        let mut signing_keys = Vec::new();
+        let mut utxo_signers = Vec::new();
+        let mut wallet_outputs = Vec::new();
+        for (spec, checked) in specs.iter().zip(checked) {
+            let sender_key_id = checked.sender_key_id;
+            let (statement, signing_key_id, inputs) = self.build_transfer_statement(lock_id, spec, checked)?;
+
+            let blinded_outputs = spec.outputs.iter().filter(|o| o.blinded_amount > 0);
+            for (requested, created) in blinded_outputs.zip(&statement.outputs_statement.outputs) {
+                if !matches!(requested.pay_to, PayTo::StealthPublicKey) {
+                    continue;
+                }
+                if let Some(account) = self.accounts_api.find_account_paid_by(&requested.address)? {
+                    wallet_outputs.push((spec.resource_address, account, created.clone(), requested));
+                }
+            }
+
+            if !signing_keys.contains(&signing_key_id) {
+                signing_keys.push(signing_key_id);
+            }
+            for input in &inputs.inputs {
+                let signer = StealthUtxoSpendKeyId {
+                    account_key_id: sender_key_id,
+                    view_key_id: spec.sender.view_only_key_id(),
+                    public_nonce: input.public_nonce,
+                };
+                if !utxo_signers.contains(&signer) {
+                    utxo_signers.push(signer);
+                }
+            }
+            statements.push(statement);
+        }
+
+        for (resource_address, account, output, requested) in wallet_outputs {
+            self.outputs_api.add_unconfirmed_output(
+                lock_id,
+                &account,
+                resource_address,
+                &output,
+                requested.blinded_amount,
+                requested.memo.clone(),
+            )?;
+        }
+
+        Ok(TransferStatements {
+            statements,
+            signing_keys,
+            utxo_signers,
+        })
+    }
+
+    /// Checks that `spec` is a statement the wallet can build, without locking anything.
+    async fn check_statement_spec(
+        &self,
+        spec: &TransferStatementSpec,
+    ) -> Result<CheckedStatementSpec, StealthTransferApiError> {
+        let Some(sender_key_id) = spec.sender.owner_key_id() else {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "owner_account",
+                reason: "cannot transfer from a view-only account".to_string(),
+            });
+        };
+
+        for output in &spec.outputs {
+            output
+                .validate_pay_to()
+                .map_err(|reason| StealthTransferApiError::InvalidParameter {
+                    param: "pay_to",
+                    reason,
+                })?;
+        }
+
+        let total_amount = spec
+            .total_output_amount()
+            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
+                param: "outputs",
+                reason: "total output amount exceeds the maximum amount".to_string(),
+            })?;
+        let revealed_amount =
+            Amount::sum_from_positive(spec.outputs.iter().map(|o| o.revealed_amount)).ok_or_else(|| {
+                StealthTransferApiError::InvalidParameter {
+                    param: "outputs",
+                    reason: "total revealed output amount exceeds the maximum amount".to_string(),
+                }
+            })?;
+
+        let resource = self.substate_api.fetch_resource(spec.resource_address).await?;
+        if !resource.resource_type().is_stealth() {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "resource_address",
+                reason: format!(
+                    "Resource is not a stealth resource (type: {})",
+                    resource.resource_type()
+                ),
+            });
+        }
+        let resource_view_key = resource
+            .view_key()
+            .map(RistrettoPublicKey::convert_from_byte_type)
+            .transpose()
+            .map_err(|e| StealthTransferApiError::InvalidParameter {
+                param: "resource_view_key",
+                reason: format!("Invalid resource view key: {e}"),
+            })?;
+
+        Ok(CheckedStatementSpec {
+            sender_key_id,
+            total_amount,
+            revealed_amount,
+            resource_view_key,
+        })
+    }
+
+    /// Locks the inputs `spec` selects and builds its statement, returning the statement, the key that signs it and
+    /// the inputs it spends.
+    fn build_transfer_statement(
+        &self,
+        lock_id: WalletLockId,
+        spec: &TransferStatementSpec,
+        checked: CheckedStatementSpec,
+    ) -> Result<(StealthTransferStatement, KeyId, InputsToSpend), StealthTransferApiError> {
+        let sender = &spec.sender;
+        let inputs = match &spec.input_selection {
+            InputSelection::Specific { utxo_addresses } => {
+                let inputs = self
+                    .outputs_api
+                    .lock_specific_outputs(
+                        sender.component_address(),
+                        &spec.resource_address,
+                        lock_id,
+                        utxo_addresses,
+                    )
+                    .map_err(|e| match e {
+                        StealthOutputsApiError::InvalidParameter { .. } => {
+                            StealthTransferApiError::IneligibleSpecificInput(e)
+                        },
+                        e => e.into(),
+                    })?;
+                InputsToSpend {
+                    inputs,
+                    revealed: Amount::zero(),
+                }
+            },
+            InputSelection::Selection(selection) => self.lock_inputs_for_transfer(
+                lock_id,
+                sender.component_address(),
+                spec.resource_address,
+                checked.total_amount,
+                *selection,
+            )?,
+            InputSelection::FromBucket { .. } => InputsToSpend::empty(),
+        };
+
+        // Revealed inputs are withdrawn from the sender's account, which only its account key may authorise. Any other
+        // statement is signed by a single-use nonce key.
+        let signing_key_id = if inputs.revealed.is_positive() {
+            checked.sender_key_id
+        } else {
+            self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
+        };
+        // The signing key is what the engine sees as a badge, so it is the key a revealed output must name.
+        let signing_public_key = self.key_manager_api.get_public_key(signing_key_id)?;
+
+        let input_revealed_amount = spec
+            .input_selection
+            .as_from_bucket()
+            .unwrap_or(Amount::zero())
+            .checked_add(inputs.revealed)
+            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
+                param: "input_revealed_amount",
+                reason: "input revealed amount overflowed or was negative".to_string(),
+            })?;
+        let outputs = spec
+            .outputs
+            .iter()
+            .filter(|o| o.blinded_amount > 0)
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<StealthOutputToCreate<'_>>, _>>()?;
+
+        let statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+            view_only_key_id: sender.view_only_key_id(),
+            resource_address: &spec.resource_address,
+            resource_view_key: checked.resource_view_key,
+            inputs: &inputs.inputs,
+            input_revealed_amount,
+            outputs,
+            revealed_output: (!checked.revealed_amount.is_zero())
+                .then(|| RevealedOutput::new(checked.revealed_amount, signing_public_key.public_key().to_byte_type())),
+        })?;
+
+        Ok((statement, signing_key_id, inputs))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -443,7 +653,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 fee_stealth_change_amt,
                 owner_account.component_address()
             );
-            self.add_unconfirmed_output_from_statement(
+            self.outputs_api.add_unconfirmed_output(
                 lock_id,
                 owner_account,
                 fee_resource,
@@ -736,7 +946,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 change_amount,
                 owner_account.component_address()
                 );
-                self.add_unconfirmed_output_from_statement(
+                self.outputs_api.add_unconfirmed_output(
                     lock.id(),
                     &owner_account,
                     params.resource_address,
@@ -1218,45 +1428,19 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
 
         Ok(transaction)
     }
-
-    fn add_unconfirmed_output_from_statement(
-        &self,
-        lock_id: WalletLockId,
-        account: &AccountWithAddress,
-        resource_address: ResourceAddress,
-        output: &StealthUnspentOutput,
-        value: u64,
-        memo: Option<Memo>,
-    ) -> Result<(), StealthTransferApiError> {
-        self.outputs_api.add_output(&StealthOutputModel {
-            owner_account: *account.component_address(),
-            resource_address,
-            commitment: output.output.commitment,
-            value,
-            sender_public_nonce: output.output.sender_public_nonce,
-            view_only_key_id: account.view_only_key_id(),
-            owner_key_id: account.owner_key_id(),
-            encrypted_data: output.output.encrypted_data.clone(),
-            status: OutputStatus::LockedUnconfirmed,
-            memo,
-            auth: output.auth.clone(),
-            minimum_value_promise: output.output.minimum_value_promise,
-            tag_byte: output.tag,
-            lock_id: Some(lock_id),
-            proven_up: None,
-            spent_version: None,
-            is_burnt: false,
-            is_frozen: false,
-            is_on_chain: false,
-            is_condition_spendable: self.outputs_api.is_spendable_auth(&output.auth),
-        })?;
-        Ok(())
-    }
 }
 
-/// Withdraws `amount` of `resource` from the owner's account, handing the badge proof to the account's frame when
-/// one is in use. A frame authorizes with the badges it is stamped with and the proofs it is passed as arguments,
-/// so a badge reaches the account's withdraw rule as an argument.
+/// What [`StealthTransferApi::create_transfer_statements`] learns about a spec while checking it, before it locks any
+/// input.
+struct CheckedStatementSpec {
+    sender_key_id: KeyId,
+    total_amount: Amount,
+    revealed_amount: Amount,
+    resource_view_key: Option<RistrettoPublicKey>,
+}
+
+/// Withdraws `amount` of `resource` from the owner's account. When a badge is in use, the call runs inside an
+/// authorization window over the workspace proof `proof`, which lends the badge to the account's withdraw rule.
 fn withdraw_from_account<D>(
     builder: TransactionBuilder<D>,
     account: ComponentAddress,
@@ -1267,11 +1451,9 @@ fn withdraw_from_account<D>(
     if badge_usage.is_none() {
         builder.call_method(account, "withdraw", args![resource, amount])
     } else {
-        builder.call_method(account, "withdraw_with_auth", args![
-            resource,
-            amount,
-            Workspace("proof")
-        ])
+        builder.with_authorized_proof("proof", |builder| {
+            builder.call_method(account, "withdraw", args![resource, amount])
+        })
     }
 }
 

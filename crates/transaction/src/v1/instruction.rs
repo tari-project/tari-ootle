@@ -153,6 +153,19 @@ pub enum Instruction {
         #[n(1)]
         dest: WorkspaceOffsetId,
     },
+    /// Opens an authorization window over the workspace proof at `proof`: native instructions and calls that follow
+    /// see it until a matching `DropProofAuthorization` or the end of the instruction phase.
+    #[n(16)]
+    AuthorizeProof {
+        #[n(0)]
+        proof: WorkspaceOffsetId,
+    },
+    /// Closes the authorization window over the workspace proof at `proof`. The proof stays on the workspace.
+    #[n(17)]
+    DropProofAuthorization {
+        #[n(0)]
+        proof: WorkspaceOffsetId,
+    },
 }
 
 impl Instruction {
@@ -167,6 +180,7 @@ impl Instruction {
     pub fn referenced_template(&self) -> Option<&TemplateAddress> {
         match self {
             Self::CallFunction { address, .. } => Some(address),
+            Self::UpdateComponentTemplate { new_template, .. } => Some(new_template),
             _ => None,
         }
     }
@@ -199,7 +213,9 @@ impl Instruction {
             Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
-            Self::PayFeeFromBucket { .. } => {},
+            Self::PayFeeFromBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => {},
         }
         out
     }
@@ -244,7 +260,9 @@ impl Instruction {
             Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
-            Self::PayFeeFromBucket { .. } => {},
+            Self::PayFeeFromBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => {},
         }
     }
 
@@ -325,6 +343,9 @@ impl Instruction {
             },
             Self::PayFeeFromBucket { bucket } => {
                 bucket.remap_id(id_offset);
+            },
+            Self::AuthorizeProof { proof } | Self::DropProofAuthorization { proof } => {
+                proof.remap_id(id_offset);
             },
             Self::UpdateComponentTemplate { component, migrate, .. } => {
                 component.remap_workspace_id(id_offset);
@@ -431,6 +452,12 @@ impl Display for Instruction {
             },
             Self::PutIntoBucket { src, dest } => {
                 write!(f, "PutIntoBucket {{ src: {}, dest: {} }}", src, dest)
+            },
+            Self::AuthorizeProof { proof } => {
+                write!(f, "AuthorizeProof {{ proof: {} }}", proof)
+            },
+            Self::DropProofAuthorization { proof } => {
+                write!(f, "DropProofAuthorization {{ proof: {} }}", proof)
             },
             Self::PublishTemplate { .. } => {
                 write!(f, "PublishTemplate")
@@ -560,6 +587,61 @@ mod tests {
         let encoded = tari_bor::encode(&instruction).unwrap();
         let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
         assert_eq!(instruction, decoded);
+
+        for instruction in [
+            Instruction::AuthorizeProof {
+                proof: WorkspaceOffsetId::new(3).with_offset(1),
+            },
+            Instruction::DropProofAuthorization {
+                proof: WorkspaceOffsetId::new(3),
+            },
+        ] {
+            let encoded = tari_bor::encode(&instruction).unwrap();
+            let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
+            assert_eq!(instruction, decoded);
+        }
+    }
+
+    /// Pins the borsh bytes of the authorization window instructions in the signing preimage: the variant's
+    /// declaration index (15 and 16, distinct from their CBOR tags 16 and 17), then the workspace id as a
+    /// little-endian `u16` and the optional offset as a little-endian `u64`.
+    #[test]
+    fn proof_authorization_borsh_preimage() {
+        let instruction = Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(3),
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [15, 3, 0, 0]);
+
+        let instruction = Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(3).with_offset(1),
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [
+            15, 3, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0
+        ]);
+
+        let instruction = Instruction::DropProofAuthorization {
+            proof: WorkspaceOffsetId::new(3),
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [16, 3, 0, 0]);
+    }
+
+    #[test]
+    fn remap_workspace_ids_shifts_proof_authorization() {
+        let mut instruction = Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(3).with_offset(1),
+        };
+        instruction.remap_workspace_ids(10);
+        assert_eq!(instruction, Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(13).with_offset(1),
+        });
+
+        let mut instruction = Instruction::DropProofAuthorization {
+            proof: WorkspaceOffsetId::new(3),
+        };
+        instruction.remap_workspace_ids(10);
+        assert_eq!(instruction, Instruction::DropProofAuthorization {
+            proof: WorkspaceOffsetId::new(13),
+        });
     }
 
     /// Pins the borsh bytes that a publish instruction contributes to the signing preimage: the variant's declaration

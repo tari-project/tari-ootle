@@ -42,13 +42,16 @@ pub(super) fn substate_lookup_error(e: SubstateManagerError) -> ErrorResponse {
     if matches!(e, SubstateManagerError::InputSubstateIsDown { .. }) || e.is_not_found_error() {
         return ErrorResponse::not_found(e.to_string());
     }
-    // No committee answers for the substate's shard group at this epoch, or its members disagree on
-    // the substate and none can prove it. Both pass as the network settles, so the caller is told to
-    // come back rather than that the indexer broke.
+    // No committee answers for the substate's shard group at this epoch, its members disagree on
+    // the substate and none can prove it, or every member that answered a versioned read named
+    // another version. Each passes as the network settles, so the caller is told to come back
+    // rather than that the indexer broke.
     if matches!(
         e,
         SubstateManagerError::IndexerError(
-            IndexerError::NoCommitteeMembers { .. } | IndexerError::InvalidSubstateState
+            IndexerError::NoCommitteeMembers { .. } |
+                IndexerError::InvalidSubstateState |
+                IndexerError::VersionMismatch { .. }
         )
     ) {
         return ErrorResponse::service_unavailable(e.to_string());
@@ -362,8 +365,13 @@ mod tests {
 
     #[test]
     fn a_committee_that_cannot_agree_is_unavailable() {
-        let resp = substate_lookup_error(SubstateManagerError::IndexerError(IndexerError::InvalidSubstateState));
-        assert_eq!(resp.status, StatusCode::SERVICE_UNAVAILABLE);
+        for e in [IndexerError::InvalidSubstateState, IndexerError::VersionMismatch {
+            requested: SubstateVersion::new(2),
+            answered: SubstateVersion::new(1),
+        }] {
+            let resp = substate_lookup_error(SubstateManagerError::IndexerError(e));
+            assert_eq!(resp.status, StatusCode::SERVICE_UNAVAILABLE);
+        }
     }
 
     /// A shard group without a committee is a state the network leaves on its own, so the caller is

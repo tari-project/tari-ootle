@@ -184,6 +184,12 @@ pub struct ValidatorNodeConfig {
     /// single line in the node's memory budget, which is logged at startup.
     #[serde(default = "default_state_store_memory_budget_bytes")]
     pub state_store_memory_budget_bytes: usize,
+    /// The number of most recent epoch checkpoints at whose versions the state store keeps each shard's whole tree, so
+    /// that indexers can take a shard snapshot at one. Disk use grows with the number of distinct substates changed
+    /// since the oldest, up to one copy of each tree per checkpoint. A value below [`MIN_PINNED_CHECKPOINT_EPOCHS`] is
+    /// raised to it.
+    #[serde(default = "default_pinned_checkpoint_epochs")]
+    pub pinned_checkpoint_epochs: u64,
     /// Local diagnostic event log
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
@@ -206,6 +212,14 @@ fn default_max_consensus_messaging_queue_bytes() -> usize {
 
 fn default_state_store_memory_budget_bytes() -> usize {
     tari_state_store_rocksdb::DEFAULT_MEMORY_BUDGET_BYTES
+}
+
+/// The fewest epoch checkpoints a validator keeps the trees of. Indexers snapshot a new shard at either of the last two
+/// checkpoints, the one before serving while the one that just ended is not yet stored.
+pub const MIN_PINNED_CHECKPOINT_EPOCHS: u64 = 2;
+
+fn default_pinned_checkpoint_epochs() -> u64 {
+    DatabaseOptions::default().pinned_checkpoint_epochs
 }
 
 /// The validator's local record of abnormal events (leader failures, consensus errors, sync and
@@ -271,6 +285,7 @@ impl ValidatorNodeConfig {
             .with_prune_transaction_history(!self.keep_transaction_history)
             .with_memory_budget_bytes(self.state_store_memory_budget_bytes)
             .with_memtable_budget_bytes(self.state_store_memory_budget_bytes / 2)
+            .with_pinned_checkpoint_epochs(self.pinned_checkpoint_epochs.max(MIN_PINNED_CHECKPOINT_EPOCHS))
     }
 
     pub fn set_base_path<P: AsRef<Path>>(&mut self, base_path: P) {
@@ -353,6 +368,7 @@ impl Default for ValidatorNodeConfig {
             max_consensus_gossip_queue_bytes: default_max_consensus_gossip_queue_bytes(),
             max_consensus_messaging_queue_bytes: default_max_consensus_messaging_queue_bytes(),
             state_store_memory_budget_bytes: default_state_store_memory_budget_bytes(),
+            pinned_checkpoint_epochs: default_pinned_checkpoint_epochs(),
             diagnostics: DiagnosticsConfig::default(),
             logging: crate::logging::default_logging_config(),
         }
@@ -412,6 +428,9 @@ pub struct ConsensusConfig {
     /// no extension beyond `state_sync_progress_timeout_secs`.
     #[serde(default = "default_state_sync_min_throughput_bytes_per_sec")]
     pub state_sync_min_throughput_bytes_per_sec: u64,
+    /// How often, in seconds, the stale state tree nodes past the state history window are deleted. At least 1.
+    #[serde(default = "default_state_tree_cleanup_interval_secs")]
+    pub state_tree_cleanup_interval_secs: u64,
 }
 
 impl Default for ConsensusConfig {
@@ -421,8 +440,13 @@ impl Default for ConsensusConfig {
             state_sync_peer_skip_runs: default_state_sync_peer_skip_runs(),
             state_sync_progress_timeout_secs: default_state_sync_progress_timeout_secs(),
             state_sync_min_throughput_bytes_per_sec: default_state_sync_min_throughput_bytes_per_sec(),
+            state_tree_cleanup_interval_secs: default_state_tree_cleanup_interval_secs(),
         }
     }
+}
+
+fn default_state_tree_cleanup_interval_secs() -> u64 {
+    60 * 60
 }
 
 fn default_state_sync_peer_skip_runs() -> u32 {

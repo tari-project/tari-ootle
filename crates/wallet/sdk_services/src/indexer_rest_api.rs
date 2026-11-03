@@ -58,6 +58,7 @@ use tari_ootle_wallet_sdk::{
     network::{
         FetchedSubstates,
         FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedNotification,
         TransactionFinalizedResult,
@@ -67,12 +68,7 @@ use tari_ootle_wallet_sdk::{
         WalletNetworkInterface,
     },
 };
-use tari_template_lib_types::{
-    ResourceAddress,
-    TemplateAddress,
-    UtxoId,
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
-};
+use tari_template_lib_types::{ResourceAddress, TemplateAddress, UtxoId, crypto::RistrettoPublicKeyBytes};
 use time::{OffsetDateTime, PrimitiveDateTime};
 use url::ParseError;
 
@@ -380,7 +376,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
 
     async fn get_substates(
         &self,
-        substate_ids: Vec<SubstateId>,
+        substate_ids: &[SubstateId],
         include_proofs: bool,
     ) -> Result<FetchedSubstates, Self::Error> {
         // The indexer's substates/fetch endpoint accepts at most MAX_SUBSTATES_PER_FETCH IDs per request, so
@@ -592,6 +588,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                     shard: Shard::from(sos.shard),
                     max_state_version: StateVersion::from(sos.max_state_version),
                     has_more: sos.has_more,
+                    spends_incomplete: sos.spends_incomplete,
                 });
                 let update = res
                     .update
@@ -644,38 +641,58 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     async fn fetch_utxos(
         &self,
         resource_address: ResourceAddress,
-        tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+        tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
     ) -> Result<FetchedUtxos, Self::Error> {
         let client = self.tracked_client();
+        let (tag_and_nonce_pairs, mut unspent_at): (Vec<_>, Vec<_>) = tag_and_nonce_pairs.into_iter().unzip();
+        if unspent_at.iter().all(Option::is_none) {
+            unspent_at.clear();
+        }
         // TODO: Given the potential size of substates protobuf, json + hex encoding may be too inefficient. Consider
         // supporting the application/x-protobuf content type in the indexer REST API.
-        self.observe_read(
-            &client,
-            client.get_utxos(GetUtxosRequest {
-                resource_address,
-                tag_and_nonce_pairs,
-            }),
-            |resp| {
-                let unspent = resp
-                    .utxos
-                    .into_iter()
-                    .map(|(id, utxo)| {
-                        let utxo =
-                            utxo.decode()
-                                .map_err(|e| IndexerRestApiNetworkInterfaceError::UndecodableValue {
-                                    what: "UTXO",
-                                    details: e.to_string(),
+        let mut fetched = FetchedUtxos {
+            unspent: Vec::new(),
+            spent: Vec::new(),
+        };
+        let mut cursor = None;
+        loop {
+            let (unspent, spent, next_cursor) = self
+                .observe_read(
+                    &client,
+                    client.get_utxos(GetUtxosRequest {
+                        resource_address,
+                        tag_and_nonce_pairs: tag_and_nonce_pairs.clone(),
+                        unspent_at: unspent_at.clone(),
+                        cursor,
+                    }),
+                    |resp| {
+                        let unspent = resp
+                            .utxos
+                            .into_iter()
+                            .map(|(id, utxo)| {
+                                let utxo = utxo.decode().map_err(|e| {
+                                    IndexerRestApiNetworkInterfaceError::UndecodableValue {
+                                        what: "UTXO",
+                                        details: e.to_string(),
+                                    }
                                 })?;
-                        Ok((id, utxo))
-                    })
-                    .collect::<Result<_, IndexerRestApiNetworkInterfaceError>>()?;
-                Ok::<_, IndexerRestApiNetworkInterfaceError>(FetchedUtxos {
-                    unspent,
-                    spent: resp.spent,
-                })
-            },
-        )
-        .await
+                                Ok((id, utxo))
+                            })
+                            .collect::<Result<Vec<_>, IndexerRestApiNetworkInterfaceError>>()?;
+                        Ok::<_, IndexerRestApiNetworkInterfaceError>((unspent, resp.spent, resp.next_cursor))
+                    },
+                )
+                .await?;
+            // Every page reports the spent pairs of the whole request
+            if cursor.is_none() {
+                fetched.spent = spent;
+            }
+            fetched.unspent.extend(unspent);
+            if next_cursor.is_none() {
+                return Ok(fetched);
+            }
+            cursor = next_cursor;
+        }
     }
 
     async fn list_watched_substates(
@@ -944,7 +961,10 @@ mod tests {
     use tari_consensus_types::Decision;
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_engine_types::{
+        Utxo,
+        UtxoOutput,
         commit_result::{FinalizeResult, TransactionResult},
+        crypto::OutputBody,
         fees::FeeReceipt,
         resource_container::ResourceContainer,
         substate::{EncodedSubstate, Substate, SubstateDiff, SubstateValue},
@@ -954,9 +974,16 @@ mod tests {
         GetSubstateResponse,
         GetSubstatesResponse,
         GetTransactionResultResponse,
+        GetUtxosResponse,
         SubmitTransactionDryRunResponse,
     };
-    use tari_template_lib_types::{ComponentAddress, constants::TARI_TOKEN};
+    use tari_template_lib_types::{
+        ComponentAddress,
+        EncryptedData,
+        constants::TARI_TOKEN,
+        crypto::UtxoTag,
+        stealth::SpendAuthorization,
+    };
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -1321,7 +1348,7 @@ mod tests {
         .unwrap();
         let network = network_answering_with(body).await;
 
-        let err = network.get_substates(vec![component_id()], false).await.unwrap_err();
+        let err = network.get_substates(&[component_id()], false).await.unwrap_err();
 
         assert!(matches!(
             err,
@@ -1502,5 +1529,99 @@ mod tests {
         assert_eq!(resp.encoded_execution_result, Some(served.clone()));
         let decoded = resp.result.into_execute_result().unwrap();
         assert_eq!(tari_bor::encode(&decoded).unwrap(), served.as_bytes());
+    }
+
+    /// Answers each UTXO fetch with a page of `utxos` in id order of at most `page_size`, whose ids order after its
+    /// cursor, as the indexer pages them, and reports `pair` spent on the first page only. Records the `cursor` of
+    /// each fetch.
+    async fn spawn_utxo_pages_server(
+        mut utxos: Vec<(UtxoId, Utxo)>,
+        page_size: usize,
+        pair: (UtxoTag, RistrettoPublicKeyBytes),
+        cursors: Arc<Mutex<Vec<Option<UtxoId>>>>,
+    ) -> Url {
+        utxos.sort_by_key(|(id, _)| *id);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                let body = loop {
+                    let n = socket.read(&mut buf).await.unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                        let len = head
+                            .lines()
+                            .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ")?.parse().ok())
+                            .unwrap_or(0);
+                        if body.len() >= len {
+                            break body.to_string();
+                        }
+                    }
+                };
+                let req: GetUtxosRequest = serde_json::from_str(&body).unwrap();
+                cursors.lock().unwrap().push(req.cursor);
+                let start = req
+                    .cursor
+                    .map_or(0, |cursor| utxos.partition_point(|(id, _)| *id <= cursor));
+                let end = (start + page_size).min(utxos.len());
+                let body = serde_json::to_string(&GetUtxosResponse {
+                    utxos: utxos[start..end]
+                        .iter()
+                        .map(|(id, utxo)| (*id, Encoded::encode(utxo).unwrap()))
+                        .collect(),
+                    spent: if start == 0 { vec![pair] } else { Vec::new() },
+                    next_cursor: (end < utxos.len()).then(|| utxos[end - 1].0),
+                })
+                .unwrap();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: \
+                     close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ignore = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn fetching_utxos_reads_every_page_and_the_spent_pairs_of_the_first() {
+        let pair = (UtxoTag::new(0), RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap());
+        let utxos = (1..=5u8)
+            .map(|seed| {
+                let key = RistrettoPublicKeyBytes::from_bytes(&[seed; 32]).unwrap();
+                let utxo = Utxo::new(UtxoOutput {
+                    output: OutputBody {
+                        public_nonce: key,
+                        encrypted_data: EncryptedData::empty(),
+                        minimum_value_promise: 0,
+                        viewable_balance: None,
+                    },
+                    auth: SpendAuthorization::Key(key),
+                    tag: UtxoTag::new(0),
+                });
+                (UtxoId::from_array([seed; 32]), utxo)
+            })
+            .collect::<Vec<_>>();
+        let cursors = Arc::new(Mutex::new(Vec::new()));
+        let url = spawn_utxo_pages_server(utxos.clone(), 2, pair, cursors.clone()).await;
+        let network = IndexerRestApiNetworkInterface::init(vec![url]).unwrap();
+
+        let fetched = network.fetch_utxos(TARI_TOKEN, vec![(pair, None)]).await.unwrap();
+
+        assert_eq!(
+            fetched.unspent.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+        );
+        assert_eq!(fetched.spent, [pair]);
+        assert_eq!(*cursors.lock().unwrap(), [
+            None,
+            Some(UtxoId::from_array([2; 32])),
+            Some(UtxoId::from_array([4; 32]))
+        ]);
     }
 }

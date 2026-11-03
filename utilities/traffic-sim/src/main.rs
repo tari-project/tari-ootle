@@ -90,11 +90,8 @@ enum Commands {
         #[arg(short = 'r', long, help = "Resource address of the resource to decrypt")]
         resource_address: ResourceAddress,
 
-        #[arg(long, help = "Last UTXO ID processed")]
-        last_id: Option<String>,
-
-        #[arg(long, help = "Specific UTXO ID to decrypt")]
-        specific_id: Option<String>,
+        #[arg(long = "id", required = true, help = "UTXO ID to decrypt (repeat for more)")]
+        ids: Vec<String>,
 
         #[arg(long, alias = "csv", help = "Path to output CSV file with results")]
         csv_output: Option<PathBuf>,
@@ -203,8 +200,7 @@ async fn main() -> Result<()> {
             min_value,
             max_value,
             resource_address,
-            last_id,
-            specific_id,
+            ids,
             csv_output,
             view_key,
         } => {
@@ -214,14 +210,9 @@ async fn main() -> Result<()> {
                 min_value,
                 max_value,
                 resource_address,
-                last_id
-                    .as_ref()
-                    .map(|id| UtxoId::from_hex(id).context("Invalid last_id"))
-                    .transpose()?,
-                specific_id
-                    .as_ref()
-                    .map(|id| UtxoId::from_hex(id).context("Invalid specific_id"))
-                    .transpose()?,
+                ids.iter()
+                    .map(|id| UtxoId::from_hex(id).with_context(|| format!("Invalid UTXO ID {id}")))
+                    .collect::<anyhow::Result<_>>()?,
                 csv_output,
                 view_key,
             )

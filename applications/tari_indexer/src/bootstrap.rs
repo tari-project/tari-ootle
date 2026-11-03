@@ -274,6 +274,7 @@ pub async fn spawn_services(
     let event_notifier = Notify::new(1000);
     let transaction_event_notifier = Notify::new(1024);
     let validator_status = ValidatorStatusMonitor::new(config.network, epoch_manager.clone());
+    let sync_status = network_state_sync::SyncStatusMonitor::new();
 
     #[cfg(feature = "metrics")]
     let network_state_metrics = network_state_sync::NetworkStateMetrics::register(metrics_registry);
@@ -327,7 +328,8 @@ pub async fn spawn_services(
         event_notifier.clone(),
         transaction_event_notifier.clone(),
         validator_status.clone(),
-        shard_watermarks,
+        sync_status.clone(),
+        shard_watermarks.clone(),
         consensus_epoch.clone(),
         config.network,
         #[cfg(feature = "metrics")]
@@ -404,17 +406,22 @@ pub async fn spawn_services(
     // to see what changed underneath them in their own logs.
     info!(
         target: LOG_TARGET,
-        "⚙️ Storage: gossip indexing {}, retention: transactions {}, receipts {}, events {}",
+        "⚙️ Storage: gossip indexing {}, retention: transactions {}, receipts {}, events {}, UTXO tombstones {}",
         if config.indexer.index_gossiped_transactions { "ON" } else { "OFF" },
         display_retention(config.indexer.transaction_retention_epochs),
         display_retention(receipt_retention_epochs),
         display_retention(config.indexer.event_retention_epochs),
+        display_retention(config.indexer.utxo_tombstone_retention_epochs),
     );
 
     for (target, retention_epochs) in [
         (PruneTarget::Transactions, config.indexer.transaction_retention_epochs),
         (PruneTarget::TransactionReceipts, receipt_retention_epochs),
         (PruneTarget::Events, config.indexer.event_retention_epochs),
+        (
+            PruneTarget::UtxoTombstones,
+            config.indexer.utxo_tombstone_retention_epochs,
+        ),
     ] {
         let Some(retention_epochs) = retention_epochs else {
             continue;
@@ -484,6 +491,8 @@ pub async fn spawn_services(
         transaction_event_notifier,
         watched_templates,
         validator_status,
+        sync_status,
+        shard_watermarks,
         consensus_epoch,
     })
 }
@@ -506,6 +515,8 @@ pub struct Services {
     pub transaction_event_notifier: Notify<TransactionEvent>,
     pub watched_templates: Arc<HashSet<TemplateAddress>>,
     pub validator_status: ValidatorStatusMonitor,
+    pub sync_status: network_state_sync::SyncStatusMonitor,
+    pub shard_watermarks: Arc<network_state_sync::ShardWatermarks>,
     pub consensus_epoch: ConsensusEpoch,
 }
 

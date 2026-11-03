@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
@@ -32,7 +32,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
 use tari_ootle_wallet_crypto::{
     OutputWitness,
     StealthCryptoApiError,
@@ -46,15 +46,14 @@ use tari_ootle_wallet_sdk::{
         accounts::AccountsApiError,
         confidential_transfer::ConfidentialTransferParams,
         key_manager::KeyManagerApiError,
-        stealth_outputs::{StealthOutputsApiError, TransferStatementParams},
-        stealth_transfer::{InputsToSpend, StealthTransferParams, TransferOutput},
+        stealth_outputs::StealthOutputsApiError,
+        stealth_transfer::{StealthTransferApiError, StealthTransferParams, TransferOutput, TransferStatementSpec},
         substate::{SubstateApiError, ValidatorScanResult},
     },
     models::{
         AccountWithAddress,
         KeyBranch,
         NewAccountData,
-        StealthUtxoSpendKeyId,
         TransactionContext,
         TransactionContextKind,
         TransactionSubmittedEvent,
@@ -1267,22 +1266,22 @@ pub async fn handle_transfer(
             }
         })
         .then(|builder| {
-            // The badge authorizes the resource's withdraw rule inside the account's frame, which it reaches as
-            // a `Proof` argument.
+            // The badge authorizes the resource's withdraw rule inside the account's frame, which is lent it by
+            // the window opened around the call.
+            let withdraw = |builder: TransactionBuilder| {
+                builder
+                    .call_method(source_account_address, "withdraw", args![
+                        req.resource_address,
+                        req.amount
+                    ])
+                    .put_last_instruction_output_on_workspace("bucket")
+            };
             if req.proof_from_badge_resource.is_some() {
-                builder.call_method(source_account_address, "withdraw_with_auth", args![
-                    req.resource_address,
-                    req.amount,
-                    Workspace("proof")
-                ])
+                builder.with_authorized_proof("proof", withdraw)
             } else {
-                builder.call_method(source_account_address, "withdraw", args![
-                    req.resource_address,
-                    req.amount
-                ])
+                withdraw(builder)
             }
         })
-        .put_last_instruction_output_on_workspace("bucket")
         .call_method(destination_account_address, "deposit", args![Workspace("bucket")])
         .then(|builder| {
             if req.proof_from_badge_resource.is_some() {
@@ -1870,16 +1869,11 @@ impl DeclaredInputPricing {
     /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
     /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
     async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
-        let ids = ids
-            .into_iter()
-            .filter(|id| !id.is_global())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
         let started = tokio::time::Instant::now();
         let mut interval = Duration::from_millis(250);
         let substates = loop {
-            match sdk.substate_api().get_substates_from_network(ids.clone()).await {
+            match sdk.substate_api().get_substates_from_network(&ids).await {
                 Err(SubstateApiError::SubstateUnproven { substate_id })
                     if started.elapsed() < Self::UNPROVEN_READ_RETRY_WINDOW =>
                 {
@@ -1985,7 +1979,6 @@ fn next_fee_estimate_step(
     FeeEstimateStep::Retry { max_fee: required }
 }
 
-#[allow(clippy::too_many_lines)]
 pub async fn handle_create_stealth_transfer_statement(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -2008,172 +2001,66 @@ pub async fn handle_create_stealth_transfer_statement(
         ));
     }
 
-    let mut required_signers = HashSet::new();
-    let mut utxo_signers = IndexSet::new();
+    // Every statement's scopes are checked before any statement is built.
+    let mut specs = Vec::with_capacity(req.requests.len());
+    for req in req.requests {
+        let sender = get_account(&req.sender_account, &sdk.accounts_api())?;
+        enforce_scopes(granted, &[Permission::Transfer(
+            Crud::Create,
+            Some(*sender.component_address()),
+        )])?;
+        // Naming exact UTXOs (and thus learning their decrypted totals through the balance check) requires scoped
+        // stealth-UTXO read authority in addition to the transfer-create scope.
+        if req.input_selection.as_specific().is_some() {
+            enforce_scopes(granted, &[Permission::StealthUtxos(
+                Crud::Read,
+                Some(*sender.component_address()),
+            )])?;
+        }
+        specs.push(TransferStatementSpec {
+            sender,
+            resource_address: req.resource_address,
+            input_selection: req.input_selection,
+            outputs: req.outputs,
+        });
+    }
+
     let lock = sdk
         .locks_api()
         .create_owned_lock_with_timeout(Duration::from_secs(5 * 60), auth.lock_owner())?;
-    let mut statements = Vec::with_capacity(req.requests.len());
-    for req in req.requests {
-        let sender_account = get_account(&req.sender_account, &sdk.accounts_api())?;
-        enforce_scopes(granted, &[Permission::Transfer(
-            Crud::Create,
-            Some(*sender_account.component_address()),
-        )])?;
-        let Some(sender_key_id) = sender_account.owner_key_id() else {
-            return Err(invalid_params(
-                "owner_account",
-                Some("cannot transfer from a view-only account"),
-            ));
-        };
-
-        let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
-
-        if !resource.resource_type().is_stealth() {
-            return Err(invalid_params(
-                "resource_address",
-                Some(format!(
-                    "Resource is not a stealth resource (type: {})",
-                    resource.resource_type()
-                )),
-            ));
-        }
-
-        // Checked before any input is locked: a malformed or silently-discarded `pay_to` is a request error, and
-        // rejecting it here avoids taking a lock this request can never use.
-        for output in &req.outputs {
-            output
-                .validate_pay_to()
-                .map_err(|reason| invalid_params("pay_to", Some(reason)))?;
-        }
-
-        let amount_to_spend = req
-            .total_output_amount()
-            .ok_or_else(|| invalid_params("outputs", Some("total output amount exceeds the maximum amount")))?;
-
-        let inputs = if let Some(utxo_addresses) = req.input_selection.as_specific() {
-            // Exact stealth inputs named by the caller: resolve, validate and lock precisely these UTXOs,
-            // preserving the requested order. They contribute no revealed amount. Naming exact UTXOs (and thus
-            // learning their decrypted totals through the balance check) requires scoped stealth-UTXO read
-            // authority in addition to the transfer-create scope enforced above.
-            enforce_scopes(granted, &[Permission::StealthUtxos(
-                Crud::Read,
-                Some(*sender_account.component_address()),
-            )])?;
-            let inputs = sdk
-                .stealth_outputs_api()
-                .lock_specific_outputs(
-                    sender_account.component_address(),
-                    &req.resource_address,
-                    lock.id(),
-                    utxo_addresses,
-                )
-                .map_err(map_specific_selection_error)?;
-            Some(InputsToSpend {
-                inputs,
-                revealed: Amount::zero(),
-            })
-        } else {
-            req.input_selection
-                .as_selection()
-                .map(|sel| {
-                    sdk.stealth_transfer_api().lock_inputs_for_transfer(
-                        lock.id(),
-                        sender_account.component_address(),
-                        req.resource_address,
-                        amount_to_spend,
-                        sel,
-                    )
-                })
-                .transpose()?
-        };
-
-        let must_sign_with_account_key = inputs.as_ref().is_some_and(|i| i.revealed.is_positive());
-        let signing_key_id = if must_sign_with_account_key {
-            sender_key_id
-        } else {
-            sdk.key_manager_api().next_derived_key_id(KeyBranch::Nonce)?.into()
-        };
-
-        // The signing key is what the engine sees as a badge, so it is the key a revealed output must name.
-        let signing_public_key = sdk.key_manager_api().get_public_key(signing_key_id)?;
-
-        let output_revealed_amount = Amount::sum_from_positive(req.outputs.iter().map(|o| o.revealed_amount))
-            .ok_or_else(|| {
-                invalid_params(
-                    "outputs",
-                    Some("total revealed output amount exceeds the maximum amount"),
-                )
-            })?;
-        let outputs = req
-            .outputs
-            .iter()
-            .filter(|o| o.blinded_amount > 0)
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let statement = sdk
-            .stealth_outputs_api()
-            .generate_transfer_statement(TransferStatementParams {
-                view_only_key_id: sender_account.view_only_key_id(),
-                resource_address: &req.resource_address,
-                resource_view_key: resource
-                    .to_view_key_public_key()
-                    .map_err(|e| anyhow!("Failed to decode resource public view key: {e}"))?,
-                inputs: inputs.as_ref().map(|i| i.inputs.as_slice()).unwrap_or(&[]),
-                input_revealed_amount: req
-                    .input_selection
-                    .as_from_bucket()
-                    .unwrap_or(Amount::zero())
-                    .checked_add(inputs.as_ref().map(|i| i.revealed).unwrap_or(Amount::zero()))
-                    .ok_or_else(|| {
-                        invalid_params(
-                            "input_revealed_amount",
-                            Some("input revealed amount overflowed or was negative"),
-                        )
-                    })?,
-                outputs,
-                // The sender signs this transaction, so its key is what authorises the revealed funds.
-                revealed_output: (!output_revealed_amount.is_zero()).then(|| {
-                    RevealedOutput::new(output_revealed_amount, signing_public_key.public_key().to_byte_type())
-                }),
-            })
-            .map_err(map_statement_construction_error)?;
-
-        utxo_signers.extend(inputs.iter().flat_map(|i| &i.inputs).map(|i| StealthUtxoSpendKeyId {
-            account_key_id: sender_key_id,
-            view_key_id: sender_account.view_only_key_id(),
-            public_nonce: i.public_nonce,
-        }));
-
-        required_signers.insert(signing_key_id);
-        statements.push(statement);
-    }
+    let built = sdk
+        .stealth_transfer_api()
+        .create_transfer_statements(lock.id(), &specs)
+        .await
+        .map_err(map_transfer_statement_error)?;
 
     // Return without unlocking the outputs
     let lock_id = lock.keep_locked();
 
     Ok(AccountsCreateStealthTransferStatementResponse {
-        statements,
+        statements: built.statements,
         lock_id,
-        signing_keys: required_signers.into_iter().collect(),
-        utxo_signers: utxo_signers.into_iter().collect(),
+        signing_keys: built.signing_keys,
+        utxo_signers: built.utxo_signers,
     })
 }
 
-/// Map a `lock_specific_outputs` failure to an RPC error. Caller-invalid selections (the SDK's `InvalidParameter`)
-/// collapse to a single generic `invalid_params` that never reveals whether a named UTXO is unknown, foreign,
-/// wrong-resource, or otherwise ineligible; genuine internal failures (storage, crypto) propagate unchanged as a
-/// server error.
-fn map_specific_selection_error(err: StealthOutputsApiError) -> anyhow::Error {
-    if matches!(err, StealthOutputsApiError::InvalidParameter { .. }) {
-        debug!(target: LOG_TARGET, "Rejected specific stealth input selection: {err}");
-        invalid_params(
-            "utxo_addresses",
-            Some("one or more requested UTXOs are unavailable or ineligible for this account"),
-        )
-    } else {
-        err.into()
+/// Map a `create_transfer_statements` failure to an RPC error. Request errors become `invalid_params`; an ineligible
+/// exactly-named input collapses to a single generic `invalid_params` that never reveals whether a named UTXO is
+/// unknown, foreign, wrong-resource, or otherwise ineligible; genuine internal failures (storage, crypto) propagate
+/// unchanged as a server error.
+fn map_transfer_statement_error(err: StealthTransferApiError) -> anyhow::Error {
+    match err {
+        StealthTransferApiError::InvalidParameter { param, reason } => invalid_params(param, Some(reason)),
+        StealthTransferApiError::IneligibleSpecificInput(e) => {
+            debug!(target: LOG_TARGET, "Rejected specific stealth input selection: {e}");
+            invalid_params(
+                "utxo_addresses",
+                Some("one or more requested UTXOs are unavailable or ineligible for this account"),
+            )
+        },
+        StealthTransferApiError::OutputsApi(e) => map_statement_construction_error(e),
+        err => err.into(),
     }
 }
 
@@ -2572,15 +2459,16 @@ mod create_stealth_transfer_statement_handler_tests {
         resource::Resource,
         stealth::{MerkleTree, hashlock_digest},
     };
-    use tari_ootle_address::{Network, OotleAddress, RistrettoOotleAddress};
+    use tari_ootle_address::{DestinationTag, Network, OotleAddress, RistrettoOotleAddress};
     use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::{Instruction, ResourceAddressRef, TransactionBuilder};
     use tari_ootle_wallet_crypto::pay_to::PayTo;
     use tari_ootle_wallet_sdk::{
         IndexerTrust,
         WalletSdkConfig,
         apis::confidential_transfer::UtxoInputSelection,
         cipher_seed::CipherSeedRestore,
-        models::{EpochBirthday, KeyBranch, KeyId, OutputStatus, StealthOutputModel},
+        models::{EpochBirthday, KeyId, OutputStatus, StealthOutputModel, WalletLockId},
     };
     use tari_ootle_wallet_sdk_services::{
         account_monitor::AccountMonitor,
@@ -2592,7 +2480,13 @@ mod create_stealth_transfer_statement_handler_tests {
     use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
     use tari_ootle_walletd_client::{
         permissions::Permissions,
-        types::{InputSelection, TransferStatementRequest},
+        types::{
+            InputSelection,
+            TransactionRequestCreateRequest,
+            TransactionRequestGetRequest,
+            TransactionRequestValueSummary,
+            TransferStatementRequest,
+        },
     };
     use tari_shutdown::Shutdown;
     use tari_template_lib_types::{
@@ -2668,15 +2562,17 @@ mod create_stealth_transfer_statement_handler_tests {
         sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
             .unwrap();
 
-        let account: ComponentAddress = "component_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
-            .parse()
-            .unwrap();
+        let owner_key_id = KeyId::derived(KeyBranch::Account, 0);
+        let owner_public_key = sdk.key_manager_api().get_public_key(owner_key_id).unwrap().public_key;
+        let account = sdk
+            .accounts_api()
+            .derive_account_address_from_public_key(&owner_public_key.to_byte_type());
         sdk.accounts_api()
             .add_account(
                 Some("stealth"),
                 &account,
                 KeyId::derived(KeyBranch::ViewOnlyKey, 0),
-                KeyId::derived(KeyBranch::Account, 0),
+                owner_key_id,
                 Epoch::zero(),
                 true,
                 true,
@@ -2932,7 +2828,8 @@ mod create_stealth_transfer_statement_handler_tests {
         assert_eq!(response.utxo_signers[0].public_nonce, output_b.sender_public_nonce);
         assert_eq!(response.utxo_signers[1].public_nonce, output_a.sender_public_nonce);
 
-        // keep_locked was reached: both selected outputs remain LockedForSpend under the returned lock.
+        // keep_locked was reached: both selected outputs remain LockedForSpend under the returned lock,
+        // and the wallet-owned output created by the statement is recorded as LockedUnconfirmed under the same lock.
         for output in [&output_b, &output_a] {
             let stored = stored_output(&test, &output.commitment);
             assert!(
@@ -2942,6 +2839,13 @@ mod create_stealth_transfer_statement_handler_tests {
             );
             assert_eq!(stored.lock_id, Some(response.lock_id));
         }
+        let created = &response.statements[0].outputs_statement.outputs[0];
+        let stored_created = stored_output(&test, created.commitment());
+        assert!(matches!(stored_created.status, OutputStatus::LockedUnconfirmed));
+        assert_eq!(stored_created.lock_id, Some(response.lock_id));
+        assert_eq!(stored_created.value, 300);
+        assert!(!stored_created.is_on_chain);
+        assert!(stored_created.is_condition_spendable);
     }
 
     #[tokio::test]
@@ -3192,6 +3096,250 @@ mod create_stealth_transfer_statement_handler_tests {
             );
             assert_eq!(stored.lock_id, Some(response.lock_id));
         }
+    }
+
+    async fn statement_value_summaries(
+        test: &StatementTest,
+        statement: StealthTransferStatement,
+        lock_id: WalletLockId,
+    ) -> Vec<TransactionRequestValueSummary> {
+        let bearer = test.bearer("transaction_requests:create,transaction_requests:read");
+        let transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .with_instructions(vec![Instruction::StealthTransfer {
+                resource_address_ref: ResourceAddressRef::Address(test.stealth_resource),
+                statement,
+                revealed_input_bucket: None,
+            }])
+            .build_unsigned();
+        let created = crate::handlers::transaction_requests::handle_create(
+            &test.context,
+            Some(&bearer),
+            TransactionRequestCreateRequest {
+                transaction,
+                seal_signer: KeyId::derived(KeyBranch::Account, 0),
+                other_signers: vec![],
+                signatures: vec![],
+                lock_ids: vec![lock_id],
+                ttl_secs: Some(60),
+            },
+        )
+        .await
+        .unwrap();
+        crate::handlers::transaction_requests::handle_get(&test.context, Some(&bearer), TransactionRequestGetRequest {
+            request_id: created.request_id,
+        })
+        .await
+        .unwrap()
+        .request
+        .value_summaries
+    }
+
+    fn blinded_output(address: OotleAddress, blinded_amount: u64) -> TransferOutput {
+        TransferOutput {
+            address,
+            revealed_amount: Amount::zero(),
+            blinded_amount,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        }
+    }
+
+    fn statement_request(
+        test: &StatementTest,
+        input_selection: InputSelection,
+        outputs: Vec<TransferOutput>,
+    ) -> TransferStatementRequest {
+        TransferStatementRequest {
+            sender_account: test.account.into(),
+            resource_address: test.stealth_resource,
+            input_selection,
+            outputs,
+        }
+    }
+
+    fn spend_exactly(output: &StealthOutputModel) -> InputSelection {
+        InputSelection::Specific {
+            utxo_addresses: vec![output.to_utxo_address()],
+        }
+    }
+
+    fn external_address() -> OotleAddress {
+        OotleAddress::new(Network::LocalNet, htlc_participant_key(7), htlc_participant_key(8))
+    }
+
+    fn is_recorded(test: &StatementTest, commitment: &PedersenCommitmentBytes) -> bool {
+        test.context
+            .wallet_sdk()
+            .stealth_outputs_api()
+            .utxos_get_many(&test.stealth_resource, Some(&test.account), None)
+            .unwrap()
+            .iter()
+            .any(|o| &o.commitment == commitment)
+    }
+
+    /// Change a statement pays back to the wallet offsets what the approval summary reports as leaving it.
+    #[tokio::test]
+    async fn change_to_the_wallet_is_recorded_and_offsets_the_amount_leaving() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![statement_request(&test, spend_exactly(&input), vec![
+                    blinded_output(external_address(), 40),
+                    blinded_output(account_ootle_address(&test), 60),
+                ])],
+            },
+        )
+        .await
+        .unwrap();
+
+        let outputs = &response.statements[0].outputs_statement.outputs;
+        assert!(!is_recorded(&test, outputs[0].commitment()));
+        let change = stored_output(&test, outputs[1].commitment());
+        assert!(matches!(change.status, OutputStatus::LockedUnconfirmed));
+        assert_eq!(change.lock_id, Some(response.lock_id));
+        assert_eq!(change.value, 60);
+
+        let summaries = statement_value_summaries(&test, response.statements[0].clone(), response.lock_id).await;
+        let [summary] = summaries.as_slice() else {
+            panic!("expected one summary: {summaries:?}");
+        };
+        assert_eq!(
+            (summary.inputs_total, summary.change_total, summary.amount_leaving),
+            (100, 60, 40)
+        );
+    }
+
+    /// An output gated on spend conditions can be claimed by whoever satisfies them, so paying one to the wallet's
+    /// own address is not change.
+    #[tokio::test]
+    async fn a_condition_gated_output_to_the_wallet_is_not_change() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+        let (claim, refund) = htlc_conditions(b"preimage", 4_242, htlc_participant_key(1), htlc_participant_key(2));
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            pay_to_conditions_request(&test, &input, vec![claim, refund]),
+        )
+        .await
+        .unwrap();
+
+        assert!(!is_recorded(
+            &test,
+            response.statements[0].outputs_statement.outputs[0].commitment()
+        ));
+        let summaries = statement_value_summaries(&test, response.statements[0].clone(), response.lock_id).await;
+        let [summary] = summaries.as_slice() else {
+            panic!("expected one summary: {summaries:?}");
+        };
+        assert_eq!(
+            (summary.inputs_total, summary.change_total, summary.amount_leaving),
+            (100, 0, 100)
+        );
+    }
+
+    /// A destination tag labels a payment without changing who can spend it, so a tagged self-payment is change.
+    #[tokio::test]
+    async fn a_tagged_payment_to_the_wallet_is_recorded() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+        let tagged = account_ootle_address(&test).with_destination_tag(DestinationTag::new_checked(*b"tag").unwrap());
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![statement_request(&test, spend_exactly(&input), vec![blinded_output(
+                    tagged, 100,
+                )])],
+            },
+        )
+        .await
+        .unwrap();
+
+        let output = stored_output(&test, response.statements[0].outputs_statement.outputs[0].commitment());
+        assert!(matches!(output.status, OutputStatus::LockedUnconfirmed));
+    }
+
+    /// An address carrying the wallet account's key with another view key pays an output the wallet cannot see.
+    #[tokio::test]
+    async fn a_payment_to_the_account_key_under_a_foreign_view_key_is_not_recorded() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+        let foreign_view = OotleAddress::new(
+            Network::LocalNet,
+            htlc_participant_key(9),
+            *account_ootle_address(&test).account_public_key(),
+        );
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![statement_request(&test, spend_exactly(&input), vec![blinded_output(
+                    foreign_view,
+                    100,
+                )])],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!is_recorded(
+            &test,
+            response.statements[0].outputs_statement.outputs[0].commitment()
+        ));
+    }
+
+    /// Each statement spends only outputs already on chain, so a later statement cannot fund itself from change an
+    /// earlier statement in the same request creates. The failed request releases everything it locked.
+    #[tokio::test]
+    async fn a_later_statement_cannot_spend_change_an_earlier_one_creates() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+
+        let err = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![
+                    statement_request(&test, spend_exactly(&input), vec![
+                        blinded_output(external_address(), 40),
+                        blinded_output(account_ootle_address(&test), 60),
+                    ]),
+                    statement_request(
+                        &test,
+                        InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+                        vec![blinded_output(external_address(), 60)],
+                    ),
+                ],
+            },
+        )
+        .await
+        .expect_err("the only funds for the second statement are the first statement's change");
+        assert!(err.to_string().contains("Insufficient funds"), "{err}");
+
+        let stored = test
+            .context
+            .wallet_sdk()
+            .stealth_outputs_api()
+            .utxos_get_many(&test.stealth_resource, Some(&test.account), None)
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].commitment, input.commitment);
+        assert!(matches!(stored[0].status, OutputStatus::Unspent));
+        assert_eq!(stored[0].lock_id, None);
     }
 
     /// Builds a balanced single-output request paying the whole of one 100-value input to `conditions`.

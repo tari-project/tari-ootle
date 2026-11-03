@@ -93,7 +93,7 @@ async fn a_substate_proven_in_the_latest_trusted_epoch_is_read() {
     let fetched = test
         .sdk()
         .substate_api()
-        .get_substates_from_network(vec![id.clone()])
+        .get_substates_from_network(std::slice::from_ref(&id))
         .await
         .unwrap();
     assert_eq!(tombstone_value(fetched[&id].substate_value()), tombstone_value(&value));
@@ -213,7 +213,7 @@ async fn a_fetch_with_any_unproven_substate_is_refused() {
     let err = test
         .sdk()
         .substate_api()
-        .get_substates_from_network(vec![proven_id, unproven_id.clone()])
+        .get_substates_from_network(&[proven_id, unproven_id.clone()])
         .await
         .unwrap_err();
     assert!(

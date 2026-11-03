@@ -57,6 +57,8 @@ pub enum ManifestIntent {
     AllocateAddress(AllocateAddressStmt),
     CreateAccount(CreateAccountIntent),
     DropAllProofs,
+    AuthorizeProof(Ident),
+    DropProofAuthorization(Ident),
     PublishTemplate(PublishTemplateIntent),
     PutIntoBucket(PutIntoBucketIntent),
     CallLocalFunction(Ident),
@@ -608,6 +610,8 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
 fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::Error> {
     match mac.to_string().as_str() {
         "drop_all_proofs" => Ok(ManifestIntent::DropAllProofs),
+        "authorize" => Ok(ManifestIntent::AuthorizeProof(parse2(tokens)?)),
+        "drop_authorize" => Ok(ManifestIntent::DropProofAuthorization(parse2(tokens)?)),
         "put_into_bucket" => {
             let args = syn::parse::Parser::parse2(
                 |input: ParseStream| {

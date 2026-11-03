@@ -5,10 +5,8 @@
 //! (`condition_root` + `SpendWitness::ScriptPath` revealing a `SpendCondition` leaf).
 
 use ootle_byte_type::ToByteType;
-use tari_crypto::{
-    keys::{PublicKey as _, SecretKey as _},
-    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
-};
+use ootle_network::Network;
+use tari_crypto::{keys::SecretKey as _, ristretto::RistrettoSecretKey};
 use tari_engine::runtime::RuntimeError;
 use tari_engine_types::{
     commit_result::FinalizeResult,
@@ -18,8 +16,9 @@ use tari_engine_types::{
     stealth::{MerkleTree, hashlock_digest},
 };
 use tari_ootle_common_types::{
-    RistrettoSchnorrBlake2bVerifier,
+    TemplateSignatureBinding,
     crypto::create_key_pair_from_seed,
+    sign_template_message_schnorr,
     substate_type::SubstateType,
 };
 use tari_ootle_transaction::{Epoch, Transaction, args};
@@ -199,6 +198,45 @@ fn script_path_access_rule_leaf_allows_spend() {
             .seal(test.secret_key()),
         vec![],
     );
+}
+
+/// A predicate frame keeps the signer badges of the instruction that reached it: a spend from a `StealthTransfer`
+/// instruction carries them, while a spend made from inside a component's frame carries that component's caller
+/// badges and no signer badge.
+#[test]
+fn script_path_predicate_sees_the_signer_badge_only_from_a_top_level_instruction() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let faucet_template = test.get_template_address(FAUCET_TEMPLATE);
+    let signer = test.to_public_key_bytes();
+    let condition = conditions(vec![script_condition(script_template, "require_signer_badge", vec![
+        encode_arg(&signer),
+    ])]);
+    let (resx, mint) = mint_utxos(&mut test, vec![condition.clone(), condition]);
+
+    let transfer =
+        stealth::generate_transfer_data([mint.input_spec_for(0, 100)], 0u64, [out(100, key_path(signer))], 0u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let transfer =
+        stealth::generate_transfer_data([mint.input_spec_for(1, 100)], 0u64, [out(100, key_path(signer))], 0u64);
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(faucet_template, "static_programmatic_transfer", args![
+                resx,
+                transfer.statement
+            ])
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "This call does not carry the badge");
 }
 
 #[test]
@@ -813,54 +851,6 @@ fn sandbox_denies_address_allocation() {
 }
 
 #[test]
-fn sandbox_denies_signer_proof() {
-    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
-    let (resx, mint) = mint_utxo(
-        &mut test,
-        script_condition(script_template, "try_get_signer_proof", vec![]),
-    );
-
-    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
-    let reason = test.execute_expect_failure(
-        Transaction::builder_localnet(Epoch(1))
-            .stealth_transfer(resx, transfer.statement)
-            .finish()
-            .seal(test.secret_key()),
-        vec![],
-    );
-    assert_reject_reason(&reason, "Spend script rejected the spend");
-    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
-        operation: "new_proof",
-    });
-}
-
-#[test]
-fn sandbox_denies_component_owner_proof() {
-    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
-    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
-    // The account is owned by `owner_key`, which signs the spend, so its owner badge is in the predicate's scope.
-    let (account, _owner_proof, owner_key) = test.create_empty_account();
-    let (resx, mint) = mint_utxo(
-        &mut test,
-        script_condition(script_template, "try_get_owner_proof", vec![encode_arg(&account)]),
-    );
-
-    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
-    let reason = test.execute_expect_failure(
-        Transaction::builder_localnet(Epoch(1))
-            .stealth_transfer(resx, transfer.statement)
-            .finish()
-            .seal(&owner_key),
-        vec![],
-    );
-    assert_reject_reason(&reason, "Spend script rejected the spend");
-    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
-        operation: "new_proof",
-    });
-}
-
-#[test]
 fn sandbox_denies_minting_into_a_bucket() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let script_template = test.get_template_address(SCRIPT_TEMPLATE);
@@ -924,16 +914,13 @@ const SPEND_SIG_DOMAIN: &[u8] = b"tari.test.spend_script signature domain";
 const SPEND_SIG_MESSAGE: &[u8] = b"spend authorisation";
 
 fn sign_spend(secret: &RistrettoSecretKey, message: &[u8]) -> Signature<NoSignatureDomain> {
-    let (nonce, nonce_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-    let public_key = RistrettoPublicKey::from_secret_key(secret);
-    let challenge = RistrettoSchnorrBlake2bVerifier::compute_challenge(
+    sign_template_message_schnorr(
+        secret,
+        &TemplateSignatureBinding::shared(Network::LocalNet),
         SPEND_SIG_DOMAIN,
         message,
-        &public_key.to_byte_type(),
-        &nonce_pub.to_byte_type(),
-    );
-    let sig = RistrettoSchnorr::sign_raw_uniform(secret, nonce, &challenge).unwrap();
-    sig.to_byte_type().into()
+    )
+    .into()
 }
 
 #[test]

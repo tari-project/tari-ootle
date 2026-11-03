@@ -92,6 +92,7 @@ pub fn create_execution_result_for_transaction(
                                     .as_component_address()
                                     .unwrap()
                                     .entity_id(),
+                                upgrade_rule: Default::default(),
                             },
                             body: ComponentBody { state },
                         }),

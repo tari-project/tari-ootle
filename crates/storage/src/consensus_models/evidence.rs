@@ -254,12 +254,6 @@ impl Evidence {
         self.evidence.get(&shard_group).is_some_and(|e| !e.inputs.is_empty())
     }
 
-    pub fn has_and_not_empty(&self, shard_group: &ShardGroup) -> bool {
-        self.evidence
-            .get(shard_group)
-            .is_some_and(|e| !e.inputs.is_empty() || !e.outputs.is_empty())
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = (&ShardGroup, &ShardGroupEvidence)> {
         self.evidence.iter()
     }

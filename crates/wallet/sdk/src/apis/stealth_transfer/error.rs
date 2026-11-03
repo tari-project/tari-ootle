@@ -53,6 +53,10 @@ pub enum StealthTransferApiError {
     InvariantViolation { details: String },
     #[error("Locks API error: {0}")]
     LocksApiError(#[from] LocksApiError),
+    /// A UTXO named for an exact input selection cannot be spent from the account. The source error says why (it is
+    /// unknown, foreign, of another resource, locked, ...), which callers serving an untrusted party may withhold.
+    #[error("Requested stealth input is ineligible: {0}")]
+    IneligibleSpecificInput(StealthOutputsApiError),
 }
 
 impl IsNotFoundError for StealthTransferApiError {

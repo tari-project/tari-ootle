@@ -5,6 +5,7 @@ use std::time;
 
 use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
 use tari_epoch_manager::EpochManagerError;
+use tari_ootle_common_types::SubstateVersion;
 
 use crate::substate_cache::SubstateCacheError;
 
@@ -18,6 +19,11 @@ pub enum IndexerError {
     ValidatorNodeClientError(String),
     #[error("Committee members did not agree on the substate's state, and none could prove it")]
     InvalidSubstateState,
+    #[error("A committee member answered v{answered} for a read of v{requested}")]
+    VersionMismatch {
+        requested: SubstateVersion,
+        answered: SubstateVersion,
+    },
     #[error("{vn} served a value for {substate_id} that does not decode: {details}")]
     UndecodableSubstateValue {
         vn: String,

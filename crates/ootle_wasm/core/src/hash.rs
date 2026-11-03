@@ -25,7 +25,7 @@ pub fn hash_unsigned_transaction(
 ) -> Result<Vec<u8>, OotleWasmError> {
     let seal_signer = public_key_bytes_from_bytes(seal_signer_public_key)?;
     let hash = TransactionSignature::create_message_v1(&seal_signer, transaction);
-    Ok(hash.to_vec())
+    Ok(hash.as_bytes().to_vec())
 }
 
 /// Hash a transaction (accepts unsigned or unsealed JSON) for an authorization signature.
@@ -42,7 +42,9 @@ pub fn hash_unsigned_transaction_json(tx_json: &str, seal_signer_public_key: &[u
 /// The seal message covers every authorization signature, so all of them must be attached before this
 /// hash is taken.
 pub fn hash_unsealed_transaction(transaction: &UnsealedTransactionV1) -> Vec<u8> {
-    TransactionSealSignature::create_message_v1(transaction).to_vec()
+    TransactionSealSignature::create_message_v1(transaction)
+        .as_bytes()
+        .to_vec()
 }
 
 /// Hash a transaction (accepts unsigned or unsealed JSON) for sealing.
@@ -86,7 +88,7 @@ mod tests {
         // Hash via the transaction crate directly
         let expected = TransactionSignature::create_message_v1(&seal_signer_bytes, &tx);
 
-        assert_eq!(our_hash, expected.to_vec());
+        assert_eq!(our_hash, expected.as_bytes().to_vec());
     }
 
     #[test]
@@ -113,8 +115,11 @@ mod tests {
         let json = serde_json::to_string(&tx).unwrap();
 
         let expected = TransactionSealSignature::create_message_v1(&tx);
-        assert_eq!(hash_unsealed_transaction(&tx), expected.to_vec());
-        assert_eq!(hash_unsealed_transaction_json(&json).unwrap(), expected.to_vec());
+        assert_eq!(hash_unsealed_transaction(&tx), expected.as_bytes().to_vec());
+        assert_eq!(
+            hash_unsealed_transaction_json(&json).unwrap(),
+            expected.as_bytes().to_vec()
+        );
     }
 
     #[test]

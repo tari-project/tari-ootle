@@ -1310,57 +1310,6 @@
         }
       }
     },
-    "/utxos": {
-      "get": {
-        "tags": [
-          "handlers::utxos"
-        ],
-        "description": "List full UTXO data",
-        "operationId": "list_utxos",
-        "responses": {
-          "200": {
-            "description": "List of UTXOs",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListUtxosResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request parameters",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The from_id UTXO is not stored on this indexer",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Failed to list UTXOs",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/utxos/fetch": {
       "post": {
         "tags": [
@@ -1820,7 +1769,16 @@
                 }
               ]
             },
-            "description": "Per shard, the state version at and below which this indexer may lack the tombstone of a spent\nUTXO, ascending by shard. A shard's first sync fetches only its live substates, so a spend\nbefore it is not seen. A shard not listed has every tombstone. The UTXO stream sets\n`StartOfShard::resync_required` for a shard whose cursor is below its horizon. This is sync\nstate, and rises while the indexer runs."
+            "description": "Per shard, the state version at and below which this indexer may lack the tombstone of a spent\nUTXO, ascending by shard. A shard's first sync fetches only its live substates, so a spend\nbefore it is not seen, and pruning a tombstone raises the horizon over it. A shard not listed\nhas every tombstone. The UTXO stream sets `StartOfShard::spends_incomplete` for a shard whose\ncursor is below its horizon. This is sync state, and rises while the indexer runs."
+          },
+          "utxo_tombstone_retention_epochs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many epochs past the epoch a UTXO was spent in this indexer retains its tombstone before\npruning it. `None` means tombstones are retained indefinitely. Pruning raises the shard's\nentry in `utxo_tombstone_horizons`, so a UTXO stream resuming from further back is told its\nspends are incomplete.",
+            "minimum": 0
           },
           "verify_substate_proofs": {
             "type": "boolean",
@@ -2004,11 +1962,11 @@
           },
           "state": {
             "$ref": "#/components/schemas/SubstateState",
-            "description": "What the shard group holds for `version`. Only a request with `include_proof` that names the version is\nanswered with [`SubstateState::Down`], and only when the indexer verified a down proof for it; any other down\nis a 404."
+            "description": "What the shard group holds for `version`. Only a request with `include_proof` that names the version is\nanswered with [`SubstateState::Down`], and only with a proof the indexer verified for it: a down proof, or an\nexclusion when more than `f` committee members agree the version is down. Any other down is a 404."
           },
           "verified": {
             "type": "boolean",
-            "description": "True when the indexer verified this answer against the shard group committee (via a merkle\nproof). False when proofs are disabled, or when no committee member could supply a proof yet\n(e.g. nothing committed since an epoch change) and the value was served unverified."
+            "description": "True when the indexer verified this answer against the shard group committee (via a merkle\nproof). False when proofs are disabled, or when no committee member could supply a proof yet\n(e.g. nothing committed since an epoch change) and the value was served unverified. A down answer\nis verified only with a down proof: an exclusion alone does not show the version was ever up."
           },
           "version": {
             "type": "integer",
@@ -2173,6 +2131,13 @@
           "resource_address"
         ],
         "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Resume after the previous page: pass its `next_cursor`. UTXOs are paged in the order of their ids, which every\nindexer shares, so any indexer can resume a page another returned. A UTXO created or spent while the pages are\nread may or may not be returned."
+          },
           "resource_address": {
             "type": "string"
           },
@@ -2192,6 +2157,29 @@
                 }
               ]
             }
+          },
+          "unspent_at": {
+            "type": "array",
+            "items": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              ]
+            },
+            "description": "Empty, or for each pair of `tag_and_nonce_pairs` in order, the shard and state version the client saw its UTXO\nunspent at, or `null` when it does not know them. A pair with no unspent UTXO is reported in `spent` once this\nindexer has indexed its shard through that state version, as this indexer keeps every unspent UTXO."
           }
         }
       },
@@ -2201,6 +2189,13 @@
           "utxos"
         ],
         "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `cursor` for the next page, or `None` once `utxos` holds the last matching UTXO."
+          },
           "spent": {
             "type": "array",
             "items": {
@@ -2217,7 +2212,7 @@
                 }
               ]
             },
-            "description": "The requested tag and nonce pairs this indexer holds as spent or burnt. A requested pair in neither list is\nunknown to this indexer, which may not yet have indexed it."
+            "description": "The requested tag and nonce pairs this indexer holds as spent or burnt. A requested pair in neither list is\nunknown to this indexer, which may not yet have indexed it, or may have pruned its tombstone."
           },
           "utxos": {
             "type": "array",
@@ -2233,7 +2228,7 @@
                 }
               ]
             },
-            "description": "The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`."
+            "description": "The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`, in id order. Any number\nof UTXOs may share a pair."
           }
         }
       },
@@ -2301,30 +2296,6 @@
               ]
             },
             "description": "Each receipt's address and its CBOR-encoded `TransactionReceipt`."
-          }
-        }
-      },
-      "ListUtxosResponse": {
-        "type": "object",
-        "required": [
-          "utxos"
-        ],
-        "properties": {
-          "utxos": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": false,
-              "prefixItems": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "string"
-                }
-              ]
-            },
-            "description": "Each UTXO's id and its CBOR-encoded `Utxo`."
           }
         }
       },
@@ -2491,7 +2462,7 @@
               "null"
             ],
             "format": "byte",
-            "description": "CBOR-encoded `SubstateDownProof`, present when the substate version is down: an inclusion proof that the\nversion was committed, anchored at a block of its own, and an exclusion proof under `anchor.state_merkle_root`\nthat it is no longer in the state tree. `value_proof` is that exclusion proof."
+            "description": "CBOR-encoded `SubstateDownProof`, present when the substate version is down and the committee still holds it:\nan inclusion proof that the version was committed, anchored at a block of its own, and an exclusion proof\nunder `anchor.state_merkle_root` that it is no longer in the state tree. `value_proof` is that exclusion\nproof.\n\nA down version without one is served with `value_proof` alone. A version that never existed also satisfies\nit, as does one committed after the anchor, so it shows the version gone only to a reader that has proven the\nversion up at a block of an earlier epoch than the anchor's."
           },
           "value_hash_epoch": {
             "type": "integer",

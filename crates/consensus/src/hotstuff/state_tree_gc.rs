@@ -3,7 +3,7 @@
 
 use log::{error, info};
 use tari_ootle_common_types::NumPreshards;
-use tari_ootle_storage::{StateStore, StateStoreWriteTransaction, StorageError};
+use tari_ootle_storage::{StateStore, StateStoreWriteTransaction, StateTreeRetention, StorageError};
 use tokio::task;
 
 use crate::traits::PeriodicTask;
@@ -17,11 +17,18 @@ const STATE_TREE_GC_MAX_DELETES: usize = 5_000;
 pub struct StateTreeGc<TStore> {
     store: TStore,
     num_preshards: NumPreshards,
+    pinned_checkpoint_epochs: u64,
 }
 
 impl<TStore: StateStore + Send + Sync + Clone + 'static> StateTreeGc<TStore> {
-    pub fn new(store: TStore, num_preshards: NumPreshards) -> Self {
-        Self { store, num_preshards }
+    /// A GC that keeps the whole tree of each shard at its version in each of the last `pinned_checkpoint_epochs`
+    /// epoch checkpoints stored, so that peers can read a shard's tree at a recent checkpoint.
+    pub fn new(store: TStore, num_preshards: NumPreshards, pinned_checkpoint_epochs: u64) -> Self {
+        Self {
+            store,
+            num_preshards,
+            pinned_checkpoint_epochs,
+        }
     }
 }
 
@@ -33,6 +40,7 @@ impl<TStore: StateStore + Send + Sync + Clone + 'static> PeriodicTask for StateT
     async fn do_work(&self) {
         let store = self.store.clone();
         let num_preshards = self.num_preshards;
+        let pinned_checkpoint_epochs = self.pinned_checkpoint_epochs;
 
         // NOTE: this task will not be aborted until after completion. When AbortOnDropGuard is dropped, these
         // could happen:
@@ -43,13 +51,18 @@ impl<TStore: StateStore + Send + Sync + Clone + 'static> PeriodicTask for StateT
             // NOTE: this task writes to the state store concurrently. This is safe
             // because we are clearing keys that are no longer part of the state tree.
             // Rocks' TransactionDb locks on the key level.
-            run_state_tree_gc(&store, num_preshards, STATE_TREE_GC_MAX_DELETES)
+            run_state_tree_gc(
+                &store,
+                num_preshards,
+                pinned_checkpoint_epochs,
+                STATE_TREE_GC_MAX_DELETES,
+            )
         })
         .await;
 
         match result {
             Ok(Ok(n)) => {
-                info!(target: LOG_TARGET, "🗑️ State tree GC task completed successfully. Deleted {n} stale rows");
+                info!(target: LOG_TARGET, "🗑️ State tree GC task completed successfully. Wrote {n} rows deleting or keeping stale nodes");
             },
             Ok(Err(err)) => {
                 error!(target: LOG_TARGET, "Failed to run state tree GC: {}", err);
@@ -62,18 +75,22 @@ impl<TStore: StateStore + Send + Sync + Clone + 'static> PeriodicTask for StateT
     }
 }
 
-/// Deletes every stale state tree node past the history window, committing at most about `max_deletes` rows per
-/// transaction. Returns the number of rows deleted.
+/// Deletes every stale state tree node past the history window that no pinned tree holds, committing at most about
+/// `max_writes` rows per transaction. Returns the number of rows written.
 fn run_state_tree_gc<TStore: StateStore>(
     store: &TStore,
     num_preshards: NumPreshards,
-    max_deletes: usize,
+    pinned_checkpoint_epochs: u64,
+    max_writes: usize,
 ) -> Result<usize, StorageError> {
     let mut total = 0usize;
     loop {
-        let n = store.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards, max_deletes))?;
+        let n = store.with_write_tx(|tx| {
+            let retention = StateTreeRetention::read(&**tx, num_preshards, pinned_checkpoint_epochs)?;
+            tx.state_tree_nodes_clear_stale(&retention, max_writes)
+        })?;
         total += n;
-        if n < max_deletes {
+        if n < max_writes {
             return Ok(total);
         }
     }

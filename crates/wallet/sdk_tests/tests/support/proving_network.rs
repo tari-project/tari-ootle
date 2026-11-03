@@ -35,19 +35,19 @@ use tari_ootle_wallet_sdk::{
     network::{
         FetchedSubstates,
         FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedStream,
         TransactionQueryResult,
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
-    storage::TagAndPublicNoncePair,
 };
 use tari_template_abi::TemplateDef;
 use tari_template_lib::types::{ResourceAddress, TemplateAddress, UtxoId};
 
-/// Answers a stealth UTXO stream request, given the cursor of each shard it asks from.
-type UtxoStreamAnswer = Arc<dyn Fn(&[(Shard, StateVersion)]) -> Vec<UtxoUpdatePayload> + Send + Sync>;
+/// Answers a stealth UTXO stream request of the given shard cursors and `unspent_only` flag.
+type UtxoStreamAnswer = Arc<dyn Fn(&[(Shard, StateVersion)], bool) -> Vec<UtxoUpdatePayload> + Send + Sync>;
 
 /// An indexer that serves a chain of signed end-of-epoch checkpoints, the committees of every epoch's validator set,
 /// one transaction result, and the substates it is given to serve.
@@ -76,6 +76,8 @@ struct ProvingNetworkState {
     /// Requests for a page of checkpoints to walk through.
     walk_requests: usize,
     substates: HashMap<SubstateId, ServedSubstate>,
+    /// Versions served as gone down to requests that name them, beside the version `substates` serves.
+    down_versions: HashMap<(SubstateId, SubstateVersion), Option<SubstateProof>>,
     /// How many of the next substate queries fail as if the indexer could not be reached.
     failing_substate_queries: usize,
     /// How many of the next substate fetches fail as if the indexer could not be reached.
@@ -133,6 +135,7 @@ impl ProvingNetwork {
                 unserved: None,
                 walk_requests: 0,
                 substates: HashMap::new(),
+                down_versions: HashMap::new(),
                 failing_substate_queries: 0,
                 failing_substate_fetches: 0,
                 committee_requests: 0,
@@ -243,6 +246,12 @@ impl ProvingNetwork {
         });
     }
 
+    /// Serves `version` of `id` as gone down, with `proof`, to requests for proofs that name the version, beside the
+    /// version served for `id`.
+    pub fn serve_down_version(&self, id: SubstateId, version: SubstateVersion, proof: Option<SubstateProof>) {
+        self.state.lock().unwrap().down_versions.insert((id, version), proof);
+    }
+
     /// Fails the next `count` substate queries as if the indexer could not be reached.
     pub fn fail_substate_queries(&self, count: usize) {
         self.state.lock().unwrap().failing_substate_queries = count;
@@ -271,9 +280,10 @@ impl ProvingNetwork {
         self.state.lock().unwrap().listed_shard_group_checkpoints = Some(checkpoints);
     }
 
-    /// Answers every stealth UTXO stream request with what `answer` returns for the request's shard cursors.
+    /// Answers every stealth UTXO stream request with what `answer` returns for the request's shard cursors and
+    /// `unspent_only` flag.
     pub fn answer_utxo_streams<F>(&self, answer: F)
-    where F: Fn(&[(Shard, StateVersion)]) -> Vec<UtxoUpdatePayload> + Send + Sync + 'static {
+    where F: Fn(&[(Shard, StateVersion)], bool) -> Vec<UtxoUpdatePayload> + Send + Sync + 'static {
         self.state.lock().unwrap().utxo_stream_answer = Some(Arc::new(answer));
     }
 
@@ -304,6 +314,16 @@ impl WalletNetworkInterface for ProvingNetwork {
             state.failing_substate_queries -= 1;
             return Err(ProvingNetworkError::Unreachable);
         }
+        if include_proof &&
+            let Some(version) = version &&
+            let Some(proof) = state.down_versions.get(&(address.clone(), version))
+        {
+            return Ok(SubstateQueryResult {
+                version,
+                state: SubstateState::Down {},
+                proof: proof.clone(),
+            });
+        }
         let served = state
             .substates
             .get(address)
@@ -324,7 +344,7 @@ impl WalletNetworkInterface for ProvingNetwork {
 
     async fn get_substates(
         &self,
-        substate_ids: Vec<SubstateId>,
+        substate_ids: &[SubstateId],
         include_proofs: bool,
     ) -> Result<FetchedSubstates, Self::Error> {
         let mut state = self.state.lock().unwrap();
@@ -335,7 +355,7 @@ impl WalletNetworkInterface for ProvingNetwork {
         }
         let mut fetched = FetchedSubstates::default();
         for id in substate_ids {
-            let Some(served) = state.substates.get(&id) else {
+            let Some(served) = state.substates.get(id) else {
                 continue;
             };
             let Some(value) = &served.value else {
@@ -346,7 +366,7 @@ impl WalletNetworkInterface for ProvingNetwork {
                 EncodedSubstate::new(served.version, Encoded::encode(value).unwrap()),
             );
             if let Some(proof) = served.proof.clone().filter(|_| include_proofs) {
-                fetched.proofs.insert(id, proof);
+                fetched.proofs.insert(id.clone(), proof);
             }
         }
         Ok(fetched)
@@ -399,14 +419,14 @@ impl WalletNetworkInterface for ProvingNetwork {
         _from_epoch: Epoch,
         _resource_address: ResourceAddress,
         shard_state_versions: Vec<(Shard, StateVersion)>,
-        _unspent_only: bool,
+        unspent_only: bool,
     ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
         let mut state = self.state.lock().unwrap();
         let answer = state
             .utxo_stream_answer
             .clone()
             .expect("ProvingNetwork answers no UTXO stream");
-        let payloads = answer(&shard_state_versions);
+        let payloads = answer(&shard_state_versions, unspent_only);
         state.utxo_stream_requests.push(shard_state_versions);
         Ok(futures::stream::iter(payloads.into_iter().map(Ok)).boxed())
     }
@@ -423,8 +443,12 @@ impl WalletNetworkInterface for ProvingNetwork {
     async fn fetch_utxos(
         &self,
         _resource_address: ResourceAddress,
-        tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
+        tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
     ) -> Result<FetchedUtxos, Self::Error> {
+        let tag_and_nonce_pairs = tag_and_nonce_pairs
+            .into_iter()
+            .map(|(pair, _)| pair)
+            .collect::<Vec<_>>();
         let state = self.state.lock().unwrap();
         let unspent = state
             .indexed_utxos

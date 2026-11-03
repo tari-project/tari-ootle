@@ -33,6 +33,9 @@ versioning rules below.
 ./scripts/publish_crates.py --dry-run        # cargo publish --dry-run each crate
 ./scripts/publish_crates.py --execute        # actually publish
 ./scripts/publish_crates.py --from <crate> --execute   # resume after a failure
+# --execute also relocks a crates.io copy of a publish-set crate (pulled in by a crates.io dependent, e.g. the
+# minotari crates' tari_sidechain -> tari_jellyfish) to the in-tree version once that version is published.
+# Commit the Cargo.lock change it reports.
 
 # Is this tree safe to tag? (bumps, pins, changelog, npm, publish order)
 ./scripts/release_check.py

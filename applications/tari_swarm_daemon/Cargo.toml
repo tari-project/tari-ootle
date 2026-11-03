@@ -52,6 +52,9 @@ tonic = { workspace = true }
 tower-http = { workspace = true, features = ["fs", "cors"] }
 url = { workspace = true, features = ["default", "serde"] }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28.0", default-features = false, features = ["signal"] }
 

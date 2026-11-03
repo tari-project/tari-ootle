@@ -101,7 +101,7 @@ pub async fn handle_decrypt_value(
         .map(Into::into)
         .collect::<Vec<_>>();
 
-    let substates = sdk.substate_api().get_substates_from_network(utxo_ids).await?;
+    let substates = sdk.substate_api().get_substates_from_network(&utxo_ids).await?;
 
     // Get view secret key
     let view_key = sdk.key_manager_api().get_key(req.view_key_id)?;

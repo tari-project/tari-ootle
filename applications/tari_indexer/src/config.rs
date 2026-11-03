@@ -243,6 +243,17 @@ pub struct IndexerConfig {
     /// cursor older than the newest pruned event, so a client learns it must resynchronise.
     #[serde(default = "default_event_retention_epochs", with = "retention_epochs")]
     pub event_retention_epochs: Option<u64>,
+    /// How many epochs past the epoch a UTXO was spent in its tombstone is retained before it is
+    /// pruned. Defaults to 504 epochs, about a week at 20-minute epochs. Write `"forever"` to retain
+    /// tombstones indefinitely; every spend on the network leaves one, so that grows the database
+    /// without bound.
+    ///
+    /// Pruning raises the shard's tombstone horizon over each tombstone it deletes. A wallet that
+    /// resumes its UTXO stream from below the horizon is told its spends are incomplete and checks
+    /// the outputs it holds in that shard itself, so a wallet offline for longer than this window
+    /// still learns of every spend, at the cost of that check.
+    #[serde(default = "default_utxo_tombstone_retention_epochs", with = "retention_epochs")]
+    pub utxo_tombstone_retention_epochs: Option<u64>,
     /// Store transactions observed on the network-wide transaction gossip topic, not only those
     /// submitted directly to this indexer. When enabled the indexer joins the transaction mesh as a
     /// full participant: it validates what it receives and propagates it onward. Disabling it leaves
@@ -346,6 +357,7 @@ pub struct PublishedIndexerConfig {
     pub transaction_retention_epochs: Option<u64>,
     pub transaction_receipt_retention_epochs: Option<u64>,
     pub event_retention_epochs: Option<u64>,
+    pub utxo_tombstone_retention_epochs: Option<u64>,
     pub index_gossiped_transactions: bool,
     pub verify_substate_proofs: bool,
     pub substate_cache_max_serve_lag: Duration,
@@ -359,6 +371,7 @@ impl From<&IndexerConfig> for PublishedIndexerConfig {
             transaction_retention_epochs: config.transaction_retention_epochs,
             transaction_receipt_retention_epochs: config.effective_receipt_retention_epochs(),
             event_retention_epochs: config.event_retention_epochs,
+            utxo_tombstone_retention_epochs: config.utxo_tombstone_retention_epochs,
             index_gossiped_transactions: config.index_gossiped_transactions,
             verify_substate_proofs: config.verify_substate_proofs,
             substate_cache_max_serve_lag: config.substate_cache_max_serve_lag,
@@ -378,6 +391,10 @@ fn default_transaction_receipt_retention_epochs() -> Option<u64> {
 
 fn default_event_retention_epochs() -> Option<u64> {
     Some(1000)
+}
+
+fn default_utxo_tombstone_retention_epochs() -> Option<u64> {
+    Some(504)
 }
 
 mod retention_epochs {
@@ -495,6 +512,7 @@ impl Default for IndexerConfig {
             transaction_retention_epochs: default_transaction_retention_epochs(),
             transaction_receipt_retention_epochs: default_transaction_receipt_retention_epochs(),
             event_retention_epochs: default_event_retention_epochs(),
+            utxo_tombstone_retention_epochs: default_utxo_tombstone_retention_epochs(),
             index_gossiped_transactions: default_index_gossiped_transactions(),
             max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),
             prune_interval: default_prune_interval(),

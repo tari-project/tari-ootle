@@ -24,7 +24,7 @@ use crate::{
     bootstrap::Services,
     config::PublishedIndexerConfig,
     dry_run::processor::DryRunTransactionProcessor,
-    network_state_sync::{ConsensusEpoch, ValidatorStatusMonitor},
+    network_state_sync::{ConsensusEpoch, ShardWatermarks, SyncStatusMonitor, ValidatorStatusMonitor},
     notify::Subscriber,
     rest_api::{
         cache::{HttpCacheConfig, SETTLED},
@@ -65,6 +65,8 @@ impl HandlerContext {
                 transaction_event_subscriber: services.transaction_event_notifier.to_subscriber(),
                 watched_templates: services.watched_templates.clone(),
                 validator_status: services.validator_status.clone(),
+                sync_status: services.sync_status.clone(),
+                shard_watermarks: services.shard_watermarks.clone(),
                 consensus_epoch: services.consensus_epoch.clone(),
                 committee_proofs: CommitteeProofCache::new(COMMITTEE_PROOF_CACHE_BYTES),
                 num_preshards: OnceCell::new(),
@@ -157,6 +159,14 @@ impl HandlerContext {
         &self.inner.validator_status
     }
 
+    pub fn sync_status(&self) -> &SyncStatusMonitor {
+        &self.inner.sync_status
+    }
+
+    pub fn shard_watermarks(&self) -> &ShardWatermarks {
+        &self.inner.shard_watermarks
+    }
+
     pub fn consensus_epoch(&self) -> &ConsensusEpoch {
         &self.inner.consensus_epoch
     }
@@ -192,6 +202,8 @@ struct InnerContext {
     transaction_event_subscriber: Subscriber<TransactionEvent>,
     watched_templates: Arc<HashSet<TemplateAddress>>,
     validator_status: ValidatorStatusMonitor,
+    sync_status: SyncStatusMonitor,
+    shard_watermarks: Arc<ShardWatermarks>,
     consensus_epoch: ConsensusEpoch,
     committee_proofs: CommitteeProofCache,
     num_preshards: OnceCell<NumPreshards>,

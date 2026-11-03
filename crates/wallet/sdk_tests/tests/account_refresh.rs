@@ -59,6 +59,7 @@ fn account_value(vaults: &[VaultId]) -> SubstateValue {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: Default::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(tari_bor::to_value(&vaults.to_vec()).unwrap()),
     }

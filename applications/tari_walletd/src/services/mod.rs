@@ -59,11 +59,13 @@ pub fn spawn_services(
 
     let utxo_scanner = StealthUtxoScannerWorker::new(wallet_sdk.clone(), notify.clone());
     let (utxo_scanner_join_handle, utxo_scanner_handle) = utxo_scanner.spawn();
+    let utxo_scanner_join_handle = abort_on_shutdown(utxo_scanner_join_handle, shutdown_signal.clone());
 
     let utxo_recovery_join_handle = {
         let sdk = wallet_sdk.clone();
         let notify_sub = utxo_scanner_handle.subscribe_notifications();
-        tokio::spawn(UtxoRecovery::new(sdk).with_notify(notify.clone()).run(notify_sub))
+        let task = tokio::spawn(UtxoRecovery::new(sdk).with_notify(notify.clone()).run(notify_sub));
+        abort_on_shutdown(task, shutdown_signal.clone())
     };
 
     let (account_monitor, account_monitor_handle) = AccountMonitor::new(
@@ -108,6 +110,25 @@ pub struct Services {
     pub account_monitor_handle: AccountMonitorHandle,
     pub utxo_scanner_handle: UtxoScannerHandle,
     pub transaction_service_handle: TransactionServiceHandle,
+}
+
+/// Aborts `task` on the shutdown, and resolves once it has stopped. The returned task holds a shutdown signal until
+/// then, so the shutdown drain waits for `task` to stop. An abort stops `task` at an await point, which leaves no
+/// store transaction half done, as each one commits without awaiting.
+fn abort_on_shutdown(
+    mut task: JoinHandle<Result<(), anyhow::Error>>,
+    mut shutdown_signal: ShutdownSignal,
+) -> JoinHandle<Result<(), anyhow::Error>> {
+    tokio::spawn(async move {
+        tokio::select! {
+            res = &mut task => res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e))),
+            _ = shutdown_signal.wait() => {
+                task.abort();
+                let _ignore = task.await;
+                Ok(())
+            },
+        }
+    })
 }
 
 async fn try_select_any<I>(handles: I) -> Result<(), anyhow::Error>

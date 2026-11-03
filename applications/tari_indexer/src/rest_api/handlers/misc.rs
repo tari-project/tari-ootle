@@ -74,6 +74,7 @@ pub async fn get_info(Extension(context): Extension<HandlerContext>) -> HandlerR
         verify_substate_proofs: config.verify_substate_proofs,
         substate_cache_max_serve_lag_secs: config.substate_cache_max_serve_lag.as_secs(),
         indexes_all_events: config.indexes_all_events,
+        utxo_tombstone_retention_epochs: config.utxo_tombstone_retention_epochs,
         utxo_tombstone_horizons,
     };
     // `current_epoch` and the tombstone horizons change at runtime; the rest is fixed for the life of the process.

@@ -56,6 +56,9 @@ mod store;
 
 pub use store::*;
 
+mod sorted_leaf_root;
+pub use sorted_leaf_root::*;
+
 mod bit_iter;
 #[cfg(feature = "minicbor")]
 mod cbor;

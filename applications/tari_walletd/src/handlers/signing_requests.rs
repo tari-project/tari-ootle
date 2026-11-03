@@ -118,7 +118,7 @@ pub async fn handle_create(
             seal_public_key: &req.seal_public_key,
             key_id: req.key_id,
             signer_public_key: &signer_public_key,
-            message_hash: &message_hash,
+            message_hash: message_hash.as_bytes(),
             memo: &req.memo,
             requester: &requester,
             ttl,
@@ -255,7 +255,7 @@ pub async fn handle_approve(
     // The approver was shown `message_hash`; sign only if the stored request
     // still produces exactly that message.
     let message = TransactionSignature::create_message(&request.seal_public_key, &request.unsigned_transaction);
-    if message != request.message_hash {
+    if *message.as_bytes() != request.message_hash {
         return Err(invalid_request(format!(
             "Signing request {} no longer produces the message it was created with; reject it and ask for a new one",
             req.request_id
@@ -431,7 +431,7 @@ mod tests {
                     seal_public_key: &seal_public_key(),
                     key_id: signer_key(),
                     signer_public_key: &signer_public_key,
-                    message_hash: &message_hash,
+                    message_hash: message_hash.as_bytes(),
                     memo: "",
                     requester: &SigningRequester::ApiKey {
                         name: "governance-signer".to_string(),
@@ -483,12 +483,10 @@ mod tests {
         let signature = info.signature.expect("a signed request carries its signature");
         assert_eq!(Some(&signature), response.signature.as_ref());
         assert_eq!(*signature.public_key(), info.signer_public_key);
-        assert_eq!(
-            info.message_hash,
-            TransactionSignature::create_message(&seal_public_key(), &transaction())
-        );
+        let message = TransactionSignature::create_message(&seal_public_key(), &transaction());
+        assert_eq!(info.message_hash, *message.as_bytes());
         assert!(
-            signature.verify_message(info.message_hash),
+            signature.verify_message(message),
             "the signature must verify against the message the approver was shown"
         );
     }

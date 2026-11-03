@@ -1013,8 +1013,7 @@ impl TransactionPoolRecord {
         }
 
         if self.current_decision().is_commit() {
-            let involved_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
-            for lock in involved_locks {
+            for lock in execution.involved_locks() {
                 self.evidence_mut()
                     .insert_from_lock_intent(num_preshards, num_committees, lock);
             }

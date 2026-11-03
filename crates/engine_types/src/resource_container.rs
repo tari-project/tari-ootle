@@ -10,18 +10,15 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_template_abi::rust::collections::BTreeSet;
-use tari_template_lib::{
-    prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    types::{
-        Amount,
-        NonFungibleAddress,
-        NonFungibleId,
-        ResourceAddress,
-        ResourceType,
-        UtxoId,
-        confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    },
+use tari_template_lib::types::{
+    Amount,
+    NonFungibleAddress,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+    UtxoId,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 
 use crate::{commit_result::ExecutionFailureCode, confidential, crypto::OutputBody, substate::SubstateId};
@@ -120,18 +117,6 @@ impl ResourceContainer {
             address,
             revealed_amount,
             locked_amount: Amount::zero(),
-        }
-    }
-
-    pub fn public_key(public_key: RistrettoPublicKeyBytes) -> Self {
-        Self::NonFungible {
-            address: PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            token_ids: {
-                let mut set = BTreeSet::new();
-                set.insert(NonFungibleId::from_public_key(public_key));
-                set
-            },
-            locked_token_ids: Default::default(),
         }
     }
 
@@ -1069,6 +1054,8 @@ impl ResourceError {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib::prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS;
+
     use super::*;
 
     /// Returns a container whose unlocked + locked balance exceeds [`Amount::MAX`], a state no operation may produce.

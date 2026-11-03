@@ -10,6 +10,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     StorageError,
 };
 use tari_state_store_rocksdb::DatabaseOptions;
@@ -68,7 +69,10 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
     .unwrap();
 
     let n = db
-        .with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards(), usize::MAX))
+        .with_write_tx(|tx| {
+            let retention = StateTreeRetention::read(&**tx, num_preshards(), 0)?;
+            tx.state_tree_nodes_clear_stale(&retention, usize::MAX)
+        })
         .unwrap();
     // 100 nodes and the version's stale record
     assert_eq!(n, 101);
@@ -132,8 +136,11 @@ fn clear_stale_is_bounded_per_call_and_resumes() {
     .unwrap();
 
     let clear = |max_deletes| {
-        db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards(), max_deletes))
-            .unwrap()
+        db.with_write_tx(|tx| {
+            let retention = StateTreeRetention::read(&**tx, num_preshards(), 0)?;
+            tx.state_tree_nodes_clear_stale(&retention, max_deletes)
+        })
+        .unwrap()
     };
     let is_present = |nodes: &[(NodeKey, Node<StateTreePayload>)]| {
         db.with_read_tx(|tx| {

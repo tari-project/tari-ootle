@@ -15,7 +15,7 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_indexer_client::types::{GetSubstateRequest, ListUtxosRequest};
+use tari_indexer_client::types::GetSubstateRequest;
 use tari_ootle_common_types::{
     displayable::Displayable,
     engine_types::published_template::PublishedTemplateAddress,
@@ -639,8 +639,7 @@ impl TrafficSim {
         min_value: u64,
         max_value: u64,
         resource_address: ResourceAddress,
-        last_id: Option<UtxoId>,
-        specific_id: Option<UtxoId>,
+        utxo_ids: Vec<UtxoId>,
         csv_out: Option<P>,
         view_key: Option<RistrettoSecretKey>,
     ) -> anyhow::Result<()> {
@@ -676,51 +675,10 @@ impl TrafficSim {
             },
         };
 
-        if let Some(specific_id) = specific_id {
-            let resp = wallet
-                .client
-                .stealth_utxos_decrypt_value(StealthUtxosDecryptValueRequest {
-                    resource_address,
-                    ids: vec![specific_id],
-                    view_key_id,
-                    minimum_expected_value: Some(min_value),
-                    maximum_expected_value: Some(max_value),
-                })
-                .await?;
-
-            log::info!("Decrypted UTXO value:");
-            for (id, value) in resp.values {
-                let value = value
-                    .map(Amount::from)
-                    .map(|a| a.to_decimal_string(divisibility.into()));
-                log::info!("{}: {} {}", id, value.display(), token_symbol);
-            }
-
-            return Ok(());
-        }
-
-        let resp = indexer
-            .list_utxos(ListUtxosRequest {
-                resource_address,
-                limit: 1000,
-                from_id: last_id,
-            })
-            .await?;
-
         log::info!(
             "Attempting to decrypt {} UTXOs within range {min_value}-{max_value}",
-            resp.utxos.len()
+            utxo_ids.len()
         );
-        if resp.utxos.is_empty() {
-            return Ok(());
-        }
-
-        let mut utxo_ids = Vec::with_capacity(resp.utxos.len());
-        for (id, utxo) in &resp.utxos {
-            if !utxo.decode()?.is_burnt() {
-                utxo_ids.push(*id);
-            }
-        }
 
         let mut csv = csv_out.map(csv::Writer::from_path).transpose()?;
         csv.as_mut()

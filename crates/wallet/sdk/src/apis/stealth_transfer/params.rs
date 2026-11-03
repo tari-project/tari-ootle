@@ -8,12 +8,15 @@ use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo, stealth::validated_condition_root};
-use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress};
+use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, UtxoAddress};
 
-use crate::apis::{
-    confidential_transfer::UtxoInputSelection,
-    stealth_outputs::StealthOutputsApiError,
-    stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
+use crate::{
+    apis::{
+        confidential_transfer::UtxoInputSelection,
+        stealth_outputs::StealthOutputsApiError,
+        stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
+    },
+    models::AccountWithAddress,
 };
 
 #[derive(Debug, Clone)]
@@ -188,6 +191,66 @@ impl TransferOutput {
         }
 
         Ok(())
+    }
+}
+
+/// Where a transfer statement's input value comes from.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum InputSelection {
+    FromBucket {
+        revealed_amount: Amount,
+    },
+    Selection(UtxoInputSelection),
+    /// Spend exactly the named wallet-owned stealth UTXOs, in the given order. The wallet resolves, validates and
+    /// locks precisely these outputs via `StealthOutputsApi::lock_specific_outputs`, rather than choosing inputs to
+    /// cover an amount.
+    Specific {
+        utxo_addresses: Vec<UtxoAddress>,
+    },
+}
+
+impl InputSelection {
+    pub fn as_selection(&self) -> Option<UtxoInputSelection> {
+        match self {
+            InputSelection::Selection(s) => Some(*s),
+            InputSelection::FromBucket { .. } | InputSelection::Specific { .. } => None,
+        }
+    }
+
+    pub fn as_from_bucket(&self) -> Option<Amount> {
+        match self {
+            InputSelection::FromBucket { revealed_amount } => Some(*revealed_amount),
+            InputSelection::Selection(_) | InputSelection::Specific { .. } => None,
+        }
+    }
+
+    /// The exact UTXOs to spend when this is an [`InputSelection::Specific`] selection.
+    pub fn as_specific(&self) -> Option<&[UtxoAddress]> {
+        match self {
+            InputSelection::Specific { utxo_addresses } => Some(utxo_addresses),
+            InputSelection::FromBucket { .. } | InputSelection::Selection(_) => None,
+        }
+    }
+}
+
+/// One stealth transfer statement for [`StealthTransferApi::create_transfer_statements`] to build.
+///
+/// [`StealthTransferApi::create_transfer_statements`]: super::StealthTransferApi::create_transfer_statements
+#[derive(Debug, Clone)]
+pub struct TransferStatementSpec {
+    pub sender: AccountWithAddress,
+    pub resource_address: ResourceAddress,
+    pub input_selection: InputSelection,
+    pub outputs: Vec<TransferOutput>,
+}
+
+impl TransferStatementSpec {
+    /// The sum of every output's revealed and blinded amounts, or `None` if it exceeds [`Amount::MAX`].
+    pub fn total_output_amount(&self) -> Option<Amount> {
+        self.outputs
+            .iter()
+            .try_fold(Amount::zero(), |sum, o| sum.checked_add(o.total_output_amount()?))
     }
 }
 

@@ -1,0 +1,12 @@
+# Kept in step with the `[advisories]` section of `deny.toml` so `.github/workflows/audit.yml`
+# (`rustsec/audit-check`, which invokes `cargo audit` rather than `cargo deny`) honours the same
+# documented exceptions. See `deny.toml` for the full per-binary reachability and upgrade-blocker
+# rationale for each entry.
+
+[advisories]
+ignore = [
+    # rsa Marvin timing sidechannel; absent from every shipped binary (`pgp` only in L1 test binaries).
+    "RUSTSEC-2023-0071",
+    # crypto-bigint 0.5.5 via `webrtc -> dtls -> p256/p384` (ephemeral ECDH only; blocked on `dtls` moving to `p256` 0.14).
+    "RUSTSEC-2026-0387",
+]

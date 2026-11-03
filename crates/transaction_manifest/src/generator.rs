@@ -254,6 +254,14 @@ impl ManifestInstructionGenerator {
                 Ok(vec![])
             },
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
+            ManifestIntent::AuthorizeProof(proof) => {
+                let proof = self.get_workspace_id(&proof.to_string())?;
+                Ok(vec![Instruction::AuthorizeProof { proof }])
+            },
+            ManifestIntent::DropProofAuthorization(proof) => {
+                let proof = self.get_workspace_id(&proof.to_string())?;
+                Ok(vec![Instruction::DropProofAuthorization { proof }])
+            },
             ManifestIntent::PutIntoBucket(p) => {
                 let src = self.get_workspace_id(&p.src.to_string())?;
                 let dest = self.get_workspace_id(&p.dest.to_string())?;

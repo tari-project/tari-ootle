@@ -113,8 +113,8 @@ pub fn add_transaction_signer(
 
 /// Seal a transaction (unsigned or unsealed JSON) with a signature from an external signer (HSM, MPC).
 ///
-/// `signature` is the raw 64-byte `R ‖ s` Ristretto255 Schnorr signature (scheme in the NPM README) over
-/// the hash from `hashUnsealedTransaction`, made by the key for `seal_signer_public_key`. The seal and any
+/// `signature` is the 64-byte sr25519 signature (scheme in the NPM README) over the hash from
+/// `hashUnsealedTransaction`, made by the key for `seal_signer_public_key`. The seal and any
 /// authorization signatures are verified.
 /// Returns the sealed `Transaction` as a JSON string.
 #[wasm_bindgen(js_name = "attachSealSignature")]
@@ -130,8 +130,8 @@ pub fn attach_seal_signature(
 /// Add an authorization signature from an external signer (HSM, MPC) to a transaction (unsigned or
 /// unsealed JSON).
 ///
-/// `signature` is the raw 64-byte `R ‖ s` Ristretto255 Schnorr signature (scheme in the NPM README) over
-/// the hash from `hashUnsignedTransaction` for `seal_signer_public_key`, made by the key for
+/// `signature` is the 64-byte sr25519 signature (scheme in the NPM README) over the hash from
+/// `hashUnsignedTransaction` for `seal_signer_public_key`, made by the key for
 /// `signer_public_key`. It is verified before it is appended.
 /// Returns the `UnsealedTransactionV1` (with the new signature appended) as a JSON string.
 #[wasm_bindgen(js_name = "attachTransactionSignature")]
@@ -156,17 +156,6 @@ pub fn bor_encode_transaction(transaction_json: &str) -> Result<String, JsError>
     ootle_wasm_core::bor::bor_encode_transaction_json(transaction_json).map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Schnorr-sign a message with a secret key.
-/// Returns { public_nonce: Uint8Array, signature: Uint8Array }.
-#[wasm_bindgen(js_name = "schnorrSign")]
-pub fn schnorr_sign(secret_key: &[u8], message: &[u8]) -> Result<SchnorrSignatureResult, JsError> {
-    let result = ootle_wasm_core::sign::schnorr_sign(secret_key, message).map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(SchnorrSignatureResult {
-        public_nonce: result.public_nonce,
-        signature: result.signature,
-    })
-}
-
 /// Derive the public key from a secret key (both raw bytes).
 #[wasm_bindgen(js_name = "publicKeyFromSecretKey")]
 pub fn public_key_from_secret_key(secret_key: &[u8]) -> Result<Vec<u8>, JsError> {
@@ -185,7 +174,7 @@ pub fn generate_keypair() -> KeypairResult {
 }
 
 /// Hash a transaction (unsigned or unsealed JSON) for an authorization signature.
-/// Returns the 64-byte signing message that must be Schnorr-signed.
+/// Returns the 64-byte signing message that must be sr25519-signed.
 ///
 /// The message excludes attached signatures, so it is the same before and after `attachTransactionSignature`.
 ///

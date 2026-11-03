@@ -32,6 +32,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     SubstateProofGenerator,
     SubstateProofVerifyError,
     consensus_models::{
@@ -300,7 +301,8 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
     // Prune the tree nodes of v1 and the target's value.
     {
         let mut tx = db.create_write_tx().unwrap();
-        assert!(tx.state_tree_nodes_clear_stale(num_preshards(), usize::MAX).unwrap() > 0);
+        let retention = StateTreeRetention::read(&*tx, num_preshards(), 0).unwrap();
+        assert!(tx.state_tree_nodes_clear_stale(&retention, usize::MAX).unwrap() > 0);
         tx.substates_prune_downed_values(EPOCH, usize::MAX).unwrap();
         tx.commit().unwrap();
     }
@@ -634,8 +636,11 @@ fn a_substate_destroyed_after_its_shard_idles_past_the_retention_window_is_recor
 
     // The shard does not move while epoch GC passes far beyond the epoch of its latest proof, and its block is pruned.
     db.with_write_tx(|tx| tx.epoch_cleanup(EPOCH + Epoch(100))).unwrap();
-    db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards(), usize::MAX))
-        .unwrap();
+    db.with_write_tx(|tx| {
+        let retention = StateTreeRetention::read(&**tx, num_preshards(), 0)?;
+        tx.state_tree_nodes_clear_stale(&retention, usize::MAX)
+    })
+    .unwrap();
 
     let mut tx = db.create_write_tx().unwrap();
     commit_version(

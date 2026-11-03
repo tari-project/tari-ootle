@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use axum::{
     Extension,
     Json,
-    extract::Query,
     http::{
         HeaderValue,
         header::{self, HeaderMap},
@@ -14,14 +13,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use log::*;
-use tari_indexer_client::types::{
-    GetUtxoUpdatesRequest,
-    GetUtxosRequest,
-    GetUtxosResponse,
-    ListUtxosRequest,
-    ListUtxosResponse,
-};
-use tari_ootle_common_types::{NumPreshards, optional::Optional};
+use tari_indexer_client::types::{GetUtxoUpdatesRequest, GetUtxosRequest, GetUtxosResponse};
+use tari_ootle_common_types::NumPreshards;
 
 use crate::rest_api::{
     context::HandlerContext,
@@ -31,6 +24,10 @@ use crate::rest_api::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::handlers::utxos";
+
+/// The most unspent UTXOs one `/utxos/fetch` response returns. Any number of UTXOs may share a tag and nonce pair, so
+/// a request for at most 1000 pairs may match more.
+const MAX_FETCHED_UTXOS: u32 = 1000;
 
 #[utoipa::path(post, path = "/utxos/stream", description = "Streams UTXO updates",
     request_body = GetUtxoUpdatesRequest,
@@ -134,44 +131,26 @@ pub async fn fetch_utxos(
     if req.tag_and_nonce_pairs.len() > 1000 {
         return Err(ErrorResponse::bad_request("cannot query more than 1000 UTXOs"));
     }
-    let (utxos, spent) = context
+    if !req.unspent_at.is_empty() && req.unspent_at.len() != req.tag_and_nonce_pairs.len() {
+        return Err(ErrorResponse::bad_request(
+            "unspent_at must be empty or hold one entry for each tag and nonce pair",
+        ));
+    }
+    let fetched = context
         .substate_manager()
-        .fetch_utxos(&req.resource_address, &req.tag_and_nonce_pairs)
+        .fetch_utxos(
+            &req.resource_address,
+            &req.tag_and_nonce_pairs,
+            &req.unspent_at,
+            req.cursor,
+            MAX_FETCHED_UTXOS,
+        )
         .await
         .map_err(ErrorResponse::anyhow)?;
 
-    Ok(Json(GetUtxosResponse { utxos, spent }))
-}
-
-#[utoipa::path(get, path = "/utxos", description = "List full UTXO data",
-responses(
-    (status = 200, description = "List of UTXOs", body = ListUtxosResponse),
-    (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
-    (status = NOT_FOUND, description = "The from_id UTXO is not stored on this indexer", body = ErrorResponse),
-    (status = INTERNAL_SERVER_ERROR, description = "Failed to list UTXOs", body = ErrorResponse),
-))]
-pub async fn list_utxos(
-    Extension(context): Extension<HandlerContext>,
-    Query(req): Query<ListUtxosRequest>,
-) -> HandlerResult<Json<ListUtxosResponse>> {
-    if req.limit == 0 {
-        return Err(ErrorResponse::bad_request("limit must be greater than 0"));
-    }
-    if req.limit > 1000 {
-        return Err(ErrorResponse::bad_request("cannot query more than 1000 UTXOs"));
-    }
-    let utxos = context
-        .substate_manager()
-        .list_utxos(&req.resource_address, req.from_id, req.limit)
-        .await
-        .optional()
-        .map_err(ErrorResponse::anyhow)?
-        .ok_or_else(|| {
-            ErrorResponse::not_found(
-                "The from_id UTXO is not stored on this indexer: it may have been pruned once spent. Restart the \
-                 listing without from_id.",
-            )
-        })?;
-
-    Ok(Json(ListUtxosResponse { utxos }))
+    Ok(Json(GetUtxosResponse {
+        utxos: fetched.utxos,
+        spent: fetched.spent,
+        next_cursor: fetched.next_cursor,
+    }))
 }

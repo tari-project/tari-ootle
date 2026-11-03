@@ -314,6 +314,7 @@ fn resolve_component_json(vault_ids: &[VaultId]) -> serde_json::Value {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(state),
     };
@@ -465,6 +466,7 @@ fn parse_sample_component(vault_ids: &[VaultId]) -> Component {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(tari_bor::to_value(&vault_ids.to_vec()).expect("encode vault ids")),
     }
@@ -1297,6 +1299,7 @@ fn balance_account_substate(vault_ids: &[VaultId]) -> serde_json::Value {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(state),
     };

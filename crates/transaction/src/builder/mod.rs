@@ -601,6 +601,27 @@ impl<D> TransactionBuilder<D> {
         self.add_instruction(Instruction::DropAllProofsInWorkspace)
     }
 
+    /// Opens an authorization window over the workspace proof `label` for the instructions that follow.
+    pub fn authorize_proof<T: Into<BuilderWorkspaceKey>>(self, label: T) -> Self {
+        let proof = self.get_workspace_offset_id_from_named_arg(label.into());
+        self.add_instruction(Instruction::AuthorizeProof { proof })
+    }
+
+    /// Closes the authorization window over the workspace proof `label`.
+    pub fn drop_proof_authorization<T: Into<BuilderWorkspaceKey>>(self, label: T) -> Self {
+        let proof = self.get_workspace_offset_id_from_named_arg(label.into());
+        self.add_instruction(Instruction::DropProofAuthorization { proof })
+    }
+
+    /// Adds the instructions built by `f` inside an authorization window over the workspace proof `label`, so the
+    /// window covers exactly those instructions.
+    pub fn with_authorized_proof<T: Into<BuilderWorkspaceKey>, F: FnOnce(Self) -> Self>(self, label: T, f: F) -> Self {
+        // Resolved once: the closure may rebind `label` to another workspace item.
+        let proof = self.get_workspace_offset_id_from_named_arg(label.into());
+        f(self.add_instruction(Instruction::AuthorizeProof { proof }))
+            .add_instruction(Instruction::DropProofAuthorization { proof })
+    }
+
     pub fn put_last_instruction_output_on_workspace<T: Into<BuilderWorkspaceKey>>(mut self, label: T) -> Self {
         let key = self.workspace_ids.insert(label.into());
         self.add_instruction(Instruction::PutLastInstructionOutputOnWorkspace { key })
@@ -973,6 +994,22 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
+        for arg in args {
+            if let Some(bytes) = arg.as_literal_bytes() &&
+                let Ok(indexed) = IndexedValue::from_raw(bytes)
+            {
+                declare_inputs(
+                    self.unsigned_transaction.inputs_mut(),
+                    indexed
+                        .referenced_substates()
+                        .filter(SubstateId::is_declarable_input)
+                        .map(InputDeclaration::write),
+                );
+            }
+        }
+    }
+
     fn add_inputs_for_instruction(&mut self, instruction: &Instruction) {
         if !self.fill_inputs {
             return;
@@ -980,35 +1017,11 @@ impl<D> TransactionBuilder<D> {
 
         match instruction {
             Instruction::CallFunction { args, .. } => {
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed
-                                .referenced_substates()
-                                .filter(SubstateId::is_declarable_input)
-                                .map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::CallMethod { call, args, .. } => {
                 self.add_input_for_component_ref(call);
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed
-                                .referenced_substates()
-                                .filter(SubstateId::is_declarable_input)
-                                .map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::StealthTransfer {
                 resource_address_ref, ..
@@ -1033,8 +1046,11 @@ impl<D> TransactionBuilder<D> {
                         .insert((*resource_address).into());
                 }
             },
-            Instruction::UpdateComponentTemplate { component, .. } => {
+            Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                 self.add_input_for_component_ref(component);
+                if let Some(migrate) = migrate {
+                    self.add_inputs_for_args(&migrate.args);
+                }
             },
             Instruction::Assert {
                 assertion: Assertion::IsNotNull,
@@ -1048,7 +1064,9 @@ impl<D> TransactionBuilder<D> {
             Instruction::PutIntoBucket { .. } |
             Instruction::PublishTemplate { .. } |
             Instruction::AllocateAddress { .. } |
-            Instruction::PayFeeFromBucket { .. } => {},
+            Instruction::PayFeeFromBucket { .. } |
+            Instruction::AuthorizeProof { .. } |
+            Instruction::DropProofAuthorization { .. } => {},
         }
     }
 
@@ -1114,12 +1132,11 @@ impl<D> TransactionBuilder<D> {
 }
 
 impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
-    type MessageOutput = [u8; 64];
     type Signature = TransactionSignature;
 
     /// The message covers the body [`IntoSigned::into_signed`] produces, so it is taken over a copy with the fee
     /// instructions applied.
-    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
         self.clone().build_unsigned().to_signing_message(sealed_signer)
     }
 }

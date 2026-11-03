@@ -77,7 +77,8 @@ secret key and account public key, and no spend key. The recommended structure i
 [Watch-only Accounts](/guides/watch-only-accounts/) describes the watch-only calls in detail. If you would rather not
 run a wallet daemon for deposits, the Ootle SDK can scan with the same two keys (`ootle-rs`:
 `IndexerProvider::watch_stealth_utxos`; `ootle_sdk_core`: `stealth::scan_stealth_output`), but you then build and
-maintain the monitor yourself.
+maintain the monitor yourself. That includes checking the outputs you hold in a shard that an indexer flags with `spends_incomplete`, when
+it may lack spends below your cursor.
 
 ## Ootle networks and release methodology
 
@@ -529,11 +530,11 @@ with its value, status, spend authorization and decrypted memo.
 </Aside>
 
 <Aside type="note">
-  **Incoming outputs are proven.** With `indexer_trust = "verify"` (the default), the wallet stores a detected output
+  **Incoming outputs are proven.** With `indexer_trust = "verify"`, the wallet stores a detected output
   only once the indexer proves that the network holds it, and it stores the output and frozen flag that the proof
   shows. Until then the output is not listed, and the wallet asks for the proof again on later scans. An indexer that
   serves no proof, or a proof that does not verify, can delay a deposit but cannot invent one. Keep this setting on
-  the deposit wallet.
+  the deposit wallet. The default is `"trust"`, so set it explicitly.
 </Aside>
 
 ```javascript
@@ -858,7 +859,7 @@ own deposit and withdrawal path. See [Burn Minotari for TARI](/guides/burn-minot
 6. **Spendable deposits only:** never credit an output that is `Invalid`, frozen, or not a key-path (`Key`) output.
 7. **Idempotency:** credit deposits once per UTXO address, and record withdrawal transaction IDs before you wait for
    the result.
-8. **Verify the indexer:** keep `indexer_trust = "verify"` in every wallet daemon, so that deposits, receipts and
+8. **Verify the indexer:** set `indexer_trust = "verify"` in every wallet daemon, so that deposits, receipts and
    spends are all proven. Point the wallets at an indexer you run, so that another operator cannot delay them.
 9. **Audit logging:** log every credit with the UTXO address, the destination tag, the amount and the time.
 

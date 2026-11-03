@@ -52,6 +52,34 @@ diesel::table! {
 }
 
 diesel::table! {
+    checkpoint_shard_leaves (shard, state_version) {
+        shard -> Integer,
+        state_version -> BigInt,
+        transition_acc -> Binary,
+    }
+}
+
+diesel::table! {
+    snapshot_substates (shard, epoch, leaf_key) {
+        shard -> Integer,
+        epoch -> BigInt,
+        leaf_key -> Binary,
+        substate -> Binary,
+    }
+}
+
+diesel::table! {
+    staged_versions (shard, state_version) {
+        shard -> Integer,
+        state_version -> BigInt,
+        epoch -> BigInt,
+        transition_acc -> Binary,
+        streamed_by -> Binary,
+        batch -> Binary,
+    }
+}
+
+diesel::table! {
     substates (id) {
         id -> BigInt,
         address -> Text,
@@ -166,12 +194,15 @@ diesel::table! {
 }
 
 diesel::allow_tables_to_appear_in_same_query!(
+    checkpoint_shard_leaves,
     epoch_checkpoints,
     events,
     key_values,
     substate_cache,
     substate_cache_invalidations,
     substate_cache_proofs,
+    snapshot_substates,
+    staged_versions,
     substates,
     template_catalogue,
     transaction_receipts,

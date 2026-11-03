@@ -56,6 +56,8 @@ use tari_ootle_p2p::{
         GetConsensusStateResponse,
         GetHighQcRequest,
         GetHighQcResponse,
+        GetShardSnapshotRequest,
+        GetShardSnapshotResponse,
         GetSubstateRequest,
         GetSubstateResponse,
         GetSubstatesBatchRequest,
@@ -90,7 +92,7 @@ use tari_ootle_storage::{
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_sidechain::FixedHash;
-use tari_state_tree::SubstateValueProof;
+use tari_state_tree::{LeafKey, SubstateValueProof, TreeHash};
 use tari_validator_node_rpc::{STATE_SYNC_MAX_BATCH_SIZE, rpc_service::ValidatorNodeRpcService};
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore, mpsc},
@@ -102,6 +104,7 @@ use crate::{
     p2p::{
         rpc::{
             CONSENSUS_NOT_RUNNING,
+            shard_snapshot::{MAX_SNAPSHOT_PAGE_SUBSTATES, ShardSnapshotPage, read_shard_snapshot},
             state_sync_task::{
                 HeldHistory,
                 ShardCursor,
@@ -1042,6 +1045,75 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         Ok(Response::new(GetCommittedBlockProofResponse {
             commit_proof: proof.to_bytes(),
             shard_leaves: leaves,
+        }))
+    }
+
+    async fn get_shard_snapshot(
+        &self,
+        req: Request<GetShardSnapshotRequest>,
+    ) -> Result<Response<GetShardSnapshotResponse>, RpcStatus> {
+        let req = req.into_message();
+        let shard = Shard::from_u32(req.shard);
+        if shard > NumPreshards::MAX_SHARD {
+            return Err(RpcStatus::bad_request(format!(
+                "Shard {shard} out of range. Maximum shard is {}",
+                NumPreshards::MAX_SHARD
+            )));
+        }
+        let after = if req.after_leaf_key.is_empty() {
+            None
+        } else {
+            let key = TreeHash::try_from_bytes(&req.after_leaf_key)
+                .map_err(|_| RpcStatus::bad_request("after_leaf_key must be empty or 32 bytes"))?;
+            Some(LeafKey::new(key))
+        };
+        let value_filters = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
+        if value_filters.is_empty() {
+            return Err(RpcStatus::bad_request(
+                "At least one SubstateValueFilterFlag must be set",
+            ));
+        }
+        let limit = usize::try_from(req.limit)
+            .unwrap_or(usize::MAX)
+            .clamp(1, MAX_SNAPSHOT_PAGE_SUBSTATES);
+
+        // A page is a synchronous read like a state sync version's, so it takes the same permits. Any node holding the
+        // tree at the version serves it: the caller checks the leaves against a quorum-signed root.
+        let _permit = self
+            .state_sync_reads
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let store = self.state_store.clone();
+        let state_version = req.state_version;
+        let page = task::spawn_blocking(move || {
+            store
+                .with_read_tx(|tx| read_shard_snapshot(tx, shard, state_version, after.as_ref(), limit, value_filters))
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        Ok(Response::new(match page {
+            ShardSnapshotPage::Unavailable => GetShardSnapshotResponse {
+                version_unavailable: true,
+                ..Default::default()
+            },
+            ShardSnapshotPage::Page {
+                substates,
+                is_last,
+                last_leaf_proof,
+            } => GetShardSnapshotResponse {
+                substates,
+                is_last,
+                version_unavailable: false,
+                last_leaf_proof: last_leaf_proof
+                    .map(|proof| tari_bor::serde_codec::to_vec(&proof))
+                    .transpose()
+                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
+                    .unwrap_or_default(),
+            },
         }))
     }
 

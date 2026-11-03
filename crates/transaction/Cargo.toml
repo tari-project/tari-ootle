@@ -30,6 +30,8 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.8.1", features = ["html_reports"] }
+# Reference sr25519 signer for interop tests
+schnorrkel = { version = "0.11.5", default-features = false, features = ["alloc", "getrandom"] }
 serde_json = { workspace = true }
 
 [[bench]]

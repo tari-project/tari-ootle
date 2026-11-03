@@ -37,7 +37,7 @@ use tari_template_lib_types::{
     Hash32,
     Hash64,
     bytes::{Bytes, BytesRef},
-    crypto::{PublicKey, RistrettoPublicKeyBytes, Scalar32Bytes, SignaturePayload},
+    crypto::{PublicKey, RistrettoPublicKeyBytes, Scalar32Bytes, SignaturePayload, SignatureScope},
     engine_args::{IntrinsicId, IntrinsicInvokeArg, SignatureVerifyArgRef},
 };
 
@@ -216,19 +216,22 @@ hash_fns!(
 
 // -------------------------------- Signatures -------------------------------- //
 
-/// Whether `payload` is a valid Ristretto Schnorr signature by `public_key` over `message`, within
-/// `domain`.
+/// Whether `payload` is a valid signature by `public_key` over `message`, within `domain` and `scope`.
 ///
-/// The domain is bound into what is signed, so a signature made for one domain never verifies under
-/// another — which is what stops one being replayed into a context it was not made for.
+/// The engine binds the network, the resolved scope and the domain into what is signed, so a signature
+/// made for one never verifies under another — which is what stops one being replayed into a context it
+/// was not made for. Verifying under an empty domain, or under [`SignatureScope::CurrentComponent`] outside a
+/// component method, fails the transaction.
 ///
 /// Templates normally reach this through [`Signature::verify`], which takes the domain from the
 /// signature's type parameter; call this directly when the domain is only known at runtime.
 ///
 /// [`Signature::verify`]: crate::models::Verifiable::verify
-pub fn schnorr_verify_with_domain(
+#[must_use]
+pub fn verify_signature(
     public_key: &PublicKey,
     domain: &[u8],
+    scope: SignatureScope,
     message: &[u8],
     payload: &SignaturePayload,
 ) -> bool {
@@ -237,5 +240,6 @@ pub fn schnorr_verify_with_domain(
         domain,
         message,
         payload,
+        scope,
     }])
 }

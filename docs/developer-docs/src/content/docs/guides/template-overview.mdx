@@ -172,6 +172,7 @@ impl MyComponent {
           .default(rule![deny_all])
       )
       .with_owner_rule(OwnerRule::OwnedBySigner) // This is the default
+      .with_upgrade_rule(UpdateRule::Locked) // This is the default: the template can never be swapped
       .create()
   }
 }

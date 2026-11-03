@@ -2,13 +2,13 @@
   "name": "account_balances/multi_vault_u64",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.47.0",
-    "git_rev": "712409abd0ae8aa7ebd1e3d92829581b7ffc9084",
+    "core_version": "0.48.0",
+    "git_rev": "3460b2ff19640c5a3b758de9ec407eac8e372044",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "account_balances",
   "input": {
-    "substate_value": "ggCBgoRYIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAggCAgqCCAYBBAIGC2IRYIEFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB2IRYIEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJC",
+    "substate_value": "ggCBgoVYIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAggCAgqCCAYBBAIIAgIGC2IRYIEFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB2IRYIEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJC",
     "vault_substates": [
       {
         "substate_id": "vault_4141414141414141414141414141414141414141414141414141414141414141",

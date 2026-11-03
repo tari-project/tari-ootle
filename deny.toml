@@ -42,6 +42,7 @@ unmaintained = "workspace"
 # crate the workspace "depends on" can be absent from everything this project ships. Being absent
 # from every binary is a reason to rank an advisory, never on its own a reason to keep it: each
 # entry here also has to say why the fix is out of reach.
+# Every id here is also listed in `.cargo/audit.toml`, which `rustsec/audit-check` reads.
 ignore = [
     { id = "RUSTSEC-2023-0071", reason = """
 Marvin timing sidechannel in RSA private-key operations, with no patched release. Absent from every

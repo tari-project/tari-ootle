@@ -1,6 +1,21 @@
 [profile.default]
 default-filter = "not package(integration_tests) and not test(export_bindings)"
 
+# Each test that compiles templates spawns its own `cargo build` for wasm32, and each of those uses every core. Run
+# unbounded alongside the rest of the suite, they starve the machine: consensus tests running at the same time miss
+# their wall-clock deadlines, and a developer machine stalls. Both groups cap how many of these tests run at once.
+[test-groups]
+template-compile = { max-threads = 8 }
+consensus = { max-threads = 8 }
+
+[[profile.default.overrides]]
+filter = 'rdeps(tari_template_test_tooling) and kind(test)'
+test-group = 'template-compile'
+
+[[profile.default.overrides]]
+filter = 'package(consensus_tests)'
+test-group = 'consensus'
+
 [profile.ci]
 slow-timeout = { period = "60s", terminate-after = 4 }
 default-filter = "not package(integration_tests) and not test(export_bindings)"
@@ -16,4 +31,3 @@ slow-timeout = { period = "120s", terminate-after = 5 }
 
 [profile.ci.junit]  # this can be some other profile, too
 path = "junit.xml"
-

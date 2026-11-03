@@ -4,12 +4,12 @@
 //! Context definitions related to the caller of an instruction
 
 use tari_template_abi::{EngineOp, call_engine, rust::prelude::*};
-use tari_template_lib_types::ComponentAddress;
+use tari_template_lib_types::{ComponentAddress, NonFungibleAddress};
 
 use crate::{
     args::{AddressAllocationInvokeArg, CallerContextAction, CallerContextInvokeArg, InvokeResult},
     error_variants::{ERR_ENGINE_DECODE_FAIL, ERR_NOT_IN_COMPONENT_CONTEXT},
-    models::{ComponentAddressAllocation, Proof, ResourceAddressAllocation},
+    models::{ComponentAddressAllocation, ResourceAddressAllocation},
     types::crypto::RistrettoPublicKeyBytes,
 };
 
@@ -27,24 +27,17 @@ impl CallerContext {
         resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
-    /// Returns a proof of the main/seal transaction signer
-    pub fn get_main_signer_proof() -> Proof {
-        Self::get_signer_proof_inner(None)
-    }
-
-    /// Returns a proof of the transaction signer with the given public key. If the public key does not match any
-    /// transaction signer, this will panic.
-    pub fn get_signer_proof_for_public_key(public_key: RistrettoPublicKeyBytes) -> Proof {
-        Self::get_signer_proof_inner(Some(public_key))
-    }
-
-    fn get_signer_proof_inner(pk: Option<RistrettoPublicKeyBytes>) -> Proof {
-        let resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
-            action: CallerContextAction::GetSignerProof,
-            args: pk.map(|pk| invoke_args![pk]).unwrap_or_default(),
+    /// Fails the transaction unless the current call carries `badge`, evaluated as `rule!(non_fungible(badge))`
+    /// against this frame. A call carries the badges the engine stamps into its frame (the transaction signers'
+    /// public-key badges when the transaction calls this component or function directly, and otherwise the badges
+    /// naming its direct caller: [`NonFungibleAddress::caller_component_badge`] and
+    /// [`NonFungibleAddress::direct_caller_template_badge`]), the badges of the proofs the frame has authorized,
+    /// and those of the proofs its caller authorized around the call. A proof shown as an argument does not count.
+    pub fn assert_badge_in_scope(badge: &NonFungibleAddress) {
+        let _resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
+            action: CallerContextAction::AssertBadgeInScope,
+            args: invoke_args![badge],
         });
-
-        resp.decode().expect(ERR_ENGINE_DECODE_FAIL)
     }
 
     /// Returns the address of the component that is being called in the current instruction.

@@ -67,6 +67,11 @@
 # stream refuses (410) to resume from a cursor older than the newest pruned event.
 #event_retention_epochs = 1000
 
+# How many epochs past the epoch a UTXO was spent in its tombstone is retained. "forever" retains
+# tombstones indefinitely. (default = 504, about a week) A UTXO stream resuming from below a pruned
+# tombstone is told its spends are incomplete, and the wallet checks the outputs it holds in that shard.
+#utxo_tombstone_retention_epochs = 504
+
 # How long, in seconds, each pruner idles between passes once it has nothing left to prune.
 # Only used when a retention window is set. (default = 3600)
 #prune_interval = 3600

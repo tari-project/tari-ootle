@@ -1,6 +1,6 @@
 [package]
 name = "ootle_ledger_client"
-version = "0.10.0"
+version = "0.11.0"
 description = "Host client for the Tari Ootle Ledger app: on-device key derivation and transaction signing over any APDU transport"
 edition.workspace = true
 authors.workspace = true
@@ -23,13 +23,15 @@ borsh = { workspace = true, default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-# Host reference test that proves the device signing recipe verifies under tari_crypto.
+# Host reference test that proves the device signing recipe produces valid transaction signatures.
 tari_ootle_transaction = { workspace = true }
 tari_ootle_wallet_crypto = { workspace = true }
 ootle-network = { workspace = true }
 tari_crypto = { workspace = true }
 curve25519-dalek = { version = "4", features = ["rand_core"] }
 blake2 = { workspace = true }
+merlin = { workspace = true }
+tari_ootle_common_types = { workspace = true }
 rand = { workspace = true }
 indexmap = { workspace = true }
 

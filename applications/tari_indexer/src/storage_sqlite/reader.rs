@@ -4,6 +4,7 @@
 use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use diesel::{
+    BoolExpressionMethods,
     EscapeExpressionMethods,
     ExpressionMethods,
     JoinOnDsl,
@@ -38,6 +39,7 @@ use tari_ootle_storage::{Ordering, StorageError, consensus_models::EpochCheckpoi
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_sidechain::FixedHash;
+use tari_state_tree::{LeafKey, TransitionAccumulator, TreeHash};
 use tari_template_lib_types::{
     Amount,
     Hash32,
@@ -54,8 +56,13 @@ use crate::{
     storage_sqlite::{
         models,
         models::{
+            CheckpointShardLeaf,
             EventRecord,
             KeyValue,
+            SnapshotSubstate,
+            StagedAccumulator,
+            StagedAccumulatorRow,
+            StagedVersion,
             SubstateCacheRow,
             SubstateRecord,
             TemplateCatalogueEntry,
@@ -64,6 +71,8 @@ use crate::{
             VerifiedStateRootRow,
             WatchedSubstateEntry,
             WatchedSubstateRow,
+            decode_staged_accumulator,
+            first_above,
         },
         serialization::{decode_committed, deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
@@ -115,6 +124,29 @@ enum EventRange {
 }
 
 impl SqliteStoreReadTransaction<'_> {
+    /// The distinct tag and nonce pairs of the rows `query` matches.
+    fn utxo_tag_and_nonce_pairs(
+        &mut self,
+        operation: &str,
+        query: crate::storage_sqlite::schema::utxos::BoxedQuery<'_, diesel::sqlite::Sqlite>,
+    ) -> Result<Vec<(UtxoTag, RistrettoPublicKeyBytes)>, StorageError> {
+        use crate::storage_sqlite::schema::utxos;
+
+        let rows = query
+            .select((utxos::utxo_tag, utxos::public_nonce))
+            .distinct()
+            .get_results::<(Option<i32>, Option<String>)>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{operation}: {}", e),
+            })?;
+
+        // The queries match on both columns, so neither is NULL in a returned row.
+        rows.into_iter()
+            .filter_map(|(tag, public_nonce)| Some((tag?, public_nonce?)))
+            .map(|(tag, public_nonce)| Ok((UtxoTag::new(tag as u32), deserialize_hex_try_from(public_nonce)?)))
+            .collect()
+    }
+
     fn query_events(
         &mut self,
         query: &EventQuery,
@@ -225,43 +257,6 @@ fn is_unspent_utxo() -> diesel::expression::SqlLiteral<sql_types::Bool> {
     dsl::sql::<sql_types::Bool>(r#""utxos"."is_spent" = false AND "utxos"."is_burnt" = false"#)
 }
 
-/// Up to `limit` unspent UTXOs of `resource_address` in insertion order, after the row `after_row_id` when given.
-pub(super) fn utxos_list_query<'a>(
-    resource_address: &ResourceAddress,
-    after_row_id: Option<i64>,
-    limit: u32,
-) -> crate::storage_sqlite::schema::utxos::BoxedQuery<'a, diesel::sqlite::Sqlite> {
-    use crate::storage_sqlite::schema::utxos;
-
-    let mut query = utxos::table
-        .filter(utxos::resource_address.eq(resource_address.to_string()))
-        .filter(is_unspent_utxo())
-        .into_boxed();
-
-    if let Some(after_row_id) = after_row_id {
-        query = query.filter(utxos::id.gt(after_row_id));
-    }
-
-    query.limit(i64::from(limit)).order_by(utxos::id.asc())
-}
-
-/// The row a listing resumes after when its cursor is `from_id`: the output's newest row, which is the one the listing
-/// served, since only an output's newest version can be unspent.
-pub(super) fn utxos_list_cursor_query<'a>(
-    resource_address: &ResourceAddress,
-    from_id: UtxoId,
-) -> crate::storage_sqlite::schema::utxos::BoxedQuery<'a, diesel::sqlite::Sqlite, sql_types::BigInt> {
-    use crate::storage_sqlite::schema::utxos;
-
-    utxos::table
-        .select(utxos::id)
-        .filter(utxos::resource_address.eq(resource_address.to_string()))
-        .filter(utxos::commitment.eq(from_id.to_commitment_hex_string()))
-        .order_by(utxos::id.desc())
-        .limit(1)
-        .into_boxed()
-}
-
 /// The unspent UTXOs of `resource_address` matching any of `tag_and_nonce_pairs`.
 pub(super) fn unspent_utxos_by_tag_and_nonce_query<'a>(
     resource_address: &ResourceAddress,
@@ -274,6 +269,29 @@ pub(super) fn unspent_utxos_by_tag_and_nonce_query<'a>(
         .filter(tag_and_nonce_in(tag_and_nonce_pairs))
         .filter(is_unspent_utxo())
         .into_boxed()
+}
+
+/// Up to `limit` unspent UTXOs of `resource_address` matching any of `tag_and_nonce_pairs` in id order, after
+/// `after_id` when given.
+///
+/// The commitment terms are written `+commitment`, which no index serves, so that SQLite seeks the rows matching the
+/// pairs through their index and sorts only those.
+pub(super) fn unspent_utxos_by_tag_and_nonce_page_query<'a>(
+    resource_address: &ResourceAddress,
+    tag_and_nonce_pairs: &[(UtxoTag, RistrettoPublicKeyBytes)],
+    after_id: Option<UtxoId>,
+    limit: u32,
+) -> crate::storage_sqlite::schema::utxos::BoxedQuery<'a, diesel::sqlite::Sqlite> {
+    let mut query = unspent_utxos_by_tag_and_nonce_query(resource_address, tag_and_nonce_pairs);
+    if let Some(after_id) = after_id {
+        query = query.filter(
+            dsl::sql::<sql_types::Bool>(r#"+"utxos"."commitment" > "#)
+                .bind::<sql_types::Text, _>(after_id.to_commitment_hex_string()),
+        );
+    }
+    query
+        .order_by(dsl::sql::<sql_types::Text>(r#"+"utxos"."commitment""#))
+        .limit(i64::from(limit))
 }
 
 /// The spent or burnt UTXOs of `resource_address` matching any of `tag_and_nonce_pairs`. The spent terms are SQL
@@ -881,57 +899,16 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         })
     }
 
-    fn utxos_list(
-        &mut self,
-        resource_address: &ResourceAddress,
-        from_id: Option<UtxoId>,
-        limit: u32,
-    ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError> {
-        const OPERATION: &str = "utxos_list";
-
-        // A cursor this indexer does not store - pruned, or never indexed - is `NotFound`, so the client restarts the
-        // listing: no later call can advance past it.
-        let after_row_id = from_id
-            .map(|from_id| {
-                utxos_list_cursor_query(resource_address, from_id)
-                    .first::<i64>(self.connection())
-                    .optional()
-                    .map_err(|e| StorageError::QueryError {
-                        reason: format!("{OPERATION}: {}", e),
-                    })?
-                    .ok_or_else(|| StorageError::NotFound {
-                        item: "utxo",
-                        key: from_id.to_string(),
-                    })
-            })
-            .transpose()?;
-
-        let rows = utxos_list_query(resource_address, after_row_id, limit)
-            .load_iter::<models::UtxoRecord, _>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("{OPERATION}: {}", e),
-            })?;
-
-        rows.map(|res| {
-            res.map_err(|e| StorageError::QueryError {
-                reason: format!("{OPERATION}: {}", e),
-            })
-            .and_then(|row| {
-                let (address, utxo) = row.try_convert_to_utxo()?;
-                Ok((*address.id(), utxo))
-            })
-        })
-        .collect()
-    }
-
     fn utxos_get_unspent_by_public_nonce_and_tag(
         &mut self,
         resource_address: &ResourceAddress,
         tag_and_nonce_pairs: &[(UtxoTag, RistrettoPublicKeyBytes)],
+        after_id: Option<UtxoId>,
+        limit: u32,
     ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError> {
         const OPERATION: &str = "utxos_get_unspent_by_public_nonce_and_tag";
 
-        let rows = unspent_utxos_by_tag_and_nonce_query(resource_address, tag_and_nonce_pairs)
+        let rows = unspent_utxos_by_tag_and_nonce_page_query(resource_address, tag_and_nonce_pairs, after_id, limit)
             .load_iter::<models::UtxoRecord, _>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {}", e),
@@ -949,27 +926,24 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         Ok(utxos)
     }
 
+    fn utxos_get_unspent_public_nonce_and_tag(
+        &mut self,
+        resource_address: &ResourceAddress,
+        tag_and_nonce_pairs: &[(UtxoTag, RistrettoPublicKeyBytes)],
+    ) -> Result<Vec<(UtxoTag, RistrettoPublicKeyBytes)>, StorageError> {
+        const OPERATION: &str = "utxos_get_unspent_public_nonce_and_tag";
+        let query = unspent_utxos_by_tag_and_nonce_query(resource_address, tag_and_nonce_pairs);
+        self.utxo_tag_and_nonce_pairs(OPERATION, query)
+    }
+
     fn utxos_get_spent_public_nonce_and_tag(
         &mut self,
         resource_address: &ResourceAddress,
         tag_and_nonce_pairs: &[(UtxoTag, RistrettoPublicKeyBytes)],
     ) -> Result<Vec<(UtxoTag, RistrettoPublicKeyBytes)>, StorageError> {
         const OPERATION: &str = "utxos_get_spent_public_nonce_and_tag";
-        use crate::storage_sqlite::schema::utxos;
-
-        let rows = spent_utxos_by_tag_and_nonce_query(resource_address, tag_and_nonce_pairs)
-            .select((utxos::utxo_tag, utxos::public_nonce))
-            .distinct()
-            .get_results::<(Option<i32>, Option<String>)>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("{OPERATION}: {}", e),
-            })?;
-
-        // The query matches on both columns, so neither is NULL in a returned row.
-        rows.into_iter()
-            .filter_map(|(tag, public_nonce)| Some((tag?, public_nonce?)))
-            .map(|(tag, public_nonce)| Ok((UtxoTag::new(tag as u32), deserialize_hex_try_from(public_nonce)?)))
-            .collect()
+        let query = spent_utxos_by_tag_and_nonce_query(resource_address, tag_and_nonce_pairs);
+        self.utxo_tag_and_nonce_pairs(OPERATION, query)
     }
 
     fn utxo_tombstone_horizon(&mut self, shard: Shard) -> Result<Option<StateVersion>, StorageError> {
@@ -1002,6 +976,148 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .into_iter()
             .map(|(shard, version)| (Shard::from(shard as u32), StateVersion::new(version as u64)))
             .collect())
+    }
+
+    fn staged_accumulators_tail(&mut self, shard: Shard, limit: usize) -> Result<Vec<StagedAccumulator>, StorageError> {
+        const OPERATION: &str = "staged_accumulators_tail";
+        use crate::storage_sqlite::schema::staged_versions;
+
+        let rows = staged_versions::table
+            .select((
+                staged_versions::state_version,
+                staged_versions::epoch,
+                staged_versions::transition_acc,
+                staged_versions::streamed_by,
+            ))
+            .filter(staged_versions::shard.eq(shard.as_u32() as i32))
+            .order_by(staged_versions::state_version.desc())
+            .limit(i64::try_from(limit).unwrap_or(i64::MAX))
+            .get_results::<StagedAccumulatorRow>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+        rows.into_iter().rev().map(decode_staged_accumulator).collect()
+    }
+
+    fn checkpoint_shard_leaves_above(
+        &mut self,
+        shard: Shard,
+        state_version: Option<StateVersion>,
+        limit: usize,
+    ) -> Result<Vec<CheckpointShardLeaf>, StorageError> {
+        const OPERATION: &str = "checkpoint_shard_leaves_above";
+        use crate::storage_sqlite::schema::checkpoint_shard_leaves;
+
+        let rows = checkpoint_shard_leaves::table
+            .select((
+                checkpoint_shard_leaves::state_version,
+                checkpoint_shard_leaves::transition_acc,
+            ))
+            .filter(checkpoint_shard_leaves::shard.eq(shard.as_u32() as i32))
+            .filter(checkpoint_shard_leaves::state_version.ge(first_above(state_version)))
+            .order_by(checkpoint_shard_leaves::state_version.asc())
+            .limit(i64::try_from(limit).unwrap_or(i64::MAX))
+            .get_results::<(i64, Vec<u8>)>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+        rows.into_iter()
+            .map(|(state_version, transition_acc)| {
+                Ok(CheckpointShardLeaf {
+                    shard,
+                    state_version: StateVersion::new(state_version as u64),
+                    transition_acc: TransitionAccumulator::try_from_bytes(&transition_acc).map_err(|e| {
+                        StorageError::DataInconsistency {
+                            details: format!(
+                                "the checkpoint leaf of shard {shard} at v{state_version} has an invalid transition \
+                                 accumulator: {e}"
+                            ),
+                        }
+                    })?,
+                })
+            })
+            .collect()
+    }
+
+    fn snapshot_substates_page(
+        &mut self,
+        shard: Shard,
+        after: Option<(Epoch, LeafKey)>,
+        limit: usize,
+    ) -> Result<Vec<SnapshotSubstate>, StorageError> {
+        const OPERATION: &str = "snapshot_substates_page";
+        use crate::storage_sqlite::schema::snapshot_substates;
+
+        let mut query = snapshot_substates::table
+            .select((
+                snapshot_substates::epoch,
+                snapshot_substates::leaf_key,
+                snapshot_substates::substate,
+            ))
+            .filter(snapshot_substates::shard.eq(shard.as_u32() as i32))
+            .into_boxed();
+        if let Some((epoch, leaf_key)) = after {
+            let epoch = epoch.as_u64() as i64;
+            query = query.filter(
+                snapshot_substates::epoch.gt(epoch).or(snapshot_substates::epoch
+                    .eq(epoch)
+                    .and(snapshot_substates::leaf_key.gt(leaf_key.bytes.into_array().to_vec()))),
+            );
+        }
+        let rows = query
+            .order_by((snapshot_substates::epoch.asc(), snapshot_substates::leaf_key.asc()))
+            .limit(i64::try_from(limit).unwrap_or(i64::MAX))
+            .get_results::<(i64, Vec<u8>, Vec<u8>)>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+        rows.into_iter()
+            .map(|(epoch, leaf_key, substate)| {
+                Ok(SnapshotSubstate {
+                    epoch: Epoch(epoch as u64),
+                    leaf_key: LeafKey::new(TreeHash::try_from_bytes(&leaf_key).map_err(|e| {
+                        StorageError::DataInconsistency {
+                            details: format!("a snapshot substate of shard {shard} has an invalid leaf key: {e}"),
+                        }
+                    })?),
+                    substate,
+                })
+            })
+            .collect()
+    }
+
+    fn staged_version_get(
+        &mut self,
+        shard: Shard,
+        state_version: StateVersion,
+    ) -> Result<Option<StagedVersion>, StorageError> {
+        const OPERATION: &str = "staged_version_get";
+        use crate::storage_sqlite::schema::staged_versions;
+
+        let row = staged_versions::table
+            .select((
+                (
+                    staged_versions::state_version,
+                    staged_versions::epoch,
+                    staged_versions::transition_acc,
+                    staged_versions::streamed_by,
+                ),
+                staged_versions::batch,
+            ))
+            .filter(staged_versions::shard.eq(shard.as_u32() as i32))
+            .filter(staged_versions::state_version.eq(state_version.as_u64() as i64))
+            .first::<(StagedAccumulatorRow, Vec<u8>)>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+        row.map(|(accumulator, batch)| {
+            Ok(StagedVersion {
+                accumulator: decode_staged_accumulator(accumulator)?,
+                batch,
+            })
+        })
+        .transpose()
     }
 
     fn list_template_catalogue(

@@ -205,7 +205,10 @@ message TreeRootSummary {
 // changes, so a shard range cannot share a single start version - each shard carries its own.
 message ShardCursor {
   uint32 shard = 1;
-  // Must be greater than zero. Genesis is committed at version 0 and is never synced.
+  // The first version to stream. A shard's history starts at v0, which holds its genesis state. A stream from v0
+  // sends an empty v0 for a shard with no genesis state, and the genesis transitions the caller's value filters
+  // select for one with it, so a caller that requests every transition, as values or hashes, receives a v0 for
+  // every shard.
   uint64 start_state_version = 2;
 }
 
@@ -276,7 +279,8 @@ message StateVersionProof {
 
 // A batch of substate updates at a single state version of a single shard. A state version whose
 // updates exceed the batch's update count or encoded size limit is split into multiple batches, all
-// but the last carrying has_more = true.
+// but the last carrying has_more = true. The v0 of a shard with no genesis state is one batch with no
+// updates.
 message SubstateBatch {
   uint64 state_version = 1;
   repeated SubstateUpdate updates = 2;
@@ -420,4 +424,41 @@ message ShardStateLeaf {
   bytes transition_acc = 4;
   // CBOR-encoded SparseMerkleProofExt of the shard's leaf in the block's state merkle root.
   bytes shard_root_proof = 5;
+}
+
+message GetShardSnapshotRequest {
+  uint32 shard = 1;
+  // The state version of the shard whose tree is read. The responder holds a shard's tree only for its recent
+  // versions, so this is normally the version of a recent leaf of the shard.
+  uint64 state_version = 2;
+  // The 32-byte leaf key the page starts above. Empty for the first page.
+  bytes after_leaf_key = 3;
+  // The most substates to return. The responder caps it, and may return fewer to keep the response within its size
+  // limit.
+  uint32 limit = 4;
+  // The SyncStateRequest.value_filters flags selecting the substates whose values are returned. Every other substate
+  // is returned as its state hash.
+  uint32 value_filters = 5;
+}
+
+message GetShardSnapshotResponse {
+  // The substates the shard's tree holds at state_version, in ascending leaf key order, starting above
+  // after_leaf_key.
+  repeated SnapshotSubstate substates = 1;
+  // No substate of the shard's tree at state_version is above the last one returned.
+  bool is_last = 2;
+  // The responder does not hold the shard's tree at state_version: the version is no longer kept, or not yet
+  // reached. No substates are returned.
+  bool version_unavailable = 3;
+  // CBOR-encoded SparseMerkleProofExt of the last substate's leaf in the shard's tree at state_version. Empty if no
+  // substates are returned. With the leaves of every page so far, its siblings to the right of the leaf's path
+  // rebuild the shard's root, which checks each page as it arrives.
+  bytes last_leaf_proof = 4;
+}
+
+// A substate a shard's tree holds, as SyncStateRequest.value_filters select its form.
+message SnapshotSubstate {
+  SubstateData substate = 1;
+  // The epoch the substate was created in, which its value hash commits to.
+  tari.ootle.common.Epoch created_epoch = 2;
 }

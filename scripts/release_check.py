@@ -58,7 +58,7 @@ from crate_versioning import (  # type: ignore[import-not-found]
     fetch_releases,
     vkey,
 )
-from publish_crates import CRATES, check_order  # type: ignore[import-not-found]
+from publish_crates import CRATES, check_order, stale_registry_locks  # type: ignore[import-not-found]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -346,6 +346,19 @@ def check_publish_preflight(rep: Report, args, releases: dict, pending: set) -> 
         rep.fail(f"{crate} pins {dep} = \"{req}\", which nothing satisfies (tree has {local})")
     if not unresolved:
         rep.ok("every publish-set pin resolves against crates.io + this release")
+
+    # See publish_crates.stale_registry_locks: a crate that reaches both copies cannot be published until the
+    # crates.io copy is locked to the in-tree version, which needs that version on crates.io.
+    stale = stale_registry_locks()
+    for crate, locked, local in stale:
+        if any(v == local for v, _ in releases[crate].published or []):
+            rep.fail(f"Cargo.lock locks the crates.io {crate} at {locked}; the tree and crates.io have {local}")
+            rep.note(f"Run: cargo update -p {crate}@{locked} --precise {local}")
+        else:
+            rep.warn(f"Cargo.lock locks the crates.io {crate} at {locked} beside the in-tree {local}")
+            rep.note(f"publish_crates.py relocks it once {crate} {local} is published. Commit Cargo.lock afterwards.")
+    if not stale:
+        rep.ok("Cargo.lock holds no older crates.io copy of a publish-set crate")
 
     if args.package:
         packageable = [

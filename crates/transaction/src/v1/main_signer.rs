@@ -4,8 +4,7 @@
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 /// The key a transaction acts as wherever the engine needs a single signer: `OwnerRule::OwnedBySigner`,
-/// `CallerContext::transaction_signer_public_key`, `CallerContext::get_main_signer_proof` and the author of a
-/// published template.
+/// `CallerContext::transaction_signer_public_key` and the author of a published template.
 ///
 /// Every authorization signature and the seal signature cover this field, so all signers agree on who the main
 /// signer is.

@@ -59,4 +59,6 @@ export type Instruction =
   | {
       UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash32 };
     }
-  | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } };
+  | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } }
+  | { AuthorizeProof: { proof: WorkspaceOffsetId } }
+  | { DropProofAuthorization: { proof: WorkspaceOffsetId } };

@@ -35,6 +35,11 @@ pub struct DatabaseOptions {
     /// state transitions, then we preserve 100 blocks worth of deleted state. Currently, this only applies to the
     /// state tree stale nodes.
     pub state_history_length: u64,
+    /// The number of most recent epoch checkpoints whose state trees are kept whole, so that a peer can read a shard's
+    /// whole tree at a checkpoint's version for this many epochs. The values of substates destroyed since the oldest
+    /// of them are kept as well. Their cost grows with the number of distinct substates changed since the oldest,
+    /// bounded by one copy of each tree. The default is 2.
+    pub pinned_checkpoint_epochs: u64,
     /// The number of epochs back from the current epoch to keep in the database.
     /// This includes blocks, foreign proposals etc.
     /// The default is 1, which means we keep the previous epoch's data until this epoch has passed. It is not
@@ -78,6 +83,13 @@ impl DatabaseOptions {
     /// state tree stale nodes.
     pub fn with_state_history_length(mut self, state_history_length: u64) -> Self {
         self.state_history_length = state_history_length;
+        self
+    }
+
+    /// The number of most recent epoch checkpoints whose state trees are kept whole. See
+    /// [`Self::pinned_checkpoint_epochs`].
+    pub fn with_pinned_checkpoint_epochs(mut self, pinned_checkpoint_epochs: u64) -> Self {
+        self.pinned_checkpoint_epochs = pinned_checkpoint_epochs;
         self
     }
 
@@ -128,6 +140,7 @@ impl Default for DatabaseOptions {
     fn default() -> Self {
         Self {
             state_history_length: 100,
+            pinned_checkpoint_epochs: 2,
             epoch_history_length: 1,
             down_proof_history_length: 72,
             debugging_data: false,

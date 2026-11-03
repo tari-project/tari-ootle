@@ -65,7 +65,7 @@ mod tests {
         let status = handle_get_status(&daemon.context, Some(&daemon.session), ValidatorSetGetStatusRequest {})
             .await
             .unwrap();
-        assert_eq!(status.indexer_trust, IndexerTrust::Verify);
+        assert_eq!(status.indexer_trust, IndexerTrust::Trust);
         assert!(status.trusted.is_none());
         assert!(status.reanchors.is_empty());
     }

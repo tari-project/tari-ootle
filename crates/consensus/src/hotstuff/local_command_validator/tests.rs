@@ -269,6 +269,7 @@ fn component_value() -> SubstateValue {
             owner_rule: SubstateOwnerRule::None,
             access_rules: Default::default(),
             entity_id: EntityId::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody {
             state: tari_bor::Value::Null,

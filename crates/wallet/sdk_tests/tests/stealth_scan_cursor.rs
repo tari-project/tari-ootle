@@ -113,6 +113,7 @@ fn start_of_shard(max_state_version: u64, has_more: bool) -> StartOfShard {
         shard: SHARD,
         max_state_version: StateVersion::from(max_state_version),
         has_more,
+        spends_incomplete: false,
     }
 }
 
@@ -133,7 +134,7 @@ fn cursor_of(cursors: &[(Shard, StateVersion)]) -> StateVersion {
 /// Answers like an indexer holding `utxos` in [`SHARD`], each at its state version: a request gets every UTXO past its
 /// cursor, and nothing at all when there is none.
 fn serve_utxos(network: &ProvingNetwork, utxos: Vec<(u64, UtxoUnspent)>) {
-    network.answer_utxo_streams(move |cursors| {
+    network.answer_utxo_streams(move |cursors, _| {
         let cursor = cursor_of(cursors);
         let past_cursor = utxos
             .iter()
@@ -462,7 +463,7 @@ async fn a_scan_pages_past_the_verified_state_version_without_storing_past_it() 
     let (network, test) = anchored_wallet().await;
     let first = own_utxo(&test);
     let second = own_utxo(&test);
-    network.answer_utxo_streams(move |cursors| {
+    network.answer_utxo_streams(move |cursors, _| {
         let cursor = cursor_of(cursors).as_u64();
         let (max_version, has_more, utxo) = if cursor < CHECKPOINT_VERSION + 1 {
             (CHECKPOINT_VERSION + 1, true, &first)
@@ -533,7 +534,7 @@ async fn a_spend_delivered_again_is_reported_once() {
     let set = ValidatorSetFixture::new(CHECKPOINT_EPOCH.as_u64());
     let proof = substate_down_proof(&set, &set, &id, spent.version);
     network.serve_down_substate(id, spent.version, Some(proof));
-    network.answer_utxo_streams(move |_| {
+    network.answer_utxo_streams(move |_, _| {
         vec![UtxoUpdatePayload {
             sos: Some(start_of_shard(CHECKPOINT_VERSION + 1, false)),
             update: Some(WalletUtxoUpdate::Spent(spent.clone())),

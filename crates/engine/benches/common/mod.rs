@@ -81,6 +81,7 @@ pub fn setup_store() -> MemoryStateStore {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: Default::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(
             tari_bor::to_value(&XtrFaucetState { vault: FAUCET_VAULT_ID })

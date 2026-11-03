@@ -75,7 +75,6 @@ use crate::{
         AuthorizationScope,
         DeclaredInputLoad,
         LoadedComponent,
-        NativeAction,
         PayFee,
         Runtime,
         RuntimeError,
@@ -100,25 +99,22 @@ pub type ModulesCollection<TStore> = Arc<[Box<dyn RuntimeModule<TStore>>]>;
 
 /// The encoded bytes of the values of `inputs`, measured the way the fee module tallies storage.
 ///
-/// A global substate is held by every shard group and never pledged, so it is not counted. Every
-/// other declared input is resolved before execution — consensus aborts a transaction that names one
-/// it cannot find, and a dry run fails to fetch it — so one missing from `store` is an invariant
-/// violation.
+/// Every declared input counts, global ones included: every shard group resolves a global input
+/// locally and pledges it to the others. Every declared input is resolved before execution —
+/// consensus aborts a transaction that names one it cannot find, and a dry run fails to fetch it —
+/// so one missing from `store` is an invariant violation.
 fn declared_input_bytes<'a, TStore: StateReader, I: IntoIterator<Item = &'a SubstateId>>(
     store: &TStore,
     inputs: I,
 ) -> Result<u64, TransactionError> {
-    inputs
-        .into_iter()
-        .filter(|id| !id.is_global())
-        .try_fold(0u64, |total, id| {
-            let substate = store
-                .get_state(id)
-                .map_err(|err| TransactionErrorKind::InvariantError {
-                    details: format!("Declared input {id} was not resolved before execution: {err}"),
-                })?;
-            Ok(total.saturating_add(tari_bor::encoded_len(substate.substate_value()) as u64))
-        })
+    inputs.into_iter().try_fold(0u64, |total, id| {
+        let substate = store
+            .get_state(id)
+            .map_err(|err| TransactionErrorKind::InvariantError {
+                details: format!("Declared input {id} was not resolved before execution: {err}"),
+            })?;
+        Ok(total.saturating_add(tari_bor::encoded_len(substate.substate_value()) as u64))
+    })
 }
 
 pub struct TransactionProcessor<TStore, TTemplateProvider> {
@@ -221,8 +217,7 @@ where
         let execute_epoch = virtual_substates.current_epoch();
 
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
-        let mut initial_call_scope = CallScope::new();
-        initial_call_scope.set_auth_scope(initial_auth_scope);
+        let mut initial_call_scope = CallScope::with_auth_scope(initial_auth_scope);
         // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
         // transaction (payment of fees)
         initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
@@ -541,6 +536,18 @@ where
                 revealed_input_bucket,
             } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
             Instruction::PayFeeFromBucket { bucket } => Self::pay_fee_from_bucket(runtime, bucket),
+            Instruction::AuthorizeProof { proof } => {
+                runtime
+                    .interface()
+                    .workspace_invoke(WorkspaceAction::AuthorizeProof, invoke_args![proof].into())?;
+                Ok(None)
+            },
+            Instruction::DropProofAuthorization { proof } => {
+                runtime
+                    .interface()
+                    .workspace_invoke(WorkspaceAction::DropProofAuthorization, invoke_args![proof].into())?;
+                Ok(None)
+            },
             Instruction::UpdateComponentTemplate {
                 component,
                 migrate,
@@ -574,6 +581,9 @@ where
             .track_template_loaded(&new_template_addr, template.code_size())?;
 
         let component_lock = runtime.interface().lock_component(component_address, LockFlag::Write)?;
+        // Evaluated in the instruction's own scope: the migration frame pushed below carries no signer badges and
+        // no loan of the authorized proofs.
+        runtime.interface().check_component_upgrade_rule(&component_lock)?;
 
         let template_def = template.shared_template_def();
         let migration_function = migrate
@@ -643,13 +653,6 @@ where
         // executes in this frame, so the template identity is honest — but `template(...)` (and
         // `direct_caller_template(...)`) would become forgeable if any other code ever ran here.
         runtime.interface().push_call_frame(call_frame, None)?;
-        // This must come after the call frame as that defines the authorization scope
-        runtime
-            .interface()
-            .check_component_ownership(NativeAction::UpdateComponentTemplate.into())?;
-        // A migration with no `migrate` function never reaches `invoke_template`, so this frame's call boundary
-        // ends here.
-        runtime.interface().revoke_boundary_proofs()?;
 
         runtime.interface().update_component_template(new_template_addr)?;
 
@@ -1051,9 +1054,7 @@ where
     }
 
     /// Runs a template function in the frame the caller has already pushed. This is the only path from the engine
-    /// into template code, so it is where a frame stops holding the proofs that were in scope for its call
-    /// boundary: whatever the frame's access rule was evaluated against, the code itself acts with its own badges
-    /// and its `Proof` arguments.
+    /// into template code.
     ///
     /// The call runs on the instance of `template_address` the transaction's earlier calls used, if any (see
     /// [`WasmInstanceCache`]), restored first to the state of a fresh instantiation.
@@ -1064,8 +1065,6 @@ where
         function_def: &FunctionDef,
         args: &[tari_bor::Value],
     ) -> Result<IndexedValue, TransactionErrorKind> {
-        runtime.interface().revoke_boundary_proofs()?;
-
         let result = match module {
             LoadedTemplate::Wasm(loaded) => {
                 // Every call pays for an instantiation, whether it gets a new instance or a reused one reset to

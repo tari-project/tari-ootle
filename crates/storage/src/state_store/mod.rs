@@ -5,6 +5,7 @@ mod epoch_cleanup;
 mod pending_chain;
 mod rewind;
 mod shard_scoped_state_tree;
+mod state_tree_retention;
 mod substate_value_proof;
 use std::{collections::HashMap, ops::Deref};
 
@@ -14,6 +15,7 @@ pub use pending_chain::*;
 pub use rewind::*;
 use serde::{Deserialize, Serialize};
 pub use shard_scoped_state_tree::*;
+pub use state_tree_retention::*;
 pub use substate_value_proof::*;
 use tari_consensus_types::{
     BlockId,
@@ -41,7 +43,6 @@ use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
-    NumPreshards,
     ShardGroup,
     ShardStateVersions,
     SubstateAddress,
@@ -807,13 +808,17 @@ pub trait StateStoreWriteTransaction {
         nodes: &[StaleTreeNode],
     ) -> Result<(), StorageError>;
 
-    /// Deletes stale state tree nodes older than the state history window, one whole stale version at a time,
-    /// stopping once `max_deletes` rows or more are deleted. Returns the number of rows deleted (nodes plus stale
-    /// version records); a result below `max_deletes` means none remain.
+    /// Deletes the stale state tree nodes of each shard in `retention` that no tree it keeps holds, one whole stale
+    /// version at a time, stopping once `max_writes` rows or more are written. Returns the number of rows written; a
+    /// result below `max_writes` means none remain.
+    ///
+    /// The nodes made stale at a version that leaves the shard's state history window are deleted, except those the
+    /// tree at a pinned version holds, which are kept until that version is no longer pinned. A pin above the lowest
+    /// releases its nodes only once every pin below it is released too, as checkpoints age out oldest first.
     fn state_tree_nodes_clear_stale(
         &mut self,
-        num_preshards: NumPreshards,
-        max_deletes: usize,
+        retention: &StateTreeRetention,
+        max_writes: usize,
     ) -> Result<usize, StorageError>;
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
     /// Truncates the state tree for `shard` back to `target_version`.

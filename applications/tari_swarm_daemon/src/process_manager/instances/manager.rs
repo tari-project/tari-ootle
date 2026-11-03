@@ -165,6 +165,36 @@ impl InstanceManager {
         Ok(())
     }
 
+    /// Forks an instance of `instance_type` that the config does not list. It starts with the settings
+    /// and envs of the first configured instance of that type, so it finds the rest of the swarm the
+    /// way that instance does, and `settings` override any of them.
+    pub async fn create_instance(
+        &mut self,
+        executable: &Executable,
+        instance_type: InstanceType,
+        instance_name: String,
+        settings: HashMap<String, String>,
+    ) -> anyhow::Result<InstanceId> {
+        // Names that slugify alike share a process directory, so they count as the same name
+        let slug = slugify(&instance_name);
+        if self.instances().any(|i| slugify(i.name()) == slug) {
+            return Err(anyhow!(
+                "Instance with name '{instance_name}' already exists. Please choose a different name"
+            ));
+        }
+
+        let mut new_settings = self.global_settings.clone();
+        let mut envs = Vec::new();
+        if let Some(config) = self.config.iter().find(|c| c.instance_type == instance_type) {
+            new_settings.extend(config.settings.clone());
+            envs.clone_from(&config.envs);
+        }
+        new_settings.extend(settings);
+
+        self.fork_new(executable, instance_type, instance_name, None, envs, new_settings)
+            .await
+    }
+
     pub async fn fork_new(
         &mut self,
         executable: &Executable,
@@ -466,7 +496,11 @@ impl InstanceManager {
                 instance.name(),
                 path.display()
             );
-            fs::remove_dir_all(path).await?;
+            if let Err(err) = fs::remove_dir_all(path).await &&
+                err.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(err.into());
+            }
         }
         Ok(())
     }
@@ -587,7 +621,15 @@ fn forward_logs<R: AsyncRead + Unpin + Send + 'static>(path: PathBuf, reader: R,
                 return;
             },
         };
-        while let Some(output) = lines.next_line().await.unwrap() {
+        loop {
+            let output = match lines.next_line().await {
+                Ok(Some(output)) => output,
+                Ok(None) => break,
+                Err(err) => {
+                    log::warn!("forward_logs read error ({target}): {err}");
+                    break;
+                },
+            };
             log::debug!(target: FORWARDED_TARGET, "[{target}] {output}");
             if let Err(err) = log_file.write_all(output.as_bytes()).await {
                 log::error!("forward_logs: {err}");
@@ -604,4 +646,93 @@ fn forward_logs<R: AsyncRead + Unpin + Send + 'static>(path: PathBuf, reader: R,
         }
         log::debug!(target: FORWARDED_TARGET, "Process exited ({target})");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    /// A stand-in base node binary that ignores its arguments and stays up long enough to pass the
+    /// start-up check.
+    async fn stub_executable(dir: &std::path::Path) -> Executable {
+        let path = dir.join("stub_minotari_node");
+        fs::write(&path, "#!/bin/sh\nexec sleep 30\n").await.unwrap();
+        fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+        Executable {
+            instance_type: InstanceType::MinoTariNode,
+            path,
+        }
+    }
+
+    #[tokio::test]
+    async fn create_instance_forks_a_new_name_with_the_configured_settings_and_rejects_a_taken_one() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = stub_executable(&base_path).await;
+
+        let mut config = InstanceConfig::new(InstanceType::MinoTariNode)
+            .with_setting("configured", "node")
+            .with_setting("overridden", "node");
+        config.envs = vec![("CONFIGURED_ENV".to_string(), "1".to_string())];
+        let global_settings = HashMap::from([
+            ("public_ip".to_string(), "10.0.0.1".to_string()),
+            ("configured".to_string(), "global".to_string()),
+        ]);
+        let mut manager = InstanceManager::new(
+            base_path.clone(),
+            Network::LocalNet,
+            global_settings,
+            vec![config],
+            47000,
+        );
+
+        let id = manager
+            .create_instance(
+                &executable,
+                InstanceType::MinoTariNode,
+                "extra-node".to_string(),
+                HashMap::from([("overridden".to_string(), "request".to_string())]),
+            )
+            .await
+            .unwrap();
+
+        let instance = manager.instances().find(|i| i.id() == id).unwrap();
+        assert_eq!(instance.name(), "extra-node");
+        assert_eq!(
+            *instance.settings(),
+            HashMap::from([
+                ("public_ip".to_string(), "10.0.0.1".to_string()),
+                ("configured".to_string(), "node".to_string()),
+                ("overridden".to_string(), "request".to_string()),
+            ])
+        );
+        assert_eq!(instance.envs(), [("CONFIGURED_ENV".to_string(), "1".to_string())]);
+
+        let err = manager
+            .create_instance(
+                &executable,
+                InstanceType::MinoTariNode,
+                "extra-node".to_string(),
+                HashMap::new(),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+
+        let err = manager
+            .create_instance(
+                &executable,
+                InstanceType::MinoTariNode,
+                "Extra Node".to_string(),
+                HashMap::new(),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert_eq!(manager.instances().count(), 1);
+    }
 }

@@ -21,9 +21,9 @@ use tari_ootle_light_client::test_fixtures::{NETWORK, Signers, ValidatorSetFixtu
 use tari_ootle_wallet_sdk::{
     IndexerTrust,
     models::{AccountWithAddress, OutputStatus, ProvenUp, StealthOutputModel, UtxoUnspent},
-    storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{QueuedUtxo, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
-use tari_ootle_wallet_sdk_services::utxo_scanner::UtxoRecovery;
+use tari_ootle_wallet_sdk_services::{account_monitor::AccountScanner, notify::Notify, utxo_scanner::UtxoRecovery};
 use tari_template_lib::types::{
     Amount,
     UtxoAddress,
@@ -102,10 +102,16 @@ fn mark_spent(test: &Test, id: UtxoId) {
 fn queue(test: &Test, network: &ProvingNetwork, account: &AccountWithAddress, id: UtxoId, utxo: &Utxo) {
     network.index_utxo(id, utxo.clone());
     let output = utxo.output().unwrap();
-    let item = (*account.account.component_address(), UtxoUnspent {
-        tag: output.tag,
-        public_nonce: output.output.public_nonce,
-    });
+    let item = (
+        UtxoUnspent {
+            tag: output.tag,
+            public_nonce: output.output.public_nonce,
+        },
+        QueuedUtxo {
+            account: *account.account.component_address(),
+            unspent_at: None,
+        },
+    );
     test.store()
         .with_write_tx(|tx| tx.utxo_process_queue_extend(&STEALTH_TARI_RESOURCE_ADDRESS, [item]))
         .unwrap();
@@ -378,6 +384,43 @@ async fn a_held_output_without_a_proof_is_proven_when_it_is_reported() {
     );
 }
 
+/// An output held without a proof, as a wallet that trusted its indexer received it, is proven once the wallet
+/// verifies its indexer, without the indexer reporting it again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_output_without_a_proof_is_proven_without_being_reported() {
+    let (sets, network, test, account) = wallet(IndexerTrust::Verify).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    hold_unproven(&test, &account, id, &utxo);
+
+    serve_proven(&sets, &network, id, &utxo);
+    AccountScanner::new(Notify::new(1), test.sdk().clone())
+        .prove_unproven_held_outputs()
+        .await
+        .unwrap();
+    assert_eq!(
+        stored(&test, id).proven_up,
+        Some(ProvenUp {
+            version: VERSION,
+            epoch: Epoch(5),
+        })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spent_output_without_a_proof_is_not_proven() {
+    let (sets, network, test, account) = wallet(IndexerTrust::Verify).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    hold_unproven(&test, &account, id, &utxo);
+    mark_spent(&test, id);
+
+    serve_proven(&sets, &network, id, &utxo);
+    AccountScanner::new(Notify::new(1), test.sdk().clone())
+        .prove_unproven_held_outputs()
+        .await
+        .unwrap();
+    assert!(stored(&test, id).proven_up.is_none());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_held_output_the_indexer_cannot_prove_is_settled_without_a_proof() {
     let (_, network, test, account) = wallet(IndexerTrust::Verify).await;
@@ -409,6 +452,30 @@ async fn a_spent_output_proven_up_no_later_than_the_version_it_saw_spent_stays_s
     assert_eq!(recover(&test, &network, &account, id, &utxo).await, 0);
     assert_eq!(stored(&test, id).status, OutputStatus::Spent);
     assert_eq!(balance(&test, &account), Amount::from_u64(0));
+}
+
+/// An output the wallet held without a proof of its initial version (e.g. created by its own transaction) and then saw
+/// spent at VERSION is held unspent again when proven up at a later version.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spent_output_without_a_prior_proven_up_is_held_unspent_again_when_proven_past_its_spent_version() {
+    let (sets, network, test, account) = wallet(IndexerTrust::Verify).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    hold_unproven(&test, &account, id, &utxo);
+    test.store()
+        .with_write_tx(|tx| tx.stealth_outputs_mark_as_spent(&STEALTH_TARI_RESOURCE_ADDRESS, &id, VERSION))
+        .unwrap();
+
+    serve_proven_at(&sets, &network, id, VERSION, &utxo);
+    assert_eq!(recover(&test, &network, &account, id, &utxo).await, 0);
+    assert_eq!(stored(&test, id).status, OutputStatus::Spent);
+
+    serve_proven_at(&sets, &network, id, VERSION.next(), &frozen(&utxo));
+    assert_eq!(recover(&test, &network, &account, id, &frozen(&utxo)).await, 0);
+    let output = stored(&test, id);
+    assert_eq!(output.status, OutputStatus::Unspent);
+    assert!(output.is_frozen);
+    assert_eq!(output.proven_up.unwrap().version, VERSION.next());
+    assert_eq!(queued(&test), 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -596,4 +663,69 @@ async fn an_unproven_output_is_asked_for_again_after_a_doubling_wait() {
     serve_proven(&sets, &network, id, &utxo);
     assert_eq!(process(240, 4).await, 0);
     assert_eq!(stored(&test, id).value, VALUE);
+}
+
+/// An output another sender made with the tag and nonce of `utxo`, which the wallet cannot spend.
+fn copy_of(test: &Test, account: &AccountWithAddress, utxo: &Utxo) -> (UtxoId, Utxo) {
+    let (id, _) = test.owned_utxo(account, 1);
+    let mut output = utxo.output().unwrap().clone();
+    output.auth = SpendAuthorization::Key(random_keypair().1.to_byte_type());
+    (id, Utxo::new(output))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_sharing_its_tag_and_nonce_with_another_is_recovered() {
+    let (_sets, network, test, account) = wallet(IndexerTrust::Trust).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    let (copy_id, copy) = copy_of(&test, &account, &utxo);
+    network.index_utxo(copy_id, copy);
+
+    assert_eq!(recover(&test, &network, &account, id, &utxo).await, 0);
+    assert_eq!(queued(&test), 0);
+    assert_eq!(stored(&test, id).value, VALUE);
+    assert!(!is_stored(&test, copy_id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unproven_output_sharing_its_tag_and_nonce_with_a_proven_one_stays_queued_until_it_is_proven() {
+    let (sets, network, test, account) = wallet(IndexerTrust::Verify).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    let (copy_id, copy) = copy_of(&test, &account, &utxo);
+    serve_proven(&sets, &network, copy_id, &copy);
+    network.index_utxo(copy_id, copy);
+    network.serve_substate(substate_id(id), VERSION, SubstateValue::Utxo(utxo.clone()), None);
+
+    assert_eq!(recover(&test, &network, &account, id, &utxo).await, 1);
+    assert_eq!(
+        queued(&test),
+        1,
+        "the pair stays queued while one of its outputs is unproven"
+    );
+    assert!(!is_stored(&test, id));
+    assert!(!is_stored(&test, copy_id));
+
+    serve_proven(&sets, &network, id, &utxo);
+    let num_unresolved = UtxoRecovery::new(test.sdk().clone())
+        .process_utxo_validation_queue()
+        .await
+        .unwrap();
+    assert_eq!(num_unresolved, 0);
+    assert_eq!(queued(&test), 0);
+    assert_eq!(stored(&test, id).value, VALUE);
+    assert!(!is_stored(&test, copy_id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_with_a_malformed_commitment_is_skipped_and_the_others_are_recovered() {
+    let (_sets, network, test, account) = wallet(IndexerTrust::Trust).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    let (_, other) = test.owned_utxo(&account, VALUE);
+    // Not a valid compressed Ristretto point
+    let malformed = UtxoId::from_array([0xab; 32]);
+    queue(&test, &network, &account, malformed, &other);
+
+    assert_eq!(recover(&test, &network, &account, id, &utxo).await, 0);
+    assert_eq!(queued(&test), 0);
+    assert_eq!(stored(&test, id).value, VALUE);
+    assert!(!is_stored(&test, malformed));
 }

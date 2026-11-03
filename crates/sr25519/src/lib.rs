@@ -67,6 +67,7 @@ impl<'a> SigningContext<'a> {
 
     /// True when `signature` is `public_key`'s signature over `message` under this context. The
     /// identity key is rejected.
+    #[must_use]
     pub fn verify(
         &self,
         signature: &Sr25519SignatureBytes,
@@ -92,6 +93,7 @@ impl<'a> SigningContext<'a> {
     ///
     /// A rejection does not say which item is at fault. An empty batch is rejected: a caller for whom
     /// no signatures is acceptable must say so before calling.
+    #[must_use]
     pub fn verify_batch<B: AsRef<[u8]>>(
         &self,
         items: &[(&Sr25519SignatureBytes, &RistrettoPublicKeyBytes, B)],

@@ -387,19 +387,22 @@ impl SubstateId {
         matches!(self, Self::NonFungible(addr) if *addr.resource_address() == PUBLIC_IDENTITY_RESOURCE_ADDRESS)
     }
 
+    /// Returns `true` for a badge the engine issues rather than stores: a public-key identity or a caller badge.
+    /// Every such badge exists by construction, so a value may name one (for example, to grant it an approval)
+    /// although nothing can be resolved or locked at it.
+    pub fn is_virtual_badge(&self) -> bool {
+        matches!(self, Self::NonFungible(addr) if {
+            let resource = addr.resource_address();
+            resource.is_caller_badge() || *resource == PUBLIC_IDENTITY_RESOURCE_ADDRESS
+        })
+    }
+
     /// Returns `true` for substate ids the engine reserves and never stores: public-key identities, the caller
     /// badges stamped into an authorization scope at frame push, and the two resources those badges are namespaced
     /// by. Nothing can ever be resolved or locked at one of these, so they are neither derived as transaction
     /// inputs nor brought into a call scope, and a transaction naming one as an input is rejected at validation.
     pub fn is_virtual(&self) -> bool {
-        match self {
-            Self::NonFungible(addr) => {
-                let resource = addr.resource_address();
-                resource.is_caller_badge() || *resource == PUBLIC_IDENTITY_RESOURCE_ADDRESS
-            },
-            Self::Resource(addr) => addr.is_caller_badge(),
-            _ => false,
-        }
+        self.is_virtual_badge() || matches!(self, Self::Resource(addr) if addr.is_caller_badge())
     }
 
     /// Returns `true` for substate ids that only exist as the output of the transaction that creates them: a

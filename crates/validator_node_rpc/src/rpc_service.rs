@@ -60,4 +60,10 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
         &self,
         req: Request<proto::GetCommittedBlockProofRequest>,
     ) -> Result<Response<proto::GetCommittedBlockProofResponse>, RpcStatus>;
+
+    #[rpc(method = 10)]
+    async fn get_shard_snapshot(
+        &self,
+        req: Request<proto::GetShardSnapshotRequest>,
+    ) -> Result<Response<proto::GetShardSnapshotResponse>, RpcStatus>;
 }

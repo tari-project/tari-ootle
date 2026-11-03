@@ -24,6 +24,9 @@ pub struct StartOfShard {
     pub max_state_version: StateVersion,
     /// The shard holds updates beyond this pass, as reported by the indexer.
     pub has_more: bool,
+    /// The indexer may lack the spends of the shard's outputs below its tombstone horizon, which the request's cursor
+    /// is below, so each output the wallet holds in the shard is checked before the shard's cursor is stored.
+    pub spends_incomplete: bool,
 }
 
 #[derive(Debug, Clone)]

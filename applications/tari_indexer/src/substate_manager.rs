@@ -50,9 +50,11 @@ use tari_ootle_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    StateVersion,
     SubstateRequirementRef,
     SubstateVersion,
-    optional::IsNotFoundError,
+    optional::{IsNotFoundError, Optional},
+    shard::Shard,
 };
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{StorageError, consensus_models::VerifiedBlockTip};
@@ -65,10 +67,94 @@ use tari_template_lib_types::{
 use tari_validator_node_rpc::client::{SubstateProofData, SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::{
-    storage_sqlite::{SqliteIndexerStore, models::VerifiedStateRoot},
+    network_state_sync::SyncProgress,
+    storage_sqlite::{
+        SqliteIndexerStore,
+        models::{Key, VerifiedStateRoot},
+    },
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
     substate_cache::SqliteSubstateCache,
 };
+
+/// A page of the unspent UTXOs matching a lookup's tag and nonce pairs, and the pairs that are spent or burnt.
+#[derive(Debug)]
+pub struct FetchedUtxos {
+    pub utxos: Vec<(UtxoId, Encoded<Utxo>)>,
+    pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+    /// The UTXO after which more unspent UTXOs match, or `None` once `utxos` holds the last of them.
+    pub next_cursor: Option<UtxoId>,
+}
+
+/// Up to `limit` of the unspent UTXOs matching `public_nonce_and_tag` in id order, after `cursor` when given,
+/// and the pairs of `public_nonce_and_tag` that are spent or burnt.
+///
+/// `unspent_at` is empty, or holds for each pair of `public_nonce_and_tag` the shard and state version its UTXO was
+/// unspent at, if known. A pair with no unspent UTXO is spent when its shard is promoted through that state version,
+/// whether or not its tombstone is kept: promotion writes every UTXO of a version with the shard's verified version, in
+/// one transaction, and an unspent UTXO is never pruned.
+fn read_utxos<TTx: IndexerStoreReadTransaction>(
+    tx: &mut TTx,
+    resource_address: &ResourceAddress,
+    public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
+    unspent_at: &[Option<(Shard, StateVersion)>],
+    cursor: Option<UtxoId>,
+    limit: u32,
+) -> Result<FetchedUtxos, StorageError> {
+    let mut utxos =
+        tx.utxos_get_unspent_by_public_nonce_and_tag(resource_address, public_nonce_and_tag, cursor, limit + 1)?;
+    let next_cursor = if utxos.len() > limit as usize {
+        utxos.truncate(limit as usize);
+        utxos.last().map(|(id, _)| *id)
+    } else {
+        None
+    };
+    let mut spent = tx.utxos_get_spent_public_nonce_and_tag(resource_address, public_nonce_and_tag)?;
+    if unspent_at.iter().all(Option::is_none) {
+        return Ok(FetchedUtxos {
+            utxos,
+            spent,
+            next_cursor,
+        });
+    }
+
+    let progress = tx
+        .key_value_get_value::<_, SyncProgress>(Key::SyncProgress)
+        .optional()?
+        .unwrap_or_default();
+    let reported = spent.iter().copied().collect::<HashSet<_>>();
+    let promoted = public_nonce_and_tag
+        .iter()
+        .zip(unspent_at)
+        .filter(|(pair, unspent_at)| {
+            !reported.contains(*pair) &&
+                unspent_at.is_some_and(|(shard, state_version)| {
+                    // A shard nothing is promoted of has no entry
+                    progress
+                        .verified
+                        .get(&shard)
+                        .is_some_and(|verified| verified.state_version >= state_version)
+                })
+        })
+        .map(|(pair, _)| *pair)
+        .collect::<Vec<_>>();
+    if promoted.is_empty() {
+        return Ok(FetchedUtxos {
+            utxos,
+            spent,
+            next_cursor,
+        });
+    }
+    let held = tx
+        .utxos_get_unspent_public_nonce_and_tag(resource_address, &promoted)?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    spent.extend(promoted.into_iter().filter(|pair| !held.contains(pair)));
+    Ok(FetchedUtxos {
+        utxos,
+        spent,
+        next_cursor,
+    })
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubstateResponse {
@@ -215,36 +301,24 @@ impl SubstateManager {
         }
     }
 
-    /// The unspent UTXOs matching `public_nonce_and_tag`, and the pairs of `public_nonce_and_tag` whose UTXO is spent
-    /// or burnt, read in one transaction.
+    /// A page of the unspent UTXOs matching `public_nonce_and_tag`, and the pairs of `public_nonce_and_tag` that are
+    /// spent or burnt, read in one transaction. See [`read_utxos`].
     pub async fn fetch_utxos(
         &self,
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
-    ) -> Result<(Vec<(UtxoId, Encoded<Utxo>)>, Vec<(UtxoTag, RistrettoPublicKeyBytes)>), SubstateManagerError> {
+        unspent_at: &[Option<(Shard, StateVersion)>],
+        cursor: Option<UtxoId>,
+        limit: u32,
+    ) -> Result<FetchedUtxos, SubstateManagerError> {
         let resource_address = *resource_address;
         let public_nonce_and_tag = public_nonce_and_tag.to_vec();
+        let unspent_at = unspent_at.to_vec();
         let utxos = self
             .substate_store
             .with_read_tx(move |tx| {
-                let unspent = tx.utxos_get_unspent_by_public_nonce_and_tag(&resource_address, &public_nonce_and_tag)?;
-                let spent = tx.utxos_get_spent_public_nonce_and_tag(&resource_address, &public_nonce_and_tag)?;
-                Ok::<_, StorageError>((unspent, spent))
+                read_utxos(tx, &resource_address, &public_nonce_and_tag, &unspent_at, cursor, limit)
             })
-            .await?;
-        Ok(utxos)
-    }
-
-    pub async fn list_utxos(
-        &self,
-        resource_address: &ResourceAddress,
-        from_id: Option<UtxoId>,
-        limit: u32,
-    ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, SubstateManagerError> {
-        let resource_address = *resource_address;
-        let utxos = self
-            .substate_store
-            .with_read_tx(move |tx| tx.utxos_list(&resource_address, from_id, limit))
             .await?;
         Ok(utxos)
     }
@@ -553,6 +627,185 @@ mod tests {
         };
         assert_eq!(version, SubstateVersion::new(3));
         assert_eq!(proof.substate_down_proof, None);
+    }
+
+    fn pair(seq: u8) -> (UtxoTag, RistrettoPublicKeyBytes) {
+        (
+            UtxoTag::from(0u32),
+            RistrettoPublicKeyBytes::from_bytes(&[seq; 32]).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_placed_pair_with_no_unspent_utxo_is_spent_once_its_shard_is_promoted_through_its_version() {
+        use tari_state_tree::TransitionAccumulator;
+
+        use crate::network_state_sync::VerifiedShardVersion;
+
+        let (_dir, store) = crate::storage_sqlite::temp_store().await;
+        let mut progress = SyncProgress::default();
+        progress.record_verified(Shard::from(1u32), VerifiedShardVersion {
+            state_version: StateVersion::new(10),
+            epoch: Epoch(1),
+            transition_acc: TransitionAccumulator::zero(),
+        });
+        store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_utxo_updates(Epoch(1), [crate::storage_sqlite::unspent_at(1, 5)])?;
+                tx.key_value_set(Key::SyncProgress, progress)
+            })
+            .await
+            .unwrap();
+
+        let pairs = [pair(1), pair(2), pair(3), pair(4), pair(5), pair(6)];
+        let unspent_at = [
+            Some((Shard::from(1u32), StateVersion::new(5))),
+            Some((Shard::from(1u32), StateVersion::new(10))),
+            Some((Shard::from(1u32), StateVersion::new(11))),
+            None,
+            Some((Shard::from(2u32), StateVersion::new(1))),
+            Some((Shard::from(1u32), StateVersion::new(1))),
+        ];
+        let fetched = store
+            .with_read_tx(move |tx| {
+                read_utxos(
+                    tx,
+                    &crate::storage_sqlite::utxo_resource(),
+                    &pairs,
+                    &unspent_at,
+                    None,
+                    10,
+                )
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(fetched.utxos.len(), 1, "the unspent UTXO is returned");
+        assert_eq!(
+            fetched.spent,
+            [pair(2), pair(6)],
+            "only absent pairs promoted through are spent"
+        );
+
+        let fetched = store
+            .with_read_tx(move |tx| read_utxos(tx, &crate::storage_sqlite::utxo_resource(), &pairs, &[], None, 10))
+            .await
+            .unwrap();
+        assert!(
+            fetched.spent.is_empty(),
+            "a pair without a placement is not known to be spent"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_unspent_utxo_sharing_a_pair_is_fetched_a_page_at_a_time() {
+        use tari_template_lib_types::{UtxoAddress, UtxoId};
+
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        let (_dir, store) = crate::storage_sqlite::temp_store().await;
+        let copies = [2u8, 3].map(|seq| {
+            let UtxoUpdateRecord::Unspent(mut copy) = crate::storage_sqlite::unspent_at(1, 5) else {
+                unreachable!()
+            };
+            copy.address = UtxoAddress::new(crate::storage_sqlite::utxo_resource(), UtxoId::from_array([seq; 32]));
+            UtxoUpdateRecord::Unspent(copy)
+        });
+        let skipped = store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_utxo_updates(
+                    Epoch(1),
+                    [crate::storage_sqlite::unspent_at(1, 5)].into_iter().chain(copies),
+                )
+            })
+            .await
+            .unwrap();
+        assert!(skipped.is_empty(), "UTXOs sharing a nonce and tag are all indexed");
+
+        let page = |cursor: Option<UtxoId>| {
+            let store = store.clone();
+            async move {
+                store
+                    .with_read_tx(move |tx| {
+                        read_utxos(tx, &crate::storage_sqlite::utxo_resource(), &[pair(1)], &[], cursor, 2)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        let first = page(None).await;
+        assert!(first.next_cursor.is_some());
+        let ids = first.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        assert_eq!(ids, [UtxoId::from_array([1; 32]), UtxoId::from_array([2; 32])]);
+
+        // A re-version of the last UTXO served stores a later row, which the cursor does not skip to
+        store
+            .with_write_tx(move |tx| {
+                let UtxoUpdateRecord::Unspent(mut refrozen) = crate::storage_sqlite::unspent_at(2, 6) else {
+                    unreachable!()
+                };
+                refrozen.address =
+                    UtxoAddress::new(crate::storage_sqlite::utxo_resource(), UtxoId::from_array([2; 32]));
+                refrozen.version = SubstateVersion::new(1);
+                refrozen.utxo_output.output.public_nonce = pair(1).1;
+                tx.batch_insert_utxo_updates(Epoch(1), [
+                    crate::storage_sqlite::spent_at(2, 6),
+                    UtxoUpdateRecord::Unspent(refrozen),
+                ])
+            })
+            .await
+            .unwrap();
+
+        let second = page(first.next_cursor).await;
+        assert_eq!(second.next_cursor, None);
+        let ids = second.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        assert_eq!(ids, [UtxoId::from_array([3; 32])]);
+    }
+
+    /// Indexers behind one address store the same outputs in different orders and at different state versions: a
+    /// follower at each output's own version, an indexer synced from a snapshot at the snapshot's. A page from one
+    /// resumes on the other without skipping an output.
+    #[tokio::test]
+    async fn a_fetch_resumes_on_an_indexer_that_stored_its_utxos_in_another_order() {
+        use tari_template_lib_types::{UtxoAddress, UtxoId};
+
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        // Output `seq` with the nonce and tag of `pair(1)`
+        let sharing = |seq: u8, state_version: u64| {
+            let UtxoUpdateRecord::Unspent(mut copy) = crate::storage_sqlite::unspent_at(1, state_version) else {
+                unreachable!()
+            };
+            copy.address = UtxoAddress::new(crate::storage_sqlite::utxo_resource(), UtxoId::from_array([seq; 32]));
+            UtxoUpdateRecord::Unspent(copy)
+        };
+        let (_follower_dir, follower) = crate::storage_sqlite::temp_store().await;
+        follower
+            .with_write_tx(move |tx| {
+                tx.batch_insert_utxo_updates(Epoch(1), [1u8, 2, 3, 4].map(|seq| sharing(seq, 10 + u64::from(seq))))
+            })
+            .await
+            .unwrap();
+        let (_snapshot_dir, snapshot) = crate::storage_sqlite::temp_store().await;
+        snapshot
+            .with_write_tx(move |tx| tx.batch_insert_utxo_updates(Epoch(1), [4u8, 3, 2, 1].map(|seq| sharing(seq, 50))))
+            .await
+            .unwrap();
+        let page = |store: SqliteIndexerStore, cursor: Option<UtxoId>| async move {
+            store
+                .with_read_tx(move |tx| {
+                    read_utxos(tx, &crate::storage_sqlite::utxo_resource(), &[pair(1)], &[], cursor, 2)
+                })
+                .await
+                .unwrap()
+        };
+        let ids = |fetched: &FetchedUtxos| fetched.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+
+        let first = page(follower.clone(), None).await;
+        assert_eq!(ids(&first), [UtxoId::from_array([1; 32]), UtxoId::from_array([2; 32])]);
+        let second = page(snapshot.clone(), first.next_cursor).await;
+        assert_eq!(ids(&second), [UtxoId::from_array([3; 32]), UtxoId::from_array([4; 32])]);
+        assert_eq!(second.next_cursor, None);
     }
 
     #[test]

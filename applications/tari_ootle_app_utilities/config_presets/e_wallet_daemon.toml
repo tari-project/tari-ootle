@@ -24,10 +24,10 @@
 # exempt. (default = 100000000, i.e. 100 TARI)
 # max_fee_limit = 100000000
 
-# How far the wallet trusts its indexer. "verify" commits a transaction's changes only once a proof of them verifies
-# against the network's validator sets, and needs an indexer with verify_substate_proofs enabled. "trust" takes the
-# indexer at its word, for development only. (default = "verify")
-# indexer_trust = "verify"
+# How far the wallet trusts its indexer. "trust" takes the indexer at its word. "verify" commits a transaction's changes
+# only once a proof of them verifies against the network's validator sets, and needs an indexer with
+# verify_substate_proofs enabled. (default = "trust")
+# indexer_trust = "trust"
 
 # Write a fresh random local authentication token (`tc_...`) to `<base_path>/.cookie` (mode 0600) on startup and
 # delete it on clean shutdown so local clients (`tari_wallet_cli`, `wallet_daemon_client`) can authenticate without

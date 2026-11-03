@@ -29,7 +29,7 @@ use tari_template_lib::types::{
     ObjectKey,
     SubstateOwnerRule,
     TemplateAddress,
-    access_rules::ComponentAccessRules,
+    access_rules::{ComponentAccessRules, UpdateRule},
     crypto::RistrettoPublicKeyBytes,
 };
 
@@ -80,6 +80,9 @@ pub struct ComponentHeader {
     pub access_rules: ComponentAccessRules,
     #[n(3)]
     pub entity_id: EntityId,
+    /// Who may swap this component's template. Fixed when the component is created.
+    #[n(4)]
+    pub upgrade_rule: UpdateRule,
 }
 
 impl Component {
@@ -127,6 +130,10 @@ impl Component {
 
     pub fn template_address(&self) -> &TemplateAddress {
         &self.header.template_address
+    }
+
+    pub fn upgrade_rule(&self) -> &UpdateRule {
+        &self.header.upgrade_rule
     }
 
     pub fn set_access_rules(&mut self, access_rules: ComponentAccessRules) -> &mut Self {

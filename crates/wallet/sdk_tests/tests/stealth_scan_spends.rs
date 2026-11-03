@@ -98,7 +98,7 @@ async fn wallet_holding(
 /// The indexer reports `output` spent at `version` to every scan of [`SHARD`] from below [`SCANNED_TO`].
 fn report_spent(network: &ProvingNetwork, output: &StealthOutputModel, version: SubstateVersion) {
     let id = output.commitment.into();
-    network.answer_utxo_streams(move |cursors| {
+    network.answer_utxo_streams(move |cursors, _| {
         if cursors
             .iter()
             .any(|(shard, cursor)| *shard == SHARD && *cursor >= SCANNED_TO)
@@ -110,6 +110,7 @@ fn report_spent(network: &ProvingNetwork, output: &StealthOutputModel, version: 
                 shard: SHARD,
                 max_state_version: SCANNED_TO,
                 has_more: false,
+                spends_incomplete: false,
             }),
             update: Some(WalletUtxoUpdate::Spent(UtxoSpent { id, version })),
             eos: Some(EndOfShard {

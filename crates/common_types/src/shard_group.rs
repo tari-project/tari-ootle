@@ -240,6 +240,9 @@ impl FromStr for ShardGroup {
         let start = start.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
         let end = parts.next().ok_or_else(|| ShardGroupParseError(s.to_string()))?;
         let end = end.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
+        if parts.next().is_some() {
+            return Err(ShardGroupParseError(s.to_string()));
+        }
         ShardGroup::new_checked(start, end).ok_or_else(|| ShardGroupParseError(s.to_string()))
     }
 }
@@ -329,6 +332,8 @@ mod tests {
         format!("{n}-999").parse::<ShardGroup>().unwrap_err();
 
         "100-1".parse::<ShardGroup>().unwrap_err();
+        "1-64-128".parse::<ShardGroup>().unwrap_err();
+        "1-64-".parse::<ShardGroup>().unwrap_err();
     }
 
     #[test]

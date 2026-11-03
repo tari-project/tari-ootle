@@ -2,13 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::Deserialize;
+use tari_ootle_common_types::signature::Sr25519SignatureBytes;
 use tari_ootle_transaction::{
     TransactionSealSignature,
     TransactionSignature,
     UnsealedTransactionV1,
     UnsignedTransactionV1,
 };
-use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
 use crate::{error::OotleWasmError, hash::public_key_bytes_from_bytes, keys::secret_key_from_bytes};
 
@@ -38,16 +38,14 @@ pub(crate) fn parse_unsealed_transaction_json(tx_json: &str) -> Result<UnsealedT
     Ok(parse_transaction_json(tx_json)?.into_unsealed())
 }
 
-/// Converts a raw 64-byte signature (`R ‖ s`) into the signature type a transaction carries.
+/// Converts a raw 64-byte sr25519 signature into the signature type a transaction carries.
 ///
-/// The scheme is Ristretto255 Schnorr as in `tari_crypto::RistrettoSchnorr`: `s = k + e·x` with
-/// `R = k·G`, where `e` is the 64-byte Blake2b digest of the length-prefixed (u64 LE) chain
-/// `"com.tari.schnorr_signature.v1.challenge" ‖ R ‖ P ‖ message`, reduced mod ℓ. `R` is a compressed
-/// Ristretto point and `s` a canonical little-endian scalar.
-fn signature_from_bytes(bytes: &[u8]) -> Result<SchnorrSignatureBytes, OotleWasmError> {
-    SchnorrSignatureBytes::from_bytes(bytes).map_err(|_| OotleWasmError::InvalidByteLength {
+/// The signature is a standard sr25519 (schnorrkel) signature under the `substrate` signing context, with the
+/// marker bit set in its last byte.
+fn signature_from_bytes(bytes: &[u8]) -> Result<Sr25519SignatureBytes, OotleWasmError> {
+    Sr25519SignatureBytes::from_bytes(bytes).map_err(|_| OotleWasmError::InvalidByteLength {
         field: "signature",
-        expected: SchnorrSignatureBytes::length(),
+        expected: Sr25519SignatureBytes::LENGTH,
         got: bytes.len(),
     })
 }
@@ -80,7 +78,7 @@ pub fn add_transaction_signer_json(
 /// Seal a transaction (accepts unsigned or unsealed JSON) with a signature produced outside this crate,
 /// e.g. by an HSM or MPC signer, over the message from `hash_unsealed_transaction_json`.
 ///
-/// `signature` is the raw 64-byte `R ‖ s` encoding described on `signature_from_bytes`. The seal and every
+/// `signature` is the 64-byte sr25519 signature described on `signature_from_bytes`. The seal and every
 /// authorization signature already on the transaction are verified, so a mismatch fails at attach time.
 ///
 /// Returns the sealed `Transaction` as a JSON string.
@@ -104,7 +102,7 @@ pub fn attach_seal_signature_json(
 /// Append an authorization signature produced outside this crate, e.g. by an HSM or MPC signer, over the
 /// message from `hash_unsigned_transaction_json` for `seal_signer_public_key`.
 ///
-/// `signature` is the raw 64-byte `R ‖ s` encoding described on `signature_from_bytes`, verified before it
+/// `signature` is the 64-byte sr25519 signature described on `signature_from_bytes`, verified before it
 /// is appended.
 ///
 /// Returns the unsealed transaction (with the new signature appended) as a JSON string.
@@ -133,7 +131,7 @@ mod tests {
     use ootle_byte_type::ToByteType;
     use tari_crypto::{
         keys::{PublicKey, SecretKey},
-        ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
         tari_utilities::ByteArray,
     };
     use tari_engine_types::Epoch;
@@ -152,14 +150,12 @@ mod tests {
         (secret, public_key)
     }
 
-    /// Signs `message` the way an external signer does, returning the raw 64-byte `R ‖ s` encoding.
+    /// Signs `message` the way an external sr25519 signer does, returning the 64-byte signature.
     fn external_sign(secret: &RistrettoSecretKey, message: &[u8]) -> Vec<u8> {
-        let signature = RistrettoSchnorr::sign(secret, message, &mut rand::rng()).unwrap();
-        [
-            signature.get_public_nonce().as_bytes(),
-            signature.get_signature().as_bytes(),
-        ]
-        .concat()
+        tari_ootle_common_types::signature::SigningContext::new(b"substrate")
+            .sign(secret, message)
+            .as_bytes()
+            .to_vec()
     }
 
     #[test]

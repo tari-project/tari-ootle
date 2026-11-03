@@ -3,7 +3,13 @@
 
 use async_trait::async_trait;
 use indexmap::IndexSet;
-use tari_ootle_transaction::{Transaction, TransactionSignature, UnsealedTransaction, UnsignedTransaction};
+use tari_ootle_transaction::{
+    Transaction,
+    TransactionMessage,
+    TransactionSignature,
+    UnsealedTransaction,
+    UnsignedTransaction,
+};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
@@ -78,9 +84,9 @@ impl WalletStealthAuthorizer<'_, OotleWallet> {
     }
 
     /// The exact message every authorization signature for this transaction must sign. An external co-signer (or an
-    /// adaptor pre-signer) produces its signature over these bytes; the resulting [`TransactionAuthorization`] is
-    /// attached via [`crate::TransactionRequest::add_authorization`].
-    pub async fn authorization_message(&self, unsigned: &UnsignedTransaction) -> signer::Result<[u8; 64]> {
+    /// adaptor pre-signer) produces its signature over [`TransactionMessage::as_bytes`]; the resulting
+    /// [`TransactionAuthorization`] is attached via [`crate::TransactionRequest::add_authorization`].
+    pub async fn authorization_message(&self, unsigned: &UnsignedTransaction) -> signer::Result<TransactionMessage> {
         let seal_signer = self.seal_public_key().await?;
         let UnsignedTransaction::V1(unsigned_v1) = unsigned;
         Ok(TransactionSignature::create_message_v1(&seal_signer, unsigned_v1))

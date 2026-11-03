@@ -65,6 +65,7 @@ pub async fn spawn(
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
     state_history_length: u64,
+    pinned_checkpoint_epochs: u64,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
@@ -76,8 +77,9 @@ pub async fn spawn(
         sidechain_id,
         consensus_constants: consensus_constants.clone(),
         state_history_length,
-        // TODO: make these configurable (defaults should probably be longer than 1 hour)
-        state_tree_cleanup_interval: Duration::from_secs(60 * 60),
+        pinned_checkpoint_epochs,
+        state_tree_cleanup_interval: Duration::from_secs(consensus_config.state_tree_cleanup_interval_secs.max(1)),
+        // TODO: make this configurable (default should probably be longer than 1 hour)
         epoch_gc_interval: Duration::from_secs(60 * 60),
         // NOTE: This value should be greater than the epoch oracle's scanning interval to avoid leader failure by race
         // condition.

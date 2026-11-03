@@ -62,9 +62,10 @@ pub struct WalletSdkConfig {
 pub enum IndexerTrust {
     /// Commits a transaction's changes only once a proof shows the network committed them, and reads a substate only
     /// with a proof of its recent state, each verified against the validator sets the wallet walks to from its anchor.
-    #[default]
+    /// A wallet can switch to it later: it proves the outputs it already holds on its next account poll.
     Verify,
-    /// Takes the indexer at its word. For development against indexers that serve no proofs.
+    /// Takes the indexer at its word, and works with an indexer that serves no proofs.
+    #[default]
     Trust,
 }
 

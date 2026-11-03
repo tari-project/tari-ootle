@@ -454,8 +454,9 @@ let manager: ResourceManager = vault.get_resource_manager(); // For minting etc.
 vault.pay_fee(amount);                               // Pay transaction fee from this vault
 
 // ─── Authorization ───
-vault.authorize();                                   // Create auth proof from vault contents (RAII)
-let proof = vault.create_proof_by_amount(amount);    // Create proof for a specific amount
+vault.authorize_with(|| { /* ... */ });              // Window over a proof of the vault's contents: covers these actions and lends to calls made inside
+let _auth = vault.authorize();                       // Same window as a guard; it lends to every call while held, so prefer authorize_with
+let proof = vault.create_proof_by_amount(amount);    // Create a proof for a specific amount (held: authorizes nothing until proof.authorize_with)
 ```
 
 > **CRITICAL:** A `Vault` MUST be stored in a component struct field before the function returns. An orphaned vault (created but not stored) will cause the transaction to fail.
@@ -482,7 +483,7 @@ bucket.burn();                                          // Permanently destroy t
 bucket.drop_empty();                                    // Assert empty and drop (panics if not)
 
 // ─── Proofs ───
-let proof = bucket.create_proof();                      // Create ownership proof
+let proof = bucket.create_proof();                      // Create ownership proof (held: open a window with proof.authorize_with to use it)
 ```
 
 > **CRITICAL:** A `Bucket` MUST be consumed before the function returns. Consume it by: depositing into a vault, burning, returning from a function, or passing to another component. An orphaned bucket will cause the transaction to fail.
@@ -538,6 +539,20 @@ OwnerRule::ByAccessRule(rule)      // Custom rule determines ownership
 OwnerRule::ByPublicKey(pk)         // Specific public key is owner
 ```
 
+### Upgrade Rules
+
+Who may swap the component's template with `UpdateComponentTemplate`. Set once at creation with
+`.with_upgrade_rule(..)`; it can never change afterwards.
+
+```rust
+UpdateRule::Locked                 // Default: the component's code can never change
+UpdateRule::Owner                  // Whoever satisfies the owner rule at upgrade time
+UpdateRule::AccessRule(rule)       // Anyone satisfying `rule`, independent of the owner
+```
+
+Leave components `Locked` unless they genuinely need upgrades: callers can see the rule in the component header,
+and an upgradable component asks them to trust whoever holds the rule, not the code they reviewed.
+
 ### Caller Context — Complete API
 
 ```rust
@@ -547,9 +562,10 @@ let signer: RistrettoPublicKeyBytes = CallerContext::transaction_signer_public_k
 // Get current component address (only in CallMethod context)
 let addr: ComponentAddress = CallerContext::current_component_address();
 
-// Get signer proof (for passing as authorization)
-let proof: Proof = CallerContext::get_main_signer_proof();
-let proof: Proof = CallerContext::get_signer_proof_for_public_key(pk);
+// Fail unless this call carries a badge: a signer's key badge when the transaction calls this directly,
+// the direct caller's component/template badge, a proof this frame has authorized, or one the caller
+// authorized around the call. A `Proof` argument does not count. Templates cannot mint proofs of a public key.
+CallerContext::assert_badge_in_scope(&badge);
 
 // Address allocation (for creating components/resources with deterministic addresses)
 let alloc: ComponentAddressAllocation = CallerContext::allocate_component_address(None);
@@ -1167,10 +1183,9 @@ mod token {
         }
 
         pub fn mint_more(&mut self, amount: Amount) {
-            // Authorize with admin badge, then mint
-            self.admin_badge_vault.authorize();
+            // Mint inside a window over the admin badge
             let manager = self.token_vault.get_resource_manager();
-            let new_tokens = manager.mint_fungible(amount);
+            let new_tokens = self.admin_badge_vault.authorize_with(|| manager.mint_fungible(amount));
             self.token_vault.deposit(new_tokens);
         }
     }

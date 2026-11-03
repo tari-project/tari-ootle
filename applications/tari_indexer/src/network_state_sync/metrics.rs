@@ -1,7 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use prometheus_client::{metrics::gauge::Gauge, registry::Registry};
+use prometheus_client::{
+    encoding::EncodeLabelSet,
+    metrics::{counter::Counter, family::Family, gauge::Gauge},
+    registry::Registry,
+};
 use tari_template_lib_types::Amount;
 
 use crate::{metrics::CollectorRegister, store::XtrEconomics};
@@ -18,6 +22,12 @@ pub struct NetworkStateMetrics {
     transaction_receipt_count: Gauge,
     validator_claimable_fees: Gauge,
     exhaust_rate_bps: Gauge,
+    shard_leaf_checks: Family<LeafCheckLabels, Counter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EncodeLabelSet)]
+struct LeafCheckLabels {
+    outcome: &'static str,
 }
 
 impl NetworkStateMetrics {
@@ -63,7 +73,22 @@ impl NetworkStateMetrics {
                 "Target exhaust burn rate in basis points in effect at the current epoch",
                 registry,
             ),
+            shard_leaf_checks: Family::default().register_at(
+                "shard_leaf_checks",
+                "Staged shard transition accumulators checked against quorum-verified shard leaves, by outcome: \
+                 promote (matched, staged versions promoted), mismatch (staged versions discarded), conflict (two \
+                 verified leaves disagree), invalid_version (a streamed version whose accumulator cannot be \
+                 computed), withheld or unverified (a stream peer blamed for withholding versions a leaf names or for \
+                 staging versions no leaf reaches), circuit_breaker (every committee member mismatched from the same \
+                 verified version, and the shard group halted), snapshot (a new shard's snapshot rebuilt its leaf's \
+                 root and was promoted) or snapshot_mismatch (a snapshot that did not rebuild its leaf's root)",
+                registry,
+            ),
         }
+    }
+
+    pub fn record_leaf_check(&self, outcome: &'static str) {
+        self.shard_leaf_checks.get_or_create(&LeafCheckLabels { outcome }).inc();
     }
 
     pub fn update(&self, economics: &XtrEconomics, target_burn_rate_bps: u16) {

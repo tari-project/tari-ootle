@@ -46,9 +46,17 @@ pub enum OutputStatus {
     /// mask were not constructed correctly by the sender. This output will not "be counted" in the confidential
     /// balance.
     Invalid,
+    /// The resource issuer burnt this stealth output. Its value is destroyed and it cannot be spent. Only stealth
+    /// outputs are burnt.
+    Burnt,
 }
 
 impl OutputStatus {
+    /// Whether the wallet holds an output in this status for good, so no later report changes it.
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Spent | Self::Burnt)
+    }
+
     pub fn as_key_str(&self) -> &'static str {
         match self {
             Self::Unspent => "Unspent",
@@ -56,6 +64,7 @@ impl OutputStatus {
             Self::LockedForSpend => "LockedForSpend",
             Self::LockedUnconfirmed => "LockedUnconfirmed",
             Self::Invalid => "Invalid",
+            Self::Burnt => "Burnt",
         }
     }
 }
@@ -70,6 +79,7 @@ impl FromStr for OutputStatus {
             "LockedForSpend" => Ok(Self::LockedForSpend),
             "LockedUnconfirmed" => Ok(Self::LockedUnconfirmed),
             "Invalid" => Ok(Self::Invalid),
+            "Burnt" => Ok(Self::Burnt),
             _ => Err(()),
         }
     }

@@ -22,7 +22,7 @@ use tari_ootle_transaction::{Epoch, Transaction, TransactionBuilder, args};
 use tari_template_abi::{ArgDef, FunctionDef, TemplateDef, TemplateDefV1, Type};
 use tari_template_lib::{
     args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg},
-    prelude::ComponentAccessRules,
+    prelude::{ComponentAccessRules, UpdateRule},
     types::{OwnerRule, TemplateAddress, bytes::Bytes},
 };
 use tari_template_test_tooling::{Package, TemplateTest};
@@ -107,6 +107,7 @@ fn creator_module(template_name: &str, def: &TemplateDef) -> Vec<u8> {
         owner_rule: OwnerRule::None,
         access_rules: ComponentAccessRules::allow_all(),
         address_allocation: None,
+        upgrade_rule: UpdateRule::Locked,
     })
     .unwrap();
     let invoke_arg = tari_bor::encode(&ComponentInvokeArg {

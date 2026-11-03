@@ -37,6 +37,7 @@ pub struct TransactionRecord {
     pub finalized_time: Option<PrimitiveDateTime>,
     pub new_account_info: Option<String>,
     pub invalid_reason: Option<String>,
+    pub submitted_at: Option<PrimitiveDateTime>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -83,6 +84,7 @@ impl TransactionRecord {
                 })
                 // Negative duration cap to 0
                 .unwrap_or_else(|_| Some(Duration::from_secs(0))),
+            submitted_at: self.submitted_at,
             last_update_time: self.updated_at,
         })
     }

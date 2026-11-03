@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 use std::collections::{BTreeMap, HashMap};
 
-use tari_engine::runtime::{ActionIdent, RuntimeError};
+use tari_engine::runtime::{ActionIdent, RuntimeError, scope::RestrictedFrame};
 use tari_engine_types::resource_container::ResourceError;
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
@@ -505,27 +505,6 @@ mod component_owner_rule {
     }
 
     #[test]
-    fn get_owner_proof_sees_an_owner_rule_set_earlier_in_the_transaction() {
-        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
-        let outgoing = Owner::new(&mut test);
-        let incoming = Owner::new(&mut test);
-        let component = create_component(&mut test, &outgoing);
-
-        let reason = fails(
-            &mut test,
-            &outgoing,
-            Transaction::builder_localnet(Epoch(1))
-                .call_method(component, "set_component_owner_rule_then_get_owner_proof", args![
-                    incoming.as_owner_rule()
-                ])
-                .build_and_seal(&outgoing.secret_key),
-        );
-        assert_reject_reason(reason, RuntimeError::SignerBadgeNotInScope {
-            public_key: incoming.public_key.to_byte_type(),
-        });
-    }
-
-    #[test]
     fn setting_the_current_owner_rule_leaves_the_component_unchanged() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
         let owner = Owner::new(&mut test);
@@ -934,15 +913,12 @@ mod resource_access_rules {
                 ])
                 .put_last_instruction_output_on_workspace("proof")
                 .call_method(component_address, "get_nft_data_using_proof", args![Workspace("proof")])
-                .call_method(component_address, "take_tokens_using_proof", args![
-                    Workspace("proof"),
-                    10
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(component_address, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -1039,15 +1015,12 @@ mod resource_access_rules {
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_by_amount", args![badge_resource, 1])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(access_rules_component, "take_tokens_using_proof", args![
-                    Workspace("proof"),
-                    10
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(access_rules_component, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -1108,15 +1081,12 @@ mod resource_access_rules {
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_by_amount", args![badge_resource, 0])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(access_rules_component, "take_tokens_using_proof", args![
-                    Workspace("proof"),
-                    10
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(access_rules_component, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -1133,15 +1103,12 @@ mod resource_access_rules {
                     Vec::<NonFungibleId>::new()
                 ])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(access_rules_component, "take_tokens_using_proof", args![
-                    Workspace("proof"),
-                    10
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(access_rules_component, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof],
@@ -1205,9 +1172,12 @@ mod resource_access_rules {
                 .call_method(account, "deposit", args![Workspace("badge")])
                 .call_method(account, "create_proof_for_resource", args![badge])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(gate, "take_tokens_using_proof", args![Workspace("proof"), 10])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(account, "deposit", args![Workspace("tokens")])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(gate, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
         };
 
@@ -1255,11 +1225,11 @@ mod resource_access_rules {
         });
     }
 
-    /// A resource's withdraw and deposit rules are evaluated in the account's own frame, and a `Proof` argument
-    /// is how a badge reaches a frame. The account holds the transaction's signer badge and nothing else of its
-    /// own, so a rule naming some other badge is satisfied only by handing that badge in.
+    /// A resource's withdraw and deposit rules are evaluated in the account's own frame. The account holds the
+    /// transaction's signer badge and nothing else of its own, so a rule naming some other badge is satisfied only
+    /// by a window the transaction opens over a proof of that badge around the call.
     #[test]
-    fn the_account_takes_a_badge_restricted_resource_when_handed_the_badge() {
+    fn the_account_takes_a_badge_restricted_resource_inside_a_window() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -1302,15 +1272,12 @@ mod resource_access_rules {
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_by_amount", args![badge_resource, 1])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(access_rules_component, "take_tokens_using_proof", args![
-                    Workspace("proof"),
-                    100
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(access_rules_component, "take_tokens", args![100])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -1328,21 +1295,17 @@ mod resource_access_rules {
 
         assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
 
-        // Handing the badge to the account's frame satisfies it.
+        // A window over the badge lends it to the account's frame.
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_by_amount", args![badge_resource, 1])
                 .put_last_instruction_output_on_workspace("badge")
-                .call_method(user_account, "withdraw_with_auth", args![
-                    token_resource,
-                    10,
-                    Workspace("badge")
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("badge")
-                ])
+                .with_authorized_proof("badge", |builder| {
+                    builder
+                        .call_method(user_account, "withdraw", args![token_resource, 10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -1353,23 +1316,22 @@ mod resource_access_rules {
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_by_amount", args![badge_resource, 1])
                 .put_last_instruction_output_on_workspace("badge")
-                .call_method(user_account, "create_proof_by_amount_with_auth", args![
-                    token_resource,
-                    10,
-                    Workspace("badge")
-                ])
-                .put_last_instruction_output_on_workspace("token_proof")
+                .with_authorized_proof("badge", |builder| {
+                    builder
+                        .call_method(user_account, "create_proof_by_amount", args![token_resource, 10])
+                        .put_last_instruction_output_on_workspace("token_proof")
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof],
         );
     }
 
-    /// `deposit_with_auth` exists so that someone other than the account's owner can deposit a badge-restricted
-    /// resource, handing the account the badge its deposit rule names. Like `deposit`, it must therefore be
-    /// callable by anyone: the account's owner rule gates withdrawals, not what arrives.
+    /// Someone other than the account's owner can deposit a badge-restricted resource by lending the account the
+    /// badge its deposit rule names. `deposit` is callable by anyone: the account's owner rule gates withdrawals,
+    /// not what arrives.
     #[test]
-    fn anyone_may_deposit_with_auth() {
+    fn anyone_may_deposit_inside_a_window() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
         let (owner_proof, _, owner_key) = test.create_owner_proof();
@@ -1411,15 +1373,12 @@ mod resource_access_rules {
             Transaction::builder_localnet(Epoch(1))
                 .call_method(sender_account, "create_proof_by_amount", args![badge_resource, 1])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(access_rules_component, "take_tokens_using_proof", args![
-                    Workspace("proof"),
-                    100
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(sender_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(access_rules_component, "take_tokens", args![100])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(sender_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&sender_key),
             vec![sender_proof.clone()],
@@ -1430,16 +1389,12 @@ mod resource_access_rules {
             Transaction::builder_localnet(Epoch(1))
                 .call_method(sender_account, "create_proof_by_amount", args![badge_resource, 1])
                 .put_last_instruction_output_on_workspace("badge")
-                .call_method(sender_account, "withdraw_with_auth", args![
-                    token_resource,
-                    10,
-                    Workspace("badge")
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(recipient_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("badge")
-                ])
+                .with_authorized_proof("badge", |builder| {
+                    builder
+                        .call_method(sender_account, "withdraw", args![token_resource, 10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(recipient_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&sender_key),
             vec![sender_proof],
@@ -1522,8 +1477,10 @@ mod resource_access_rules {
         );
     }
 
+    /// A window the transaction opens lends the proof to the frame it calls, and that frame lends nothing of its
+    /// own: a proof reaches one hop. Forwarding a shown proof is refused outright.
     #[test]
-    fn it_permits_cross_template_calls_using_proofs() {
+    fn a_window_lends_through_one_cross_template_hop() {
         let mut test = TemplateTest::new(CRATE_PATH, [
             "tests/templates/access_rules",
             "tests/templates/cross_template",
@@ -1574,12 +1531,40 @@ mod resource_access_rules {
 
         assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
 
-        // Do a cross template call using a proof
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
                 .call_method(component_address, "mint_new_badge", args![])
                 .put_last_instruction_output_on_workspace("badge")
                 .call_method(owner_account, "deposit", args![Workspace("badge")])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        // The cross-template frame is lent the proof; the component it calls is not.
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(owner_account, "create_proof_for_resource", args![badge_resource])
+                .put_last_instruction_output_on_workspace("proof")
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_function(cross_call_template, "call_component_with_args", args![
+                            component_address,
+                            "take_tokens",
+                            invoke_args![10],
+                        ])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(owner_account, "deposit", args![Workspace("tokens")])
+                })
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
+
+        // A frame shown the proof cannot pass it on.
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
                 .call_method(owner_account, "create_proof_for_resource", args![badge_resource])
                 .put_last_instruction_output_on_workspace("proof")
                 .call_function(cross_call_template, "call_component_with_args_using_proof", args![
@@ -1594,13 +1579,14 @@ mod resource_access_rules {
                 .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
+
+        assert_reject_reason(reason, RuntimeError::ProofNotHeld { proof_id: 0.into() });
     }
 
-    /// A proof the submitter left on the workspace authorizes the call boundary and nothing past it: a frame acts
-    /// with the badges it is stamped with and the proofs it is handed as arguments. A method that takes no `Proof`
-    /// therefore cannot reach a resource action the badge guards, however the transaction was assembled.
+    /// A proof the submitter left on the workspace is held and authorizes nothing until the transaction opens a
+    /// window over it. Inside the window every top-level call is lent it; shown as an argument, it lends nothing.
     #[test]
-    fn a_workspace_proof_reaches_a_callee_only_as_an_argument() {
+    fn a_workspace_proof_reaches_a_callee_only_through_a_window() {
         let mut test = TemplateTest::new(CRATE_PATH, [
             "tests/templates/access_rules",
             "tests/templates/cross_template",
@@ -1612,7 +1598,6 @@ mod resource_access_rules {
         let (user_account, user_proof, user_key) = test.create_empty_account();
 
         let access_rules_template = test.get_template_address("AccessRulesTest");
-        let cross_call_template = test.get_template_address("CrossTemplate");
 
         let result = test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
@@ -1644,17 +1629,16 @@ mod resource_access_rules {
             vec![owner_proof],
         );
 
-        // `take_tokens` takes no proof, so the component's frame is left with its own badges alone.
+        // Held on the workspace, the proof leaves the component's frame with its own badges alone.
         let reason = test.execute_expect_failure(
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_for_resource", args![badge_resource])
                 .put_last_instruction_output_on_workspace("proof")
                 .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder.call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -1662,8 +1646,8 @@ mod resource_access_rules {
 
         assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
 
-        // The same badge, handed to the method, satisfies the rule.
-        test.execute_expect_success(
+        // Shown to the method as an argument, it cannot be authorized there.
+        let reason = test.execute_expect_failure(
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_for_resource", args![badge_resource])
                 .put_last_instruction_output_on_workspace("proof")
@@ -1672,31 +1656,27 @@ mod resource_access_rules {
                     10
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder.call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
-        // A frame that was handed the proof may forward it onward.
+        assert_reject_reason(reason, "Access denied");
+
+        // A window around the call lends it to the component's frame.
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
                 .call_method(user_account, "create_proof_for_resource", args![badge_resource])
                 .put_last_instruction_output_on_workspace("proof")
-                .call_function(cross_call_template, "call_component_with_args_using_proof", args![
-                    component_address,
-                    "take_tokens_using_proof",
-                    Workspace("proof"),
-                    10,
-                ])
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(component_address, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&user_key),
             vec![user_proof],
@@ -1818,16 +1798,12 @@ mod resource_access_rules {
                     args![Workspace("badges")],
                 )
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(
-                    component_address,
-                    "take_tokens_using_proof",
-                    args![Workspace("proof"), 10],
-                )
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(component_address, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 // Deposit before dropping the proof - this step should error
                 .call_method(user_account, "deposit", args![Workspace("badges")])
                 .drop_all_proofs_in_workspace()
@@ -1864,16 +1840,12 @@ mod resource_access_rules {
                     args![Workspace("badges")],
                 )
                 .put_last_instruction_output_on_workspace("proof")
-                .call_method(
-                    component_address,
-                    "take_tokens_using_proof",
-                    args![Workspace("proof"), 10],
-                )
-                .put_last_instruction_output_on_workspace("tokens")
-                .call_method(user_account, "deposit_with_auth", args![
-                    Workspace("tokens"),
-                    Workspace("proof")
-                ])
+                .with_authorized_proof("proof", |builder| {
+                    builder
+                        .call_method(component_address, "take_tokens", args![10])
+                        .put_last_instruction_output_on_workspace("tokens")
+                        .call_method(user_account, "deposit", args![Workspace("tokens")])
+                })
                 .drop_all_proofs_in_workspace()
                 .call_method(user_account, "deposit", args![Workspace("badges")])
                 .build_and_seal(&owner_key),
@@ -2131,8 +2103,9 @@ mod resource_access_rules {
             vec![user_proof.clone()],
         );
 
-        assert_reject_reason(result, RuntimeError::ForbiddenInAuthHookContext {
+        assert_reject_reason(result, RuntimeError::ForbiddenInRestrictedFrame {
             operation: "call_invoke",
+            frame: RestrictedFrame::AuthHook,
         });
     }
 
@@ -2234,8 +2207,9 @@ mod resource_access_rules {
             vec![user_proof.clone()],
         );
 
-        assert_reject_reason(result, RuntimeError::ForbiddenInAuthHookContext {
+        assert_reject_reason(result, RuntimeError::ForbiddenInRestrictedFrame {
             operation: "allocate_address_invoke",
+            frame: RestrictedFrame::AuthHook,
         });
     }
 
@@ -2268,8 +2242,9 @@ mod resource_access_rules {
             vec![user_proof.clone()],
         );
 
-        assert_reject_reason(result, RuntimeError::ForbiddenInAuthHookContext {
+        assert_reject_reason(result, RuntimeError::ForbiddenInRestrictedFrame {
             operation: "new_bucket",
+            frame: RestrictedFrame::AuthHook,
         });
     }
 
@@ -2364,8 +2339,9 @@ mod resource_access_rules {
             action_ident: ResourceAuthAction::Deposit.into(),
             details: String::new(),
         });
-        assert_reject_reason(&result, RuntimeError::ForbiddenInAuthHookContext {
+        assert_reject_reason(&result, RuntimeError::ForbiddenInRestrictedFrame {
             operation: "call_invoke",
+            frame: RestrictedFrame::AuthHook,
         });
     }
 
@@ -2473,6 +2449,64 @@ mod resource_access_rules {
         );
 
         test.execute_expect_success(take_and_deposit(), vec![owner_proof]);
+    }
+
+    #[test]
+    fn it_rejects_resource_actions_when_the_hook_component_is_not_an_input() {
+        use tari_engine_types::substate::SubstateId;
+
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_account, owner_proof, owner_key) = test.create_empty_account();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        // The denying hook is lifted only while the owner's account receives some tokens.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "with_updatable_auth_hook", args![
+                    false,
+                    "valid_auth_hook",
+                    OWNER
+                ])
+                .put_last_instruction_output_on_workspace("hook")
+                .call_method("hook", "set_auth_hook", args![None::<String>])
+                .call_method("hook", "take_tokens", args![10])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(owner_account, "deposit", args![Workspace("tokens")])
+                .call_method("hook", "set_auth_hook", args![Some("valid_auth_hook")])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let hook_component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+        let vaults: HashMap<ResourceAddress, VaultId> = test.extract_component_value(owner_account, "$.0");
+        let resource = *vaults.keys().find(|r| **r != TARI_TOKEN).unwrap();
+
+        let withdraw_and_deposit = || {
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(owner_account, "withdraw", args![resource, 1])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_method(owner_account, "deposit", args![Workspace("tokens")])
+                .build_and_seal(&owner_key)
+        };
+
+        let reason = test.execute_expect_failure(withdraw_and_deposit(), vec![owner_proof.clone()]);
+        assert_reject_reason(reason, RuntimeError::AccessDeniedAuthHook {
+            action_ident: ResourceAuthAction::Withdraw.into(),
+            details: "Template error: Access denied for action Withdraw".to_string(),
+        });
+
+        // `TemplateTest` declares exactly the substates in its store as inputs, so removing the hook component
+        // executes the transaction as a validator would one that does not declare it.
+        test.get_state_store_mut()
+            .delete_state(&SubstateId::Component(hook_component));
+
+        let reason = test.execute_expect_failure(withdraw_and_deposit(), vec![owner_proof]);
+        assert_reject_reason(reason, RuntimeError::AuthHookComponentNotDeclared {
+            resource_address: resource,
+            component_address: hook_component,
+        });
     }
 
     #[test]
@@ -2869,6 +2903,82 @@ mod resource_access_rules {
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
             vec![user_proof],
+        );
+    }
+}
+
+mod access_rule_metering {
+    use tari_engine_types::{
+        commit_result::ExecutionFailureCode,
+        limits::{MAX_NATIVE_POINTS_PER_TRANSACTION, NativeExecutionPoints},
+    };
+
+    use super::*;
+
+    /// Native points charged for creating `proofs` token proofs, each held while the next is authorized, under a
+    /// withdraw rule that tests `unmatched_requirements` badge requirements before the one that passes.
+    fn native_points_for_held_proofs(test: &mut TemplateTest, unmatched_requirements: u32, proofs: u32) -> u64 {
+        let component: ComponentAddress = test.call_function(
+            "AccessRulesTest",
+            "with_withdraw_rule_of_unmatched_requirements",
+            args![unmatched_requirements],
+            vec![],
+        );
+        test.call_method::<()>(component, "hold_token_proofs", args![proofs], vec![]);
+        test.last_execution_points().native
+    }
+
+    #[test]
+    fn it_charges_for_each_requirement_and_proof_examined() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let proofs = 20u64;
+
+        // Each unmatched requirement is a node visited, then a scan of every proof already held, on each of the
+        // `proofs` authorizations.
+        let one = native_points_for_held_proofs(&mut test, 1, proofs as u32);
+        let many = native_points_for_held_proofs(&mut test, 33, proofs as u32);
+        let per_requirement = proofs * NativeExecutionPoints::PER_ACCESS_RULE_NODE +
+            proofs * (proofs - 1) / 2 * NativeExecutionPoints::PER_ACCESS_RULE_PROOF;
+        assert_eq!(many - one, 32 * per_requirement);
+
+        // Every authorization in the second half of the proofs examines `proofs / 2` more proofs than its counterpart
+        // in the first half.
+        let half = native_points_for_held_proofs(&mut test, 1, (proofs / 2) as u32);
+        let none = native_points_for_held_proofs(&mut test, 1, 0);
+        let second_half = one - half;
+        let first_half = half - none;
+        assert!(
+            second_half >= first_half + (proofs / 2).pow(2) * NativeExecutionPoints::PER_ACCESS_RULE_PROOF,
+            "the proofs held while authorizing went uncharged: second half {second_half}, first half {first_half}"
+        );
+    }
+
+    #[test]
+    fn it_stops_evaluating_once_the_transaction_cannot_pay() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let component: ComponentAddress = test.call_function(
+            "AccessRulesTest",
+            "with_withdraw_rule_of_unmatched_requirements",
+            args![1022u32],
+            vec![],
+        );
+
+        // Authorizing all of these proofs would examine ~8e7 proofs, far beyond what any transaction may pay for.
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component, "hold_token_proofs", args![400u32])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert_eq!(
+            reason.execution_failure_code(),
+            Some(ExecutionFailureCode::LimitExceeded),
+            "unexpected rejection: {reason:?}"
+        );
+        assert!(
+            test.last_execution_points().native <= MAX_NATIVE_POINTS_PER_TRANSACTION,
+            "evaluation ran past the per-transaction maximum: {}",
+            test.last_execution_points().native
         );
     }
 }

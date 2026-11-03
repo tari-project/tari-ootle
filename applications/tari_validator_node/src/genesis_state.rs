@@ -54,8 +54,9 @@ use tari_template_lib::types::{
     governance::BurnRateGovernanceState,
 };
 
-/// The state version (and epoch) that bootstrapped genesis state is committed at. Consensus and
-/// state-sync state changes begin at version 1 (see the state-sync `start_state_version` logic).
+/// The state version (and epoch) that bootstrapped genesis state is committed at. Consensus state
+/// changes begin at version 1. A validator bootstraps genesis itself and syncs from v1; an indexer
+/// syncs from v0, which streams the genesis transitions.
 const GENESIS_STATE_VERSION: Version = 0;
 
 pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool, StorageError> {
@@ -120,6 +121,7 @@ fn burn_rate_governance_substate(council: &GenesisCouncil) -> (SubstateId, Subst
             owner_rule: council.owner_rule(),
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(
             tari_bor::to_value(&BurnRateGovernanceState::new()).expect("BurnRateGovernanceState encode is infallible"),
@@ -142,6 +144,7 @@ fn xtr_faucet_substates(network: Network) -> Vec<(SubstateId, SubstateValue)> {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(
             tari_bor::to_value(&XtrFaucetState {
@@ -167,6 +170,7 @@ fn nft_faucet_substates() -> Vec<(SubstateId, SubstateValue)> {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(
             tari_bor::to_value(&NftFaucetState { serial_number: 0 }).expect("NftFaucetState encode is infallible"),

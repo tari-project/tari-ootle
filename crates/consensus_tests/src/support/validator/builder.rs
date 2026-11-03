@@ -144,14 +144,14 @@ impl ValidatorBuilder {
 
     /// The store keeps the state history that consensus's down proof lookback reaches into.
     fn database_options(&self) -> DatabaseOptions {
-        let state_history_length = self
+        let config = self
             .config
             .as_ref()
-            .expect("No config given (use ValidatorBuilder::with_config)")
-            .state_history_length;
+            .expect("No config given (use ValidatorBuilder::with_config)");
         DatabaseOptions::default()
             .with_debugging_data(true)
-            .with_state_history_length(state_history_length)
+            .with_state_history_length(config.state_history_length)
+            .with_pinned_checkpoint_epochs(config.pinned_checkpoint_epochs)
     }
 
     #[allow(clippy::too_many_lines)]

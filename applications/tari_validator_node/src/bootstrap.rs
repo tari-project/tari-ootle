@@ -120,6 +120,7 @@ use crate::metrics::{
 };
 use crate::{
     ApplicationConfig,
+    MIN_PINNED_CHECKPOINT_EPOCHS,
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
     base_layer::verify_correct_network,
@@ -265,6 +266,14 @@ pub async fn spawn_services(
 
     // TODO: just enable it always for now, later make it configurable and default to true for testnets
     let db_options = config.validator_node.state_store_options();
+    if config.validator_node.pinned_checkpoint_epochs < MIN_PINNED_CHECKPOINT_EPOCHS {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ validator_node.pinned_checkpoint_epochs = {} is below the minimum of {MIN_PINNED_CHECKPOINT_EPOCHS}, which \
+             indexers rely on to snapshot new shards. Keeping the trees of {MIN_PINNED_CHECKPOINT_EPOCHS} checkpoints",
+            config.validator_node.pinned_checkpoint_epochs
+        );
+    }
 
     memory_budget::check_against_available_memory(&memory_budget::MemoryBudget::from_config(
         &config.validator_node,
@@ -273,6 +282,7 @@ pub async fn spawn_services(
     ));
 
     let state_history_length = db_options.state_history_length;
+    let pinned_checkpoint_epochs = db_options.pinned_checkpoint_epochs;
     let epoch_history_length = db_options.epoch_history_length;
     let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, db_options)?;
 
@@ -460,6 +470,7 @@ pub async fn spawn_services(
         tx_hotstuff_events,
         consensus_constants.clone(),
         state_history_length,
+        pinned_checkpoint_epochs,
     )
     .await;
     handles.push(consensus_join_handle);

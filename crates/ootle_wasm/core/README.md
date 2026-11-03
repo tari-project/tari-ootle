@@ -26,16 +26,15 @@ Each function accepts unsigned or unsealed transaction JSON.
 
 - `seal_transaction_json(json, seal_signer_secret_key) → Result<String>`
 - `add_transaction_signer_json(json, signer_secret_key, seal_signer_public_key) → Result<String>`
-- `attach_seal_signature_json(json, seal_signer_public_key, signature) → Result<String>`: seals with an externally produced 64-byte `R ‖ s` signature over the seal message
+- `attach_seal_signature_json(json, seal_signer_public_key, signature) → Result<String>`: seals with an externally produced 64-byte sr25519 signature over the seal message
 - `attach_transaction_signature_json(json, signer_public_key, signature, seal_signer_public_key) → Result<String>`: appends an externally produced authorization signature
 
-Externally produced signatures are Ristretto255 Schnorr (`tari_crypto::RistrettoSchnorr`); see `NPM_README.md` for the challenge construction. The `attach_*` functions verify the signature before returning, so a signature over the wrong message or by the wrong key fails at attach time.
+Externally produced signatures are standard sr25519 signatures under the `substrate` signing context; see `NPM_README.md`, including its key isolation requirements: the signing key signs Ootle transaction messages only. The `attach_*` functions verify the signature before returning, so a signature over the wrong message or by the wrong key fails at attach time.
 
-### `sign` — Schnorr signing and key management
+### `sign` — key management
 
-Ristretto255 Schnorr signatures and keypair operations.
+Ristretto255 keypair operations. Transaction signing lives in `transaction`, which hashes the transaction itself.
 
-- `schnorr_sign(secret_key_hex: &str, message: &[u8]) → Result<SchnorrSignatureResult>`
 - `public_key_from_secret_key(secret_key_hex: &str) → Result<String>`
 - `generate_keypair() → KeypairResult`
 

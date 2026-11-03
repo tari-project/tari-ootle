@@ -54,12 +54,7 @@ fn the_declared_authorizer_is_the_main_signer_in_any_signature_position() {
 
     let transaction = co_signed(
         &test,
-        test.transaction()
-            .call_function(template, "log_caller_pk", args![])
-            .call_function(template, "main_signer_proof", args![])
-            .put_last_instruction_output_on_workspace("proof")
-            .call_function(template, "check_pk_proof", args![Workspace("proof"), main_public])
-            .drop_all_proofs_in_workspace(),
+        test.transaction().call_function(template, "log_caller_pk", args![]),
         MainSigner::Authorizer(main_public),
         &[&other_secret, &main_secret],
     );

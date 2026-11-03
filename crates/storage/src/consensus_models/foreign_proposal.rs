@@ -252,6 +252,13 @@ pub struct ForeignProposalAtom {
 }
 
 impl ForeignProposalAtom {
+    /// The key a block orders its foreign proposal commands by (see [`BlockCommands`](super::BlockCommands)): shard
+    /// group, then block id. Replicas apply a block's foreign proposals in this order, so a proposer must apply them in
+    /// the same order to derive the same transaction commands.
+    pub fn block_order_key(&self) -> (ShardGroup, &BlockId) {
+        (self.shard_group, &self.block_id)
+    }
+
     pub fn exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
         tx.foreign_proposals_exists(&self.block_id)
     }
@@ -506,6 +513,8 @@ impl ForeignProposal {
             .into()
     }
 
+    /// The transactions whose evidence names the committee's shard group. An aborting transaction's evidence clears
+    /// the outputs of every shard group, so an output-only shard group is named with no substates.
     pub fn all_transaction_ids_in_committee<'a>(
         &'a self,
         committee_info: &'a CommitteeInfo,
@@ -517,7 +526,7 @@ impl ForeignProposal {
             .filter_map(|cmd| cmd.transaction())
             .filter(|t| {
                 t.evidence()
-                    .is_some_and(|evidence| evidence.has_and_not_empty(&committee_info.shard_group()))
+                    .is_some_and(|evidence| evidence.has(&committee_info.shard_group()))
             })
             .map(|t| t.id())
     }

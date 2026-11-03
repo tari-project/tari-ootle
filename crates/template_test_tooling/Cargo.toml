@@ -25,3 +25,5 @@ cargo_toml = "0.22.3"
 rand = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 thiserror = { workspace = true }
+[dev-dependencies]
+tempfile = { workspace = true }

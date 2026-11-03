@@ -199,41 +199,43 @@ impl ProcessManager {
                 .await
                 .context("waiting for wallet funds")?;
 
-            self.register_all_validator_nodes()
+            let num_registered = self
+                .register_all_validator_nodes()
                 .await
                 .context("registering validator node via GRPC")?;
 
-            // We need to process these now so that we can automatically mine once the transactions are submitted
-            let num_validator_nodes = self.instance_manager.num_validator_nodes();
-            let mut transaction_ids = vec![];
-            loop {
-                let transactions = layer_one_transaction_service.process_any().await?;
-                transaction_ids.extend(
-                    transactions
-                        .iter()
-                        .filter(|(transaction, _)| transaction.payload_type.is_validator_registration())
-                        .map(|(_, tx_id)| *tx_id),
-                );
+            if num_registered > 0 {
+                // We need to process these now so that we can automatically mine once the transactions are submitted
+                let mut transaction_ids = vec![];
+                loop {
+                    let transactions = layer_one_transaction_service.process_any().await?;
+                    transaction_ids.extend(
+                        transactions
+                            .iter()
+                            .filter(|(transaction, _)| transaction.payload_type.is_validator_registration())
+                            .map(|(_, tx_id)| *tx_id),
+                    );
 
-                info!(
-                    "🟢 {}/{} validator node registration submitted",
-                    transaction_ids.len(),
-                    num_validator_nodes
-                );
-                if transaction_ids.len() == num_validator_nodes {
-                    break;
+                    info!(
+                        "🟢 {}/{} validator node registration submitted",
+                        transaction_ids.len(),
+                        num_registered
+                    );
+                    if transaction_ids.len() >= num_registered {
+                        break;
+                    }
+                    // 1
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-                // 1
-                tokio::time::sleep(Duration::from_millis(100)).await;
+
+                info!("🟢 All validator nodes registrations have been submitted to the wallet");
+
+                // Wait to ensure the wallet has broadcast all transactions before mining
+                self.wait_for_wallet_to_broadcast_transactions(transaction_ids).await?;
+
+                // "Mine in" the validators and templates
+                self.mine_in_validator_registrations().await?;
             }
-
-            info!("🟢 All validator nodes registrations have been submitted to the wallet");
-
-            // Wait to ensure the wallet has broadcast all transactions before mining
-            self.wait_for_wallet_to_broadcast_transactions(transaction_ids).await?;
-
-            // "Mine in" the validators and templates
-            self.mine_in_validator_registrations().await?;
         }
 
         Ok(())
@@ -462,29 +464,16 @@ impl ProcessManager {
                 settings,
                 reply,
             } => {
-                let Some(instance) = self.instance_manager.instances().find(|i| i.name() == name) else {
-                    if reply
-                        .send(Err(anyhow!(
-                            "Instance with name '{name}' already exists. Please choose a different name",
-                        )))
-                        .is_err()
-                    {
-                        log::warn!("Request cancelled before response could be sent")
-                    }
-                    return Ok(());
-                };
-
-                let envs = instance.envs().to_vec();
-
-                let executable = self.executable_manager.get_executable(instance_type).ok_or_else(|| {
-                    anyhow!(
+                let result = match self.executable_manager.get_executable(instance_type) {
+                    Some(executable) => {
+                        self.instance_manager
+                            .create_instance(executable, instance_type, name, settings)
+                            .await
+                    },
+                    None => Err(anyhow!(
                         "No configuration for instance type '{instance_type}'. Please add this to the configuration",
-                    )
-                })?;
-                let result = self
-                    .instance_manager
-                    .fork_new(executable, instance_type, name, None, envs, settings)
-                    .await;
+                    )),
+                };
 
                 if reply.send(result).is_err() {
                     log::warn!("Request cancelled before response could be sent")
@@ -503,7 +492,7 @@ impl ProcessManager {
                 }
             },
             StartInstance { instance_id, reply } => {
-                let (instance_type, is_validator) = self
+                let instance_info = self
                     .instance_manager
                     .instances()
                     .find(|i| i.id() == instance_id)
@@ -511,14 +500,22 @@ impl ProcessManager {
                         let instance_type = i.instance_type();
                         (instance_type, instance_type.is_validator())
                     })
-                    .ok_or_else(|| anyhow!("Instance with ID '{}' not found", instance_id))?;
+                    .ok_or_else(|| anyhow!("Instance with ID '{}' not found", instance_id));
 
-                let result = {
-                    let executable = self
-                        .executable_manager
-                        .compile_executable_if_required(instance_type)
-                        .await?;
-                    self.instance_manager.start_instance(instance_id, executable).await
+                let mut is_validator = false;
+                let result = match instance_info {
+                    Ok((instance_type, validator)) => {
+                        is_validator = validator;
+                        match self
+                            .executable_manager
+                            .compile_executable_if_required(instance_type)
+                            .await
+                        {
+                            Ok(executable) => self.instance_manager.start_instance(instance_id, executable).await,
+                            Err(err) => Err(err),
+                        }
+                    },
+                    Err(err) => Err(err),
                 };
 
                 // A restarted validator comes up with an empty in-memory peer store and no seed
@@ -600,11 +597,14 @@ impl ProcessManager {
                     .instance_manager
                     .minotari_nodes()
                     .find(|i| i.instance().id() == instance_id)
-                    .ok_or_else(|| anyhow!("MinotariNode with ID '{}' not found", instance_id))?;
-                let result = node.get_chain_metadata().await.map(|metadata| MinotariNodeDetails {
-                    instance_info: node.instance().into(),
-                    height: metadata.map(|m| m.best_block_height),
-                });
+                    .ok_or_else(|| anyhow!("MinotariNode with ID '{}' not found", instance_id));
+                let result = match node {
+                    Ok(node) => node.get_chain_metadata().await.map(|metadata| MinotariNodeDetails {
+                        instance_info: node.instance().into(),
+                        height: metadata.map(|m| m.best_block_height),
+                    }),
+                    Err(err) => Err(err),
+                };
                 if reply.send(result).is_err() {
                     log::warn!("Request cancelled before response could be sent")
                 }
@@ -654,7 +654,7 @@ impl ProcessManager {
         Ok(file_name)
     }
 
-    async fn register_all_validator_nodes(&mut self) -> anyhow::Result<()> {
+    async fn register_all_validator_nodes(&mut self) -> anyhow::Result<usize> {
         let mut skip = vec![];
         for vn in self.instance_manager.validator_nodes_mut() {
             if let Some(status) = vn.instance_mut().check_running()? {
@@ -668,6 +668,7 @@ impl ProcessManager {
             }
         }
 
+        let mut num_registered = 0usize;
         for vn in self.instance_manager.validator_nodes() {
             if skip.contains(&vn.instance().id()) {
                 continue;
@@ -687,8 +688,9 @@ impl ProcessManager {
                 .context("waiting for initial scanning to complete")?;
 
             vn.prepare_registration_transaction().await?;
+            num_registered += 1;
         }
-        Ok(())
+        Ok(num_registered)
     }
 
     async fn register_validator_node(
@@ -813,11 +815,13 @@ impl ProcessManager {
     async fn wait_for_validators_to_activate(&self, timeout: Duration) -> anyhow::Result<bool> {
         let deadline = Instant::now() + timeout;
         loop {
+            let mut num_running = 0usize;
             let mut num_inactive = 0usize;
             for vn in self.instance_manager.validator_nodes() {
                 if !vn.instance().is_running() {
                     continue;
                 }
+                num_running += 1;
                 let mut client = vn.connect_client()?;
                 match client.get_epoch_manager_stats().await {
                     Ok(stats) if stats.is_valid => {},
@@ -829,7 +833,7 @@ impl ProcessManager {
                 }
             }
 
-            if num_inactive == 0 {
+            if num_running > 0 && num_inactive == 0 {
                 return Ok(true);
             }
             if Instant::now() >= deadline {

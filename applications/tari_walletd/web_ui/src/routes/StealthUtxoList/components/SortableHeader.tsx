@@ -85,6 +85,12 @@ function SortableHeader({ title, currentFilter, onFilterChange, getDisplayName }
               {currentFilter === "Invalid" && <CheckIcon />}
             </Stack>
           </MenuItem>
+          <MenuItem value="Burnt">
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ width: "100%" }}>
+              <span>Burnt</span>
+              {currentFilter === "Burnt" && <CheckIcon />}
+            </Stack>
+          </MenuItem>
         </Select>
       </FormControl>
     </Stack>

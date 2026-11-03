@@ -81,7 +81,6 @@ use tari_ootle_storage::{
         StateVersionTransitions,
         SubstateChange,
         SubstateCreate,
-        SubstateData,
         SubstateDestroy,
         SubstateDownProofRecord,
         SubstateLock,
@@ -89,7 +88,6 @@ use tari_ootle_storage::{
         SubstateRecord,
         SubstateUpdateProof,
         SubstateValueFilterFlags,
-        SubstateValueOrHash,
         TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
@@ -1808,43 +1806,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
                         // leave the caller holding a substate nothing later in the stream takes back down.
                         None
                     } else {
-                        let metadata_mode = value_filter.contains(SubstateValueFilterFlags::TEMPLATE_METADATA);
-                        let template_metadata_opt = if metadata_mode && substate.substate_id.is_template() {
-                            substate
-                                .substate_value
-                                .as_ref()
-                                .and_then(|v| v.as_template())
-                                .map(|t| t.clone().into_template_metadata())
-                        } else {
-                            None
-                        };
-
-                        let is_metadata_only = metadata_mode &&
-                            !value_filter.contains(SubstateValueFilterFlags::TEMPLATE) &&
-                            substate.substate_id.is_template();
-                        let resolved_value = value_filter
-                                .contains_substate(&substate.substate_id)
-                                // filter includes substate, return full value if available (unless metadata-only for templates), otherwise return hash
-                                .then(|| {
-                                    substate
-                                        .substate_value
-                                        .filter(|_| !is_metadata_only)
-                                        .map(|v| SubstateValueOrHash::Value(Box::new(v)))
-                                        .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
-                                })
-                                // Otherwise if the client still wants all hashes for filtered out substates
-                                .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)));
-
-                        resolved_value.map(|value| {
-                            SubstateUpdateProof::Create(Box::new(SubstateCreate {
-                                substate: SubstateData {
-                                    substate_id: substate.substate_id,
-                                    version: substate.version,
-                                    value,
-                                    template_metadata: template_metadata_opt,
-                                },
-                            }))
-                        })
+                        value_filter
+                            .serve(substate)
+                            .map(|substate| SubstateUpdateProof::Create(Box::new(SubstateCreate { substate })))
                     }
                 },
                 StateTransitionType::Down => (!up_only)

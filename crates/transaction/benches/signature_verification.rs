@@ -17,58 +17,89 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
+use ootle_byte_type::ToByteType;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
-    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::ByteArray,
 };
-use tari_ootle_transaction::{TransactionSealSignature, TransactionSignature, verify_sealed_batch};
+use tari_ootle_common_types::signature::components;
+use tari_ootle_transaction::{
+    Epoch,
+    TRANSACTION_SIGNING_CONTEXT,
+    TransactionMessage,
+    TransactionSealSignature,
+    TransactionSignature,
+    UnsealedTransactionV1,
+    UnsignedTransactionV1,
+    verify_sealed_batch,
+};
+
+/// An empty transaction, distinct for each `max_epoch`.
+fn transaction(max_epoch: u64) -> UnsignedTransactionV1 {
+    UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, Epoch(max_epoch), false)
+}
+
+/// The authorization message of [`transaction`]`(max_epoch)`.
+fn authorization_message(max_epoch: u64) -> TransactionMessage {
+    let seal_signer = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()));
+    TransactionSignature::create_message_v1(&seal_signer.to_byte_type(), &transaction(max_epoch))
+}
+
+/// The seal message of [`transaction`]`(max_epoch)`.
+fn seal_message(max_epoch: u64) -> TransactionMessage {
+    TransactionSealSignature::create_message_v1(&UnsealedTransactionV1::new(transaction(max_epoch), vec![]))
+}
 
 /// `n` valid signatures over `message`, each from a distinct key — the shape a multi-input stealth
 /// spend or a coinjoin produces, where every input contributes its own one-time key.
-fn signatures(n: usize, message: &[u8; 64]) -> Vec<TransactionSignature> {
+fn signatures(n: usize, message: &TransactionMessage) -> Vec<TransactionSignature> {
     let mut rng = rand::rng();
     (0..n)
         .map(|_| {
             let secret = RistrettoSecretKey::random(&mut rng);
             let public_key = RistrettoPublicKey::from_secret_key(&secret);
-            let signature = RistrettoSchnorr::sign(&secret, message, &mut rng).expect("sign is infallible");
-            TransactionSignature::new(public_key.to_byte_type(), signature.to_byte_type())
+            TransactionSignature::new(
+                public_key.to_byte_type(),
+                TRANSACTION_SIGNING_CONTEXT.sign(&secret, message),
+            )
         })
         .collect()
 }
 
 /// The pre-batch verification path: one double-base multiplication per signature, against the same
 /// already-derived message.
-fn verify_individually(signatures: &[TransactionSignature], message: [u8; 64]) -> bool {
+fn verify_individually(signatures: &[TransactionSignature], message: TransactionMessage) -> bool {
     signatures.iter().all(|sig| sig.verify_message(message))
 }
 
-/// Decoding alone: the two point decompressions every term needs before any equation can be
-/// evaluated, and the floor under both verification paths.
+/// Decoding alone: the key decompression and signature parsing every term needs before any equation
+/// can be evaluated, and the floor under both verification paths.
 ///
 /// A signature reaches a node as bytes, so this cost is unavoidable and cannot be amortised across a
 /// batch — which is what separates the speed-up achievable here from one measured over keys and
 /// nonces that are already decompressed (as `tari_crypto`'s own batch benchmark is).
 fn decode_only(signatures: &[TransactionSignature]) {
     for sig in signatures {
-        let public_key: RistrettoPublicKey = sig.public_key().try_from_byte_type().unwrap();
-        let signature = RistrettoSchnorr::convert_from_byte_type(sig.signature()).unwrap();
+        let public_key = RistrettoPublicKey::from_canonical_bytes(sig.public_key().as_bytes()).unwrap();
+        let signature = components(sig.signature()).unwrap();
         black_box((public_key, signature));
     }
 }
 
 /// A seal over `seal_message`, from a key of its own.
-fn seal(seal_message: &[u8; 64]) -> TransactionSealSignature {
+fn seal(seal_message: &TransactionMessage) -> TransactionSealSignature {
     let mut rng = rand::rng();
     let secret = RistrettoSecretKey::random(&mut rng);
     let public_key = RistrettoPublicKey::from_secret_key(&secret);
-    let signature = RistrettoSchnorr::sign(&secret, seal_message, &mut rng).expect("sign is infallible");
-    TransactionSealSignature::new(public_key.to_byte_type(), signature.to_byte_type())
+    TransactionSealSignature::new(
+        public_key.to_byte_type(),
+        TRANSACTION_SIGNING_CONTEXT.sign(&secret, seal_message),
+    )
 }
 
 fn bench(c: &mut Criterion) {
-    let message = [7u8; 64];
+    let message = authorization_message(1);
     let mut g = c.benchmark_group("transaction_signature_verification");
 
     for n in [1usize, 2, 4, 8, 16, 32, 64, 128, 256, 1024] {
@@ -98,7 +129,7 @@ fn bench(c: &mut Criterion) {
     for n in [1usize, 16, 256] {
         let mut sigs = signatures(n, &message);
         let last = sigs.len() - 1;
-        sigs[last] = signatures(1, &[8u8; 64]).remove(0);
+        sigs[last] = signatures(1, &authorization_message(2)).remove(0);
 
         g.bench_with_input(BenchmarkId::new("rejected_individual", n), &n, |b, _| {
             b.iter(|| assert!(!black_box(verify_individually(black_box(&sigs), message))))
@@ -118,8 +149,8 @@ fn bench(c: &mut Criterion) {
     // authorizations, so this measures what folding it into the same multiplication is worth over
     // verifying it on its own and batching the rest.
     for n in [1usize, 4, 16] {
-        let authorization_message = [7u8; 64];
-        let seal_message = [9u8; 64];
+        let authorization_message = authorization_message(1);
+        let seal_message = seal_message(1);
         let sigs = signatures(n, &authorization_message);
         let seal = seal(&seal_message);
 

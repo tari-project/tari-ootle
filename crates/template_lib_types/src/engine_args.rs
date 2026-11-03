@@ -6,7 +6,7 @@ use tari_template_abi::rust::{fmt, prelude::*};
 
 use crate::{
     bytes::Bytes,
-    crypto::{PublicKey, SignaturePayload},
+    crypto::{PublicKey, SignaturePayload, SignatureScope},
 };
 
 // -------------------------------- Signature -------------------------------- //
@@ -25,6 +25,8 @@ pub struct SignatureVerifyArgRef<'a> {
     pub message: &'a [u8],
     #[n(3)]
     pub payload: &'a SignaturePayload,
+    #[n(4)]
+    pub scope: SignatureScope,
 }
 
 #[derive(Debug, Clone, Decode, CborLen)]
@@ -38,6 +40,8 @@ pub struct SignatureVerifyArg {
     pub message: Bytes,
     #[n(3)]
     pub payload: SignaturePayload,
+    #[n(4)]
+    pub scope: SignatureScope,
 }
 
 // -------------------------------- Intrinsics -------------------------------- //

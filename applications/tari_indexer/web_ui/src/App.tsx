@@ -28,6 +28,7 @@ import Events from "./routes/Events/Events";
 import RecentTransactions from "./routes/RecentTransactions/RecentTransactionsLayout";
 import Resources from "./routes/Resources/Resources";
 import Substates from "./routes/Substates/Substates";
+import Sync from "./routes/Sync/Sync";
 import Templates from "./routes/Templates/Templates";
 import TransactionDetails from "./routes/Transaction/TransactionDetails";
 import TransactionReceiptDetails from "./routes/TransactionReceipts/TransactionReceiptDetailsLayout";
@@ -94,6 +95,11 @@ export const breadcrumbRoutes = [
     dynamic: false,
   },
   {
+    label: "Sync",
+    path: "/sync",
+    dynamic: false,
+  },
+  {
     label: "Transaction Receipts",
     path: "/transaction-receipts",
     dynamic: false,
@@ -125,6 +131,7 @@ export default function App() {
           <Route path="templates" element={<Templates />} />
           <Route path="watched" element={<WatchedSubstates />} />
           <Route path="validators" element={<Validators />} />
+          <Route path="sync" element={<Sync />} />
           <Route path="transaction-receipts" element={<TransactionReceipts />} />
           <Route path="transaction-receipts/:receipt_address" element={<TransactionReceiptDetails />} />
           <Route path="*" element={<ErrorPage />} />

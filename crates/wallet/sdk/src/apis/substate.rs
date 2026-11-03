@@ -85,7 +85,7 @@ where
     }
 
     pub async fn get_substate_from_network(&self, id: SubstateId) -> Result<Substate, SubstateApiError> {
-        let mut map = self.get_substates_from_network(vec![id.clone()]).await?;
+        let mut map = self.get_substates_from_network(std::slice::from_ref(&id)).await?;
         map.remove(&id)
             .ok_or_else(|| SubstateApiError::SubstateDoesNotExist { address: id })
     }
@@ -94,7 +94,7 @@ where
     /// is proven, as [`Self::fetch_substate_from_network`] describes, or the fetch fails.
     pub async fn get_substates_from_network(
         &self,
-        ids: Vec<SubstateId>,
+        ids: &[SubstateId],
     ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
         if ids.is_empty() {
             return Ok(HashMap::new());
@@ -120,7 +120,7 @@ where
     /// Only a failed fetch fails every result.
     pub async fn get_each_substate_from_network(
         &self,
-        ids: Vec<SubstateId>,
+        ids: &[SubstateId],
     ) -> Result<Vec<(SubstateId, Result<ReadSubstate, SubstateApiError>)>, SubstateApiError> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -129,17 +129,20 @@ where
         let verify = self.indexer_trust.is_verify();
         let FetchedSubstates { mut substates, proofs } = self
             .network_interface
-            .get_substates(ids.clone(), verify)
+            .get_substates(ids, verify)
             .await
             .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
         let mut results = Vec::with_capacity(ids.len());
         for id in ids {
-            let Some(substate) = substates.remove(&id) else {
-                results.push((id.clone(), Err(SubstateApiError::SubstateDoesNotExist { address: id })));
+            let Some(substate) = substates.remove(id) else {
+                results.push((
+                    id.clone(),
+                    Err(SubstateApiError::SubstateDoesNotExist { address: id.clone() }),
+                ));
                 continue;
             };
-            let result = self.read_served(&id, &substate, verify, proofs.get(&id)).await;
-            results.push((id, result));
+            let result = self.read_served(id, &substate, verify, proofs.get(id)).await;
+            results.push((id.clone(), result));
         }
         Ok(results)
     }
@@ -679,6 +682,17 @@ where
 pub struct ReadSubstate {
     pub substate: Substate,
     pub proven_up: Option<ProvenUp>,
+}
+
+impl ReadSubstate {
+    /// Whether the substate is a UTXO that a burn left without an output. A burn is final: every later version of the
+    /// UTXO is without one too.
+    pub fn is_burnt_utxo(&self) -> bool {
+        self.substate
+            .substate_value()
+            .as_utxo()
+            .is_some_and(|utxo| utxo.is_burnt())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

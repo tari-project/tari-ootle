@@ -50,6 +50,7 @@ use tari_ootle_transaction::{
     TransactionSignature,
     UnsignedTransaction,
 };
+pub use tari_ootle_wallet_sdk::apis::stealth_transfer::InputSelection;
 use tari_ootle_wallet_sdk::{
     IndexerTrust,
     apis::{
@@ -1735,12 +1736,25 @@ pub struct WebauthnAlreadyRegisteredResponse {
     pub registered: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct WebauthnStartRegisterRequest {
     pub username: String,
     #[serde(default)]
     pub label: Option<String>,
+    /// One-time setup token required for initial passkey enrollment.
+    #[serde(default)]
+    pub setup_token: Option<String>,
+}
+
+impl std::fmt::Debug for WebauthnStartRegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebauthnStartRegisterRequest")
+            .field("username", &self.username)
+            .field("label", &self.label)
+            .field("setup_token", &self.setup_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1753,7 +1767,7 @@ pub struct WebauthnStartRegisterResponse {
     pub public_key: PublicKeyCredentialCreationOptions,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct WebauthnFinishRegisterRequest {
     /// Session ID received from [`WebauthnStartRegisterResponse`].
@@ -1761,6 +1775,19 @@ pub struct WebauthnFinishRegisterRequest {
     /// [`RegisterPublicKeyCredential`]
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub credential: RegisterPublicKeyCredential,
+    /// One-time setup token required for initial passkey enrollment.
+    #[serde(default)]
+    pub setup_token: Option<String>,
+}
+
+impl std::fmt::Debug for WebauthnFinishRegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebauthnFinishRegisterRequest")
+            .field("session_id", &self.session_id)
+            .field("credential", &self.credential)
+            .field("setup_token", &self.setup_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1955,45 +1982,6 @@ impl TransferStatementRequest {
         self.outputs
             .iter()
             .try_fold(Amount::zero(), |sum, o| sum.checked_add(o.total_output_amount()?))
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub enum InputSelection {
-    FromBucket {
-        revealed_amount: Amount,
-    },
-    Selection(UtxoInputSelection),
-    /// Spend exactly the named wallet-owned stealth UTXOs, in the given order. The wallet resolves, validates and
-    /// locks precisely these outputs via `StealthOutputsApi::lock_specific_outputs`, rather than choosing inputs to
-    /// cover an amount.
-    Specific {
-        utxo_addresses: Vec<UtxoAddress>,
-    },
-}
-
-impl InputSelection {
-    pub fn as_selection(&self) -> Option<UtxoInputSelection> {
-        match self {
-            InputSelection::Selection(s) => Some(*s),
-            InputSelection::FromBucket { .. } | InputSelection::Specific { .. } => None,
-        }
-    }
-
-    pub fn as_from_bucket(&self) -> Option<Amount> {
-        match self {
-            InputSelection::FromBucket { revealed_amount } => Some(*revealed_amount),
-            InputSelection::Selection(_) | InputSelection::Specific { .. } => None,
-        }
-    }
-
-    /// The exact UTXOs to spend when this is an [`InputSelection::Specific`] selection.
-    pub fn as_specific(&self) -> Option<&[UtxoAddress]> {
-        match self {
-            InputSelection::Specific { utxo_addresses } => Some(utxo_addresses),
-            InputSelection::FromBucket { .. } | InputSelection::Selection(_) => None,
-        }
     }
 }
 
@@ -2622,5 +2610,26 @@ mod tests {
         assert_eq!(finish_additional_json, serde_json::json!({}));
         let parsed_additional: WebauthnFinishRegisterResponse = serde_json::from_value(finish_additional_json).unwrap();
         assert!(parsed_additional.token.is_none());
+    }
+
+    #[test]
+    fn webauthn_start_register_request_accepts_setup_token_and_redacts_debug() {
+        let without_token: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+        }))
+        .unwrap();
+        assert_eq!(without_token.username, "tari-wallet-webui");
+        assert_eq!(without_token.setup_token, None);
+
+        let secret = "super-secret-setup-token-12345";
+        let with_token: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+            "setup_token": secret,
+        }))
+        .unwrap();
+        assert_eq!(with_token.setup_token.as_deref(), Some(secret));
+        let debug_str = format!("{with_token:?}");
+        assert!(!debug_str.contains(secret), "Debug output must not leak setup_token");
+        assert!(debug_str.contains("<redacted>"));
     }
 }

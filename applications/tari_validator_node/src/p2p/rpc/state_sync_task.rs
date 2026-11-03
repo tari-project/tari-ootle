@@ -111,10 +111,6 @@ impl ShardCursor {
                     "Shard cursors must be ordered by strictly ascending shard",
                 ));
             }
-            // Genesis is committed at version 0 and is never synced - every node bootstraps it.
-            if cursor.start_state_version == 0 {
-                return Err(RpcStatus::bad_request("start_state_version must be greater than 0"));
-            }
             prev_shard = Some(shard);
             validated.push(Self {
                 shard,
@@ -452,6 +448,10 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     if !transitions.updates.is_empty() {
                         debug!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) for {} up to v{}", transitions.updates.len(), shard, transitions.state_version);
                     }
+                    if current_state_version == 0 && transitions.state_version > 0 {
+                        self.send_empty_genesis(shard).await?;
+                        last_sent_version = Some(0);
+                    }
 
                     current_state_version = transitions.state_version + 1;
                     counter += transitions.updates.len();
@@ -487,6 +487,10 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             }
         }
 
+        if current_state_version == 0 {
+            self.send_empty_genesis(shard).await?;
+            last_sent_version = Some(0);
+        }
         if let Some(proofs) = proofs.as_mut() {
             let end = proofs.last.saturating_add(1);
             self.send_proof_points_before(shard, proofs, end).await?;
@@ -699,6 +703,22 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         };
         self.send(Ok(rpc::SyncStateResponse {
             response: Some(rpc::sync_state_response::Response::VersionProof(message)),
+        }))
+        .await
+    }
+
+    /// Streams v0 of `shard` with no updates. A shard's history starts at v0, which holds its genesis state, so a shard
+    /// with none has no v0 record but is still streamed one: its accumulator after v0 is zero, which a verified leaf
+    /// at v0 or later checks.
+    async fn send_empty_genesis(&mut self, shard: Shard) -> Result<(), ()> {
+        self.send(Ok(rpc::SyncStateResponse {
+            response: Some(rpc::sync_state_response::Response::Batch(rpc::SubstateBatch {
+                state_version: 0,
+                updates: Vec::new(),
+                has_more: false,
+                epoch: Some(Epoch::zero().into()),
+                shard: shard.as_u32(),
+            })),
         }))
         .await
     }
@@ -1112,8 +1132,9 @@ mod tests {
     }
 
     #[test]
-    fn it_rejects_a_zero_start_state_version() {
-        assert!(ShardCursor::validate_all(vec![cursor(1, 1), cursor(2, 0)]).is_err());
+    fn it_accepts_a_cursor_from_the_genesis_version() {
+        let cursors = ShardCursor::validate_all(vec![cursor(1, 1), cursor(2, 0)]).unwrap();
+        assert_eq!(cursors[1].start_state_version, 0);
     }
 
     #[test]
@@ -1213,14 +1234,21 @@ mod tests {
         }
     }
 
-    /// A store holding `num_versions` state versions of the global shard, each bringing up one template.
+    /// A store holding `num_versions` state versions of the global shard from v1, each bringing up one template.
     fn store_with_history(num_versions: u16) -> (CountingStore<RocksDbStateStore<String>>, tempfile::TempDir) {
+        store_with_versions(1..=num_versions)
+    }
+
+    /// A store holding `versions` of the global shard, each bringing up one template.
+    fn store_with_versions(
+        versions: impl IntoIterator<Item = u16>,
+    ) -> (CountingStore<RocksDbStateStore<String>>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
         store
             .with_write_tx(|tx| {
                 let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
-                for seed in 1..=num_versions {
+                for seed in versions {
                     batch
                         .with_transition(Shard::global(), u64::from(seed))
                         .push(SubstateTransition::Up {
@@ -1250,12 +1278,23 @@ mod tests {
         )
     }
 
-    /// A task syncing the global shard from its first version through epoch 1.
+    /// A task syncing the global shard from v1 through epoch 1.
     fn sync_task<TStore: StateStore>(
         store: TStore,
         sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
         value_filters: SubstateValueFilterFlags,
         reads: Arc<Semaphore>,
+    ) -> StateSyncTask<TStore> {
+        sync_task_from(store, sender, value_filters, reads, 1)
+    }
+
+    /// A task syncing the global shard from `start_state_version` through epoch 1.
+    fn sync_task_from<TStore: StateStore>(
+        store: TStore,
+        sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
+        value_filters: SubstateValueFilterFlags,
+        reads: Arc<Semaphore>,
+        start_state_version: Version,
     ) -> StateSyncTask<TStore> {
         let (events, _) = broadcast::channel(1);
         StateSyncTask::new(
@@ -1263,7 +1302,7 @@ mod tests {
             sender,
             vec![ShardCursor {
                 shard: Shard::global(),
-                start_state_version: 1,
+                start_state_version,
             }],
             Some(Epoch(1)),
             ConsensusHandle::for_test(&events),
@@ -1275,6 +1314,59 @@ mod tests {
             false,
             reads,
         )
+    }
+
+    /// The batches a stream of the global shard from `start_state_version` sends before it ends, as `(version,
+    /// number of updates)`.
+    async fn streamed_versions(
+        store: CountingStore<RocksDbStateStore<String>>,
+        start_state_version: Version,
+    ) -> Vec<(Version, usize)> {
+        let (sender, mut receiver) = mpsc::channel(100);
+        let task = sync_task_from(
+            store,
+            sender,
+            SubstateValueFilterFlags::all(),
+            Arc::new(Semaphore::new(1)),
+            start_state_version,
+        );
+        let handle = tokio::spawn(task.run());
+        let mut versions = Vec::new();
+        while let Some(Ok(response)) = receiver.recv().await {
+            match response.response {
+                Some(rpc::sync_state_response::Response::Batch(batch)) => {
+                    versions.push((batch.state_version, batch.updates.len()));
+                },
+                _ => break,
+            }
+        }
+        drop(receiver);
+        handle.await.unwrap().ok();
+        versions
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v0_streams_a_shard_without_genesis_state_an_empty_v0_first() {
+        let (store, _dir) = store_with_history(2);
+        assert_eq!(streamed_versions(store, 0).await, [(0, 0), (1, 1), (2, 1)]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v0_streams_the_genesis_state_of_a_shard_that_has_it() {
+        let (store, _dir) = store_with_versions(0..=1);
+        assert_eq!(streamed_versions(store, 0).await, [(0, 1), (1, 1)]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v0_of_a_shard_with_no_history_streams_an_empty_v0() {
+        let (store, _dir) = store_with_versions([]);
+        assert_eq!(streamed_versions(store, 0).await, [(0, 0)]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v1_streams_no_v0() {
+        let (store, _dir) = store_with_history(2);
+        assert_eq!(streamed_versions(store, 1).await, [(1, 1), (2, 1)]);
     }
 
     #[tokio::test]

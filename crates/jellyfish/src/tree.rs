@@ -659,6 +659,58 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
         self.get_root_node(version).map(|n| n.leaf_count())
     }
 
+    /// Returns up to `limit` leaves of the tree at `version` in ascending key order, starting with the first key above
+    /// `after` (or the first key, if `after` is `None`).
+    ///
+    /// Only the subtrees that can hold a key above `after` are read, so paging through a tree reads each node about
+    /// once plus one root-to-leaf path per page.
+    pub fn get_leaves_after(
+        &self,
+        version: Version,
+        after: Option<&LeafKey>,
+        limit: usize,
+    ) -> Result<Vec<LeafNode<P>>, JmtStorageError> {
+        let mut leaves = Vec::new();
+        // Each key carries the kind its parent's `Child` entry records (`None` for the root). Children are pushed last
+        // first, so they are visited in nibble order.
+        let mut stack = vec![(NodeKey::new_empty_path(version), None)];
+        while leaves.len() < limit &&
+            let Some((key, expected_leaf)) = stack.pop()
+        {
+            let node = self.reader.get_node(&key)?;
+            if expected_leaf.is_some_and(|expected_leaf: bool| expected_leaf != node.is_leaf()) {
+                return Err(JmtStorageError::InconsistentState);
+            }
+            match node {
+                Node::Internal(internal_node) => {
+                    let children = internal_node.children_sorted().collect::<Vec<_>>();
+                    for (child_nibble, child) in children.into_iter().rev() {
+                        let child_key = key.gen_child_node_key(child.version, child_nibble)?;
+                        if after.is_some_and(|after| prefix_is_below(child_key.nibble_path(), after)) {
+                            continue;
+                        }
+                        stack.push((child_key, Some(child.is_leaf())));
+                    }
+                },
+                Node::Leaf(leaf_node) => {
+                    if !leaf_key_has_prefix(leaf_node.leaf_key(), key.nibble_path()) {
+                        return Err(JmtStorageError::InconsistentState);
+                    }
+                    if after.is_none_or(|after| leaf_node.leaf_key() > after) {
+                        leaves.push(leaf_node);
+                    }
+                },
+                // Null only represents the empty tree, so it can only be the root
+                Node::Null => {
+                    if !key.nibble_path().is_empty() {
+                        return Err(JmtStorageError::InconsistentState);
+                    }
+                },
+            }
+        }
+        Ok(leaves)
+    }
+
     /// Returns the keys of `key` and every node below it, in post-order (children in nibble order before their
     /// parent). Returns [`JmtStorageError::InconsistentState`] if the store links nodes deeper than a leaf key allows.
     pub fn get_all_nodes_referenced(&self, key: NodeKey) -> Result<Vec<NodeKey>, JmtStorageError> {
@@ -698,6 +750,19 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
         out_keys.reverse();
         Ok(out_keys)
     }
+}
+
+/// Whether every key with the nibble prefix `path` sorts below `key`, i.e. `path` is below `key`'s prefix of the same
+/// length.
+fn prefix_is_below(path: &NibblePath, key: &LeafKey) -> bool {
+    for (i, nibble) in path.nibbles().enumerate() {
+        match key.get_nibble(i) {
+            Some(key_nibble) if nibble == key_nibble => {},
+            Some(key_nibble) => return nibble < key_nibble,
+            None => return false,
+        }
+    }
+    false
 }
 
 /// An iterator that iterates the index range (inclusive) of each different nibble at given
@@ -817,6 +882,7 @@ mod tests {
         JmtHashScheme::V1,
         NodeInProof,
         NodeType,
+        SortedLeafRootBuilder,
         SparseMerkleLeafNode,
         StaleTreeNode,
         TreeNode,
@@ -1451,5 +1517,121 @@ mod tests {
             "814874eb47cff683da9ef2685860f14e75935f687a16126161cd89001ee2307b",
         ]);
         proof.verify_exclusion(V1, &root, &key).unwrap();
+    }
+
+    /// Commits `num_leaves` leaves at version 1 and changes a third of them at version 2.
+    fn two_version_tree(num_leaves: u64) -> MemoryTreeStore<u64> {
+        let mut mem = MemoryTreeStore::new();
+        let values = (0..num_leaves).map(|i| (leaf_key(i), Some((jmt_node_hash(&i), i))));
+        let (_, diff) = JellyfishMerkleTree::new(&mem, V1)
+            .batch_put_value_set(values, None, 1)
+            .unwrap();
+        for (k, v) in diff.node_batch {
+            mem.insert_node(k, v).unwrap();
+        }
+        let values = (0..num_leaves)
+            .step_by(3)
+            .map(|i| (leaf_key(i), Some((jmt_node_hash(&(i + 1000)), i + 1000))));
+        let (_, diff) = JellyfishMerkleTree::new(&mem, V1)
+            .batch_put_value_set(values, Some(1), 2)
+            .unwrap();
+        for (k, v) in diff.node_batch {
+            mem.insert_node(k, v).unwrap();
+        }
+        mem
+    }
+
+    fn page_through(mem: &MemoryTreeStore<u64>, version: Version, page_size: usize) -> Vec<LeafNode<u64>> {
+        let jmt = JellyfishMerkleTree::new(mem, V1);
+        let mut all = Vec::new();
+        loop {
+            let page = jmt
+                .get_leaves_after(version, all.last().map(LeafNode::leaf_key), page_size)
+                .unwrap();
+            assert!(page.len() <= page_size);
+            let is_last = page.len() < page_size;
+            all.extend(page);
+            if is_last {
+                return all;
+            }
+        }
+    }
+
+    #[test]
+    fn it_pages_through_the_leaves_of_a_version_in_key_order() {
+        let mem = two_version_tree(300);
+        for page_size in [1, 7, 16, 299, 300, 1000] {
+            let leaves = page_through(&mem, 1, page_size);
+            let mut expected = (0..300u64).map(|i| (leaf_key(i), i)).collect::<Vec<_>>();
+            expected.sort();
+            assert_eq!(
+                leaves
+                    .iter()
+                    .map(|leaf| (*leaf.leaf_key(), *leaf.payload()))
+                    .collect::<Vec<_>>(),
+                expected,
+                "page size {page_size}"
+            );
+        }
+
+        let leaves = page_through(&mem, 2, 13);
+        let mut expected = (0..300u64)
+            .map(|i| (leaf_key(i), if i % 3 == 0 { i + 1000 } else { i }))
+            .collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(
+            leaves
+                .iter()
+                .map(|leaf| (*leaf.leaf_key(), *leaf.payload()))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let mut builder = SortedLeafRootBuilder::new(V1);
+        for leaf in &leaves {
+            builder.push(*leaf.leaf_key(), &leaf.value_hash()).unwrap();
+        }
+        assert_eq!(
+            builder.finish(),
+            JellyfishMerkleTree::new(&mem, V1).get_root_hash(2).unwrap()
+        );
+    }
+
+    #[test]
+    fn it_starts_a_page_above_a_key_the_tree_does_not_hold() {
+        let mem = two_version_tree(50);
+        let all = page_through(&mem, 1, 100);
+        let jmt = JellyfishMerkleTree::new(&mem, V1);
+        for (i, leaf) in all.iter().enumerate() {
+            // Just below the leaf's key, so that the page starts at it
+            let mut below = leaf.leaf_key().bytes.into_array();
+            let last = below.iter().rposition(|b| *b != 0).unwrap();
+            below[last] -= 1;
+            let page = jmt
+                .get_leaves_after(1, Some(&LeafKey::new(TreeHash::new(below))), 2)
+                .unwrap();
+            assert_eq!(
+                page.iter().map(LeafNode::leaf_key).collect::<Vec<_>>(),
+                all[i..].iter().take(2).map(LeafNode::leaf_key).collect::<Vec<_>>()
+            );
+        }
+        let max = LeafKey::new(TreeHash::new([0xff; 32]));
+        assert!(jmt.get_leaves_after(1, Some(&max), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_tree_has_no_leaves() {
+        let mut mem = MemoryTreeStore::<u64>::new();
+        let (_, diff) = JellyfishMerkleTree::new(&mem, V1)
+            .batch_put_value_set([], None, 1)
+            .unwrap();
+        for (k, v) in diff.node_batch {
+            mem.insert_node(k, v).unwrap();
+        }
+        assert!(
+            JellyfishMerkleTree::new(&mem, V1)
+                .get_leaves_after(1, None, 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

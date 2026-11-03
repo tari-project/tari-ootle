@@ -99,6 +99,12 @@ Main indexer application settings.
 # resynchronises from current state instead of silently missing events.
 #event_retention_epochs = 1000
 
+# How many epochs past the epoch a UTXO was spent in its tombstone is retained (default: 504, about a
+# week). "forever" retains tombstones indefinitely. Pruning raises the shard's tombstone horizon on
+# /info, and a UTXO stream resuming from below it is told its spends are incomplete, so the wallet
+# checks the outputs it holds in that shard and still learns of every spend.
+#utxo_tombstone_retention_epochs = 504
+
 # How long each pruner idles between passes once it has nothing left to prune, in seconds. While a
 # backlog remains it drains in back-to-back batches rather than waiting out this interval. Only used
 # when a retention window is set. Also accepted as transaction_prune_interval.

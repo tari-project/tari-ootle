@@ -16,6 +16,8 @@ pub struct HotstuffConfig {
     /// The number of state versions the state store keeps the tree nodes of. A substate's down proof is built from a
     /// version within it.
     pub state_history_length: u64,
+    /// The number of most recent epoch checkpoints at whose versions the state store keeps each shard's whole tree.
+    pub pinned_checkpoint_epochs: u64,
     pub state_tree_cleanup_interval: Duration,
     pub epoch_gc_interval: Duration,
     pub epoch_end_grace_period: Duration,

@@ -37,7 +37,7 @@ const publicKey = publicKeyFromSecretKey(secretKey);
 
 ### `hashUnsignedTransaction(unsignedTxJson, sealSignerPublicKey)`
 
-Hash a transaction for an authorization signature. Returns a 64-byte `Uint8Array` that should be passed to `schnorrSign`. The hash excludes attached signatures, so it is the same before and after `attachTransactionSignature`.
+Hash a transaction for an authorization signature. Returns the 64-byte `Uint8Array` an external signer signs (see [External signers](#external-signers-hsm-mpc)). The hash excludes attached signatures, so it is the same before and after `attachTransactionSignature`.
 
 - `unsignedTxJson` — JSON-serialised `UnsignedTransactionV1` or `UnsealedTransactionV1`
 - `sealSignerPublicKey` — raw public key bytes of the account owner (seal signer)
@@ -51,23 +51,41 @@ const hash = hashUnsignedTransaction(
 );
 ```
 
-### `schnorrSign(secretKey, message)`
+### `addTransactionSigner(txJson, signerSecretKey, sealSignerPublicKey)`
 
-Schnorr-sign a message (typically the hash from `hashUnsignedTransaction`).
+Hash the transaction and append an authorization signature by `signerSecretKey`, committing to the seal signer `sealSignerPublicKey`. Accepts unsigned or unsealed transaction JSON and returns the unsealed transaction JSON.
+
+### `sealTransaction(txJson, sealSignerSecretKey)`
+
+Hash the transaction and seal it with `sealSignerSecretKey`. Accepts unsigned or unsealed transaction JSON and returns the sealed `Transaction` JSON. The seal covers every authorization signature, so add them all first.
 
 ```typescript
-import { schnorrSign } from "@tari-project/ootle-wasm";
+import { addTransactionSigner, sealTransaction } from "@tari-project/ootle-wasm";
 
-const { public_nonce, signature } = schnorrSign(secretKey, hash);
-// public_nonce: Uint8Array (32 bytes)
-// signature:    Uint8Array (32 bytes)
+let txJson = JSON.stringify(unsignedTransaction);
+// Optional: authorizations from other keys
+txJson = addTransactionSigner(txJson, authorizerSecretKey, sealSignerPublicKey);
+const transactionJson = sealTransaction(txJson, sealSignerSecretKey);
 ```
+
+These functions sign only messages they hash from the transaction themselves. Signing a hash computed elsewhere is the external-signer path below.
 
 ## External signers (HSM, MPC)
 
-These functions sign a transaction without passing a secret key to the binding. The external signer signs a 64-byte hash and returns a raw 64-byte signature (`R ‖ s`); the binding verifies it and attaches it.
+These functions sign a transaction without passing a secret key to the binding. The external signer signs a 64-byte hash and returns its 64-byte signature; the binding verifies it and attaches it.
 
-The signature must be Ristretto255 Schnorr as produced by `tari_crypto`'s `RistrettoSchnorr`: `R = k·G`, `s = k + e·x`, where `e` is the 64-byte Blake2b digest of the chain `"com.tari.schnorr_signature.v1.challenge" ‖ R ‖ P ‖ hash` (each item prefixed with its length as a little-endian u64), reduced mod ℓ. `R` is a compressed Ristretto point and `s` a canonical little-endian scalar. Ed25519 or sr25519 signatures have the same length but do not verify.
+The signature must be a standard sr25519 (schnorrkel) signature under the default `substrate` signing context, with the sr25519 marker bit set in its last byte. Any sr25519 signer, such as a Polkadot signing library, produces this form. The signer must sign the 64 bytes exactly as given: a signer that hashes, prefixes or wraps the message (for example in `<Bytes>…</Bytes>`) produces a signature that fails verification.
+
+### Key isolation
+
+An Ootle signing key is single-purpose: it signs Ootle transaction messages and nothing else.
+
+Every Ootle authorization is a `substrate`-context sr25519 signature over a 64-byte message. Any path that signs caller-supplied bytes under `substrate` with the same key, such as a "sign message" endpoint, a login or proof-of-ownership challenge, or a raw-signing API another service can call, can be handed an Ootle transaction message, and the signature it returns authorizes that transaction. The network cannot tell such a signature from one your integration produced.
+
+- Give each Ootle account its own key (or derivation path), used by no Substrate chain and no other application.
+- Let only the component that builds Ootle transactions request signatures from that key.
+- Sign only hashes you computed with `hashUnsignedTransaction` or `hashUnsealedTransaction` from a transaction you built or inspected.
+- Sign proofs of ownership and other application messages with a different key.
 
 ### `hashUnsealedTransaction(txJson)`
 
@@ -136,9 +154,7 @@ const derivedPublicKey = publicKeyFromSecretKey(restored);
 ```typescript
 import {
   generateKeypair,
-  publicKeyFromSecretKey,
-  hashUnsignedTransaction,
-  schnorrSign,
+  sealTransaction,
   borEncodeTransaction,
 } from "@tari-project/ootle-wasm";
 
@@ -150,19 +166,13 @@ const unsignedTx = {
   /* ... UnsignedTransactionV1 fields ... */
 };
 
-// 3. Hash for signing
-const hash = hashUnsignedTransaction(JSON.stringify(unsignedTx), public_key);
+// 3. Seal with the account key
+const transactionJson = sealTransaction(JSON.stringify(unsignedTx), secret_key);
 
-// 4. Sign
-const { public_nonce, signature } = schnorrSign(secret_key, hash);
+// 4. BOR-encode
+const envelope = borEncodeTransaction(transactionJson);
 
-// 5. Assemble the signed transaction and BOR-encode
-const signedTx = {
-  /* ... Transaction with signature attached ... */
-};
-const envelope = borEncodeTransaction(JSON.stringify(signedTx));
-
-// 6. Submit envelope to the Ootle network
+// 5. Submit envelope to the Ootle network
 ```
 
 ## License

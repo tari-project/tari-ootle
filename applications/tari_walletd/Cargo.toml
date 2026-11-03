@@ -70,6 +70,7 @@ tokio = { workspace = true, features = [
     "default",
     "rt-multi-thread",
     "macros",
+    "signal",
     "time",
 ] }
 tower-http = { workspace = true, features = ["cors", "trace"] }

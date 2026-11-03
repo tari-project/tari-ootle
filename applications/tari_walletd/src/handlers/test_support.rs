@@ -42,6 +42,7 @@ pub(crate) struct TestDaemon {
     pub session: Bearer,
     /// The daemon's local `.cookie` bearer token (`tc_...`).
     pub cookie: Bearer,
+    _shutdown: Shutdown,
     _temp: tempfile::TempDir,
 }
 
@@ -49,6 +50,16 @@ impl TestDaemon {
     /// A handler context on LocalNet whose indexer is a closed port, so any
     /// handler path that reaches the network fails fast.
     pub async fn start() -> Self {
+        Self::init(false).await
+    }
+
+    /// Like [`Self::start`], with the transaction service left running so
+    /// handlers can submit transactions.
+    pub async fn start_with_transaction_service() -> Self {
+        Self::init(true).await
+    }
+
+    async fn init(run_transaction_service: bool) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let store = SqliteWalletStore::try_open(temp.path().join("wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
@@ -92,18 +103,23 @@ impl TestDaemon {
         )
         .with_cookie_token(Some((cookie_token, cookie_permissions)));
 
-        // Handlers need only the context, so the background workers shut down now.
-        shutdown.trigger();
+        // The other background workers are not needed by handlers, so they stop now.
         drop(account_monitor);
-        drop(transaction_service);
         utxo_worker.abort();
         drop(utxo_worker.await);
+        if run_transaction_service {
+            tokio::spawn(transaction_service.run());
+        } else {
+            shutdown.trigger();
+            drop(transaction_service);
+        }
 
         let session = Self::jwt(&context, "admin", false);
         Self {
             context,
             session,
             cookie,
+            _shutdown: shutdown,
             _temp: temp,
         }
     }

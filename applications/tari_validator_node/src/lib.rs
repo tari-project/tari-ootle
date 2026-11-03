@@ -61,7 +61,7 @@ use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::Shutdown;
 use tokio::task;
 
-pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
+pub use crate::config::{ApplicationConfig, MIN_PINNED_CHECKPOINT_EPOCHS, ValidatorNodeConfig};
 use crate::{
     bootstrap::{Services, spawn_services},
     consensus::spec::ValidatorNodeStateStore,

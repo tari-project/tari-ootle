@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod rpc_impl;
+mod shard_snapshot;
 mod state_sync_task;
 
 /// The status returned to a peer whose request needs consensus in a state this node is not in.

@@ -29,6 +29,7 @@ use tari_ootle_wallet_sdk::{
     network::{
         FetchedSubstates,
         FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedResult,
         TransactionFinalizedStream,
@@ -36,7 +37,7 @@ use tari_ootle_wallet_sdk::{
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
-    storage::{ReadableWalletStore, TagAndPublicNoncePair, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_sdk_services::{account_monitor::AccountScanner, notify::Notify};
 use tari_template_abi::TemplateDef;
@@ -82,6 +83,7 @@ fn account_component_value() -> SubstateValue {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: Default::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::empty(),
     }
@@ -220,7 +222,7 @@ impl WalletNetworkInterface for FixedSubstateNetwork {
         })
     }
 
-    async fn get_substates(&self, _: Vec<SubstateId>, _: bool) -> Result<FetchedSubstates, Self::Error> {
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("FixedSubstateNetwork called")
     }
 
@@ -280,7 +282,7 @@ impl WalletNetworkInterface for FixedSubstateNetwork {
     async fn fetch_utxos(
         &self,
         _resource_address: ResourceAddress,
-        _tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
+        _tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
     ) -> Result<FetchedUtxos, Self::Error> {
         panic!("FixedSubstateNetwork called")
     }

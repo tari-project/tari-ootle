@@ -144,6 +144,7 @@ impl TransactionV1 {
         self.declared_main_signer().is_seal_signer_authorized()
     }
 
+    #[must_use]
     pub fn verify_all_signatures(&self) -> bool {
         // Derived once and shared between the seal and the authorization messages: deriving blob
         // commitments hashes every blob payload.
@@ -418,6 +419,8 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::Assert { .. } => 1,
         Instruction::TakeFromBucket { .. } => 1,
         Instruction::PutIntoBucket { .. } => 1,
+        Instruction::AuthorizeProof { .. } => 1,
+        Instruction::DropProofAuthorization { .. } => 1,
         // The binary's bytes are charged at the transaction-level via `calc_blobs_weight`,
         // uniformly with any other blob references. The instruction itself is a fixed cost.
         Instruction::PublishTemplate { .. } => 1,

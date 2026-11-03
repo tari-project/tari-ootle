@@ -18,7 +18,7 @@ use tari_indexer_client::{
     protobuf,
     types::{GetUtxoUpdatesRequest, UtxoStateUpdateSet, WalletUtxoUpdate},
 };
-use tari_ootle_common_types::{StateVersion, shard::Shard};
+use tari_ootle_common_types::{StateVersion, optional::Optional, shard::Shard};
 
 use crate::{
     rest_api::{encoder::Encoder, error::ErrorResponse, streaming::encoding::MimeTypeEncoder},
@@ -42,6 +42,9 @@ impl UtxoUpdateStream {
         let content_type = encoder.media_type();
         let inner = try_stream! {
             let mut buffer = BytesMut::with_capacity(1024);
+            // Read once before the shard reads. A verified version only rises, and commits with the rows it covers,
+            // so one read earlier than a shard's rows is still covered by them.
+            let sync_progress = store.get_sync_progress().await.optional().map_err(anyhow::Error::from)?;
             for &(shard, state_version) in &request.shard_state_versions {
                 debug!(
                     target: LOG_TARGET,
@@ -63,6 +66,7 @@ impl UtxoUpdateStream {
                         state_version,
                         request.unspent_only,
                         request.per_shard_limit,
+                        sync_progress.as_ref().and_then(|progress| progress.verified_version(shard)),
                     )
                     .await
                     .map_err(anyhow::Error::from)?;
@@ -73,10 +77,10 @@ impl UtxoUpdateStream {
                 // read matched nothing still reports it when the read moved past the cursor, so that
                 // the client does not read the excluded rows again on its next pass.
                 //
-                // A cursor below the tombstone horizon is told to resync whatever the read found, so a
-                // shard with nothing past the cursor still sends its frame.
-                let resync_required = resync_required(request.unspent_only, state_version, tombstone_horizon);
-                if updates.is_empty() && max_state_version <= state_version && !resync_required {
+                // A cursor below the tombstone horizon is told its spends are incomplete whatever the read
+                // found, so a shard with nothing past the cursor still sends its frame.
+                let spends_incomplete = spends_incomplete(request.unspent_only, state_version, tombstone_horizon);
+                if updates.is_empty() && max_state_version <= state_version && !spends_incomplete {
                     debug!(target: LOG_TARGET, "No updates found for shard {}, moving to next shard", shard);
                     continue;
                 }
@@ -92,7 +96,7 @@ impl UtxoUpdateStream {
                     shard,
                     max_state_version,
                     has_more,
-                    resync_required,
+                    spends_incomplete,
                     updates,
                     index: 0,
                 };
@@ -106,7 +110,7 @@ impl UtxoUpdateStream {
                             max_state_version: pending.max_state_version.as_u64(),
                             num_updates: u32::try_from(pending.updates_len()).expect("loaded more than u32::MAX updates"),
                             has_more: pending.has_more,
-                            resync_required: pending.resync_required,
+                            spends_incomplete: pending.spends_incomplete,
                         });
                         pending.sos_emitted = true;
                     }
@@ -172,7 +176,7 @@ struct PendingUpdates {
     pub shard: Shard,
     pub max_state_version: StateVersion,
     pub has_more: bool,
-    pub resync_required: bool,
+    pub spends_incomplete: bool,
     pub updates: Vec<WalletUtxoUpdate>,
     pub index: usize,
 }
@@ -202,7 +206,7 @@ impl PendingUpdates {
 
 /// Whether a read of a shard from `cursor` may be missing spends, which it is when it asks for them and resumes below
 /// the shard's tombstone horizon. A cursor of zero is a full scan, and misses them as much as any other.
-fn resync_required(unspent_only: bool, cursor: StateVersion, tombstone_horizon: Option<StateVersion>) -> bool {
+fn spends_incomplete(unspent_only: bool, cursor: StateVersion, tombstone_horizon: Option<StateVersion>) -> bool {
     !unspent_only && tombstone_horizon.is_some_and(|horizon| cursor < horizon)
 }
 
@@ -267,10 +271,10 @@ mod tests {
     }
 
     /// The shard's head fetch reached v1000 on other substates, far past the resource's newest row at v10. A read
-    /// from below the horizon is told to resync even with nothing past its cursor, and the rescan resumes from the
-    /// horizon, which clears the flag.
+    /// from below the horizon is told its spends are incomplete even with nothing past its cursor, and a read that
+    /// reaches the end of the shard resumes from the horizon, which clears the flag.
     #[tokio::test]
-    async fn a_resync_below_the_tombstone_horizon_resumes_from_above_it() {
+    async fn a_read_below_the_tombstone_horizon_resumes_from_above_it() {
         let (_dir, store) = store_with_utxos(&[(10, 1)]).await;
         store
             .with_write_tx(|tx| tx.raise_utxo_tombstone_horizon(Shard::from(1u32), StateVersion::new(1000)))
@@ -279,12 +283,12 @@ mod tests {
 
         let frames = stream_frames(&store, &[(1, 10)], false).await;
         assert_eq!(frames.len(), 1);
-        assert!(frames[0].resync_required);
+        assert!(frames[0].spends_incomplete);
         assert_eq!(frames[0].num_updates, 0);
 
         let frames = stream_frames(&store, &[(1, 0), (2, 0)], true).await;
         assert_eq!(frames.len(), 1, "the empty shard without a horizon sends nothing");
-        assert!(!frames[0].resync_required);
+        assert!(!frames[0].spends_incomplete);
         assert_eq!(frames[0].num_updates, 1);
         assert_eq!(frames[0].max_state_version, 1000);
 
@@ -292,14 +296,72 @@ mod tests {
         assert!(frames.is_empty(), "{frames:?}");
     }
 
+    /// Another resource's spend in the shard, newer than every row of the client's resource, ages out. A client that
+    /// read to the end of its resource's rows resumes from the shard's verified version, above that spend, so pruning
+    /// it does not flag the client.
+    #[tokio::test]
+    async fn pruning_another_resources_tombstone_does_not_flag_a_caught_up_client() {
+        use std::str::FromStr;
+
+        use tari_ootle_common_types::SubstateVersion;
+        use tari_state_tree::TransitionAccumulator;
+        use tari_template_lib_types::{ResourceAddress, UtxoAddress, UtxoId};
+
+        use crate::{
+            network_state_sync::{SyncProgress, VerifiedShardVersion},
+            storage_sqlite::models::{Key, UtxoSpent, UtxoUpdateRecord},
+        };
+
+        let shard = Shard::from(1u32);
+        let (_dir, store) = store_with_utxos(&[(10, 1)]).await;
+        let other_resource =
+            ResourceAddress::from_str("resource_0101010101010101010101010101010101010101010101010101010101010101")
+                .unwrap();
+        let other_spend = UtxoUpdateRecord::Spent(UtxoSpent {
+            address: UtxoAddress::new(other_resource, UtxoId::from_array([9; 32])),
+            version: SubstateVersion::ZERO,
+            shard,
+            state_version: StateVersion::new(50),
+        });
+        let mut progress = SyncProgress::default();
+        progress.record_verified(shard, VerifiedShardVersion {
+            state_version: StateVersion::new(50),
+            epoch: Epoch(5),
+            transition_acc: TransitionAccumulator::zero(),
+        });
+        store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_utxo_updates(Epoch(5), [other_spend])?;
+                tx.key_value_set(Key::SyncProgress, progress)
+            })
+            .await
+            .unwrap();
+
+        let frames = stream_frames(&store, &[(1, 0)], false).await;
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].num_updates, 1);
+        assert_eq!(
+            frames[0].max_state_version, 50,
+            "the read resumes from the verified version"
+        );
+
+        let num_pruned = store
+            .with_write_tx(|tx| tx.prune_utxo_tombstones_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 1);
+        let frames = stream_frames(&store, &[(1, 50)], false).await;
+        assert!(frames.is_empty(), "the caught-up client is not flagged: {frames:?}");
+    }
+
     #[test]
-    fn a_cursor_below_the_tombstone_horizon_must_resync_when_it_reads_spends() {
+    fn a_cursor_below_the_tombstone_horizon_reads_incomplete_spends() {
         let v = StateVersion::new;
 
-        assert!(resync_required(false, v(0), Some(v(10))));
-        assert!(resync_required(false, v(9), Some(v(10))));
-        assert!(!resync_required(false, v(10), Some(v(10))));
-        assert!(!resync_required(false, v(0), None));
-        assert!(!resync_required(true, v(9), Some(v(10))));
+        assert!(spends_incomplete(false, v(0), Some(v(10))));
+        assert!(spends_incomplete(false, v(9), Some(v(10))));
+        assert!(!spends_incomplete(false, v(10), Some(v(10))));
+        assert!(!spends_incomplete(false, v(0), None));
+        assert!(!spends_incomplete(true, v(9), Some(v(10))));
     }
 }

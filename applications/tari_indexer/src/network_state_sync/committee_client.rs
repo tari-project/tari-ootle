@@ -52,6 +52,22 @@ impl ValidatorCommitteeRpcPool {
         self.random_member_session(SessionKind::Dedicated).await
     }
 
+    /// Excludes `peer` from the members this pool opens sessions with for the rest of the epoch.
+    pub fn mark_failed(&mut self, peer: PeerAddress) {
+        let epoch = self.epoch_manager.get_current_epoch();
+        self.failed_peers.at(epoch).insert(peer);
+    }
+
+    /// The number of members in this pool's shard group at the current epoch.
+    pub async fn committee_size(&self) -> Result<usize, ValidatorCommitteeClientError> {
+        let epoch = self.epoch_manager.get_current_epoch();
+        Ok(self
+            .epoch_manager
+            .get_committee_by_shard_group(epoch, self.shard_group)
+            .await?
+            .len())
+    }
+
     async fn random_member_session(
         &mut self,
         kind: SessionKind,

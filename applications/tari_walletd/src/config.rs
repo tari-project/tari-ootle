@@ -82,9 +82,9 @@ pub struct WalletDaemonConfig {
     /// comma-separated URLs.
     #[serde(rename = "indexer_api_url", deserialize_with = "deserialize_indexer_urls")]
     pub indexer_api_urls: Vec<Url>,
-    /// How far the wallet trusts its indexer. `verify` (the default) commits a transaction's changes only once a proof
-    /// of them verifies against the network's validator sets, and needs indexers that verify substate proofs. `trust`
-    /// takes the indexer at its word, for development only.
+    /// How far the wallet trusts its indexer. `trust` (the default) takes the indexer at its word. `verify` commits a
+    /// transaction's changes only once a proof of them verifies against the network's validator sets, and needs
+    /// indexers that verify substate proofs.
     #[serde(default)]
     pub indexer_trust: IndexerTrust,
     /// Expiration duration of the JWT token

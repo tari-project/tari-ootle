@@ -201,6 +201,12 @@ function summarize(instruction: Instruction, blobs: Blobs | undefined): string {
     const { src, dest } = instruction.PutIntoBucket;
     return `PutIntoBucket(${workspaceId(src)} -> ${workspaceId(dest)})`;
   }
+  if ("AuthorizeProof" in instruction) {
+    return `AuthorizeProof(${workspaceId(instruction.AuthorizeProof.proof)})`;
+  }
+  if ("DropProofAuthorization" in instruction) {
+    return `DropProofAuthorization(${workspaceId(instruction.DropProofAuthorization.proof)})`;
+  }
   return Object.keys(instruction)[0];
 }
 

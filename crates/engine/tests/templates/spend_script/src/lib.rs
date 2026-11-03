@@ -66,6 +66,13 @@ mod spend_scripts {
             assert!(signature.verify(&public_key, SIG_MESSAGE), "invalid spend signature");
         }
 
+        /// Signer lock: authorises only if the spending call carries the badge of `public_key`. A predicate reached
+        /// from a `StealthTransfer` instruction carries the transaction signers' badges; one reached through a
+        /// component's frame carries that component's caller badges instead.
+        pub fn require_signer_badge(public_key: RistrettoPublicKeyBytes, _ctx: SpendContext) {
+            CallerContext::assert_badge_in_scope(&NonFungibleAddress::from_public_key(public_key));
+        }
+
         /// Witness-data lock: authorises only if the spend-supplied witness `data` equals the committed `expected`
         /// bytes. Exercises reading uncommitted witness data (alongside a committed argument) inside a spend script.
         pub fn require_witness_data(expected: Vec<u8>, ctx: SpendContext) {
@@ -75,7 +82,13 @@ mod spend_scripts {
         /// Attempts to mutate ledger state by creating a component. The read-only spend-script sandbox refuses the
         /// underlying `new_substate`/write-lock, so this always aborts the spend.
         pub fn try_write(_ctx: SpendContext) {
-            engine().create_component(0u32, OwnerRule::default(), AccessRules::allow_all(), None);
+            engine().create_component(
+                0u32,
+                OwnerRule::default(),
+                AccessRules::allow_all(),
+                None,
+                UpdateRule::Locked,
+            );
         }
 
         /// Emits an event, which the sandbox permits.
@@ -87,18 +100,6 @@ mod spend_scripts {
         /// always aborts the spend.
         pub fn try_allocate_address(_ctx: SpendContext) {
             let _allocation = CallerContext::allocate_component_address(None);
-        }
-
-        /// Attempts to create a proof of the transaction signer. The read-only sandbox refuses the new proof, so this
-        /// always aborts the spend.
-        pub fn try_get_signer_proof(_ctx: SpendContext) {
-            let _proof = CallerContext::get_main_signer_proof();
-        }
-
-        /// Attempts to create a proof of `component`'s owner. The read-only sandbox refuses the new proof, so this
-        /// always aborts the spend.
-        pub fn try_get_owner_proof(component: ComponentAddress, _ctx: SpendContext) {
-            let _proof = ComponentManager::get(component).get_owner_proof();
         }
 
         /// Attempts to mint `resource`. For a resource that does not track supply the mint writes nothing, and the

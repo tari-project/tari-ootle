@@ -164,6 +164,7 @@ impl PrunedUnsealedTransactionV1 {
     }
 
     /// Verify all extra signatures against the seal signer.
+    #[must_use]
     pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
         if self.signatures.is_empty() {
             return true;
@@ -290,6 +291,7 @@ impl PrunedTransactionV1 {
     }
 
     /// Verify the seal and all extra signatures.
+    #[must_use]
     pub fn verify_all_signatures(&self) -> bool {
         let seal_message = TransactionSealSignature::create_message_v1_pruned(&self.body);
         let authorization_message = TransactionSignature::create_message_v1_pruned(

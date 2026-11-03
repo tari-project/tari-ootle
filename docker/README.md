@@ -82,7 +82,9 @@ variables above win over the config file. One exception: indexer URLs saved over
 On first start the daemon writes a default `config.toml` to `/data/<network>/config/`, creates
 the wallet database at `/data/<network>/data/wallet.sqlite` and generates a new seed. Logs go to
 `/data/<network>/log/` and stdout. Keep `/data` on a persistent volume: losing it loses the
-wallet unless its seed words were backed up.
+wallet unless its seed words were backed up. A backup that copies files one by one must copy
+`wallet.sqlite-wal` and `wallet.sqlite-shm` along with `wallet.sqlite`, as the `-wal` file can
+hold changes not yet written into the database.
 
 The container runs as uid/gid 1000 and never as root, so `/data` must be writable by uid 1000.
 A Docker named volume inherits the image's ownership and works as is. A host bind mount or an

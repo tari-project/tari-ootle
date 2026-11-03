@@ -63,7 +63,7 @@ use tari_ootle_wallet_sdk::{
         WalletTransaction,
         WebauthnRegistrationPasskeyModel,
     },
-    storage::{UtxoProcessQueueBatch, UtxoProcessQueueCursor, WalletStorageError, WalletStoreReader},
+    storage::{QueuedUtxo, UtxoProcessQueueBatch, UtxoProcessQueueCursor, WalletStorageError, WalletStoreReader},
 };
 use tari_template_lib_types::{
     Amount,
@@ -1057,48 +1057,16 @@ impl WalletStoreReader for ReadTransaction<'_> {
         use crate::schema::{accounts, confidential_outputs, vaults};
 
         let rows = confidential_outputs::table
+            .inner_join(vaults::table.on(vaults::id.eq(confidential_outputs::vault_id)))
+            .inner_join(accounts::table.on(accounts::id.eq(confidential_outputs::account_id)))
+            .select((confidential_outputs::all_columns, accounts::address, vaults::address))
             .filter(confidential_outputs::lock_id.eq(lock_id))
-            .get_results::<models::ConfidentialOutput>(self.connection())
+            .get_results::<(models::ConfidentialOutput, String, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        if rows.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let vault_addresses = if rows.is_empty() {
-            HashMap::new()
-        } else {
-            let vec = vaults::table
-                .filter(vaults::id.eq_any(rows.iter().map(|v| v.vault_id)))
-                .select((vaults::id, vaults::address))
-                .get_results::<(i32, String)>(self.connection())
-                .map_err(|e| WalletStorageError::general("outputs_get_locked_by_proof", e))?;
-            vec.into_iter().collect()
-        };
-
-        // account_id should be the same in all rows
-        let account_address = rows
-            .first()
-            .map(|row| {
-                accounts::table
-                    .filter(accounts::id.eq(row.account_id))
-                    .select(accounts::address)
-                    .first::<String>(self.connection())
-                    .map_err(|e| WalletStorageError::general("outputs_get_locked_by_proof", e))
-            })
-            .transpose()?;
-
-        let confidential_outputs = rows
-            .into_iter()
-            .map(|row| {
-                let vault_id = row.vault_id;
-                row.try_into_output(
-                    account_address.as_ref().unwrap(),
-                    vault_addresses.get(&vault_id).unwrap(),
-                )
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(confidential_outputs)
+        rows.into_iter()
+            .map(|(row, account_address, vault_address)| row.try_into_output(&account_address, &vault_address))
+            .collect()
     }
 
     fn confidential_outputs_get_by_commitment(
@@ -1196,7 +1164,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .select(stealth_outputs::value)
             .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
             .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
-            // Burnt outputs keep status = Unspent but their value is destroyed on-chain.
+            // Rows stored before the Burnt status hold a burnt output as Unspent with is_burnt set.
             .filter(stealth_outputs::is_burnt.eq(false))
             .load::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
@@ -1256,7 +1224,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     .assume_not_null()),
             )
             .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
-            // Burnt outputs keep status = Unspent but their value is destroyed on-chain.
+            // Rows stored before the Burnt status hold a burnt output as Unspent with is_burnt set.
             .filter(stealth_outputs::is_burnt.eq(false))
             .into_boxed();
 
@@ -1307,6 +1275,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                         .and(stealth_outputs::lock_id.eq(lock_id))),
             )
             .filter(stealth_outputs::owner_key_id.is_not_null())
+            // Rows stored before the Burnt status hold a burnt output as Unspent with is_burnt set.
             .filter(stealth_outputs::is_burnt.eq(false))
             .filter(stealth_outputs::is_condition_spendable.eq(true))
             .filter(stealth_outputs::is_frozen.eq(false))
@@ -1328,30 +1297,29 @@ impl WalletStoreReader for ReadTransaction<'_> {
         use crate::schema::{accounts, stealth_outputs};
 
         let rows = stealth_outputs::table
+            .inner_join(accounts::table.on(accounts::id.eq(stealth_outputs::owner_account_id)))
+            .select((stealth_outputs::all_columns, accounts::address))
             .filter(stealth_outputs::lock_id.eq(lock_id))
-            .get_results::<models::StealthOutput>(self.connection())
+            .get_results::<(models::StealthOutput, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        // account_id should be the same in all rows
-        let first_row = rows.first().ok_or_else(|| WalletStorageError::NotFound {
-            operation: OPERATION,
-            entity: "stealth_output".to_string(),
-            key: lock_id.to_string(),
-        })?;
-        let account_address = accounts::table
-            .filter(accounts::id.eq(first_row.owner_account_id))
-            .select(accounts::address)
-            .first::<String>(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        let account_address = account_address.parse().map_err(|e| WalletStorageError::DecodingError {
-            operation: OPERATION,
-            item: "account",
-            details: format!("Corrupt db: invalid owner account address '{account_address}': {e}"),
-        })?;
+        if rows.is_empty() {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "stealth_output".to_string(),
+                key: lock_id.to_string(),
+            });
+        }
 
         rows.into_iter()
-            .map(|row| row.try_convert(account_address))
+            .map(|(row, account_address)| {
+                let account_address = account_address.parse().map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "account",
+                    details: format!("Corrupt db: invalid owner account address '{account_address}': {e}"),
+                })?;
+                row.try_convert(account_address)
+            })
             .collect::<Result<_, _>>()
     }
 
@@ -1506,6 +1474,35 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         let rows = query
             .order_by(stealth_outputs::id.desc())
+            .get_results::<(models::StealthOutput, String)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter()
+            .map(|(row, address)| {
+                let address = address.parse().map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "account",
+                    details: format!("Corrupt db: invalid owner account address '{address}': {e}"),
+                })?;
+                row.try_convert(address)
+            })
+            .collect()
+    }
+
+    fn stealth_outputs_get_unproven_held(&mut self) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_unproven_held";
+        use crate::schema::{accounts, stealth_outputs};
+
+        let rows = stealth_outputs::table
+            .inner_join(accounts::table.on(accounts::id.eq(stealth_outputs::owner_account_id)))
+            .select((stealth_outputs::all_columns, accounts::address))
+            .filter(stealth_outputs::status.eq_any([
+                OutputStatus::Unspent.as_key_str(),
+                OutputStatus::LockedForSpend.as_key_str(),
+            ]))
+            .filter(stealth_outputs::is_on_chain.eq(true))
+            .filter(stealth_outputs::proven_version.is_null())
+            .order_by(stealth_outputs::id.asc())
             .get_results::<(models::StealthOutput, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -2007,6 +2004,29 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .get_results::<(models::UtxoProcessQueue, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
+        // Every queued row of the batch's pairs, of any account and in any batch
+        let pair_rows = utxo_process_queue::table
+            .select((
+                utxo_process_queue::resource_address,
+                utxo_process_queue::utxo_tag,
+                utxo_process_queue::public_nonce,
+                utxo_process_queue::shard,
+                utxo_process_queue::state_version,
+            ))
+            .filter(utxo_process_queue::public_nonce.eq_any(rows.iter().map(|(row, _)| &row.public_nonce)))
+            .get_results::<(String, i32, String, Option<i32>, Option<i64>)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        let mut pair_unspent_at = HashMap::<(String, i32, String), Option<(Shard, StateVersion)>>::new();
+        for (resource_address, tag, public_nonce, shard, state_version) in pair_rows {
+            let unspent_at = shard
+                .zip(state_version)
+                .map(|(shard, state_version)| (Shard::from(shard as u32), StateVersion::new(state_version as u64)));
+            pair_unspent_at
+                .entry((resource_address, tag, public_nonce))
+                .and_modify(|merged| *merged = QueuedUtxo::merge_unspent_at(*merged, unspent_at))
+                .or_insert(unspent_at);
+        }
+
         let mut result = HashMap::new();
         for (row, account_addr) in &rows {
             let resource_address =
@@ -2022,10 +2042,17 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 item: "account_address",
                 details: format!("Corrupt db: invalid account address '{}': {}", account_addr, e),
             })?;
+            let unspent_at = pair_unspent_at
+                .get(&(row.resource_address.clone(), row.utxo_tag, row.public_nonce.clone()))
+                .copied()
+                .flatten();
             result
                 .entry(resource_address)
                 .or_insert_with(HashMap::new)
-                .insert((tag, public_nonce), account_addr);
+                .insert((tag, public_nonce), QueuedUtxo {
+                    account: account_addr,
+                    unspent_at,
+                });
         }
 
         Ok(UtxoProcessQueueBatch {
@@ -2229,12 +2256,11 @@ impl Drop for ReadTransaction<'_> {
 
 #[cfg(test)]
 mod tests {
-    use tari_ootle_wallet_sdk::storage::{
-        CommittableStore,
-        ReadableWalletStore,
-        WalletStoreWriter,
-        WriteableWalletStore,
+    use tari_ootle_wallet_sdk::{
+        models::KeyId,
+        storage::{CommittableStore, ReadableWalletStore, WalletStoreWriter, WriteableWalletStore},
     };
+    use tari_template_lib_types::{EncryptedData, stealth::SpendAuthorization};
 
     use super::*;
     use crate::SqliteWalletStore;
@@ -2332,5 +2358,209 @@ mod tests {
             assert_eq!(list[0].id, id2);
             assert_eq!(list[0].label, "YubiKey 5C");
         }
+    }
+
+    fn locked_stealth_output(
+        owner_account: ComponentAddress,
+        resource_address: ResourceAddress,
+        commitment_byte: u8,
+        key_ids: (KeyId, Option<KeyId>),
+        lock_id: WalletLockId,
+    ) -> StealthOutputModel {
+        let (view_only_key_id, owner_key_id) = key_ids;
+        StealthOutputModel {
+            owner_account,
+            resource_address,
+            commitment: PedersenCommitmentBytes::from_array([commitment_byte; 32]),
+            value: 100,
+            sender_public_nonce: RistrettoPublicKeyBytes::default(),
+            view_only_key_id,
+            owner_key_id,
+            encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+            tag_byte: UtxoTag::new(0),
+            memo: None,
+            auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
+            minimum_value_promise: 0,
+            status: OutputStatus::LockedForSpend,
+            is_burnt: false,
+            is_frozen: false,
+            is_on_chain: true,
+            is_condition_spendable: true,
+            lock_id: Some(lock_id),
+            proven_up: None,
+            spent_version: None,
+        }
+    }
+
+    fn locked_confidential_output(
+        account_address: ComponentAddress,
+        vault_id: VaultId,
+        commitment_byte: u8,
+        key_ids: (KeyId, Option<KeyId>),
+        lock_id: WalletLockId,
+    ) -> ConfidentialOutputModel {
+        let (view_only_key_id, owner_key_id) = key_ids;
+        ConfidentialOutputModel {
+            account_address,
+            vault_id,
+            commitment: PedersenCommitmentBytes::from_array([commitment_byte; 32]),
+            value: Amount::from(100u64),
+            sender_public_nonce: None,
+            view_only_key_id,
+            owner_key_id,
+            encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+            public_asset_tag: None,
+            memo: None,
+            status: OutputStatus::LockedForSpend,
+            lock_id: Some(lock_id),
+        }
+    }
+
+    #[test]
+    fn get_locked_by_lock_id_preserves_each_outputs_account_across_multiple_accounts() {
+        use std::collections::HashSet;
+
+        use tari_ootle_common_types::{Epoch, SubstateVersion};
+        use tari_ootle_wallet_sdk::models::{KeyBranch, LockOwner};
+        use tari_template_lib_types::{ObjectKey, ResourceType};
+
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        let acct_a = ComponentAddress::from_array([1u8; 32]);
+        let acct_b = ComponentAddress::from_array([2u8; 32]);
+        let vault_a = VaultId::new([10u8; 32].into());
+        let vault_b = VaultId::new([20u8; 32].into());
+        let resource = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
+        let view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
+        let owner_key = Some(KeyId::derived(KeyBranch::Account, 0));
+
+        let lock_id = {
+            let mut tx = store.create_write_tx().unwrap();
+            for (name, addr, vault, owner_pk) in [("a", acct_a, vault_a, 1u8), ("b", acct_b, vault_b, 2u8)] {
+                tx.accounts_insert(
+                    Some(name),
+                    &addr,
+                    view_key,
+                    owner_key,
+                    &RistrettoPublicKeyBytes::from([owner_pk; 32]),
+                    &HashSet::new(),
+                    Epoch(0),
+                    true,
+                    false,
+                )
+                .unwrap();
+                tx.vaults_insert(VaultModel {
+                    account_address: addr,
+                    id: vault,
+                    vault_version: SubstateVersion::new(0),
+                    resource_address: resource,
+                    resource_type: ResourceType::Confidential,
+                    revealed_balance: Amount::ZERO,
+                    locked_revealed_balance: Amount::ZERO,
+                    confidential_balance: Amount::ZERO,
+                    token_symbol: None,
+                    divisibility: 0,
+                })
+                .unwrap();
+            }
+            let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+            for (byte, addr, vault) in [(1u8, acct_a, vault_a), (2u8, acct_b, vault_b)] {
+                tx.stealth_outputs_insert(&locked_stealth_output(
+                    addr,
+                    resource,
+                    byte,
+                    (view_key, owner_key),
+                    lock_id,
+                ))
+                .unwrap();
+                tx.confidential_outputs_insert(locked_confidential_output(
+                    addr,
+                    vault,
+                    byte + 10,
+                    (view_key, owner_key),
+                    lock_id,
+                ))
+                .unwrap();
+            }
+            tx.commit().unwrap();
+            lock_id
+        };
+
+        let mut tx = store.create_read_tx().unwrap();
+        let stealth = tx.stealth_outputs_get_locked_by_lock_id(lock_id).unwrap();
+        let stealth_by_commitment = stealth
+            .into_iter()
+            .map(|o| (o.commitment, o.owner_account))
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            stealth_by_commitment,
+            HashSet::from([
+                (PedersenCommitmentBytes::from_array([1u8; 32]), acct_a),
+                (PedersenCommitmentBytes::from_array([2u8; 32]), acct_b),
+            ])
+        );
+
+        let confidential = tx.confidential_outputs_get_locked_by_lock_id(lock_id).unwrap();
+        let confidential_by_commitment = confidential
+            .into_iter()
+            .map(|o| (o.commitment, o.account_address))
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            confidential_by_commitment,
+            HashSet::from([
+                (PedersenCommitmentBytes::from_array([11u8; 32]), acct_a),
+                (PedersenCommitmentBytes::from_array([12u8; 32]), acct_b),
+            ])
+        );
+    }
+
+    #[test]
+    fn webauthn_reg_clear_all_removes_all_passkeys_and_preserves_api_keys() {
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.webauthn_reg_insert(
+                "owner".to_string(),
+                "Primary".to_string(),
+                sample_passkey("AAECAwQFBgcICQoLDA0ODw"),
+            )
+            .unwrap();
+            tx.api_key_insert("automation", "deadbeef", "admin", None).unwrap();
+            tx.commit().unwrap();
+        }
+
+        {
+            let mut tx = store.create_read_tx().unwrap();
+            assert!(tx.webauthn_has_any_registration().unwrap());
+            assert_eq!(tx.webauthn_reg_fetch_all_passkeys().unwrap().len(), 1);
+            assert!(tx.api_key_find_active_by_hash("deadbeef").unwrap().is_some());
+        }
+
+        let deleted = store.with_write_tx(|tx| tx.webauthn_reg_clear_all()).unwrap();
+        assert_eq!(deleted, 1);
+
+        {
+            let mut tx = store.create_read_tx().unwrap();
+            assert!(!tx.webauthn_has_any_registration().unwrap());
+            assert!(tx.webauthn_reg_fetch_all_passkeys().unwrap().is_empty());
+            // API keys are preserved across passkey resets.
+            assert!(tx.api_key_find_active_by_hash("deadbeef").unwrap().is_some());
+        }
+
+        // After reset, a new initial registration under the same username succeeds.
+        store
+            .with_write_tx(|tx| {
+                tx.webauthn_reg_insert(
+                    "owner".to_string(),
+                    "Primary".to_string(),
+                    sample_passkey("AAECAwQFBgcICQoLDA0ODw"),
+                )
+            })
+            .unwrap();
+        let mut tx = store.create_read_tx().unwrap();
+        assert!(tx.webauthn_has_any_registration().unwrap());
     }
 }

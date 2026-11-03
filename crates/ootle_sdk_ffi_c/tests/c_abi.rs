@@ -42,8 +42,14 @@ use ootle_sdk_ffi_c::{
     ootle_build_stealth_unsigned_with_seed,
     ootle_build_unsigned,
     ootle_build_unsigned_instructions,
+    ootle_decode_event,
+    ootle_decode_execute_result,
+    ootle_decode_resource,
     ootle_decode_stealth_utxo,
     ootle_decode_substate,
+    ootle_decode_substate_value,
+    ootle_decode_transaction_receipt,
+    ootle_decode_utxo,
     ootle_derive_account_address,
     ootle_derive_account_key_from_seed,
     ootle_derive_view_key_from_seed,
@@ -1266,7 +1272,7 @@ fn stealth_send_args(fx: &serde_json::Value) -> StealthSendArgs {
 /// declares both as wants (the fee + any revealed input draw on the account), so a test must serve
 /// them before a transfer resolves. The addresses match the stealth fixtures (`component_aa..` /
 /// `resource_01..`, vault `vault_cc..`); the JSON was captured from the core's looped-resolution helpers.
-const ACCOUNT_SUBSTATES_JSON: &str = r#"[{"substate_id":"component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","substate_value":{"Component":{"body":{"state":[{"@cbor":"tag","tag":132,"value":{"@cbor":"bytes","hex":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}]},"header":{"access_rules":{"default":"DenyAll","method_access":{}},"entity_id":"00","owner_rule":"None","template_address":"0000000000000000000000000000000000000000000000000000000000000000"}}},"version":0},{"substate_id":"vault_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","substate_value":{"Vault":{"freeze_flags":0,"resource_container":{"Fungible":{"address":"resource_0101010101010101010101010101010101010101010101010101010101010101","amount":"1000000","locked_amount":"0"}}}},"version":0}]"#;
+const ACCOUNT_SUBSTATES_JSON: &str = r#"[{"substate_id":"component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","substate_value":{"Component":{"body":{"state":[{"@cbor":"tag","tag":132,"value":{"@cbor":"bytes","hex":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}]},"header":{"access_rules":{"default":"DenyAll","method_access":{}},"entity_id":"00","owner_rule":"None","template_address":"0000000000000000000000000000000000000000000000000000000000000000","upgrade_rule":"Locked"}}},"version":0},{"substate_id":"vault_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","substate_value":{"Vault":{"freeze_flags":0,"resource_container":{"Fungible":{"address":"resource_0101010101010101010101010101010101010101010101010101010101010101","amount":"1000000","locked_amount":"0"}}}},"version":0}]"#;
 
 /// The from-account component + vault batch alone (no stealth UTXO) — resolves the account wants while
 /// any required stealth UTXO stays unsupplied (drives the missing-UTXO error path).
@@ -1754,6 +1760,181 @@ fn decode_substate_round_trips() {
     let r = unsafe { ootle_decode_substate(std::ptr::null()) };
     assert!(!ok(&r) && error_code(&r) == "INVALID");
     unsafe { ootle_result_free(r) };
+}
+
+/// `ootle_decode_event` turns the indexer's base64 CBOR event (a `/transactions/events/stream` message's `event`) into
+/// the engine `Event`'s JSON; a value of another type ⇒ PARSE; bad JSON ⇒ PARSE; null arg ⇒ INVALID.
+#[test]
+fn decode_event_round_trips() {
+    use tari_engine_types::{encoded::Encoded, events::Event};
+
+    let event = Event::new(
+        None,
+        Default::default(),
+        "std.vault.deposit".to_string(),
+        [("amount", "100".to_string())].into_iter().collect(),
+    );
+    let served = serde_json::to_string(&Encoded::encode(&event).unwrap()).unwrap();
+    let event_json = CArg::new(&served);
+
+    let result = unsafe { ootle_decode_event(event_json.ptr()) };
+    assert!(ok(&result), "decode failed: {}", error_code(&result));
+    assert!(result.handle.is_null(), "decode is stateless — no handle");
+    let decoded = data_json(&result);
+    assert_eq!(decoded, serde_json::to_value(&event).unwrap());
+    assert_eq!(decoded["topic"], "std.vault.deposit");
+    unsafe { ootle_result_free(result) };
+
+    // A served value of another type ⇒ PARSE.
+    let r = unsafe { ootle_decode_execute_result(event_json.ptr()) };
+    assert!(!ok(&r) && error_code(&r) == "PARSE");
+    unsafe { ootle_result_free(r) };
+
+    // Bad JSON ⇒ PARSE.
+    let bad = CArg::new("{ not json");
+    let r = unsafe { ootle_decode_event(bad.ptr()) };
+    assert!(!ok(&r) && error_code(&r) == "PARSE");
+    unsafe { ootle_result_free(r) };
+
+    // Null arg ⇒ INVALID.
+    let r = unsafe { ootle_decode_event(std::ptr::null()) };
+    assert!(!ok(&r) && error_code(&r) == "INVALID");
+    unsafe { ootle_result_free(r) };
+}
+
+type FfiDecode = unsafe extern "C" fn(*const c_char) -> OotleResult;
+type WasmDecode = fn(&str) -> Result<String, ootle_wasm_core::error::OotleWasmError>;
+
+/// `value` as the indexer serves it: its CBOR encoding in base64.
+fn base64_of<T: tari_bor::Encode<()>>(value: &T) -> String {
+    serde_json::to_value(tari_engine_types::encoded::Encoded::encode(value).unwrap())
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// One served value per full decoder, as `(what, base64, C ABI decoder, ootle-wasm-bor decoder)`.
+fn served_decode_cases() -> [(&'static str, String, FfiDecode, WasmDecode); 6] {
+    use std::time::Duration;
+
+    use ootle_network::Network;
+    use tari_engine_types::{
+        Epoch,
+        Utxo,
+        commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
+        events::Event,
+        fees::FeeReceipt,
+        resource::Resource,
+        resource_container::ResourceContainer,
+        substate::{SubstateDiff, SubstateValue},
+        transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
+        vault::Vault,
+    };
+    use tari_template_lib_types::{Hash32, ResourceType, SubstateOwnerRule, constants::TARI_TOKEN};
+
+    let event = Event::new(
+        None,
+        Default::default(),
+        "std.vault.deposit".to_string(),
+        [("amount", "100".to_string())].into_iter().collect(),
+    );
+    let substate_value = SubstateValue::Vault(Vault::new(ResourceContainer::public_fungible(TARI_TOKEN, 100u64)));
+    let execute_result = ExecuteResult {
+        finalize: FinalizeResult::new(
+            Hash32::from_array([7; 32]),
+            vec![],
+            vec![],
+            TransactionResult::Accept(SubstateDiff::new()),
+            FeeReceipt::default(),
+        ),
+        execution_time: Duration::from_secs(1),
+        execute_epoch: None,
+        wasm_execution_points: 3,
+        native_execution_points: 4,
+    };
+    let receipt = TransactionReceipt {
+        outcome: FinalizeOutcome::Commit,
+        diff_summary: DiffSummary::from_diff(Network::LocalNet, &SubstateDiff::new(), Epoch(5)),
+        fee_withdrawals: Box::new([]),
+        events: Box::new([event.clone()]),
+        fee_receipt: FeeReceipt::default(),
+        epoch: Epoch(5),
+        intent_commitment: Hash32::from_array([3; 32]),
+    };
+    let resource = Resource::new(
+        ResourceType::Fungible,
+        SubstateOwnerRule::None,
+        Default::default(),
+        Default::default(),
+        None,
+        None,
+        6,
+        true,
+    );
+    let utxo = Utxo {
+        output: None,
+        is_frozen: true,
+    };
+
+    [
+        (
+            "event",
+            base64_of(&event),
+            ootle_decode_event,
+            ootle_wasm_core::encoded::decode_event_json,
+        ),
+        (
+            "substate value",
+            base64_of(&substate_value),
+            ootle_decode_substate_value,
+            ootle_wasm_core::encoded::decode_substate_value_json,
+        ),
+        (
+            "execute result",
+            base64_of(&execute_result),
+            ootle_decode_execute_result,
+            ootle_wasm_core::encoded::decode_execute_result_json,
+        ),
+        (
+            "transaction receipt",
+            base64_of(&receipt),
+            ootle_decode_transaction_receipt,
+            ootle_wasm_core::encoded::decode_transaction_receipt_json,
+        ),
+        (
+            "resource",
+            base64_of(&resource),
+            ootle_decode_resource,
+            ootle_wasm_core::encoded::decode_resource_json,
+        ),
+        (
+            "UTXO",
+            base64_of(&utxo),
+            ootle_decode_utxo,
+            ootle_wasm_core::encoded::decode_utxo_json,
+        ),
+    ]
+}
+
+/// Each full decoder turns a served value (a JSON base64 CBOR string) into the same JSON `ootle-wasm-bor` returns for
+/// it, and rejects the bare base64.
+#[test]
+fn encoded_decoders_match_wasm_bor() {
+    for (what, base64, ffi_decode, wasm_decode) in served_decode_cases() {
+        let served = CArg::new(&serde_json::Value::String(base64.clone()).to_string());
+        let result = unsafe { ffi_decode(served.ptr()) };
+        assert!(ok(&result), "{what}: decode failed: {}", error_code(&result));
+        assert!(result.handle.is_null(), "{what}: decode is stateless — no handle");
+        let wasm_json: serde_json::Value = serde_json::from_str(&wasm_decode(&base64).unwrap()).unwrap();
+        assert_eq!(data_json(&result), wasm_json, "{what}: matches ootle-wasm-bor");
+        unsafe { ootle_result_free(result) };
+
+        let bare = CArg::new(&base64);
+        let r = unsafe { ffi_decode(bare.ptr()) };
+        assert!(!ok(&r) && error_code(&r) == "PARSE", "{what}: bare base64 ⇒ PARSE");
+        unsafe { ootle_result_free(r) };
+    }
 }
 
 /// `ootle_account_balances` over the committed account-balances vector reproduces the per-resource

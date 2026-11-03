@@ -88,3 +88,40 @@ impl QueryCf for ByStateTreeStaleShardVersionQuery {
     type Key = (Shard, Version);
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
 }
+
+prefixed!(
+    StateTreeDeferredStaleNodesPrefix,
+    KeyPrefix::StateTreeDeferredStaleNodes
+);
+
+/// Stale nodes the tree at a pinned version holds, keyed by `(shard, pinned version, version they went stale at)`.
+/// They are deleted once that version is no longer pinned.
+pub struct StateTreeDeferredStaleNodesCf;
+
+impl Cf for StateTreeDeferredStaleNodesCf {
+    type Key = (Shard, Version, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>, NumberCodec<Version>);
+    type Prefix = StateTreeDeferredStaleNodesPrefix;
+    type Value = Vec<StaleTreeNode>;
+    type ValueCodec = StaleTreeNodesCodec;
+
+    fn name() -> &'static str {
+        cf_names::STATE_TREE
+    }
+}
+
+pub struct ByDeferredStaleShardQuery;
+
+impl QueryCf for ByDeferredStaleShardQuery {
+    type Cf = StateTreeDeferredStaleNodesCf;
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
+}
+
+pub struct ByDeferredStaleShardPinQuery;
+
+impl QueryCf for ByDeferredStaleShardPinQuery {
+    type Cf = StateTreeDeferredStaleNodesCf;
+    type Key = (Shard, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
+}

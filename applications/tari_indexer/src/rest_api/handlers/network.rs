@@ -3,7 +3,7 @@
 
 use std::{
     ops::Deref,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{Extension, Json, response::Response};
@@ -18,7 +18,20 @@ use tari_indexer_client::{
         GetNetworkSyncStateResponse,
         NetworkDescription,
         ScheduledBurnRate,
+        ShardGroupSyncPhase,
+        ShardGroupSyncStatus,
+        ShardLevel,
+        ShardMismatch,
+        ShardObservedLeaf,
+        ShardSnapshotProgress,
+        ShardSyncState,
+        ShardSyncStatus,
+        ShardVersionAt,
+        SyncActivityBucket,
+        SyncBlame,
+        SyncObservedTip,
         SyncProgress,
+        SyncStoredCheckpoint,
         ValidatorConsensusState,
         ValidatorProbeError,
         ValidatorProbeErrorKind,
@@ -26,12 +39,12 @@ use tari_indexer_client::{
         ValidatorStatusSnapshot,
     },
 };
-use tari_ootle_common_types::optional::Optional;
+use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, optional::Optional, shard::Shard};
 use tari_template_lib_types::Amount;
 
 use crate::{
     exhaust_burn_rate::resolve_burn_rate_outlook,
-    network_state_sync::ProbeFailure,
+    network_state_sync::{self, ACTIVITY_BUCKET, GroupPhase, ProbeFailure, SyncStatus},
     rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult},
 };
 
@@ -138,6 +151,39 @@ pub async fn get_network_sync_stats(
         })
         .collect();
 
+    let now = SystemTime::now();
+    let status = context.sync_status().snapshot();
+    let max_serve_lag = context.published_config().substate_cache_max_serve_lag;
+    let shard_groups = network_desc.shard_groups_iter().collect::<Vec<_>>();
+    let progress = sync_progress.clone().unwrap_or_default();
+    let shards = shard_groups
+        .iter()
+        .enumerate()
+        .flat_map(|(i, shard_group)| {
+            (i == 0)
+                .then_some(Shard::global())
+                .into_iter()
+                .chain(shard_group.shard_iter())
+                .map(|shard| (*shard_group, shard))
+        })
+        .map(|(shard_group, shard)| {
+            to_shard_sync_status(
+                shard,
+                shard_group,
+                &status,
+                &progress,
+                context.shard_watermarks().confirmed(shard),
+                max_serve_lag,
+                now,
+            )
+        })
+        .collect();
+    let shard_group_statuses = shard_groups
+        .iter()
+        .enumerate()
+        .map(|(i, shard_group)| to_shard_group_sync_status(*shard_group, i == 0, network_desc.epoch(), &status, now))
+        .collect();
+
     let response = GetNetworkSyncStateResponse {
         network_desc: NetworkDescription {
             epoch: network_desc.epoch,
@@ -154,8 +200,179 @@ pub async fn get_network_sync_stats(
             last_state_versions: p.last_state_versions.into_iter().collect(),
         }),
         validators,
+        shard_groups: shard_group_statuses,
+        shards,
+        activity_bucket_secs: ACTIVITY_BUCKET.as_secs(),
     };
     Ok(Json(response))
+}
+
+fn to_shard_group_sync_status(
+    shard_group: ShardGroup,
+    syncs_global_shard: bool,
+    epoch: Epoch,
+    status: &SyncStatus,
+    now: SystemTime,
+) -> ShardGroupSyncStatus {
+    let group = status.groups.get(&shard_group);
+    let mut activity = network_state_sync::ActivityWindow::default()
+        .buckets(now)
+        .into_iter()
+        .map(|bucket| SyncActivityBucket {
+            start_unix_s: bucket.start,
+            versions: 0,
+            transactions: 0,
+        })
+        .collect::<Vec<_>>();
+    let shards = syncs_global_shard
+        .then_some(Shard::global())
+        .into_iter()
+        .chain(shard_group.shard_iter())
+        .filter_map(|shard| status.shards.get(&shard));
+    for shard in shards {
+        for (total, bucket) in activity.iter_mut().zip(shard.promoted.buckets(now)) {
+            total.versions += bucket.versions;
+            total.transactions += bucket.transactions;
+        }
+    }
+
+    ShardGroupSyncStatus {
+        shard_group,
+        phase: group
+            .map(|group| to_client_phase(group.phase))
+            .unwrap_or(ShardGroupSyncPhase::Starting),
+        phase_since_unix_s: group.map(|group| to_unix_secs(group.phase_since)).unwrap_or_default(),
+        stream_peer: group.and_then(|group| group.stream_peer).map(|peer| peer.to_string()),
+        blames: group
+            .map(|group| {
+                group
+                    .blamed
+                    .iter()
+                    .map(|blame| SyncBlame {
+                        peer_ids: blame.peers.iter().map(|peer| peer.to_string()).collect(),
+                        epoch: blame.epoch,
+                        at_unix_s: to_unix_secs(blame.at),
+                        details: blame.details.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        excluded_peers: group
+            .filter(|group| group.excluded.0 == epoch)
+            .map(|group| group.excluded.1.iter().map(|peer| peer.to_string()).collect())
+            .unwrap_or_default(),
+        tip: group.and_then(|group| group.tip).map(|tip| SyncObservedTip {
+            epoch: tip.epoch,
+            height: tip.height.as_u64(),
+            observed_at_unix_s: to_unix_secs(tip.observed_at),
+        }),
+        last_checkpoint: group
+            .and_then(|group| group.last_checkpoint)
+            .map(|(epoch, stored_at)| SyncStoredCheckpoint {
+                epoch,
+                stored_at_unix_s: to_unix_secs(stored_at),
+            }),
+        activity,
+    }
+}
+
+fn to_client_phase(phase: GroupPhase) -> ShardGroupSyncPhase {
+    match phase {
+        GroupPhase::Starting => ShardGroupSyncPhase::Starting,
+        GroupPhase::SyncingCheckpoints => ShardGroupSyncPhase::SyncingCheckpoints,
+        GroupPhase::Snapshotting { shard } => ShardGroupSyncPhase::Snapshotting { shard },
+        GroupPhase::Streaming => ShardGroupSyncPhase::Streaming,
+        GroupPhase::Paused { reason, until } => ShardGroupSyncPhase::Paused {
+            reason: reason.to_string(),
+            until_unix_s: to_unix_secs(until),
+        },
+        GroupPhase::Halted { shard, from } => ShardGroupSyncPhase::Halted {
+            shard,
+            from_version: from,
+        },
+    }
+}
+
+fn to_shard_sync_status(
+    shard: Shard,
+    shard_group: ShardGroup,
+    status: &SyncStatus,
+    progress: &network_state_sync::SyncProgress,
+    level: Option<(StateVersion, Duration)>,
+    max_serve_lag: Duration,
+    now: SystemTime,
+) -> ShardSyncStatus {
+    let record = status.shards.get(&shard);
+    let halted = status
+        .groups
+        .get(&shard_group)
+        .is_some_and(|group| matches!(group.phase, GroupPhase::Halted { .. }));
+    let snapshot = record.and_then(|record| record.snapshot);
+    let verified = progress.verified.get(&shard).map(|verified| ShardVersionAt {
+        state_version: verified.state_version,
+        epoch: verified.epoch,
+    });
+    let staged = progress
+        .last_state_versions
+        .get(&shard)
+        .map(|(state_version, epoch)| ShardVersionAt {
+            state_version: *state_version,
+            epoch: *epoch,
+        });
+    let state = shard_sync_state(
+        halted,
+        snapshot.is_some(),
+        verified.is_some() || staged.is_some(),
+        level.is_some_and(|(_, age)| age <= max_serve_lag),
+    );
+    ShardSyncStatus {
+        shard,
+        state,
+        verified,
+        staged,
+        tip_leaf: record
+            .and_then(|record| record.tip_leaf)
+            .map(|(state_version, observed_at)| ShardObservedLeaf {
+                state_version,
+                observed_at_unix_s: to_unix_secs(observed_at),
+            }),
+        level: level.map(|(state_version, age)| ShardLevel {
+            state_version,
+            confirmed_secs_ago: age.as_secs(),
+        }),
+        last_promoted_at_unix_s: record.and_then(|record| record.last_promoted_at).map(to_unix_secs),
+        versions_last_minute: record
+            .map(|record| record.promoted.versions_within(now, Duration::from_secs(60)))
+            .unwrap_or_default(),
+        last_mismatch: record
+            .and_then(|record| record.last_mismatch.as_ref())
+            .map(|(at, details)| ShardMismatch {
+                at_unix_s: to_unix_secs(*at),
+                details: details.clone(),
+            }),
+        snapshot: snapshot.map(|snapshot| ShardSnapshotProgress {
+            state_version: snapshot.state_version,
+            substates: snapshot.substates as u64,
+            fraction: snapshot.key_fraction,
+            started_at_unix_s: to_unix_secs(snapshot.started_at),
+        }),
+    }
+}
+
+/// A shard is following while the stream's last finding that it is level with its committee is recent enough for the
+/// substate cache to serve it, which it confirms only once every version up to that level is promoted.
+fn shard_sync_state(halted: bool, snapshotting: bool, started: bool, level_is_fresh: bool) -> ShardSyncState {
+    if halted {
+        ShardSyncState::Halted
+    } else if snapshotting {
+        ShardSyncState::Snapshotting
+    } else if !started {
+        ShardSyncState::Waiting
+    } else if level_is_fresh {
+        ShardSyncState::Following
+    } else {
+        ShardSyncState::CatchingUp
+    }
 }
 
 fn to_client_probe_error(failure: ProbeFailure) -> ValidatorProbeError {
@@ -217,4 +434,33 @@ pub async fn get_connections(Extension(context): Extension<HandlerContext>) -> H
         .collect();
 
     Ok(context.apply_cache_control(Json(GetConnectionsResponse { connections }), 10))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_halted_group_halts_every_shard_state() {
+        assert_eq!(shard_sync_state(true, true, true, true), ShardSyncState::Halted);
+    }
+
+    #[test]
+    fn a_snapshot_outranks_progress() {
+        assert_eq!(
+            shard_sync_state(false, true, false, false),
+            ShardSyncState::Snapshotting
+        );
+    }
+
+    #[test]
+    fn a_shard_with_nothing_staged_is_waiting() {
+        assert_eq!(shard_sync_state(false, false, false, true), ShardSyncState::Waiting);
+    }
+
+    #[test]
+    fn a_shard_follows_only_while_its_level_is_fresh() {
+        assert_eq!(shard_sync_state(false, false, true, true), ShardSyncState::Following);
+        assert_eq!(shard_sync_state(false, false, true, false), ShardSyncState::CatchingUp);
+    }
 }

@@ -37,7 +37,6 @@ use tari_ootle_common_types::{
     ValidatorSetHash,
     VersionedSubstateId,
     VersionedSubstateIdRef,
-    committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
     shard::Shard,
@@ -276,22 +275,6 @@ impl Block {
 
     pub fn all_transaction_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {
         self.commands.iter().filter_map(|d| d.transaction().map(|t| t.id()))
-    }
-
-    pub fn all_transaction_ids_in_committee<'a>(
-        &'a self,
-        committee_info: &'a CommitteeInfo,
-    ) -> impl Iterator<Item = &'a TransactionId> + Clone + 'a {
-        self.commands
-            .iter()
-            .filter_map(|cmd| cmd.transaction())
-            .filter(|t| {
-                t.evidence()
-                    .map_or(self.shard_group() == committee_info.shard_group(), |evidence| {
-                        evidence.has_and_not_empty(&committee_info.shard_group())
-                    })
-            })
-            .map(|t| t.id())
     }
 
     pub fn all_committing_transactions_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {

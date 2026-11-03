@@ -4,10 +4,10 @@
 use tari_common_types::seeds::cipher_seed::CipherSeed;
 use tari_crypto::{
     keys::PublicKey,
-    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_common_types::signature::SignatureOutput;
-use tari_ootle_transaction::Signable;
+use tari_ootle_transaction::{Signable, TRANSACTION_SIGNING_CONTEXT};
 use tari_ootle_wallet_crypto::derive_ristretto_key;
 
 use crate::models::DerivedKeyIndex;
@@ -27,8 +27,7 @@ pub trait WalletKeyStore {
         message: &M,
     ) -> Result<SignatureOutput, Self::Error> {
         let secret = self.derive_secret(key_branch, index)?;
-        let signature = RistrettoSchnorr::sign(&secret, message.to_signing_message(context), &mut rand::rng())
-            .expect("RistrettoSchnorr::sign is infallible as it internally hashes the message into canonical form");
+        let signature = TRANSACTION_SIGNING_CONTEXT.sign(&secret, &message.to_signing_message(context));
         Ok(SignatureOutput {
             signature,
             public_key: RistrettoPublicKey::from_secret_key(&secret),

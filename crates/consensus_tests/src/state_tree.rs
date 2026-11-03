@@ -22,6 +22,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     StorageError,
     consensus_models::{
         Block,
@@ -330,7 +331,10 @@ async fn committed_state_versions_stay_provable_after_their_blocks_are_pruned() 
     // Far enough past epoch 1 that every retention window has passed.
     store.with_write_tx(|tx| tx.epoch_cleanup(Epoch(100))).unwrap();
     store
-        .with_write_tx(|tx| tx.state_tree_nodes_clear_stale(TEST_NUM_PRESHARDS, usize::MAX))
+        .with_write_tx(|tx| {
+            let retention = StateTreeRetention::read(&**tx, TEST_NUM_PRESHARDS, 0)?;
+            tx.state_tree_nodes_clear_stale(&retention, usize::MAX)
+        })
         .unwrap();
 
     store

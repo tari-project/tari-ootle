@@ -19,11 +19,16 @@ use url::Url;
 
 const LOG_TARGET: &str = "tari::ootle::app_utilities::epoch_oracle_config";
 
-/// The base layer height MainNet nodes scan from. A burn is claimable only if its block is at or above this height,
-/// so it must not be raised once burns intended for MainNet exist below it.
+/// The base layer height MainNet nodes scan from. Burns in blocks at or above it are claimable, and so are burns up
+/// to `base_layer_confirmations` blocks below it, because scanning starts that much earlier.
+///
+/// Every node's set of base layer headers starts here and resumes from its saved scan position, so the value is fixed
+/// once MainNet runs. Changing it in either direction makes fresh and existing nodes disagree on which burns are
+/// claimable, and with it on the state root, unless every node resyncs.
 pub const MAINNET_START_HEIGHT: u64 = 380_400;
 
-/// The MainNet validator set for the hybrid oracle.
+/// The MainNet validator set for the hybrid oracle. Existing entries are fixed once MainNet runs, for the same reason
+/// as [`MAINNET_START_HEIGHT`]. A claim key rotates through the validator's `claim_key_changes`.
 const MAINNET_ORACLE_CONFIG_JSON: &str = include_str!("mainnet_epoch_oracle.json");
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

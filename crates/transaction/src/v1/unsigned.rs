@@ -13,7 +13,6 @@ use tari_template_lib_types::{
     ComponentAddress,
     UtxoAddress,
     crypto::RistrettoPublicKeyBytes,
-    stealth::AtomicCondition,
 };
 
 use crate::{
@@ -269,17 +268,7 @@ impl UnsignedTransactionV1 {
                                 .map(SubstateId::Utxo),
                         );
                     }
-                    for arg in statement
-                        .stealth_inputs()
-                        .iter()
-                        .filter_map(|i| i.witness.as_script_path())
-                        .flat_map(|(leaf, _, _)| leaf.conditions())
-                        .filter_map(|c| match c {
-                            AtomicCondition::TemplateFunction(tf) => Some(&tf.args),
-                            _ => None,
-                        })
-                        .flatten()
-                    {
+                    for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }

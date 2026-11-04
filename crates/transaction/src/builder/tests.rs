@@ -361,8 +361,8 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
     use tari_template_lib_types::{
         Amount,
         ObjectKey,
+        ResourceAddress,
         UtxoAddress,
-        constants::TARI_TOKEN,
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
         stealth::{
             MerkleProof,
@@ -396,28 +396,39 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
     };
 
     let secret = RistrettoSecretKey::random(&mut rand::rng());
+    let custom_resource = ResourceAddress::new(ObjectKey::from_array([0x77; 32]));
     let transaction = Transaction::builder_localnet(Epoch(1))
         .with_auto_fill_inputs()
-        .stealth_transfer(TARI_TOKEN, statement)
+        .stealth_transfer(custom_resource, statement.clone())
+        .put_last_instruction_output_on_workspace("revealed_bucket")
+        .assert_bucket_contains_any("revealed_bucket", custom_resource)
         .build_and_seal(&secret);
 
-    let inputs = transaction
-        .inputs()
-        .iter()
-        .map(|input| input.substate_id().clone())
-        .collect::<HashSet<_>>();
-    assert_eq!(inputs, HashSet::from([SubstateId::from(bound_component)]));
+    let bound_decl = transaction.inputs().get(&SubstateId::from(bound_component)).unwrap();
+    assert!(!bound_decl.is_write(), "spend-script bound args run in a ReadOnly frame");
+    let res_decl = transaction.inputs().get(&SubstateId::Resource(custom_resource)).unwrap();
+    assert!(!res_decl.is_write(), "stealth transfer + bucket assert must stay a read");
 
     let referenced = transaction.to_referenced_substates().unwrap();
     let expected = HashSet::from([
-        SubstateId::Resource(TARI_TOKEN),
-        SubstateId::Utxo(UtxoAddress::new(TARI_TOKEN, commitment.into())),
+        SubstateId::Resource(custom_resource),
+        SubstateId::Utxo(UtxoAddress::new(custom_resource, commitment.into())),
         SubstateId::from(bound_component),
     ]);
     assert_eq!(referenced, expected);
     assert_eq!(
         transaction.referenced_templates_iter().copied().collect::<Vec<_>>(),
         vec![script_template]
+    );
+
+    let workspace_tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .allocate_resource_address("res")
+        .stealth_transfer("res", statement)
+        .build_and_seal(&secret);
+    assert_eq!(
+        workspace_tx.to_referenced_substates().unwrap(),
+        HashSet::from([SubstateId::from(bound_component)]),
     );
 }
 

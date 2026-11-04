@@ -29,7 +29,7 @@ use tari_template_lib_types::{
     access_rules::ComponentAccessRules,
     constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
-    stealth::{AtomicCondition, StealthTransferStatement},
+    stealth::StealthTransferStatement,
 };
 
 use crate::{
@@ -996,14 +996,15 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    fn add_inputs_for_raw_arg(&mut self, bytes: &[u8]) {
+    fn add_inputs_for_raw_arg<F>(&mut self, bytes: &[u8], make_declaration: F)
+    where F: FnMut(SubstateId) -> InputDeclaration {
         if let Ok(indexed) = IndexedValue::from_raw(bytes) {
             declare_inputs(
                 self.unsigned_transaction.inputs_mut(),
                 indexed
                     .referenced_substates()
                     .filter(SubstateId::is_declarable_input)
-                    .map(InputDeclaration::write),
+                    .map(make_declaration),
             );
         }
     }
@@ -1011,7 +1012,7 @@ impl<D> TransactionBuilder<D> {
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
             if let Some(bytes) = arg.as_literal_bytes() {
-                self.add_inputs_for_raw_arg(bytes);
+                self.add_inputs_for_raw_arg(bytes, InputDeclaration::write);
             }
         }
     }
@@ -1038,18 +1039,8 @@ impl<D> TransactionBuilder<D> {
                 // on-chain substate input. This means the user will have to manually add them as inputs as required.
 
                 self.add_input_for_resource_ref(resource_address_ref);
-                for arg in statement
-                    .stealth_inputs()
-                    .iter()
-                    .filter_map(|i| i.witness.as_script_path())
-                    .flat_map(|(leaf, _, _)| leaf.conditions())
-                    .filter_map(|c| match c {
-                        AtomicCondition::TemplateFunction(tf) => Some(&tf.args),
-                        _ => None,
-                    })
-                    .flatten()
-                {
-                    self.add_inputs_for_raw_arg(arg);
+                for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
+                    self.add_inputs_for_raw_arg(arg, InputDeclaration::read);
                 }
             },
             Instruction::ClaimValidatorFees { address, .. } => {
@@ -1062,7 +1053,10 @@ impl<D> TransactionBuilder<D> {
                 ..
             } => {
                 if *resource_address != TARI_TOKEN {
-                    declare_input(self.unsigned_transaction.inputs_mut(), (*resource_address).into());
+                    declare_input(
+                        self.unsigned_transaction.inputs_mut(),
+                        InputDeclaration::read(*resource_address),
+                    );
                 }
             },
             Instruction::UpdateComponentTemplate { component, migrate, .. } => {

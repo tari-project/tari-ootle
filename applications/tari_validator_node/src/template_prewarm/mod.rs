@@ -274,8 +274,6 @@ fn templates_for<'a>(
     instruction: &'a Instruction,
     instantiated: &'a HashMap<ComponentAddress, TemplateAddress>,
 ) -> impl Iterator<Item = TemplateAddress> + 'a {
-    // `update_component_template` loads the template replacing the component's, and never the
-    // one it replaces.
     let referenced = instruction.referenced_templates().copied();
     let from_component = called_component(instruction)
         .and_then(|component| instantiated.get(&component))

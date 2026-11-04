@@ -211,6 +211,39 @@ fn rejects_a_malformed_template_def_section() {
     let err = validation_error(&code);
     assert!(err.contains("inconsistent"), "unexpected error: {err}");
 
+    // A length prefix that stops short of the section, leaving trailing bytes after it.
+    let code = wat::parse_str(format!(
+        r#"
+        (module
+          (memory (export "memory") 1)
+          {ABI_EXPORTS}
+          (@custom "tari_tdef" "\05\00\00\00\80\00")
+        )
+        "#
+    ))
+    .unwrap();
+    let err = validation_error(&code);
+    assert!(err.contains("inconsistent"), "unexpected error: {err}");
+
+    // A prefix matching the section over a valid `TemplateDef` followed by a trailing CBOR item.
+    let mut section = TEMPLATE_DEF.to_vec();
+    section.push(0x00);
+    let full_len = u32::try_from(section.len()).unwrap();
+    section[..4].copy_from_slice(&full_len.to_le_bytes());
+    let code = wat::parse_str(format!(
+        r#"
+        (module
+          (memory (export "memory") 1)
+          {ABI_EXPORTS}
+          (@custom "tari_tdef" "{}")
+        )
+        "#,
+        wat_bytes(&section)
+    ))
+    .unwrap();
+    let err = validation_error(&code);
+    assert!(err.contains("decode template definition"), "unexpected error: {err}");
+
     // A well-formed prefix over a payload that is not a `TemplateDef`.
     let code = wat::parse_str(format!(
         r#"

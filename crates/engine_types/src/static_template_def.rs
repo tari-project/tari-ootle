@@ -42,8 +42,8 @@ pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateD
 
 /// Decode a `[u32 LE: full_len] || [bor bytes]` blob (the format produced by
 /// `TemplateDef::encode_for_wasm_embedding`). `full_len` is the total length
-/// including the 4-byte prefix itself; the bor payload occupies
-/// `blob[4..full_len]`.
+/// including the 4-byte prefix itself, and must equal `blob.len()`. The bor
+/// payload `blob[4..]` must decode as exactly one `TemplateDef` item.
 fn decode_template_def_from_blob(blob: &[u8]) -> Result<TemplateDef, ExtractTemplateDefError> {
     if blob.len() < WASM_PTR_SIZE {
         return Err(ExtractTemplateDefError::SectionTooShort { len: blob.len() });

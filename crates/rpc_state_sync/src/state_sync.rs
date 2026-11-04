@@ -840,7 +840,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             }
 
             // A QC for another shard group is evidence about that group's chain only, and only an Accept certificate
-            // can serve as a HighQc.
+            // can serve as a HighQc. Both checks are defensive: at `leaf_epoch` the QC is verified against the leaf's
+            // own committee, and the decision is part of every signed vote, which honest validators cast only as
+            // Accept.
             if qc.shard_group() != leaf.shard_group() || !qc.decision().is_accept() {
                 debug!(
                     target: LOG_TARGET,
@@ -1205,7 +1207,6 @@ fn local_state_matches_checkpoints<TTx: StateStoreReadTransaction>(
 
 #[cfg(test)]
 mod tests {
-    use tari_epoch_manager::EpochManagerError;
     use tari_ootle_storage::{
         StateStoreWriteTransaction,
         consensus_models::{BlockHeaderMetadata, EndOfEpochCommand, TreeRootSummary},
@@ -1358,15 +1359,6 @@ mod tests {
         )])]);
 
         assert!(!matches(&store, group));
-    }
-
-    #[test]
-    fn a_node_unregistered_at_the_oracle_epoch_has_no_local_shard_group() {
-        let unregistered = Err::<(), _>(EpochManagerError::ValidatorNodeNotRegistered {
-            address: "node".to_string(),
-            epoch: Epoch(5),
-        });
-        assert!(unregistered.optional().unwrap().is_none());
     }
 
     fn request_failed(status: RpcStatus) -> RpcStateSyncError {

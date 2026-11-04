@@ -340,6 +340,8 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
     /// - the QC certifies another shard group's chain, or this node has no shard group in the QC's epoch;
     /// - the QC is empty / justifies the zero block (no signatures to verify, so unforgeability doesn't hold — must not
     ///   promote on this);
+    /// - the QC carries a Reject decision (defensive: the decision is part of every signed vote, which honest
+    ///   validators cast only as Accept);
     /// - signature verification fails (likely spam or a malicious peer trying to wedge us into sync mode — drop
     ///   silently and buffer normally).
     async fn probe_future_epoch_qc(

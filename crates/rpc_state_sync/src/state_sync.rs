@@ -1788,6 +1788,10 @@ mod tests {
         shard_group: ShardGroup,
     }
 
+    type EmError = tari_epoch_manager::EpochManagerError;
+    type VnRecord = tari_ootle_storage::global::models::ValidatorNode<PeerAddress>;
+    type LocalCommitteeInfo = tari_ootle_common_types::committee::CommitteeInfo;
+
     impl EpochManagerReader for RegisteredFromEpoch {
         type Addr = PeerAddress;
 
@@ -1795,15 +1799,11 @@ mod tests {
             unimplemented!()
         }
 
-        async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), tari_epoch_manager::EpochManagerError> {
+        async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EmError> {
             unimplemented!()
         }
 
-        async fn get_all_validator_nodes(
-            &self,
-            _epoch: Epoch,
-        ) -> Result<Vec<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>>, tari_epoch_manager::EpochManagerError>
-        {
+        async fn get_all_validator_nodes(&self, _epoch: Epoch) -> Result<Vec<VnRecord>, EmError> {
             unimplemented!()
         }
 
@@ -1811,7 +1811,7 @@ mod tests {
             &self,
             _epoch: Epoch,
             _address: &Self::Addr,
-        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<LocalCommitteeInfo, EmError> {
             unimplemented!()
         }
 
@@ -1819,7 +1819,7 @@ mod tests {
             &self,
             _epoch: Epoch,
             _substate_address: tari_ootle_common_types::SubstateAddress,
-        ) -> Result<std::sync::Arc<Committee<Self::Addr>>, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<std::sync::Arc<Committee<Self::Addr>>, EmError> {
             unimplemented!()
         }
 
@@ -1827,30 +1827,22 @@ mod tests {
             &self,
             _epoch: Epoch,
             _public_key: RistrettoPublicKeyBytes,
-        ) -> Result<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>, tari_epoch_manager::EpochManagerError>
-        {
+        ) -> Result<VnRecord, EmError> {
             unimplemented!()
         }
 
-        async fn get_our_validator_node(
-            &self,
-            _epoch: Epoch,
-        ) -> Result<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>, tari_epoch_manager::EpochManagerError>
-        {
+        async fn get_our_validator_node(&self, _epoch: Epoch) -> Result<VnRecord, EmError> {
             unimplemented!()
         }
 
-        async fn get_local_committee_info(
-            &self,
-            epoch: Epoch,
-        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+        async fn get_local_committee_info(&self, epoch: Epoch) -> Result<LocalCommitteeInfo, EmError> {
             if epoch < self.registered_from {
-                return Err(tari_epoch_manager::EpochManagerError::ValidatorNodeNotRegistered {
+                return Err(EmError::ValidatorNodeNotRegistered {
                     address: RistrettoPublicKeyBytes::default().to_string(),
                     epoch,
                 });
             }
-            Ok(tari_ootle_common_types::committee::CommitteeInfo::new(
+            Ok(LocalCommitteeInfo::new(
                 NumPreshards::P256,
                 1,
                 1,
@@ -1863,7 +1855,7 @@ mod tests {
             &self,
             _epoch: Epoch,
             _shard_group: ShardGroup,
-        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<LocalCommitteeInfo, EmError> {
             unimplemented!()
         }
 
@@ -1871,26 +1863,26 @@ mod tests {
             &self,
             _epoch: Epoch,
             _shard: tari_ootle_common_types::SubstateAddress,
-        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<LocalCommitteeInfo, EmError> {
             unimplemented!()
         }
 
-        async fn current_epoch(&self) -> Result<Epoch, tari_epoch_manager::EpochManagerError> {
+        async fn current_epoch(&self) -> Result<Epoch, EmError> {
             unimplemented!()
         }
 
-        async fn get_current_epoch_hash(&self) -> Result<FixedHash, tari_epoch_manager::EpochManagerError> {
+        async fn get_current_epoch_hash(&self) -> Result<FixedHash, EmError> {
             unimplemented!()
         }
 
-        async fn get_epoch_hash(&self, _epoch: Epoch) -> Result<FixedHash, tari_epoch_manager::EpochManagerError> {
+        async fn get_epoch_hash(&self, _epoch: Epoch) -> Result<FixedHash, EmError> {
             unimplemented!()
         }
 
         async fn get_validator_set_hash(
             &self,
             _epoch: Epoch,
-        ) -> Result<tari_ootle_common_types::ValidatorSetHash, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<tari_ootle_common_types::ValidatorSetHash, EmError> {
             unimplemented!()
         }
 
@@ -1898,11 +1890,11 @@ mod tests {
             &self,
             _epoch: Epoch,
             _shard_group: ShardGroup,
-        ) -> Result<tari_state_tree::ValidatorSetCommitteeProof, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<tari_state_tree::ValidatorSetCommitteeProof, EmError> {
             unimplemented!()
         }
 
-        async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, tari_epoch_manager::EpochManagerError> {
+        async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, EmError> {
             unimplemented!()
         }
 
@@ -1910,7 +1902,7 @@ mod tests {
             &self,
             _epoch: Epoch,
             _shards: ShardGroup,
-        ) -> Result<std::sync::Arc<Committee<Self::Addr>>, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<std::sync::Arc<Committee<Self::Addr>>, EmError> {
             unimplemented!()
         }
 
@@ -1918,7 +1910,7 @@ mod tests {
             &self,
             _epoch: Epoch,
             _shard_group: ShardGroup,
-        ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, tari_epoch_manager::EpochManagerError> {
+        ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EmError> {
             unimplemented!()
         }
 
@@ -1927,23 +1919,19 @@ mod tests {
             _epoch: Epoch,
             _shard_group: Option<ShardGroup>,
             _excluding: HashSet<Self::Addr>,
-        ) -> Result<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>, tari_epoch_manager::EpochManagerError>
-        {
+        ) -> Result<VnRecord, EmError> {
             unimplemented!()
         }
 
-        async fn lock_epoch(&self, _epoch: Epoch) -> Result<(), tari_epoch_manager::EpochManagerError> {
+        async fn lock_epoch(&self, _epoch: Epoch) -> Result<(), EmError> {
             unimplemented!()
         }
 
-        async fn get_observed_epoch_hash(
-            &self,
-            _epoch: Epoch,
-        ) -> Result<Option<FixedHash>, tari_epoch_manager::EpochManagerError> {
+        async fn get_observed_epoch_hash(&self, _epoch: Epoch) -> Result<Option<FixedHash>, EmError> {
             unimplemented!()
         }
 
-        async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, tari_epoch_manager::EpochManagerError> {
+        async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EmError> {
             unimplemented!()
         }
     }

@@ -21,7 +21,7 @@ const LOG_TARGET: &str = "tari::ootle::app_utilities::epoch_oracle_config";
 
 /// The base layer height MainNet nodes scan from. A burn is claimable only if its block is at or above this height,
 /// so it must not be raised once burns intended for MainNet exist below it.
-pub const MAINNET_START_HEIGHT: u64 = 369_878;
+pub const MAINNET_START_HEIGHT: u64 = 380_400;
 
 /// The MainNet validator set for the hybrid oracle.
 const MAINNET_ORACLE_CONFIG_JSON: &str = include_str!("mainnet_epoch_oracle.json");

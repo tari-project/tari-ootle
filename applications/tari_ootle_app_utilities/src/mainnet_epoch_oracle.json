@@ -7,37 +7,37 @@
             "public_key": "764ad1b1f2a10186ebf5bd708dc6f2d414b08b183bf7c379d3bc0d8ea5e0d110",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 36908
+            "registration_epoch": 37960
         },
         {
             "public_key": "f013327f2480056719ed695f18af7064944a364a9f6793e69d7c275803c9e404",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 36908
+            "registration_epoch": 37960
         },
         {
             "public_key": "40c17290ffff420ecc4a85af4c45027778ea86f0435c3952641fd96d5761ca73",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 36908
+            "registration_epoch": 37960
         },
         {
             "public_key": "b4ec2e200317f6a26dfc7b8721e45dae26629f14ac76b1f950d8608ef152f475",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 36908
+            "registration_epoch": 37960
         },
         {
             "public_key": "6cb876ec9cdc6dfc938c217b57579e10ec9e13da991a1a2ed829feac582b0710",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 36908
+            "registration_epoch": 37960
         },
         {
             "public_key": "601facbf3e3a56f286df795e381b9382dd1f3cc3fe6b2378b9eef8b53308692b",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 36908
+            "registration_epoch": 37960
         }
     ]
 }

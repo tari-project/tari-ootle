@@ -238,7 +238,7 @@ pub async fn handle_reject(
     token: Option<&Bearer>,
     req: TransactionRequestDecisionRequest,
 ) -> Result<TransactionRequestDecisionResponse, anyhow::Error> {
-    context.authorize(token, &[Permission::TransactionRequests(TxRequestAction::Approve)])?;
+    context.authorize_user_only(token, &[Permission::TransactionRequests(TxRequestAction::Approve)])?;
 
     // An approved-but-unsubmitted request is still cancellable: approval is a
     // decision, not a commitment, and without this the only way out is letting
@@ -671,6 +671,15 @@ mod tests {
         let delegated = daemon.delegated_session("admin");
         let err = approve(&delegated).await.unwrap_err();
         assert!(err.to_string().contains("interactive user session"), "{err}");
+
+        for caller in [&api_key, &admin_key, &delegated] {
+            let err = handle_reject(&daemon.context, Some(caller), TransactionRequestDecisionRequest {
+                request_id,
+            })
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("interactive user session"), "{err}");
+        }
 
         assert_eq!(status_of(&daemon, request_id), TransactionRequestStatus::Pending);
 

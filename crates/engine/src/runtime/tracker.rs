@@ -37,7 +37,7 @@ use tari_engine_types::{
     limits,
     lock::LockFlag,
     logs::LogEntry,
-    substate::{Substate, SubstateId, SubstateValue},
+    substate::{Substate, SubstateId},
     transaction_receipt::FinalizeOutcome,
     virtual_substate::VirtualSubstates,
 };
@@ -376,10 +376,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 });
             }
 
-            let indexed = IndexedWellKnownTypes::from_value(&component.body.state)?;
-            state.validate_component_state(None, &indexed)?;
-
-            state.new_substate(substate_id.clone(), SubstateValue::Component(component))?;
+            state.new_component_substate(component_address, component)?;
 
             state.push_event(Event::std(
                 Some(substate_id),

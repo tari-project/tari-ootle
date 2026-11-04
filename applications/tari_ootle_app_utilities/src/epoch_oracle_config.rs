@@ -19,8 +19,9 @@ use url::Url;
 
 const LOG_TARGET: &str = "tari::ootle::app_utilities::epoch_oracle_config";
 
-/// The base layer height MainNet nodes scan from. Burns in blocks at or above it are claimable, and so are burns up
-/// to `base_layer_confirmations` blocks below it, because scanning starts that much earlier.
+/// The base layer height MainNet nodes scan from. Burns in blocks at or above it are claimable, and so are burns in
+/// the `base_layer_confirmations - 1` blocks below it, because scanning starts at
+/// `start_height - base_layer_confirmations + 1`.
 ///
 /// Every node's set of base layer headers starts here and resumes from its saved scan position, so the value is fixed
 /// once MainNet runs. Changing it in either direction makes fresh and existing nodes disagree on which burns are

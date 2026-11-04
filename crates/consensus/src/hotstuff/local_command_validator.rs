@@ -6,7 +6,7 @@ use std::num::NonZeroU64;
 use log::*;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::commit_result::{AbortReason, RejectReason};
+use tari_engine_types::commit_result::RejectReason;
 use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
@@ -509,30 +509,7 @@ where
                     tx_rec.is_fee_intent_only(),
                 )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-                // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all
-                // inputs as Write due to lack of information. We now know what locks are necessary, and this
-                // block has the correct evidence so this should be fine.
-                tx_rec.update_from_execution(
-                    local_committee_info.num_preshards(),
-                    local_committee_info.num_committees(),
-                    &locked.execution,
-                );
                 if let Some(err) = locked.lock_status.failures().first() {
-                    if atom.decision.is_commit() {
-                        // If we disagree with any local decision we abstain from voting
-                        warn!(
-                            target: LOG_TARGET,
-                            "❌ NO VOTE LocalAccept: Lock failure: {} but leader decided COMMIT for tx {} in block {}. Leader proposed COMMIT, we decided ABORT",
-                            err,
-                            tx_rec.id(),
-                            block,
-                        );
-                        return Ok(Some(NoVoteReason::DecisionDisagreement {
-                            local: Decision::Abort(AbortReason::LockOutputsFailed),
-                            remote: Decision::Commit,
-                        }));
-                    }
-
                     info!(
                         target: LOG_TARGET,
                         "⚠️ Failed to lock outputs for transaction {} in block {}. Error: {}",
@@ -545,24 +522,26 @@ where
                         &transaction_id,
                         RejectReason::FailedToLockOutputs(err.to_string()),
                     );
-
-                    tx_rec
-                        .set_local_decision(execution.decision())
-                        .set_transaction_fee(0)
-                        .set_exhaust_burn(0)
-                        .no_leader_fee()
-                        .set_next_stage_and_readiness(TransactionPoolStage::LocalAccepted, block.shard_group())?;
-
-                    proposed_block_change_set
-                        .add_transaction_execution(*tx_rec.id(), execution)?
-                        .set_next_transaction_update(tx_rec)?;
-
-                    return Ok(None);
+                    tx_rec.update_from_execution(
+                        local_committee_info.num_preshards(),
+                        local_committee_info.num_committees(),
+                        &execution,
+                    );
+                    execution
+                } else {
+                    // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all
+                    // inputs as Write due to lack of information. We now know what locks are necessary, and this
+                    // block has the correct evidence so this should be fine.
+                    tx_rec.update_from_execution(
+                        local_committee_info.num_preshards(),
+                        local_committee_info.num_committees(),
+                        &locked.execution,
+                    );
+                    if locked.fee_intent_only {
+                        tx_rec.set_fee_intent_only(true);
+                    }
+                    locked.execution
                 }
-                if locked.fee_intent_only {
-                    tx_rec.set_fee_intent_only(true);
-                }
-                locked.execution
             } else {
                 tx_rec.update_from_execution(
                     local_committee_info.num_preshards(),
@@ -600,6 +579,21 @@ where
             if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "LocalAccept") {
                 return Ok(Some(reason));
             }
+        }
+
+        if tx_rec.current_decision() != atom.decision {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE LocalAccept: decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
+                tx_rec.id(),
+                block,
+                atom.decision,
+                tx_rec.current_decision(),
+            );
+            return Ok(Some(NoVoteReason::DecisionDisagreement {
+                local: tx_rec.current_decision(),
+                remote: atom.decision,
+            }));
         }
 
         if let Some(reason) = fee_intent_only_disagreement(tx_rec.is_fee_intent_only(), atom) {

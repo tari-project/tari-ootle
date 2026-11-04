@@ -133,7 +133,7 @@ use tari_template_lib::{
         access_rules::{
             AccessRule,
             ComponentAccessRules,
-            InvalidMOfN,
+            InvalidAccessRule,
             RequireRule,
             ResourceAuthAction,
             RestrictedAccessRule,
@@ -1501,8 +1501,8 @@ where
                             .to_string(),
                     });
                 }
-                reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
-                reject_invalid_m_of_n("owner_rule", owner_rule_m_of_n(&owner_rule))?;
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
+                reject_invalid_rule("owner_rule", find_invalid_owner_rule(&owner_rule))?;
                 // A component owner rule is only ever evaluated with the component's own frame on top, so
                 // `component(..)`/`template(..)` would be constant (true for the component's own address).
                 if let OwnerRule::ByAccessRule(rule) = &owner_rule &&
@@ -1523,7 +1523,7 @@ where
                             reason: "component(..)/template(..) cannot be used in a component upgrade rule".to_string(),
                         });
                     }
-                    reject_invalid_m_of_n("upgrade_rule", rule.find_invalid_m_of_n())?;
+                    reject_invalid_rule("upgrade_rule", rule.find_invalid_rule())?;
                 }
 
                 let owner_rule = match owner_rule {
@@ -1647,7 +1647,7 @@ where
                             .to_string(),
                     });
                 }
-                reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
 
                 self.tracker.write_with_authorization(|state| {
                     let component_lock = state
@@ -1702,7 +1702,7 @@ where
                     });
                 }
                 if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule {
-                    reject_invalid_m_of_n("owner_rule", rule.find_invalid_m_of_n())?;
+                    reject_invalid_rule("owner_rule", rule.find_invalid_rule())?;
                 }
 
                 self.tracker.write_with_authorization(|state| {
@@ -1829,8 +1829,8 @@ where
 
                 Self::check_metadata_values("metadata", &arg.metadata)?;
                 Self::check_token_symbol(&arg.metadata)?;
-                reject_invalid_m_of_n("resource_access_rules", arg.access_rules.find_invalid_m_of_n())?;
-                reject_invalid_m_of_n("resource_owner_rule", owner_rule_m_of_n(&arg.owner_rule))?;
+                reject_invalid_rule("resource_access_rules", arg.access_rules.find_invalid_rule())?;
+                reject_invalid_rule("resource_owner_rule", find_invalid_owner_rule(&arg.owner_rule))?;
 
                 let owner_rule = match arg.owner_rule {
                     OwnerRule::OwnedBySigner => {
@@ -2180,7 +2180,7 @@ where
                             reason: "UpdateAccessRule resource action requires a resource address".to_string(),
                         })?;
                 let UpdateAccessRuleArg { action, new_rule } = args.assert_one_arg()?;
-                reject_invalid_m_of_n("new_rule", new_rule.find_invalid_m_of_n())?;
+                reject_invalid_rule("new_rule", new_rule.find_invalid_rule())?;
 
                 let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
@@ -4635,9 +4635,17 @@ where
     }
 }
 
-fn reject_invalid_m_of_n(argument: &'static str, invalid: Option<InvalidMOfN>) -> Result<(), RuntimeError> {
+fn reject_invalid_rule(argument: &'static str, invalid: Option<InvalidAccessRule>) -> Result<(), RuntimeError> {
     match invalid {
-        Some(InvalidMOfN::ThresholdOutOfRange {
+        Some(InvalidAccessRule::EmptyAnyOf) => Err(RuntimeError::EmptyAccessRuleComposite {
+            argument,
+            composite: "any_of",
+        }),
+        Some(InvalidAccessRule::EmptyAllOf) => Err(RuntimeError::EmptyAccessRuleComposite {
+            argument,
+            composite: "all_of",
+        }),
+        Some(InvalidAccessRule::ThresholdOutOfRange {
             threshold,
             num_requirements,
         }) => Err(RuntimeError::InvalidMOfNThreshold {
@@ -4645,16 +4653,16 @@ fn reject_invalid_m_of_n(argument: &'static str, invalid: Option<InvalidMOfN>) -
             threshold,
             num_requirements,
         }),
-        Some(InvalidMOfN::DuplicateRequirement { requirement }) => {
+        Some(InvalidAccessRule::DuplicateRequirement { requirement }) => {
             Err(RuntimeError::DuplicateMOfNRequirement { argument, requirement })
         },
         None => Ok(()),
     }
 }
 
-fn owner_rule_m_of_n(owner_rule: &OwnerRule) -> Option<InvalidMOfN> {
+fn find_invalid_owner_rule(owner_rule: &OwnerRule) -> Option<InvalidAccessRule> {
     match owner_rule {
-        OwnerRule::ByAccessRule(rule) => rule.find_invalid_m_of_n(),
+        OwnerRule::ByAccessRule(rule) => rule.find_invalid_rule(),
         OwnerRule::OwnedBySigner | OwnerRule::None | OwnerRule::ByPublicKey(_) => None,
     }
 }

@@ -538,7 +538,7 @@ mod component_owner_rule {
     }
 }
 
-mod m_of_n_threshold {
+mod invalid_rule_shape {
     use tari_template_lib::types::{NonFungibleAddress, SubstateOwnerRule, crypto::RistrettoPublicKeyBytes};
 
     use super::*;
@@ -692,6 +692,106 @@ mod m_of_n_threshold {
             argument: "owner_rule",
             requirement: RuleRequirement::NonFungibleAddress(badge),
         });
+    }
+
+    fn empty_composite(argument: &'static str, composite: &'static str) -> RuntimeError {
+        RuntimeError::EmptyAccessRuleComposite { argument, composite }
+    }
+
+    fn empty_any_of() -> AccessRule {
+        AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([])))
+    }
+
+    fn empty_require_all_of() -> AccessRule {
+        AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::AllOf(Box::new([]))))
+    }
+
+    /// An `any_of` that the signer satisfies through its first branch, but whose second branch lists nothing.
+    fn satisfiable_with_a_nested_empty_all_of(badge: &NonFungibleAddress) -> AccessRule {
+        AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([
+            RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::NonFungibleAddress(badge.clone()))),
+            RestrictedAccessRule::AllOf(Box::new([])),
+        ])))
+    }
+
+    #[test]
+    fn creating_a_component_or_resource_with_an_empty_composite_is_rejected() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let badge = signer_badge(&test);
+
+        let component_rule = create_component(
+            &test,
+            OwnerRule::OwnedBySigner,
+            ComponentAccessRules::new().default(empty_any_of()),
+            ResourceAccessRules::new(),
+        );
+        let resource_rule = create_component(
+            &test,
+            OwnerRule::OwnedBySigner,
+            ComponentAccessRules::new(),
+            ResourceAccessRules::new().burnable(empty_require_all_of(), UpdateRule::Owner),
+        );
+        let resource_owner_rule = create_component(
+            &test,
+            OwnerRule::ByAccessRule(satisfiable_with_a_nested_empty_all_of(&badge)),
+            ComponentAccessRules::new(),
+            ResourceAccessRules::new(),
+        );
+        let component_owner_rule = Transaction::builder_localnet(Epoch(1))
+            .call_function(
+                test.get_template_address("AccessRulesTest"),
+                "with_component_owner_rule",
+                args![OwnerRule::ByAccessRule(empty_any_of())],
+            )
+            .build_and_seal(test.secret_key());
+
+        let reason = test.execute_expect_failure(component_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("access_rules", "any_of"));
+        let reason = test.execute_expect_failure(resource_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("resource_access_rules", "all_of"));
+        let reason = test.execute_expect_failure(resource_owner_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("resource_owner_rule", "all_of"));
+        let reason = test.execute_expect_failure(component_owner_rule, vec![badge]);
+        assert_reject_reason(reason, empty_composite("owner_rule", "any_of"));
+    }
+
+    #[test]
+    fn changing_a_rule_to_an_empty_composite_is_rejected() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let badge = signer_badge(&test);
+        test.execute_expect_success(
+            create_component(
+                &test,
+                OwnerRule::OwnedBySigner,
+                ComponentAccessRules::new().default(AccessRule::AllowAll),
+                ResourceAccessRules::new().mintable(AccessRule::DenyAll, UpdateRule::Owner),
+            ),
+            vec![badge.clone()],
+        );
+        let component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+        let call = |method: &str, args| {
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component, method, args)
+                .build_and_seal(test.secret_key())
+        };
+        let set_owner_rule = call("set_component_owner_rule", args![SubstateOwnerRule::ByAccessRule(
+            satisfiable_with_a_nested_empty_all_of(&badge)
+        )]);
+        let set_access_rules = call("set_component_access_rules", args![
+            ComponentAccessRules::new().method("set_value", empty_require_all_of())
+        ]);
+        let update_resource_rule = call("update_tokens_access_rule", args![
+            ResourceAuthAction::Mint,
+            empty_any_of()
+        ]);
+
+        let reason = test.execute_expect_failure(set_owner_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("owner_rule", "all_of"));
+        let reason = test.execute_expect_failure(set_access_rules, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("access_rules", "all_of"));
+        let reason = test.execute_expect_failure(update_resource_rule, vec![badge]);
+        assert_reject_reason(reason, empty_composite("new_rule", "any_of"));
     }
 }
 

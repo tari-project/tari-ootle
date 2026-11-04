@@ -152,6 +152,14 @@ pub enum RuntimeError {
         requirement: RuleRequirement,
     },
     #[error(
+        "{argument} has an {composite} rule that lists nothing; an {composite} rule must list at least one rule or \
+         requirement, and deny_all is the rule that admits nobody"
+    )]
+    EmptyAccessRuleComposite {
+        argument: &'static str,
+        composite: &'static str,
+    },
+    #[error(
         "Intrinsic {intrinsic} is not supported by this validator. The template requires a newer engine — validators \
          and indexers must be upgraded before it can be called."
     )]
@@ -556,6 +564,7 @@ impl RuntimeError {
             Self::InvalidNumberOfArguments { .. } |
             Self::InvalidMOfNThreshold { .. } |
             Self::DuplicateMOfNRequirement { .. } |
+            Self::EmptyAccessRuleComposite { .. } |
             Self::InvalidAmount { .. } |
             Self::BucketNotFound { .. } |
             Self::BucketNotInScope { .. } |

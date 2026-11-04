@@ -20,6 +20,11 @@ pub struct HybridEpochOracle<TStore, TOracle = BaseLayerOracle<TStore>> {
     configured: ConfiguredEpochOracle<TStore, MpscEpochTicker>,
     base_layer: TOracle,
     trigger: mpsc::UnboundedSender<EpochTickerData>,
+    /// The last epoch sent to the configured oracle. The biased `select!` drains every configured
+    /// event for a triggered epoch before the base layer is polled again, and the base layer's
+    /// `DoneForNow` carries the epoch of the last boundary in its round, so a `DoneForNow` for
+    /// `last_triggered_epoch` is forwarded directly while an untriggered one (such as after a
+    /// restart that crossed no boundary) triggers the configured oracle with `done_for_now: true`.
     last_triggered_epoch: Option<Epoch>,
 }
 
@@ -163,6 +168,34 @@ mod tests {
         assert!(matches!(e1, EpochEvent::EpochChanged { epoch: Epoch(1), epoch_hash } if epoch_hash == h1));
         assert!(matches!(e2, EpochEvent::EpochChanged { epoch: Epoch(2), epoch_hash } if epoch_hash == h2));
         assert!(matches!(e3, EpochEvent::DoneForNow { epoch: Epoch(2), epoch_hash } if epoch_hash == h2));
+        assert!(hybrid.next_epoch_event().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn done_for_now_without_prior_epoch_changed_triggers_configured_oracle_once() {
+        let (ticker, trigger) = mpsc_ticker();
+        let configured = ConfiguredEpochOracle::with_custom_ticker(Config::default(), TestStore::default(), ticker);
+        let h5 = FixedHash::from([5u8; 32]);
+        let base_layer = ScriptedOracle {
+            events: VecDeque::from([
+                EpochEvent::DoneForNow {
+                    epoch: Epoch(5),
+                    epoch_hash: h5,
+                },
+                EpochEvent::DoneForNow {
+                    epoch: Epoch(5),
+                    epoch_hash: h5,
+                },
+            ]),
+        };
+        let mut hybrid = HybridEpochOracle::new(configured, base_layer, trigger);
+
+        let e1 = hybrid.next_epoch_event().await.unwrap();
+        let e2 = hybrid.next_epoch_event().await.unwrap();
+        let e3 = hybrid.next_epoch_event().await.unwrap();
+        assert!(matches!(e1, EpochEvent::EpochChanged { epoch: Epoch(5), epoch_hash } if epoch_hash == h5));
+        assert!(matches!(e2, EpochEvent::DoneForNow { epoch: Epoch(5), epoch_hash } if epoch_hash == h5));
+        assert!(matches!(e3, EpochEvent::DoneForNow { epoch: Epoch(5), epoch_hash } if epoch_hash == h5));
         assert!(hybrid.next_epoch_event().await.is_none());
     }
 

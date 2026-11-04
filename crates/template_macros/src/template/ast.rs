@@ -530,17 +530,6 @@ pub struct FunctionAst {
     // pub is_public: bool,
 }
 
-impl FunctionAst {
-    /// The function's `self` receiver, or `None` for a static function.
-    pub fn receiver(&self) -> Option<tari_template_abi::Receiver> {
-        self.input_types.iter().find_map(|t| match t {
-            TypeAst::Receiver { mutability: true } => Some(tari_template_abi::Receiver::RefMut),
-            TypeAst::Receiver { mutability: false } => Some(tari_template_abi::Receiver::Ref),
-            _ => None,
-        })
-    }
-}
-
 pub enum TypeAst {
     Receiver {
         mutability: bool,
@@ -604,7 +593,12 @@ mod stateless_tests {
         assert_eq!(ast.functions[0].name, "add");
         assert_eq!(ast.functions[1].name, "mul");
         // A stateless template has no component, so no function takes a receiver.
-        assert!(ast.functions.iter().all(|f| f.receiver().is_none()));
+        assert!(
+            ast.functions
+                .iter()
+                .flat_map(|f| &f.input_types)
+                .all(|t| !matches!(t, super::TypeAst::Receiver { .. }))
+        );
     }
 
     #[test]

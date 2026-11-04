@@ -68,7 +68,12 @@ function TemplateFunctions() {
                 <DataTableCell style={{ textAlign: "left" }}>{fn.name}</DataTableCell>
                 <DataTableCell>
                   {[
-                    ...(fn.receiver ? [fn.receiver === "RefMut" ? "&mut self" : "&self"] : []),
+                    ...(typeof fn.kind === "object" && "Method" in fn.kind
+                      ? [fn.kind.Method === "RefMut" ? "&mut self" : "&self"]
+                      : []),
+                    ...(typeof fn.kind === "object" && "Migration" in fn.kind
+                      ? ["from:" + fn.kind.Migration.from]
+                      : []),
                     ...fn.arguments.map((a) => a.name + ":" + a.arg_type),
                   ].join(", ")}
                 </DataTableCell>

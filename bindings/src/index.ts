@@ -93,6 +93,7 @@ export * from "./types/FinalizeResult";
 export * from "./types/ForeignProposalAtom";
 export * from "./types/FunctionDef";
 export * from "./types/FunctionDoc";
+export * from "./types/FunctionKind";
 export * from "./types/Hash32";
 export * from "./types/Hash64";
 export * from "./types/HashAlg";

@@ -517,7 +517,7 @@ impl JsonRpcHandlers {
                 .iter()
                 .map(|f| FunctionDef {
                     name: f.name.clone(),
-                    receiver: f.receiver,
+                    kind: f.kind.clone(),
                     arguments: f.arguments.to_vec(),
                     output: f.output.to_string(),
                 })

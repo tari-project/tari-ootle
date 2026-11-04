@@ -23,7 +23,7 @@
 use std::{fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits::{self, ModuleShape};
-use tari_template_abi::{FunctionDef, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
+use tari_template_abi::{FunctionDef, FunctionKind, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
 use wasmer::{
     Engine,
     ExternType,
@@ -460,26 +460,10 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                         }
                         .into());
                     }
-                    match &arg.arg_type {
-                        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
-                            return Err(WasmValidationError::FunctionTooManyTupleReturn {
-                                name: func.name.clone(),
-                                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
-                                tuple_size: tuple.len(),
-                            }
-                            .into());
-                        },
-                        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
-                            return Err(WasmValidationError::FunctionNameTooLong {
-                                name: name.clone(),
-                                max_length: limits::WASM_LIMITS.max_function_name_length,
-                            }
-                            .into());
-                        },
-                        _ => {},
-                    }
+                    validate_arg_type(&func.name, &arg.arg_type)?;
                 }
-                if func.is_migration {
+                if let FunctionKind::Migration { from } = &func.kind {
+                    validate_arg_type(&func.name, from)?;
                     // Note that we are checking the TemplateDef, not the actual return type of the function in Wasm.
                     match &func.output {
                         Type::Other { name } => {
@@ -508,6 +492,27 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
         },
     }
     Ok(())
+}
+
+fn validate_arg_type(function_name: &str, arg_type: &Type) -> Result<(), WasmExecutionError> {
+    match arg_type {
+        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
+            Err(WasmValidationError::FunctionTooManyTupleReturn {
+                name: function_name.to_string(),
+                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
+                tuple_size: tuple.len(),
+            }
+            .into())
+        },
+        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
+            Err(WasmValidationError::FunctionNameTooLong {
+                name: name.clone(),
+                max_length: limits::WASM_LIMITS.max_function_name_length,
+            }
+            .into())
+        },
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]

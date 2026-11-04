@@ -57,7 +57,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -854,14 +854,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Validates the shape of a spend-script predicate `FunctionDef`, mirroring `check_resource_auth_hook`. A spend
-    /// script must be a unit-returning static function whose last argument is a `SpendContext`. Taking no receiver is
-    /// load-bearing: a predicate that locked a component could write it, defeating the read-only guarantee.
+    /// script must be a unit-returning static function whose last argument is a `SpendContext`. Taking no component
+    /// is load-bearing: a predicate that locked a component could write it, defeating the read-only guarantee.
     fn validate_spend_script_signature(func: &FunctionDef) -> Result<(), RuntimeError> {
-        if func.has_receiver() {
+        if func.kind != FunctionKind::Function {
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
-                    "spend script function '{}' must be a template function, not a method taking &self or &mut self",
+                    "spend script function '{}' must be a template function, not a method or a migration",
                     func.name
                 ),
             });

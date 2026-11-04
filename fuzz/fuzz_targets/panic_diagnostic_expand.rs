@@ -22,6 +22,7 @@ use tari_template_abi::{
     diagnostics::{expand_panic_message, PanicDiagnostic, MARKER},
     ArgDef,
     FunctionDef,
+    FunctionKind,
     Receiver,
     Type,
 };
@@ -47,10 +48,9 @@ fn func_def(arg_count: u8) -> FunctionDef {
 
     FunctionDef {
         name: "withdraw".to_string(),
-        receiver: Some(Receiver::RefMut),
+        kind: FunctionKind::Method(Receiver::RefMut),
         arguments,
         output: Type::Unit,
-        is_migration: false,
     }
 }
 

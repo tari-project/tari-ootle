@@ -45,8 +45,9 @@ function getTypeAsString(funcType: FuncType): string {
 
 export default function FunctionItem({ functionDef }: FunctionItemProps) {
   const theme = useTheme();
-  const { name, arguments: args, receiver, is_migration, output } = functionDef;
-  const is_mut = receiver === "RefMut";
+  const { name, arguments: args, kind, output } = functionDef;
+  const is_mut = typeof kind === "object" && "Method" in kind && kind.Method === "RefMut";
+  const migrates_from = typeof kind === "object" && "Migration" in kind ? kind.Migration.from : null;
 
   const argumentItems = args.map(({ name, arg_type }) => {
     return (
@@ -92,8 +93,8 @@ export default function FunctionItem({ functionDef }: FunctionItemProps) {
             <Chip label="mut" size="small" color="warning" sx={{ ml: 1 }} />
           </Tooltip>
         )}
-        {is_migration && (
-          <Tooltip title="This is a migration function">
+        {migrates_from && (
+          <Tooltip title={`Migrates a component from ${getTypeAsString(migrates_from)}`}>
             <Chip label="migration" size="small" color="info" sx={{ ml: 1 }} />
           </Tooltip>
         )}

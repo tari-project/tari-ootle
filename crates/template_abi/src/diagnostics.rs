@@ -94,7 +94,7 @@ mod render {
         ///
         /// `None` when the diagnostic does not describe `func_def`, which means the marker did not
         /// come from this function's dispatcher: an index past its parameters, or index 0 on a
-        /// method, whose receiver the dispatcher reports as `ComponentDecode`.
+        /// method or migration, whose component the dispatcher reports as `ComponentDecode`.
         pub fn render(&self, func_def: &FunctionDef, detail: &str) -> Option<String> {
             let name = &func_def.name;
             match *self {
@@ -102,8 +102,9 @@ mod render {
                     "failed to decode component instance for function '{name}'{DETAIL_SEPARATOR}{detail}"
                 )),
                 Self::ArgDecode { index } => {
-                    // The dispatcher counts the receiver among a method's parameters, and `arguments` does not.
-                    let position = if func_def.has_receiver() {
+                    // The dispatcher counts the component among a method's or migration's parameters, and
+                    // `arguments` does not.
+                    let position = if func_def.takes_component() {
                         index.checked_sub(1)?
                     } else {
                         index
@@ -139,12 +140,12 @@ pub use render::expand_panic_message;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArgDef, FunctionDef, Receiver, Type};
+    use crate::{ArgDef, FunctionDef, FunctionKind, Receiver, Type};
 
     fn func_def() -> FunctionDef {
         FunctionDef {
             name: "withdraw".to_string(),
-            receiver: Some(Receiver::RefMut),
+            kind: FunctionKind::Method(Receiver::RefMut),
             arguments: vec![
                 ArgDef {
                     name: "amount".to_string(),
@@ -158,7 +159,6 @@ mod tests {
                 },
             ],
             output: Type::Unit,
-            is_migration: false,
         }
     }
 
@@ -215,6 +215,24 @@ mod tests {
             expand_panic_message(&func_def(), message),
             "failed to decode tuple argument at position 2 (Tuple<String,U32>) for function 'withdraw': unexpected \
              type"
+        );
+    }
+
+    #[test]
+    fn renders_a_migration_argument_failure_past_the_previous_state() {
+        let migration = FunctionDef {
+            name: "migrate".to_string(),
+            kind: FunctionKind::Migration {
+                from: Type::Other {
+                    name: "CounterV1".to_string(),
+                },
+            },
+            ..func_def()
+        };
+        let message = format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 1 }.marker());
+        assert_eq!(
+            expand_panic_message(&migration, message),
+            "failed to decode argument at position 1 (Amount) for function 'migrate': unexpected type"
         );
     }
 
@@ -289,7 +307,7 @@ mod tests {
             let expanded = expand_panic_message(&func_def, message.to_string());
             match PanicDiagnostic::parse(message) {
                 Some((PanicDiagnostic::ArgDecode { index }, _))
-                    if (index == 0 && func_def.has_receiver()) || index >= func_def.num_call_args() =>
+                    if (index == 0 && func_def.takes_component()) || index >= func_def.num_call_args() =>
                 {
                     assert_eq!(&expanded, message, "out-of-range index rewrote {message:?}");
                 },

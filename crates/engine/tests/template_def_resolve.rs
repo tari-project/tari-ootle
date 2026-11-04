@@ -19,7 +19,7 @@ use tari_engine::wasm::WasmModule;
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Epoch, Transaction, TransactionBuilder, args};
-use tari_template_abi::{FunctionDef, Receiver, TemplateDef, TemplateDefV2, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, Receiver, TemplateDef, TemplateDefV2, Type};
 use tari_template_lib::{
     args::{ComponentAction, ComponentInvokeArg, ComponentRef, CreateComponentArg},
     prelude::{ComponentAccessRules, UpdateRule},
@@ -73,17 +73,15 @@ fn template_def(template_name: &str, output: Type) -> TemplateDef {
         functions: vec![
             FunctionDef {
                 name: "run".to_string(),
-                receiver: None,
+                kind: FunctionKind::Function,
                 arguments: vec![],
                 output: output.clone(),
-                is_migration: false,
             },
             FunctionDef {
                 name: "poke".to_string(),
-                receiver: Some(Receiver::Ref),
+                kind: FunctionKind::Method(Receiver::Ref),
                 arguments: vec![],
                 output,
-                is_migration: false,
             },
         ],
     })

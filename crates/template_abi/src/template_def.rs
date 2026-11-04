@@ -118,34 +118,73 @@ impl TemplateDefV2 {
 pub struct FunctionDef {
     #[n(0)]
     pub name: String,
-    /// `None` for a static template function.
     #[n(1)]
-    pub receiver: Option<Receiver>,
-    /// The parameters after the receiver, in declaration order.
+    pub kind: FunctionKind,
+    /// The parameters the caller supplies, in declaration order. [`Self::kind`] carries a method's receiver and a
+    /// migration's previous state, which precede them in the Rust signature.
     #[n(2)]
     pub arguments: Vec<ArgDef>,
     #[n(3)]
     pub output: Type,
-    #[n(4)]
-    pub is_migration: bool,
 }
 
 impl FunctionDef {
-    /// True for a component method, which the caller invokes on a component and which receives that component's
-    /// address ahead of [`Self::arguments`].
+    /// The method's receiver, or `None` for a function or a migration.
+    pub fn receiver(&self) -> Option<Receiver> {
+        match self.kind {
+            FunctionKind::Method(receiver) => Some(receiver),
+            FunctionKind::Function | FunctionKind::Migration { .. } => None,
+        }
+    }
+
+    /// True for a component method, which the caller invokes on a component.
     pub fn has_receiver(&self) -> bool {
-        self.receiver.is_some()
+        self.receiver().is_some()
     }
 
     /// True for a method taking `&mut self`, which writes the component's state.
     pub fn is_mut(&self) -> bool {
-        matches!(self.receiver, Some(Receiver::RefMut))
+        matches!(self.kind, FunctionKind::Method(Receiver::RefMut))
     }
 
-    /// How many values a call passes: the component address for a method, then one per argument.
-    pub fn num_call_args(&self) -> usize {
-        usize::from(self.has_receiver()) + self.arguments.len()
+    /// True for a migration, which runs only while a component moves to this template.
+    pub fn is_migration(&self) -> bool {
+        matches!(self.kind, FunctionKind::Migration { .. })
     }
+
+    /// True when the engine passes a component address ahead of [`Self::arguments`]: a method receives its
+    /// component, and a migration the component whose state it converts.
+    pub fn takes_component(&self) -> bool {
+        match self.kind {
+            FunctionKind::Method(_) | FunctionKind::Migration { .. } => true,
+            FunctionKind::Function => false,
+        }
+    }
+
+    /// How many values a call passes: the component address if [`Self::takes_component`], then one per argument.
+    pub fn num_call_args(&self) -> usize {
+        usize::from(self.takes_component()) + self.arguments.len()
+    }
+}
+
+/// How a template function is called.
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum FunctionKind {
+    /// A static function, called on the template.
+    #[n(0)]
+    Function,
+    /// A method, called on a component of the template.
+    #[n(1)]
+    Method(#[n(0)] Receiver),
+    /// A migration, run by `UpdateComponentTemplate` to convert a component's state from its previous template.
+    #[n(2)]
+    Migration {
+        /// The previous template's component state, which the template loads from the component itself.
+        #[n(0)]
+        from: Type,
+    },
 }
 
 /// How a method takes its component.
@@ -203,7 +242,9 @@ pub struct FunctionDefV1 {
 
 impl From<FunctionDefV1> for FunctionDef {
     /// A leading `&self` or `&mut self` argument becomes the receiver, whose mutability comes from `is_mut` because
-    /// that is what sets the component lock for a V1 method.
+    /// that is what sets the component lock for a V1 method. A migration's first argument, its previous state,
+    /// becomes [`FunctionKind::Migration::from`]. A V1 migration with no arguments, which only a hand-built definition
+    /// can have, migrates from [`Type::Unit`].
     fn from(def: FunctionDefV1) -> Self {
         let FunctionDefV1 {
             name,
@@ -212,19 +253,27 @@ impl From<FunctionDefV1> for FunctionDef {
             is_mut,
             is_migration,
         } = def;
-        let has_receiver = arguments
+        let kind = if is_migration {
+            let from = if arguments.is_empty() {
+                Type::Unit
+            } else {
+                arguments.remove(0).arg_type
+            };
+            FunctionKind::Migration { from }
+        } else if arguments
             .first()
-            .is_some_and(|arg| matches!(arg.arg_type.other(), Some("&self" | "&mut self")));
-        let receiver = has_receiver.then(|| {
+            .is_some_and(|arg| matches!(arg.arg_type.other(), Some("&self" | "&mut self")))
+        {
             arguments.remove(0);
-            if is_mut { Receiver::RefMut } else { Receiver::Ref }
-        });
+            FunctionKind::Method(if is_mut { Receiver::RefMut } else { Receiver::Ref })
+        } else {
+            FunctionKind::Function
+        };
         Self {
             name,
-            receiver,
+            kind,
             arguments,
             output,
-            is_migration,
         }
     }
 }
@@ -345,6 +394,24 @@ mod layout_tests {
         }
     }
 
+    fn v1_migration(arguments: Vec<ArgDef>) -> FunctionDefV1 {
+        FunctionDefV1 {
+            name: "migrate".to_string(),
+            arguments,
+            output: Type::Other {
+                name: "Counter".to_string(),
+            },
+            is_mut: false,
+            is_migration: true,
+        }
+    }
+
+    fn previous_state() -> Type {
+        Type::Other {
+            name: "CounterV1".to_string(),
+        }
+    }
+
     fn v1_def() -> VersionedTemplateDef {
         VersionedTemplateDef::V1(TemplateDefV1 {
             template_name: "Counter".to_string(),
@@ -353,27 +420,35 @@ mod layout_tests {
                 v1_function("new", vec![arg("start", Type::U64)], false),
                 v1_function("get", vec![receiver_arg("&self")], false),
                 v1_function("add", vec![receiver_arg("&mut self"), arg("by", Type::U64)], true),
+                v1_migration(vec![arg("previous", previous_state()), arg("seed", Type::U32)]),
             ],
         })
     }
 
     fn assert_converted(def: &TemplateDef) {
         let new = def.get_function("new").unwrap();
-        assert_eq!(new.receiver, None);
+        assert_eq!(new.receiver(), None);
         assert_eq!(new.arguments.len(), 1);
         assert_eq!(new.arguments[0].name, "start");
 
         let get = def.get_function("get").unwrap();
-        assert_eq!(get.receiver, Some(Receiver::Ref));
+        assert_eq!(get.receiver(), Some(Receiver::Ref));
         assert!(get.arguments.is_empty());
         assert_eq!(get.num_call_args(), 1);
 
         let add = def.get_function("add").unwrap();
-        assert_eq!(add.receiver, Some(Receiver::RefMut));
+        assert_eq!(add.receiver(), Some(Receiver::RefMut));
         assert!(add.is_mut());
         assert_eq!(add.arguments.len(), 1);
         assert_eq!(add.arguments[0].name, "by");
         assert_eq!(add.num_call_args(), 2);
+
+        let migrate = def.get_function("migrate").unwrap();
+        assert_eq!(migrate.kind, FunctionKind::Migration { from: previous_state() });
+        assert_eq!(migrate.receiver(), None);
+        assert_eq!(migrate.arguments.len(), 1);
+        assert_eq!(migrate.arguments[0].name, "seed");
+        assert_eq!(migrate.num_call_args(), 2);
     }
 
     #[test]
@@ -386,7 +461,21 @@ mod layout_tests {
     #[test]
     fn a_v1_receiver_takes_its_mutability_from_is_mut() {
         let converted = FunctionDef::from(v1_function("f", vec![receiver_arg("&self")], true));
-        assert_eq!(converted.receiver, Some(Receiver::RefMut));
+        assert_eq!(converted.receiver(), Some(Receiver::RefMut));
+    }
+
+    #[test]
+    fn a_v1_migration_stays_a_migration_whatever_its_first_argument() {
+        let converted = FunctionDef::from(v1_migration(vec![receiver_arg("&mut self")]));
+        assert_eq!(converted.kind, FunctionKind::Migration {
+            from: Type::Other {
+                name: "&mut self".to_string()
+            }
+        });
+        assert!(converted.arguments.is_empty());
+
+        let converted = FunctionDef::from(v1_migration(vec![]));
+        assert_eq!(converted.kind, FunctionKind::Migration { from: Type::Unit });
     }
 
     #[test]

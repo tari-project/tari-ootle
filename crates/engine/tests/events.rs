@@ -5,7 +5,7 @@ use tari_bor::RawCbor;
 use tari_engine::runtime::RuntimeError;
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_transaction::{Epoch, Transaction, args};
-use tari_template_abi::{EngineOp, FunctionDef, TemplateDef, TemplateDefV2, Type};
+use tari_template_abi::{EngineOp, FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::EmitEventArg,
@@ -74,10 +74,9 @@ fn event_emitting_template(template_name: &str, topic: &str) -> Vec<u8> {
         abi_version: 0,
         functions: vec![FunctionDef {
             name: "main".to_string(),
-            receiver: None,
+            kind: FunctionKind::Function,
             arguments: vec![],
             output: Type::Unit,
-            is_migration: false,
         }],
     })
     .encode_for_wasm_embedding()

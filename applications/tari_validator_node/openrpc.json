@@ -860,7 +860,7 @@
                 "functions": [
                   {
                     "arguments": [],
-                    "receiver": null,
+                    "kind": "Function",
                     "name": "new",
                     "output": "U32"
                   },
@@ -868,7 +868,9 @@
                     "arguments": [
                       "ResourceAddress"
                     ],
-                    "receiver": "Ref",
+                    "kind": {
+                      "Method": "Ref"
+                    },
                     "name": "balance",
                     "output": "Amount"
                   },
@@ -877,7 +879,9 @@
                       "ResourceAddress",
                       "Amount"
                     ],
-                    "receiver": "RefMut",
+                    "kind": {
+                      "Method": "RefMut"
+                    },
                     "name": "withdraw",
                     "output": "Bucket"
                   },
@@ -885,7 +889,9 @@
                     "arguments": [
                       "Bucket"
                     ],
-                    "receiver": "RefMut",
+                    "kind": {
+                      "Method": "RefMut"
+                    },
                     "name": "deposit",
                     "output": "Unit"
                   },
@@ -893,7 +899,9 @@
                     "arguments": [
                       "ResourceAddress"
                     ],
-                    "receiver": "Ref",
+                    "kind": {
+                      "Method": "Ref"
+                    },
                     "name": "get_non_fungible_ids",
                     "output": "Vec"
                   }

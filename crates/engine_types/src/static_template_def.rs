@@ -78,7 +78,7 @@ pub enum ExtractTemplateDefError {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_abi::{ArgDef, FunctionDef, TemplateDef, TemplateDefV2, Type, version};
+    use tari_template_abi::{ArgDef, FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type, version};
     use tari_template_builtin::all_builtin_templates;
 
     use super::*;
@@ -138,13 +138,12 @@ mod tests {
                 abi_version: version::LATEST_TEMPLATE_VERSION,
                 functions: vec![FunctionDef {
                     name: "f".to_string(),
-                    receiver: None,
+                    kind: FunctionKind::Function,
                     arguments: vec![ArgDef {
                         name: "a".to_string(),
                         arg_type,
                     }],
                     output: Type::Unit,
-                    is_migration: false,
                 }],
             })
         }

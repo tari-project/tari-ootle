@@ -57,7 +57,7 @@ fn deserialize_functions(json: &str) -> Result<Vec<FunctionDef>, WalletStorageEr
 
 #[cfg(test)]
 mod tests {
-    use tari_template_abi::{Receiver, Type};
+    use tari_template_abi::{FunctionKind, Receiver, Type};
 
     use super::*;
 
@@ -67,7 +67,7 @@ mod tests {
 
         let functions = deserialize_functions(json).unwrap();
 
-        assert_eq!(functions[0].receiver, Some(Receiver::Ref));
+        assert_eq!(functions[0].receiver(), Some(Receiver::Ref));
         assert_eq!(functions[0].arguments.len(), 1);
         assert_eq!(functions[0].arguments[0].name, "key");
     }
@@ -76,16 +76,15 @@ mod tests {
     fn a_current_row_reads_unchanged() {
         let function = FunctionDef {
             name: "add".to_string(),
-            receiver: Some(Receiver::RefMut),
+            kind: FunctionKind::Method(Receiver::RefMut),
             arguments: vec![],
             output: Type::Unit,
-            is_migration: false,
         };
         let json = serde_json::to_string(&vec![function]).unwrap();
 
         let functions = deserialize_functions(&json).unwrap();
 
-        assert_eq!(functions[0].receiver, Some(Receiver::RefMut));
+        assert_eq!(functions[0].receiver(), Some(Receiver::RefMut));
         assert!(functions[0].arguments.is_empty());
     }
 }

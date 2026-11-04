@@ -5,12 +5,15 @@
 //! the V2 layout embeds a V1 definition: each method's receiver is a leading `self` argument and `is_mut` sets its
 //! component lock. These tests run such a template end to end.
 
+use ootle_byte_type::ToByteType;
 use tari_engine::wasm::WasmModule;
 use tari_engine_types::hashing::hash_template_code;
+use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_transaction::args;
 use tari_template_abi::{
     ArgDef,
     FunctionDefV1,
+    FunctionKind,
     Receiver,
     TEMPLATE_DEF_CUSTOM_SECTION,
     TemplateDef,
@@ -19,7 +22,13 @@ use tari_template_abi::{
     VersionedTemplateDef,
     WASM_PTR_SIZE,
 };
-use tari_template_lib::types::{ComponentAddress, TemplateAddress};
+use tari_template_lib::types::{
+    ComponentAddress,
+    OwnerRule,
+    TemplateAddress,
+    access_rules::UpdateRule,
+    crypto::RistrettoPublicKeyBytes,
+};
 use tari_template_test_tooling::{Package, TemplateTest, compile::compile_template};
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -31,22 +40,29 @@ fn to_v1(def: &TemplateDef) -> VersionedTemplateDef {
         .functions()
         .iter()
         .map(|f| {
-            let receiver = f.receiver.map(|receiver| ArgDef {
-                name: "self".to_string(),
-                arg_type: Type::Other {
-                    name: match receiver {
-                        Receiver::Ref => "&self",
-                        Receiver::RefMut => "&mut self",
-                    }
-                    .to_string(),
-                },
-            });
+            let leading = match &f.kind {
+                FunctionKind::Function => None,
+                FunctionKind::Method(receiver) => Some(ArgDef {
+                    name: "self".to_string(),
+                    arg_type: Type::Other {
+                        name: match receiver {
+                            Receiver::Ref => "&self",
+                            Receiver::RefMut => "&mut self",
+                        }
+                        .to_string(),
+                    },
+                }),
+                FunctionKind::Migration { from } => Some(ArgDef {
+                    name: "previous_state".to_string(),
+                    arg_type: from.clone(),
+                }),
+            };
             FunctionDefV1 {
                 name: f.name.clone(),
-                arguments: receiver.into_iter().chain(f.arguments.iter().cloned()).collect(),
+                arguments: leading.into_iter().chain(f.arguments.iter().cloned()).collect(),
                 output: f.output.clone(),
                 is_mut: f.is_mut(),
-                is_migration: f.is_migration,
+                is_migration: f.is_migration(),
             }
         })
         .collect();
@@ -131,15 +147,35 @@ fn v1_state_template() -> (Vec<u8>, TemplateDef) {
 }
 
 fn load(code: Vec<u8>) -> (TemplateTest, TemplateAddress) {
-    let address: TemplateAddress = hash_template_code(&code);
+    let (test, addresses) = load_all(vec![code]);
+    (test, addresses[0])
+}
+
+fn load_all(codes: Vec<Vec<u8>>) -> (TemplateTest, Vec<TemplateAddress>) {
     let mut builder = Package::builder();
     builder.add_all_builtin_templates();
-    builder
-        .add_template_from_code(address, code)
-        .expect("template was rejected by the loader");
+    let addresses = codes
+        .into_iter()
+        .map(|code| {
+            let address: TemplateAddress = hash_template_code(&code);
+            builder
+                .add_template_from_code(address, code)
+                .expect("template was rejected by the loader");
+            address
+        })
+        .collect();
     let mut test = TemplateTest::from_package(builder.build());
     test.bootstrap_state();
-    (test, address)
+    (test, addresses)
+}
+
+/// The `template_upgrade` templates: V1 as the macro builds it, and V2 rebuilt with a V1 definition, so that its
+/// migrations carry their previous state as their first argument.
+fn v1_upgrade_templates() -> (Vec<u8>, Vec<u8>) {
+    let from = compile_template(format!("{CRATE_PATH}/tests/templates/template_upgrade/v1"), &[]).unwrap();
+    let to = compile_template(format!("{CRATE_PATH}/tests/templates/template_upgrade/v2"), &[]).unwrap();
+    let current = WasmModule::validate_code(to.code()).unwrap();
+    (from.code().to_vec(), with_template_def(to.code(), &to_v1(&current)))
 }
 
 #[test]
@@ -150,12 +186,18 @@ fn a_v1_definition_loads_as_the_definition_the_macro_emits() {
 
     for expected in current.functions() {
         let function = loaded.get_function(&expected.name).unwrap();
-        assert_eq!(function.receiver, expected.receiver, "{}", expected.name);
+        assert_eq!(function.kind, expected.kind, "{}", expected.name);
         assert_eq!(function.arguments.len(), expected.arguments.len(), "{}", expected.name);
     }
-    assert_eq!(loaded.get_function("set").unwrap().receiver, Some(Receiver::RefMut));
-    assert_eq!(loaded.get_function("get").unwrap().receiver, Some(Receiver::Ref));
-    assert_eq!(loaded.get_function("new").unwrap().receiver, None);
+    assert_eq!(
+        loaded.get_function("set").unwrap().kind,
+        FunctionKind::Method(Receiver::RefMut)
+    );
+    assert_eq!(
+        loaded.get_function("get").unwrap().kind,
+        FunctionKind::Method(Receiver::Ref)
+    );
+    assert_eq!(loaded.get_function("new").unwrap().kind, FunctionKind::Function);
 }
 
 /// `set` writes the component, which needs the write lock `is_mut` asks for, and takes one argument after the
@@ -180,4 +222,56 @@ fn a_v1_template_runs_its_methods() {
     test.call_method::<()>(component, "set", args![7u32], vec![]);
     let value: u32 = test.call_method(component, "get", args![], vec![]);
     assert_eq!(value, 7);
+}
+
+#[test]
+fn a_v1_migration_loads_with_its_previous_state_as_the_kind() {
+    let (_, code) = v1_upgrade_templates();
+
+    let loaded = WasmModule::validate_code(&code).unwrap();
+
+    let migrate = loaded.get_function("migrate_v1_to_v2_with_args").unwrap();
+    assert_eq!(migrate.kind, FunctionKind::Migration {
+        from: Type::Other {
+            name: "TemplateV1".to_string()
+        }
+    });
+    assert_eq!(migrate.arguments.len(), 1);
+    assert_eq!(migrate.num_call_args(), 2);
+}
+
+/// The migration receives the component address ahead of its one argument, and replaces the component's state.
+#[test]
+fn a_v1_migration_upgrades_a_component() {
+    let (from_code, to_code) = v1_upgrade_templates();
+    let (mut test, addresses) = load_all(vec![from_code, to_code]);
+    let [from, to] = addresses[..] else {
+        unreachable!("two templates were loaded")
+    };
+    let signers: Vec<RistrettoPublicKeyBytes> = (0..5)
+        .map(create_key_pair_from_seed)
+        .map(|(_, pk)| pk.to_byte_type())
+        .collect();
+
+    test.execute_expect_success(
+        test.transaction()
+            .call_function(from, "new", args![OwnerRule::OwnedBySigner, UpdateRule::Owner, signers])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let component: ComponentAddress = test
+        .read_only_state_store()
+        .get_first_component_of(from)
+        .unwrap()
+        .unwrap();
+
+    test.execute_expect_success(
+        test.transaction()
+            .update_component_template_address_with_migrate(component, to, "migrate_v1_to_v2_with_args", args![
+                "Something new"
+            ])
+            .call_method(component, "assert_correct", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
 }

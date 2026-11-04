@@ -316,9 +316,9 @@ pub type ShardState = (Shard, TreeHash, Version, TransitionAccumulator);
 /// value, or `None` when the tree holds no leaf for the shard.
 ///
 /// The leaf is keyed by the shard, so a proof names the shard a leaf belongs to, and the leaf value commits to the
-/// shard as well (see [`shard_state_leaf`]). A shard with no state - the empty-tree root at state version 0 - has no
-/// leaf, and the absence of its key proves its state. This keeps the tree, and the cost of building it for every
-/// block, proportional to the shards that hold state.
+/// shard as well (see [`shard_state_leaf`]). A shard with no state - the empty-tree root at state version 0 with a
+/// zero transition accumulator - has no leaf, and the absence of its key proves its state. This keeps the tree, and
+/// the cost of building it for every block, proportional to the shards that hold state.
 #[derive(Debug, Clone)]
 pub struct ShardGroupLeaf {
     pub key: LeafKey,

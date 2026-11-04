@@ -36,7 +36,7 @@ mod template {
             if amount.is_zero() || amount.is_negative() {
                 panic!("Amount must be greater than zero");
             }
-            if amount >= Amount::from(10u64) {
+            if amount > Amount::from(10u64) {
                 panic!("Amount must be less than or equal to 10");
             }
 
@@ -54,7 +54,7 @@ mod template {
                 }
                 let id = NonFungibleId::from_u64(self.serial_number);
                 counter += 1;
-                self.serial_number += 1;
+                self.serial_number = self.serial_number.checked_add(1).expect("Serial number overflow");
                 Some(id)
             })
         }

@@ -21,7 +21,15 @@ pub trait SyncManager {
         &mut self,
         shard_group: ShardGroup,
         epoch: Epoch,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    ) -> impl Future<Output = Result<PresyncStatus, Self::Error>> + Send;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresyncStatus {
+    Synced,
+    /// No peer holds the checkpoint ending the epoch before the presync's epoch yet. The committee stores it once it
+    /// commits that epoch's end, shortly after the epoch changes, so a later attempt in the same epoch succeeds.
+    CheckpointNotAvailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

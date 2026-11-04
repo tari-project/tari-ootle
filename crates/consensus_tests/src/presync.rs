@@ -64,3 +64,22 @@ async fn a_pending_validator_presyncs_once_per_epoch_until_it_activates() {
 
     test.stop();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_presync_that_finds_no_checkpoint_is_retried_in_the_same_epoch() {
+    setup_logger();
+    let mut test = Test::builder()
+        .with_test_timeout(Duration::from_secs(60))
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .start()
+        .await;
+    let pending = TestAddress::new("4");
+    let vn = test.get_validator(&pending);
+    vn.epoch_manager.set_activation_epoch(Epoch(3));
+    vn.sync_manager.report_checkpoint_unavailable_on_next_presync();
+
+    test.start_epoch(Epoch(1)).await;
+    wait_for_presyncs(&test, &pending, 2).await;
+
+    test.stop();
+}

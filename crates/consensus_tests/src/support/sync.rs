@@ -8,7 +8,7 @@ use std::sync::{
 
 use tari_consensus::{
     hotstuff::HotStuffError,
-    traits::{SyncManager, SyncStatus},
+    traits::{PresyncStatus, SyncManager, SyncStatus},
 };
 use tari_engine_types::Epoch;
 use tari_ootle_common_types::ShardGroup;
@@ -22,6 +22,7 @@ pub struct TestSyncManager {
     behind_on_next_check: Arc<AtomicBool>,
     num_syncs: Arc<AtomicUsize>,
     num_presyncs: Arc<AtomicUsize>,
+    checkpoint_unavailable_on_next_presync: Arc<AtomicBool>,
 }
 
 impl TestSyncManager {
@@ -32,6 +33,12 @@ impl TestSyncManager {
 
     pub fn num_syncs(&self) -> usize {
         self.num_syncs.load(Ordering::SeqCst)
+    }
+
+    /// Makes the next `presync` find no checkpoint, as at an epoch boundary before the committee stores it.
+    pub fn report_checkpoint_unavailable_on_next_presync(&self) {
+        self.checkpoint_unavailable_on_next_presync
+            .store(true, Ordering::SeqCst);
     }
 
     pub fn num_presyncs(&self) -> usize {
@@ -54,8 +61,14 @@ impl SyncManager for TestSyncManager {
         Ok(())
     }
 
-    async fn presync(&mut self, _shard_group: ShardGroup, _epoch: Epoch) -> Result<(), Self::Error> {
+    async fn presync(&mut self, _shard_group: ShardGroup, _epoch: Epoch) -> Result<PresyncStatus, Self::Error> {
         self.num_presyncs.fetch_add(1, Ordering::SeqCst);
-        Ok(())
+        if self
+            .checkpoint_unavailable_on_next_presync
+            .swap(false, Ordering::SeqCst)
+        {
+            return Ok(PresyncStatus::CheckpointNotAvailable);
+        }
+        Ok(PresyncStatus::Synced)
     }
 }

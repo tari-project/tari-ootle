@@ -10,12 +10,12 @@ use tokio::time;
 
 use crate::{
     hotstuff::{ConsensusWorkerContext, HotStuffError, state_machine::event::ConsensusStateEvent},
-    traits::{ConsensusSpec, SyncManager},
+    traits::{ConsensusSpec, PresyncStatus, SyncManager},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::sm::syncing";
 
-/// How long a failed presync waits before `Idle` retries it.
+/// How long a presync that found no checkpoint waits before `Idle` retries it.
 const PRESYNC_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,12 +118,12 @@ where
         {
             return Ok(ConsensusStateEvent::PresyncComplete { epoch });
         }
-        if let Err(err) = context.state_sync.presync(shard_group, epoch).await {
-            // The previous epoch's checkpoint routinely lands a little after the epoch changes, so a failed presync
-            // waits and returns to `Idle`, which retries it.
-            time::sleep(PRESYNC_RETRY_DELAY).await;
-            return Ok(ConsensusStateEvent::PresyncFailed { error: err.into() });
+        match context.state_sync.presync(shard_group, epoch).await? {
+            PresyncStatus::Synced => Ok(ConsensusStateEvent::PresyncComplete { epoch }),
+            PresyncStatus::CheckpointNotAvailable => {
+                time::sleep(PRESYNC_RETRY_DELAY).await;
+                Ok(ConsensusStateEvent::PresyncDeferred)
+            },
         }
-        Ok(ConsensusStateEvent::PresyncComplete { epoch })
     }
 }

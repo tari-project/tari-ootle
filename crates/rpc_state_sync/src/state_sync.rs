@@ -13,7 +13,7 @@ use ootle_network::Network;
 use rand::seq::SliceRandom;
 use tari_consensus::{
     check_quorum_certificate_signatures,
-    traits::{ConsensusSpec, SyncManager, SyncStatus, ValidatorSignerService},
+    traits::{ConsensusSpec, PresyncStatus, SyncManager, SyncStatus, ValidatorSignerService},
 };
 use tari_consensus_types::{LeafBlock, ProposalCertificate};
 use tari_epoch_manager::EpochManagerReader;
@@ -1152,13 +1152,24 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         self.report_sync("State sync", result)
     }
 
-    async fn presync(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<(), Self::Error> {
+    async fn presync(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<PresyncStatus, Self::Error> {
         if self.skip_sync {
             warn!(target: LOG_TARGET, "🛜 State sync is disabled (--skip-sync). Not presyncing {shard_group}.");
-            return Ok(());
+            return Ok(PresyncStatus::Synced);
         }
-        let result = self.presync_inner(shard_group, epoch).await;
-        self.report_sync("Presync", result)
+        match self.presync_inner(shard_group, epoch).await {
+            Err(RpcStateSyncError::CheckpointNotAvailable {
+                epoch: checkpoint_epoch,
+            }) => {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 No peer holds the checkpoint for epoch {checkpoint_epoch} yet. Presync of {shard_group} will retry."
+                );
+                self.stats = StateSyncStats::default();
+                Ok(PresyncStatus::CheckpointNotAvailable)
+            },
+            result => self.report_sync("Presync", result).map(|()| PresyncStatus::Synced),
+        }
     }
 }
 

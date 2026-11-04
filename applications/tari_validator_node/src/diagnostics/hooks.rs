@@ -232,7 +232,7 @@ fn classify(
     to: ConsensusCurrentState,
     event: &ConsensusStateEvent,
 ) -> (&'static str, DiagnosticLevel) {
-    use tari_ootle_common_types::diagnostics::DiagnosticLevel::{Error, Info, Warn};
+    use tari_ootle_common_types::diagnostics::DiagnosticLevel::{Error, Info};
 
     match (from, to, event) {
         // `Sleeping` is only ever entered from a failure, and is where an operator looks first when
@@ -244,7 +244,7 @@ fn classify(
         (ConsensusCurrentState::Syncing, ConsensusCurrentState::Shutdown, _) => ("consensus.state_transition", Info),
         (ConsensusCurrentState::Syncing, _, _) => ("sync.completed", Info),
         (_, ConsensusCurrentState::Presyncing, _) => ("presync.started", Info),
-        (_, _, ConsensusStateEvent::PresyncFailed { .. }) => ("presync.failed", Warn),
+        (_, _, ConsensusStateEvent::PresyncDeferred) => ("presync.deferred", Info),
         (ConsensusCurrentState::Presyncing, ConsensusCurrentState::Shutdown, _) => ("consensus.state_transition", Info),
         (ConsensusCurrentState::Presyncing, _, _) => ("presync.completed", Info),
         _ => ("consensus.state_transition", Info),
@@ -372,13 +372,29 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_presync_is_a_warning() {
-        let failed = ConsensusStateEvent::PresyncFailed {
+    fn a_presync_awaiting_its_checkpoint_is_routine() {
+        assert_eq!(
+            classify(
+                ConsensusCurrentState::Presyncing,
+                ConsensusCurrentState::Idle,
+                &ConsensusStateEvent::PresyncDeferred
+            ),
+            ("presync.deferred", DiagnosticLevel::Info)
+        );
+    }
+
+    #[test]
+    fn a_failed_presync_is_a_crash() {
+        let failure = ConsensusStateEvent::Failure {
             error: HotStuffError::NotRegisteredForCurrentEpoch { epoch: Epoch(1) },
         };
         assert_eq!(
-            classify(ConsensusCurrentState::Presyncing, ConsensusCurrentState::Idle, &failed),
-            ("presync.failed", DiagnosticLevel::Warn)
+            classify(
+                ConsensusCurrentState::Presyncing,
+                ConsensusCurrentState::Sleeping,
+                &failure
+            ),
+            ("consensus.crashed", DiagnosticLevel::Error)
         );
     }
 }

@@ -2389,6 +2389,23 @@ mod resource_access_rules {
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
+
+        // Once the account holds a vault for the resource, the hook also decodes `caller.component_state()` as an
+        // `Account` and reads `vault.balance()`, exercising vault lock release across withdraw, deposit and proof
+        // creation hooks.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(user_account, "withdraw", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("withdrawn")
+                .call_method(user_account, "deposit", args![Workspace("withdrawn")])
+                .call_method(user_account, "create_proof_for_resource", args![token_resource])
+                .put_last_instruction_output_on_workspace("proof_all")
+                .call_method(user_account, "create_proof_by_amount", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("proof_amt")
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&user_key),
+            vec![user_proof],
+        );
     }
 
     #[test]

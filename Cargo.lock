@@ -13458,6 +13458,7 @@ dependencies = [
  "tari_template_abi",
  "tari_template_lib_types",
  "thiserror 2.0.18",
+ "tokio",
  "ts-rs",
 ]
 

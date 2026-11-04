@@ -2306,7 +2306,7 @@ mod some_accept {
     #[test]
     fn an_honest_some_accept_is_voted_for() {
         let (replica, rec) = aborted_after_local_accept();
-        let atom = rec.get_current_multi_shard_atom();
+        let atom = rec.get_current_multi_shard_atom().unwrap();
 
         let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
             change_set.set_next_transaction_update(rec).unwrap();
@@ -2320,7 +2320,7 @@ mod some_accept {
         let (replica, rec) = aborted_after_local_accept();
         let atom = MultiShardAtom {
             decision: Decision::Abort(AbortReason::LockOutputsFailed),
-            ..rec.get_current_multi_shard_atom()
+            ..rec.get_current_multi_shard_atom().unwrap()
         };
 
         let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
@@ -2345,7 +2345,7 @@ mod some_accept {
         let (replica, rec) = aborted_after_local_accept();
         let atom = MultiShardAtom {
             transaction_fee: rec.transaction_fee() + 1,
-            ..rec.get_current_multi_shard_atom()
+            ..rec.get_current_multi_shard_atom().unwrap()
         };
 
         let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
@@ -2364,7 +2364,7 @@ mod some_accept {
         let (replica, rec) = aborted_after_local_accept();
         let atom = MultiShardAtom {
             leader_fee: Some(calculate_leader_fee(FEE, exhaust_burn(), NonZeroU64::new(2).unwrap())),
-            ..rec.get_current_multi_shard_atom()
+            ..rec.get_current_multi_shard_atom().unwrap()
         };
 
         let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
@@ -2384,7 +2384,7 @@ mod some_accept {
         let id = *rec.id();
         let atom = MultiShardAtom {
             fee_intent_only: true,
-            ..rec.get_current_multi_shard_atom()
+            ..rec.get_current_multi_shard_atom().unwrap()
         };
 
         let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
@@ -2413,7 +2413,7 @@ mod some_accept {
         assert_ne!(evidence, *rec.evidence());
         let atom = MultiShardAtom {
             evidence,
-            ..rec.get_current_multi_shard_atom()
+            ..rec.get_current_multi_shard_atom().unwrap()
         };
 
         let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {

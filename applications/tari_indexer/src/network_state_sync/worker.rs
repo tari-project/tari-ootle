@@ -4761,6 +4761,12 @@ mod tests {
             async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
                 unimplemented!()
             }
+
+            async fn get_pending_activation(
+                &self,
+            ) -> Result<Option<tari_epoch_manager::PendingActivation>, EpochManagerError> {
+                unimplemented!()
+            }
         }
 
         fn is_invalid_checkpoint(result: &Result<CheckpointCheck, NetworkStateSyncError>) -> bool {

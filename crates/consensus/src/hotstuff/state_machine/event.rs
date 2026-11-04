@@ -33,6 +33,10 @@ pub enum ConsensusStateEvent {
     PresyncComplete {
         epoch: Epoch,
     },
+    /// A presync failed. It is retried from `Idle`.
+    PresyncFailed {
+        error: HotStuffError,
+    },
     Ready,
     Failure {
         error: HotStuffError,
@@ -56,6 +60,7 @@ impl Display for ConsensusStateEvent {
             SyncComplete => write!(f, "Sync complete"),
             PendingActivation { shard_group } => write!(f, "Pending activation into {}", shard_group),
             PresyncComplete { epoch } => write!(f, "Presync complete at epoch {}", epoch),
+            PresyncFailed { error } => write!(f, "Presync failed({error})"),
             Ready => write!(f, "Ready"),
             Failure { error } => write!(f, "Failure({error})"),
             Resume => write!(f, "Resume"),

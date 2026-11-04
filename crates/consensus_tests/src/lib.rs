@@ -41,6 +41,8 @@ mod output_exists;
 #[cfg(test)]
 mod peer_message_admission;
 #[cfg(test)]
+mod presync;
+#[cfg(test)]
 mod proposal_certificate_signatures;
 #[cfg(test)]
 mod safe_node_predicate;

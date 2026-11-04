@@ -250,12 +250,10 @@ pub trait EpochManagerReader: Send + Sync {
     fn get_birthday_epoch(&self) -> impl Future<Output = Result<Option<Epoch>, EpochManagerError>> + Send;
 
     /// The local validator's registration that activates after the current epoch, if the epoch event oracle has
-    /// announced one. A node that never registers as a validator has none.
+    /// announced one.
     fn get_pending_activation(
         &self,
-    ) -> impl Future<Output = Result<Option<PendingActivation>, EpochManagerError>> + Send {
-        async { Ok(None) }
-    }
+    ) -> impl Future<Output = Result<Option<PendingActivation>, EpochManagerError>> + Send;
 }
 
 pub trait LayerOneTransactionSubmitter {

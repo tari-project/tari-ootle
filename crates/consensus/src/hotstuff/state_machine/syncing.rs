@@ -1,11 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Duration};
 
 use log::*;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{Epoch, ShardGroup};
+use tokio::time;
 
 use crate::{
     hotstuff::{ConsensusWorkerContext, HotStuffError, state_machine::event::ConsensusStateEvent},
@@ -13,6 +14,9 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::sm::syncing";
+
+/// How long a failed presync waits before `Idle` retries it.
+const PRESYNC_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncMode {
@@ -98,12 +102,28 @@ where
 
     /// The transaction pool stays as it is until this node activates, when the member sync clears it before the node
     /// joins consensus.
+    ///
+    /// One epoch read governs the whole presync, so the checkpoint it syncs to always ends before an epoch in which
+    /// this node is not yet a member. A node registered for that epoch returns to `Idle`, which moves it on to the
+    /// member sync.
     async fn presync(
         context: &mut ConsensusWorkerContext<TSpec>,
         shard_group: ShardGroup,
     ) -> Result<ConsensusStateEvent, HotStuffError> {
         let epoch = context.epoch_manager.current_epoch().await?;
-        context.state_sync.presync(shard_group).await?;
+        if context
+            .epoch_manager
+            .is_this_validator_registered_for_epoch(epoch)
+            .await?
+        {
+            return Ok(ConsensusStateEvent::PresyncComplete { epoch });
+        }
+        if let Err(err) = context.state_sync.presync(shard_group, epoch).await {
+            // The previous epoch's checkpoint routinely lands a little after the epoch changes, so a failed presync
+            // waits and returns to `Idle`, which retries it.
+            time::sleep(PRESYNC_RETRY_DELAY).await;
+            return Ok(ConsensusStateEvent::PresyncFailed { error: err.into() });
+        }
         Ok(ConsensusStateEvent::PresyncComplete { epoch })
     }
 }

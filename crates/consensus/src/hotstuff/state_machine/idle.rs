@@ -153,16 +153,11 @@ where TSpec: ConsensusSpec
         event: EpochManagerEvent,
     ) -> Result<Option<ConsensusStateEvent>, HotStuffError> {
         match event {
-            EpochManagerEvent::EpochChanged {
-                epoch,
-                registered_shard_group,
-                ..
-            } => {
-                if registered_shard_group.is_some() {
-                    Ok(Some(ConsensusStateEvent::RegisteredForEpoch { epoch }))
-                } else {
-                    self.check_pending_activation(context).await
+            EpochManagerEvent::EpochChanged { .. } => {
+                if let Some(event) = self.check_registration(context).await? {
+                    return Ok(Some(event));
                 }
+                self.check_pending_activation(context).await
             },
             EpochManagerEvent::PendingActivation { .. } => self.check_pending_activation(context).await,
         }

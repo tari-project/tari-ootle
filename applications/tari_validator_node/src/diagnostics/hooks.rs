@@ -232,7 +232,7 @@ fn classify(
     to: ConsensusCurrentState,
     event: &ConsensusStateEvent,
 ) -> (&'static str, DiagnosticLevel) {
-    use tari_ootle_common_types::diagnostics::DiagnosticLevel::{Error, Info};
+    use tari_ootle_common_types::diagnostics::DiagnosticLevel::{Error, Info, Warn};
 
     match (from, to, event) {
         // `Sleeping` is only ever entered from a failure, and is where an operator looks first when
@@ -244,6 +244,7 @@ fn classify(
         (ConsensusCurrentState::Syncing, ConsensusCurrentState::Shutdown, _) => ("consensus.state_transition", Info),
         (ConsensusCurrentState::Syncing, _, _) => ("sync.completed", Info),
         (_, ConsensusCurrentState::Presyncing, _) => ("presync.started", Info),
+        (_, _, ConsensusStateEvent::PresyncFailed { .. }) => ("presync.failed", Warn),
         (ConsensusCurrentState::Presyncing, ConsensusCurrentState::Shutdown, _) => ("consensus.state_transition", Info),
         (ConsensusCurrentState::Presyncing, _, _) => ("presync.completed", Info),
         _ => ("consensus.state_transition", Info),
@@ -348,5 +349,36 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].topic, "consensus.needs_sync");
         assert_eq!(events[0].level, DiagnosticLevel::Warn);
+    }
+
+    #[test]
+    fn a_presync_is_classified_apart_from_a_member_sync() {
+        let presync = ConsensusStateEvent::PendingActivation {
+            shard_group: ShardGroup::all_shards(NumPreshards::P256),
+        };
+        assert_eq!(
+            classify(ConsensusCurrentState::Idle, ConsensusCurrentState::Presyncing, &presync),
+            ("presync.started", DiagnosticLevel::Info)
+        );
+        let complete = ConsensusStateEvent::PresyncComplete { epoch: Epoch(1) };
+        assert_eq!(
+            classify(
+                ConsensusCurrentState::Presyncing,
+                ConsensusCurrentState::Idle,
+                &complete
+            ),
+            ("presync.completed", DiagnosticLevel::Info)
+        );
+    }
+
+    #[test]
+    fn a_failed_presync_is_a_warning() {
+        let failed = ConsensusStateEvent::PresyncFailed {
+            error: HotStuffError::NotRegisteredForCurrentEpoch { epoch: Epoch(1) },
+        };
+        assert_eq!(
+            classify(ConsensusCurrentState::Presyncing, ConsensusCurrentState::Idle, &failed),
+            ("presync.failed", DiagnosticLevel::Warn)
+        );
     }
 }

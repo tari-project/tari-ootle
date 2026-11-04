@@ -21,6 +21,7 @@ use tari_ootle_common_types::ShardGroup;
 pub struct TestSyncManager {
     behind_on_next_check: Arc<AtomicBool>,
     num_syncs: Arc<AtomicUsize>,
+    num_presyncs: Arc<AtomicUsize>,
 }
 
 impl TestSyncManager {
@@ -31,6 +32,10 @@ impl TestSyncManager {
 
     pub fn num_syncs(&self) -> usize {
         self.num_syncs.load(Ordering::SeqCst)
+    }
+
+    pub fn num_presyncs(&self) -> usize {
+        self.num_presyncs.load(Ordering::SeqCst)
     }
 }
 
@@ -49,7 +54,8 @@ impl SyncManager for TestSyncManager {
         Ok(())
     }
 
-    async fn presync(&mut self, _shard_group: ShardGroup) -> Result<(), Self::Error> {
+    async fn presync(&mut self, _shard_group: ShardGroup, _epoch: Epoch) -> Result<(), Self::Error> {
+        self.num_presyncs.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }

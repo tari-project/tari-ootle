@@ -566,11 +566,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         .await
     }
 
-    /// Syncs `shard_group` to the latest epoch checkpoint for a node outside its committee, which joins it at a later
-    /// epoch. The state matches the checkpoint of the epoch before the current one, which a later presync or the
-    /// member sync at activation extends.
-    async fn presync_inner(&mut self, shard_group: ShardGroup) -> Result<(), RpcStateSyncError> {
-        let current_epoch = self.epoch_manager.current_epoch().await?;
+    /// Syncs `shard_group` to the checkpoint ending the epoch before `current_epoch`, for a node outside its
+    /// committee that joins it at a later epoch. A later presync or the member sync at activation extends the state.
+    async fn presync_inner(&mut self, shard_group: ShardGroup, current_epoch: Epoch) -> Result<(), RpcStateSyncError> {
         info!(target: LOG_TARGET, "🛜 Presyncing {shard_group} at epoch {current_epoch}");
         let our_address = PeerAddress::from(self.signer_service.public_key().clone());
         let committee_info = self
@@ -1154,12 +1152,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         self.report_sync("State sync", result)
     }
 
-    async fn presync(&mut self, shard_group: ShardGroup) -> Result<(), Self::Error> {
+    async fn presync(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<(), Self::Error> {
         if self.skip_sync {
             warn!(target: LOG_TARGET, "🛜 State sync is disabled (--skip-sync). Not presyncing {shard_group}.");
             return Ok(());
         }
-        let result = self.presync_inner(shard_group).await;
+        let result = self.presync_inner(shard_group, epoch).await;
         self.report_sync("Presync", result)
     }
 }

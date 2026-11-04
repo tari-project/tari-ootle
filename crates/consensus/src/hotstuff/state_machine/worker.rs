@@ -114,6 +114,10 @@ where
             (ConsensusState::Syncing(_), ConsensusStateEvent::PresyncComplete { epoch }) => {
                 ConsensusState::Idle(Idle::presynced_at(*epoch))
             },
+            (ConsensusState::Syncing(_), ConsensusStateEvent::PresyncFailed { error }) => {
+                warn!(target: LOG_TARGET, "🛜 Presync failed: {error}. Retrying from Idle.");
+                ConsensusState::Idle(Idle::new())
+            },
             // Resuming from a failure starts over: whatever was known about the epoch was established
             // before the failure and is not assumed to still hold.
             (ConsensusState::Sleeping, ConsensusStateEvent::Resume) => {

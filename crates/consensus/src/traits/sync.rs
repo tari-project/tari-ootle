@@ -15,10 +15,13 @@ pub trait SyncManager {
     /// "use your usual fallback" — typically the oracle's current epoch.
     fn sync(&mut self, target_epoch: Option<Epoch>) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    /// Synchronise `shard_group`'s state, for a node that joins its committee at a later epoch, to the latest
-    /// epoch checkpoint the network holds for it. Repeating it after an epoch change extends the state already
-    /// synced.
-    fn presync(&mut self, shard_group: ShardGroup) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    /// Synchronise `shard_group`'s state, for a node that joins its committee after `epoch`, to the checkpoint that
+    /// ends the epoch before `epoch`. Repeating it in a later epoch extends the state already synced.
+    fn presync(
+        &mut self,
+        shard_group: ShardGroup,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
